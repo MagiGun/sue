@@ -67,9 +67,9 @@ pub use sniff::{
 };
 pub use tile_cache::{TileCache, TileCacheStats, TileKey};
 pub use video::{
-    MAX_FRAMES, MjpegAvi, MovieError, MovieFormat, MovieQuality, MovieSettings, MovieSink,
-    MovieSound, Nv12, PADDED_NOTE, TICKS_PER_SECOND, decode_frames, rgba_to_nv12,
-    rgba_to_nv12_into,
+    MAX_FRAMES, MP4_MOST_BLOCKS, MjpegAvi, MovieError, MovieFormat, MovieQuality, MovieSettings,
+    MovieSink, MovieSound, Nv12, PADDED_NOTE, TICKS_PER_SECOND, decode_frames, mp4_index_first,
+    rgba_to_nv12, rgba_to_nv12_into,
 };
 
 /// One codec compiled into this build.

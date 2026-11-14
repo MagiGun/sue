@@ -29,12 +29,17 @@ const NO_SOUND_TRACK: &str = "this movie format carries no sound";
 const WRONG_SIZE: &str = "every frame must be the movie's size";
 const BAD_SIZE: &str = "the movie size is outside what the format allows";
 const BAD_RATE: &str = "the frame rate is not usable";
-const BAD_SOUND: &str = "the sound must be 1 or 2 channels at 8000 to 192000 Hz";
+const BAD_SOUND: &str = "the sound's rate or channel count does not fit the format";
 const NO_PIXELS: &str = "the frame has no 8-bit RGBA pixels";
 const NO_FRAMES: &str = "the movie has no frames";
 const ENCODER_FAILED: &str = "the system encoder failed";
 /// What a movie dialog says when it pads an odd size by one pixel.
 pub const PADDED_NOTE: &str = "MP4 needs an even width and height: one pixel is added";
+
+/// The most 16 by 16 blocks an MP4 picture may have: H.264 level 5.2, for
+/// example 4096 by 2304 or 3840 by 2160. Windows' encoder writes larger
+/// pictures only at level 6, which Windows' own decoder refuses.
+pub const MP4_MOST_BLOCKS: u32 = 36_864;
 
 /// The movie formats Sue writes, in the order a dialog offers them. Their
 /// [`MovieFormat::id`]s are stable names (saved in settings and presets).
@@ -90,6 +95,16 @@ impl MovieFormat {
         matches!(self, Self::Mp4H264)
     }
 
+    /// The sound rates the format takes: Windows' AAC encoder takes 44100
+    /// and 48000 (the timeline mixes at 48000).
+    #[must_use]
+    pub fn sound_rates(self) -> &'static [u32] {
+        match self {
+            Self::Mp4H264 => &[44_100, 48_000],
+            Self::MjpegAvi => &[],
+        }
+    }
+
     /// Whether width and height must be even (4:2:0 video). An odd size
     /// is padded by one pixel, repeating the last column or row.
     #[must_use]
@@ -98,13 +113,12 @@ impl MovieFormat {
     }
 
     /// The smallest and largest width and height the format takes. The
-    /// Windows H.264 encoder refuses 16 by 16 and was measured to work
-    /// from 64 by 64 to 7680 by 4320 (`research-video-export.md`); 32 is
-    /// kept as the floor, which it also takes.
+    /// Windows H.264 encoder refuses a side of 32 and takes 34; up to 4096
+    /// it takes any picture of at most [`MP4_MOST_BLOCKS`] blocks.
     #[must_use]
     pub fn size_limits(self) -> (u32, u32) {
         match self {
-            Self::Mp4H264 => (32, 8192),
+            Self::Mp4H264 => (34, 4096),
             Self::MjpegAvi => (1, 0x7FFF),
         }
     }
@@ -266,6 +280,11 @@ impl MovieSettings {
         if !(least..=most).contains(&width) || !(least..=most).contains(&height) {
             return Err(MovieError::BadSize);
         }
+        if format == MovieFormat::Mp4H264
+            && width.div_ceil(16) * height.div_ceil(16) > MP4_MOST_BLOCKS
+        {
+            return Err(MovieError::BadSize);
+        }
         let fps = self.fps();
         if self.rate.0 == 0 || self.rate.1 == 0 || !(1.0..=240.0).contains(&fps) {
             return Err(MovieError::BadRate);
@@ -274,7 +293,7 @@ impl MovieSettings {
             if !format.carries_sound() {
                 return Err(MovieError::NoSoundTrack);
             }
-            if !(1..=2).contains(&sound.channels) || !(8_000..=192_000).contains(&sound.rate) {
+            if !(1..=2).contains(&sound.channels) || !format.sound_rates().contains(&sound.rate) {
                 return Err(MovieError::BadSound);
             }
         }
@@ -479,7 +498,7 @@ pub fn rgba_to_nv12_into(
         }
     }
     for (by, row) in chroma.chunks_exact_mut(ow).enumerate() {
-        for (bx, pair) in row.chunks_exact_mut(2).enumerate() {
+        for (bx, pair) in row.as_chunks_mut::<2>().0.iter_mut().enumerate() {
             let (x, y) = (bx * 2, by * 2);
             let mut sum = [0_i32; 3];
             for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
@@ -736,6 +755,157 @@ impl MovieSink for MjpegAvi {
         }
         Ok(MjpegAvi::finish(*self))
     }
+}
+
+/// One top-level box of an MP4: where it starts and how long it is.
+struct Mp4Box {
+    kind: [u8; 4],
+    start: usize,
+    len: usize,
+}
+
+/// The boxes laid one after another in `bytes`, or `None` if they do not
+/// tile it exactly.
+fn mp4_boxes(bytes: &[u8]) -> Option<Vec<Mp4Box>> {
+    let mut boxes = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        let head = bytes.get(at..at + 8)?;
+        let size = u32::from_be_bytes([head[0], head[1], head[2], head[3]]);
+        let kind = [head[4], head[5], head[6], head[7]];
+        let len = match size {
+            0 => bytes.len() - at,
+            1 => {
+                let large = bytes.get(at + 8..at + 16)?;
+                usize::try_from(u64::from_be_bytes(large.try_into().ok()?)).ok()?
+            }
+            size => size as usize,
+        };
+        if len < 8 || at.checked_add(len)? > bytes.len() {
+            return None;
+        }
+        boxes.push(Mp4Box {
+            kind,
+            start: at,
+            len,
+        });
+        at += len;
+    }
+    Some(boxes)
+}
+
+/// Moves every chunk offset (`stco`, `co64`) found under the container
+/// boxes of `body` through `moved`.
+fn mp4_shift_offsets(
+    body: &mut [u8],
+    moved: &dyn Fn(u64) -> Option<u64>,
+) -> Result<(), MovieError> {
+    let broken = || MovieError::Encoder("the MP4 index cannot be read".to_owned());
+    let children = mp4_boxes(body).ok_or_else(broken)?;
+    for child in children {
+        let inner = child.start + 8..child.start + child.len;
+        match &child.kind {
+            b"trak" | b"mdia" | b"minf" | b"stbl" => {
+                mp4_shift_offsets(&mut body[inner], moved)?;
+            }
+            b"stco" | b"co64" => {
+                let wide = &child.kind == b"co64";
+                let table = &mut body[inner];
+                let count = table
+                    .get(4..8)
+                    .map(|count| u32::from_be_bytes([count[0], count[1], count[2], count[3]]))
+                    .ok_or_else(broken)? as usize;
+                let size = if wide { 8 } else { 4 };
+                let entries = table.get_mut(8..8 + count * size).ok_or_else(broken)?;
+                for entry in entries.chunks_exact_mut(size) {
+                    let old = if wide {
+                        u64::from_be_bytes(entry.try_into().map_err(|_| broken())?)
+                    } else {
+                        u64::from(u32::from_be_bytes(entry.try_into().map_err(|_| broken())?))
+                    };
+                    let new = moved(old).ok_or_else(broken)?;
+                    if wide {
+                        entry.copy_from_slice(&new.to_be_bytes());
+                    } else {
+                        let new = u32::try_from(new).map_err(|_| {
+                            MovieError::Encoder(
+                                "the MP4 is too large to put its index first".to_owned(),
+                            )
+                        })?;
+                        entry.copy_from_slice(&new.to_be_bytes());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// The MP4 `bytes` with its index (`moov`) moved in front of the picture
+/// and sound data (`mdat`), so the file starts playing while it loads and
+/// sites take it as it is ("fast start"). Every chunk offset is moved
+/// with the data it points at. A file whose index is already first comes
+/// back unchanged.
+///
+/// # Errors
+/// When the boxes cannot be read, an offset points outside every box, or
+/// a 32-bit offset table would overflow (a file of nearly 4 GB); the file
+/// as given is still a valid MP4 then.
+pub fn mp4_index_first(bytes: &[u8]) -> Result<Vec<u8>, MovieError> {
+    let broken = || MovieError::Encoder("the MP4 boxes cannot be read".to_owned());
+    let boxes = mp4_boxes(bytes).ok_or_else(broken)?;
+    let moov = boxes
+        .iter()
+        .position(|found| &found.kind == b"moov")
+        .ok_or_else(broken)?;
+    let Some(first_data) = boxes.iter().position(|found| &found.kind == b"mdat") else {
+        return Ok(bytes.to_vec());
+    };
+    if moov < first_data {
+        return Ok(bytes.to_vec());
+    }
+    // The new order: what came before the data, the index, then the rest.
+    let mut order: Vec<usize> = (0..first_data).collect();
+    order.push(moov);
+    order.extend((first_data..boxes.len()).filter(|index| *index != moov));
+    // Where each box lands.
+    let mut landing = vec![0_u64; boxes.len()];
+    let mut at = 0_u64;
+    for index in &order {
+        landing[*index] = at;
+        at += boxes[*index].len as u64;
+    }
+    let moved = |offset: u64| -> Option<u64> {
+        let (index, found) = boxes.iter().enumerate().find(|(_, found)| {
+            (found.start as u64..(found.start + found.len) as u64).contains(&offset)
+        })?;
+        Some(landing[index] + (offset - found.start as u64))
+    };
+    let index = &boxes[moov];
+    let mut index_bytes = bytes[index.start..index.start + index.len].to_vec();
+    let header = if u32::from_be_bytes([
+        index_bytes[0],
+        index_bytes[1],
+        index_bytes[2],
+        index_bytes[3],
+    ]) == 1
+    {
+        16
+    } else {
+        8
+    };
+    mp4_shift_offsets(&mut index_bytes[header..], &moved)?;
+    let mut out = Vec::with_capacity(bytes.len());
+    for position in order {
+        if position == moov {
+            out.extend_from_slice(&index_bytes);
+        } else {
+            let found = &boxes[position];
+            out.extend_from_slice(&bytes[found.start..found.start + found.len]);
+        }
+    }
+    Ok(out)
 }
 
 /// The most frames [`decode_frames`] reads from one file.
@@ -1061,6 +1231,25 @@ mod tests {
             settings.check(MovieFormat::Mp4H264),
             Err(MovieError::BadSound)
         );
+        settings.sound = Some(MovieSound {
+            rate: 22_050,
+            channels: 2,
+        });
+        assert_eq!(
+            settings.check(MovieFormat::Mp4H264),
+            Err(MovieError::BadSound)
+        );
+        for (width, height) in [(4096, 4096), (7680, 4320), (4098, 1000)] {
+            let huge = MovieSettings::new(width, height, 24);
+            assert_eq!(huge.check(MovieFormat::Mp4H264), Err(MovieError::BadSize));
+        }
+        for (width, height) in [(3840, 2160), (4096, 2304), (2304, 4096), (34, 34)] {
+            let fits = MovieSettings::new(width, height, 24);
+            assert!(
+                fits.check(MovieFormat::Mp4H264).is_ok(),
+                "{width} by {height}"
+            );
+        }
         let tiny = MovieSettings::new(16, 16, 24);
         assert_eq!(tiny.check(MovieFormat::Mp4H264), Err(MovieError::BadSize));
         assert!(tiny.check(MovieFormat::MjpegAvi).is_ok());
@@ -1136,6 +1325,58 @@ mod tests {
             Box::new(MjpegAvi::sink(MovieSettings::new(16, 8, 12)).unwrap());
         sink.push_frame(&solid(16, 8, [9, 9, 9, 255])).unwrap();
         assert_eq!(sink.finish().unwrap(), plain.finish());
+    }
+
+    fn mp4_box(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut out = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(body);
+        out
+    }
+
+    /// An MP4 shaped like Media Foundation's: ftyp, mdat, then moov whose
+    /// one track's chunk offsets point at the two chunks in mdat.
+    fn index_last() -> (Vec<u8>, [&'static [u8]; 2]) {
+        let chunks: [&[u8]; 2] = [b"FIRST-CHUNK", b"SECOND"];
+        let ftyp = mp4_box(b"ftyp", b"isom\0\0\0\0isomavc1");
+        let mdat_start = ftyp.len() + 8;
+        let offsets = [mdat_start, mdat_start + chunks[0].len()];
+        let mut stco = vec![0, 0, 0, 0, 0, 0, 0, 2];
+        for offset in offsets {
+            stco.extend_from_slice(&(offset as u32).to_be_bytes());
+        }
+        let stbl = mp4_box(b"stbl", &mp4_box(b"stco", &stco));
+        let trak = mp4_box(b"trak", &mp4_box(b"mdia", &mp4_box(b"minf", &stbl)));
+        let moov = mp4_box(b"moov", &[mp4_box(b"mvhd", &[0; 12]), trak].concat());
+        let mdat = mp4_box(b"mdat", &chunks.concat());
+        ([ftyp, mdat, moov].concat(), chunks)
+    }
+
+    #[test]
+    fn the_mp4_index_moves_first_with_its_offsets() {
+        let (file, chunks) = index_last();
+        let moved = mp4_index_first(&file).unwrap();
+        assert_eq!(moved.len(), file.len());
+        let tags: Vec<_> = mp4_boxes(&moved)
+            .unwrap()
+            .iter()
+            .map(|found| found.kind)
+            .collect();
+        assert_eq!(tags, [*b"ftyp", *b"moov", *b"mdat"]);
+        // Each offset still points at its chunk.
+        let stco = moved.windows(4).position(|tag| tag == b"stco").unwrap() + 4;
+        for (entry, chunk) in chunks.iter().enumerate() {
+            let at = stco + 8 + entry * 4;
+            let offset = u32::from_be_bytes(moved[at..at + 4].try_into().unwrap()) as usize;
+            assert_eq!(&moved[offset..offset + chunk.len()], *chunk);
+        }
+        // Already first: unchanged. Moving twice changes nothing more.
+        assert_eq!(mp4_index_first(&moved).unwrap(), moved);
+        // Not an MP4, or cut short: an error, never a panic.
+        assert!(mp4_index_first(b"not an mp4 file").is_err());
+        assert!(mp4_index_first(&file[..file.len() - 3]).is_err());
+        let no_index = [mp4_box(b"ftyp", b"isom"), mp4_box(b"mdat", b"x")].concat();
+        assert!(mp4_index_first(&no_index).is_err());
     }
 
     #[test]
