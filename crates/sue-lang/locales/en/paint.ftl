@@ -2355,3 +2355,5 @@ copied-vector-lines-as-svg = { $count ->
    *[other] Copied { $count } lines as SVG
 }
 cannot-copy-to-clipboard = Cannot copy to the clipboard: { $error }
+switch-using-layer-color = Switch Using Layer Color
+select-overlapping-area = Select Overlapping Area
