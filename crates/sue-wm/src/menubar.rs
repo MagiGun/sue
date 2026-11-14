@@ -276,6 +276,7 @@ impl MenuBar {
         // Only a pointer that moves takes the bar from menu to menu: one
         // resting on a title leaves the keyboard free to go elsewhere.
         let moved = ui.input(|input| input.pointer.delta() != egui::Vec2::ZERO);
+        let mut hovered = Vec::with_capacity(menus.len());
         for (index, menu) in menus.iter().enumerate() {
             let galley = painter.layout_no_wrap(menu.title.clone(), font.clone(), theme.text);
             let title = Rect::from_min_size(
@@ -301,8 +302,39 @@ impl MenuBar {
                 self.open = Some(index);
                 self.menu.switch(&menu.items, false);
             }
+            hovered.push(response.hovered());
+            titles.push((title, galley));
+        }
+        // The open menu. When the keys go to the menu beside it, that
+        // one is drawn in this frame too, so no frame shows neither.
+        let mut picked = None;
+        for _ in 0..2 {
+            let Some(open) = self.open else {
+                self.menu.idle(ui.ctx());
+                break;
+            };
+            let event = self.menu.show(
+                ui.ctx(),
+                &MenuRequest {
+                    id: base.with(("menu", open)),
+                    anchor: titles[open].0.left_bottom() + vec2(0.0, 1.0),
+                    owner: rect,
+                    items: &menus[open].items,
+                    state,
+                    density: menu_density(ui.ctx()),
+                },
+                theme,
+            );
+            let switched = matches!(event, MenuEvent::Previous | MenuEvent::Next);
+            picked = self.answer(event, menus);
+            if !switched {
+                break;
+            }
+        }
+        // The titles, the open one lit as it now is.
+        for (index, (title, galley)) in titles.into_iter().enumerate() {
             let shown = self.open == Some(index);
-            if shown || response.hovered() {
+            if shown || hovered[index] {
                 painter.rect_filled(
                     title,
                     radius,
@@ -314,25 +346,8 @@ impl MenuBar {
                 );
             }
             painter.galley(title.center() - galley.size() / 2.0, galley, theme.text);
-            titles.push(title);
         }
-        let Some(open) = self.open else {
-            self.menu.idle(ui.ctx());
-            return None;
-        };
-        let event = self.menu.show(
-            ui.ctx(),
-            &MenuRequest {
-                id: base.with(("menu", open)),
-                anchor: titles[open].left_bottom() + vec2(0.0, 1.0),
-                owner: rect,
-                items: &menus[open].items,
-                state,
-                density: menu_density(ui.ctx()),
-            },
-            theme,
-        );
-        self.answer(event, menus)
+        picked
     }
 
     /// What the bar does about what its open menu did.
@@ -357,7 +372,6 @@ impl MenuBar {
                 };
                 self.open = Some(next);
                 self.menu.switch(&menus[next].items, true);
-                // The new menu is drawn from the next frame on.
                 None
             }
         }
@@ -953,6 +967,61 @@ mod tests {
         bar.open(&menus, "File");
         assert_eq!(frame(&ctx, &mut bar, &menus, Vec::new()), None);
         assert!(bar.is_open());
+    }
+
+    /// Every text one frame of the bar draws, with `events`.
+    fn drawn(
+        ctx: &egui::Context,
+        bar: &mut MenuBar,
+        menus: &[Menu],
+        events: Vec<Event>,
+    ) -> Vec<String> {
+        let theme = Theme::from_rice(&sue_rice::RiceSchema::new());
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
+            let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 24.0));
+            bar.ui(ui, rect, menus, &|_| ItemState::on(), &theme);
+        });
+        output.textures_delta.clear();
+        let mut found = Vec::new();
+        for clipped in &output.shapes {
+            let mut look = |shape: &egui::Shape| {
+                if let egui::Shape::Text(text) = shape {
+                    found.push(text.galley.text().to_owned());
+                }
+            };
+            match &clipped.shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(&mut look),
+                shape => look(shape),
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn the_menu_beside_shows_in_the_frame_the_key_goes_to_it() {
+        let menus = menus();
+        let ctx = egui::Context::default();
+        let mut bar = MenuBar::new();
+        // egui keeps a menu hidden for the first frame it ever shows, to
+        // learn its size: let each menu show once.
+        bar.open(&menus, "Layer");
+        drawn(&ctx, &mut bar, &menus, Vec::new());
+        bar.open(&menus, "File");
+        drawn(&ctx, &mut bar, &menus, Vec::new());
+        let texts = drawn(&ctx, &mut bar, &menus, Vec::new());
+        assert!(texts.iter().any(|text| text == "New..."), "{texts:?}");
+        // No frame without a menu: Right draws Layer at once.
+        let texts = drawn(&ctx, &mut bar, &menus, vec![key(Key::ArrowRight)]);
+        assert_eq!(bar.open, Some(1));
+        assert!(texts.iter().any(|text| text == "Delete"), "{texts:?}");
+        assert!(!texts.iter().any(|text| text == "New..."), "{texts:?}");
+        let texts = drawn(&ctx, &mut bar, &menus, vec![key(Key::ArrowLeft)]);
+        assert!(texts.iter().any(|text| text == "New..."), "{texts:?}");
     }
 
     #[test]
