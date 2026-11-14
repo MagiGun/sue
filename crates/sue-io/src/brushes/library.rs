@@ -230,16 +230,104 @@ pub fn open(saved: Option<&[u8]>, item_bank: Option<&str>) -> Result<(Arena, boo
     Ok((arena, moved))
 }
 
-/// The 0.0.75 tools by their English labels, and the key of each that
-/// paints with a brush.
-const OLD_TOOLS: [(&str, &str); 6] = [
-    ("Pen", "pen"),
-    ("Sketch", "pencil"),
-    ("Brush", "brush"),
-    ("Airbrush", "airbrush"),
-    ("Decoration", "decoration"),
-    ("Eraser", "eraser"),
+/// The 0.0.75 tools that paint with a brush: each tool's key, and the
+/// labels `item_bank.txt` named it by. Sue 0.0.75 wrote a line's tool in
+/// the language it was showing, so these are that release's labels in
+/// each of its languages (en, ar, de, es, fr, it, ja, pt-BR, zh-Hans),
+/// kept as they were: they are data of old files, not interface text,
+/// and a later translation must not change what an old file says.
+const OLD_TOOLS: [(&str, &[&str]); 6] = [
+    (
+        "pen",
+        &[
+            "Pen",
+            "قلم",
+            "Feder",
+            "Plumilla",
+            "Stylo",
+            "Penna",
+            "ペン",
+            "Caneta",
+            "蘸水笔",
+        ],
+    ),
+    (
+        "pencil",
+        &[
+            "Sketch",
+            "تخطيط (سكتش)",
+            "Skizze",
+            "Boceto",
+            "Croquis",
+            "Schizzo",
+            "スケッチ",
+            "Esboço",
+            "草稿",
+        ],
+    ),
+    (
+        "brush",
+        &[
+            "Brush",
+            "فرشاة",
+            "Pinsel",
+            "Pincel",
+            "Pinceau",
+            "Pennello",
+            "ブラシ",
+            "笔刷",
+        ],
+    ),
+    (
+        "airbrush",
+        &[
+            "Airbrush",
+            "مرذاذ",
+            "Aerógrafo",
+            "Aérographe",
+            "Aerografo",
+            "エアブラシ",
+            "喷枪",
+        ],
+    ),
+    (
+        "decoration",
+        &[
+            "Decoration",
+            "زخرفة",
+            "Dekoration",
+            "Decoración",
+            "Décoration",
+            "Decorazione",
+            "デコレーション",
+            "Decoração",
+            "装饰",
+        ],
+    ),
+    (
+        "eraser",
+        &[
+            "Eraser",
+            "ممحاة",
+            "Radierer",
+            "Goma",
+            "Gomme",
+            "Gomma",
+            "消しゴム",
+            "Borracha",
+            "橡皮擦",
+        ],
+    ),
 ];
+
+/// The tool key of a tool label of `item_bank.txt`, in any language
+/// Sue 0.0.75 had.
+fn old_tool(label: &str) -> Option<&'static str> {
+    OLD_TOOLS
+        .iter()
+        .find(|(_, labels)| labels.contains(&label))
+        .map(|(tool, _)| *tool)
+}
 
 /// A person's own sub tools of 0.0.75 (`item_bank.txt`: tool, name,
 /// stabilization and brush text, tab separated, one a line) as brushes,
@@ -274,12 +362,11 @@ pub fn migrate(arena: &mut Arena, item_bank: &str) -> usize {
     let mut count = 0;
     let mut made: BTreeMap<String, EntityId> = BTreeMap::new();
     for (index, (label, preset)) in from_item_bank(item_bank).into_iter().enumerate() {
-        let tool = OLD_TOOLS
-            .iter()
-            .find(|(old, _)| *old == label)
-            .map(|(_, key)| *key);
-        let set = *made.entry(label.clone()).or_insert_with(|| {
-            let id = stable_id(&format!("custom:{label}"));
+        let tool = old_tool(&label);
+        // One set a tool, whatever language its lines were written in.
+        let key = tool.map_or_else(|| label.clone(), str::to_owned);
+        let set = *made.entry(key.clone()).or_insert_with(|| {
+            let id = stable_id(&format!("custom:{key}"));
             let name = if tool.is_some() {
                 CUSTOM.to_owned()
             } else {

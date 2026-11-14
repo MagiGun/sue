@@ -579,6 +579,55 @@ fn custom_sub_tools_of_0_0_75_move_into_the_library() {
     assert!(same(&opened, &arena));
 }
 
+#[test]
+fn custom_sub_tools_saved_in_another_language_find_their_tool() {
+    // Sue 0.0.75 named each line's tool in the language it showed: a
+    // person who switched from English to German has both in one file.
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sue-paint/tests/golden/paint/item_bank.txt"
+    );
+    let english = std::fs::read_to_string(path).unwrap();
+    let tip = english
+        .lines()
+        .next()
+        .unwrap()
+        .splitn(4, '\t')
+        .nth(3)
+        .unwrap();
+    let bank =
+        format!("Pen\tA\t3\t{tip}\nFeder\tB\t4\t{tip}\n消しゴム\tC\t0\t{tip}\nFill\tD\t0\t{tip}\n");
+    let (arena, moved) = library::open(None, Some(&bank)).unwrap();
+    assert!(moved);
+    let custom: Vec<_> = library::sets(&arena)
+        .into_iter()
+        .filter(|set| {
+            arena
+                .get_by_id(*set)
+                .unwrap()
+                .name()
+                .starts_with(library::CUSTOM)
+        })
+        .collect();
+    let names = |set| -> Vec<String> {
+        library::brushes(&arena, set)
+            .into_iter()
+            .map(|id| library::preset(&arena, id).unwrap().name.clone())
+            .collect()
+    };
+    assert_eq!(custom.len(), 3, "pen, eraser, and the fill on its own");
+    assert_eq!(library::tool(&arena, custom[0]), Some("pen"));
+    assert_eq!(
+        names(custom[0]),
+        ["A", "B"],
+        "one pen set for both languages"
+    );
+    assert_eq!(library::tool(&arena, custom[1]), Some("eraser"));
+    assert_eq!(names(custom[1]), ["C"]);
+    assert_eq!(library::tool(&arena, custom[2]), None);
+    assert_eq!(arena.get_by_id(custom[2]).unwrap().name(), "Custom: Fill");
+}
+
 /// Applies `edit`, undoes it and checks the arena is as before, redoes it
 /// and checks it is as after; ids included.
 fn undo_pair(arena: &mut Arena, stack: &mut UndoStack<Arena>, edit: sue_core::txn::Batch<Arena>) {
