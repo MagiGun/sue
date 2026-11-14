@@ -2365,3 +2365,4 @@ ruler-show-in-all-layers = Show in all layers
 ruler-show-in-same-folder = Show in same folder
 ruler-show-when-editing-target = Show only when editing target
 moves-picture-across-stroke = Moves the picture sideways across the stroke
+copies-picture-from-source = Copies the picture from where Alt and click set, as you paint

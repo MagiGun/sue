@@ -323,6 +323,7 @@ pub(super) fn blend_properties(ui: &mut Ui, sub: &mut SubTool, theme: &Theme) {
         3 => tr!("swells-picture-brushs-middle"),
         4 => tr!("draws-picture-into-brushs-middle"),
         8 | 9 => tr!("moves-picture-across-stroke"),
+        crate::blend::COPY_STAMP => tr!("copies-picture-from-source"),
         _ => tr!("turns-picture-around-brushs-middle"),
     }));
 }
