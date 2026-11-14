@@ -329,10 +329,16 @@ fn density_sizes(ui: &mut Ui, theme: &Theme, density: Density, _demo: &mut Demo)
         ("tab_strip", density.tab_strip()),
         ("min_hit", density.min_hit()),
     ];
+    // Every square stands on one line, so their names line up too.
+    let tallest = sizes.iter().map(|(_, side)| *side).fold(0.0, f32::max);
     ui.horizontal_wrapped(|ui| {
         for (size_name, side) in sizes {
             ui.vertical(|ui| {
-                let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+                let (cell, _) = ui.allocate_exact_size(vec2(side, tallest), Sense::hover());
+                let rect = egui::Rect::from_min_max(
+                    egui::pos2(cell.left(), cell.bottom() - side),
+                    cell.max,
+                );
                 ui.painter().rect_stroke(
                     rect,
                     theme.radius(Radius::Xs),
