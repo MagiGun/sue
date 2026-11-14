@@ -18,33 +18,9 @@ launchpad-pinned = الفتح عند البدء
 
 ## [profile]
 
-profile-hardware = تفضيل الأداء
-    .description = توقيت الإطارات وميزانية المؤثرات
-    .auto = تلقائي
-    .high-refresh = تحديث عالي
-    .balanced = متوازن
-    .legacy-low-spec = أجهزة قديمة
-    .mobile-battery-saver = موفر طاقة البطارية
 
 ## [display]
 
-display-frame_rate_cap = حد معدل الإطارات
-    .description = أقصى معدل إطارات أثناء الحركة (0 يتبع تفضيل الأداء)
-display-ui_scale = حجم الواجهة
-    .description = مقياس الواجهة بالإضافة إلى مقياس النظام
-display-interface = الواجهة
-    .description = التخطيط: تلقائي يتبع الجهاز (تخطيطات اللمس على الأجهزة اللوحية والهواتف)
-    .auto = تلقائي
-    .desktop = سطح المكتب
-    .tablet = لوحي
-    .phone = هاتف
-display-phone_frame = شكل هاتف
-    .description = على الكمبيوتر، رسم تخطيط الهاتف في عمود بعرض الهاتف في منتصف النافذة
-display-gpu_preference = تفضيل وحدة معالجة الرسوميات
-    .description = المعالج الرسومي الذي يرسم النافذة؛ تلقائي يستخدم معالج الشاشة (يطبق بعد إعادة التشغيل)
-    .auto = تلقائي
-    .integrated = مدمج
-    .discrete = منفصل
 
 ## [motion]
 
@@ -52,78 +28,28 @@ motion-instant_transitions = انتقالات فورية
     .description = تبديل الصفحات والقوائم في 0 مللي ثانية دون حركات
 motion-animation_speed = سرعة الحركة
     .description = سرعة جميع حركات النوابض
-motion-spring_stiffness = صلابة النابض
-    .description = ثابت المرونة k لكل حركة
-motion-spring_damping = تخميد النابض
-    .description = معامل التخميد c لكل حركة
-motion-settle_grace_ms = مهلة الاستقرار (مللي ثانية)
-    .description = استمرار الرسم لهذه المدة بعد آخر تغيير (مللي ثانية)
 motion-caret_blink_ms = وميض المؤشر (مللي ثانية)
     .description = الفاصل الزمني لوميض مؤشر النص (0 يبقيه ثابتاً)
 motion-smooth_caret = مؤشر سلس
     .description = انزلاق مؤشر النص بسلاسة إلى موقعه الجديد بدلاً من القفز
 motion-caret_glide_ms = مدة انزلاق المؤشر
     .description = المدة المستغرقة لانزلاق المؤشر إلى مكانه الجديد (مللي ثانية؛ الأقل أسرع)
-motion-message_seconds = ثواني بقاء الرسالة
-    .description = مدة بقاء الرسائل في شريط الحالة (ث)
 
 ## [layout]
 
 layout-padding = الحشو
     .description = المسافة داخل الأشرطة والأزرار وعناصر التحكم (بكسل)
-layout-border_width = عرض الحدود
-    .description = سُمك الحدود الرفيعة (بكسل)
-layout-control_radius = نصف قطر التحكم
-    .description = تدوير زوايا الأزرار والحقول (بكسل)
-layout-card_radius = نصف قطر البطاقات
-    .description = تدوير زوايا البطاقات وصفوف القوائم واللوحات العائمة (بكسل)
-layout-pill_radius = نصف قطر الأزرار البيضاوية
-    .description = تدوير زوايا النوافذ والقوائم والأزرار البيضاوية (بكسل)
-layout-pill_height = ارتفاع الزر البيضاوي
-    .description = ارتفاع الأزرار البيضاوية (بكسل)
 layout-status_bar = شريط الحالة
     .description = إظهار شريط الحالة الرفيع أسفل النافذة (بدونه تظهر الرسائل كتنبيهات)
 
 ## [colors]
-colors-void = فراغ
-    .description = خلفية الصفحة
-colors-panel = لوحة
-    .description = الأشرطة واللوحات
-colors-pill = عنصر بيضاوي
-    .description = القوائم والمربعات والأسطح العائمة
-colors-hover = عند التمرير
-    .description = عناصر التحكم تحت المؤشر
-colors-active = نشط
-    .description = عناصر التحكم المضغوطة والمختارة
-colors-border = حد
-    .description = الحدود الرفيعة
-colors-border_active = حد نشط
-    .description = حدود المربعات الممرر عليها وعناصر التحكم المفعلة
 colors-text = نص
     .description = النص الأساسي والأيقونات النشطة
-colors-muted = خافت
-    .description = النص الثانوي
-colors-selection = تحديد
-    .description = تمييز تحديد النص
-colors-selection_text = نص التحديد
-    .description = النص داخل التحديد
 colors-shadow = ظل
     .description = الظل أسفل الأسطح العائمة
 
 ## [typography]
 
-typography-ui_font = خط الواجهة
-    .description = خط الواجهة المدمج
-typography-ui_size = حجم الواجهة
-    .description = حجم نص الواجهة (بكسل)
-typography-small_size = نص صغير
-    .description = حجم نص التسميات التوضيحية وشريط الحالة (بكسل)
-typography-title_size = حجم العناوين الفرعية
-    .description = حجم عناوين البطاقات ومربعات الحوار والأقسام (بكسل)
-typography-heading_size = حجم العناوين
-    .description = حجم نص العناوين (بكسل)
-typography-mono_size = حجم الخط أحادي المسافة
-    .description = حجم النص أحادي المسافة (بكسل)
 
 ## [input]
 
@@ -131,8 +57,6 @@ typography-mono_size = حجم الخط أحادي المسافة
 
 ## [audio]
 
-audio-buffer_frames = إطارات مخزن الصوت
-    .description = العينات المرسلة لبطاقة الصوت في كل دفعة (0 للافتراضي)
 audio-sample_rate = معدل عينة الصوت
     .description = المعدل الداخلي لمعالجة الصوت (هرتز؛ 0 للافتراضي)
 ## [packages]
@@ -146,32 +70,10 @@ sue_paint-width = العرض
     .description = عرض الرسوم التوضيحية الجديدة (بكسل)
 sue_paint-height = الارتفاع
     .description = ارتفاع الرسوم التوضيحية الجديدة (بكسل)
-sue_paint-dpi = الدقة
-    .description = دقة الرسوم التوضيحية الجديدة (نقطة لكل بوصة)
-sue_paint-materials_dir = مجلد المواد
-    .description = مكان حفظ المواد ورؤوس الفرش في Sue Paint (فارغ: المجلد الخاص)
 sue_paint-save_format = تنسيق الحفظ
     .description = طريقة حفظ الصورة: ملف clip. من Clip Studio Paint أو مشروع Sue
     .clip = Clip Studio Paint (.clip)
     .sue = مشروع Sue (.sue)
-sue_paint-touch_mode = وضع اللمس
-    .description = Sue Paint على الهواتف والأجهزة اللوحية: الوضع البسيط أو وضع الاستوديو
-    .simple = بسيط
-    .studio = استوديو
-sue_paint-custom_key_1 = مفتاح مخصص 1
-    .description = الأمر الذي ينفذه المفتاح T1 في وضع الاستوديو
-sue_paint-custom_key_2 = مفتاح مخصص 2
-    .description = الأمر الذي ينفذه المفتاح T2 في وضع الاستوديو
-sue_paint-custom_key_3 = مفتاح مخصص 3
-    .description = الأمر الذي ينفذه المفتاح T3 في وضع الاستوديو
-sue_paint-custom_key_4 = مفتاح مخصص 4
-    .description = الأمر الذي ينفذه المفتاح T4 في وضع الاستوديو
-sue_paint-custom_key_5 = مفتاح مخصص 5
-    .description = الأمر الذي ينفذه المفتاح T5 في وضع الاستوديو
-sue_paint-custom_key_6 = مفتاح مخصص 6
-    .description = الأمر الذي ينفذه المفتاح T6 في وضع الاستوديو
-sue_paint-custom_key_7 = مفتاح مخصص 7
-    .description = الأمر الذي ينفذه المفتاح T7 في وضع الاستوديو
 sue_paint-theme = السمة
     .description = ألوان Sue Paint: رمادي، سمة Sue، مسبق الضبط أو مخصص
     .gray = رمادي
@@ -180,69 +82,11 @@ sue_paint-theme = السمة
     .graphite = جرافيت
     .paper = ورق
     .custom = مخصص
-sue_paint-pen_pressure = ضغط القلم
-    .description = منحنى ضغط القلم لكل أداة (ملف -> ضبط مستوى ضغط القلم)
-sue_paint-shift_line = Shift للخطوط المستقيمة
-    .description = Shift مع السحب يرسم خطاً مستقيماً أثناء السحب (تفضيلات -> أدوات)
-sue_paint-two_finger_tap = نقر بإصبعين
-    .description = ما يفعله النقر السريع بإصبعين على اللوحة (تفضيلات -> إيماءات اللمس)
-    .undo = تراجع
-    .none = لا شيء
-sue_paint-three_finger_tap = نقر بثلاثة أصابع
-    .description = ما يفعله النقر السريع بثلاثة أصابع على اللوحة (تفضيلات -> إيماءات اللمس)
-    .redo = إعادة
-    .none = لا شيء
-sue_paint-brush_cursor = مؤشر الفرشاة
-    .description = المؤشر على اللوحة أثناء الرسم: مخطط الفرشاة أو علامة زائد أو نقطة (تفضيلات -> المؤشر)
-    .brush = شكل الفرشاة
-    .crosshair = علامة زائد
-    .dot = نقطة
-sue_paint-selection_layer_opacity = عتامة طبقات التحديد
-    .description = عتامة طبقة التحديد الجديدة (٪؛ تفضيلات -> طبقة/إطار)
-sue_paint-rotate_step = خطوة التدوير
-    .description = مقدار دوران العرض عند التدوير لليسار أو اليمين (درجات؛ تفضيلات -> لوحة الرسم)
-sue_paint-alt_tool = أداة Alt
-    .description = ما يفعله Alt أثناء الرسم على اللوحة (ملف -> إعدادات مفاتيح التعديل)
-    .eyedropper = قطارة
-    .eraser = ممحاة
-    .none = لا شيء
-sue_paint-space_tool = أداة المسافة
-    .description = ما يفعله مفتاح المسافة على اللوحة (ملف -> إعدادات مفاتيح التعديل)
-    .hand = يد
-    .none = لا شيء
-sue_paint-ctrl_shift = Ctrl+Shift
-    .description = ما ينفذه النقر مع Ctrl+Shift على اللوحة (ملف -> إعدادات مفاتيح التعديل)
-    .pick_layer = اختيار طبقة
-    .none = لا شيء
-sue_paint-language = اللغة
-    .description = اللغة: sue تتبع لغة Sue، أو علامة لغة لتمييز هذا الاستوديو
 
 ## [sue_paint_colors]
 
-sue_paint_colors-void = فراغ
-    .description = حول الصورة
-sue_paint_colors-panel = لوحة
-    .description = اللوحات والقوائم
-sue_paint_colors-pill = عنصر بيضاوي
-    .description = الحقول والرقاقات والبطاقات
-sue_paint_colors-hover = عند التمرير
-    .description = عناصر التحكم تحت المؤشر
-sue_paint_colors-active = نشط
-    .description = عناصر التحكم المضغوطة والمحددة
-sue_paint_colors-border = حد
-    .description = الحدود الرفيعة
-sue_paint_colors-border_active = حد نشط
-    .description = حدود عناصر التحكم المحددة والمفعلة
 sue_paint_colors-text = نص
     .description = النص الأساسي والأيقونات النشطة
-sue_paint_colors-muted = خافت
-    .description = النص الثانوي
-sue_paint_colors-selection = تحديد
-    .description = تمييز تحديد النص
-sue_paint_colors-selection_text = نص التحديد
-    .description = النص داخل التحديد
-sue_paint_colors-grid = شبكة
-    .description = الشبكات والمساطر
 sue_paint_colors-shadow = ظل
     .description = الظل أسفل الأسطح العائمة
 
@@ -261,8 +105,6 @@ sue_writer-dark_paper = ورق داكن
     .description = إظهار الصفحة بالألوان الداكنة للسمة بدلاً من الورق الأبيض
 sue_writer-spell_check = التدقيق الإملائي
     .description = وضع خط تحت الكلمات التي تحتوي على أخطاء إملائية أثناء الكتابة
-sue_writer-language = اللغة
-    .description = اللغة: sue تتبع لغة Sue، أو علامة لغة لتمييز هذا الاستوديو
 
 ## [keys]
 
@@ -512,50 +354,28 @@ sue_writer_keys-insert_mark_nbsp = إدراج مسافة غير منقسمة
 ## [layout]
 
 
-layout-bar_height = ارتفاع الشريط
-    .description = ارتفاع الشريط العلوي مع زر Sue والقوائم (بكسل؛ تخطيطات اللمس تجعله أطول)
 
 layout-status_bar_height = ارتفاع شريط الحالة
     .description = ارتفاع شريط الحالة (بكسل)
 
-layout-settings_sidebar_width = عرض الشريط الجانبي للإعدادات
-    .description = عرض قائمة الفئات في الإعدادات (بكسل)
 
 layout-shadow_blur = ضبابية الظل
     .description = ضبابية الظل أسفل القوائم والنوافذ (بكسل)
 
-colors-grid = شبكة
-    .description = خطوط الشبكة في محررات المنحنيات
 
-input-wheel_line_px = خط عجلة التمرير (بكسل)
-    .description = البكسلات التي يتم تمريرها لكل حركة لعجلة الفأرة في القوائم
 
-io-jxl_effort = جهد JPEG XL
-    .description = جهد JPEG XL عند التصدير (الأعلى أصغر وأبطأ)
 
-io-jpeg_lossless_transcode = تحويل JPEG دون فقدان
-    .description = إعادة ضغط JPEG إلى JPEG XL بدقة البت عند تثبيت برنامج ترميز
 
 io-jpeg_quality = جودة JPEG
     .description = جودة JPEG عند التصدير إلى jpg.
 
-io-byte_map_width = عرض خريطة البايتات
-    .description = الأعمدة في خريطة البايتات للملفات غير المعروفة
 
-io-max_ingest_mib = أقصى حجم للإدخال (ميغابايت)
-    .description = أكبر ملف يمكن لـ Sue فتحه (ميغابايت)
 
-io-convert_dir = مجلد التحويل
-    .description = مجلد الملفات المصدرة والمحولة دفعة واحدة (الفارغ يحفظ بجانب المصدر)
 
 audio-output_device = جهاز الإخراج
     .description = جهاز إخراج الصوت (الفارغ يستخدم الافتراضي للنظام)
 
-audio-realtime_priority = أولوية الوقت الفعلي
-    .description = طلب جدولة مسار الصوت في الوقت الفعلي من نظام التشغيل
 
 audio-volume = مستوى الصوت
     .description = مستوى صوت كل ما يشغله Sue
 
-packages-require_signatures = طلب التوقيعات
-    .description = قبول الحزم ذات توقيع Ed25519 الصالح فقط

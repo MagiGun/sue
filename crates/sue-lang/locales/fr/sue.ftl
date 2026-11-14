@@ -1,5 +1,4 @@
 ## Sue : fenêtre, fichiers, projets et messages
-could-not-save-the-rice = Impossible d'enregistrer le Rice : { $error }
 quit-sue = Quitter Sue ?
 your-settings-are-saved-first = Vos paramètres sont d'abord enregistrés.
 quit = Quitter
@@ -23,18 +22,14 @@ untitled-sue = Sans titre.sue
 sue-project = Projet Sue
 opened = Ouvert : { $value }
 it-is-a-folder = c'est un dossier
-over-mib-limit-io-max-ingest = sa taille est de { $value }, au-delà de la limite de { $limit_mib } Mio (io.max_ingest_mib)
 cannot-open = Impossible d'ouvrir { $name } : { $reason }
 no-studio-tool-opens-yet = Aucun atelier ou outil ne peut encore ouvrir { $name }
 there-no-audio-device-mode = aucun périphérique audio n'est disponible dans ce mode
 audio = Audio : { $error }
 cannot-read = Impossible de lire { $path } : { $error }
-rice-file-has-error = Le fichier Rice contient une erreur : { $error }
-rice-file-matches-what-sue-shows = Le fichier Rice correspond à l'affichage de Sue
 reload-default-suerice = Recharger default.suerice
 reloaded-values-from-disk = { $count } valeurs rechargées depuis le disque
 reload-failed = Échec du rechargement : { $error }
-export-rice = Exporter le Rice
 could-not-keep-unsaved-work = Impossible de conserver le travail non enregistré : { $error }
 that-unsaved-work-is-gone = Le travail non enregistré a été perdu
 cannot-recover = Impossible de récupérer { $title } : { $error }

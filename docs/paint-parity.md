@@ -540,8 +540,8 @@ The order of work is the plan at the end.
 
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
-| Preferences dialog | File > Preferences | done | |
-| Shortcut Settings | File > Shortcut Settings | done | Settings, Keymaps; the menus show what you chose |
+| Preferences dialog | File > Preferences | done | Opens Settings on the Sue Paint page, in named groups; only options that work are shown, and Clip Studio's option names find them in the filter |
+| Shortcut Settings | File > Shortcut Settings | done | Settings, Keyboard Shortcuts: grouped by menu and Tools, any command can get a key, a key held twice is marked on both rows with an offer to take it from the other; the menus show what you chose |
 | Modifier Key Settings | File > Modifier Key Settings | partial | Command exists; verify |
 | Command Bar Settings | File > Command Bar Settings | partial | Command exists; verify |
 | Pen Pressure Settings | File > Pen Pressure Settings | done | |

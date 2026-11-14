@@ -1,6 +1,5 @@
 ## Sue itself (bins/sue).
 
-could-not-save-the-rice = Não foi possível salvar as configurações: { $error }
 quit-sue = Sair do Sue?
 your-settings-are-saved-first = Suas configurações são salvas primeiro.
 quit = Sair
@@ -24,18 +23,14 @@ untitled-sue = Sem título.sue
 sue-project = Projeto Sue
 opened = Aberto { $value }
 it-is-a-folder = é uma pasta
-over-mib-limit-io-max-ingest = tem { $value }, acima do limite de { $limit_mib } MiB (io.max_ingest_mib)
 cannot-open = Não foi possível abrir { $name }: { $reason }
 no-studio-tool-opens-yet = Nenhum estúdio ou ferramenta abre { $name } ainda
 there-no-audio-device-mode = não há dispositivo de áudio neste modo
 audio = Áudio: { $error }
 cannot-read = Não foi possível ler { $path }: { $error }
-rice-file-has-error = O arquivo de configurações contém um erro: { $error }
-rice-file-matches-what-sue-shows = O arquivo de configurações coincide com o que o Sue exibe
 reload-default-suerice = Recarregar default.suerice
 reloaded-values-from-disk = Recarregados { $count } valores do disco
 reload-failed = Falha ao recarregar: { $error }
-export-rice = Exportar Configurações
 could-not-keep-unsaved-work = Não foi possível manter o trabalho não salvo: { $error }
 that-unsaved-work-is-gone = O trabalho não salvo foi perdido
 cannot-recover = Não foi possível recuperar { $title }: { $error }

@@ -1,27 +1,130 @@
-//! Scenes of Settings.
+//! Scenes of Settings. Every click lands where a frame drew what it
+//! clicks, never at a fixed position.
 
-use egui::Pos2;
+use egui::{Pos2, Rect, vec2};
 use sue_rice::RiceValue;
 use sue_wm::ShellRequest;
 
 use super::super::Tour;
 
-/// 04 and 05. Settings, on two categories; 04b. the color wheel behind
-/// the Void swatch.
-pub(super) fn desktop(tour: &mut Tour<'_>) -> Result<(), String> {
-    for (page, name) in [
-        ("appearance", "04-settings-appearance"),
-        ("general", "05-settings-general"),
-    ] {
-        tour.request(ShellRequest::OpenSettings(Some(page.to_owned())));
-        tour.shoot(name)?;
-        if page == "appearance" {
-            tour.camera.click(Pos2::new(1176.0, 318.0));
-            tour.shoot("04b-color-wheel")?;
-            tour.camera.click(Pos2::new(700.0, 860.0));
-            tour.settle();
+/// Every piece of text the next frame draws, with its rect.
+fn texts(tour: &mut Tour<'_>) -> Vec<(String, Rect)> {
+    let output = tour.camera.frame(&mut tour.runtime);
+    tour.camera
+        .painter
+        .apply_textures(output.textures_delta.clone());
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        let mut look = |shape: &egui::Shape| {
+            if let egui::Shape::Text(text) = shape {
+                found.push((
+                    text.galley.text().to_owned(),
+                    Rect::from_min_size(text.pos, text.galley.size()),
+                ));
+            }
+        };
+        match &clipped.shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(&mut look),
+            shape => look(shape),
         }
     }
+    found
+}
+
+/// Where Settings drew `text` inside its window, the topmost first.
+fn rect_of(tour: &mut Tour<'_>, text: &str) -> Result<Rect, String> {
+    let window = tour
+        .runtime
+        .shell
+        .window_rect()
+        .ok_or("Settings is not open")?;
+    texts(tour)
+        .into_iter()
+        .filter(|(found, rect)| found == text && window.contains(rect.center()))
+        .map(|(_, rect)| rect)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .ok_or_else(|| format!("Settings draws no {text:?}"))
+}
+
+/// Clicks the middle of `text` in Settings.
+fn click(tour: &mut Tour<'_>, text: &str) -> Result<(), String> {
+    let at = rect_of(tour, text)?.center();
+    tour.camera.click(at);
+    tour.settle();
+    Ok(())
+}
+
+/// Turns the mouse wheel over Settings' page by `by` points.
+fn scroll(tour: &mut Tour<'_>, by: f32) {
+    if let Some(window) = tour.runtime.shell.window_rect() {
+        let at = window.center() + vec2(window.width() * 0.15, 0.0);
+        tour.camera.input.push(vec![egui::Event::PointerMoved(at)]);
+        tour.camera.input.push(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -by),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        tour.settle();
+    }
+}
+
+/// Types `text` into the Settings filter, which is empty.
+fn filter(tour: &mut Tour<'_>, text: &str) -> Result<(), String> {
+    click(
+        tour,
+        &sue_lang::text("settings", "filter-settings-ellipsis"),
+    )?;
+    tour.camera
+        .input
+        .push(vec![egui::Event::Text(text.to_owned())]);
+    tour.settle();
+    Ok(())
+}
+
+/// 04 and 05. Settings, on two categories; 04b. the color wheel behind
+/// the page background's swatch; 04c to 04g. Sue Paint's page, the
+/// keyboard shortcuts with a key held twice, the icons, and Sue Writer's
+/// page.
+pub(super) fn desktop(tour: &mut Tour<'_>) -> Result<(), String> {
+    tour.request(ShellRequest::OpenSettings(Some("appearance".to_owned())));
+    tour.shoot("04-settings-appearance")?;
+    // The colors wait under Advanced: open them, then the first wheel.
+    scroll(tour, 900.0);
+    click(tour, &sue_lang::text("settings", "colors"))?;
+    let row = rect_of(tour, &sue_lang::text("rice", "colors-void"))?;
+    let window = tour.runtime.shell.window_rect().ok_or("Settings closed")?;
+    // The swatch sits at the row's right end, level with its name.
+    tour.camera
+        .click(Pos2::new(window.right() - 40.0, row.center().y + 4.0));
+    tour.shoot("04b-color-wheel")?;
+    tour.camera
+        .click(Pos2::new(window.left() + 40.0, window.bottom() - 20.0));
+    tour.settle();
+    // The icons: Sue's own, as a sheet.
+    tour.request(ShellRequest::OpenSettings(Some("appearance".to_owned())));
+    scroll(tour, 380.0);
+    click(tour, &sue_lang::text("settings", "icons-show-sheet"))?;
+    tour.shoot("04c-settings-icons")?;
+    // File, Preferences in Sue Paint opens this page.
+    tour.request(ShellRequest::OpenSettings(Some(sue_paint::ID.to_owned())));
+    tour.shoot("04d-settings-sue-paint")?;
+    tour.request(ShellRequest::OpenSettings(Some(sue_writer::ID.to_owned())));
+    tour.shoot("04e-settings-sue-writer")?;
+    // Keyboard Shortcuts: Sue Paint's Tools, with R given to Bigger Brush
+    // as well, so both rows are marked.
+    let both: sue_rice::Keybinds = "] or R".parse().map_err(|error| format!("{error}"))?;
+    tour.set("sue_paint_keys.brush_bigger", RiceValue::Keybind(both));
+    tour.request(ShellRequest::OpenSettings(Some("keymaps".to_owned())));
+    tour.shoot("04f-settings-keyboard-shortcuts")?;
+    filter(tour, "brush")?;
+    tour.shoot("04g-settings-key-held-twice")?;
+    let shipped: sue_rice::Keybinds = "]".parse().map_err(|error| format!("{error}"))?;
+    tour.set("sue_paint_keys.brush_bigger", RiceValue::Keybind(shipped));
+    tour.runtime.shell.close_window();
+    tour.request(ShellRequest::OpenSettings(Some("general".to_owned())));
+    tour.shoot("05-settings-general")?;
     tour.runtime.shell.close_window();
     tour.runtime.shell.dismiss_overlays();
     Ok(())

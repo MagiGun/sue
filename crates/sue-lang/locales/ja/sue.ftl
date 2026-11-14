@@ -1,7 +1,6 @@
 ## Sue (bins/sue): ウィンドウ、ファイル、プロジェクト。下書き: ネイティブ
 ## スピーカーの確認待ち。
 
-could-not-save-the-rice = 設定を保存できませんでした: { $error }
 quit-sue = Sue を終了しますか?
 your-settings-are-saved-first = 設定は先に保存されます。
 quit = 終了
@@ -23,18 +22,14 @@ untitled-sue = 無題.sue
 sue-project = Sue プロジェクト
 opened = { $value } を開きました
 it-is-a-folder = フォルダーです
-over-mib-limit-io-max-ingest = { $value } あり、上限の { $limit_mib } MiB を超えています (io.max_ingest_mib)
 cannot-open = { $name } を開けません: { $reason }
 no-studio-tool-opens-yet = { $name } を開けるスタジオやツールはまだありません
 there-no-audio-device-mode = このモードにはオーディオデバイスがありません
 audio = オーディオ: { $error }
 cannot-read = { $path } を読めません: { $error }
-rice-file-has-error = 設定ファイルにエラーがあります: { $error }
-rice-file-matches-what-sue-shows = 設定ファイルは Sue の表示と一致しています
 reload-default-suerice = default.suerice を再読み込み
 reloaded-values-from-disk = ディスクから { $count } 個の値を再読み込みしました
 reload-failed = 再読み込みできませんでした: { $error }
-export-rice = 設定を書き出す
 cannot-discard = { $title } を破棄できません: { $error }
 cannot-recover = { $title } を復元できません: { $error }
 cannot-remember-the-recent-files = 最近使ったファイルを記録できません: { $error }

@@ -18,33 +18,9 @@ launchpad-pinned = 启动时打开
 
 ## [profile]
 
-profile-hardware = 性能偏好
-    .description = 帧率节奏与特效开销预算
-    .auto = 自动
-    .high-refresh = 高刷新率
-    .balanced = 均衡
-    .legacy-low-spec = 旧设备低配置
-    .mobile-battery-saver = 移动省电
 
 ## [display]
 
-display-frame_rate_cap = 帧率上限
-    .description = 动画播放时的最高帧率（0 遵循性能偏好）
-display-ui_scale = 界面缩放
-    .description = 在系统缩放基础上的界面缩放比例
-display-interface = 界面布局
-    .description = 布局：自动跟随设备（平板和手机使用触摸布局）；可手动选择切换
-    .auto = 自动
-    .desktop = 桌面
-    .tablet = 平板
-    .phone = 手机
-display-phone_frame = 手机边框样式
-    .description = 在电脑上以窗口居中的手机等宽列绘制手机布局
-display-gpu_preference = GPU 偏好
-    .description = 负责绘制窗口的显卡；自动使用显示器对应的显卡（重启后生效）
-    .auto = 自动
-    .integrated = 核芯显卡
-    .discrete = 独立显卡
 
 ## [motion]
 
@@ -52,78 +28,28 @@ motion-instant_transitions = 即时过渡
     .description = 页面、菜单和窗口在 0 毫秒内瞬间完成切换而不播放动画
 motion-animation_speed = 动画速度
     .description = 所有弹簧动画的播放速度
-motion-spring_stiffness = 弹簧刚度
-    .description = 所有动画的弹簧弹性系数 k
-motion-spring_damping = 弹簧阻尼
-    .description = 所有动画的阻尼系数 c
-motion-settle_grace_ms = 静止缓冲时间 (ms)
-    .description = 最后一次改动后保持重绘的时长（毫秒）
 motion-caret_blink_ms = 光标闪烁间隔 (ms)
     .description = 文本光标闪烁周期（0 保持光标常亮）
 motion-smooth_caret = 平滑光标
     .description = 文本光标平滑滑动至新位置而不是跳变
 motion-caret_glide_ms = 光标平滑时间
     .description = 光标平滑滑动至新位置所需时长（毫秒；越小越快）
-motion-message_seconds = 状态栏消息时长
-    .description = 消息在状态栏保留显示的秒数 (s)
 
 ## [layout]
 
 layout-padding = 内边距
     .description = 栏、药丸按钮和控件内部的间距 (px)
-layout-border_width = 边框粗细
-    .description = 细边框厚度 (px)
-layout-control_radius = 控件圆角
-    .description = 按钮和输入框的圆角半径 (px)
-layout-card_radius = 卡片圆角
-    .description = 卡片、列表行和浮动面板的圆角半径 (px)
-layout-pill_radius = 药丸圆角
-    .description = 窗口、菜单和药丸按钮的圆角半径 (px)
-layout-pill_height = 药丸高度
-    .description = 药丸按钮的高度 (px)
 layout-status_bar = 状态栏
     .description = 在窗口底部显示窄状态栏（隐藏时消息将以通知形式弹出）
 
 ## [colors]
-colors-void = 纯黑底色
-    .description = 页面背景
-colors-panel = 面板
-    .description = 侧边栏和面板
-colors-pill = 药丸控件
-    .description = 菜单、对话框和浮动表面
-colors-hover = 悬停
-    .description = 鼠标悬停控件
-colors-active = 激活
-    .description = 按下及选中的控件
-colors-border = 边框
-    .description = 细边框线
-colors-border_active = 激活边框
-    .description = 悬停框及聚焦控件的边框
 colors-text = 文本
     .description = 主要文本和激活图标
-colors-muted = 次要文本
-    .description = 次要文本
-colors-selection = 选中高亮
-    .description = 文本选中高亮底色
-colors-selection_text = 选中文本
-    .description = 选中区域内部文本
 colors-shadow = 阴影
     .description = 浮动表面下方的阴影
 
 ## [typography]
 
-typography-ui_font = 界面字体
-    .description = 界面显示的内置字体
-typography-ui_size = 界面字号
-    .description = 界面文本字号 (px)
-typography-small_size = 小号字体
-    .description = 说明文字和状态栏文本字号 (px)
-typography-title_size = 小标题字号
-    .description = 卡片、对话框和分区标题的字号 (px)
-typography-heading_size = 标题字号
-    .description = 标题文本字号 (px)
-typography-mono_size = 等宽字号
-    .description = 等宽代码文本字号 (px)
 
 ## [input]
 
@@ -131,8 +57,6 @@ typography-mono_size = 等宽字号
 
 ## [audio]
 
-audio-buffer_frames = 音频缓冲区帧数
-    .description = 每次送往声卡的采样帧数（0 使用声卡默认值）
 audio-sample_rate = 音频采样率
     .description = 声音引擎内部采样率（Hz；0 遵循声卡默认值）
 ## [packages]
@@ -146,32 +70,10 @@ sue_paint-width = 宽度
     .description = 新建插画的宽度 (px)
 sue_paint-height = 高度
     .description = 新建插画的高度 (px)
-sue_paint-dpi = 分辨率
-    .description = 新建插画的分辨率 (dpi)
-sue_paint-materials_dir = 素材文件夹
-    .description = Sue Paint 存放素材和笔刷笔尖的路径（留空为自带文件夹）
 sue_paint-save_format = 保存格式
     .description = 保存图片的格式：Clip Studio Paint .clip 文件或 Sue 项目
     .clip = Clip Studio Paint (.clip)
     .sue = Sue 项目 (.sue)
-sue_paint-touch_mode = 触摸模式
-    .description = 手机和平板上的 Sue Paint 模式：简单模式或工作室模式
-    .simple = 简单
-    .studio = 工作室
-sue_paint-custom_key_1 = 自定义键 1
-    .description = 工作室模式 T1 键执行的命令
-sue_paint-custom_key_2 = 自定义键 2
-    .description = 工作室模式 T2 键执行的命令
-sue_paint-custom_key_3 = 自定义键 3
-    .description = 工作室模式 T3 键执行的命令
-sue_paint-custom_key_4 = 自定义键 4
-    .description = 工作室模式 T4 键执行的命令
-sue_paint-custom_key_5 = 自定义键 5
-    .description = 工作室模式 T5 键执行的命令
-sue_paint-custom_key_6 = 自定义键 6
-    .description = 工作室模式 T6 键执行的命令
-sue_paint-custom_key_7 = 自定义键 7
-    .description = 工作室模式 T7 键执行的命令
 sue_paint-theme = 主题
     .description = Sue Paint 配色：灰色、Sue 自带主题（跟随）、预设或自定义
     .gray = 灰色
@@ -180,69 +82,11 @@ sue_paint-theme = 主题
     .graphite = 石墨
     .paper = 纸白
     .custom = 自定义
-sue_paint-pen_pressure = 压感调节
-    .description = 全局笔刷压感曲线（在“文件” -> “调节笔压检知等级”中绘制）
-sue_paint-shift_line = Shift 直线
-    .description = 按住 Shift 拖动可绘制直线（首选项 -> 工具）
-sue_paint-two_finger_tap = 双指轻点
-    .description = 在画布上双指快速轻点的操作（首选项 -> 触摸手势）
-    .undo = 撤销
-    .none = 无
-sue_paint-three_finger_tap = 三指轻点
-    .description = 在画布上三指快速轻点的操作（首选项 -> 触摸手势）
-    .redo = 重做
-    .none = 无
-sue_paint-brush_cursor = 笔刷光标
-    .description = 绘画时画布上的光标样式：笔刷轮廓、十字准星或圆点（首选项 -> 光标）
-    .brush = 笔刷形状
-    .crosshair = 十字准星
-    .dot = 圆点
-sue_paint-selection_layer_opacity = 选择范围图层不透明度
-    .description = 新建选择范围图层的不透明度（%，首选项 -> 图层/分镜框）
-sue_paint-rotate_step = 旋转步长
-    .description = 向左旋转和向右旋转单次转动的角度（度，首选项 -> 画布）
-sue_paint-alt_tool = Alt 工具
-    .description = 绘画时按住 Alt 在画布上的动作（文件 -> 修饰键设置）
-    .eyedropper = 吸管
-    .eraser = 橡皮擦
-    .none = 无
-sue_paint-space_tool = 空格工具
-    .description = 在画布上按住空格键的动作（文件 -> 修饰键设置）
-    .hand = 抓手
-    .none = 无
-sue_paint-ctrl_shift = Ctrl+Shift
-    .description = 在画布上 Ctrl+Shift 点击的动作（文件 -> 修饰键设置）
-    .pick_layer = 选择图层
-    .none = 无
-sue_paint-language = 语言
-    .description = 语言：sue 跟随 Sue 语言，也可通过语言标签单独指定
 
 ## [sue_paint_colors]
 
-sue_paint_colors-void = 纯黑底色
-    .description = 画布周围空白区域
-sue_paint_colors-panel = 面板
-    .description = 面板与菜单
-sue_paint_colors-pill = 药丸控件
-    .description = 输入框、芯片与卡片
-sue_paint_colors-hover = 悬停
-    .description = 鼠标悬停控件
-sue_paint_colors-active = 激活
-    .description = 按下及选中的控件
-sue_paint_colors-border = 边框
-    .description = 细分割线
-sue_paint_colors-border_active = 激活边框
-    .description = 选中及聚焦控件的边框
 sue_paint_colors-text = 文本
     .description = 主文本与激活图标
-sue_paint_colors-muted = 次要文本
-    .description = 次要说明文本
-sue_paint_colors-selection = 选中高亮
-    .description = 文本选中高亮底色
-sue_paint_colors-selection_text = 选中文本
-    .description = 选中区域内部文字
-sue_paint_colors-grid = 网格
-    .description = 网格与标尺
 sue_paint_colors-shadow = 阴影
     .description = 浮动面板下方阴影
 
@@ -261,8 +105,6 @@ sue_writer-dark_paper = 深色纸张
     .description = 页面显示为主题深色背景而非白纸
 sue_writer-spell_check = 拼写检查
     .description = 键入时标出拼写错误的单词
-sue_writer-language = 语言
-    .description = 语言：sue 跟随 Sue 语言，也可单独指定
 
 ## [keys]
 
@@ -512,50 +354,28 @@ sue_writer_keys-insert_mark_nbsp = 插入 不换行空格
 ## [layout]
 
 
-layout-bar_height = 顶栏高度
-    .description = 带有 Sue 按钮和菜单的顶部栏高度（px；触摸布局会更高）
 
 layout-status_bar_height = 状态栏高度
     .description = 底部状态栏高度 (px)
 
-layout-settings_sidebar_width = 设置侧边栏宽度
-    .description = 设置中分类列表的宽度 (px)
 
 layout-shadow_blur = 阴影模糊
     .description = 菜单和窗口下方的阴影模糊半径 (px)
 
-colors-grid = 曲线网格
-    .description = 曲线编辑器中的网格线
 
-input-wheel_line_px = 滚轮滚动像素
-    .description = 列表中鼠标滚轮每刻度滚动的像素数
 
-io-jxl_effort = JPEG XL 编码算力
-    .description = 导出时的 JPEG XL 算力消耗（越高文件越小且耗时越长）
 
-io-jpeg_lossless_transcode = JPEG 无损转码
-    .description = 安装重压缩编解码器后按位将 JPEG 无损重压缩为 JPEG XL
 
 io-jpeg_quality = JPEG 质量
     .description = 导出为 .jpg 时的 JPEG 图像质量
 
-io-byte_map_width = 字节图宽度
-    .description = 未知文件字节图的列数
 
-io-max_ingest_mib = 最大导入大小 (MiB)
-    .description = Sue 能够打开的最大文件大小 (MiB)
 
-io-convert_dir = 转换保存文件夹
-    .description = 导出文件和批量转换文件的保存目录（留空则保存在源文件旁边）
 
 audio-output_device = 输出设备
     .description = 音频输出设备（留空使用系统默认）
 
-audio-realtime_priority = 实时优先级
-    .description = 请求系统以实时优先级调度音频线程
 
 audio-volume = 音量
     .description = Sue 播放声音的主音量
 
-packages-require_signatures = 强制签名验证
-    .description = 仅接受带有有效 Ed25519 签名的扩展包

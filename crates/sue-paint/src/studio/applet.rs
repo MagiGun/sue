@@ -10,8 +10,8 @@ use sue_model::picture;
 use sue_platform::write_atomic;
 use sue_rice::{RiceDeclaration, RiceParameter};
 use sue_wm::{
-    AppletContext, AppletId, AppletManifest, AppletRole, Facts, FilePick, PaletteEntry,
-    ShellRequest, SueApplet,
+    AppletContext, AppletId, AppletManifest, AppletRole, Choice, Facts, FilePick, PaletteEntry,
+    SettingsPage, ShellRequest, SueApplet,
 };
 
 use super::{
@@ -213,6 +213,14 @@ impl SueApplet for SuePaint {
             shortcut_table(),
         ));
         declarations
+    }
+
+    fn settings_page(&self) -> Option<SettingsPage> {
+        Some(crate::prefs::page(&self.manifest().title()))
+    }
+
+    fn setting_choices(&self) -> Vec<(String, Vec<Choice>)> {
+        crate::prefs::choices()
     }
 
     fn page_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
@@ -638,13 +646,6 @@ impl SueApplet for SuePaint {
         match target {
             "dialog/new" => {
                 self.dialog = Some(Dialog::New(NewDialog::new(&NewPicture::default())));
-                true
-            }
-            "dialog/preferences" => {
-                let Ok(rice) = sue_rice::RiceSchema::parse(sue_rice::DEFAULT_RICE) else {
-                    return false;
-                };
-                self.dialog = Some(Dialog::Preferences(crate::prefs::Preferences::read(&rice)));
                 true
             }
             "dialog/pages" => {

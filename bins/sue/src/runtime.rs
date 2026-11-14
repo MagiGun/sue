@@ -358,6 +358,12 @@ impl Runtime {
         let _language = sue_lang::scope(&sue_wm::sue_language(&self.engine.world.rice));
         if !self.booted {
             self.booted = true;
+            // The icon pack chosen in Settings, and icons replaced one by
+            // one, from the first frame on.
+            let icons = sue_wm::icons::pack::IconHome::of(&self.engine.paths);
+            if icons.chosen().is_some() || !icons.overrides().is_empty() {
+                let _ = sue_wm::icons::pack::refresh(ui.ctx(), &icons);
+            }
             let mut io = shell_io!(self, textures);
             self.shell.boot(&mut io);
             if self.interactive

@@ -1,6 +1,5 @@
 ## Sue itself (bins/sue).
 
-could-not-save-the-rice = تعذر حفظ الإعدادات: { $error }
 quit-sue = هل تريد إنهاء Sue؟
 your-settings-are-saved-first = يتم حفظ إعداداتك أولا.
 quit = إنهاء
@@ -24,18 +23,14 @@ untitled-sue = بلا عنوان.sue
 sue-project = مشروع Sue
 opened = تم فتح { $value }
 it-is-a-folder = إنه مجلد
-over-mib-limit-io-max-ingest = حجمه { $value }، يتجاوز الحد الأقصى { $limit_mib } ميغابايت (io.max_ingest_mib)
 cannot-open = تعذر فتح { $name }: { $reason }
 no-studio-tool-opens-yet = لا يوجد استوديو أو أداة تفتح { $name } بعد
 there-no-audio-device-mode = لا يوجد جهاز صوتي في هذا الوضع
 audio = الصوت: { $error }
 cannot-read = تعذرت قراءة { $path }: { $error }
-rice-file-has-error = ملف الإعدادات يحتوي على خطأ: { $error }
-rice-file-matches-what-sue-shows = ملف الإعدادات يتطابق مع ما يعرضه Sue
 reload-default-suerice = إعادة تحميل default.suerice
 reloaded-values-from-disk = تمت إعادة تحميل { $count } قيمة من القرص
 reload-failed = فشلت إعادة التحميل: { $error }
-export-rice = تصدير الإعدادات
 could-not-keep-unsaved-work = تعذر الاحتفاظ بالعمل غير المحفوظ: { $error }
 that-unsaved-work-is-gone = تم فقدان ذلك العمل غير المحفوظ
 cannot-recover = تعذرت استعادة { $title }: { $error }

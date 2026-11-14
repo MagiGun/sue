@@ -12,54 +12,28 @@ each-studio-tool-follows-sues-language = Each studio and tool follows Sue's lang
 sue = Sue
 language-sue-every-studio-tool-follows = The language of Sue and of every studio and tool that follows it. System uses the system's language when Sue has it.
 studios-and-tools = Studios and Tools
-appearance-and-rice = Appearance & Rice
 theme = Theme
 colors = Colors
-geometry = Geometry
-typography = Typography
-rice-file = Rice File
 reload-from-disk = Reload from Disk
 export-ellipsis = Export...
 open-folder = Open Folder
-display-and-graphics = Display & Graphics
 performance = Performance
 graphics-card = Graphics Card
 restart-sue = Restart Sue
-frame-pacing = Frame Pacing
-interface-and-scale = Interface and Scale
 motion = Motion
-audio-and-dsp = Audio & DSP
 output = Output
 status = Status
-files-and-codecs = Files & Codecs
-jpeg-xl = JPEG XL
-conversion = Conversion
 opening-files = Opening Files
-built-in-codecs = Built-in Codecs
-studios = Studios
-sue-paint = Sue Paint
-each-studio-can-wear-own-theme = Each studio can wear its own theme. Sue Paint starts in Gray, like other painting apps; choose Sue theme to have it follow Sue's colors everywhere, or Custom to color it with the wheels below.
-sue-paint-custom-colors = Sue Paint Custom Colors
-sue-writer = Sue Writer
-sue-writer-follows-sues-theme-unless = Sue Writer follows Sue's theme unless you choose a preset. The page itself stays white paper, as it prints, unless you turn on dark paper.
-packages-and-updates = Packages & Updates
 trust = Trust
-installed-applets = Installed Applets
 packages = Packages
 updates = Updates
-sue-updates = Sue Updates
 check-for-updates = Check for Updates
-keymaps = Keymaps
-shortcuts = Shortcuts
 every-action-can-have-as-many = Every action can have as many shortcuts as you like: + adds one, x takes one away, and clicking one changes it.
-model-context-protocol = Model Context Protocol
-not-yet-available = Not yet available.
 the-hub = The Hub
 system-default = System default
 format = Format
 abilities = Abilities
 library = Library
-applet = Applet
 lives-in = Lives in
 what-it-does = What it does
 hub-studios = Hub, Studios
@@ -115,9 +89,64 @@ settings-reset-all-confirm = Click Again to Reset Every Setting
 all-settings = All settings
 
 applet-name = Settings
-applet-summary = Every setting and every rice parameter.
+applet-summary = Everything you can change in Sue.
 
 ## engine.rs
 
 unsaved-work = Unsaved Work
 sue-keeps-work-you-have-not = Sue keeps work you have not saved by itself. The Hub lists it under Unsaved Work, to recover or discard.
+
+## engine.rs: the pages of Settings (0.0.8)
+
+appearance = Appearance
+text-and-size = Text and Size
+rounded-corners = Rounded Corners
+icons = Icons
+sizes-and-spacing = Sizes and Spacing
+more-text-sizes = More Text Sizes
+animation-details = Animation Details
+display-and-performance = Display and Performance
+interface = Interface
+scrolling = Scrolling
+sound = Sound
+files = Files
+saving-and-export = Saving and Export
+built-in-formats = Built-in Formats
+unknown-files = Unknown Files
+keyboard-shortcuts = Keyboard Shortcuts
+extensions = Extensions
+advanced = Advanced
+settings-file = Settings File
+studio-or-tool = Studio or tool
+
+## settings/keys.rs: Keyboard Shortcuts
+
+keys-sue-key = Sue's { $name }
+keys-group-held-twice = { $group } ({ $count } held twice)
+keys-held-twice = { $chord } also runs { $other }; a press runs only one of them.
+keys-take-from = Take { $chord } from { $other }
+keys-taken-notice = { $chord } is now a key of { $command }, and { $others } holds it too. Take it from one of them below.
+
+## settings/icons.rs: Appearance, Icons
+
+icons-note = Every icon can be drawn by someone else: choose an icon pack, or replace single icons. A pack is a folder of SVG files; what it leaves out stays Sue's own.
+icons-sues-own = Sue's own icons
+icons-show-sheet = Show All Icons
+icons-hide-sheet = Hide the Icons
+icons-about = By { $author }, { $licence }, version { $version }. Draws { $count } icons; { $notes } things could not be read.
+icons-remove = Remove
+icons-remove-confirm = Click Again to Remove
+icons-removed = The pack is removed.
+icons-install-folder = Install from Folder...
+icons-install-archive = Install from Archive...
+icons-export = Export Sue's Icons as a Template...
+icons-replace-one = Replace one icon
+icons-line = Line
+icons-solid = Solid
+icons-choose-svg = Choose SVG...
+icons-give-back = Give Back
+icons-installed = Installed { $name }; { $count } things could not be read.
+icons-exported = Sue's icons are in { $path }.
+icons-replaced = { $name } is replaced; { $count } things could not be read.
+icons-failed = That did not work: { $error }
+icons-not-read = { $count } things in the icons in use could not be read; Sue's own stand in for them.

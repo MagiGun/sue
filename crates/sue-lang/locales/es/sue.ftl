@@ -1,7 +1,6 @@
 ## Sue (bins/sue): la ventana, los archivos y los proyectos. Borrador: espera
 ## la revisión de un hablante nativo.
 
-could-not-save-the-rice = No se pudieron guardar los ajustes: { $error }
 quit-sue = ¿Salir de Sue?
 your-settings-are-saved-first = Tus ajustes se guardan antes.
 quit = Salir
@@ -23,18 +22,14 @@ untitled-sue = Sin título.sue
 sue-project = Proyecto de Sue
 opened = Abierto { $value }
 it-is-a-folder = es una carpeta
-over-mib-limit-io-max-ingest = ocupa { $value }, más que el límite de { $limit_mib } MiB (io.max_ingest_mib)
 cannot-open = No se puede abrir { $name }: { $reason }
 no-studio-tool-opens-yet = Ningún estudio ni herramienta abre { $name } todavía
 there-no-audio-device-mode = no hay ningún dispositivo de audio en este modo
 audio = Audio: { $error }
 cannot-read = No se puede leer { $path }: { $error }
-rice-file-has-error = El archivo de ajustes tiene un error: { $error }
-rice-file-matches-what-sue-shows = El archivo de ajustes coincide con lo que muestra Sue
 reload-default-suerice = Recargar default.suerice
 reloaded-values-from-disk = Se recargaron { $count } valores del disco
 reload-failed = No se pudo recargar: { $error }
-export-rice = Exportar ajustes
 cannot-discard = No se puede descartar { $title }: { $error }
 cannot-recover = No se puede recuperar { $title }: { $error }
 cannot-remember-the-recent-files = No se pueden recordar los archivos recientes: { $error }

@@ -18,33 +18,9 @@ launchpad-pinned = Abrir ao iniciar
 
 ## [profile]
 
-profile-hardware = Preferencia de desempenho
-    .description = Ritmo de quadros e consumo de efeitos
-    .auto = Automatico
-    .high-refresh = Alta taxa de atualizacao
-    .balanced = Equilibrado
-    .legacy-low-spec = Dispositivo antigo
-    .mobile-battery-saver = Economia de bateria
 
 ## [display]
 
-display-frame_rate_cap = Limite de taxa de quadros
-    .description = Taxa maxima de quadros durante animacoes (0 segue a preferencia de desempenho)
-display-ui_scale = Escala da interface
-    .description = Escala da interface sobre a escala do sistema
-display-interface = Interface
-    .description = Disposicao: automatico segue o dispositivo (layouts de toque em tablets e celulares); escolha para alternar
-    .auto = Automatico
-    .desktop = Computador
-    .tablet = Tablet
-    .phone = Celular
-display-phone_frame = Formato de celular
-    .description = No computador, exibe a interface de celular em uma coluna central com largura de telefone
-display-gpu_preference = Preferencia de GPU
-    .description = GPU que desenha a janela; automatico usa a GPU da tela (aplica apos reiniciar)
-    .auto = Automatico
-    .integrated = Integrada
-    .discrete = Dedicada
 
 ## [motion]
 
@@ -52,78 +28,28 @@ motion-instant_transitions = Transicoes instantaneas
     .description = Muda paginas, menus e janelas em 0 ms sem animacoes
 motion-animation_speed = Velocidade da animacao
     .description = Velocidade de todas as animacoes de mola
-motion-spring_stiffness = Rigidez da mola
-    .description = Constante elastica k de cada animacao
-motion-spring_damping = Amortecimento da mola
-    .description = Coeficiente de amortecimento c de cada animacao
-motion-settle_grace_ms = Tolerancia de estabilizacao (ms)
-    .description = Continua desenhando por este tempo apos a ultima mudanca (ms)
 motion-caret_blink_ms = Piscar do cursor (ms)
     .description = Intervalo de intermitencia do cursor de texto (0 mantem solido)
 motion-smooth_caret = Cursor suave
     .description = Faz o cursor de texto deslizar suavemente ate a nova posicao em vez de pular
 motion-caret_glide_ms = Tempo de deslizamento do cursor
     .description = Quanto tempo o cursor leva para deslizar ate o novo local (ms; menor e mais rapido)
-motion-message_seconds = Duracao das mensagens
-    .description = Quanto tempo as mensagens permanecem na barra de status (s)
 
 ## [layout]
 
 layout-padding = Espacamento interno
     .description = Espaco dentro de barras, botoes e controles (px)
-layout-border_width = Espessura da borda
-    .description = Espessura das bordas finas (px)
-layout-control_radius = Raio dos controles
-    .description = Arredondamento dos cantos de botoes e campos (px)
-layout-card_radius = Raio dos cartoes
-    .description = Arredondamento dos cantos de cartoes, linhas de lista e paletas flutuantes (px)
-layout-pill_radius = Raio dos botoes em capsula
-    .description = Arredondamento dos cantos de janelas, menus e botoes em capsula (px)
-layout-pill_height = Altura dos botoes em capsula
-    .description = Altura dos botoes em capsula (px)
 layout-status_bar = Barra de status
     .description = Exibe a barra de status fina na parte inferior da janela (sem ela as mensagens surgem como aviso)
 
 ## [colors]
-colors-void = Vazio
-    .description = Fundo da pagina
-colors-panel = Painel
-    .description = Barras e paineis
-colors-pill = Capsula
-    .description = Menus, caixas e superficies flutuantes
-colors-hover = Ao passar o mouse
-    .description = Controles sob o cursor
-colors-active = Ativo
-    .description = Controles pressionados e escolhidos
-colors-border = Borda
-    .description = Bordas finas
-colors-border_active = Borda ativa
-    .description = Bordas de caixas apontadas e controles com foco
 colors-text = Texto
     .description = Texto principal e icones ativos
-colors-muted = Atenuado
-    .description = Texto secundario
-colors-selection = Selecao
-    .description = Realce de selecao de texto
-colors-selection_text = Texto selecionado
-    .description = Texto dentro de uma selecao
 colors-shadow = Sombra
     .description = Sombra sob superficies flutuantes
 
 ## [typography]
 
-typography-ui_font = Fonte da interface
-    .description = Fonte integrada da interface
-typography-ui_size = Tamanho da interface
-    .description = Tamanho do texto da interface (px)
-typography-small_size = Tamanho do texto pequeno
-    .description = Tamanho do texto de legendas e barra de status (px)
-typography-title_size = Tamanho dos cabecalhos
-    .description = Tamanho dos cabecalhos de cartoes, dialogos e secoes (px)
-typography-heading_size = Tamanho dos titulos
-    .description = Tamanho do texto dos titulos (px)
-typography-mono_size = Tamanho monoespacado
-    .description = Tamanho do texto monoespacado (px)
 
 ## [input]
 
@@ -131,8 +57,6 @@ typography-mono_size = Tamanho monoespacado
 
 ## [audio]
 
-audio-buffer_frames = Quadros do buffer de audio
-    .description = Amostras enviadas a placa de som por vez (0 usa o padrao da placa)
 audio-sample_rate = Taxa de amostragem de audio
     .description = Taxa interna de processamento de som (Hz; 0 segue a placa)
 ## [packages]
@@ -146,32 +70,10 @@ sue_paint-width = Largura
     .description = Largura de novas ilustracoes (px)
 sue_paint-height = Altura
     .description = Altura de novas ilustracoes (px)
-sue_paint-dpi = Resolucao
-    .description = Resolucao de novas ilustracoes (dpi)
-sue_paint-materials_dir = Pasta de materiais
-    .description = Onde o Sue Paint guarda materiais e pontas de pinceis (vazio: pasta propria)
 sue_paint-save_format = Formato de salvamento
     .description = Como salvar uma imagem: arquivo .clip do Clip Studio Paint ou projeto Sue
     .clip = Clip Studio Paint (.clip)
     .sue = Projeto Sue (.sue)
-sue_paint-touch_mode = Modo de toque
-    .description = Sue Paint em celulares e tablets: Modo Simples ou Modo Estudio
-    .simple = Simples
-    .studio = Estudio
-sue_paint-custom_key_1 = Tecla personalizada 1
-    .description = Comando que a tecla T1 do Modo Estudio executa
-sue_paint-custom_key_2 = Tecla personalizada 2
-    .description = Comando que a tecla T2 do Modo Estudio executa
-sue_paint-custom_key_3 = Tecla personalizada 3
-    .description = Comando que a tecla T3 do Modo Estudio executa
-sue_paint-custom_key_4 = Tecla personalizada 4
-    .description = Comando que a tecla T4 do Modo Estudio executa
-sue_paint-custom_key_5 = Tecla personalizada 5
-    .description = Comando que a tecla T5 do Modo Estudio executa
-sue_paint-custom_key_6 = Tecla personalizada 6
-    .description = Comando que a tecla T6 do Modo Estudio executa
-sue_paint-custom_key_7 = Tecla personalizada 7
-    .description = Comando que a tecla T7 do Modo Estudio executa
 sue_paint-theme = Tema
     .description = Cores do Sue Paint: Cinza, tema do Sue (segue), predefinicao ou Personalizado
     .gray = Cinza
@@ -180,69 +82,11 @@ sue_paint-theme = Tema
     .graphite = Grafite
     .paper = Papel
     .custom = Personalizado
-sue_paint-pen_pressure = Pressao da caneta
-    .description = Curva de pressao da caneta para cada ferramenta (Arquivo, Ajustar nivel de pressao da caneta)
-sue_paint-shift_line = Shift para linhas retas
-    .description = Shift e arrastar desenha uma linha reta enquanto e tracada (Preferencias, Ferramentas)
-sue_paint-two_finger_tap = Toque com dois dedos
-    .description = O que um toque rapido de dois dedos na tela faz (Preferencias, Gestos de toque)
-    .undo = Desfazer
-    .none = Nada
-sue_paint-three_finger_tap = Toque com tres dedos
-    .description = O que um toque rapido de tres dedos na tela faz (Preferencias, Gestos de toque)
-    .redo = Refazer
-    .none = Nada
-sue_paint-brush_cursor = Cursor do pincel
-    .description = O ponteiro sobre a tela ao pintar: contorno do pincel, cruz ou ponto (Preferencias, Cursor)
-    .brush = Formato do pincel
-    .crosshair = Cruz
-    .dot = Ponto
-sue_paint-selection_layer_opacity = Opacidade das camadas de selecao
-    .description = Opacidade de uma nova camada de selecao (%; Preferencias, Camada/Quadro)
-sue_paint-rotate_step = Passo de rotacao
-    .description = Quanto Girar para a esquerda e Girar para a direita giram a vista (graus; Preferencias, Tela)
-sue_paint-alt_tool = Ferramenta Alt
-    .description = O que Alt faz ao desenhar na tela (Arquivo, Configuracoes de teclas modificadoras)
-    .eyedropper = Conta-gotas
-    .eraser = Borracha
-    .none = Nenhum
-sue_paint-space_tool = Ferramenta Espaco
-    .description = O que a barra de espaco faz na tela (Arquivo, Configuracoes de teclas modificadoras)
-    .hand = Mao
-    .none = Nenhum
-sue_paint-ctrl_shift = Ctrl+Shift
-    .description = O que Ctrl+Shift clique faz na tela (Arquivo, Configuracoes de teclas modificadoras)
-    .pick_layer = Selecionar camada
-    .none = Nenhum
-sue_paint-language = Idioma
-    .description = Idioma: sue segue o idioma do Sue, ou defina um dedicado
 
 ## [sue_paint_colors]
 
-sue_paint_colors-void = Vazio
-    .description = Ao redor da imagem
-sue_paint_colors-panel = Painel
-    .description = Paletas e menus
-sue_paint_colors-pill = Capsula
-    .description = Campos, fichas e cartoes
-sue_paint_colors-hover = Ao passar o mouse
-    .description = Controles sob o cursor
-sue_paint_colors-active = Ativo
-    .description = Controles pressionados e selecionados
-sue_paint_colors-border = Borda
-    .description = Linhas divisórias finas
-sue_paint_colors-border_active = Borda ativa
-    .description = Bordas de controles escolhidos e em foco
 sue_paint_colors-text = Texto
     .description = Texto principal e icones ativos
-sue_paint_colors-muted = Atenuado
-    .description = Texto secundario
-sue_paint_colors-selection = Selecao
-    .description = Realce de selecao de texto
-sue_paint_colors-selection_text = Texto selecionado
-    .description = Texto dentro de uma selecao
-sue_paint_colors-grid = Grade
-    .description = Grades e reguas
 sue_paint_colors-shadow = Sombra
     .description = Sombra sob superficies flutuantes
 
@@ -261,8 +105,6 @@ sue_writer-dark_paper = Papel escuro
     .description = Mostrar a pagina nas cores escuras do tema em vez de papel branco
 sue_writer-spell_check = Verificacao ortografica
     .description = Sublinhar palavras incorretas ao digitar
-sue_writer-language = Idioma
-    .description = Idioma: sue segue o idioma do Sue, ou defina um dedicado
 
 ## [keys]
 
@@ -512,50 +354,28 @@ sue_writer_keys-insert_mark_nbsp = Inserir espaco inseparavel
 ## [layout]
 
 
-layout-bar_height = Altura da barra
-    .description = Altura da barra superior com o botao Sue e os menus (px; layouts de toque tornam mais alta)
 
 layout-status_bar_height = Altura da barra de status
     .description = Altura da barra de status (px)
 
-layout-settings_sidebar_width = Larghezza lateral de Configuracoes
-    .description = Largura da lista de categorias em Configuracoes (px)
 
 layout-shadow_blur = Desfoque de sombra
     .description = Desfoque da sombra sob menus e janelas (px)
 
-colors-grid = Grade
-    .description = Linhas de grade em editores de curvas
 
-input-wheel_line_px = Linha da roda (px)
-    .description = Pixels rolados por entalhe da roda do mouse em listas
 
-io-jxl_effort = Esforco JPEG XL
-    .description = Esforco de JPEG XL para exportacoes (maior e menor e mais lento)
 
-io-jpeg_lossless_transcode = Transcodificacao JPEG sem perdas
-    .description = Recomprimir JPEG para JPEG XL bit a bit quando houver codec instalado
 
 io-jpeg_quality = Qualidade JPEG
     .description = Qualidade JPEG para exportacoes para .jpg
 
-io-byte_map_width = Largura do mapa de bytes
-    .description = Colunas no mapa de bytes de arquivos desconhecidos
 
-io-max_ingest_mib = Ingestao maxima (MiB)
-    .description = Maior arquivo que o Sue abre (MiB)
 
-io-convert_dir = Pasta de conversao
-    .description = Pasta para arquivos exportados e convertidos em lote (vazio salva ao lado da fonte)
 
 audio-output_device = Dispositivo de saida
     .description = Dispositivo de saida (vazio usa o padrao do sistema)
 
-audio-realtime_priority = Prioridade em tempo real
-    .description = Solicitar ao SO o agendamento da thread de audio em tempo real
 
 audio-volume = Volume
     .description = Volume de reproducao geral do Sue
 
-packages-require_signatures = Exigir assinaturas
-    .description = Aceitar apenas pacotes com assinatura Ed25519 valida

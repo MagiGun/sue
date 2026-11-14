@@ -31,6 +31,7 @@ mod commands;
 mod compile;
 mod menus;
 mod project;
+mod settings_page;
 mod studio;
 pub mod templates;
 mod ui;
