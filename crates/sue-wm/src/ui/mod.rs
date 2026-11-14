@@ -19,8 +19,16 @@ pub mod focus;
 pub mod motion;
 pub mod tokens;
 
+pub mod dialog;
+pub mod toast;
+
+pub use dialog::{
+    Answer, Dialog, DialogHost, DialogResponse, FormGrid, Sheet, SheetResponse, confirm, form_grid,
+    form_row,
+};
 pub use focus::{FocusScope, Roving, focus_ring, focus_visible, paint_focus_ring, watch_focus};
 pub use motion::{Motion, Pace};
+pub use toast::{Toast, ToastEvent, ToastId, ToastRects, Toasts, Tone};
 pub use tokens::{
     Density, EDGE_CONTRAST, Elevation, Layer, MIN_TEXT_SIZE, Radius, Space, TEXT_CONTRAST,
     TextRole, contrast, nested_radius,
