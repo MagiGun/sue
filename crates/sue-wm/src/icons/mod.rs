@@ -420,6 +420,8 @@ icons! {
     /// A padlock: a body with a keyhole and a shackle over it. Locked;
     /// solid for the state that is on.
     Lock = "lock" => reference::LOCK,
+
+    // Group K: writing and text (`text.rs`).
     /// A capital letter B with its upright drawn solid and wide: the
     /// letters made heavier. Bold.
     Bold = "bold" => text::BOLD,
