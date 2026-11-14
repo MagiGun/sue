@@ -9,3 +9,8 @@
 //!
 //! The engine is built module by module; each package of the 0.0.8 plan
 //! adds its own file and its line to the list below.
+//!
+//! - [`raster`]: the rasterizer primitives (the exact uneven capsule, the
+//!   mip-mapped dab, the ribbon) and the premultiplied row kernels.
+
+pub mod raster;
