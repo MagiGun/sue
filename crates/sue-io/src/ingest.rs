@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use sue_core::{Arena, AssetHandle, CoreError, RasterTile2D, StringBuffer};
+use sue_core::{Arena, AssetHandle, ComponentKind, CoreError, Entity, RasterTile2D, StringBuffer};
 
 use crate::{
     IngestRoute, JxlImageInfo, JxlPipeline, NativeFormat, ProgressiveTarget, byte_map_tile,
@@ -45,6 +45,18 @@ pub mod meta {
     pub const ALBUM: &str = "album";
     /// The file the entity was read from (set by whoever read it).
     pub const SOURCE: &str = "source";
+}
+
+/// A flat picture: decoded pixels with a size, as ingest makes from a
+/// picture file, and not the byte map of a file nothing could read (that
+/// one carries its entropy). A layered picture is not one: it holds its
+/// pixels in its layers. Studios and tools that take such a picture ask
+/// here, so they agree on what one is.
+#[must_use]
+pub fn is_flat_picture(entity: &Entity) -> bool {
+    entity.component(ComponentKind::RasterTile2D).is_some()
+        && entity.meta(meta::WIDTH).is_some()
+        && entity.meta(meta::ENTROPY).is_none()
 }
 
 /// Which kind of view suits the ingested entity.
@@ -369,12 +381,36 @@ pub fn route_label(route: &IngestRoute) -> String {
 mod tests {
     use super::*;
     use crate::{NativeJxlPipeline, encode_png, encode_wav};
-    use sue_core::{ComponentKind, PCMFloat1D, PixelFormat, RasterTile2D};
+    use sue_core::{PCMFloat1D, PixelFormat};
 
     const OPTIONS: IngestOptions = IngestOptions {
         byte_map_width: 64,
         clock: || Duration::ZERO,
     };
+
+    #[test]
+    fn a_flat_picture_is_decoded_pixels_and_never_a_byte_map_or_text() {
+        let mut arena = Arena::new();
+        let tile = RasterTile2D::from_bytes(4, 3, PixelFormat::Rgba8, vec![200; 48]).unwrap();
+        let png = encode_png(&tile).unwrap();
+        let picture = ingest_bytes(&mut arena, "a.png", png, &NativeJxlPipeline, OPTIONS).unwrap();
+        assert_eq!(picture.view, IngestView::Raster);
+        assert!(is_flat_picture(arena.get(picture.handle).unwrap()));
+        // The byte map of an unknown file has pixels too, but is no picture.
+        let unknown = [0_u8, 1, 2, 3, 255, 254, 0, 7].repeat(64);
+        let bytes =
+            ingest_bytes(&mut arena, "a.bin", unknown, &NativeJxlPipeline, OPTIONS).unwrap();
+        assert_eq!(bytes.view, IngestView::Bytes);
+        let map = arena.get(bytes.handle).unwrap();
+        assert!(map.component(ComponentKind::RasterTile2D).is_some());
+        assert!(!is_flat_picture(map));
+        let words = b"Some words.".to_vec();
+        let text = ingest_bytes(&mut arena, "a.txt", words, &NativeJxlPipeline, OPTIONS).unwrap();
+        assert_eq!(text.view, IngestView::Text);
+        assert!(!is_flat_picture(arena.get(text.handle).unwrap()));
+        // Pixels nobody gave a size: a layer of a layered picture.
+        assert!(!is_flat_picture(&Entity::new("layer", tile)));
+    }
 
     #[test]
     fn jxl_files_become_decoded_rasters() {

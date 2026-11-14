@@ -13,6 +13,7 @@ mod paint_basics;
 mod paint_brush;
 mod paint_comic;
 mod paint_edit;
+mod paint_files;
 mod paint_layers;
 mod paint_palettes;
 mod paint_rulers;

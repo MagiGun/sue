@@ -236,10 +236,11 @@ to before it converts; they land there, named as the status bar says.
 Whenever Sue needs a file, or a place to save one, it shows your system's own
 Open, Save or folder window, the one every other app uses. Open File (in the
 Sue menu, or `Ctrl+O`) and dropping a file anywhere on the window both put
-the file where it belongs: a picture opens in the Image Viewer, a Word,
-Markdown or text file in Sue Writer, and a `.sue` project replaces what is
-open. A file nothing in Sue opens yet is left alone, and the status bar says
-so.
+the file where it belongs: a picture opens in Sue Paint as a new canvas, a
+brush file (`.sut`, `.abr`, `.gbr`, `.gih`) becomes sub tools there, a
+sound file goes on the timeline of the canvas in front, a Word, Markdown or
+text file opens in Sue Writer, and a `.sue` project replaces what is open.
+A file nothing in Sue opens yet is left alone, and the status bar says so.
 
 Whenever Sue saves or exports a file (a project, a picture from Sue Paint, a
 re-encoded JPEG XL, an exported rice), the status bar says the file's name and
@@ -376,25 +377,10 @@ the left side:
   kind, Favorite and Recently used, as large or small cards or a list.
   With a canvas open, a click puts a material on it; `+` copies a PNG
   picture in as a material.
-- **Browse Assets** shows CLIP STUDIO ASSETS as Clip Studio's start page
-  does: today's top free and paid materials and the newest, as cards with
-  their picture, kind, author, downloads and price. **See more** shows a
-  whole ranking, a card opens the material's page (its pictures,
-  description and what the set holds), and back, forward and reload sit
-  above. On a material's page, paste the link of a file (a brush, a PNG
-  or a zip of them, from the author or any site) and **Download into
-  Sue**: it downloads as a transfer and its brushes and pictures come in
-  by themselves. **Open on CLIP STUDIO ASSETS** opens the material on
-  the site instead, where it downloads with a CLIP STUDIO account. Sue
-  keeps the
-  pages and pictures it read, so without a connection it shows them from
-  last time. Phones and tablets have it as a tab at the bottom, beside
-  Projects, Draw, Manage Materials and Data Transfers.
 
 At the top right: **Data Transfers** (two arrows) lists the files Sue
-opened, saved, exported, copied and downloaded in this run, with **Clear
-Completed Transfers** and a field to download from a link (brushes,
-PNG pictures and zips of them arrive in Sue Paint by themselves); **Help** links to tips, this guide, questions, contact and
+opened, saved, exported and copied in this run, with **Clear
+Completed Transfers**; **Help** links to tips, this guide, questions, contact and
 feedback on the Sue site and GitHub; **Settings** turns dark mode on or off,
 shows or changes where your materials are kept, has a Maintenance Menu
 (draw thumbnails again, look for materials again, forget projects that are

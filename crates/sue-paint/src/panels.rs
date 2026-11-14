@@ -971,9 +971,8 @@ impl SuePaint {
         ui.painter().rect_filled(strip, 0.0, theme.panel);
         ui.painter()
             .vline(strip.right(), strip.y_range(), theme.hairline());
-        // (icon, name, tools; none for Downloads), and None between groups.
-        let entries: [Option<(Icon, String, &[Tool])>; 23] = [
-            Some((Icon::Import, tr!("downloads"), &[])),
+        // (icon, name, tools), and None between groups.
+        let entries: [Option<(Icon, String, &[Tool])>; 22] = [
             Some((Icon::Pen, tr!("pen"), &[Tool::Pen])),
             Some((Icon::Pencil, tr!("sketch"), &[Tool::Pencil])),
             Some((Icon::Brush, tr!("brush"), &[Tool::Brush])),
@@ -1114,12 +1113,6 @@ impl SuePaint {
                 continue;
             }
             match tools {
-                // Downloads: Browse Assets on the start page, where
-                // materials download into Sue as transfers.
-                [] => {
-                    self.start.navigate("start/show");
-                    self.start.navigate("start/browse");
-                }
                 [Tool::Blend] => {
                     self.toolbox.pick(Tool::Blend);
                     let picked = is_liquify_mode(self.toolbox.of(Tool::Blend).mode);

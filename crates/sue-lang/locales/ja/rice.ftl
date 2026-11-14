@@ -181,81 +181,15 @@ sue_paint-height = 高さ
     .description = 新しいイラストの高さ (px)
 sue_paint-dpi = 解像度
     .description = 新しいイラストの解像度 (dpi)
-sue_paint-theme = テーマ
-    .description = Sue Paint の色: グレー、Sue のテーマ (合わせる)、プリセット、カスタム (下)
-    .gray = グレー
-    .sue-theme = Sue のテーマ
-    .void = ボイド
-    .graphite = グラファイト
-    .paper = ペーパー
-    .custom = カスタム
-sue_paint-pen_pressure = 筆圧
-    .description = すべてのツールの筆圧カーブ。筆圧,出力 の点で表します (ファイル、筆圧の設定で描けます)
-sue_paint-alt_tool = Alt のツール
-    .description = 描画中に Alt を押したときのキャンバスでの動作 (ファイル、修飾キーの設定)
-    .eyedropper = スポイト
-    .eraser = 消しゴム
-    .none = なし
-sue_paint-space_tool = Space のツール
-    .description = キャンバスで Space を押したときの動作 (ファイル、修飾キーの設定)
-    .hand = 手のひら
-    .none = なし
-sue_paint-ctrl_shift = Ctrl+Shift
-    .description = キャンバスで Ctrl+Shift+クリックしたときの動作 (ファイル、修飾キーの設定)
-    .pick_layer = レイヤーを選ぶ
-    .none = なし
-sue_paint-language = 言語
-    .description = 言語: sue は Sue の言語に合わせ、言語タグを指定すると独自の言語になります
 
 ## [sue_paint_colors]
 
-sue_paint_colors-void = 背景
-    .description = 画像の周り
-sue_paint_colors-panel = パネル
-    .description = パレットとメニュー
-sue_paint_colors-pill = ピル
-    .description = 入力欄、チップ、カード
-sue_paint_colors-hover = ホバー
-    .description = ポインターが乗ったコントロール
-sue_paint_colors-active = アクティブ
-    .description = 押された、選ばれたコントロール
-sue_paint_colors-border = 枠線
-    .description = 細い枠線
-sue_paint_colors-border_active = アクティブな枠線
-    .description = 選ばれた、フォーカスのあるコントロールの枠線
-sue_paint_colors-text = テキスト
-    .description = 主なテキストとアクティブなアイコン
-sue_paint_colors-muted = 控えめ
-    .description = 補助的なテキスト
-sue_paint_colors-selection = 選択
-    .description = テキスト選択の強調
-sue_paint_colors-selection_text = 選択中のテキスト
-    .description = 選択範囲内のテキスト
-sue_paint_colors-grid = グリッド
-    .description = グリッドと定規
-sue_paint_colors-shadow = 影
-    .description = 浮かぶ面の下の影
 
 ## [sue_writer]
 
-sue_writer-theme = テーマ
-    .description = Sue Writer の色: Sue のテーマ (合わせる) かプリセット
-    .sue-theme = Sue のテーマ
-    .gray = グレー
-    .void = ボイド
-    .graphite = グラファイト
-    .paper = ペーパー
-sue_writer-smart_quotes = スマート引用符
-    .description = 入力中にまっすぐな引用符を曲がった引用符に変える
-sue_writer-dark_paper = ダークペーパー
-    .description = ページを白い紙ではなくテーマの暗い色で表示する
-sue_writer-language = 言語
-    .description = 言語: sue は Sue の言語に合わせ、言語タグを指定すると独自の言語になります
 
 ## [image_viewer] と [convert]
 
-image_viewer-language = 言語
-    .description = 言語: sue は Sue の言語に合わせ、言語タグを指定すると独自の言語になります
 convert-language = 言語
     .description = 言語: sue は Sue の言語に合わせ、言語タグを指定すると独自の言語になります
 

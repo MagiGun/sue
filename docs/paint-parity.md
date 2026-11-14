@@ -29,7 +29,7 @@ rows are at the end.
 
 | Area | done | partial | missing | percent |
 | --- | --- | --- | --- | --- |
-| File: new, open and save | 11 | 1 | 5 | 68 |
+| File: new, open and save | 11 | 1 | 3 | 77 |
 | File: export | 15 | 1 | 2 | 86 |
 | File: import, batch and scanning | 6 | 4 | 5 | 53 |
 | Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
@@ -42,19 +42,19 @@ rows are at the end.
 | Comics: frames, balloons and webtoons | 11 | 0 | 0 | 100 |
 | Story: multi-page works (EX) | 6 | 5 | 2 | 65 |
 | Animation | 15 | 1 | 0 | 97 |
-| Tools and drawing | 37 | 8 | 1 | 89 |
+| Tools and drawing | 36 | 8 | 1 | 89 |
 | Text | 6 | 3 | 1 | 75 |
 | Vector | 6 | 2 | 0 | 88 |
 | 3D | 7 | 2 | 4 | 62 |
 | Colors | 9 | 0 | 1 | 90 |
 | View and navigation | 9 | 3 | 0 | 88 |
 | Window, palettes and workspaces | 21 | 3 | 1 | 90 |
-| Materials and assets | 6 | 4 | 1 | 73 |
+| Materials and assets | 6 | 3 | 1 | 75 |
 | Print | 0 | 2 | 2 | 25 |
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 10 | 2 | 2 | 79 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 267 | 61 | 28 | 84 |
+| **All of Sue Paint** | 266 | 60 | 26 | 84 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -121,8 +121,6 @@ The order of work is the plan at the end.
 | Revert | File > Revert | done | Reloads the last saved file, and says so when nothing was saved yet |
 | Manage fonts | File > Manage fonts | missing | Text reads the installed fonts from `sue_wm::fonts`; no manager yet |
 | Connect to smartphone | File > Connect to smartphone | missing | Companion Mode, a phone as a second screen |
-| Files in the CLIP STUDIO cloud | File > Manage files in Clip Studio | missing | Sue's projects and package manager serve the same end |
-| Tab-Mate and TABMATE hardware | File > Tab-Mate Controller | missing | Peripheral devices |
 | Quit | File > Quit | done | Back to the Hub first |
 
 ## File: export
@@ -373,7 +371,6 @@ The order of work is the plan at the end.
 | Paint unpainted area | Fill tool | done | Inside the lasso, what the layer left unpainted and no line covers fills |
 | Ruby (furigana) | Text tool, Tool Property | done | Over the words, or to their right in vertical text; kept on its words as they change |
 | Lasso fill | Figure tool | done | |
-| Download button on the tool bar | Tool palette | done | Opens Browse Assets, where materials download into Sue |
 | Fill bucket: Close gap, Area scaling | Tool | done | Paint stays inside lines with small breaks, no white edge |
 | Auto Select (magic wand) | Tool | done | Looks at reference layers only when set |
 | Gradient tool | Tool | partial | Gradient layers exist; verify the tool's dials |
@@ -528,7 +525,6 @@ The order of work is the plan at the end.
 | Materials kept in a folder of your choice | Settings | done | |
 | Recently used folder and frequency sorting (5.0) | Palette | partial | To verify |
 | User tags and batch tag management (5.1) | Palette | missing | |
-| Download materials from CLIP STUDIO ASSETS | Material palette, Browse Assets | partial | Sue downloads any direct link as a transfer and brings its brushes and pictures in; CLIP STUDIO ASSETS itself needs a CLIP STUDIO account, so its button opens the site |
 | Pose, 3D and texture material kinds | Palette | partial | Poses done, each with a picture of it; 3D models and textures as materials to come |
 
 ## Print
@@ -577,12 +573,28 @@ The order of work is the plan at the end.
 | Feature | Sue | Notes |
 | --- | --- | --- |
 | Start page with Projects, labels, search and favorites | done | The same lists the Hub shows |
-| Manage Materials and Browse Assets on the start page | done | Phones and tablets have Browse Assets and Data Transfers as tabs too |
+| Manage Materials on the start page | done | Phones and tablets have Manage Materials and Data Transfers as tabs too |
 | Simple Mode for phones and tablets | done | Studio Mode for the desktop layout |
 | Studio Mode and touch layouts, modifier keys on a slide-out | done | |
 | One project holds Paint with every studio | done | Entities by EntityId in the `.sue` file |
 | Send To between studios | done | Work moves by EntityId, never by exporting and importing |
 | Command button (the palette of commands) | done | In the status bar, since Tab belongs to the palettes |
+
+## Not built on purpose
+
+These are left out for good, so they have no row above and nobody
+should build them from this list:
+
+- Browsing or downloading from Clip Studio's online material store, in
+  any form: no page of it inside Sue, no button that opens it, no reader
+  of its site. Sue 0.0.8 removed Browse Assets and the Download button
+  of the tool palette for this reason.
+- Downloading a brush or a picture from a link. Brushes and pictures
+  that are already on the device are imported instead (Tool Group
+  palette, Manage Materials).
+- Anything that needs a Clip Studio account, its cloud files among
+  them, and anything for Clip Studio's own hardware: no menu item, no
+  settings page.
 
 ## The plan
 
@@ -602,8 +614,7 @@ the rest:
    brush.
 6. 3D: drawing figures with poses, painting directly on 3D, heads and
    hands, then the rest of the 3D rows.
-7. Materials: downloads from CLIP STUDIO ASSETS into the palette, user
-   tags, pose and 3D materials.
+7. Materials: user tags, pose and 3D materials.
 8. Text depth: mixed fonts and sizes in one layer, spacing and
    justification.
 9. The verify rows: every row whose note says verify, checked against

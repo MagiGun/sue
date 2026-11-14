@@ -23,8 +23,6 @@ pub enum TransferKind {
     Export,
     /// Copies files (into a library, between folders).
     Copy,
-    /// Fetches a file from the internet.
-    Download,
 }
 
 impl TransferKind {
@@ -35,7 +33,6 @@ impl TransferKind {
             Self::Import => tr!("transfer-import"),
             Self::Export => tr!("transfer-export"),
             Self::Copy => tr!("transfer-copy"),
-            Self::Download => tr!("transfer-download"),
         }
     }
 }

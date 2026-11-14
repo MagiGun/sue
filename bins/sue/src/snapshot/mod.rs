@@ -321,15 +321,6 @@ impl Tour<'_> {
         );
     }
 
-    /// Gives a page that reads from the network a few seconds to load.
-    fn wait_for_the_network(&mut self) {
-        for _ in 0..60 {
-            let output = self.camera.frame(&mut self.runtime);
-            self.camera.painter.apply_textures(output.textures_delta);
-            std::thread::sleep(Duration::from_millis(100));
-        }
-    }
-
     /// Opens the sample novel in Sue Writer.
     fn open_novel(&mut self) -> Result<(), String> {
         let entity = self.novel.ok_or("the sample novel was not made")?;
@@ -339,11 +330,6 @@ impl Tour<'_> {
         });
         Ok(())
     }
-}
-
-/// Whether the scenes that read from the network are wanted.
-fn online() -> bool {
-    std::env::var_os("SUE_SNAPSHOT_ONLINE").is_some()
 }
 
 /// The smallest and largest scale a run can ask for.

@@ -37,7 +37,6 @@ pub(crate) fn localize(text: &str) -> String {
 
 pub mod anim;
 mod anim_ui;
-mod assets;
 pub mod blend;
 pub mod brush;
 pub mod camera;
@@ -53,7 +52,6 @@ pub mod decoration;
 mod dialogs;
 pub mod doc;
 mod dock;
-mod downloads;
 pub mod effects;
 mod extras;
 pub mod figure;

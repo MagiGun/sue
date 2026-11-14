@@ -25,6 +25,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- A picture you open with Open File (`Ctrl+O`), drop on the window or
+  hand to Sue from the system now opens in Sue Paint as a new canvas,
+  not in the Image Viewer. That includes GIF, TGA, QOI, ICO and the
+  PPM family (PGM, PBM, PNM, PAM), which Sue Paint did not open before.
+  Opening changes nothing in the file, and a canvas you have not
+  touched is not asked about when you quit.
+- A brush file (`.sut`, `.abr`, `.gbr`, `.gih`) dropped on Sue becomes
+  sub tools in Sue Paint, and a sound file dropped while a canvas is in
+  front goes on its timeline.
 - Sue Paint's 3D controls (camera, light, shadow, shapes and body
   shape) are translated into German, French, Spanish, Italian,
   Brazilian Portuguese, Japanese, Simplified Chinese and Arabic.
@@ -75,6 +84,21 @@ follow [Semantic Versioning](https://semver.org/).
   way Clip Studio Paint does. A line's far end follows the pen, a shape turns
   and grows around its middle, and what the drag leaves is what lifting the
   pen keeps, still one stroke to undo.
+
+### Removed
+
+- **Browse Assets** is gone from Sue Paint's start page, on computers,
+  phones and tablets, with everything that read another company's
+  material site. Sue Paint no longer goes online for materials at all,
+  and the pages and pictures it had kept from that site are deleted from
+  Sue's cache the next time Sue Paint starts.
+- The **Downloads** button at the top of Sue Paint's tool palette, which
+  only opened Browse Assets. The tools move up by one place.
+- Downloading from a link in **Data Transfers**. Brushes and pictures
+  that are already on your device still come in as before: **Add from
+  downloads** in the Tool Group palette and `+` in Manage Materials.
+- A page of Sue Paint's Preferences for a hand controller that Sue
+  never worked with; its one setting did nothing.
 
 ## [0.0.75] - 2026-11-09
 

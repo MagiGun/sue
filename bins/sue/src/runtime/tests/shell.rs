@@ -67,7 +67,8 @@ fn files_open_through_the_system_dialog_in_the_studio_or_tool_that_takes_them() 
     assert_eq!(runtime.shell.page(), Some(&paint));
     assert!(!runtime.answer_pick(&picture, &mut NoTextures, start));
 
-    // Open File (Ctrl+O on the Hub) puts a picture in the Image Viewer.
+    // Open File (Ctrl+O on the Hub) puts a picture in Sue Paint, as a new
+    // canvas that says which file it came from.
     runtime.request(ShellRequest::Hub, &mut NoTextures, start);
     frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |frame| {
         if frame == 1 {
@@ -76,21 +77,32 @@ fn files_open_through_the_system_dialog_in_the_studio_or_tool_that_takes_them() 
             Vec::new()
         }
     });
+    assert_eq!(runtime.shell.page(), None, "on the Hub");
     let asked = runtime.pending_pick().cloned().expect("Ctrl+O asked");
     assert_eq!((asked.requester, asked.title.as_str()), (None, "Open File"));
+    let before = pictures(&runtime);
     assert!(runtime.answer_pick(&picture, &mut NoTextures, start));
-    let viewer = AppletId::new(crate::viewer::ID).unwrap();
-    assert_eq!(runtime.shell.page(), Some(&viewer));
+    assert_eq!(runtime.shell.page(), Some(&paint));
+    assert_eq!(pictures(&runtime), before + 1, "a new canvas");
     let shown = runtime
         .applets
-        .get(&viewer)
+        .get(&paint)
         .and_then(|applet| applet.focus());
     assert_eq!(
         shown
             .and_then(|id| runtime.engine.world.arena.get_by_id(id).ok())
             .and_then(|entity| entity.meta(sue_io::meta::SOURCE)),
         Some(picture.display().to_string().as_str()),
-        "the Image Viewer shows the file"
+        "Sue Paint shows the file"
+    );
+    let viewer = AppletId::new(crate::viewer::ID).unwrap();
+    assert!(
+        runtime
+            .applets
+            .get(&viewer)
+            .and_then(|applet| applet.focus())
+            .is_none(),
+        "the Image Viewer was not handed it"
     );
 
     // Text goes to Sue Writer.

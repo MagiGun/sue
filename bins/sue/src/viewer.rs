@@ -40,9 +40,7 @@ fn me() -> AppletId {
 /// A decoded picture the viewer shows: raster pixels with a size, and not a
 /// byte map of an unknown file.
 pub fn is_picture(entity: &Entity) -> bool {
-    entity.component(ComponentKind::RasterTile2D).is_some()
-        && entity.meta(meta::WIDTH).is_some()
-        && entity.meta(meta::ENTROPY).is_none()
+    sue_io::is_flat_picture(entity)
 }
 
 /// The viewer's menus, in Sue's top bar.

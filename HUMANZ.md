@@ -1300,11 +1300,17 @@ to an applet for a purpose of its own (`figure`, `add`, `adopt`).
 
 **Opening files.** A file opened anywhere (Open File, a drop on the window)
 goes first to an applet whose `opens_file` takes it as it is (Sue Writer:
-Word, Markdown, HTML, Fountain and plain text). Anything else is read into
-the arena through the ingest path (§2.2), a `.sue` project replacing the
-document, and opens in the first studio, then tool, whose `accepts` takes the
-entity (`Applets::page_for`): a picture in the Image Viewer. A file nothing
-opens is not kept in the project, and the status bar says so.
+Word, Markdown, HTML, Fountain and plain text; Sue Paint: every picture
+file, which opens as a new canvas whose entity carries the file's path and
+size as `source` and `bytes`, brush files, and a sound file while a canvas
+is in front). Anything else is read into the arena through the ingest path
+(§2.2), a `.sue` project replacing the document, and opens in the first
+studio, then tool, whose `accepts` takes the entity (`Applets::page_for`).
+A flat picture already in the project (`sue_io::is_flat_picture`) is Sue
+Paint's too: 8-bit color pixels become the canvas's layer as they are, and
+gray or float pixels are copied to 8 bit for the canvas while the entity
+itself stays as it was. A file nothing opens is not kept in the project,
+and the status bar says so.
 
 **The work Sue remembers.** `sue_wm::WorkList` is one list for every studio
 and tool, kept in Sue's data folder (`<data>/work`), read by the shell for the
@@ -1327,18 +1333,14 @@ them; `WorkList::{labels, has_label, is_favorite}` read them. Sue Paint's
 start page sorts its projects with them.
 
 **Data transfers.** `sue_wm::Transfers` lists what this run brought in,
-wrote out, copied and downloaded
-(`TransferKind::{Import, Export, Copy, Download}`), newest
+wrote out and copied
+(`TransferKind::{Import, Export, Copy}`), newest
 first: the runtime notes every file it opens and every project it saves,
 the shell every `ShellRequest::Saved`, and an applet runs a long transfer
 with `AppletContext::transfers.spawn`, a `JobPool` job reporting progress
 that the runtime polls every 100 ms while one runs. `clear_completed`
 forgets the finished ones. A start page shows it in its Data Transfers
-popup. Sue Paint downloads a link with `sue_platform::update::download_link`
-(a `.part` file renamed when whole, progress and cancel through the job)
-into the materials' `downloads` folder, then `downloads::unpack` sorts it:
-brushes to the tool, PNGs to the materials, a zip's brushes and PNGs
-written by their own names only into a folder beside it.
+popup.
 
 **Start pages** (`sue_wm::start`). Shared widgets for the page a studio
 opens on: a rail of large buttons with labels (`rail`, the first round),

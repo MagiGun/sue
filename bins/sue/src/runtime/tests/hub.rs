@@ -147,7 +147,8 @@ fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
     frames(&mut runtime, &ctx, size, start, |_| Vec::new());
     assert!(runtime.shell.hub_rows().is_empty(), "nothing yet");
 
-    // A picture opened from a file goes first among the recent files.
+    // A picture opened from a file goes first among the recent files. It
+    // is a canvas of Sue Paint's.
     std::fs::create_dir_all(&root).unwrap();
     let photo = root.join("photo.png");
     let pixels = vec![200_u8; 4 * 4 * 4];
@@ -199,7 +200,7 @@ fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
         &mut NoTextures,
         start,
     );
-    assert_eq!(pictures(&runtime), 2);
+    assert_eq!(pictures(&runtime), 3);
     runtime.shutdown();
 
     // The next start lists all three on the Hub.
@@ -217,7 +218,7 @@ fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
         assert!(hub_row(&runtime, &row).is_some(), "{row:?} is on the Hub");
     }
 
-    // A click on it brings it back in Sue Paint, both pictures, and the
+    // A click on it brings it back in Sue Paint, every picture, and the
     // project it belongs to.
     let at = hub_row(&runtime, &HubRow::Recover(kept.id.clone()))
         .unwrap()
@@ -225,7 +226,7 @@ fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
         + vec2(40.0, 0.0);
     frames(&mut runtime, &ctx, size, start, click_at(at));
     assert_eq!(runtime.shell.page(), Some(&paint));
-    assert_eq!(pictures(&runtime), 2);
+    assert_eq!(pictures(&runtime), 3);
     assert_eq!(runtime.project(), Some(album.as_path()));
     assert_eq!(runtime.work().unsaved().count(), 0, "it is this run's now");
     assert!(kept.file.exists(), "kept until it is saved");
@@ -241,13 +242,13 @@ fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
         &mut NoTextures,
         start,
     );
-    assert_eq!(pictures(&runtime), 3);
+    assert_eq!(pictures(&runtime), 4);
     runtime.request(
         ShellRequest::OpenFile(album.clone()),
         &mut NoTextures,
         start,
     );
-    assert_eq!(pictures(&runtime), 2, "the saved project");
+    assert_eq!(pictures(&runtime), 3, "the saved project");
     assert_eq!(
         runtime.shell.page(),
         Some(&paint),

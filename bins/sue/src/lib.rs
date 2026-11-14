@@ -13,6 +13,8 @@ mod applets;
 mod convert;
 mod desktop;
 mod engine;
+#[cfg(test)]
+mod legal;
 mod runtime;
 mod selfcheck;
 mod settings;
