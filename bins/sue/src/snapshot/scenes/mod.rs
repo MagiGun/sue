@@ -20,6 +20,7 @@ mod paint_touch;
 mod settings;
 mod shell;
 mod tools;
+mod ui_dialogs;
 mod writer_compile;
 mod writer_corkboard;
 mod writer_document;
@@ -102,6 +103,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
 
     // 27. The icons: the reference sheet, then every icon.
     icons::contact_sheets(tour)?;
+
+    // 28a to 28f. The dialog host, the sheet and the toast stack.
+    ui_dialogs::gallery(tour)?;
     Ok(())
 }
 
