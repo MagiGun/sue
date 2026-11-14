@@ -437,3 +437,55 @@ fn rasterize_bakes_the_effects_of_any_layer() {
     );
     assert_eq!(arena.get_by_id(whole).unwrap().name(), "Folder 1");
 }
+
+#[test]
+fn masks_and_live_layers_follow_the_canvas_size_and_resolution() {
+    let (mut arena, picture, mut history, first) = picture_of(4, 1);
+    fill(&mut arena, first, [0, 0, 0, 255]);
+    let (edit, _) = new_mask(&arena, first, |x, _| if x < 2 { 1.0 } else { 0.0 }).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let gradient = Gradient {
+        line: [[0.0, 0.0], [4.0, 0.0]],
+        colors: [[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]],
+        radial: false,
+    };
+    let (edit, live) = new_gradient_layer(&arena, picture, None, "Grad", gradient);
+    history.apply(&mut arena, edit).unwrap();
+    history
+        .apply(&mut arena, set(live, picture::OPACITY, 0.0))
+        .unwrap();
+    let alpha = |arena: &Arena, width: u32| -> Vec<u8> {
+        render(
+            arena,
+            picture,
+            [0, 0, width, 1],
+            RenderOptions {
+                paper: false,
+                drafts: true,
+            },
+        )
+        .iter()
+        .skip(3)
+        .step_by(4)
+        .copied()
+        .collect()
+    };
+    assert_eq!(alpha(&arena, 4), [255, 255, 0, 0]);
+    // Two more pixels on the left: the drawing and its mask move along.
+    let edit = resize_canvas(&arena, picture, [6, 1], [2, 0]).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    assert_eq!(alpha(&arena, 6), [0, 0, 255, 255, 0, 0]);
+    let line = Gradient::of(arena.get_by_id(live).unwrap()).line;
+    assert_eq!(line, [[2.0, 0.0], [6.0, 0.0]], "the gradient moved too");
+    // Twice the resolution: so do they.
+    let edit = resample(&arena, picture, [12, 2], 144.0).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    let wide: Vec<u8> = alpha(&arena, 12);
+    // Smoothed at its edges (and, one pixel high before, a little
+    // across too).
+    assert_eq!(&wide[..3], &[0, 0, 0]);
+    assert!(wide[5] == wide[6] && wide[5] > 100, "{wide:?}");
+    assert_eq!(&wide[10..], &[0, 0]);
+    let line = Gradient::of(arena.get_by_id(live).unwrap()).line;
+    assert_eq!(line, [[4.0, 0.0], [12.0, 0.0]]);
+}

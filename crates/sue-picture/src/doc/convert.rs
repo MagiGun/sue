@@ -147,6 +147,17 @@ pub fn resize_canvas(
             i64::from(height),
         ));
     for info in layers(arena, picture) {
+        edit = live_moved(
+            arena,
+            info.id,
+            edit,
+            [shift[0] as f32, shift[1] as f32],
+            [1.0, 1.0],
+        );
+        edit = mask_resized(arena, info.id, edit, |mask, at| {
+            let pixels = placed_cover(mask, [at[0] + shift[0], at[1] + shift[1]], size);
+            Some((pixels, size))
+        })?;
         let Some(raster) = raster(arena, info.id) else {
             continue;
         };
@@ -245,6 +256,16 @@ pub fn resample(
         ))
         .then(SetProperty::new(picture, picture::DPI, dpi));
     for info in layers(arena, picture) {
+        edit = live_moved(arena, info.id, edit, [0.0, 0.0], scale);
+        edit = mask_resized(arena, info.id, edit, |mask, at| {
+            let full = placed_cover(mask, at, [old_w, old_h]);
+            let rgba: Vec<u8> = full
+                .iter()
+                .flat_map(|cover| [255, 255, 255, *cover])
+                .collect();
+            let small = resize_rgba(&rgba, [old_w, old_h], size);
+            Some((small.iter().skip(3).step_by(4).copied().collect(), size))
+        })?;
         let Some(raster) = raster(arena, info.id) else {
             continue;
         };
@@ -350,6 +371,13 @@ pub fn rotate_canvas(arena: &Arena, picture: EntityId, clockwise: bool) -> Resul
         Ok(edit)
     };
     for info in layers(arena, picture) {
+        edit = live_turned(
+            arena,
+            info.id,
+            edit,
+            [width as f32, height as f32],
+            clockwise,
+        );
         edit = turn(info.id, info.style.offset, edit)?;
         if let Some(mask) = mask_of(arena, info.id) {
             edit = turn(mask, info.style.offset, edit)?;
@@ -425,4 +453,152 @@ pub fn vectorize(
         edit = edit.then(Relate::new(Relation::new(folder, MEMBER, id)));
     }
     Ok((edit.then(delete(layer)), id))
+}
+
+/// The cover of `mask` (placed with its top left at picture pixel `at`)
+/// over a picture of `size`, one byte a pixel: 0 where it does not reach.
+fn placed_cover(mask: &RasterTile2D, at: [i64; 2], size: [u32; 2]) -> Vec<u8> {
+    let mut out = vec![0_u8; (size[0] * size[1]) as usize];
+    for y in 0..size[1] {
+        for x in 0..size[0] {
+            let shown = super::cover(mask, i64::from(x) - at[0], i64::from(y) - at[1]);
+            out[(y * size[0] + x) as usize] = (shown * 255.0).round() as u8;
+        }
+    }
+    out
+}
+
+/// `edit` followed by giving `layer`'s mask, if it has one, the cover
+/// `remake` makes of it (from its raster and where it sits) as a raster
+/// over the whole new canvas, at its corner, in the mask's own format.
+fn mask_resized(
+    arena: &Arena,
+    layer: EntityId,
+    mut edit: Edit,
+    remake: impl Fn(&RasterTile2D, [i64; 2]) -> Option<(Vec<u8>, [u32; 2])>,
+) -> Result<Edit, String> {
+    let (Some(mask), Some(at)) = (mask_of(arena, layer), super::mask_offset(arena, layer)) else {
+        return Ok(edit);
+    };
+    let Some(tile) = raster(arena, mask) else {
+        return Ok(edit);
+    };
+    let Some((cover, size)) = remake(tile, at) else {
+        return Ok(edit);
+    };
+    let pixels = if tile.format() == PixelFormat::Gray8 {
+        cover
+    } else {
+        cover
+            .iter()
+            .flat_map(|value| [255, 255, 255, *value])
+            .collect()
+    };
+    let format = if tile.format() == PixelFormat::Gray8 {
+        PixelFormat::Gray8
+    } else {
+        PixelFormat::Rgba8
+    };
+    let fresh = RasterTile2D::from_bytes(size[0], size[1], format, pixels)
+        .map_err(|error| error.to_string())?;
+    edit = edit.then(sue_core::txn::ReplaceComponent::new(
+        mask,
+        fresh,
+        tr!("change-canvas-size"),
+    ));
+    // At the canvas's corner; a linked mask's place is its layer's, and
+    // every layer is at the corner after this too.
+    for key in [picture::X, picture::Y] {
+        if arena
+            .get_by_id(mask)
+            .is_ok_and(|entity| entity.property(key).is_some())
+        {
+            edit = edit.then(SetProperty::new(mask, key, 0_i64));
+        }
+    }
+    Ok(edit)
+}
+
+/// `edit` followed by moving a gradient's line or an image material's
+/// place by `shift`, then scaling them by `scale`.
+fn live_moved(
+    arena: &Arena,
+    layer: EntityId,
+    mut edit: Edit,
+    shift: [f32; 2],
+    scale: [f32; 2],
+) -> Edit {
+    let Ok(entity) = arena.get_by_id(layer) else {
+        return edit;
+    };
+    let points: &[(&str, usize)] = match entity.class() {
+        super::GRADIENT_LAYER => &[
+            (super::GRADIENT_FROM_X, 0),
+            (super::GRADIENT_FROM_Y, 1),
+            (super::GRADIENT_TO_X, 0),
+            (super::GRADIENT_TO_Y, 1),
+        ],
+        super::MATERIAL_LAYER => &[(super::MATERIAL_X, 0), (super::MATERIAL_Y, 1)],
+        _ => return edit,
+    };
+    for (key, axis) in points {
+        let value = entity.property(key).and_then(Value::as_f64).unwrap_or(0.0) as f32;
+        edit = edit.then(SetProperty::new(
+            layer,
+            *key,
+            f64::from((value + shift[*axis]) * scale[*axis]),
+        ));
+    }
+    if entity.class() == super::MATERIAL_LAYER && scale != [1.0, 1.0] {
+        let size = super::Placement::of(entity).scale * (scale[0] + scale[1]) / 2.0;
+        edit = edit.then(SetProperty::new(
+            layer,
+            super::MATERIAL_SCALE,
+            f64::from(size),
+        ));
+    }
+    edit
+}
+
+/// `edit` followed by turning a gradient's line or an image material's
+/// place a quarter turn with a canvas of `size` (before the turn).
+fn live_turned(
+    arena: &Arena,
+    layer: EntityId,
+    mut edit: Edit,
+    size: [f32; 2],
+    clockwise: bool,
+) -> Edit {
+    let Ok(entity) = arena.get_by_id(layer) else {
+        return edit;
+    };
+    let pairs: &[(&str, &str)] = match entity.class() {
+        super::GRADIENT_LAYER => &[
+            (super::GRADIENT_FROM_X, super::GRADIENT_FROM_Y),
+            (super::GRADIENT_TO_X, super::GRADIENT_TO_Y),
+        ],
+        super::MATERIAL_LAYER => &[(super::MATERIAL_X, super::MATERIAL_Y)],
+        _ => return edit,
+    };
+    let number = |key: &str| entity.property(key).and_then(Value::as_f64).unwrap_or(0.0);
+    for (x_key, y_key) in pairs {
+        let (x, y) = (number(x_key), number(y_key));
+        let (nx, ny) = if clockwise {
+            (f64::from(size[1]) - y, x)
+        } else {
+            (y, f64::from(size[0]) - x)
+        };
+        edit = edit
+            .then(SetProperty::new(layer, *x_key, nx))
+            .then(SetProperty::new(layer, *y_key, ny));
+    }
+    if entity.class() == super::MATERIAL_LAYER {
+        let turn = if clockwise { 90.0 } else { -90.0 };
+        edit = edit.then(SetProperty::new(
+            layer,
+            super::MATERIAL_ANGLE,
+            number(super::MATERIAL_ANGLE) + turn,
+        ));
+    }
+    edit
 }
