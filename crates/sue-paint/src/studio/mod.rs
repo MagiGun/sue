@@ -512,6 +512,9 @@ pub struct SuePaint {
     pub(crate) language: sue_lang::Watch,
     /// The shortcuts as Settings has them, for the menus and the shell.
     pub(crate) bound: sue_wm::shortcuts::Bound,
+    /// The key each command palette entry shows, as Settings has it, and
+    /// the settings' revision it was read at.
+    pub(crate) palette_keys: (Option<u64>, Vec<(String, String)>),
     pub(crate) menubar: MenuBar,
     pub(crate) dialog: Option<Dialog>,
     pub(crate) gesture: Option<Gesture>,
@@ -754,6 +757,7 @@ impl Default for SuePaint {
             menus: crate::menus::menus(),
             language: sue_lang::Watch::default(),
             bound: sue_wm::shortcuts::Bound::default(),
+            palette_keys: (None, Vec::new()),
             menubar: MenuBar::new(),
             dialog: None,
             gesture: None,

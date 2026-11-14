@@ -611,6 +611,17 @@ impl SueApplet for SuePaint {
             self.shown = false;
             self.settle(cx);
         }
+        // The command palette shows the keys Settings has, read again
+        // only when the settings changed.
+        let revision = cx.rice().revision();
+        if self.palette_keys.0 != Some(revision) {
+            let keys = crate::commands::registry()
+                .palette(cx.rice())
+                .into_iter()
+                .map(|entry| (entry.command, entry.hint))
+                .collect();
+            self.palette_keys = (Some(revision), keys);
+        }
         sue_wm::Tick::default()
     }
 
@@ -622,9 +633,21 @@ impl SueApplet for SuePaint {
     }
 
     fn commands(&self) -> Vec<PaletteEntry> {
-        // The palette says whose command it is ("Sue Paint: ..."). It has
-        // no settings at hand here, so it shows the default keys.
-        crate::commands::registry().palette(&sue_rice::RiceSchema::new())
+        // The palette says whose command it is ("Sue Paint: ..."), in the
+        // language in use now, with the keys Settings has (the default
+        // keys until the first tick has read them).
+        let mut entries = crate::commands::registry().palette(&sue_rice::RiceSchema::new());
+        for entry in &mut entries {
+            if let Some((_, hint)) = self
+                .palette_keys
+                .1
+                .iter()
+                .find(|(command, _)| *command == entry.command)
+            {
+                entry.hint.clone_from(hint);
+            }
+        }
+        entries
     }
 
     fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool {
