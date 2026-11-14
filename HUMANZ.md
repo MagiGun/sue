@@ -1643,6 +1643,26 @@ studio's own when the layout already is that default. `to_lines` and
 also reading the lines from before groups and from before the top row),
 and a layout missing a palette gets it where the default layout has it.
 
+**Layout styles in the dock** (`sue_wm::dock`). A studio may have more
+than one design for its workspace: `DockPanel::styles` lists them as
+`LayoutStyle`s (a stable `id` kept in settings files, a language key for
+its name, whether it is built yet, and its layout), the default first.
+`DockPanel::style` and `style_layout` give the style an id names, or the
+first built one when the id is unknown or names a style that is not built
+yet, so a grayed style can never be in use; `default_layout` is the first
+style's. `reset` and `fill_missing_from` take the layout of the style in
+use (`from_lines_with` reads a saved layout against it), so Reset goes to
+that style's arrangement. `close` takes a palette away for good: it is
+kept in `closed`, written as a `close` line, and neither `fill_missing`
+nor reading the layout again brings it back until it is placed again, so
+an emptied layout stays empty. The top and bottom rows fold into an icon
+strip (`row_folded`, `Laid::top_strip` and `bottom_strip`, the bottom one
+under the work area) or close to a thin bar (`row_hidden`,
+`Laid::row_handles`) as the sides do, and a drop on either goes into the
+row. Collapsed palettes keep their tab groups as icon groups
+(`iconize_group`, `join_icon`, `icon_groups`, `Laid::icon_groups`); the
+lines for all of this are new words older readers skip.
+
 **Shortcuts.** Every applet assigns keys the same way, through
 `sue_wm::shortcuts`: it lists its commands with their default chords
 (`Shortcut::new("file.save_as", "Save As", "Ctrl+Shift+S or Ctrl+Alt+S")`),
