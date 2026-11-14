@@ -165,6 +165,56 @@ pub fn write_atomic_with(
     result
 }
 
+/// A file opened for reading, that can seek: a few small reads take one
+/// part of a large file without reading the rest. In the browser the
+/// whole file is read at once.
+#[derive(Debug)]
+pub struct FileReader(Reader);
+
+#[derive(Debug)]
+enum Reader {
+    #[cfg(not(target_arch = "wasm32"))]
+    File(io::BufReader<fs::File>),
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    Memory(io::Cursor<Vec<u8>>),
+}
+
+impl io::Read for FileReader {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        match &mut self.0 {
+            #[cfg(not(target_arch = "wasm32"))]
+            Reader::File(file) => file.read(buffer),
+            Reader::Memory(bytes) => bytes.read(buffer),
+        }
+    }
+}
+
+impl io::Seek for FileReader {
+    fn seek(&mut self, to: io::SeekFrom) -> io::Result<u64> {
+        match &mut self.0 {
+            #[cfg(not(target_arch = "wasm32"))]
+            Reader::File(file) => file.seek(to),
+            Reader::Memory(bytes) => bytes.seek(to),
+        }
+    }
+}
+
+/// Opens the file at `path` for reading.
+///
+/// # Errors
+/// If it is missing or cannot be opened.
+pub fn open(path: impl AsRef<Path>) -> io::Result<FileReader> {
+    let path = path.as_ref();
+    #[cfg(target_arch = "wasm32")]
+    {
+        read(path).map(|bytes| FileReader(Reader::Memory(io::Cursor::new(bytes))))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        fs::File::open(path).map(|file| FileReader(Reader::File(io::BufReader::new(file))))
+    }
+}
+
 /// Adds `bytes` to the end of the file at `path` (made if missing) and
 /// waits until they are on disk. A crash may leave part of them; readers
 /// of an appended file check what they read (the autosave journal does).
@@ -457,6 +507,11 @@ mod tests {
         append(&journal, b"ab").unwrap();
         append(&journal, b"cd").unwrap();
         assert_eq!(fs::read(&journal).unwrap(), b"abcd");
+        let mut reader = open(&journal).unwrap();
+        io::Seek::seek(&mut reader, io::SeekFrom::Start(2)).unwrap();
+        let mut rest = String::new();
+        io::Read::read_to_string(&mut reader, &mut rest).unwrap();
+        assert_eq!(rest, "cd");
         fs::remove_dir_all(&dir).unwrap();
     }
 
