@@ -76,7 +76,21 @@ fn every_file_command_runs_on_a_canvas() {
         })
         .collect();
     assert!(commands.len() > 50, "{}", commands.len());
+    // Open Recent and Clear Recent Files have no file to work on in a
+    // fresh test home; every other command must show that it ran.
+    let quiet_here = ["file.recent.clear", "file.recent.open.0"];
+    let mut silent = Vec::new();
     for command in &commands {
+        // Something copied, so New from Clipboard works.
+        if command == "file.new_clipboard" {
+            run(&mut paint, "select.all");
+            run(&mut paint, "edit.copy");
+        }
+        // A mark in the status line: a command that says something
+        // replaces it.
+        paint.runtime.shell.notify(SILENT, false);
+        let drawn_before = drawn(&paint.settle(2));
+        let arena_before = arena(&paint);
         run(&mut paint, command);
         let said = paint
             .runtime
@@ -89,6 +103,14 @@ fn every_file_command_runs_on_a_canvas() {
                 .is_some_and(|text| text.contains("not in Sue Paint yet")),
             "{command}: {said:?}"
         );
+        // It ran: it opened something (a dialog, a page, a file
+        // dialog's notice), said something, or changed the document.
+        let ran = said.as_deref() != Some(SILENT)
+            || drawn(&paint.settle(2)) != drawn_before
+            || arena(&paint) != arena_before;
+        if !ran && !quiet_here.contains(&command.as_str()) {
+            silent.push(command.clone());
+        }
         // Close whatever opened, and keep a canvas in front for the next.
         paint.step(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
         paint.settle(2);
@@ -104,6 +126,20 @@ fn every_file_command_runs_on_a_canvas() {
             paint.settle(10);
         }
     }
+    assert!(silent.is_empty(), "these did nothing: {silent:?}");
+}
+
+/// The status line's text while no command has said anything.
+const SILENT: &str = "(test: nothing said yet)";
+
+/// The texts a frame drew, without where: what a command that opens
+/// something adds to the screen.
+fn drawn(texts: &[(String, egui::Rect)]) -> std::collections::BTreeSet<String> {
+    texts
+        .iter()
+        .map(|(text, _)| text.clone())
+        .filter(|text| text != SILENT)
+        .collect()
 }
 
 #[test]
