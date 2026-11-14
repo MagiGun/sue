@@ -17,10 +17,12 @@
 //!
 //! - [`list`]: list rows, tree rows, the empty state, dividers and
 //!   headings.
+//! - [`progress`]: the progress bar, the spinner and the skeleton.
 
 pub mod focus;
 pub mod list;
 pub mod motion;
+pub mod progress;
 pub mod tokens;
 
 pub use focus::{FocusScope, Roving, focus_ring, focus_visible, paint_focus_ring, watch_focus};
@@ -29,6 +31,9 @@ pub use list::{
     heading, list_row, tree_row,
 };
 pub use motion::{Motion, Pace};
+pub use progress::{
+    ProgressBar, Skeleton, Spinner, paint_skeleton, progress_bar, skeleton, spinner,
+};
 pub use tokens::{
     Density, EDGE_CONTRAST, Elevation, Layer, MIN_TEXT_SIZE, Radius, Space, TEXT_CONTRAST,
     TextRole, contrast, nested_radius,
