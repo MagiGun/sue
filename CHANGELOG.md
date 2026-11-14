@@ -35,9 +35,21 @@ follow [Semantic Versioning](https://semver.org/).
 - Your settings file moves to format 7 the first time this version
   starts (the old one is kept as `default.suerice.v6.bak`). Everything
   you changed in Settings stays as you set it.
+- A rounder, easier to read look: buttons and fields have corners of 6
+  (they had 4) and windows and menus of 14 (they had 12), secondary text
+  is lighter in Void, Graphite and Gray and darker in Paper so it still
+  reads on a row under the pointer, and hairlines in Void and Graphite
+  are a gray of their own instead of the hover color. A button or field
+  that holds keyboard focus shows it with a thicker outline. Two new
+  settings, Card radius (Layout) and Title size (Typography), join the
+  ones you can tune. A radius or color you set yourself stays as it is.
 
 ### Fixed
 
+- Instant transitions and Animation speed (Settings, Motion) now reach
+  the switches in Settings and on the start pages and everything else
+  the interface toolkit animates by itself: they used to keep their own
+  fixed time whatever the settings said.
 - Sue Paint's pen strokes no longer end in a blob wider than the line
   with tablets whose pressure comes from the driver (Windows Ink turned
   off, X11, a browser): the stroke's last points keep the pressure the

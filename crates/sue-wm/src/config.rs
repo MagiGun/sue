@@ -163,12 +163,17 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         ),
         declare(
             "layout.control_radius",
-            float(4.0, 0.0, 12.0),
+            float(6.0, 0.0, 12.0),
             "Corner rounding of buttons and fields (px)",
         ),
         declare(
+            "layout.card_radius",
+            float(10.0, 0.0, 24.0),
+            "Corner rounding of cards, list rows and floating palettes (px)",
+        ),
+        declare(
             "layout.pill_radius",
-            float(12.0, 0.0, 24.0),
+            float(14.0, 0.0, 24.0),
             "Corner rounding of windows, menus and pill buttons (px)",
         ),
         declare(
@@ -215,7 +220,7 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
             color("#333333"),
             "Pressed and chosen controls",
         ),
-        declare("colors.border", color("#262626"), "Hairline borders"),
+        declare("colors.border", color("#2e2e2e"), "Hairline borders"),
         declare(
             "colors.border_active",
             color("#ffffff"),
@@ -226,7 +231,7 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
             color("#ffffff"),
             "Primary text and active icons",
         ),
-        declare("colors.muted", color("#808080"), "Secondary text"),
+        declare("colors.muted", color("#9a9a9a"), "Secondary text"),
         declare(
             "colors.selection",
             color("#404040"),
@@ -261,6 +266,11 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
             "typography.small_size",
             int(11, 8, 24),
             "Caption and status bar text size (px)",
+        ),
+        declare(
+            "typography.title_size",
+            int(15, 10, 40),
+            "Title size of cards, dialogs and sections (px)",
         ),
         declare(
             "typography.heading_size",
