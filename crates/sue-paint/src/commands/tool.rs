@@ -1,10 +1,16 @@
 //! The tool and brush keys: Clip Studio Paint's letters for each tool,
 //! the sub tool steps, the colors and the brush size.
 
-use sue_wm::Command;
+use sue_wm::{AppletContext, Call, Command};
 
 use crate::color;
 use crate::studio::SuePaint;
+
+/// Does what a tool or brush key does when Auto Actions or Studio Mode's
+/// keys run its command, as the key itself does.
+fn run(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
+    paint.tool_key(call.name);
+}
 
 impl SuePaint {
     /// Runs a tool or brush key's command; `false` if `command` is not one.
@@ -63,7 +69,7 @@ impl SuePaint {
 
 /// A command of this group.
 const fn c(name: &'static str, label: &'static str) -> Command<SuePaint> {
-    Command::new(name, label, "tool", super::nothing).state(super::doc_open)
+    Command::new(name, label, "tool", run).state(super::doc_open)
 }
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[

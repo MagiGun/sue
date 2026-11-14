@@ -72,8 +72,9 @@ follow [Semantic Versioning](https://semver.org/).
   that holds keyboard focus shows it with a thicker outline. Two new
   settings, Card radius (Layout) and Title size (Typography), join the
   ones you can tune. A radius or color you set yourself stays as it is.
-- Sue Paint's entries in the command palette carry the names of its
-  menu items ("Sue Paint: New...") and show the key each one has.
+- Sue Paint's entries in the command palette show the key each one
+  has, Keyboard Shortcuts too, and New is named as in the File menu
+  ("Sue Paint: New...").
 
 ### Fixed
 
@@ -112,6 +113,9 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint's Edit menu no longer shows Shift+Del beside Delete Outside
   Selection: that key fills. The item shows the key you give it in
   Settings.
+- Swap Main and Sub Color, Drawing or Transparent Color, Smaller Brush
+  and Bigger Brush do their work when Auto Actions or Studio Mode's keys
+  run them, as their keys always did.
 
 ### Removed
 
