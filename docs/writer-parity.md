@@ -66,7 +66,7 @@ of work is by how much people miss each one (the plan at the end).
 | Asian typography | WL | missing | |
 | Paragraph dialog | WL | missing | |
 | Show formatting marks | WL | missing | |
-| Paragraph styles: apply | WL | done | Style box and Ctrl+1 to 3 style shortcuts |
+| Paragraph styles: apply | WL | done | Style box, Ctrl+Alt+1 to 3 and Ctrl+Alt+0; every style can take a key |
 | Style sheets (standard, manuscript, screenplay) | - | done | Sue's own |
 | Create, modify, delete a style | WL | missing | |
 | Update style to match, new style from selection | WL | missing | |
@@ -285,7 +285,7 @@ of work is by how much people miss each one (the plan at the end).
 | Scripting | L | missing | |
 | Command palette | W | done | Sue's palette lists Writer's commands |
 | Repeat last command | WL | missing | |
-| Customize keyboard | WL | done | Sue's Settings, Shortcuts |
+| Customize keyboard | WL | done | Every command can take a key: Settings, Keymaps, Sue Writer; Help, Keyboard Shortcuts lists them |
 | Customize menus and toolbars | WL | missing | |
 
 ## Math
