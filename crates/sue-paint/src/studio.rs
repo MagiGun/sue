@@ -23,7 +23,7 @@ use sue_platform::write_atomic;
 use sue_rice::{RiceDeclaration, RiceParameter};
 use sue_wm::{
     AppletContext, AppletId, AppletManifest, AppletRole, ArenaEdit, Facts, FilePick, FileType,
-    ItemState, Menu, MenuBar, PaletteEntry, ShellRequest, SueApplet,
+    Menu, MenuBar, PaletteEntry, ShellRequest, SueApplet,
 };
 
 use crate::brush::{Stabilizer, Stroke};
@@ -3916,85 +3916,6 @@ impl SuePaint {
         change(&mut doc.view, viewport, size);
     }
 
-    // ----- Commands ---------------------------------------------------------
-
-    /// How a menu item for `command` looks right now: grayed when it is
-    /// not a command of the studio.
-    pub(crate) fn state(&self, command: &str, facts: &Facts<'_>) -> ItemState {
-        let registry = crate::commands::registry();
-        if !registry.has(command) {
-            return ItemState::off();
-        }
-        // A tab torn off into a palette of its own is shown while it is.
-        if crate::dock::Palette::torn_by(command).is_some_and(|palette| self.dock.is_open(palette))
-        {
-            return ItemState::check(true);
-        }
-        registry.state(self, facts, command)
-    }
-
-    pub(crate) fn any_panel(&self) -> bool {
-        let p = self.panels;
-        p.tool
-            || p.sub_tool
-            || p.tool_property
-            || p.brush_size
-            || p.color
-            || p.color_set
-            || p.navigator
-            || p.layer
-            || p.timeline
-    }
-
-    /// Runs a command of the menus, the command bar or a shortcut.
-    pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) {
-        // Words being typed are kept before anything else happens.
-        self.finish_typing(cx);
-        // A tool's command (from a script or Auto Actions) picks the tool.
-        if command.starts_with("tool.") && self.tool_key(command) {
-            return;
-        }
-        // The Window menu hides a tab torn off into a palette of its own.
-        if let Some(palette) = crate::dock::Palette::torn_by(command)
-            && self.dock.is_open(palette)
-        {
-            self.close_palette(palette);
-            return;
-        }
-        // Studio Mode's keys T1 to T7 run the commands the rice names.
-        if let Some(index) = command
-            .strip_prefix("touch.custom.")
-            .and_then(|index| index.parse::<usize>().ok())
-        {
-            let custom = self.custom_command(index, cx);
-            if !custom.starts_with("touch.") && !custom.is_empty() {
-                self.run(&custom, cx);
-            }
-            return;
-        }
-        self.record_auto(command);
-        if command.starts_with("story.") && self.story_command(command, cx) {
-            return;
-        }
-        if (command.starts_with("anim.")
-            || command.starts_with("file.export.gif")
-            || command == "file.export.apng"
-            || command == "file.export.webp_animation"
-            || command == "file.export.exposure_sheet"
-            || command == "file.import.exposure_sheet"
-            || command == "file.export.sequence"
-            || command == "file.export.movie"
-            || command == "file.export.cels")
-            && self.anim_command(command, cx)
-        {
-            return;
-        }
-        if !self.state(command, &Facts::of(cx)).enabled {
-            return;
-        }
-        crate::commands::registry().run(self, cx, command);
-    }
-
     /// Edit, Outline Selection: a line `width` pixels wide along the
     /// selection's edge, half inside and half outside, in the drawing
     /// color on the current layer.
@@ -4050,92 +3971,6 @@ impl SuePaint {
                 }
             }
         });
-    }
-
-    // ----- Keys ---------------------------------------------------------------
-
-    /// The studio's shortcuts (the shell already took undo, redo, save,
-    /// open, Settings and the command palette).
-    pub(crate) fn keys(&mut self, ctx: &egui::Context, cx: &mut AppletContext<'_>) {
-        // Puppet warp keeps Enter and Esc for itself.
-        if ctx.text_edit_focused()
-            || self.dialog.is_some()
-            || self.menubar.is_open()
-            || self.warp.is_some()
-            || self.transform.is_some()
-        {
-            return;
-        }
-        // The shortcuts as Settings has them (Clip Studio Paint's unless
-        // changed), any number of chords each, tools and brush keys too.
-        let bound = &self.bound;
-        let taken =
-            ctx.input_mut(|input| bound.take(input, cx.rice(), KEYS_SECTION, shortcut_table()));
-        let registry = crate::commands::registry();
-        for name in taken {
-            if self.tool_key(name) {
-                continue;
-            }
-            if registry.has(name) {
-                self.run(name, cx);
-            } else {
-                let label = registry.label(name).unwrap_or_else(|| name.to_owned());
-                cx.notify(tr!("not-sue-paint-yet", label = label));
-            }
-        }
-    }
-
-    /// Runs a tool or brush key's command; `false` if `command` is not one.
-    fn tool_key(&mut self, command: &str) -> bool {
-        let letter = match command {
-            "tool.zoom" => '/',
-            "tool.hand" => 'H',
-            "tool.operation" => 'O',
-            "tool.move_layer" => 'K',
-            "tool.selection" => 'M',
-            "tool.auto_select" => 'W',
-            "tool.eyedropper" => 'I',
-            "tool.pen" => 'P',
-            "tool.brush" => 'B',
-            "tool.eraser" => 'E',
-            "tool.blend" => 'J',
-            "tool.fill" => 'G',
-            "tool.figure" => 'U',
-            "tool.text" => 'T',
-            "tool.correct_line" => 'Y',
-            _ => '\0',
-        };
-        if letter != '\0' {
-            self.toolbox.cycle(letter);
-            return true;
-        }
-        match command {
-            // The hand's Rotate sub tool.
-            "tool.rotate" => {
-                self.toolbox.pick(crate::tools::Tool::Hand);
-                self.toolbox.pick_sub(crate::tools::Tool::Hand, 1);
-            }
-            "tool.previous_sub" => self.toolbox.step_sub(false),
-            "tool.next_sub" => self.toolbox.step_sub(true),
-            "color.swap" => {
-                std::mem::swap(&mut self.main, &mut self.sub);
-                self.transparent = false;
-                self.hex = color::hex(self.drawing_color());
-            }
-            // Between the drawing color and the transparent color.
-            "color.transparent" => self.transparent = !self.transparent,
-            "brush.smaller" | "brush.bigger" => {
-                let tip = &mut self.toolbox.current_mut().tip;
-                tip.size = if command == "brush.bigger" {
-                    (tip.size * 1.2).max(tip.size + 1.0)
-                } else {
-                    (tip.size / 1.2).min(tip.size - 1.0)
-                }
-                .clamp(0.5, 2000.0);
-            }
-            _ => return false,
-        }
-        true
     }
 
     // ----- The frame ----------------------------------------------------------
