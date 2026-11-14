@@ -12,7 +12,7 @@ use sue_core::{PixelFormat, RasterTile2D};
 use sue_model::BlendMode;
 
 use super::finish::Field;
-use super::math::unit;
+use super::math::{pow_unit, unit};
 use crate::buffer::MergeError;
 use crate::raster::PixelRect;
 use crate::raster::kernel::Channel;
@@ -60,7 +60,16 @@ impl Lay {
     /// opacity) of `color` on it, darkened by `dark`; with `keep_alpha`
     /// (lock transparent pixels) the layer's alpha does not change.
     fn pixel(&self, dst: Pixel, share: f32, color: [f32; 3], dark: f32, keep_alpha: bool) -> Pixel {
-        let color = color.map(|c| unit(c) * (1.0 - unit(dark)));
+        // A darker rim is denser pigment, as a watercolor's edge dries:
+        // each channel raised to a power above 1, so a blue rim is a
+        // deeper blue rather than a gray one; at full darkness the power
+        // is 4.
+        let dark = unit(dark);
+        let color = if dark > 0.0 {
+            color.map(|c| pow_unit(c, 1.0 + 3.0 * dark))
+        } else {
+            color.map(unit)
+        };
         let [br, bg, bb, ab] = dst;
         let backdrop = [br, bg, bb];
         match *self {
@@ -204,8 +213,9 @@ fn lay_samples<C: Channel>(
     Some(PixelRect { x0, y0, x1, y1 })
 }
 
-/// One layer an eraser is handed: its raster, where its pixel `(0, 0)`
-/// lies, and whether its transparent pixels are locked.
+/// One layer an eraser is handed: its raster and where its pixel
+/// `(0, 0)` lies. (A layer whose transparent pixels are locked keeps its
+/// alpha, so an eraser leaves it alone; the caller does not hand it.)
 #[derive(Debug)]
 pub struct EraseTarget<'a> {
     /// The layer's pixels.
@@ -391,6 +401,19 @@ mod tests {
             mode: BlendMode::Normal,
         };
         lay_field(&f, &mut r, [0, 0], lay, false).expect("laid");
-        assert_eq!(first(&r), [102, 102, 102, 255]);
+        // 0.8 raised to 2.5: denser, not grayer.
+        assert_eq!(first(&r), [146, 146, 146, 255]);
+        // A blue rim is a deeper blue: darker, and further from gray.
+        let mut r = raster([255, 255, 255, 255]);
+        let blue = Lay::Paint {
+            color: [0.36, 0.55, 0.8],
+            opacity: 1.0,
+            mode: BlendMode::Normal,
+        };
+        lay_field(&f, &mut r, [0, 0], blue, false).expect("laid");
+        let [red, green, b, _] = first(&r).map(f32::from);
+        let plain = [0.36_f32, 0.55, 0.8].map(|c| c * 255.0);
+        assert!(red < plain[0] && green < plain[1] && b < plain[2]);
+        assert!(b / red > plain[2] / plain[0], "{red} {b}");
     }
 }
