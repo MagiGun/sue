@@ -542,3 +542,67 @@ fn a_mask_stays_on_its_layer_when_a_moved_layer_changes_resolution() {
     undo_pair(&mut arena, &mut history, edit);
     assert_eq!(alpha(&arena, 6), [255, 255, 0, 0, 0, 0]);
 }
+
+#[test]
+fn a_quarter_turn_turns_moved_layers_with_their_masks() {
+    // A 5 by 3 picture, a layer moved one right and its mask showing a
+    // corner of it, and the mask of a second layer unlinked: the turned
+    // picture is the picture turned, both ways.
+    let (mut arena, picture, mut history, first) = picture_of(5, 3);
+    for (index, pixel) in raster_mut(&mut arena, first)
+        .unwrap()
+        .bytes_mut()
+        .unwrap()
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .enumerate()
+    {
+        *pixel = [(index * 17) as u8, 40, 200, 255];
+    }
+    history
+        .apply(&mut arena, set(first, picture::X, 1_i64))
+        .unwrap();
+    let (edit, _) = new_mask(&arena, first, |x, y| if x < 3 && y < 2 { 1.0 } else { 0.3 }).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let (spawn, second) = add_raster_layer(
+        &arena,
+        picture,
+        Some(first),
+        "Top".to_owned(),
+        Some([250, 200, 0, 255]),
+    )
+    .unwrap();
+    history
+        .apply(&mut arena, Edit::new("Add").then(spawn))
+        .unwrap();
+    let (edit, _) = new_mask(&arena, second, |x, _| if x == 4 { 1.0 } else { 0.0 }).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let unlink = set_mask_linked(&arena, second, false).unwrap();
+    history.apply(&mut arena, unlink).unwrap();
+    let shown = |arena: &Arena, size: [u32; 2]| -> Vec<[u8; 4]> {
+        render(
+            arena,
+            picture,
+            [0, 0, size[0], size[1]],
+            RenderOptions::default(),
+        )
+        .as_chunks::<4>()
+        .0
+        .to_vec()
+    };
+    let before = shown(&arena, [5, 3]);
+    for clockwise in [true, false] {
+        let edit = rotate_canvas(&arena, picture, clockwise).unwrap();
+        undo_pair(&mut arena, &mut history, edit);
+        let after = shown(&arena, [3, 5]);
+        for y in 0..5_usize {
+            for x in 0..3_usize {
+                // Where the turned pixel came from.
+                let (ox, oy) = if clockwise { (y, 2 - x) } else { (4 - y, x) };
+                assert_eq!(after[y * 3 + x], before[oy * 5 + ox], "{clockwise} {x},{y}");
+            }
+        }
+        history.undo(&mut arena).unwrap();
+    }
+}

@@ -350,13 +350,18 @@ pub fn rotate_canvas(arena: &Arena, picture: EntityId, clockwise: bool) -> Resul
     let mut edit = Edit::new(label)
         .then(SetProperty::new(picture, picture::WIDTH, i64::from(height)))
         .then(SetProperty::new(picture, picture::HEIGHT, i64::from(width)));
-    let turn = |id: EntityId, offset: [i64; 2], edit: Edit| -> Result<Edit, String> {
+    // Turns `id`'s pixels (8-bit color, or a `Gray8` mask) sitting at
+    // picture pixel `offset`, and answers where they sit after.
+    let turn = |id: EntityId, offset: [i64; 2], edit: Edit| -> Result<(Edit, [i64; 2]), String> {
         let Some(raster) = raster(arena, id) else {
-            return Ok(edit);
+            return Ok((edit, offset));
         };
-        let (Some(bytes), PixelFormat::Rgba8) = (raster.bytes(), raster.format()) else {
-            return Ok(edit);
+        let (Some(bytes), PixelFormat::Rgba8 | PixelFormat::Gray8) =
+            (raster.bytes(), raster.format())
+        else {
+            return Ok((edit, offset));
         };
+        let step = raster.format().bytes_per_pixel();
         let (w, h) = (raster.width(), raster.height());
         let mut out = vec![0_u8; bytes.len()];
         for ny in 0..w {
@@ -366,12 +371,12 @@ pub fn rotate_canvas(arena: &Arena, picture: EntityId, clockwise: bool) -> Resul
                 } else {
                     (w - 1 - ny, nx)
                 };
-                let from = ((oy * w + ox) * 4) as usize;
-                let to = ((ny * h + nx) * 4) as usize;
-                out[to..to + 4].copy_from_slice(&bytes[from..from + 4]);
+                let from = (oy * w + ox) as usize * step;
+                let to = (ny * h + nx) as usize * step;
+                out[to..to + step].copy_from_slice(&bytes[from..from + step]);
             }
         }
-        let tile = RasterTile2D::from_bytes(h, w, PixelFormat::Rgba8, out)
+        let tile = RasterTile2D::from_bytes(h, w, raster.format(), out)
             .map_err(|error| error.to_string())?;
         let [x, y] = offset;
         let moved = if clockwise {
@@ -379,13 +384,21 @@ pub fn rotate_canvas(arena: &Arena, picture: EntityId, clockwise: bool) -> Resul
         } else {
             [y, i64::from(width) - (x + i64::from(w))]
         };
-        let mut edit = edit.then(sue_core::txn::ReplaceComponent::new(id, tile, label));
-        if moved != [0, 0] || offset != [0, 0] {
-            edit = edit
-                .then(SetProperty::new(id, picture::X, moved[0]))
-                .then(SetProperty::new(id, picture::Y, moved[1]));
+        Ok((
+            edit.then(sue_core::txn::ReplaceComponent::new(id, tile, label)),
+            moved,
+        ))
+    };
+    // Sets `id`'s place to `at` (left out while it is and stays 0, 0).
+    let place = |id: EntityId, at: [i64; 2], edit: Edit| -> Edit {
+        let stored = arena.get_by_id(id).is_ok_and(|entity| {
+            entity.property(picture::X).is_some() || entity.property(picture::Y).is_some()
+        });
+        if at == [0, 0] && !stored {
+            return edit;
         }
-        Ok(edit)
+        edit.then(SetProperty::new(id, picture::X, at[0]))
+            .then(SetProperty::new(id, picture::Y, at[1]))
     };
     for info in layers(arena, picture) {
         edit = live_turned(
@@ -395,9 +408,24 @@ pub fn rotate_canvas(arena: &Arena, picture: EntityId, clockwise: bool) -> Resul
             [width as f32, height as f32],
             clockwise,
         );
-        edit = turn(info.id, info.style.offset, edit)?;
-        if let Some(mask) = mask_of(arena, info.id) {
-            edit = turn(mask, info.style.offset, edit)?;
+        let (turned, moved) = turn(info.id, info.style.offset, edit)?;
+        edit = if moved == info.style.offset {
+            turned
+        } else {
+            place(info.id, moved, turned)
+        };
+        if let (Some(mask), Some(at)) =
+            (mask_of(arena, info.id), super::mask_offset(arena, info.id))
+        {
+            // Turned where it sits on the canvas; a linked mask's place
+            // is then taken relative to its layer's new one.
+            let (turned, mask_moved) = turn(mask, at, edit)?;
+            let own = if super::mask_linked(arena, info.id) {
+                [mask_moved[0] - moved[0], mask_moved[1] - moved[1]]
+            } else {
+                mask_moved
+            };
+            edit = place(mask, own, turned);
         }
         if crate::vector::is_vector(arena, info.id) {
             let mut lines = crate::vector::lines(&crate::vector::geometry(arena, info.id));
