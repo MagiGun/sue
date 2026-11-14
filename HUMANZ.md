@@ -475,6 +475,23 @@ thumbnail or the document properties are read without loading the pixels.
 `to_bytes`, without building them in memory first. A file that ends before
 its end mark is an error for both readers.
 
+#### The tile codec benchmark
+
+Which codec a stored tile of pixels gets is decided by measuring, not by
+guess. `sue-core/tests/codec_bench.rs` generates pictures (flat shapes,
+line art, noise, a gradient, a photo-like field, a painting of 20 layers)
+at four sizes, cuts them into 256 pixel tiles, and prints stored size and
+encode and decode speed for raw, deflate at levels 1, 3 and 6 with three
+predictors and without one, and lossless JPEG XL at four efforts. Every
+blob is decoded and compared with its tile. It is an ignored test:
+
+```bash
+cargo test --release -p sue-core --test codec_bench -- --ignored --nocapture
+```
+
+Its crates are development dependencies of `sue-core` only: the kernel
+itself still depends on nothing.
+
 ### 1.10 Formats and bundles
 
 Every importer and exporter is a `FormatHandler` in one `FormatRegistry`:
