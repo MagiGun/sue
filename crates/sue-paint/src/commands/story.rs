@@ -5,7 +5,7 @@
 //! none has a chord here; people give them keys in Settings.
 
 use sue_core::{Arena, EntityId};
-use sue_wm::{AppletContext, Call, Command, Facts, ItemState};
+use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
 use super::when;
 use crate::dialogs::{Dialog, PagesDialog};
@@ -356,8 +356,21 @@ fn export_pages(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.ask_export_pages(cx);
 }
 
-/// A command of this group.
+/// A command of this group that Auto Actions may record: it changes the
+/// pages or which page is shown, or opens a dialog on them.
 const fn c(
+    name: &'static str,
+    label: &'static str,
+    icon: &'static str,
+    run: fn(&mut SuePaint, &mut AppletContext<'_>, Call<'_>),
+) -> Command<SuePaint> {
+    unrecorded(name, label, icon, run).with(Flags::RECORDABLE)
+}
+
+/// A command of this group that Auto Actions leave out, as they leave
+/// out the File menu: it reads or writes files, or (the Story Editor)
+/// edits the text of every page at once.
+const fn unrecorded(
     name: &'static str,
     label: &'static str,
     icon: &'static str,
@@ -409,8 +422,8 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "info",
         info,
     ),
-    c("story.editor", "story-editor", "edit", editor),
-    c(
+    unrecorded("story.editor", "story-editor", "edit", editor),
+    unrecorded(
         "story.import_text",
         "batch-import-text-ellipsis",
         "import",
@@ -423,13 +436,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "duplicate",
         duplicate,
     ),
-    c(
+    unrecorded(
         "story.export_page",
         "export-page-as-file-ellipsis",
         "export",
         export_page,
     ),
-    c(
+    unrecorded(
         "story.export_pages",
         "export-all-pages-ellipsis",
         "export",
@@ -441,7 +454,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
 #[cfg(test)]
 mod tests {
     use sue_core::{Arena, EntityId, UndoStack};
-    use sue_wm::{AppletContext, Facts, World};
+    use sue_wm::{AppletContext, Facts, Flags, World};
 
     use crate::doc::{self, NewPicture};
     use crate::studio::SuePaint;
@@ -513,6 +526,41 @@ mod tests {
             .story_here(&cx.world.arena)
             .map(|(_, pages, _)| pages)
             .unwrap_or_default()
+    }
+
+    #[test]
+    fn auto_actions_record_what_changes_the_pages() {
+        // What `extras::recordable` said for "story.", but for the
+        // commands that read or write files, which it kept out only under
+        // "file.": the Story menu's file commands are left out the same
+        // way now. No Story command leaves the canvas.
+        let unrecorded: Vec<&str> = super::COMMANDS
+            .iter()
+            .filter(|command| !command.flags.has(Flags::RECORDABLE))
+            .map(|command| command.name)
+            .collect();
+        assert_eq!(
+            unrecorded,
+            [
+                "story.editor",
+                "story.import_text",
+                "story.export_page",
+                "story.export_pages"
+            ]
+        );
+        assert!(
+            super::COMMANDS
+                .iter()
+                .all(|command| !command.flags.has(Flags::LEAVES_CANVAS))
+        );
+        for command in super::COMMANDS {
+            assert_eq!(
+                crate::commands::registry().flags(command.name),
+                command.flags,
+                "{}",
+                command.name
+            );
+        }
     }
 
     #[test]
