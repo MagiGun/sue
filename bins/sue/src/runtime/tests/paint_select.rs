@@ -22,7 +22,9 @@ impl Canvas {
         let start = Instant::now();
         let paint = AppletId::new(sue_paint::ID).unwrap();
         runtime.request(ShellRequest::Open(paint.clone()), &mut NoTextures, start);
-        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| Vec::new());
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
+            Vec::new()
+        });
         let mut canvas = Self {
             runtime,
             root,
@@ -137,7 +139,9 @@ impl Canvas {
             .unwrap()
             .bytes()
             .unwrap()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|pixel| pixel[3])
             .collect();
         self.command("edit.undo");
@@ -219,20 +223,29 @@ fn sue_paint_runs_every_select_command() {
     let pixels = (width * height) as usize;
 
     // Select All, Deselect, Reselect.
-    assert!(canvas.selection().is_none(), "a new canvas has no selection");
+    assert!(
+        canvas.selection().is_none(),
+        "a new canvas has no selection"
+    );
     canvas.leaves_document("select.all");
     let all = canvas.selection().expect("everything selected");
     assert_eq!(selected(&all), pixels);
     canvas.leaves_document("select.none");
     assert!(canvas.selection().is_none());
     canvas.leaves_document("select.again");
-    assert!(canvas.selection() == Some(all.clone()), "the same selection back");
+    assert!(
+        canvas.selection() == Some(all.clone()),
+        "the same selection back"
+    );
 
     // Shrink, Invert, Expand, Blur Border: each through its dialog's OK.
     canvas.command_ok("select.shrink");
     let shrunk = canvas.selection().expect("still a selection");
     let inside = selected(&shrunk);
-    assert!(inside < pixels && inside > pixels / 2, "{inside} of {pixels}");
+    assert!(
+        inside < pixels && inside > pixels / 2,
+        "{inside} of {pixels}"
+    );
     assert_eq!(shrunk[0], 0, "the corner is let go");
     canvas.leaves_document("select.invert");
     let inverted = canvas.selection().expect("the border is selected");
@@ -250,7 +263,12 @@ fn sue_paint_runs_every_select_command() {
         "a soft border"
     );
     // The commands that open a dialog change nothing until OK.
-    for name in ["select.expand", "select.shrink", "select.feather", "select.gamut"] {
+    for name in [
+        "select.expand",
+        "select.shrink",
+        "select.feather",
+        "select.gamut",
+    ] {
         canvas.leaves_document(name);
     }
     assert!(canvas.selection() == Some(blurred));
@@ -283,9 +301,15 @@ fn sue_paint_runs_every_select_command() {
     canvas.command("layer.select_above");
     canvas.leaves_document("select.none");
     canvas.leaves_document("select.from_selection_layer");
-    assert!(canvas.selection() == Some(shrunk.clone()), "the layer as a selection");
+    assert!(
+        canvas.selection() == Some(shrunk.clone()),
+        "the layer as a selection"
+    );
     canvas.undo_pair("select.quick_mask");
-    assert!(canvas.selection().is_none(), "Quick Mask holds the selection");
+    assert!(
+        canvas.selection().is_none(),
+        "Quick Mask holds the selection"
+    );
     canvas.undo_pair("select.quick_mask");
     assert!(canvas.selection() == Some(shrunk), "and gives it back");
 

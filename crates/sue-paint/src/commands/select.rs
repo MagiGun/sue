@@ -1,8 +1,8 @@
 //! The Select menu's commands: one entry each, with its own `run` and
 //! `state`, its label, default keys, icon and flags.
 
-use sue_core::txn::SetProperty;
 use sue_core::Value;
+use sue_core::txn::SetProperty;
 use sue_model::picture;
 use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
@@ -621,7 +621,10 @@ mod tests {
     fn a_line_off_the_canvas_is_never_within() {
         let selection = Selection::all(10, 10);
         let paths = vec![vec![[2.0, 2.0], [14.0, 2.0]], vec![[-3.0, 5.0], [5.0, 5.0]]];
-        assert_eq!(reached(&selection, &paths, Reach::Within), Vec::<usize>::new());
+        assert_eq!(
+            reached(&selection, &paths, Reach::Within),
+            Vec::<usize>::new()
+        );
         assert_eq!(reached(&selection, &paths, Reach::Overlapping), [0, 1]);
     }
 
