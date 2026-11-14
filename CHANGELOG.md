@@ -165,6 +165,8 @@ follow [Semantic Versioning](https://semver.org/).
   you pressed on even when the hand moves quickly, instead of adding a
   second point beside it.
 - The opacity bar's handle shows on light themes too.
+- Sue Paint's Help, Sue Paint Guide and Help, Check for Updates open
+  before a canvas is, instead of staying grayed.
 
 ### Removed
 
