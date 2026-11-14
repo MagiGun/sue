@@ -103,8 +103,6 @@ pub struct MenuState {
     typed_at: u64,
     /// Goes up with every opening, so that each starts fresh.
     serial: u32,
-    /// Opened by a script: it appears at once.
-    instant: bool,
     /// Drawn at least once since it opened.
     shown: bool,
     /// What held keyboard focus when it opened.
@@ -236,13 +234,12 @@ impl MenuState {
         Self::default()
     }
 
-    fn start(&mut self, instant: bool) {
+    fn start(&mut self) {
         // What a menu that was closed without a frame still owes.
         let owed = self.focus_before.take().filter(|_| self.shown);
         *self = Self {
             open: true,
             serial: self.serial.wrapping_add(1),
-            instant,
             focus_before: owed,
             hand_back: false,
             shown: owed.is_some(),
@@ -251,15 +248,16 @@ impl MenuState {
         // A menu opened over one that held the keyboard keeps holding it.
     }
 
-    /// Opens the menu; it fades in.
+    /// Opens the menu. It appears at once, whole: a menu that faded in
+    /// would need frames that Sue's frame pacing does not know of.
     pub fn open(&mut self) {
-        self.start(false);
+        self.start();
     }
 
-    /// Opens the menu at once, without a fade: for scripted runs, whose
-    /// pictures must not catch it half shown.
+    /// Opens the menu, for scripted runs. The same as
+    /// [`open`](Self::open), kept so that scripts say what they mean.
     pub fn open_at_once(&mut self) {
-        self.start(true);
+        self.start();
     }
 
     /// Closes the menu and every nested one.
@@ -748,7 +746,7 @@ impl MenuState {
             .order(layer.order)
             .fixed_pos(origin)
             .constrain(false)
-            .fade_in(!self.instant)
+            .fade_in(false)
             .sense(Sense::hover())
             .show(ctx, |ui| {
                 let painter = ui.painter().clone();

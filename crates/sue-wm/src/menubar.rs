@@ -216,8 +216,8 @@ impl MenuBar {
         Self::default()
     }
 
-    /// Opens the menu titled `title` (scripted runs), at once and without
-    /// a fade. Returns `false` if there is none.
+    /// Opens the menu titled `title` (scripted runs). Returns `false` if
+    /// there is none.
     pub fn open(&mut self, menus: &[Menu], title: &str) -> bool {
         let found = menus
             .iter()
@@ -229,8 +229,7 @@ impl MenuBar {
         found.is_some()
     }
 
-    /// Opens a [`Self::dropdown`] menu (scripted runs, a shortcut), at once
-    /// and without a fade.
+    /// Opens a [`Self::dropdown`] menu (scripted runs, a shortcut).
     pub fn open_dropdown(&mut self) {
         self.open = Some(0);
         self.menu.open_at_once();
