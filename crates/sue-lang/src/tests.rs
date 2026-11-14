@@ -407,3 +407,86 @@ fn english_text_kept_as_data_reads_in_the_language_in_use() {
     assert!(has_english("test-translate", "G-pen"));
     assert!(!has_english("test-translate", "My own pen"));
 }
+
+/// The message or term a line of a language file starts, if it starts one:
+/// a name at the very start of the line, then `=`.
+fn starts_message(line: &str) -> Option<&str> {
+    let name = line.split('=').next()?.trim_end();
+    let rest = name.strip_prefix('-').unwrap_or(name);
+    let named = line.len() > name.len()
+        && rest.starts_with(|first: char| first.is_ascii_alphabetic())
+        && rest
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    named.then_some(name)
+}
+
+#[test]
+fn a_line_that_starts_a_message_is_told_from_the_rest() {
+    assert_eq!(starts_message("start-back = Back"), Some("start-back"));
+    assert_eq!(
+        starts_message("sue_paint-theme =Theme"),
+        Some("sue_paint-theme")
+    );
+    assert_eq!(starts_message("-brand = Sue"), Some("-brand"));
+    assert_eq!(starts_message("empty ="), Some("empty"));
+    assert_eq!(starts_message("    .description = Indented"), None);
+    assert_eq!(starts_message("   *[other] { $count } = more"), None);
+    assert_eq!(starts_message("# a comment = with an equals sign"), None);
+    assert_eq!(starts_message("## [sue_paint]"), None);
+    assert_eq!(starts_message("}"), None);
+    assert_eq!(starts_message(""), None);
+    assert_eq!(starts_message("no equals sign"), None);
+}
+
+/// The second definition of a message silently wins over the first, and
+/// a merge that keeps both sides of a clash can bring a deleted line back
+/// that way. So every name is defined once in each file.
+#[test]
+fn no_language_file_defines_a_key_twice() {
+    let locales = workspace().join("crates").join("sue-lang").join("locales");
+    let mut files = Vec::new();
+    for language in std::fs::read_dir(&locales)
+        .expect("the languages folder")
+        .filter_map(Result::ok)
+    {
+        let Ok(entries) = std::fs::read_dir(language.path()) else {
+            continue;
+        };
+        files.extend(
+            entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "ftl")),
+        );
+    }
+    assert!(
+        files.len() >= BUILT_IN.len(),
+        "the scan found {} language files, fewer than the {} built in",
+        files.len(),
+        BUILT_IN.len()
+    );
+    let mut twice = Vec::new();
+    for path in &files {
+        let text = std::fs::read_to_string(path).expect("a language file reads as text");
+        let mut first: BTreeMap<&str, usize> = BTreeMap::new();
+        for (index, line) in text.lines().enumerate() {
+            let Some(name) = starts_message(line) else {
+                continue;
+            };
+            if let Some(before) = first.insert(name, index + 1) {
+                first.insert(name, before);
+                twice.push(format!(
+                    "{}:{}: {name} is already defined at line {before}",
+                    path.display(),
+                    index + 1
+                ));
+            }
+        }
+    }
+    assert!(
+        twice.is_empty(),
+        "A message defined twice in one file:\n{}",
+        twice.join("\n")
+    );
+}

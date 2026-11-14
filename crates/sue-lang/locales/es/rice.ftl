@@ -178,81 +178,15 @@ sue_paint-height = Alto
     .description = Alto de las ilustraciones nuevas (px)
 sue_paint-dpi = PPP
     .description = Resolución de las ilustraciones nuevas (ppp)
-sue_paint-theme = Tema
-    .description = Los colores de Sue Paint: Gris, el tema de Sue (lo sigue), un preajuste o Personalizado (abajo)
-    .gray = Gris
-    .sue-theme = Tema de Sue
-    .void = Vacío
-    .graphite = Grafito
-    .paper = Papel
-    .custom = Personalizado
-sue_paint-pen_pressure = Presión del lápiz
-    .description = Curva de presión del lápiz para todas las herramientas, como puntos presión,salida (Archivo, Ajustes de presión del lápiz la dibuja)
-sue_paint-alt_tool = Herramienta con Alt
-    .description = Qué hace Alt al dibujar en el lienzo (Archivo, Ajustes de teclas modificadoras)
-    .eyedropper = Cuentagotas
-    .eraser = Borrador
-    .none = Nada
-sue_paint-space_tool = Herramienta con Espacio
-    .description = Qué hace Espacio en el lienzo (Archivo, Ajustes de teclas modificadoras)
-    .hand = Mano
-    .none = Nada
-sue_paint-ctrl_shift = Ctrl Mayús
-    .description = Qué hace Ctrl+Mayús+clic en el lienzo (Archivo, Ajustes de teclas modificadoras)
-    .pick_layer = Elegir capa
-    .none = Nada
-sue_paint-language = Idioma
-    .description = Idioma: sue sigue el idioma de Sue; una etiqueta de idioma le da uno propio
 
 ## [sue_paint_colors]
 
-sue_paint_colors-void = Fondo
-    .description = Alrededor de la imagen
-sue_paint_colors-panel = Panel
-    .description = Paletas y menús
-sue_paint_colors-pill = Píldora
-    .description = Campos, fichas y tarjetas
-sue_paint_colors-hover = Al pasar
-    .description = Controles bajo el puntero
-sue_paint_colors-active = Activo
-    .description = Controles pulsados y elegidos
-sue_paint_colors-border = Borde
-    .description = Bordes finos
-sue_paint_colors-border_active = Borde activo
-    .description = Bordes de los controles elegidos y con foco
-sue_paint_colors-text = Texto
-    .description = Texto principal e iconos activos
-sue_paint_colors-muted = Atenuado
-    .description = Texto secundario
-sue_paint_colors-selection = Selección
-    .description = Resaltado de la selección de texto
-sue_paint_colors-selection_text = Texto seleccionado
-    .description = Texto dentro de una selección
-sue_paint_colors-grid = Cuadrícula
-    .description = Cuadrículas y reglas
-sue_paint_colors-shadow = Sombra
-    .description = Sombra bajo las superficies flotantes
 
 ## [sue_writer]
 
-sue_writer-theme = Tema
-    .description = Los colores de Sue Writer: el tema de Sue (lo sigue) o un preajuste
-    .sue-theme = Tema de Sue
-    .gray = Gris
-    .void = Vacío
-    .graphite = Grafito
-    .paper = Papel
-sue_writer-smart_quotes = Comillas tipográficas
-    .description = Convertir las comillas rectas en curvas al escribir
-sue_writer-dark_paper = Papel oscuro
-    .description = Mostrar la página con los colores oscuros del tema en lugar de papel blanco
-sue_writer-language = Idioma
-    .description = Idioma: sue sigue el idioma de Sue; una etiqueta de idioma le da uno propio
 
 ## [image_viewer] y [convert]
 
-image_viewer-language = Idioma
-    .description = Idioma: sue sigue el idioma de Sue; una etiqueta de idioma le da uno propio
 convert-language = Idioma
     .description = Idioma: sue sigue el idioma de Sue; una etiqueta de idioma le da uno propio
 
