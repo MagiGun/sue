@@ -82,7 +82,26 @@ const IN_PALETTES: [&str; 18] = [
 ];
 
 /// The palettes' code, which runs those commands by name.
-const PALETTES_SOURCE: &str = include_str!("../panels.rs");
+const PALETTES_SOURCE: [&str; 18] = [
+    include_str!("../panels/brush_size.rs"),
+    include_str!("../panels/cels.rs"),
+    include_str!("../panels/color.rs"),
+    include_str!("../panels/color_set.rs"),
+    include_str!("../panels/command_bar.rs"),
+    include_str!("../panels/history.rs"),
+    include_str!("../panels/layer.rs"),
+    include_str!("../panels/layer_property.rs"),
+    include_str!("../panels/material.rs"),
+    include_str!("../panels/mod.rs"),
+    include_str!("../panels/navigator.rs"),
+    include_str!("../panels/sub_tool.rs"),
+    include_str!("../panels/timeline.rs"),
+    include_str!("../panels/tool.rs"),
+    include_str!("../panels/tool_property/brush.rs"),
+    include_str!("../panels/tool_property/effect.rs"),
+    include_str!("../panels/tool_property/mod.rs"),
+    include_str!("../panels/tool_property/three.rs"),
+];
 
 #[test]
 fn every_command_can_be_reached() {
@@ -120,7 +139,9 @@ fn every_command_can_be_reached() {
             "{name} is in a menu"
         );
         assert!(
-            PALETTES_SOURCE.contains(&format!("\"{name}\"")),
+            PALETTES_SOURCE
+                .iter()
+                .any(|source| source.contains(&format!("\"{name}\""))),
             "no palette runs {name}"
         );
     }
