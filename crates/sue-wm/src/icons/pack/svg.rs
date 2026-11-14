@@ -148,6 +148,12 @@ pub enum Problem {
         /// Its name.
         id: String,
     },
+    /// Elements nested deeper than [`DEEPEST`]: what lies deeper is left
+    /// out.
+    TooDeep,
+    /// More path segments than [`MOST_SEGMENTS`]: the shapes after them
+    /// are left out.
+    TooDetailed,
 }
 
 /// One element of the document.
@@ -173,10 +179,21 @@ fn local(name: &str) -> &str {
 }
 
 /// The document as a tree under a root that has no name.
-fn tree(text: &str) -> Node {
+fn tree(text: &str) -> (Node, bool) {
     let mut stack: Vec<Node> = vec![Node::default()];
+    // Elements opened past the deepest kept level are left out, and so
+    // are their closing tags.
+    let mut deeper = 0_usize;
+    let mut cut = false;
     for event in parse_xml(text) {
         match event {
+            XmlEvent::Open { empty, .. } if deeper > 0 || stack.len() > DEEPEST + 2 => {
+                cut = true;
+                if !empty {
+                    deeper += 1;
+                }
+            }
+            XmlEvent::Close(_) if deeper > 0 => deeper -= 1,
             XmlEvent::Open { name, attrs, empty } => {
                 let node = Node {
                     name: local(&name).to_owned(),
@@ -214,7 +231,7 @@ fn tree(text: &str) -> Node {
             parent.children.push(node);
         }
     }
-    stack.pop().unwrap_or_default()
+    (stack.pop().unwrap_or_default(), cut)
 }
 
 /// An affine map: `x' = a x + c y + e`, `y' = b x + d y + f`.
@@ -437,7 +454,12 @@ impl Style {
 }
 
 /// The attributes that change the picture and are not read.
-const IGNORED: [&str; 6] = [
+const IGNORED: [&str; 11] = [
+    "opacity",
+    "fill-opacity",
+    "stroke-opacity",
+    "stroke-linecap",
+    "stroke-linejoin",
     "clip-path",
     "filter",
     "stroke-dasharray",
@@ -462,12 +484,23 @@ const SILENT: [&str; 12] = [
     "filter",
 ];
 
+/// How deep elements may nest; anything deeper is left out (and noted),
+/// so that no file can exhaust the stack.
+pub const DEEPEST: usize = 64;
+
+/// The most path segments one file may draw, masks counted. An icon
+/// needs a few dozen; the limit keeps a file from making a tile take
+/// seconds to draw.
+pub const MOST_SEGMENTS: usize = 4096;
+
 /// Everything that reads one file.
 struct Reader<'a> {
     masks: HashMap<String, &'a Node>,
     problems: Vec<Problem>,
     /// The style of the root element, which a mask's shapes inherit.
     root: Style,
+    /// The path segments read so far, against [`MOST_SEGMENTS`].
+    segments: usize,
 }
 
 impl<'a> Reader<'a> {
@@ -525,6 +558,10 @@ impl<'a> Reader<'a> {
                 "display" if value.trim() == "none" => style.hidden = true,
                 "visibility" => style.hidden = matches!(value.trim(), "hidden" | "collapse"),
                 "class" => self.note(Problem::StyleSheet),
+                "opacity" | "fill-opacity" | "stroke-opacity"
+                    if value.trim().parse::<f32>().is_ok_and(|alpha| alpha >= 1.0) => {}
+                "stroke-linecap" | "stroke-linejoin"
+                    if matches!(value.trim(), "round" | "inherit") => {}
                 "stroke-dasharray" if value.trim() == "none" => {}
                 "filter" | "clip-path" if value.trim() == "none" => {}
                 _ if IGNORED.contains(&key.as_str()) => self.note(Problem::Ignored {
@@ -650,6 +687,13 @@ impl<'a> Reader<'a> {
         let Some(paths) = self.outlines(node) else {
             return Vec::new();
         };
+        let segments: usize = paths.iter().map(|path| path.segments.len() + 1).sum();
+        if self.segments + segments > MOST_SEGMENTS {
+            self.segments = MOST_SEGMENTS;
+            self.note(Problem::TooDetailed);
+            return Vec::new();
+        }
+        self.segments += segments;
         let paths = place(&paths, style.matrix);
         if paths.is_empty() {
             return Vec::new();
@@ -696,7 +740,11 @@ impl<'a> Reader<'a> {
     /// What one element draws.
     fn item(&mut self, node: &'a Node, outer: Style, depth: usize) -> Vec<Item> {
         let name = node.name.as_str();
-        if SILENT.contains(&name) || name.contains(':') || depth > 64 {
+        if SILENT.contains(&name) || name.contains(':') {
+            return Vec::new();
+        }
+        if depth > DEEPEST {
+            self.note(Problem::TooDeep);
             return Vec::new();
         }
         let style = self.style(node, outer);
@@ -759,7 +807,8 @@ impl<'a> Reader<'a> {
 
     /// The shapes of a mask, light and dark.
     fn cuts(&mut self, node: &'a Node, outer: Style, cuts: &mut Vec<Cut>, depth: usize) {
-        if depth > 64 {
+        if depth > DEEPEST {
+            self.note(Problem::TooDeep);
             return;
         }
         for child in &node.children {
@@ -1041,7 +1090,7 @@ fn viewport(root: &Node, problems: &mut Vec<Problem>) -> Matrix {
 /// an empty drawing and says why.
 #[must_use]
 pub fn read(text: &str) -> (Drawing, Vec<Problem>) {
-    let document = tree(text);
+    let (document, cut) = tree(text);
     fn find(node: &Node) -> Option<&Node> {
         if node.name == "svg" {
             return Some(node);
@@ -1055,7 +1104,11 @@ pub fn read(text: &str) -> (Drawing, Vec<Problem>) {
         masks: HashMap::new(),
         problems: Vec::new(),
         root: Style::ROOT,
+        segments: 0,
     };
+    if cut {
+        reader.note(Problem::TooDeep);
+    }
     let matrix = viewport(root, &mut reader.problems);
     reader.find_masks(root);
     let style = reader.style(

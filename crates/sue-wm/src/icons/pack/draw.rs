@@ -61,6 +61,19 @@ fn inside(point: Point, line: &Polyline) -> bool {
 /// counts windings, sees the same holes: an outline inside an odd number
 /// of others runs the other way round from one inside an even number.
 fn even_odd(lines: &mut [Polyline]) {
+    // Each outline's box, so that only outlines whose box holds the probe
+    // are walked.
+    let boxes: Vec<[f32; 4]> = lines
+        .iter()
+        .map(|line| {
+            line.points.iter().fold(
+                [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+                |[left, top, right, bottom], [x, y]| {
+                    [left.min(*x), top.min(*y), right.max(*x), bottom.max(*y)]
+                },
+            )
+        })
+        .collect();
     let depths: Vec<usize> = (0..lines.len())
         .map(|index| {
             let Some(probe) = lines[index].points.first().copied() else {
@@ -68,6 +81,10 @@ fn even_odd(lines: &mut [Polyline]) {
             };
             (0..lines.len())
                 .filter(|other| *other != index && lines[*other].points.len() > 2)
+                .filter(|other| {
+                    let [left, top, right, bottom] = boxes[*other];
+                    (left..=right).contains(&probe[0]) && (top..=bottom).contains(&probe[1])
+                })
                 .filter(|other| inside(probe, &lines[*other]))
                 .count()
         })
@@ -78,6 +95,30 @@ fn even_odd(lines: &mut [Polyline]) {
             line.points.reverse();
         }
     }
+}
+
+/// The most straight pieces a drawing is cut into for one tile. A file
+/// that would need more (curves by the thousand) is cut more coarsely
+/// until it fits, so that no file can make a tile take seconds; an icon
+/// needs a few hundred, far below it, and is drawn exactly.
+const MOST_POINTS: usize = 16_384;
+
+fn points(items: &[FlatItem]) -> usize {
+    let count = |flat: &Flat| {
+        flat.lines
+            .iter()
+            .map(|line| line.points.len())
+            .sum::<usize>()
+    };
+    items
+        .iter()
+        .map(|item| match item {
+            FlatItem::Shape(flat) => count(flat),
+            FlatItem::Masked { items, mask } => {
+                points(items) + mask.iter().map(|(flat, _)| count(flat)).sum::<usize>()
+            }
+        })
+        .sum()
 }
 
 fn flatten(shape: &Shape, tolerance: f32) -> Flat {
@@ -216,6 +257,14 @@ pub fn render(drawing: &Drawing, size: usize, stroke: f32) -> Tile {
     };
     let tolerance = 0.02 * CANVAS / size as f32;
     let mut items = flatten_items(&drawing.items, tolerance);
+    let mut coarser = tolerance;
+    for _ in 0..8 {
+        if points(&items) <= MOST_POINTS {
+            break;
+        }
+        coarser *= 4.0;
+        items = flatten_items(&drawing.items, coarser);
+    }
     let fit = {
         let mut shapes = Vec::new();
         drawn(&items, &mut shapes);

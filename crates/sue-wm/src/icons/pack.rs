@@ -203,6 +203,16 @@ impl Note {
                 svg::Problem::NoMask { id } => {
                     tr!("icon-pack-no-mask", file = file, id = id.as_str())
                 }
+                svg::Problem::TooDeep => tr!(
+                    "icon-pack-too-deep",
+                    file = file,
+                    most = svg::DEEPEST.to_string()
+                ),
+                svg::Problem::TooDetailed => tr!(
+                    "icon-pack-too-detailed",
+                    file = file,
+                    most = svg::MOST_SEGMENTS.to_string()
+                ),
             },
             Problem::NoManifest => tr!("icon-pack-no-manifest", file = file),
             Problem::ManifestLine { line } => {
@@ -379,21 +389,36 @@ impl Manifest {
 }
 
 /// An id for a pack called `name`: lower case letters, digits and
-/// hyphens.
+/// hyphens. A name with letters outside `a-z` (`Ícones`, `アイコン`)
+/// ends in a short number made from the whole name, so that two such
+/// names never share an id while the same name always gets the same
+/// one (installing it again updates it).
 #[must_use]
 pub fn id_for(name: &str) -> String {
     let mut id = String::new();
-    for ch in name.chars().flat_map(char::to_lowercase) {
+    let mut beyond = false;
+    for ch in name.trim().chars().flat_map(char::to_lowercase) {
         if ch.is_ascii_alphanumeric() {
             id.push(ch);
-        } else if !id.is_empty() && !id.ends_with('-') {
-            id.push('-');
-        }
-        if id.len() >= 64 {
-            break;
+        } else {
+            beyond |= ch.is_alphanumeric();
+            if !id.is_empty() && !id.ends_with('-') {
+                id.push('-');
+            }
         }
     }
-    let id = id.trim_end_matches('-').to_owned();
+    id.truncate(if beyond { 55 } else { 64 });
+    let mut id = id.trim_end_matches('-').to_owned();
+    if beyond {
+        // FNV-1a of the name: stable across builds and machines.
+        let hash = name.trim().bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+            (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+        });
+        if id.is_empty() {
+            id.push_str("pack");
+        }
+        let _ = write!(id, "-{hash:08x}");
+    }
     if id.is_empty() { "pack".to_owned() } else { id }
 }
 
@@ -1250,7 +1275,9 @@ impl IconHome {
     }
 
     /// The set as it would be with the pack `id` chosen (overrides
-    /// included), for a preview before choosing it.
+    /// included), for a preview before choosing it. This reads every
+    /// file of the pack, and each set made has tiles of its own: keep
+    /// the set while the preview is open rather than asking each frame.
     #[must_use]
     pub fn preview(&self, id: &str) -> (IconSet, Vec<Note>) {
         self.load_with(Some(id))

@@ -520,7 +520,17 @@ fn packs_are_installed_listed_chosen_replaced_and_removed() {
 fn ids_and_manifests() {
     assert_eq!(id_for("Rounded Lines 2!"), "rounded-lines-2");
     assert_eq!(id_for("  "), "pack");
-    assert_eq!(id_for("Ünïcode Ñame"), "n-code-ame");
+    // Letters outside a-z keep names apart and keep each name's id.
+    let unicode = id_for("Ünïcode Ñame");
+    assert_eq!(
+        unicode, "n-code-ame-ca453922",
+        "as docs/icon-packs.md shows"
+    );
+    assert_eq!(unicode, id_for("Ünïcode Ñame"));
+    let (first, second) = (id_for("アイコン"), id_for("图标"));
+    assert_eq!(first, "pack-5ddf9a30", "as docs/icon-packs.md shows");
+    assert_ne!(first, second);
+    assert!(id_for(&"é".repeat(200)).len() <= 64);
     assert!(id_for(&"x".repeat(200)).len() <= 64);
     assert!(valid_id("a-1"));
     assert!(!valid_id("A") && !valid_id("") && !valid_id("a/b") && !valid_id("-a"));
@@ -777,4 +787,84 @@ fn pack_contact_sheet() {
         }
         picture.save(&folder.join(format!("pack-vs-sue-{name}.png")));
     }
+}
+
+#[test]
+fn no_file_can_exhaust_the_stack_or_draw_without_end() {
+    // Groups nested as deep as a file of 250 KiB allows: the deep part is
+    // left out and named, and nothing overflows the stack.
+    let mut deep = String::from(r##"<svg viewBox="0 0 24 24"><path d="M4 4 H20" stroke="#000"/>"##);
+    while deep.len() < 250_000 {
+        deep.push_str("<g>");
+    }
+    deep.push_str(r##"<path d="M4 20 H20" stroke="#000"/></svg>"##);
+    let (drawing, notes) = read_svg("deep.svg", deep.as_bytes());
+    let drawing = drawing.expect("the shallow line is drawn");
+    assert!(
+        notes.contains(&Note {
+            file: "deep.svg".into(),
+            problem: Problem::Svg(svg::Problem::TooDeep),
+        }),
+        "{notes:?}"
+    );
+    let _ = draw::render(&drawing, 24, 1.5);
+    // Path data by the thousand: the segments past the limit are left
+    // out and named, and what is kept is cut coarsely enough to draw.
+    let mut busy = String::from(r##"<svg viewBox="0 0 24 24">"##);
+    for _ in 0..3000 {
+        busy.push_str(
+            r##"<path fill="none" stroke="#000" stroke-width="40" d="M0 0c9 9 -9 9 0 1"/>"##,
+        );
+    }
+    busy.push_str(r##"<path fill-rule="evenodd" d=""##);
+    while busy.len() < 250_000 {
+        busy.push_str("M1 1h1v1z");
+    }
+    busy.push_str(r##""/></svg>"##);
+    let (drawing, notes) = read_svg("busy.svg", busy.as_bytes());
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.problem == Problem::Svg(svg::Problem::TooDetailed)),
+        "{notes:?}"
+    );
+    let drawing = drawing.expect("the first shapes are drawn");
+    for size in [16, 24, 48] {
+        let _ = draw::render(&drawing, size, 1.5);
+    }
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    for note in &notes {
+        assert!(!note.message().contains("icon-pack-"), "{}", note.message());
+    }
+}
+
+#[test]
+fn opacity_caps_and_joins_are_named_when_they_differ() {
+    let ignored = |svg: &str| -> Vec<String> {
+        read_svg("a.svg", svg.as_bytes())
+            .1
+            .into_iter()
+            .filter_map(|note| match note.problem {
+                Problem::Svg(svg::Problem::Ignored { attribute }) => Some(attribute),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        ignored(
+            r##"<svg viewBox="0 0 24 24"><path d="M4 4 H20" stroke="#000" opacity="0.4" stroke-linecap="square" style="stroke-linejoin:miter;fill-opacity:.5"/></svg>"##
+        ),
+        [
+            "opacity",
+            "stroke-linecap",
+            "stroke-linejoin",
+            "fill-opacity"
+        ]
+    );
+    assert!(
+        ignored(
+            r##"<svg viewBox="0 0 24 24"><path d="M4 4 H20" stroke="#000" opacity="1" stroke-linecap="round" stroke-linejoin="round"/></svg>"##
+        )
+        .is_empty()
+    );
 }

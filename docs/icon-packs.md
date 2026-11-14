@@ -67,7 +67,7 @@ description = Soft, round icons for every part of Sue.
 | Key | Meaning |
 | --- | --- |
 | `format` | The version of this format the pack is written in: `1`. A pack for a newer format is still read as far as Sue can, and says so. |
-| `name` | The pack's name as people read it. Its id (the folder it is installed in) is made from it: lower case letters, digits and hyphens (`rounded-lines`). |
+| `name` | The pack's name as people read it. Its id (the folder it is installed in) is made from it: lower case letters, digits and hyphens (`rounded-lines`). A name with letters outside `a-z` gets a short number at the end of its id (`n-code-ame-ca453922` for `Ünïcode Ñame`, `pack-5ddf9a30` for `アイコン`), the same number each time, so two such packs never replace each other. |
 | `author` | Who made it. |
 | `licence` | Its licence, best as an SPDX name (`CC-BY-4.0`, `CC0-1.0`, `MIT`). `license` is read too. |
 | `version` | Its own version. Installing a pack whose name matches an installed one replaces it: that is how a pack is updated. |
@@ -108,7 +108,10 @@ What is not read, and why:
   state of its button. Every color draws ink; white and black only mean
   something inside a mask. A gradient or pattern draws plain ink.
 - **Opacity**, **caps and joins** (always round, like Sue's pen),
-  **dashes**, **markers**, **filters** and **clip paths**.
+  **dashes**, **markers**, **filters** and **clip paths**. Each is
+  named in the notes where a file asks for it (`opacity="0.4"`,
+  `stroke-linecap="square"`); `round` caps and joins and an opacity of
+  1 are what Sue draws anyway and are not noted.
 - **Text**, **pictures** (`image`), **`use`** and **style sheets**
   (`<style>` and `class`). Convert text to paths and write paint as
   attributes.
@@ -119,6 +122,13 @@ element that is not drawn, an attribute that cannot be read, path data
 that breaks off (what comes before the break is drawn, as browsers do),
 a file that is not text, has no `svg` element or draws nothing. A file
 that draws nothing falls back to Sue's own icon.
+
+An icon is small, and Sue keeps it so: elements nested more than 64
+deep and path segments past the 4096th (a shape counts each of its
+segments, plus one per subpath) are left out and noted, and a drawing
+that would need more than 16384 straight pieces at one size is drawn
+with coarser curves. Sue's own icons use at most a few hundred
+segments. A file is at most 256 KiB.
 
 ### Pens and the grid
 

@@ -248,6 +248,8 @@ icon-pack-ignored = In { $file }, { $attribute } is not used; the shape is drawn
 icon-pack-style-sheet = In { $file }, style sheets and classes are not read; write fill and stroke as attributes.
 icon-pack-plain-ink = In { $file }, gradients and patterns are drawn in the one ink of the theme.
 icon-pack-no-mask = In { $file }, the mask { $id } is not found; what it would hide is drawn.
+icon-pack-too-deep = In { $file }, elements are nested more than { $most } deep; what lies deeper is left out.
+icon-pack-too-detailed = { $file } has more than { $most } path segments; the shapes after them are left out.
 icon-pack-no-manifest = The pack { $file } has no icon-pack.txt; its folder name stands for its name.
 icon-pack-manifest-line = Line { $line } of { $file } is not key = value.
 icon-pack-unknown-key = { $file } has a key Sue does not know: { $key }.
