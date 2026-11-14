@@ -8,8 +8,11 @@
 
 use std::sync::OnceLock;
 
+use sue_core::Arena;
+use sue_model::picture::LayerKind;
 use sue_wm::{AppletContext, Call, CommandRegistry, Facts, ItemState};
 
+use crate::doc;
 use crate::studio::{KEYS_SECTION, SuePaint};
 
 mod anim;
@@ -75,16 +78,59 @@ pub(crate) fn shortcut_table() -> &'static [sue_wm::shortcuts::Shortcut] {
     })
 }
 
-/// Does what a command does, as the studio's one match always did.
-fn run(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
-    paint.run_arms(call.name, cx);
+/// What most commands' state looks at, worked out once per item.
+pub(super) struct Basis {
+    /// A canvas is open.
+    pub has_doc: bool,
+    /// The current layer.
+    pub info: Option<doc::LayerInfo>,
+    /// The current layer is a raster layer.
+    pub raster: bool,
+    /// The canvas has a selection.
+    pub selection: bool,
 }
 
-/// How an item for a command looks, as the studio's one match always
-/// said.
-fn state(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
-    paint.state_arms(call.name, facts.arena, facts.history)
+impl SuePaint {
+    /// The [`Basis`] of every command's state now.
+    pub(super) fn basis(&self, arena: &Arena) -> Basis {
+        let has_doc = self.doc().is_some();
+        let info = self.layer_info(arena);
+        let raster = info
+            .as_ref()
+            .is_some_and(|info| info.kind == LayerKind::Raster);
+        let selection = self.doc().is_some_and(|doc| doc.selection.is_some());
+        Basis {
+            has_doc,
+            info,
+            raster,
+            selection,
+        }
+    }
 }
+
+/// An item checked when `on`.
+pub(super) fn flag(on: bool) -> ItemState {
+    ItemState::check(on)
+}
+
+/// An item that works when `on` and is grayed otherwise.
+pub(super) fn when(on: bool) -> ItemState {
+    if on {
+        ItemState::on()
+    } else {
+        ItemState::off()
+    }
+}
+
+/// How an item looks for a command that works while a canvas is open.
+pub(super) fn doc_open(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(paint.doc().is_some())
+}
+
+/// A command the studio runs before the registry: Story and Animation
+/// commands by their own match, the tool keys by `tool_key`. Through
+/// the registry they do nothing, as they did through the one match.
+pub(super) fn nothing(_: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {}
 
 #[cfg(test)]
 mod tests;

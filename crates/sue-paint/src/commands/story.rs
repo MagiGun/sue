@@ -4,9 +4,9 @@ use sue_wm::Command;
 
 use crate::studio::SuePaint;
 
-/// A command of this group, run and grayed as the studio always did.
+/// A command of this group.
 const fn c(name: &'static str, label: &'static str) -> Command<SuePaint> {
-    Command::new(name, label, "story", super::run).state(super::state)
+    Command::new(name, label, "story", super::nothing).state(super::doc_open)
 }
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[

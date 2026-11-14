@@ -1,13 +1,40 @@
 //! The Animation menu's commands, and those of the timeline, the cels
 //! and the light table palettes.
 
-use sue_wm::Command;
+use sue_core::{Arena, UndoStack};
+use sue_wm::{Call, Command, Facts, ItemState, World};
 
+use super::{Basis, flag, when};
 use crate::studio::SuePaint;
 
-/// A command of this group, run and grayed as the studio always did.
+/// How an item for a Animation command looks right now.
+pub(super) fn state(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    paint.state_anim(call.name, facts.arena, facts.history)
+}
+
+impl SuePaint {
+    /// How an item for a Animation command looks right now.
+    fn state_anim(&self, command: &str, arena: &Arena, _history: &UndoStack<World>) -> ItemState {
+        let Basis { has_doc, .. } = self.basis(arena);
+        match command {
+            "anim.timeline.enable" => flag(self.timeline_on),
+            "anim.onion" => flag(self.onion),
+            "anim.loop" => flag(self.looping),
+            "anim.light_table" => flag(self.light_table),
+            "anim.light_table.color" => flag(self.light_color),
+            "anim.light_table.cel" => flag(self.light_cel),
+            "anim.light_table.general" => flag(self.light_general),
+            "anim.light_table.opacity_target" => flag(self.opacity_general),
+            "anim.light_table.tool" => flag(self.light_tool),
+            "anim.cel.lock" => flag(self.cel_lock.is_some()),
+            _ => when(has_doc),
+        }
+    }
+}
+
+/// A command of this group.
 const fn c(name: &'static str, label: &'static str) -> Command<SuePaint> {
-    Command::new(name, label, "anim", super::run).state(super::state)
+    Command::new(name, label, "anim", super::nothing).state(state)
 }
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[
