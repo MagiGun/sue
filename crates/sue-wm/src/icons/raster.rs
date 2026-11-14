@@ -6,6 +6,11 @@
 //! Apache 2.0 or MIT): every outline edge adds its signed area to the cells
 //! it crosses, and a running sum along each row gives each pixel's coverage.
 
+use super::fit::{CANVAS, Fit};
+use super::path::{PathError, Polyline, parse};
+use super::stroke::Coverage;
+use super::{CLEAR, Part};
+
 /// Coverage (0 to 1) of `lines` over a `width` by `height` grid whose top
 /// left is at `min`: the accumulation rasterizer.
 #[must_use]
@@ -78,4 +83,74 @@ pub fn fill(lines: &[[[f32; 2]; 2]], min: [f32; 2], width: usize, height: usize)
         *cover = sum.abs().min(1.0);
     }
     out
+}
+
+/// One icon at one size: how much of each pixel it covers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tile {
+    /// The side of the square tile, in pixels.
+    pub size: usize,
+    /// The pixels, row by row from the top: 0 for nothing, 255 for
+    /// covered.
+    pub alpha: Vec<u8>,
+}
+
+/// Draws `parts` on a tile `size` pixels wide with a pen `stroke` pixels
+/// wide: the path data is read, cut into straight pieces a fiftieth of a
+/// pixel true, fitted to the pixel grid ([`Fit`]), and stroked and filled
+/// part by part, each part over the ones before it.
+///
+/// # Errors
+/// Path data that cannot be read.
+pub fn render(parts: &[Part], size: usize, stroke: f32) -> Result<Tile, PathError> {
+    let size = size.max(1);
+    let stroke = stroke.max(0.0);
+    let tolerance = 0.02 * CANVAS / size as f32;
+    let mut flat: Vec<(Part, Vec<Polyline>)> = Vec::with_capacity(parts.len());
+    for part in parts {
+        let lines = parse(part.data())?
+            .iter()
+            .map(|path| path.flatten(tolerance))
+            .collect();
+        flat.push((*part, lines));
+    }
+    let of = |wanted: fn(&Part) -> bool| -> Vec<Polyline> {
+        flat.iter()
+            .filter(|(part, _)| wanted(part))
+            .flat_map(|(_, lines)| lines.iter().cloned())
+            .collect()
+    };
+    let fit = Fit::new(
+        &of(|part| matches!(part, Part::Stroke(_))),
+        &of(|part| matches!(part, Part::Fill(_))),
+        size,
+        stroke,
+    );
+    let mut tile = Coverage::new(size);
+    for (part, lines) in &mut flat {
+        for line in lines.iter_mut() {
+            for point in &mut line.points {
+                *point = fit.point(*point);
+            }
+        }
+        match part {
+            Part::Stroke(_) => {
+                for line in lines.iter() {
+                    tile.stroke(line, stroke / 2.0);
+                }
+            }
+            Part::Fill(_) => tile.fill(lines),
+            Part::Clear(_) => {
+                let mut cut = Coverage::new(size);
+                for line in lines.iter() {
+                    cut.stroke(line, stroke * CLEAR / 2.0);
+                }
+                tile.clear(&cut);
+            }
+        }
+    }
+    Ok(Tile {
+        size,
+        alpha: tile.bytes(),
+    })
 }
