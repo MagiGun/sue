@@ -347,13 +347,14 @@ fn the_palette_offers_what_it_offered() {
             "file.export.png",
             "file.fonts",
             "file.import.pose_scanner",
+            "anim.cel.rename_timeline",
+            "anim.cel.rename_layer",
             "help.shortcuts",
             "help.tips",
             "help.online_guide",
             "help.faq",
             "help.contact",
             "help.feedback",
-
         ]
     );
     let new = &palette[1];

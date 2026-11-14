@@ -2381,3 +2381,6 @@ help-contact = Contact
 help-feedback-and-requests = Feedback and Requests
 switch-main-and-sub-color = Switch Between Main and Sub Color
 swap-main-and-sub-color-values = Swap main and sub color
+rename-in-timeline-order = Rename in Timeline Order
+rename-in-layer-order = Rename in Layer Order
+no-animation-folder-to-rename-cels = The timeline has no animation folder whose cels could be renamed
