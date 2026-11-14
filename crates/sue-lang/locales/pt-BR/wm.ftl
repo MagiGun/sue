@@ -91,6 +91,8 @@ entities = { $count ->
 }
 curve-pen-pressure = Pressão da caneta
 curve-output = Saída
+color-wheel-show-triangle = Mostrar o triângulo HLS
+color-wheel-show-square = Mostrar o quadrado HSV
 window-minimize = Minimizar
 window-maximize = Maximizar
 window-restore = Restaurar
