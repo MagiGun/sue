@@ -300,7 +300,7 @@ fn the_shortcuts_keep_the_keys_and_names_they_had() {
         ("tool.correct_line", "Y", "Correct Line Tool"),
         ("tool.previous_sub", ",", "Previous Sub Tool"),
         ("tool.next_sub", ".", "Next Sub Tool"),
-        ("color.swap", "X", "Swap Main and Sub Color"),
+        ("color.swap", "X", "Switch Between Main and Sub Color"),
         ("color.transparent", "C", "Drawing or Transparent Color"),
         ("brush.smaller", "[", "Smaller Brush"),
         ("brush.bigger", "]", "Bigger Brush"),

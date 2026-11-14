@@ -155,8 +155,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     })
     .keys(".")
     .icon("chevron-down"),
-    c("color.swap", "swap-main-and-sub-color", |paint, _, _| {
-        std::mem::swap(&mut paint.main, &mut paint.sub);
+    // Clip Studio Paint's X: the other of the main and the sub color
+    // becomes the one brushes paint with, and both keep their values, as
+    // a click on the other color of the palette does. (The palette's own
+    // arrow button is the one that swaps the two values.) The name stays
+    // `color.swap`: it is saved data.
+    c("color.swap", "switch-main-and-sub-color", |paint, _, _| {
+        paint.sub_active = !paint.sub_active;
         paint.transparent = false;
         paint.hex = color::hex(paint.drawing_color());
     })
@@ -361,15 +366,28 @@ mod tests {
     }
 
     #[test]
-    fn x_swaps_the_two_colors_and_c_the_transparent_one() {
+    fn x_switches_the_active_color_and_c_the_transparent_one() {
         with_studio(|paint, cx| {
             paint.main = [10, 20, 30];
             paint.sub = [200, 210, 220];
+            assert!(
+                !paint.sub_active,
+                "a fresh studio paints with the main color"
+            );
             paint.transparent = true;
+            // X: the sub color becomes the drawing color; the values stay.
             assert!(paint.tool_key("color.swap", cx));
-            assert_eq!((paint.main, paint.sub), ([200, 210, 220], [10, 20, 30]));
+            assert!(paint.sub_active);
+            assert_eq!((paint.main, paint.sub), ([10, 20, 30], [200, 210, 220]));
+            assert_eq!(paint.drawing_color(), [200, 210, 220]);
             assert!(!paint.transparent, "X goes back to a color");
-            assert_eq!(paint.hex, color::hex(paint.drawing_color()));
+            assert_eq!(paint.hex, color::hex([200, 210, 220]));
+            // X again: back to the main color.
+            assert!(paint.tool_key("color.swap", cx));
+            assert!(!paint.sub_active);
+            assert_eq!((paint.main, paint.sub), ([10, 20, 30], [200, 210, 220]));
+            assert_eq!(paint.drawing_color(), [10, 20, 30]);
+            assert_eq!(paint.hex, color::hex([10, 20, 30]));
             assert!(paint.tool_key("color.transparent", cx));
             assert!(paint.transparent);
             assert!(paint.tool_key("color.transparent", cx));
