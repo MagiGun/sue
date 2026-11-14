@@ -63,6 +63,11 @@ follow [Semantic Versioning](https://semver.org/).
   small button at the wheel's bottom right switches between a square of
   saturation and value (HSV) and a triangle between the hue, white and
   black (HLS), and the numbers under the wheel follow it.
+- Sue Paint: a layer folder inside an animation folder is a cel of its
+  own (a folder cel) and shows and hides as a whole on the timeline,
+  onion skin included. A new cel made after a folder cel copies its
+  folders and layers, empty, and a cel made between two others is named
+  after the one before it (1a, 1b) and sits right above it.
 
 ### Changed
 
@@ -124,6 +129,10 @@ follow [Semantic Versioning](https://semver.org/).
   the font list follow the theme's spacing, corners and type sizes. The
   title bar's buttons light up smoothly under the pointer and tell a
   screen reader their names.
+- Sue Paint: New Camera Folder makes an empty camera folder beside the
+  picked layer, so a cel you are drawing stays in its animation folder,
+  and a new animation folder is named "Folder 1", "Folder 2" and so on,
+  as in Clip Studio Paint.
 
 ### Fixed
 
