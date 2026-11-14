@@ -862,11 +862,48 @@ impl SuePaint {
 
     /// How hard the pen presses, through the pen pressure curve: from the
     /// window's touch events (Windows Ink, macOS, Linux, phones), else from
-    /// a WinTab tablet or a pen in a browser, else full (a mouse).
+    /// a WinTab tablet or a pen in a browser. With neither, a brush stroke
+    /// under way goes on as hard as its last point (a pen whose driver
+    /// said it lifted before the window handed over its last events: never
+    /// full pressure for a stroke's end), and anything else is full (a
+    /// mouse, whose strokes are full from their first point).
     fn pen_pressure(&self) -> f32 {
         self.pressure
             .or_else(|| sue_platform::stylus::pressure().map(|raw| self.pen_curve.eval(raw)))
+            .or_else(|| match &self.gesture {
+                Some(Gesture::Stroke { stroke, .. }) => {
+                    stroke.samples().last().map(|sample| sample.pressure)
+                }
+                _ => None,
+            })
             .unwrap_or(1.0)
+    }
+
+    /// Tells the brush stroke under way where the button was let go
+    /// (`pos`, on screen): the place its line is finished to, as a move
+    /// there would have set it, without painting a point there. Letting go
+    /// is the end of the line, not one more point of it.
+    fn lift_at(&mut self, pos: Pos2, viewport: Rect, size: [u32; 2]) {
+        let (
+            Some(Gesture::Stroke {
+                offset, raw, snap, ..
+            }),
+            Some(doc),
+        ) = (self.gesture.as_mut(), self.docs.get(self.active))
+        else {
+            return;
+        };
+        let p = doc.view.to_picture(viewport, size, pos);
+        let mut local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
+        if let Some(snap) = snap.as_mut() {
+            // Along a ruler, as a move: only once the pen has shown which
+            // way it goes.
+            match snap.follow(local, 4.0 / doc.view.zoom.max(0.01)) {
+                Some(on) => local = on,
+                None => return,
+            }
+        }
+        *raw = local;
     }
 
     /// How far the pen leans at `pos` (0 upright to 1 flat, tilt dynamics)
@@ -1067,7 +1104,14 @@ impl SuePaint {
                     {
                         lifted = true;
                     }
-                    if self.gesture.is_some() {
+                    if matches!(self.gesture, Some(Gesture::Stroke { .. })) {
+                        // A brush stroke takes no point from its release:
+                        // the line is finished to where the button was let
+                        // go, at the pressure of its own last point.
+                        self.lift_at(pos, viewport, size);
+                        self.release(viewport, size, cx);
+                    } else if self.gesture.is_some() {
+                        // Every other gesture ends where it was let go.
                         self.drag(pos, viewport, size, cx);
                         self.release(viewport, size, cx);
                     }
