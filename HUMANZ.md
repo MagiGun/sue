@@ -3287,6 +3287,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §1.13 Shared models (text marks, table, curves, sequence, notes, graph, geometry, layout, encoded) | **Implemented** as data with tests; no applet edits them yet | `sue-model` |
 | §1.13 Layered pictures and blend modes | **Implemented**; Sue Paint makes and edits them | `sue-model/src/picture.rs`, `blend.rs` |
 | §1.13 The brush model (`sue.brush`) | **Implemented** as data with tests (round trip, unknown fields, a version 1 fixture, every built-in brush of 0.0.75 read from its text); Sue Paint still paints from its own `Tip` until the 0.0.8 engine lands | `sue-model/src/brush.rs`, `sue-model/tests/brush.rs`, `sue-brush` |
+| The brush engine's input pipeline (`sue_brush::input`) | **Implemented** with tests (smoothness of a jittered circle and line at stabilization 0, 10 and 50; stroke ends that never grow for a mouse and for pens that ramp, lift abruptly or stop sending pressure; the same points however the samples are split into frames); not yet wired to a canvas | `sue-brush/src/input/`, `sue-brush/tests/input.rs` |
 | §3.8 Rich text with paragraph marks, manuscripts | **Implemented**; Sue Writer edits them | `sue-model/src/text.rs`, `manuscript.rs` |
 | §3.8 Installed fonts | **Implemented** (a background scan; faces installed into egui on first use) | `sue-wm/src/fonts.rs`, `sue-platform/src/paths.rs` |
 | §3.8 Rich text editor, styles, page layout, typesetting | **Implemented**; the caret glides and blinks at rest (`sue-type/src/caret.rs`) | `sue-type` |
