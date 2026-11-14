@@ -28,6 +28,16 @@
 //! - [`scroll`]: the scroll view, with thin bars over its content and
 //!   edges that fade where there is more.
 //! - [`mod@splitter`]: the line between two panes.
+//! - [`input`]: text, search and number fields, the dropdown and the
+//!   combo box.
+//! - [`mod@slider`]: the slider, the tall opacity slider, the range and
+//!   the wedge.
+//! - [`menu`]: the one menu of the menu bar, the Sue menu, context menus
+//!   and popovers.
+//! - [`mod@tooltip`]: tooltips and the note beside a menu row.
+//! - [`dialog`]: the dialog host, the confirmation, the sheet and form
+//!   rows.
+//! - [`toast`]: the stack of notices above the status bar.
 
 pub mod button;
 pub mod card;

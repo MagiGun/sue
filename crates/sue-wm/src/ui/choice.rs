@@ -10,10 +10,11 @@
 //! - [`chip`]: a small label that filters or tags, lit while on, with a
 //!   cross to take it away where that makes sense.
 //!
-//! Like the buttons of [`super::button`], each reads its sizes from the
-//! [`Density`] of its `Ui`, its colors from the [`Theme`], draws the
-//! focus ring, tells assistive technology what it is and whether it is
-//! on, moves through [`motion`] and is named by a salt of its caller.
+//! Like the buttons of [`super::button`](mod@super::button), each
+//! reads its sizes from the [`Density`] of its `Ui`, its colors from the
+//! [`Theme`], draws the focus ring, tells assistive technology what it is
+//! and whether it is on, moves through [`motion`] and is named by a salt
+//! of its caller.
 //!
 //! None of them changes anything: a click is an answer in the
 //! [`Response`], and the caller sets the value. The control then follows
