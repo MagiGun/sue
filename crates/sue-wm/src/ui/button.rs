@@ -367,17 +367,23 @@ pub(super) fn skin(kind: ButtonKind, on: bool, theme: &Theme, visual: Visual) ->
         ButtonKind::Danger => {
             let danger = theme.danger();
             let inverse = ink_on(danger, theme);
+            let fill = if visual.pressed {
+                mix(danger, inverse, SOLID_PRESS)
+            } else {
+                danger.gamma_multiply(hover)
+            };
+            // The label takes whichever of the two inks reads better on
+            // the fill as it is now. Blending the inks along with the
+            // fill would make them meet halfway, where the label would
+            // vanish for a moment on every hover.
+            let seen = theme.surface(1).blend(fill);
             Skin {
-                fill: if visual.pressed {
-                    mix(danger, inverse, SOLID_PRESS)
-                } else {
-                    danger.gamma_multiply(hover)
-                },
+                fill,
                 stroke: Stroke::new(Theme::STRONG_STROKE * 0.75, danger),
-                ink: if visual.pressed {
-                    inverse
+                ink: if contrast(danger, seen) >= contrast(inverse, seen) {
+                    danger
                 } else {
-                    mix(danger, inverse, hover)
+                    inverse
                 },
             }
         }
@@ -1734,6 +1740,31 @@ mod tests {
                     seen(kind, false, &theme, Visual::REST, theme.surface(1)),
                     "{id}: {kind:?}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn a_label_never_fades_out_while_a_hover_comes_and_goes() {
+        for (id, theme) in presets() {
+            for kind in ButtonKind::ALL {
+                for on in [false, true] {
+                    for step in 0..=20 {
+                        let visual = Visual {
+                            hover: step as f32 / 20.0,
+                            ..Visual::REST
+                        };
+                        for level in 0..=2 {
+                            let (under, ink) = seen(kind, on, &theme, visual, theme.surface(level));
+                            let ratio = contrast(ink, under);
+                            assert!(
+                                ratio >= 3.0,
+                                "{id}: {kind:?} on={on} hover {:.2} on surface {level}:                                  {ratio:.2} to 1",
+                                visual.hover
+                            );
+                        }
+                    }
+                }
             }
         }
     }
