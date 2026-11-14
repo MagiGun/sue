@@ -2246,7 +2246,13 @@ mod tests {
         let legacy = line([0.0, 50.0], [100.0, 50.0]);
         let new = to_engine(&legacy).expect("a legacy line");
         assert!(to_engine(&new).is_none(), "already the engine's");
-        let pieces = erase(&[new.clone()], [50.0, 50.0], 3.0, Erase::Touched).expect("touched");
+        let pieces = erase(
+            std::slice::from_ref(&new),
+            [50.0, 50.0],
+            3.0,
+            Erase::Touched,
+        )
+        .expect("touched");
         assert_eq!(pieces.len(), 2);
         let pen = &new.engine.as_ref().unwrap().pen;
         for piece in &pieces {
