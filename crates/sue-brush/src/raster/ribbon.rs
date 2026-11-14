@@ -20,7 +20,8 @@ pub struct RibbonPoint {
 /// the line goes), along the line it repeats every `tile` pixels of arc
 /// length. Each pixel reads the picture at the nearest point of the path
 /// (outside a bend, at the corner itself, so the outer side of a bend is
-/// filled rather than torn open). The path ends square at both ends.
+/// filled rather than torn open). The path ends square at both ends,
+/// antialiased over a pixel.
 ///
 /// A long path is drawn in pieces (the committed points of one update,
 /// then the tail), since every pixel looks at every segment of its
@@ -85,6 +86,8 @@ struct Nearest {
     segment: usize,
     /// Where along the segment, 0 to 1, before holding to it.
     t: f32,
+    /// The segment's length.
+    length: f32,
 }
 
 impl Shape for Ribbon<'_> {
@@ -136,6 +139,7 @@ impl Shape for Ribbon<'_> {
                     distance,
                     segment,
                     t,
+                    length: length_sq.sqrt(),
                 });
             }
         }
@@ -146,14 +150,31 @@ impl Shape for Ribbon<'_> {
             return 0.0;
         }
         let last = self.points.len() - 2;
-        // Square ends: nothing beyond the first and the last point.
-        if (near.segment == 0 && near.t < 0.0) || (near.segment == last && near.t > 1.0) {
+        // Square ends, antialiased like a hard rim: how far past the
+        // first or the last point the pixel lies along the path, and the
+        // share of a pixel-wide box around it still inside.
+        let mut past = f32::NEG_INFINITY;
+        if near.segment == 0 {
+            past = past.max(-near.t * near.length);
+        }
+        if near.segment == last {
+            past = past.max((near.t - 1.0) * near.length);
+        }
+        let end = (0.5 - past).clamp(0.0, 1.0);
+        if end <= 0.0 {
             return 0.0;
         }
         let (from, to) = (self.points[near.segment], self.points[near.segment + 1]);
         let t = near.t.clamp(0.0, 1.0);
         let radius = from.disc.radius + (to.disc.radius - from.disc.radius) * t;
-        if radius <= 0.0 || near.distance > radius + 1.0 {
+        // Beyond an end, across is measured square to the path, not to
+        // the end point.
+        let distance = if past > 0.0 {
+            (near.distance * near.distance - past * past).max(0.0).sqrt()
+        } else {
+            near.distance
+        };
+        if radius <= 0.0 || distance > radius + 1.0 {
             return 0.0;
         }
         let strength = from.disc.strength + (to.disc.strength - from.disc.strength) * t;
@@ -165,12 +186,12 @@ impl Shape for Ribbon<'_> {
         );
         let (qx, qy) = (p[0] - from.disc.at[0], p[1] - from.disc.at[1]);
         let side = if dx * qy - dy * qx < 0.0 { -1.0 } else { 1.0 };
-        let across = near.distance * side;
+        let across = distance * side;
         let (width, height) = (self.image.width() as f32, self.image.height() as f32);
         let tx = along / self.tile * width;
         let ty = (across / (2.0 * radius) + 0.5) * height;
         let footprint = (width / self.tile).max(height / (2.0 * radius));
-        self.image.sample(tx, ty, footprint, true) * strength
+        self.image.sample(tx, ty, footprint, true) * strength * end
     }
 }
 
@@ -200,6 +221,33 @@ mod tests {
         // Outside the corner, up and to the right of it.
         assert!(ribbon.coverage([22.0, -2.0]) > 0.99, "the bend is filled");
         assert_eq!(ribbon.coverage([26.0, -6.0]), 0.0);
+    }
+
+    #[test]
+    fn square_ends_are_antialiased_and_as_long_as_the_path() {
+        // Along the middle of a straight ribbon the ink adds up to its
+        // length, wherever its ends fall between pixel centers: the ends
+        // are a ramp a pixel wide, not a step.
+        let image = TipImage::from_coverage(16, 16, &[255; 256]).expect("a full picture");
+        for k in 0..8 {
+            let shift = k as f32 * 0.125;
+            let (start, stop) = (10.0 + shift, 70.0 + shift * 1.7);
+            let points = [point(start, 20.0, 0.0), point(stop, 20.0, stop - start)];
+            let ribbon = Ribbon::new(&points, &image, 4.0);
+            let ink: f32 = (0..90)
+                .map(|x| ribbon.coverage([x as f32 + 0.5, 20.5]))
+                .sum();
+            assert!(
+                (ink - (stop - start)).abs() < 1.0e-3,
+                "{shift}: {ink} against {}",
+                stop - start
+            );
+            let partial = (0..90)
+                .map(|x| ribbon.coverage([x as f32 + 0.5, 20.5]))
+                .filter(|&c| c > 0.0 && c < 1.0)
+                .count();
+            assert!(partial <= 2, "{shift}: {partial} pixels on the ramps");
+        }
     }
 
     #[test]
