@@ -1,6 +1,9 @@
-//! Clip Studio Paint files (`.clip`), read and written with their layers,
-//! folders, blend modes, opacity, visibility and clipping, as the same
-//! [`Psd`] records Photoshop documents use.
+//! Clip Studio Paint files (`.clip`), read into and written from a
+//! [`ClipDocument`]: the canvas, the layer tree with each layer's style,
+//! pixels and mask, and everything the model does not name kept as it was
+//! found ([`ClipForeign`]). [`decode_clip`] and [`encode_clip`] give the
+//! same document as the [`Psd`] records Photoshop documents use, for Sue
+//! Paint as it opens and saves files today.
 //!
 //! A `.clip` is a chunk file: a `CSFCHUNK` header, a `Head` chunk, one
 //! `Exta` chunk per stored bitmap, an SQLite database (`SQLi`) that
@@ -18,17 +21,24 @@
 //! (vector lines, tones, effects), while Clip Studio sees the layers.
 
 mod container;
+mod model;
 mod offscreen;
 mod read;
 mod schema;
+pub mod testkit;
 mod write;
 
 pub use container::{Chunk, Layout, layout, sniff};
+pub use model::{
+    ClipAttribute, ClipBitmap, ClipBlock, ClipBlocks, ClipChunk, ClipDocument, ClipDrawColor,
+    ClipForeign, ClipHead, ClipLayer, ClipMask, ClipPixels, ClipRow, ClipShape, ClipTable, Columns,
+    FOLDER, PAPER, RASTER, ROOT, column,
+};
 pub use offscreen::{
     AttributePart, BitmapSurvey, Block, BlockList, attribute_parts, survey_bitmap,
 };
-pub use read::decode_clip;
-pub use write::encode_clip;
+pub use read::{decode_clip, read};
+pub use write::{document_of, encode_clip, write};
 
 use crate::psd::Psd;
 

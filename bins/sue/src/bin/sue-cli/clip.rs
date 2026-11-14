@@ -224,11 +224,18 @@ impl<'a> Opened<'a> {
 
     /// The stored bitmap `blob` names, when it is the id of one.
     fn named_bitmap(&self, blob: &BlobRef) -> Option<&'a [u8]> {
+        self.external.get(&self.bitmap_id(blob)?).copied()
+    }
+
+    /// The text of a blob that names a stored bitmap (`extrnlid` and
+    /// more), whether or not the file has a chunk by that name.
+    fn bitmap_id(&self, blob: &BlobRef) -> Option<String> {
         if blob.is_empty() || blob.len() > 256 {
             return None;
         }
-        let id = String::from_utf8(self.start(blob, blob.len())).ok()?;
-        self.external.get(&id).copied()
+        String::from_utf8(self.start(blob, blob.len()))
+            .ok()
+            .filter(|id| id.starts_with("extrnlid"))
     }
 }
 
@@ -846,6 +853,19 @@ impl Diff<'_> {
             for line in q {
                 self.detail(&format!("after:  {line}"));
             }
+            return;
+        }
+        // Ids that name no stored bitmap on either side (a folder's)
+        // are only names too.
+        if self
+            .a
+            .bitmap_id(x)
+            .is_some_and(|id| !self.a.external.contains_key(&id))
+            && self
+                .b
+                .bitmap_id(y)
+                .is_some_and(|id| !self.b.external.contains_key(&id))
+        {
             return;
         }
         let at = match self.first_difference(x, y) {

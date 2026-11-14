@@ -2,8 +2,6 @@
 //! it, and the big-endian numbers and UTF-16 names everything inside is
 //! spelled with.
 
-use std::collections::HashMap;
-
 pub(super) fn be32(bytes: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_be_bytes(bytes.get(at..at + 4)?.try_into().ok()?))
 }
@@ -161,27 +159,6 @@ pub fn layout(bytes: &[u8]) -> Result<Layout<'_>, String> {
     })
 }
 
-/// The chunks of a `.clip`: the `Exta` payloads by id, and the database.
-/// A `.clip`'s bitmap chunks by id.
-pub(super) type Bitmaps<'a> = HashMap<String, &'a [u8]>;
-
-pub(super) fn chunks(bytes: &[u8]) -> Result<(Bitmaps<'_>, &[u8]), String> {
-    let mut exta = HashMap::new();
-    let mut database = None;
-    for chunk in Walk::new(bytes)? {
-        let chunk = chunk?;
-        match &chunk.kind {
-            b"Exta" => {
-                let (id, payload) = chunk.external()?;
-                exta.insert(id, payload);
-            }
-            b"SQLi" => database = Some(chunk.data),
-            _ => {}
-        }
-    }
-    Ok((exta, database.ok_or("the file has no layer database")?))
-}
-
 pub(super) fn put32(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_be_bytes());
 }
@@ -214,17 +191,19 @@ mod tests {
         // A first chunk offset, a chunk size and a bitmap id length at the
         // top of what 64 bits hold.
         for huge in [u64::MAX, u64::MAX - 15, u64::MAX - 40, 1 << 63] {
-            assert!(chunks(&file(huge, &[])).is_err(), "offset {huge}");
             assert!(
-                chunks(&file(24, &[(b"SQLi", huge, b"abc")])).is_err(),
-                "size {huge}"
+                crate::clip::read(&file(huge, &[])).is_err(),
+                "offset {huge}"
             );
+            let sized = file(24, &[(b"SQLi", huge, b"abc")]);
+            assert!(layout(&sized).unwrap().problem.is_some(), "size {huge}");
+            assert!(crate::clip::read(&sized).is_err(), "size {huge}");
             let mut exta = huge.to_be_bytes().to_vec();
             exta.extend_from_slice(b"extrnlid0123");
-            assert!(
-                chunks(&file(24, &[(b"Exta", exta.len() as u64, &exta)])).is_err(),
-                "id length {huge}"
-            );
+            let bitmap = file(24, &[(b"Exta", exta.len() as u64, &exta)]);
+            let walked = layout(&bitmap).unwrap();
+            assert!(walked.chunks[0].external().is_err(), "id length {huge}");
+            assert!(crate::clip::read(&bitmap).is_err(), "id length {huge}");
         }
     }
 
@@ -261,10 +240,7 @@ mod tests {
         );
         assert!(layout.chunks[0].external().is_err());
         assert_eq!((layout.trailing, &layout.problem), (0, &None));
-        // The reader finds the same bitmap and database.
-        let (bitmaps, database) = chunks(&bytes).unwrap();
-        assert_eq!(bitmaps.get("extrnlid"), Some(&b"abc".as_slice()));
-        assert_eq!(database, b"data");
+        assert_eq!(layout.chunks[3].data, b"data");
 
         // Bytes that are no chunk, and a chunk cut short.
         let mut longer = bytes.clone();
