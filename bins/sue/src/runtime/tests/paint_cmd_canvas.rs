@@ -110,6 +110,13 @@ fn sue_paint_every_canvas_command_turns_the_picture_and_undoes() {
             depth + 1,
             "{command}: one undo step"
         );
+        // History names the step as the menu names the item.
+        let history = &driver.runtime.engine.history;
+        assert_eq!(
+            history.label(history.cursor()).map(str::to_owned),
+            sue_paint::registry().label(command),
+            "{command}: its undo step"
+        );
         let after = arena_bytes(&driver.runtime);
         assert_ne!(before, after, "{command} changed the picture");
         let want = moved(command, at, before_size);

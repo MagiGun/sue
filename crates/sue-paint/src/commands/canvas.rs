@@ -26,17 +26,17 @@ fn rotate_right(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 
 /// Rotate 180 Degrees: the canvas a half turn.
 fn rotate180(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.transform_canvas(cx, true, true, &tr!("rotate-canvas"));
+    paint.transform_canvas(cx, true, true, &tr!("rotate-180-degrees"));
 }
 
 /// Flip Horizontal: the canvas mirrored left to right.
 fn flip_h(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.transform_canvas(cx, true, false, &tr!("flip-canvas"));
+    paint.transform_canvas(cx, true, false, &tr!("flip-horizontal"));
 }
 
 /// Flip Vertical: the canvas mirrored top to bottom.
 fn flip_v(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.transform_canvas(cx, false, true, &tr!("flip-canvas"));
+    paint.transform_canvas(cx, false, true, &tr!("flip-vertical"));
 }
 
 impl SuePaint {
