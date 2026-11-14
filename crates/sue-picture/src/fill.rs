@@ -11,6 +11,17 @@ use crate::select::Selection;
 #[must_use]
 pub fn flood(reference: &[u8], size: [u32; 2], seed: [u32; 2], tolerance: f32) -> Vec<u8> {
     let [width, height] = size;
+    let mask = flood_joined(reference, size, seed, tolerance);
+    if mask.len() < width as usize * height as usize || width == 0 || height == 0 {
+        return mask;
+    }
+    grow(&mask, width, height)
+}
+
+/// The pixels joined to `seed` that are like it, one byte a pixel, not
+/// yet grown under the edge.
+fn flood_joined(reference: &[u8], size: [u32; 2], seed: [u32; 2], tolerance: f32) -> Vec<u8> {
+    let [width, height] = size;
     let count = width as usize * height as usize;
     let mut mask = vec![0_u8; count];
     if seed[0] >= width || seed[1] >= height || reference.len() < count * 4 {
@@ -63,7 +74,7 @@ pub fn flood(reference: &[u8], size: [u32; 2], seed: [u32; 2], tolerance: f32) -
             }
         }
     }
-    grow(&mask, width, height)
+    mask
 }
 
 /// How far a Close gap level (0 none, then weak to strongest) reaches,
@@ -130,6 +141,9 @@ pub fn flood_closing(
     if gap == 0 && spread == 0 {
         return plain;
     }
+    // The area itself, before the one pixel tucked under the lines that
+    // the spread below adds, so a spread of n reaches n pixels further.
+    let joined = flood_joined(reference, size, seed, tolerance);
     let count = (width * height) as usize;
     let premultiplied = |index: usize| {
         let p = &reference[index * 4..index * 4 + 4];
@@ -160,7 +174,7 @@ pub fn flood_closing(
         let blocked = dilate(&walls, width, height, gap);
         let start = (seed[1] * width + seed[0]) as usize;
         if blocked[start] {
-            plain.iter().map(|value| *value != 0).collect()
+            joined.iter().map(|value| *value != 0).collect()
         } else {
             let mut region = vec![false; count];
             let mut stack = vec![start];
@@ -214,7 +228,7 @@ pub fn flood_closing(
             region
         }
     } else {
-        plain.iter().map(|value| *value != 0).collect()
+        joined.iter().map(|value| *value != 0).collect()
     };
     // Under the lines: one pixel always (as the plain fill), more by spread.
     region = dilate(&region, width, height, 1 + spread);
