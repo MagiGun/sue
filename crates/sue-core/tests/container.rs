@@ -19,8 +19,9 @@ use sue_core::codec::{Reader, Writer, crc32};
 use sue_core::file::{ARENA, CONTAINER_VERSION, Directory, MAGIC, META, THUMBNAIL};
 use sue_core::txn::{AttachProjection, DespawnEntity, Rename, ReplaceComponent, SetProperty};
 use sue_core::{
-    Arena, Chunk, ComponentKind, ComponentRegistry, Entity, EntityId, PixelFormat, Projection,
-    Properties, RasterTile2D, RelationStore, StringBuffer, SueFile, TimeSpan, UndoStack,
+    Arena, Bundle, Chunk, ComponentKind, ComponentRegistry, Entity, EntityId, PixelFormat,
+    Projection, Properties, RasterTile2D, RelationStore, StringBuffer, SueFile, TimeSpan,
+    UndoStack,
 };
 
 /// The file 0.0.75 wrote (P0-4). Read, never rewritten.
@@ -408,6 +409,70 @@ fn an_unread_raster_stays_in_its_place_among_the_other_components() {
     assert!(undo.undo(&mut arena).unwrap());
     assert_eq!(arena.get_by_id(id).unwrap(), &before);
     assert_eq!(save(&arena), payload);
+}
+
+#[test]
+fn what_is_unread_survives_the_clipboard_and_a_copy_to_another_document() {
+    // One entity with all of it at once: an unread raster as its base, a
+    // readable component, an extension this build does not know, a tail.
+    let id = EntityId::new();
+    let raster = strange_raster(77);
+    let tail = [0xAB, 0x00, 0xCD];
+    let mut body = Writer::new();
+    body.raw(&id.to_bytes());
+    body.str("Layer 1");
+    body.str("sue.image");
+    body.str("RasterTile2D");
+    body.len(2);
+    body.str("RasterTile2D");
+    body.bytes(&raster);
+    body.str("TimeSpan");
+    body.bytes(&encoded(TimeSpan::new(0, 100).unwrap()));
+    body.len(0);
+    Properties::new().encode(&mut body);
+    body.len(1);
+    body.str("later.effect");
+    body.varint(3);
+    body.bytes(&[4, 5, 6]);
+    body.raw(&tail);
+    let body = body.into_bytes();
+    let payload = arena_payload(std::slice::from_ref(&body));
+    let arena = load(&payload);
+    let entity = arena.get_by_id(id).unwrap();
+    assert_eq!(
+        entity.unread_component(ComponentKind::RasterTile2D),
+        Some(&raster[..])
+    );
+    assert_eq!(entity.unread_tail(), tail);
+    assert!(entity.ext_named("later.effect").is_some());
+    assert_eq!(save(&arena), payload, "saved again byte for byte");
+
+    // The clipboard format is the second reader of an entity.
+    let bundle = Bundle::copy_from(&arena, &[id], true).unwrap();
+    let mut out = Writer::new();
+    bundle.encode(&mut out);
+    let bytes = out.into_bytes();
+    let mut input = Reader::new(&bytes);
+    let pasted = Bundle::decode(&mut input, &registry()).unwrap();
+    assert!(input.is_empty());
+    assert_eq!(pasted.entities.len(), 1);
+    assert_eq!(&pasted.entities[0], entity);
+
+    // Into another document, and saved from there.
+    let mut other = Arena::new();
+    for entity in pasted.entities {
+        other.insert_keep_id(entity).unwrap();
+    }
+    assert_eq!(save(&other), payload);
+
+    // A copy under a new id keeps the bytes too; only the id differs.
+    let mut copy = Bundle::copy_from(&arena, &[id], true).unwrap();
+    let new_id = copy.renew_ids()[&id];
+    let mut renamed = Writer::new();
+    copy.entities[0].encode(&mut renamed);
+    let renamed = renamed.into_bytes();
+    assert_eq!(&renamed[..16], &new_id.to_bytes()[..]);
+    assert_eq!(&renamed[16..], &body[16..]);
 }
 
 #[test]
