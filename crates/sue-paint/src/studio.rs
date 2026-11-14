@@ -7466,6 +7466,18 @@ impl SueApplet for SuePaint {
             cx.request(ShellRequest::Open(me_id()));
             return;
         }
+        // Pixels that are a canvas's layer already (a flat picture Sue
+        // Paint took before still reads as one) open that canvas.
+        let canvas = cx
+            .arena()
+            .relations()
+            .parent(entity, CHILD)
+            .filter(|&parent| cx.arena().get_by_id(parent).is_ok_and(picture::is_picture));
+        if let Some(canvas) = canvas {
+            self.activate(&cx.world.arena, canvas);
+            cx.request(ShellRequest::Open(me_id()));
+            return;
+        }
         // Any other picture becomes a layered picture whose layer is that
         // very entity, and Sue Paint opens on it.
         let name = cx.arena().get_by_id(entity).map_or_else(

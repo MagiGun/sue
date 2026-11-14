@@ -389,3 +389,64 @@ fn a_float_picture_opens_as_an_8_bit_copy_and_save_asks_where() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn a_project_whose_canvas_adopted_a_flat_picture_opens_on_that_canvas() {
+    let (mut runtime, root) = runtime("paint-adopted");
+    let ctx = egui::Context::default();
+    let now = Instant::now();
+    frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+    // A flat 8-bit picture in the project, as ingest leaves one, taken by
+    // Sue Paint: it becomes the layer of a new canvas, the same entity.
+    let flat = sue_core::Entity::new("photo.png", a_picture())
+        .with_meta(sue_io::meta::WIDTH, "6")
+        .with_meta(sue_io::meta::HEIGHT, "4");
+    let handle = runtime.engine.world.arena.insert(flat);
+    let layer = runtime.engine.world.arena.get(handle).unwrap().id();
+    runtime.request(
+        ShellRequest::OpenIn {
+            entity: layer,
+            applet: paint(),
+        },
+        &mut NoTextures,
+        now,
+    );
+    frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+    let picture = canvas(&runtime);
+    assert_ne!(picture, layer);
+    assert_eq!(
+        runtime
+            .engine
+            .world
+            .arena
+            .relations()
+            .parent(layer, sue_core::CHILD),
+        Some(picture),
+        "the flat picture is the canvas's layer"
+    );
+    // The layer still reads as a flat picture, so it is what a project
+    // may hand Sue Paint first when it opens again (0.0.75 projects hold
+    // such canvases). That opens the canvas it belongs to, with no
+    // complaint that it is a layer already.
+    let (first, studio) = runtime.first_page(Some(&paint())).expect("something opens");
+    assert_eq!(studio, paint());
+    runtime.request(ShellRequest::Hub, &mut NoTextures, now);
+    frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+    for entity in [first, layer] {
+        runtime.request(
+            ShellRequest::OpenIn {
+                entity,
+                applet: paint(),
+            },
+            &mut NoTextures,
+            now,
+        );
+        frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+        let complaint = runtime.shell.message().filter(|(_, error)| *error);
+        assert_eq!(complaint, None, "it opened without a complaint");
+        assert_eq!(runtime.shell.page(), Some(&paint()));
+        assert_eq!(canvas(&runtime), picture, "the canvas, not a new one");
+    }
+    assert_eq!(canvases(&runtime), 1);
+    let _ = std::fs::remove_dir_all(&root);
+}
