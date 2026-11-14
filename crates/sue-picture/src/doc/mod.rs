@@ -12,6 +12,7 @@ mod convert;
 mod folders;
 mod kinds;
 mod layers;
+mod lines_tones;
 mod masks;
 mod order;
 mod palette;
@@ -38,6 +39,7 @@ pub use layers::{
     add_raster_layer, add_raster_layer_at, add_vector_layer, add_vector_lines, delete, duplicate,
     is_reference, merge_down, merge_layers, merge_visible, new_correction, transfer_down,
 };
+pub use lines_tones::{LinesAndTones, lines_and_tones};
 pub use masks::{
     MASK, MASK_CLASS, MASK_LINKED, MASK_ON, apply_mask, cover, delete_mask, mask_linked, mask_of,
     mask_offset, mask_on, new_mask, set_mask_linked, shown_at,
