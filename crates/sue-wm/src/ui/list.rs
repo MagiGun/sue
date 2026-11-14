@@ -75,9 +75,15 @@ pub(super) fn ground(ui: &Ui, theme: &Theme) -> Color32 {
 /// Whether the pointer is on `response`: over it with nothing covering
 /// it, or holding it down (while a press lasts egui says only the
 /// pressed widget is hovered, and something drawn over it no longer
-/// counts as covering it).
+/// counts as covering it). While something else is being dragged over
+/// it (a tab, a splitter) it is not: what lies under a drag does not
+/// light up.
 pub(super) fn under_pointer(response: &Response) -> bool {
-    response.hovered() || response.contains_pointer()
+    let other_dragged = response
+        .ctx
+        .dragged_id()
+        .is_some_and(|dragged| dragged != response.id);
+    response.hovered() || (response.contains_pointer() && !other_dragged)
 }
 
 /// The fill of something that can be clicked: `rest` (or the chosen fill
@@ -991,6 +997,27 @@ mod tests {
         assert_eq!(room, Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)));
         let (_, again) = run.frame(Vec::new(), draw);
         assert!(!again, "measured, it asks for nothing");
+    }
+
+    #[test]
+    fn what_a_drag_passes_over_does_not_light_up() {
+        let mut run = Run::new();
+        let left = Rect::from_min_size(pos2(0.0, 0.0), vec2(100.0, 30.0));
+        let right = Rect::from_min_size(pos2(100.0, 0.0), vec2(100.0, 30.0));
+        let draw = |ui: &mut Ui, _: &Theme| {
+            let dragged = ui.interact(left, Id::unique("dragged"), Sense::click_and_drag());
+            let under = ui.interact(right, Id::unique("under"), Sense::click());
+            (dragged.dragged(), under_pointer(&under))
+        };
+        let seen = run.drag(left.center(), right.center(), 6, draw);
+        let (dragging, lit) = *seen.last().expect("frames ran");
+        assert!(dragging, "the drag goes on over the other");
+        assert!(!lit, "the one under the drag stays unlit");
+        // Without a drag the pointer lights it.
+        let mut run = Run::new();
+        let _ = run.frame(vec![egui::Event::PointerMoved(right.center())], draw);
+        let (_, lit) = run.frame(Vec::new(), draw).0;
+        assert!(lit);
     }
 
     #[test]
