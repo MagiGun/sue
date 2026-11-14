@@ -1277,12 +1277,18 @@ impl SuePaint {
         let at = screen.center() - size / 2.0;
         let mut outcome = Outcome::Open;
         let mut change_keys = false;
+        // Every command can be given a key, but the list shows the ones
+        // that have one, as set now.
         let keys = matches!(dialog, Dialog::Shortcuts).then(|| {
-            sue_wm::shortcuts::rows(
-                cx.rice(),
-                crate::studio::KEYS_SECTION,
-                crate::studio::shortcut_table(),
-            )
+            let section = crate::studio::KEYS_SECTION;
+            let table = crate::studio::shortcut_table();
+            let bound: Vec<sue_wm::shortcuts::Shortcut> = table
+                .iter()
+                .zip(sue_wm::shortcuts::resolve(cx.rice(), section, table))
+                .filter(|(_, chords)| !chords.is_empty())
+                .map(|(shortcut, _)| shortcut.clone())
+                .collect();
+            sue_wm::shortcuts::rows(cx.rice(), section, &bound)
         });
         // The dialog's body, in its own window or (in the browser and on
         // phones) over the studio.

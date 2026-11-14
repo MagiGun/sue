@@ -228,6 +228,7 @@ color_swap = "X"               # @keybind Swap Main and Sub Color
 color_transparent = "C"        # @keybind Drawing or Transparent Color
 brush_smaller = "["            # @keybind Smaller Brush
 brush_bigger = "]"             # @keybind Bigger Brush
+custom = ""                    # @text Keys of commands that have no default key
 
 [sue_writer_keys]
 binder_new_folder = "Ctrl+Shift+N" # @keybind New Folder

@@ -31,6 +31,14 @@ follow [Semantic Versioning](https://semver.org/).
   `CREATE` text, row count and rows), and `sue-cli clip diff <before>
   <after>` prints what differs between two such files. For people
   working on the converter; neither changes a file.
+- Every Sue Paint command can be given a key, not only the ones that
+  come with one: each filter, layer, selection, view, window and
+  animation command, and the light table and cel commands of their
+  palettes. A key for one without a default goes in Settings, Keymaps,
+  Sue Paint, as the command's name and its key
+  (`sue_paint_keys.custom`, for example `layer.merge_visible=Ctrl+M`).
+  Keyboard Shortcuts (Help) lists every command that has a key, in the
+  order of the menus.
 
 ### Changed
 
@@ -77,6 +85,9 @@ follow [Semantic Versioning](https://semver.org/).
 - Duplicating a layer or a page no longer copies its pixels: the copy
   and the original share them until one of the two is painted on, so
   duplicating is instant and costs no memory, however large the picture.
+- Sue Paint's entries in the command palette show the key each one
+  has, Keyboard Shortcuts too, and New is named as in the File menu
+  ("Sue Paint: New...").
 
 ### Fixed
 
@@ -112,6 +123,12 @@ follow [Semantic Versioning](https://semver.org/).
 - Undo, Redo, Open, Save and Quit show in a studio's menus the keys they
   really have: change one in Settings (Keymaps) and the menu follows, as
   it already did for the studio's own commands.
+- Sue Paint's Edit menu no longer shows Shift+Del beside Delete Outside
+  Selection: that key fills. The item shows the key you give it in
+  Settings.
+- Swap Main and Sub Color, Drawing or Transparent Color, Smaller Brush
+  and Bigger Brush do their work when Auto Actions or Studio Mode's keys
+  run them, as their keys always did.
 
 ### Removed
 

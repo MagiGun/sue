@@ -798,7 +798,7 @@ pub fn import_frames(
             let tile = if [frame.width(), frame.height()] == size {
                 frame.clone()
             } else {
-                crate::materials::fitted(frame, size)?
+                crate::doc::fitted(frame, size)?
             };
             Some((format!("{name} {}", index + 1), tile))
         })

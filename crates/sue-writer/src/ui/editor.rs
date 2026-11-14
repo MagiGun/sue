@@ -74,7 +74,7 @@ impl SueWriter {
         let mut table = HashMap::new();
         for id in wanted {
             let seen = if cx.arena().get_by_id(id).is_ok_and(picture::is_picture) {
-                sue_paint::composite::signature(cx.arena(), id)
+                sue_picture::composite::signature(cx.arena(), id)
                     .iter()
                     .map(|(_, revision)| *revision)
                     .sum::<u64>()

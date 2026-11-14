@@ -21,6 +21,7 @@ sue-wm = { path = "crates/sue-wm" }
 sue-model = { path = "crates/sue-model" }
 sue-brush = { path = "crates/sue-brush" }
 sue-paint = { path = "crates/sue-paint" }
+sue-picture = { path = "crates/sue-picture" }
 sue-type = { path = "crates/sue-type" }
 sue-writer = { path = "crates/sue-writer" }
 sue-lang = { path = "crates/sue-lang" }
@@ -140,9 +141,14 @@ codegen-units = 1
 strip = "debuginfo"
 
 # But the pixel loops run for every pixel of every stroke, and the browser
-# runs them on one thread: they are built for speed even there.
-[profile.web.package.sue-paint]
+# runs them on one thread: they are built for speed even there. They live
+# in the picture engine. Sue Paint keeps a little pixel work of its own
+# (materials, the canvas), so it stays at 2, not at "s".
+[profile.web.package.sue-picture]
 opt-level = 3
+
+[profile.web.package.sue-paint]
+opt-level = 2
 
 [profile.web.package.sue-model]
 opt-level = 3
@@ -158,9 +164,10 @@ opt-level = 3
 [profile.dev.package."*"]
 opt-level = 3
 
-# Sue Paint's pixel loops and the blend math they call run for every pixel
-# on every change; unoptimized, painting and layer edits would stutter.
-[profile.dev.package.sue-paint]
+# The picture engine's pixel loops and the blend math they call run for
+# every pixel on every change; unoptimized, painting and layer edits would
+# stutter.
+[profile.dev.package.sue-picture]
 opt-level = 3
 
 [profile.dev.package.sue-model]
@@ -172,6 +179,11 @@ opt-level = 3
 # The interface, the project file reader and the format codecs run on every
 # click and every project opened; unoptimized, `cargo run` stalls on them.
 [profile.dev.package.sue-wm]
+opt-level = 2
+
+# Sue Paint is interface now (its engine is sue-picture), so it is built
+# like sue-wm and a restyle does not rebuild it at full optimization.
+[profile.dev.package.sue-paint]
 opt-level = 2
 
 [profile.dev.package.sue-core]

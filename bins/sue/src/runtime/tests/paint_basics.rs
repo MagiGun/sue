@@ -267,20 +267,29 @@ fn sue_paint_every_menu_command_and_tool_works() {
     ] {
         assert!(commands.iter().any(|command| command == wanted), "{wanted}");
     }
-    // Leaving, quitting, printing and help go outside the canvas.
-    let outside = [
-        "file.leave",
-        "file.quit",
-        "file.close",
-        "file.print",
-        "help.",
-        "window.new",
-        "window.interface.",
-    ];
-    for command in commands
+    // Every registered command, menus or not, runs too; a family runs
+    // as its first member. Leaving, quitting, printing and the help that
+    // opens a browser go outside the canvas and say so with a flag.
+    let registry = sue_paint::registry();
+    for command in &commands {
+        assert!(
+            registry.has(command),
+            "{command} is in a menu, not registered"
+        );
+    }
+    let everything: Vec<String> = registry
         .iter()
-        .filter(|command| !outside.iter().any(|skip| command.starts_with(skip)))
-    {
+        .filter(|command| !command.flags.has(sue_wm::Flags::LEAVES_CANVAS))
+        .map(|command| {
+            if command.is_family() {
+                format!("{}0", command.name)
+            } else {
+                command.name.to_owned()
+            }
+        })
+        .collect();
+    assert!(everything.len() > 380, "{}", everything.len());
+    for command in &everything {
         runtime.request(
             ShellRequest::AppletCommand {
                 applet: paint.clone(),
@@ -783,4 +792,37 @@ fn sue_paint_opens_a_menu_by_a_click_on_its_title() {
     paint.click_text("Start Page");
     assert!(paint.rect_of("Save As...").is_none(), "the menu closed");
     assert!(paint.rect_of("Draw").is_some(), "{:?}", paint.texts);
+}
+
+#[test]
+fn sue_paint_palette_shows_the_keys_settings_have() {
+    let (mut runtime, root) = runtime("paint-palette-keys");
+    let paint = AppletId::new(sue_paint::ID).unwrap();
+    let hint = |runtime: &Runtime, command: &str| {
+        runtime
+            .applets
+            .get(&paint)
+            .unwrap()
+            .commands()
+            .into_iter()
+            .find(|entry| entry.command == command)
+            .map(|entry| entry.hint)
+    };
+    let now = Instant::now();
+    runtime.timer(&mut NoTextures, now);
+    assert_eq!(hint(&runtime, "file.new").as_deref(), Some("Ctrl+N"));
+    // A key changed in Settings shows in the palette, Sue Paint open or
+    // not.
+    runtime
+        .engine
+        .world
+        .rice
+        .set(
+            "sue_paint_keys.file_new",
+            sue_rice::RiceValue::Keybind("Ctrl+Alt+N".parse().unwrap()),
+        )
+        .unwrap();
+    runtime.timer(&mut NoTextures, now + Duration::from_secs(5));
+    assert_eq!(hint(&runtime, "file.new").as_deref(), Some("Ctrl+Alt+N"));
+    let _ = std::fs::remove_dir_all(&root);
 }

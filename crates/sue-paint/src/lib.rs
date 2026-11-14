@@ -21,8 +21,9 @@
 //!
 //! The brush engine ([`brush`]), compositing ([`composite`]), selections
 //! ([`select`]), fills ([`fill`]) and filters ([`filters`]) are plain
-//! functions over pixels with their own tests; the studio ([`SuePaint`])
-//! ties them to the interface.
+//! functions over pixels with their own tests, in the picture engine
+//! ([`sue_picture`], re-exported here); the studio ([`SuePaint`]) ties
+//! them to the interface.
 
 /// Text from the language database's `paint` namespace (Sue Paint).
 macro_rules! tr {
@@ -35,32 +36,18 @@ pub(crate) fn localize(text: &str) -> String {
     sue_lang::translate("paint", text)
 }
 
-pub mod anim;
 mod anim_ui;
-pub mod blend;
-pub mod brush;
-pub mod camera;
 mod canvas;
 pub mod clip_io;
-pub mod color;
 mod colorsets;
 mod comic;
-pub mod composite;
-mod comps;
-pub mod correct;
-pub mod decoration;
+mod commands;
 mod dialogs;
-pub mod doc;
 mod dock;
-pub mod effects;
 mod extras;
-pub mod figure;
-pub mod fill;
-pub mod filters;
 mod icons;
 mod launchers;
 mod lettering;
-pub mod manga;
 pub mod materials;
 mod menus;
 mod mobile;
@@ -68,30 +55,26 @@ mod pages;
 mod panels;
 mod phone;
 mod prefs;
-pub mod print;
-pub mod proof;
-pub mod psd_io;
-pub mod quick;
-pub mod rulers;
 mod scan;
-pub mod select;
 pub mod simple;
-mod smart;
 mod start;
-pub mod story;
 mod studio;
 pub mod studio_mode;
 mod subview;
-pub mod templates;
-pub mod three;
-pub mod timelapse;
-pub mod tools;
-pub mod transform;
 mod transform_ui;
-pub mod vector;
 pub mod view;
-pub mod warp;
 
+// The picture engine moved to `sue-picture`; these keep every
+// `crate::brush::Tip` and `sue_paint::composite::flatten` path working.
+pub use sue_picture::{
+    anim, blend, brush, camera, color, composite, correct, decoration, doc, effects, figure, fill,
+    filters, manga, print, proof, psd_io, quick, rulers, select, story, templates, three,
+    timelapse, tools, transform, vector, warp,
+};
+// Private in Sue Paint before the move, so private here still.
+use sue_picture::{comps, smart};
+
+pub use commands::registry;
 pub use menus::menus;
 pub use studio::{ID, SuePaint, mirror};
 

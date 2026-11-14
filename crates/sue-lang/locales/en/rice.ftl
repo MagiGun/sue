@@ -466,6 +466,8 @@ sue_paint_keys-brush_smaller = Brush smaller
     .description = Smaller Brush
 sue_paint_keys-brush_bigger = Brush bigger
     .description = Bigger Brush
+sue_paint_keys-custom = Custom
+    .description = Keys of commands that have no default key
 
 ## [sue_writer_keys]
 

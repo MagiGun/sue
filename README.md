@@ -85,15 +85,17 @@ feature Sue may grow into onto the backbone.
 | [`sue-pkg`](crates/sue-pkg) | Content-addressed packages, Ed25519 trust, resolver, atomic generations | `PackageManifest`, `ContentHash`, `TrustStore`, `PackageIndex`, `resolve`, `AtomicUpdater` |
 | [`sue-ai`](crates/sue-ai) | Offline, zero-copy AI substrate | `LocalModelRegistry`, `ComputeBackend`, `ZeroCopyTensorTask`, `OnnxModel` |
 | [`sue-wm`](crates/sue-wm) | The shell: the Hub with its pins, the top bar with the Sue button and menus, studios and tools, palette, springs, theme | `SueApplet`, `Launchpad`, `Shell`, `MenuBar`, `DockLayout`, `SpringDamper`, `Typing`, `Transport` |
-| [`sue-paint`](crates/sue-paint) | Sue Paint: the painting studio, its brush engine, compositing, selections, fills and filters | `SuePaint`, `Stroke`, `Compositor`, `Selection`, `Filter` |
+| [`sue-picture`](crates/sue-picture) | The picture engine every studio uses: layered pictures, compositing, the brush engine, selections, fills, filters, transforms, animation; no interface of its own | `doc`, `Compositor`, `Stroke`, `Selection`, `Filter` |
+| [`sue-paint`](crates/sue-paint) | Sue Paint: the painting studio (canvas, palettes, tools and commands) on the picture engine | `SuePaint` |
 | [`sue-type`](crates/sue-type) | Typography for every studio that sets text: paragraph styles, the rich text editor, page layout and typesetting | `Editor`, `StyleSheet`, `PageSetup` |
 | [`sue-writer`](crates/sue-writer) | Sue Writer: the writing and publishing studio | `SueWriter` |
 | [`bins/sue`](bins/sue) | The executable: runtime, built-in applets, self-check, snapshots | `Engine`, `Runtime` |
 
 ```text
 bins/sue      ──► every crate below                                        + egui
-sue-writer    ──► sue-paint, sue-type, sue-wm, sue-io, sue-model, sue-rice, sue-lang, sue-platform, sue-core
-sue-paint     ──► sue-type, sue-wm, sue-ai, sue-io, sue-model, sue-rice, sue-lang, sue-platform, sue-core
+sue-writer    ──► sue-picture, sue-type, sue-wm, sue-io, sue-model, sue-rice, sue-lang, sue-platform, sue-core
+sue-paint     ──► sue-picture, sue-type, sue-wm, sue-ai, sue-io, sue-model, sue-rice, sue-lang, sue-platform, sue-core
+sue-picture   ──► sue-type, sue-io, sue-model, sue-lang, sue-platform, sue-core
 sue-type      ──► sue-wm, sue-io, sue-model, sue-lang, sue-platform, sue-core
 sue-wm        ──► sue-rice, sue-model, sue-lang, sue-platform, sue-core   + egui
 sue-ai        ──► sue-platform, sue-core                                   + tract-onnx

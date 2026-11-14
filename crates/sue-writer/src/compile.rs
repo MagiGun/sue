@@ -247,7 +247,7 @@ pub fn publish_styles(sheet: &StyleSheet) -> Vec<PublishStyle> {
 pub fn picture_pixels(arena: &Arena, id: EntityId, max: u32) -> Option<(Vec<u8>, [u32; 2])> {
     let entity = arena.get_by_id(id).ok()?;
     if picture::is_picture(entity) {
-        return sue_paint::composite::preview(arena, id, [max, max]);
+        return sue_picture::composite::preview(arena, id, [max, max]);
     }
     let raster = entity.component(ComponentKind::RasterTile2D)?.as_raster()?;
     let (width, height) = (raster.width(), raster.height());
