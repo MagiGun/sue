@@ -6,7 +6,7 @@
 //! alignments, the two kinds of transform) share a function and tell
 //! themselves apart by their name.
 
-use sue_core::Value;
+use sue_core::{Arena, Value};
 use sue_model::picture::{self, LayerKind};
 use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
@@ -17,6 +17,7 @@ use crate::doc;
 use crate::filters::Filter;
 use crate::select::Selection;
 use crate::studio::{SuePaint, mirror};
+use crate::vector::{self, Line};
 
 // How an item looks right now.
 
@@ -42,6 +43,12 @@ fn with_selection(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState
 fn with_clipboard(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
     let Basis { has_doc, .. } = paint.basis(facts.arena);
     when(has_doc && paint.clipboard.is_some())
+}
+
+/// Works on a vector layer.
+fn on_vector(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    let Basis { info, .. } = paint.basis(facts.arena);
+    when(info.is_some_and(|info| vector::is_vector(facts.arena, info.id)))
 }
 
 /// Works while there is a step to undo.
@@ -87,6 +94,71 @@ fn copy(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     if paint.copy(cx) {
         cx.notify(tr!("copied"));
     }
+}
+
+/// Copy vectors as SVG: the lines of the vector layer as SVG code on
+/// the system clipboard, for a program that draws vectors. With lines
+/// picked by the Operation tool only those go, else all of the layer.
+fn copy_svg(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let Some((text, count)) = vectors_svg(paint, &cx.world.arena) else {
+        cx.notify(tr!("no-vector-lines-to-copy"));
+        return;
+    };
+    match sue_platform::copy_text(&text) {
+        Ok(()) => cx.notify(tr!("copied-vector-lines-as-svg", count = count)),
+        Err(error) => cx.fail(tr!("cannot-copy-to-clipboard", error = error)),
+    }
+}
+
+/// The lines Copy vectors as SVG copies, as SVG code the size of the
+/// canvas, and how many shapes it holds; `None` when there is none.
+fn vectors_svg(paint: &SuePaint, arena: &Arena) -> Option<(String, usize)> {
+    let picture = paint.picture()?;
+    let info = paint.layer_info(arena)?;
+    if !vector::is_vector(arena, info.id) {
+        return None;
+    }
+    let size = arena.get_by_id(picture).ok().and_then(picture::size)?;
+    let lines = vector::lines(&vector::geometry(arena, info.id));
+    let picked = paint
+        .picked_lines
+        .as_ref()
+        .filter(|(layer, picked)| *layer == info.id && !picked.is_empty())
+        .map(|(_, picked)| picked.as_slice());
+    svg_of(
+        &lines,
+        picked,
+        info.style.offset.map(|value| value as f32),
+        size,
+    )
+}
+
+/// `lines` (only those at the indices `picked` when given), moved by
+/// `offset`, as SVG code of `size` pixels, and how many shapes it holds;
+/// `None` when nothing is drawn (no line, or erasing lines only).
+fn svg_of(
+    lines: &[Line],
+    picked: Option<&[usize]>,
+    offset: [f32; 2],
+    size: [u32; 2],
+) -> Option<(String, usize)> {
+    let chosen: Vec<Line> = lines
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| picked.is_none_or(|picked| picked.contains(index)))
+        .map(|(_, line)| line.clone())
+        .collect();
+    let shapes = vector::svg_shapes(&chosen, offset);
+    if shapes.is_empty() {
+        return None;
+    }
+    let count = shapes.len();
+    let text = sue_io::svg::write_svg(&sue_io::svg::SvgDrawing {
+        width: size[0] as f32,
+        height: size[1] as f32,
+        shapes,
+    });
+    Some((text, count))
 }
 
 fn paste(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
@@ -445,6 +517,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     c("edit.copy", "copy-2", "copy", copy)
         .keys("Ctrl+C or F3")
         .state(on_raster),
+    c("edit.copy_svg", "copy-vectors-as-svg", "copy", copy_svg).state(on_vector),
     c("edit.paste", "paste", "paste", paste)
         .keys("Ctrl+V or F4")
         .state(with_clipboard),
@@ -650,7 +723,9 @@ mod tests {
     use sue_wm::Flags;
     use sue_wm::icons::Icon;
 
-    use super::COMMANDS;
+    use super::{COMMANDS, svg_of};
+    use crate::brush::{Finish, SAME, Sample, Tip};
+    use crate::vector::Line;
 
     #[test]
     fn every_edit_command_has_an_icon_of_the_shared_set() {
@@ -683,5 +758,75 @@ mod tests {
                 command.name
             );
         }
+    }
+
+    /// A line of 21 samples from `from` to `to`, 4 pixels wide.
+    fn line(from: [f32; 2], to: [f32; 2]) -> Line {
+        let samples = (0..=20)
+            .map(|step| {
+                let t = step as f32 / 20.0;
+                Sample {
+                    at: [
+                        from[0] + (to[0] - from[0]) * t,
+                        from[1] + (to[1] - from[1]) * t,
+                    ],
+                    pressure: 1.0,
+                    speed: 0.2,
+                    tilt: 0.0,
+                    lean: [0.0, 0.0],
+                    width: 1.0,
+                    alpha: 1.0,
+                }
+            })
+            .collect();
+        Line {
+            samples,
+            tip: Tip {
+                size: 4.0,
+                ..Tip::default()
+            },
+            colors: [[0.0; 3], [1.0; 3]],
+            finish: Finish::default(),
+            copies: vec![SAME],
+            marks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn copy_vectors_as_svg_writes_the_lines_as_svg_code() {
+        let mut red = line([10.0, 10.0], [90.0, 10.0]);
+        red.colors[0] = [1.0, 0.0, 0.0];
+        let blue = {
+            let mut blue = line([10.0, 50.0], [90.0, 80.0]);
+            blue.colors[0] = [0.0, 0.0, 1.0];
+            blue
+        };
+        let mut eraser = line([0.0, 0.0], [20.0, 20.0]);
+        eraser.tip.eraser = true;
+        let lines = [red, blue, eraser];
+        // Every drawn line, as big as the canvas, moved with its layer.
+        let (text, count) = svg_of(&lines, None, [5.0, 0.0], [200, 100]).expect("svg");
+        assert_eq!(count, 2, "an erasing line draws nothing");
+        let drawing = sue_io::svg::parse_svg(&text).expect("it reads back");
+        assert_eq!((drawing.width, drawing.height), (200.0, 100.0));
+        assert_eq!(drawing.shapes.len(), 2);
+        assert!(
+            text.contains("#ff0000") && text.contains("#0000ff"),
+            "{text}"
+        );
+        let left = drawing
+            .shapes
+            .iter()
+            .flat_map(|shape| shape.points.iter())
+            .map(|point| point[0])
+            .fold(f32::MAX, f32::min);
+        assert!(left >= 13.0, "moved by the layer's offset: {left}");
+        // Only the picked lines.
+        let (text, count) = svg_of(&lines, Some(&[1]), [0.0, 0.0], [200, 100]).expect("svg");
+        assert_eq!(count, 1);
+        assert!(text.contains("#0000ff") && !text.contains("#ff0000"));
+        // Nothing to copy: no line, or only an erasing one.
+        assert!(svg_of(&[], None, [0.0, 0.0], [200, 100]).is_none());
+        assert!(svg_of(&lines, Some(&[2]), [0.0, 0.0], [200, 100]).is_none());
     }
 }

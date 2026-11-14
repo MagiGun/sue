@@ -2343,3 +2343,10 @@ zoom-100-percent = 100%
 zoom-200-percent = 200%
 paste-material = Paste Material
 cancel-transform = Cancel Transform
+copy-vectors-as-svg = Copy Vectors as SVG
+no-vector-lines-to-copy = There are no lines on this vector layer to copy.
+copied-vector-lines-as-svg = { $count ->
+    [one] Copied one line as SVG
+   *[other] Copied { $count } lines as SVG
+}
+cannot-copy-to-clipboard = Cannot copy to the clipboard: { $error }

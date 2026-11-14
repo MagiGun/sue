@@ -255,6 +255,7 @@ pub fn menus() -> Vec<Menu> {
                 SEP,
                 item("edit.cut"),
                 item("edit.copy"),
+                item("edit.copy_svg"),
                 item("edit.paste"),
                 item("edit.paste_here"),
                 item("edit.clear"),

@@ -32,7 +32,7 @@ rows are at the end.
 | File: new, open and save | 11 | 1 | 3 | 77 |
 | File: export | 15 | 1 | 2 | 86 |
 | File: import, batch and scanning | 6 | 4 | 5 | 53 |
-| Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
+| Edit: undo, clipboard and fills | 9 | 5 | 0 | 82 |
 | Edit: transform and canvas size | 8 | 6 | 0 | 79 |
 | Tonal correction and color | 11 | 1 | 0 | 96 |
 | Filters | 20 | 0 | 0 | 100 |
@@ -54,7 +54,7 @@ rows are at the end.
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 10 | 2 | 2 | 79 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 266 | 60 | 26 | 84 |
+| **All of Sue Paint** | 267 | 60 | 26 | 84 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -172,6 +172,7 @@ The order of work is the plan at the end.
 | --- | --- | --- | --- |
 | Undo, Redo | Edit | done | A history per document; exact inverse deltas, never a snapshot |
 | Cut, Copy, Paste | Edit | done | |
+| Copy vectors as SVG | Edit > Copy vectors as SVG | done | The vector layer's lines, or those the Operation tool picked, as SVG code on the clipboard |
 | Paste to shown position | Edit > Paste to shown position | done | |
 | Delete | Edit | done | |
 | Delete Outside Selection | Edit | done | Shift+Delete |

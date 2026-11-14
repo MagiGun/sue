@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: Edit, Copy Vectors as SVG puts the lines of the vector
+  layer (only the ones the Operation tool picked, when it picked some) on
+  the clipboard as SVG code, for any program that draws vectors.
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
