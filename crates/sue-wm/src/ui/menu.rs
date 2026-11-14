@@ -40,6 +40,8 @@ const MIN_WIDTH: f32 = 180.0;
 const MARK: f32 = 26.0;
 /// Height of the strip at an end of a menu that scrolls.
 const STRIP: f32 = 16.0;
+/// How far the rows fade out where they pass under a strip.
+const FADE: f32 = 10.0;
 /// How long typed letters count as one word, in milliseconds.
 const TYPE_AHEAD_MS: u64 = 1000;
 /// Rows a second a menu scrolls while the pointer rests on a strip.
@@ -723,7 +725,9 @@ impl MenuState {
             } else if step(items, None, false) == Some(cursor) {
                 offset = overflow;
             } else {
-                offset = offset.min(top - STRIP).max(bottom + STRIP - height);
+                // Clear of the strips and of the fade under them.
+                let margin = STRIP + FADE;
+                offset = offset.min(top - margin).max(bottom + margin - height);
             }
         }
 
@@ -992,13 +996,19 @@ impl MenuState {
                         rect.with_max_y(rect.bottom() - 1.0)
                     };
                     painter.rect_filled(rect, corners, surface);
-                    // A line where the rows pass under the strip.
+                    // Where the rows pass under the strip they fade out,
+                    // so a row cut by the strip shows no slivers of text.
                     let edge = if up { rect.bottom() } else { rect.top() };
-                    painter.hline(
-                        (rect.left() + pad * 2.0)..=(rect.right() - pad * 2.0),
-                        edge,
-                        theme.hairline(),
-                    );
+                    let far = if up { edge + FADE } else { edge - FADE };
+                    let clear = egui::Color32::TRANSPARENT;
+                    let mut fade = egui::Mesh::default();
+                    fade.colored_vertex(pos2(rect.left(), edge), surface);
+                    fade.colored_vertex(pos2(rect.right(), edge), surface);
+                    fade.colored_vertex(pos2(rect.right(), far), clear);
+                    fade.colored_vertex(pos2(rect.left(), far), clear);
+                    fade.add_triangle(0, 1, 2);
+                    fade.add_triangle(0, 2, 3);
+                    painter.add(fade);
                     let middle = rect.center();
                     let lift = if up { -2.0 } else { 2.0 };
                     painter.line(
