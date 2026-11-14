@@ -1,8 +1,8 @@
 //! The applet contract every studio, tool and window implements.
 //!
 //! Nothing in the shell names an applet. Studios (Sue Paint, Sue Writer),
-//! tools (the Image Viewer, the Converter) and the Settings window all
-//! register at runtime and describe themselves through an
+//! tools (Sue ships none; a package may add one) and the Settings window
+//! all register at runtime and describe themselves through an
 //! [`AppletManifest`] and their [`FileTemplate`]s: the Hub's boxes, the Sue
 //! menu's Studios, Tools and New submenus and the command palette are all
 //! read from them.
@@ -62,9 +62,9 @@ pub enum AppletRole {
     /// fills the page under the top bar and is listed under Studios in the
     /// Hub.
     Studio,
-    /// A focused job on a file or an entity (the Image Viewer, the
-    /// Converter). It opens like a studio, in a page of its own, and is
-    /// listed under Tools in the Hub.
+    /// A focused job on a file or an entity (Sue ships none of its own; a
+    /// package may add one). It opens like a studio, in a page of its own,
+    /// and is listed under Tools in the Hub.
     Tool,
     /// A floating window over the page (Settings).
     Window,
@@ -265,7 +265,7 @@ pub enum ShellRequest {
         applet: AppletId,
     },
     /// Hand an entity to an applet (`SueApplet::take_entity`), e.g. a
-    /// picture to the Converter.
+    /// picture to Sue Writer as a figure.
     SendEntity {
         /// Who gets it.
         to: AppletId,

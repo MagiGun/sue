@@ -115,7 +115,7 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
         declare(
             "io.jxl_effort",
             int(7, 1, 9),
-            "JPEG XL effort for conversions (higher is smaller and slower)",
+            "JPEG XL effort for exports (higher is smaller and slower)",
         ),
         declare(
             "io.jpeg_lossless_transcode",
@@ -125,7 +125,7 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
         declare(
             "io.jpeg_quality",
             int(90, 10, 100),
-            "JPEG quality for conversions to .jpg",
+            "JPEG quality for exports to .jpg",
         ),
         declare(
             "io.byte_map_width",
@@ -140,7 +140,7 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
         declare(
             "io.convert_dir",
             text(""),
-            "Folder for converted files (empty saves next to the source)",
+            "Folder for exported and batch converted files (empty saves next to the source)",
         ),
         declare(
             "audio.output_device",
@@ -564,8 +564,6 @@ impl Engine {
                         tr!("sue-paint-custom-colors"),
                         vec![section("sue_paint_colors")],
                     ),
-                    group(tr!("image-viewer"), vec![section("image_viewer")]),
-                    group(tr!("converter"), vec![section("convert")]),
                     group(
                         tr!("sue-writer"),
                         vec![
@@ -620,7 +618,6 @@ impl Engine {
                     ),
                     group(tr!("sue-paint"), vec![section("sue_paint_keys")]),
                     group(tr!("sue-writer"), vec![section("sue_writer_keys")]),
-                    group(tr!("image-viewer"), vec![section("image_viewer_keys")]),
                 ],
             ),
             SettingsPage::new(
@@ -996,17 +993,15 @@ pub(crate) mod tests {
                 .collect()
         };
         assert_eq!(pages(AppletRole::Studio), ["Sue Paint", "Sue Writer"]);
-        assert_eq!(pages(AppletRole::Tool), ["Image Viewer", "Converter"]);
+        // Sue ships no tool of its own; a package may add one.
+        assert_eq!(pages(AppletRole::Tool), Vec::<String>::new());
         assert_eq!(pages(AppletRole::Window), ["Settings"]);
         // Settings offers every studio and tool to pin, and the Hub.
         let pins: Vec<&str> = engine.catalog.choices[sue_wm::PIN_KEY]
             .iter()
             .map(|choice| choice.value.as_str())
             .collect();
-        assert_eq!(
-            pins,
-            ["", "sue-paint", "sue-writer", "image-viewer", "convert"]
-        );
+        assert_eq!(pins, ["", "sue-paint", "sue-writer"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 

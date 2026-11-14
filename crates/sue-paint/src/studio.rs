@@ -7425,37 +7425,6 @@ impl SueApplet for SuePaint {
         ))
     }
 
-    fn sue_actions(&self, focus: Option<&Entity>, current: bool) -> Vec<sue_wm::SueAction> {
-        let me = || AppletId::new(ID).expect("a valid id");
-        if current {
-            return Vec::new();
-        }
-        // A picture file open elsewhere (a PNG in the Image Viewer, say)
-        // opens as a new picture.
-        let file = focus
-            .filter(|entity| !picture::is_picture(entity))
-            .filter(|entity| {
-                entity
-                    .component(sue_core::ComponentKind::RasterTile2D)
-                    .is_some()
-            })
-            .and_then(|entity| entity.meta(sue_io::meta::SOURCE))
-            .map(PathBuf::from)
-            .filter(|path| sue_platform::fs::is_file(path));
-        match file {
-            Some(path) => vec![sue_wm::SueAction::new(
-                sue_wm::sue_menu::SEND_TO,
-                "Sue Paint",
-                ShellRequest::SendFile {
-                    to: me(),
-                    purpose: "open".to_owned(),
-                    path,
-                },
-            )],
-            None => Vec::new(),
-        }
-    }
-
     fn take_entity(&mut self, purpose: &str, entity: EntityId, cx: &mut AppletContext<'_>) {
         if !matches!(purpose, "open" | "adopt") {
             return;

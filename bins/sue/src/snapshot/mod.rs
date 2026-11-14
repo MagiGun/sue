@@ -275,7 +275,6 @@ struct Tour<'a> {
     home: PathBuf,
     paint: AppletId,
     writer: AppletId,
-    convert: AppletId,
     /// The sample novel, once Sue Writer's first scene has made it.
     novel: Option<EntityId>,
 }
@@ -632,7 +631,6 @@ pub fn write_snapshots_with(
         home: paths.home_dir,
         paint: id(sue_paint::ID)?,
         writer: id(sue_writer::ID)?,
-        convert: id(crate::convert::ID)?,
         novel: None,
     };
     scenes::run(&mut tour)?;

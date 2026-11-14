@@ -759,12 +759,12 @@ fn check_pin(
             pin_of(runtime) == sue_writer::ID,
             "Ctrl+Y did not pin it again",
         )?;
-        // One pin at a time: pinning the Converter moves it.
-        let (_, pin) = hub_box(runtime, crate::convert::ID).ok_or("the Hub has no Converter")?;
+        // One pin at a time: pinning Sue Paint moves it.
+        let (_, pin) = hub_box(runtime, sue_paint::ID).ok_or("the Hub has no Sue Paint")?;
         click_at(runtime, ctx, clock, pin.center());
         ensure(
-            pin_of(runtime) == crate::convert::ID,
-            "pinning a tool did not move the pin to it",
+            pin_of(runtime) == sue_paint::ID,
+            "pinning the other studio did not move the pin to it",
         )?;
         // A second click on the same pin takes it away.
         click_at(runtime, ctx, clock, pin.center());
@@ -784,6 +784,80 @@ fn check_pin(
     outcome
 }
 
+/// Opens a PNG written into `dir` the way opening the file from outside
+/// does, and saves the canvas Sue Paint makes of it as JPEG XL through
+/// Save As. The JPEG XL must hold the PNG's pixels.
+fn check_picture_file(
+    runtime: &mut Runtime,
+    ctx: &egui::Context,
+    clock: &mut Instant,
+    paint: &sue_wm::AppletId,
+    dir: &std::path::Path,
+) -> Result<(), String> {
+    let mut tex = NoTextures;
+    std::fs::create_dir_all(dir).map_err(text)?;
+    let (width, height) = (6_u8, 4_u8);
+    let pixels: Vec<u8> = (0..width * height)
+        .flat_map(|index| [index * 10, 200 - index * 7, 30, 255])
+        .collect();
+    let png = dir.join("card.png");
+    let encoded = sue_io::encode_png_rgba(u32::from(width), u32::from(height), &pixels)?;
+    std::fs::write(&png, encoded).map_err(text)?;
+    runtime.open_path(&png, &mut tex, *clock);
+    run_frames(runtime, ctx, clock, Vec::new());
+    let canvas = runtime
+        .applets
+        .get(paint)
+        .and_then(|applet| applet.focus())
+        .filter(|_| runtime.shell.page() == Some(paint))
+        .ok_or("the PNG did not open in Sue Paint")?;
+    let canvas = runtime.engine.world.arena.get_by_id(canvas).map_err(text)?;
+    ensure(
+        sue_model::picture::is_picture(canvas)
+            && canvas.meta(sue_io::meta::SOURCE) == Some(png.display().to_string().as_str()),
+        "the PNG is not a canvas that knows its file",
+    )?;
+    // Save As, answered as the system's dialog would answer it.
+    let jxl = dir.join("card.jxl");
+    runtime.request(
+        ShellRequest::Picked {
+            pick: sue_wm::FilePick::save(Some(paint.clone()), "save-as", "Save As", "card.jxl"),
+            path: jxl.clone(),
+        },
+        &mut tex,
+        *clock,
+    );
+    run_frames(runtime, ctx, clock, Vec::new());
+    let bytes = std::fs::read(&jxl).map_err(|error| format!("no JPEG XL was written: {error}"))?;
+    let back = NativeJxlPipeline
+        .decode(&bytes, ProgressiveTarget::Full)
+        .map_err(text)?
+        .tile;
+    ensure(
+        (back.width(), back.height()) == (u32::from(width), u32::from(height))
+            && back.bytes() == Some(&pixels[..]),
+        "the JPEG XL does not hold the PNG's pixels",
+    )?;
+    // The canvas closes again: nothing was changed, so nothing is asked.
+    runtime.request(
+        ShellRequest::AppletCommand {
+            applet: paint.clone(),
+            command: "file.close".to_owned(),
+        },
+        &mut tex,
+        *clock,
+    );
+    run_frames(runtime, ctx, clock, Vec::new());
+    ensure(
+        runtime
+            .applets
+            .get(paint)
+            .and_then(|applet| applet.focus())
+            .is_none(),
+        "the canvas did not close",
+    )
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "one scripted session through the shell"
@@ -794,10 +868,10 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     let mut clock = (*ORIGIN).max(Instant::now());
     let mut tex = NoTextures;
     let paint = sue_wm::AppletId::new(sue_paint::ID).map_err(text)?;
-    let viewer = sue_wm::AppletId::new(crate::viewer::ID).map_err(text)?;
-    let convert = sue_wm::AppletId::new(crate::convert::ID).map_err(text)?;
+    let writer = sue_wm::AppletId::new(sue_writer::ID).map_err(text)?;
 
-    // Sue opens on the Hub: a box for every studio and every tool.
+    // Sue opens on the Hub: a box for every studio, and for every tool a
+    // package adds (Sue itself ships none).
     let roles = |role: AppletRole| runtime.applets.with_role(role).count();
     let (studios, tools, windows) = (
         roles(AppletRole::Studio),
@@ -805,8 +879,8 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         roles(AppletRole::Window),
     );
     ensure(
-        studios >= 2 && tools >= 2 && windows == 1,
-        "the studios, tools and Settings are not all installed",
+        studios >= 2 && windows == 1,
+        "the studios and Settings are not all installed",
     )?;
     // Sue opens on the Hub, or straight into what is pinned there (the
     // check runs against this machine's own settings).
@@ -901,7 +975,7 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     )?;
     let labels = runtime.shell.sue_menu_labels(&[]);
     for wanted in [
-        "Hub", "Studios", "Tools", "New", "File", "Project", "Settings", "Quit Sue",
+        "Hub", "Studios", "New", "File", "Project", "Settings", "Quit Sue",
     ] {
         ensure(
             labels.iter().any(|label| label == wanted),
@@ -909,8 +983,12 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         )?;
     }
     ensure(
-        runtime.shell.sue_menu_labels(&["Tools"]) == ["Image Viewer", "Converter"],
-        "the Sue menu's Tools are not the tools",
+        runtime.shell.sue_menu_labels(&["Studios"]) == ["Sue Paint", "Sue Writer"],
+        "the Sue menu's Studios are not the studios",
+    )?;
+    ensure(
+        labels.iter().any(|label| label == "Tools") == (tools > 0),
+        "the Sue menu shows Tools with no tool installed, or hides the ones there are",
     )?;
     run_frames(
         runtime,
@@ -923,53 +1001,16 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         "Esc did not close the Sue menu",
     )?;
 
-    // A picture opens in the Image Viewer, a tool with a page of its own,
-    // and goes on from there by the Sue menu's Send To.
-    let picture = runtime
-        .engine
-        .world
-        .arena
-        .iter()
-        .find(|(_, entity)| crate::viewer::is_picture(entity))
-        .map(|(_, entity)| entity.id())
-        .ok_or("no picture to view")?;
-    runtime.request(
-        ShellRequest::OpenIn {
-            entity: picture,
-            applet: viewer.clone(),
-        },
-        &mut tex,
-        clock,
-    );
-    run_frames(runtime, &ctx, &mut clock, Vec::new());
-    ensure(
-        runtime.shell.page() == Some(&viewer)
-            && runtime
-                .applets
-                .get(&viewer)
-                .and_then(|applet| applet.focus())
-                == Some(picture),
-        "the picture did not open in the Image Viewer",
-    )?;
-    runtime.request(ShellRequest::SueMenu, &mut tex, clock);
-    let send_to = runtime.shell.sue_menu_labels(&["Send To"]);
-    ensure(
-        send_to.iter().any(|label| label == "Converter"),
-        "the Sue menu cannot send the picture to the Converter",
-    )?;
-    let sent = runtime.with_shell(&mut tex, clock, |shell, io, now| {
-        shell.sue_menu_pick(&["Send To", "Converter"], io, now)
-    });
-    ensure(sent, "Send To, Converter is not in the Sue menu")?;
-    run_frames(runtime, &ctx, &mut clock, Vec::new());
-    ensure(
-        runtime.shell.page() == Some(&convert),
-        "Send To did not open the Converter",
-    )?;
+    // A picture file opens in Sue Paint as a canvas of its own, and Save
+    // As writes that canvas out as JPEG XL, pixel for pixel.
+    let dir = runtime.engine.paths.cache_dir.join("self-check-shell");
+    let exported = check_picture_file(runtime, &ctx, &mut clock, &paint, &dir);
+    let _ = std::fs::remove_dir_all(&dir);
+    exported?;
 
-    // The palette finds a tool; Settings floats over it and Esc closes it.
+    // The palette finds a studio; Settings floats over it and Esc closes it.
     runtime.shell.open_palette();
-    runtime.shell.palette_query("open image viewer");
+    runtime.shell.palette_query("open sue writer");
     run_frames(runtime, &ctx, &mut clock, Vec::new());
     ensure(runtime.shell.palette_open(), "the palette did not open")?;
     run_frames(
@@ -979,8 +1020,8 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
     );
     ensure(
-        runtime.shell.page() == Some(&viewer),
-        "the palette's Open Image Viewer did not run",
+        runtime.shell.page() == Some(&writer),
+        "the palette's Open Sue Writer did not run",
     )?;
     run_frames(
         runtime,
@@ -1042,9 +1083,8 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         "the idle shell keeps drawing",
     )?;
     let mut detail = format!(
-        "{opened} ({}, {}, {}); pinned with a click, one pin at a time, Ctrl+Z and Ctrl+Y; a box opened Sue Paint, gliding in {glide} frames ({}) vs {snap} (legacy snap); the Sue button's menu; a picture into the Image Viewer, Send To the Converter; palette, Settings, back to the Hub; then 0 FPS",
+        "{opened} ({}, {}); pinned with a click, one pin at a time, Ctrl+Z and Ctrl+Y; a box opened Sue Paint, gliding in {glide} frames ({}) vs {snap} (legacy snap); the Sue button's menu; a PNG opened in Sue Paint and saved as JPEG XL; palette, Settings, back to the Hub; then 0 FPS",
         count(studios, "studio", "studios"),
-        count(tools, "tool", "tools"),
         count(windows, "window", "windows"),
         sue_wm::profile_label(profile)
     );

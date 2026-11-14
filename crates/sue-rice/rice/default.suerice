@@ -79,12 +79,12 @@ mono_size = 12                 # [8..32] Monospace text size (px)
 wheel_line_px = 48             # [8..200] Pixels scrolled per mouse-wheel notch in lists
 
 [io]
-jxl_effort = 7                 # [1..9] JPEG XL effort for conversions (higher is smaller and slower)
+jxl_effort = 7                 # [1..9] JPEG XL effort for exports (higher is smaller and slower)
 jpeg_lossless_transcode = true # Recompress JPEG to JPEG XL bit for bit when a recompression codec is installed
-jpeg_quality = 90              # [10..100] JPEG quality for conversions to .jpg
+jpeg_quality = 90              # [10..100] JPEG quality for exports to .jpg
 byte_map_width = 64            # [16..1024] Columns in the byte map of unknown files
 max_ingest_mib = 512           # [1..4096] Largest file Sue opens (MiB)
-convert_dir = ""               # @text Folder for converted files (empty saves next to the source)
+convert_dir = ""               # @text Folder for exported and batch converted files (empty saves next to the source)
 
 [audio]
 output_device = ""             # @text Output device (empty for the system default)
@@ -147,12 +147,6 @@ theme = "sue-theme"            # {sue-theme|gray|void|graphite|paper} Sue Writer
 smart_quotes = true            # Turn straight quotes into curly ones while typing
 dark_paper = false             # Show the page in the theme's dark colors instead of white paper
 spell_check = true             # Underline misspelled words while typing
-language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
-
-[image_viewer]
-language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
-
-[convert]
 language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
 
 [keys]
@@ -276,15 +270,3 @@ view_corkboard = "Ctrl+2"      # @keybind Corkboard
 view_outliner = "Ctrl+3"       # @keybind Outliner
 project_snapshot = "Ctrl+5"    # @keybind Take Snapshot
 list_bullet = "Ctrl+Shift+L"   # @keybind Bulleted List
-
-[image_viewer_keys]
-viewer_next = "Right or Space" # @keybind Next Picture
-viewer_previous = "Left"       # @keybind Previous Picture
-viewer_fit = "0"               # @keybind Fit to the Window
-viewer_actual = "1"            # @keybind Actual Size
-viewer_zoom_in = "+ or ="      # @keybind Zoom In
-viewer_zoom_out = "-"          # @keybind Zoom Out
-viewer_rotate_right = "R"      # @keybind Turn Right
-viewer_rotate_left = "Shift+R" # @keybind Turn Left
-viewer_crop = "C"              # @keybind Crop
-viewer_save_as = "Ctrl+Shift+S" # @keybind Save As

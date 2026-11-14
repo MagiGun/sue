@@ -143,17 +143,17 @@ input-wheel_line_px = ホイール 1 行 (px)
 ## [io]
 
 io-jxl_effort = JPEG XL の処理量
-    .description = 変換時の JPEG XL の処理量 (高いほど小さく、遅くなります)
+    .description = 書き出し時の JPEG XL の処理量 (高いほど小さく、遅くなります)
 io-jpeg_lossless_transcode = JPEG のロスレス変換
     .description = 再圧縮コーデックがある場合、JPEG をビット単位で JPEG XL に再圧縮する
 io-jpeg_quality = JPEG の画質
-    .description = .jpg への変換時の JPEG の画質
+    .description = .jpg への書き出し時の JPEG の画質
 io-byte_map_width = バイトマップの幅
     .description = 不明なファイルのバイトマップの列数
 io-max_ingest_mib = 最大サイズ (MiB)
     .description = Sue が開く最大のファイルサイズ (MiB)
 io-convert_dir = 変換先フォルダー
-    .description = 変換したファイルのフォルダー (空なら元のファイルの隣に保存)
+    .description = 書き出したファイルと一括変換したファイルのフォルダー (空なら元のファイルの隣に保存)
 
 ## [audio]
 
@@ -187,11 +187,6 @@ sue_paint-dpi = 解像度
 
 ## [sue_writer]
 
-
-## [image_viewer] と [convert]
-
-convert-language = 言語
-    .description = 言語: sue は Sue の言語に合わせ、言語タグを指定すると独自の言語になります
 
 ## [keys]
 
@@ -339,11 +334,6 @@ sue_writer-dark_paper = ダークペーパー
 sue_writer-spell_check = スペルチェック
     .description = 入力中にスペルミスの単語に下線を表示
 sue_writer-language = 言語
-    .description = 言語: sue は Sue の言語に従い、言語タグで個別に設定
-
-## [image_viewer]
-
-image_viewer-language = 言語
     .description = 言語: sue は Sue の言語に従い、言語タグで個別に設定
 
 ## [sue_paint_keys]
@@ -565,26 +555,3 @@ sue_writer_keys-format_shrink = 書式 フォント縮小
     .description = フォントを縮小
 sue_writer_keys-insert_mark_nbsp = 挿入 改行なしスペース
     .description = 改行なしスペース
-
-## [image_viewer_keys]
-
-image_viewer_keys-viewer_next = ビューアー 次へ
-    .description = 次の画像
-image_viewer_keys-viewer_previous = ビューアー 前へ
-    .description = 前の画像
-image_viewer_keys-viewer_fit = ビューアー ウィンドウに合わせる
-    .description = ウィンドウに合わせる
-image_viewer_keys-viewer_actual = ビューアー 原寸大
-    .description = 原寸大
-image_viewer_keys-viewer_zoom_in = ビューアー ズームイン
-    .description = ズームイン
-image_viewer_keys-viewer_zoom_out = ビューアー ズームアウト
-    .description = ズームアウト
-image_viewer_keys-viewer_rotate_right = ビューアー 右回転
-    .description = 右回転
-image_viewer_keys-viewer_rotate_left = ビューアー 左回転
-    .description = 左回転
-image_viewer_keys-viewer_crop = ビューアー トリミング
-    .description = トリミング
-image_viewer_keys-viewer_save_as = ビューアー 別名で保存
-    .description = 別名で保存

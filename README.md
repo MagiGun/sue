@@ -29,9 +29,9 @@ Sue is made of the crates below and the `sue` executable. It opens a native GPU 
 theme (black to white, nothing else), straight onto the **Hub**:
 
 - **The Hub:** a full page with a box for every studio (Sue Paint, Sue Writer)
-  and every tool (the Image Viewer, the Converter). A click opens one. The pin
-  at each box's bottom right makes Sue open straight into it at launch, one
-  pin at a time (`launchpad.pinned` in the rice, so it shows in Settings).
+  and every tool a package adds. A click opens one. The pin at each box's
+  bottom right makes Sue open straight into it at launch, one pin at a time
+  (`launchpad.pinned` in the rice, so it shows in Settings).
 - **The top bar:** the **Sue button** sits once in the top left corner,
   followed by the open studio's or tool's own menus. It opens the Sue menu:
   the Hub, every studio and tool, New, Open File, projects, Send To (the
@@ -46,10 +46,6 @@ theme (black to white, nothing else), straight onto the **Hub**:
   page comes in over the Hub and its palettes slide in from the edges.
 - **Sue Writer:** pages, styles, a binder, a corkboard, an outliner,
   composition mode and compiling to PDF, Word, OpenDocument, EPUB and more.
-- **The Image Viewer** and **the Converter:** tools with pages of their own,
-  like the studios. One shows a picture large with quick fixes and saving as
-  any picture type; the other turns pictures, sounds, text and tables into
-  other kinds of files on a background thread.
 - **The command palette:** `Tab` or `/` for a fuzzy search over every action
   and template.
 - **Settings:** a floating window (the Sue menu or `Ctrl+,`) with nine
@@ -166,17 +162,16 @@ the Arena, the rice introspection, the sniffer, the package manager, the AI
 registry and the shell working together through real egui frames (Sue opening
 on the Hub, a click on a pin with `Ctrl+Z` and `Ctrl+Y`, a click on a box that
 glides Sue Paint in (and snaps on legacy hardware), the Sue button's menu, a
-picture opened in the Image Viewer and sent to the Converter, the palette and
-Settings, then 0 FPS), the studios (a painting and a novel made, undone,
+PNG opened in Sue Paint and saved as JPEG XL, the palette and Settings,
+then 0 FPS), the studios (a painting and a novel made, undone,
 redone, saved and exported), and the backbone (the project saved and opened
 again, pictures and tables through the format registry, an operator run with
 a preset and undone, a background job). When a GPU is available it also
 renders a frame and checks that not one pixel is tinted. The process exits
 non-zero if any check fails. `--snapshot <dir>` renders the main scenes into
 PNG files in `<dir>`, from a fresh temporary profile: the Hub and a pin, the
-Sue menu, the palette, Settings, the Image Viewer, the Converter, Sue Paint
-and its menus and dialogs, Sue Writer's views, and the Hub and Sue Paint on a
-phone and a tablet.
+Sue menu, the palette, Settings, Sue Paint and its menus and dialogs, Sue
+Writer's views, and the Hub and Sue Paint on a phone and a tablet.
 
 A snapshot run takes options, and two runs can be compared:
 

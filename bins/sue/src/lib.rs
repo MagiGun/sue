@@ -10,7 +10,6 @@ macro_rules! tr {
 }
 
 mod applets;
-mod convert;
 mod desktop;
 mod engine;
 #[cfg(test)]
@@ -23,7 +22,6 @@ mod snapshot;
 mod style;
 mod update;
 mod util;
-mod viewer;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

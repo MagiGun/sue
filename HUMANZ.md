@@ -655,8 +655,8 @@ Three shared shapes need no component of their own:
 | Manuscripts (`sue_model::manuscript`) | a `sue.manuscript` entity, ordered `CHILD` folders and documents | A binder with draft, research and trash folders (`manuscript.role`); synopsis, notes, status, label, include, word target and keywords as `doc.*` properties (§3.8) | novels, scripts, theses, manuals, e-books, outlines |
 | `BlendMode` | its name in `style.blend` | 26 blend modes (normal; darken, multiply, burns; lighten, screen, dodges, add; overlay and the lights; difference, exclusion, divide; hue, saturation, color, luminosity) and W3C compositing with straight alpha; names from a newer Sue fall back to normal | every feature that stacks layers |
 
-A layer can be any raster entity, so a photo open in the Image Viewer can also
-be a layer of a picture: the same entity, never a copy.
+A layer can be any raster entity, so a photo in the project can also be a
+layer of a picture: the same entity, never a copy.
 
 A feature that needs something new adds its own `ComponentType` the same way,
 under its own prefix, and registers it.
@@ -760,7 +760,7 @@ reads a file's tags and length without decoding it); text becomes a
 `StringBuffer`; anything else, including media Sue has no decoder for yet,
 becomes a `Gray8` byte-map raster. Each entity carries metadata (`bytes`,
 `route`, `format`, size, decode time, colour and depth, codec and tags,
-entropy, and the source path). For the converter, `encode_png` writes
+entropy, and the source path). For export, `encode_png` writes
 compressed PNG; `encode_wav_as`, `encode_aiff` and `encode_flac` (with
 `flacenc`) write WAV (16, 24 or 32-bit float), AIFF and FLAC; and
 `decode_picture` and `encode_picture` read and write BMP, GIF, ICO, PNM, QOI,
@@ -804,8 +804,8 @@ the `PlatformHost` trait and the portable services next to it:
 | `AudioOutput` / `AudioSink` | A `cpal` output stream fed from a lock-free ring (§3.5); `NullAudio` is a device-free clock for tests |
 | `fs::{read, read_to_string, write, metadata, exists, is_file, is_dir, create_dir_all, remove_file, remove_dir_all, rename}` | The file calls everything above the platform makes: std's own on computers, phones and tablets; the page's files in the browser (below) |
 | `time::{Instant, SystemTime, UNIX_EPOCH, since_start}` | The clock everything above the platform reads: std's, except in the browser, where std's panics and `web-time` reads the page's clock; `since_start` is a plain function for code below the platform that times its work (ingest) |
-| `random_seed`, `THREADS` | Random bits for `sue_core::seed_entity_ids` (the browser gives std's hasher no randomness), and whether Sue may start threads (not in the browser: work meant for a worker runs where it is asked for, such as the Converter's) |
-| `list_dir`, `hidden_by_os`, `write_atomic` | Sorted folder listings (the Converter adds a whole folder), without dot files or, on Windows, the legacy junctions (`NetHood`, `PrintHood`, `Cookies`, `SendTo`, `Recent`, `Start Menu`, `Templates`, `Application Data`, `Local Settings`, `My Documents`); crash-safe writes (temporary file, sync, rename) |
+| `random_seed` | Random bits for `sue_core::seed_entity_ids` (the browser gives std's hasher no randomness) |
+| `list_dir`, `hidden_by_os`, `write_atomic` | Sorted folder listings (Sue Paint's Batch import reads a whole folder), without dot files or, on Windows, the legacy junctions (`NetHood`, `PrintHood`, `Cookies`, `SendTo`, `Recent`, `Start Menu`, `Templates`, `Application Data`, `Local Settings`, `My Documents`); crash-safe writes (temporary file, sync, rename) |
 | `copy_text` | The system clipboard (`arboard`; the browser's in the browser) for buttons such as Copy All; text fields copy and paste through `egui-winit` |
 | `EguiPainter`, `TextureUpload` | Paints egui frames with `egui-wgpu` into the window or an offscreen texture; uploads image pixels the caller borrows from the arena straight into GPU textures (rule 5) |
 | `open_url`, `reveal_folder` | The system browser (only `http` and `https`, validated by `web_url`; on Android through Sue's activity) and file manager |
@@ -1106,8 +1106,7 @@ stand-in:
   (a new file beside an opened document's copy: Android granted only that
   document, and iOS's copy is Sue's own), so writes there stay in the cache.
   `stays_in_cache` says so, and what would write there asks for a folder
-  first: the Converter's "Next to each file" picks one through `FilePick`
-  before it converts such copies.
+  first through `FilePick` (Sue Paint's batch conversion, when it comes).
 
 | | Android (`android::Documents`) | iOS (`ios::Files`) |
 | --- | --- | --- |
@@ -1163,8 +1162,8 @@ host:
   `navigator.clipboard.writeText`;
 - plays sound through `cpal`'s Web Audio host, on the browser's own audio
   thread; seeds entity ids from the page (`random_seed`); runs background
-  work where it is asked for (`THREADS` is `false`), and the font scan
-  finds nothing, so text uses the bundled Ubuntu Light and Hack;
+  work where it is asked for, and the font scan finds nothing, so text
+  uses the bundled Ubuntu Light and Hack;
 - counts as a tablet or phone (by the shorter side of the screen) when
   touch is how the page is used (touch points and no fine pointer), else
   as a desktop (`FormFactor::for_browser`); a phone whose user agent no
@@ -1372,10 +1371,10 @@ pub trait SueApplet: Send {
 
 The **role** decides where an applet lives. A `Studio` is a whole workspace
 for making something (Sue Paint, Sue Writer); a `Tool` does a focused job on a
-file or an entity (the Image Viewer, the Converter). Both fill the **page**
-under the top bar (`page_ui`) and put their menus in the bar after the Sue
-button (`bar_ui`), so a tool opens exactly like a studio. A `Window` (Settings)
-floats over the page. There are no side panels.
+file or an entity (Sue ships none of its own; a package may add one). Both
+fill the **page** under the top bar (`page_ui`) and put their menus in the
+bar after the Sue button (`bar_ui`), so a tool opens exactly like a studio.
+A `Window` (Settings) floats over the page. There are no side panels.
 
 **The Hub** is the page Sue opens on, a full page and not an overlay: a
 heading **Studios** with a box for every `Studio` manifest, then **Tools** with
@@ -1423,7 +1422,7 @@ down under the button, built for what is open (`MenuBar::dropdown`):
 | New | A submenu per kind of file from the applets' `templates` (a `FileTemplate` names a category such as Picture, the exact kind such as Square Post, and a key the applet's `create` gets back; the applet makes it and opens itself) |
 | File | Open File (`Ctrl+O`), Open Recent (the `WorkList`'s ten newest), and what applets add there |
 | Project | Open Project, Save Project (`Ctrl+S`), Save Project As |
-| Send To | What the page works on (`focus`), into every other studio or tool whose `accepts` takes it (`ShellRequest::OpenIn`), and what applets add (`SueAction`s, such as Converter, or Sue Writer for a picture) |
+| Send To | What the page works on (`focus`), into every other studio or tool whose `accepts` takes it (`ShellRequest::OpenIn`), and what applets add (`SueAction`s, such as Sue Writer for a picture) |
 | Any other submenu | `SueAction`s on a menu of an applet's own |
 | Language | Sue's language (`ShellRequest::Language`) |
 | Layout | Automatic (naming the device's own), Desktop, Tablet, Phone (`ShellRequest::Interface`; no Desktop on a touch device), and Phone Shaped while a computer shows the phone layout (`ShellRequest::PhoneFrame`) |
@@ -1439,12 +1438,13 @@ beside the Sue button.
 
 **Shared features.** Sue owns its features and every studio uses them: one
 color wheel (`color_button`), one way to pick and save files (`FilePick`,
-answered by the system's dialogs), one Converter, one theme system, and the
-shared models. When a studio needs more, the shared feature gains a mode or
-parameter. Work moves between studios by `EntityId`: `ShellRequest::OpenIn {
-entity, applet }` hands an entity to a studio or tool (`take_entity` with the
-purpose `open`) and opens its page, and `ShellRequest::SendEntity` hands one
-to an applet for a purpose of its own (`figure`, `add`, `adopt`).
+answered by the system's dialogs), one set of export formats in `sue-io`,
+one theme system, and the shared models. When a studio needs more, the
+shared feature gains a mode or parameter. Work moves between studios by
+`EntityId`: `ShellRequest::OpenIn { entity, applet }` hands an entity to a
+studio or tool (`take_entity` with the purpose `open`) and opens its page,
+and `ShellRequest::SendEntity` hands one to an applet for a purpose of its
+own (`figure`, `adopt`).
 
 **Opening files.** A file opened anywhere (Open File, a drop on the window)
 goes first to an applet whose `opens_file` takes it as it is (Sue Writer:
@@ -1713,8 +1713,6 @@ register its own:
 | --- | --- | --- | --- |
 | Sue Paint | Studio | Picture: Illustration, Print A4, Full HD, Square Post, Sprite, Custom... | The painting studio (§3.7) |
 | Sue Writer | Studio | Document (Blank Document, Letter, Resume, Report and the other templates) and Presets (Novel, Short Story, Screenplay, ...), all read from template files (§3.8) | The writing and publishing studio (§3.8) |
-| Image Viewer | Tool | n/a | One picture filling its page: fit, 100% and wheel zoom, panning, the project's next and previous pictures; simple edits (turn, mirror, crop, resize, brightness and contrast, saturation and hue, grayscale, invert), each one undo step on the same entity (`ReplaceComponent`); menus File (Open Picture, Save As in any picture format, Save Over, a lossless JPEG XL re-encode, Show in Folder, Back to the Hub), Image, View and Send (the Converter, Sue Paint and Sue Writer by `EntityId`), and a toolbar under them |
-| Converter | Tool | n/a | Any file in (Add Files, Add a Folder, the project's pictures and sounds, or Send To from any studio or tool); a target per kind (pictures: PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, TGA, QOI, ICO, PPM; sounds: FLAC, WAV, AIFF; text: tidied, Markdown to HTML, CSV, TSV, JSON; anything: Base64, hex dump, byte map, copy); picture resizing with Lanczos, bicubic, bilinear or nearest in premultiplied alpha, turns, mirrors, brightness, contrast, saturation, grays, flattening; sound trimming, channels, Lanczos resampling, speed, reverse, gain or normalizing, fades, depth; text tidying; output folder ("Next to each file" asks for one first where a result beside its file would stay in Sue's cache, `stays_in_cache`), name pattern and keep or replace (never the source); files convert on a background thread; menus File and Convert (`Ctrl+Enter`) |
 | Settings | Window | n/a | Preferences by category (§4.3) |
 
 ### 3.7 Sue Paint (`sue-paint`)
@@ -1801,8 +1799,8 @@ pictures made, opened, loaded with a project or brought back by redo, and
 closing a tab leaves the picture in the project. The studio keeps only views,
 screen images, the current layer and selections. Other studios and tools reach
 the same entity by `EntityId`: Send To Sue Paint opens a layered picture as it
-is, and any other picture (from the Image Viewer, say) becomes a layered
-picture whose layer is that very entity.
+is, and any other picture (a raster entity of the project, say) becomes a
+layered picture whose layer is that very entity.
 
 **Painting.** The brush engine (`sue_paint::brush`) is built so lines come out
 clean without the brush feeling slow. A stroke passes through these stages:
@@ -2720,7 +2718,7 @@ Fluent messages (plurals, variables, selectors) under
 `crates/sue-lang/locales/<tag>/`, one `.ftl` file per namespace. Each part of
 Sue reads its own namespace: `wm` (the shell), `sue` (the window, files and
 projects), `settings` (the Settings pages), `rice` (the settings themselves),
-`viewer`, `convert`, `type` (the text editor), `writer`, `paint`, `model`
+`type` (the text editor), `writer`, `paint`, `model`
 (blend modes) and `io` (codecs). The build script finds the language folders
 and embeds them, so no list in the code names a language; plug-ins add their
 own namespace, or a whole language, at runtime with
@@ -2876,7 +2874,7 @@ packages can add their own:
 | Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder and JPEG quality, the open-file size limit, byte-map width, the built-in codecs |
 | Studios | Each studio's own settings and theme: for Sue Paint the new picture size and resolution, `sue_paint.theme` (Gray by default, the Sue theme, a preset, or Custom) and the Custom colors (`sue_paint_colors`) |
 | Packages & Updates | The signature policy, the installed applets, installed packages, the active generation and rollback state |
-| Keymaps | Every shortcut as an action with all its chords: Sue's own, then Sue Paint's (Clip Studio Paint's defaults, tools and brush keys too), Sue Writer's and the Image Viewer's |
+| Keymaps | Every shortcut as an action with all its chords: Sue's own, then Sue Paint's (Clip Studio Paint's defaults, tools and brush keys too) and Sue Writer's |
 | MCP | "Not yet available." (a `SettingsItem::Note`) |
 
 Any rice section no page claims is listed on a final "Other" page, so every

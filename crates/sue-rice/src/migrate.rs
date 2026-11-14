@@ -306,6 +306,39 @@ mod tests {
     }
 
     #[test]
+    fn the_image_viewer_and_the_converter_left_the_shipped_settings() {
+        // Sue no longer has the two tools: their language and key settings
+        // are gone from the shipped file, and the io settings stay.
+        let shipped = RiceSchema::parse(DEFAULT_RICE).unwrap();
+        for gone in [
+            "image_viewer.language",
+            "convert.language",
+            "image_viewer_keys.viewer_next",
+            "image_viewer_keys.viewer_save_as",
+        ] {
+            assert!(shipped.get(gone).is_none(), "{gone}");
+        }
+        for kept in ["io.convert_dir", "io.jpeg_quality", "io.jxl_effort"] {
+            assert!(shipped.get(kept).is_some(), "{kept}");
+        }
+        // A 0.0.75 file that never touched them migrates without a word.
+        let migration = migrate(V6).unwrap().unwrap();
+        assert!(migration.dropped.is_empty(), "{:?}", migration.dropped);
+        // One that set a language or rebound a key has it reported.
+        let custom = with_language(V6, "image_viewer", "ja")
+            .replace("viewer_crop = \"C\" ", "viewer_crop = \"K\" ");
+        let schema = RiceSchema::parse(&custom).unwrap();
+        assert_eq!(schema.get_str("image_viewer.language"), Some("ja"));
+        let migration = migrate(&custom).unwrap().unwrap();
+        assert_eq!(
+            migration.dropped,
+            ["image_viewer.language", "image_viewer_keys.viewer_crop"]
+        );
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert!(schema.get("image_viewer_keys.viewer_crop").is_none());
+    }
+
+    #[test]
     fn quit_sue_is_no_longer_asked_unless_someone_chose_it() {
         // Format 6 stops asking "Quit Sue?" (work not saved is still asked
         // about); a format 5 file that never changed it follows.

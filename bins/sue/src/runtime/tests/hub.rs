@@ -11,22 +11,15 @@ fn a_click_on_a_hub_box_glides_its_studio_in_and_then_sleeps() {
         Vec::new()
     });
     assert!(runtime.shell.hub_open());
-    // Studios first, then tools, each a box with its pin.
+    // The studios, each a box with its pin. Sue ships no tool; one that
+    // a package adds would follow them.
     let boxes: Vec<&str> = runtime
         .shell
         .hub_boxes()
         .iter()
         .map(|(id, _, _)| id.as_str())
         .collect();
-    assert_eq!(
-        boxes,
-        [
-            sue_paint::ID,
-            sue_writer::ID,
-            crate::viewer::ID,
-            crate::convert::ID
-        ]
-    );
+    assert_eq!(boxes, [sue_paint::ID, sue_writer::ID]);
     let (rect, _) = hub_box(&runtime, sue_paint::ID).expect("Sue Paint's box");
     let at = rect.left_top() + vec2(30.0, 30.0);
     let count = frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, click_at(at));
@@ -88,8 +81,8 @@ fn pages_slide_in_over_the_hub_and_back_out() {
     assert!(runtime.shell.reveal() < 0.001);
     assert_eq!(
         runtime.shell.hub_boxes().len(),
-        4,
-        "the Hub shows every studio and tool again"
+        2,
+        "the Hub shows both studios again"
     );
 
     // With instant transitions the same trip takes a frame or two.

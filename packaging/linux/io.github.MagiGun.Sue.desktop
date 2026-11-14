@@ -7,6 +7,6 @@ Exec=sue %F
 Icon=io.github.MagiGun.Sue
 Terminal=false
 Categories=Graphics;2DGraphics;RasterGraphics;
-MimeType=image/png;image/jpeg;image/jxl;image/vnd.adobe.photoshop;image/webp;audio/flac;audio/x-wav;text/plain;
+MimeType=image/png;image/jpeg;image/jxl;image/vnd.adobe.photoshop;image/webp;text/plain;
 Keywords=paint;draw;illustration;comic;animation;write;audio;
 StartupWMClass=io.github.MagiGun.Sue

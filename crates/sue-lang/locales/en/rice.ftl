@@ -148,17 +148,17 @@ input-wheel_line_px = Wheel line (px)
 ## [io]
 
 io-jxl_effort = JPEG XL effort
-    .description = JPEG XL effort for conversions (higher is smaller and slower)
+    .description = JPEG XL effort for exports (higher is smaller and slower)
 io-jpeg_lossless_transcode = JPEG lossless transcode
     .description = Recompress JPEG to JPEG XL bit for bit when a recompression codec is installed
 io-jpeg_quality = JPEG quality
-    .description = JPEG quality for conversions to .jpg
+    .description = JPEG quality for exports to .jpg
 io-byte_map_width = Byte map width
     .description = Columns in the byte map of unknown files
 io-max_ingest_mib = Max ingest (MiB)
     .description = Largest file Sue opens (MiB)
 io-convert_dir = Convert dir
-    .description = Folder for converted files (empty saves next to the source)
+    .description = Folder for exported and batch converted files (empty saves next to the source)
 
 ## [audio]
 
@@ -307,16 +307,6 @@ sue_writer-dark_paper = Dark paper
 sue_writer-spell_check = Spell check
     .description = Underline misspelled words while typing
 sue_writer-language = Language
-    .description = Language: sue follows Sue's language, a language tag sets this one apart
-
-## [image_viewer]
-
-image_viewer-language = Language
-    .description = Language: sue follows Sue's language, a language tag sets this one apart
-
-## [convert]
-
-convert-language = Language
     .description = Language: sue follows Sue's language, a language tag sets this one apart
 
 ## [keys]
@@ -559,27 +549,3 @@ sue_writer_keys-format_shrink = Format shrink
     .description = Shrink Font
 sue_writer_keys-insert_mark_nbsp = Insert mark nbsp
     .description = Non-breaking Space
-
-## [image_viewer_keys]
-
-image_viewer_keys-viewer_next = Viewer next
-    .description = Next Picture
-image_viewer_keys-viewer_previous = Viewer previous
-    .description = Previous Picture
-image_viewer_keys-viewer_fit = Viewer fit
-    .description = Fit to the Window
-image_viewer_keys-viewer_actual = Viewer actual
-    .description = Actual Size
-image_viewer_keys-viewer_zoom_in = Viewer zoom in
-    .description = Zoom In
-image_viewer_keys-viewer_zoom_out = Viewer zoom out
-    .description = Zoom Out
-image_viewer_keys-viewer_rotate_right = Viewer rotate right
-    .description = Turn Right
-image_viewer_keys-viewer_rotate_left = Viewer rotate left
-    .description = Turn Left
-image_viewer_keys-viewer_crop = Viewer crop
-    .description = Crop
-image_viewer_keys-viewer_save_as = Viewer save as
-    .description = Save As
-
