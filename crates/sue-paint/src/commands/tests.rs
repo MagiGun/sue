@@ -450,3 +450,114 @@ fn a_key_given_to_a_command_without_one_runs_it() {
         "Ctrl+M is free"
     );
 }
+
+/// Every key the menus show, pressed: the shortcut code Sue Paint reads
+/// its keys with ([`super::SuePaint::keys`]) answers with the very command
+/// of the item, and the items the shell runs (Undo, Redo, Open, Save,
+/// Quit) show a key of the shell's own settings for that command.
+#[test]
+fn every_menu_item_shows_the_chord_that_runs_it() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let table = shortcut_table();
+    let section = super::KEYS_SECTION;
+    let mut rice = sue_rice::RiceSchema::new();
+    sue_wm::register_rice(&mut rice).expect("the shell's settings register");
+    rice.register_all(&sue_wm::shortcuts::declarations(section, table))
+        .expect("the key settings register");
+    let mut menus = crate::menus::menus();
+    crate::menus::set_canvases(&mut menus, &["Illustration".to_owned()]);
+    let mut bound = sue_wm::shortcuts::Bound::default();
+    bound.refresh(&mut menus, &rice, section, table);
+
+    fn shown(items: &[MenuItem], out: &mut Vec<(String, String)>) {
+        for item in items {
+            match item {
+                MenuItem::Action {
+                    command, shortcut, ..
+                } if !shortcut.is_empty() => out.push((command.clone(), shortcut.clone())),
+                MenuItem::Sub { items, .. } => shown(items, out),
+                _ => {}
+            }
+        }
+    }
+    let mut items = Vec::new();
+    for menu in &menus {
+        shown(&menu.items, &mut items);
+    }
+    assert!(
+        items.len() > 50,
+        "the items show their keys: {}",
+        items.len()
+    );
+
+    let shell = [
+        ("edit.undo", &["keys.undo"][..]),
+        ("edit.redo", &["keys.redo", "keys.redo_alt"][..]),
+        ("file.open", &["keys.open_file"][..]),
+        ("file.save", &["keys.save"][..]),
+        ("app.quit", &["keys.quit"][..]),
+    ];
+    let ctx = egui::Context::default();
+    let mut checked = 0;
+    for (command, text) in &items {
+        let chord: sue_rice::Keybind = text
+            .parse()
+            .unwrap_or_else(|_| panic!("{command} shows {text:?}, which is no chord"));
+        if let Some((_, settings)) = shell.iter().find(|(name, _)| name == command) {
+            let runs = settings.iter().any(|setting| {
+                rice.get_keybind(setting)
+                    .is_some_and(|chords| chords.chords().contains(&chord))
+            });
+            assert!(
+                runs,
+                "{command} shows {text}, which the shell does not run it with"
+            );
+            continue;
+        }
+        let key = sue_wm::keys::egui_key(chord.key)
+            .unwrap_or_else(|| panic!("{command} shows {text}, which no key can press"));
+        let modifiers = egui::Modifiers {
+            alt: chord.modifiers.alt,
+            ctrl: chord.modifiers.ctrl,
+            shift: chord.modifiers.shift,
+            mac_cmd: false,
+            command: chord.modifiers.ctrl || chord.modifiers.super_key,
+        };
+        let input = egui::RawInput {
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }],
+            ..Default::default()
+        };
+        let mut ran = Vec::new();
+        ctx.run_ui(input, |ui| {
+            ran = ui
+                .ctx()
+                .input_mut(|input| bound.take(input, &rice, section, table));
+        })
+        .drop_without_applying_deltas();
+        assert_eq!(ran, [command.as_str()], "{text}, shown beside {command}");
+        checked += 1;
+    }
+    assert!(checked > 45, "{checked} chords pressed");
+    // The defects the menus had: Delete Outside Selection showed
+    // Shift+Del, which filled; Rotate Right showed a key it was not bound
+    // to; Preferences showed Ctrl+, while Ctrl+K opened it.
+    let key_of = |command: &str| {
+        items
+            .iter()
+            .find(|(name, _)| name == command)
+            .map(|(_, text)| text.as_str())
+    };
+    assert_eq!(key_of("edit.clear_outside"), Some("Shift+Delete"));
+    assert_eq!(key_of("edit.fill"), Some("Alt+Delete"));
+    assert_eq!(key_of("file.preferences"), Some("Ctrl+K"));
+    assert_eq!(key_of("file.shortcuts"), Some("Ctrl+Alt+Shift+K"));
+    assert_eq!(key_of("file.modifiers"), Some("Ctrl+Alt+Shift+Y"));
+    assert_eq!(key_of("view.rotate_right"), Some("="));
+    assert_eq!(key_of("window.hide_all"), Some("Tab"));
+}
