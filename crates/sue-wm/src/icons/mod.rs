@@ -101,6 +101,9 @@
 //! on.
 
 mod cache;
+mod chrome;
+mod edit;
+mod file;
 pub mod fit;
 pub mod path;
 pub mod raster;
@@ -419,6 +422,255 @@ icons! {
     /// A padlock: a body with a keyhole and a shackle over it. Locked;
     /// solid for the state that is on.
     Lock = "lock" => reference::LOCK,
+
+    // Group A: the window, moving about and the small shared controls
+    // (`chrome.rs`).
+    /// A level line across the middle, a little shorter than the minus.
+    /// Puts a window away, down to the bar.
+    WindowMinimize = "window-minimize" => chrome::WINDOW_MINIMIZE,
+    /// One box that fills the picture. Makes a window fill the screen.
+    WindowMaximize = "window-maximize" => chrome::WINDOW_MAXIMIZE,
+    /// A box in front of the corner of a second box. Brings a window
+    /// that fills the screen back to its own size.
+    WindowRestore = "window-restore" => chrome::WINDOW_RESTORE,
+    /// A large cross from corner to corner. Closes a window.
+    WindowClose = "window-close" => chrome::WINDOW_CLOSE,
+    /// A cross, clearly smaller than the one of the window. Closes or
+    /// removes the thing it sits on: a tab, a tag, a search.
+    Close = "close" => chrome::CLOSE,
+    /// A tick: a short stroke down and a long one up to the right.
+    /// Chosen, done, switched on.
+    Check = "check" => chrome::CHECK,
+    /// An angle that points left. Back, the one before, fold in.
+    ChevronLeft = "chevron-left" => chrome::CHEVRON_LEFT,
+    /// An angle that points right. On, the next one, a list that opens
+    /// to the side.
+    ChevronRight = "chevron-right" => chrome::CHEVRON_RIGHT,
+    /// An angle that points up. Fold away, one up.
+    ChevronUp = "chevron-up" => chrome::CHEVRON_UP,
+    /// An angle that points down. Unfold, one down.
+    ChevronDown = "chevron-down" => chrome::CHEVRON_DOWN,
+    /// Two angles, one behind the other, that point left. Fold a whole
+    /// side of the window away to the left, or go to the very first.
+    ChevronsLeft = "chevrons-left" => chrome::CHEVRONS_LEFT,
+    /// Two angles, one behind the other, that point right. Fold a whole
+    /// side of the window away to the right, or go to the very last.
+    ChevronsRight = "chevrons-right" => chrome::CHEVRONS_RIGHT,
+    /// A small solid triangle that points down. A button that opens a
+    /// list under it; an open branch of a tree.
+    CaretDown = "caret-down" => chrome::CARET_DOWN,
+    /// A small solid triangle that points right. A closed branch of a
+    /// tree.
+    CaretRight = "caret-right" => chrome::CARET_RIGHT,
+    /// An arrow to the left: a shaft and an open head. Go back.
+    ArrowLeft = "arrow-left" => chrome::ARROW_LEFT,
+    /// An arrow to the right: a shaft and an open head. Go on.
+    ArrowRight = "arrow-right" => chrome::ARROW_RIGHT,
+    /// An arrow that points up: a shaft and an open head. Move up.
+    ArrowUp = "arrow-up" => chrome::ARROW_UP,
+    /// An arrow that points down: a shaft and an open head. Move down.
+    ArrowDown = "arrow-down" => chrome::ARROW_DOWN,
+    /// Three level lines of one length, one under the other and
+    /// spread over the height of the picture. Opens a menu.
+    Menu = "menu" => chrome::MENU,
+    /// Three solid dots in a row, as wide as the picture. More that did
+    /// not fit.
+    More = "more" => chrome::MORE,
+    /// Three solid dots, one under the other, as tall as the picture.
+    /// More, on a narrow or upright bar.
+    MoreVertical = "more-vertical" => chrome::MORE_VERTICAL,
+    /// Six solid dots, two beside each other three times. A place to
+    /// take hold of and drag.
+    Grip = "grip" => chrome::GRIP,
+    /// A plus: an upright and a level line that cross. Add.
+    Plus = "plus" => chrome::PLUS,
+    /// A minus: one level line across the middle, a little heavier than
+    /// a stroke so that it holds its own at 16 points. Take away.
+    Minus = "minus" => chrome::MINUS,
+    /// A funnel: wide at the top, with a narrow spout. Show only what
+    /// passes.
+    Filter = "filter" => chrome::FILTER,
+    /// An arrow that points up beside three lines that grow longer
+    /// downward. Sorted from first to last.
+    SortUp = "sort-up" => chrome::SORT_UP,
+    /// An arrow that points down beside three lines that grow shorter
+    /// downward. Sorted from last to first.
+    SortDown = "sort-down" => chrome::SORT_DOWN,
+    /// Four boxes, two by two. Shown as large cards.
+    ViewGrid = "view-grid" => chrome::VIEW_GRID,
+    /// Nine small solid squares, three by three. Shown as small cards.
+    ViewGridSmall = "view-grid-small" => chrome::VIEW_GRID_SMALL,
+    /// Three rows, each a solid dot and a line. Shown as a list.
+    ViewList = "view-list" => chrome::VIEW_LIST,
+    /// A box with its top right corner open and an arrow leaving
+    /// through it. Opens outside Sue.
+    External = "external" => chrome::EXTERNAL,
+    /// A ring with a large angle in it that points right. Everything
+    /// about one thing, on a page of its own.
+    Details = "details" => chrome::DETAILS,
+    /// A pushpin standing upright: a cap, a neck that widens into a
+    /// plate, and a needle. Kept in place; solid when it is.
+    Pin = "pin" => chrome::PIN,
+    /// A ring with a question mark in it. Help.
+    Help = "help" => chrome::HELP,
+    /// A triangle with round corners that stands on its base, and in it
+    /// an exclamation mark. Take care: something may go wrong.
+    Warning = "warning" => chrome::WARNING,
+    /// A sign with eight sides and in it an exclamation mark. Something
+    /// went wrong and stopped.
+    Error = "error" => chrome::ERROR,
+    /// A large question mark by itself. Sue asks and waits for an
+    /// answer.
+    Question = "question" => chrome::QUESTION,
+    /// A ring with a large solid dot in it. The one that is chosen, of
+    /// several.
+    RadioOn = "radio-on" => chrome::RADIO_ON,
+    /// An empty ring. One that is not chosen, of several.
+    RadioOff = "radio-off" => chrome::RADIO_OFF,
+    /// A ring, open at the right, that runs clockwise and ends in the
+    /// corner of an arrow head. Load again.
+    Reload = "reload" => chrome::RELOAD,
+    /// A house: a roof, walls and a door. The start page.
+    Home = "home" => chrome::HOME,
+
+    // Group B: files and what is done with data (`file.rs`).
+    /// A sheet of paper with a folded corner and a plus on it. A new
+    /// file.
+    FileNew = "file-new" => file::FILE_NEW,
+    /// An open folder with a sheet of paper standing up out of it
+    /// behind its front. Open a file.
+    FileOpen = "file-open" => file::FILE_OPEN,
+    /// A folder whose front leans open. A folder that shows what is in
+    /// it.
+    FolderOpen = "folder-open" => file::FOLDER_OPEN,
+    /// A closed folder with a plus on it. A new folder.
+    FolderNew = "folder-new" => file::FOLDER_NEW,
+    /// A storage disk: a square case with one corner cut, a shutter at
+    /// the top and a label below. Save.
+    Save = "save" => file::SAVE,
+    /// The storage disk with three dots in place of its label. Save
+    /// under another name; Sue asks which.
+    SaveAs = "save-as" => file::SAVE_AS,
+    /// An arrow that goes from the left into a box open on that side.
+    /// Bring something in from a file.
+    Import = "import" => file::IMPORT,
+    /// An arrow that leaves to the right from a box open on that side.
+    /// Write something out to a file.
+    Export = "export" => file::EXPORT,
+    /// A sheet of paper with a folded corner and an arrow that leaves
+    /// it to the right. Make the finished pages: a PDF.
+    ExportPdf = "export-pdf" => file::EXPORT_PDF,
+    /// A printer: a box, a sheet going in at the top and a sheet coming
+    /// out at the front. Print.
+    Print = "print" => file::PRINT,
+    /// An arrow that points down into a tray. Fetch something and keep
+    /// it.
+    Download = "download" => file::DOWNLOAD,
+    /// Two arrows side by side, one up and one down. What is being sent
+    /// and fetched.
+    Transfers = "transfers" => file::TRANSFERS,
+    /// A sheet in front of the corner of a second sheet. Copy.
+    Copy = "copy" => file::COPY,
+    /// A pair of scissors, open, points up. Cut.
+    Cut = "cut" => file::CUT,
+    /// A clipboard: a board with a clip at its top and two lines of
+    /// writing. Paste.
+    Paste = "paste" => file::PASTE,
+    /// A sheet in front of the corner of a second sheet, with a plus on
+    /// it. Make another one of this.
+    Duplicate = "duplicate" => file::DUPLICATE,
+    /// A text field with a little writing in it and a text cursor
+    /// after the writing. Give another name.
+    Rename = "rename" => file::RENAME,
+    /// A pencil, point down to the left, over the line it is writing.
+    /// Edit.
+    Edit = "edit" => file::EDIT,
+    /// A label with a hole for its string: square at one end, pointed
+    /// at the other. A tag.
+    Tag = "tag" => file::TAG,
+    /// A closed folder with an arrow in it that points right. Move
+    /// into a folder.
+    MoveTo = "move-to" => file::MOVE_TO,
+    /// A clock: a ring and two hands. Used a short while ago.
+    Recent = "recent" => file::RECENT,
+    /// A clock whose ring runs backward and ends in the corner of an
+    /// arrow head. What was done, step by step.
+    History = "history" => file::HISTORY,
+    /// Two links of a chain, joined. A link to something elsewhere.
+    Link = "link" => file::LINK,
+    /// A wrench lying from the bottom left up to its open jaw at the
+    /// top right. Tools, repair, setting up.
+    Wrench = "wrench" => file::WRENCH,
+    /// An asterisk of six arms: the sign that stands for anything.
+    /// Everything, with nothing left out.
+    All = "all" => file::ALL,
+
+    // Group C: editing and the view (`edit.rs`).
+    /// An arrow that comes back to the left out of a turn. Undo.
+    Undo = "undo" => edit::UNDO,
+    /// An arrow that goes on to the right out of a turn. Redo.
+    Redo = "redo" => edit::REDO,
+    /// A magnifier with a plus in its lens. Zoom in.
+    ZoomIn = "zoom-in" => edit::ZOOM_IN,
+    /// A magnifier with a minus in its lens. Zoom out.
+    ZoomOut = "zoom-out" => edit::ZOOM_OUT,
+    /// The four corners of a frame around a small box. Show the whole
+    /// picture in the window.
+    ZoomFit = "zoom-fit" => edit::ZOOM_FIT,
+    /// The numbers one to one, with a colon between them. One pixel of
+    /// the picture on one of the screen.
+    ZoomActual = "zoom-actual" => edit::ZOOM_ACTUAL,
+    /// An upright line with a triangle on its left that points away from
+    /// it, and the same triangle mirrored, solid, on its right. Flip left
+    /// to right.
+    FlipHorizontal = "flip-horizontal" => edit::FLIP_HORIZONTAL,
+    /// A level line with a triangle above it that points away from it,
+    /// and the same triangle mirrored, solid, below. Flip top to bottom.
+    FlipVertical = "flip-vertical" => edit::FLIP_VERTICAL,
+    /// A box, and a quarter of a circle with an arrow head that turns
+    /// over it to the left. Turn a quarter counterclockwise.
+    RotateLeft = "rotate-left" => edit::ROTATE_LEFT,
+    /// A box, and a quarter of a circle with an arrow head that turns
+    /// over it to the right. Turn a quarter clockwise.
+    RotateRight = "rotate-right" => edit::ROTATE_RIGHT,
+    /// An arrow that runs backward round a solid dot. Back to how it
+    /// was at the start.
+    Reset = "reset" => edit::RESET,
+    /// Two level arrows, the upper to the right and the lower to the
+    /// left. The two change places.
+    Swap = "swap" => edit::SWAP,
+    /// An empty square and a solid one side by side at the bottom, and
+    /// an arrow that arcs over from the first into the place of the
+    /// second. Put another in its place.
+    Replace = "replace" => edit::REPLACE,
+    /// An upright arrow with a head at both ends beside three lines of
+    /// one length. Turn the order round.
+    Reverse = "reverse" => edit::REVERSE,
+    /// A ring with a tick in it. Yes: apply it.
+    Confirm = "confirm" => edit::CONFIRM,
+    /// A ring with a cross in it. No: leave it.
+    Cancel = "cancel" => edit::CANCEL,
+    /// The open eye, struck through from the top left to the bottom
+    /// right. Hidden.
+    EyeOff = "eye-off" => edit::EYE_OFF,
+    /// The padlock with its shackle open: one end free, lifted off the
+    /// body. Not locked.
+    Unlock = "unlock" => edit::UNLOCK,
+    /// Two arrows that point apart, to the top right and to the bottom
+    /// left corner. Fill the whole screen.
+    Fullscreen = "fullscreen" => edit::FULLSCREEN,
+    /// A keyboard: a wide box with a row of keys and a long key under
+    /// them. Keyboard shortcuts.
+    Keyboard = "keyboard" => edit::KEYBOARD,
+    /// A crescent moon. The dark look.
+    Moon = "moon" => edit::MOON,
+    /// A sun: a ring with eight short rays. The light look.
+    Sun = "sun" => edit::SUN,
+    /// A globe: a ring, the line round its middle and a narrow oval
+    /// from pole to pole. The language.
+    Language = "language" => edit::LANGUAGE,
+    /// A ring with an arrow in it that points up. A newer version.
+    Update = "update" => edit::UPDATE,
 }
 
 /// Frames drawn without a window or a GPU, for the tests of this module.
