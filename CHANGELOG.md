@@ -171,6 +171,9 @@ follow [Semantic Versioning](https://semver.org/).
   faces none, Split Pages on a page that is no spread, and Change Page
   Settings and Export All Pages on a picture that is no story. Before,
   they looked ready and did nothing or only said why.
+- Add Page, Insert Page and Duplicate Page on a picture that is no story
+  yet are one undo step: one Ctrl+Z leaves the picture as it was,
+  instead of a story of one page.
 
 ### Removed
 

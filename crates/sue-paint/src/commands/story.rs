@@ -104,9 +104,33 @@ fn step(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
     }
 }
 
+/// Runs `work` as one undo step called `label`, however many edits it
+/// applies. Add Page and Duplicate Page on a picture that is in no story
+/// first make it one (an edit of its own); undone, both go together.
+fn one_step(cx: &mut AppletContext<'_>, label: String, work: impl FnOnce(&mut AppletContext<'_>)) {
+    // Words being typed are a step of their own, before this one.
+    cx.typing.flush(cx.history);
+    let mark = cx.history.cursor();
+    work(cx);
+    let mut steps = cx.history.take_since(mark);
+    if steps.len() == 1 {
+        cx.history.record_boxed(steps.remove(0));
+    } else if !steps.is_empty() {
+        let mut batch = sue_core::txn::Batch::new(label);
+        for step in steps {
+            batch.push(step);
+        }
+        cx.history.record(batch);
+    }
+}
+
 /// Add Page puts a page after the one shown, Insert Page before it; the
 /// picture becomes a story's first page if it is in none.
 fn add(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    one_step(cx, tr!("add-page"), |cx| add_page(paint, cx, call));
+}
+
+fn add_page(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
     let Some(picture) = paint.picture() else {
         return;
     };
@@ -135,6 +159,10 @@ fn add(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
 
 /// Duplicate Page: a copy of the page shown, after it.
 fn duplicate(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    one_step(cx, tr!("duplicate-page"), |cx| duplicate_page(paint, cx));
+}
+
+fn duplicate_page(paint: &mut SuePaint, cx: &mut AppletContext<'_>) {
     let Some(picture) = paint.picture() else {
         return;
     };
