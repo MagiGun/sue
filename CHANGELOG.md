@@ -35,6 +35,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint's pen strokes no longer end in a blob wider than the line
+  with tablets whose pressure comes from the driver (Windows Ink turned
+  off, X11, a browser): the stroke's last points keep the pressure the
+  pen had as it lifted instead of taking full pressure, and letting go
+  no longer paints one more point. A big brush lifted with a hook no
+  longer leaves a scrap of the hook behind.
 - Sue Paint's palette icons in the strips beside the canvas answer clicks
   again: the grip that drags an icon out of the strip was sitting over the
   icon and taking its clicks, so a collapsed palette could not be opened

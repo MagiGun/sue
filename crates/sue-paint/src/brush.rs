@@ -1446,7 +1446,10 @@ impl Stroke {
         // A smooth curve through the samples, so even a fast mouse that
         // reported only a few points ends as a curve, not a polygon.
         let step = (self.tip.size * 0.05).clamp(0.75, 8.0);
-        let mut path = spline(&trim_hooks(&self.samples, self.tip.size), step);
+        let trimmed = trim_hooks(&self.samples, self.tip.size);
+        // How much of the line as drawn the trimming took off its ends.
+        let cut = (length(&self.samples) - length(&trimmed)).max(0.0);
+        let mut path = spline(&trimmed, step);
         if finish.correction > 0 {
             path = correct(&path, finish.correction, self.tip.size);
         }
@@ -1469,7 +1472,7 @@ impl Stroke {
         // Only the tapered ends change when the pen lifts: the tiles near
         // them are drawn again and the rest of the stroke stays, so a long
         // stroke finishes as quickly as a short one.
-        let only = self.ends_only(&path, finish);
+        let only = self.ends_only(&path, finish, cut);
         // What the screen shows now, to tell it afterwards only what the
         // finished stroke changed (its ends, mostly), not the whole stroke.
         let shown = self.shown_in(raster, only.as_ref());
@@ -1496,11 +1499,13 @@ impl Stroke {
     /// change, when only they need drawing again; `None` when all of it
     /// does (post correction moves every point, a mixing brush picks up
     /// what is under it, a ribbon spans the whole stroke, or the ends
-    /// reach most of the way along).
+    /// reach most of the way along). `cut` is how much of the line as
+    /// drawn was trimmed off its ends as hooks.
     fn ends_only(
         &self,
         path: &[Sample],
         finish: Finish,
+        cut: f32,
     ) -> Option<std::collections::BTreeSet<(u32, u32)>> {
         let tip = &self.tip;
         if finish.correction > 0 || tip.mix > 0.0 || tip.ribbon || self.picture.is_some() {
@@ -1527,29 +1532,46 @@ impl Stroke {
         }
         let reach = tip.size + tip.aa.edge() + 3.0;
         let mut keys = std::collections::BTreeSet::new();
-        let mut s = 0.0;
-        let mut last: Option<[f32; 2]> = None;
-        for point in path {
-            if let Some(last) = last {
-                s += distance(last, point.at);
-            }
-            last = Some(point.at);
-            if s > head && s < total - tail {
-                continue;
-            }
-            let [x, y] = point.at;
-            let (x0, y0) = (
-                ((x - reach).max(0.0) as u32) / TILE,
-                ((y - reach).max(0.0) as u32) / TILE,
-            );
-            let (x1, y1) = (
-                ((x + reach).max(0.0) as u32) / TILE,
-                ((y + reach).max(0.0) as u32) / TILE,
-            );
-            for ty in y0..=y1 {
-                for tx in x0..=x1 {
-                    keys.insert((ty, tx));
+        // The finished path's ends, and the ends of the line as it was
+        // drawn: a hook trimmed off the path was painted too, and may
+        // reach a tile the finished path comes nowhere near. All of what
+        // was trimmed counts as an end, and every step is walked, since a
+        // fast pointer's hook can be one step that crosses whole tiles.
+        let drawn = (&self.samples[..], length(&self.samples), cut);
+        for (points, total, cut) in [(path, total, 0.0), drawn] {
+            let (head, tail) = (head + cut, tail + cut);
+            let mut s = 0.0;
+            let mut last: Option<[f32; 2]> = None;
+            for point in points {
+                let from = last.unwrap_or(point.at);
+                let far = distance(from, point.at);
+                last = Some(point.at);
+                let steps = (far / (reach * 0.5)).ceil().max(1.0) as usize;
+                for step in 1..=steps {
+                    let t = step as f32 / steps as f32;
+                    let along = s + far * t;
+                    if along > head && along < total - tail {
+                        continue;
+                    }
+                    let (x, y) = (
+                        from[0] + (point.at[0] - from[0]) * t,
+                        from[1] + (point.at[1] - from[1]) * t,
+                    );
+                    let (x0, y0) = (
+                        ((x - reach).max(0.0) as u32) / TILE,
+                        ((y - reach).max(0.0) as u32) / TILE,
+                    );
+                    let (x1, y1) = (
+                        ((x + reach).max(0.0) as u32) / TILE,
+                        ((y + reach).max(0.0) as u32) / TILE,
+                    );
+                    for ty in y0..=y1 {
+                        for tx in x0..=x1 {
+                            keys.insert((ty, tx));
+                        }
+                    }
                 }
+                s += far;
             }
         }
         Some(keys)
@@ -4246,6 +4268,157 @@ mod tests {
         assert!(
             rest.iter().any(|point| point[0] > 79.0 && point[1] < 10.0),
             "it goes by the corner: {rest:?}"
+        );
+    }
+
+    /// A light pen line, drawn as the canvas draws one: 30 points 8 pixels
+    /// apart through the stabilizer at pressure 0.3, then, as the pen
+    /// lifts 3 pixels on, the stabilizer's catch-up points at pressure
+    /// `lift`. Answers the body's median width and the widest column of
+    /// the last two brush sizes (both as [`widths`] has them).
+    fn body_and_end(lift: f32) -> (u32, u32) {
+        let size = 16.0_f32;
+        let mut raster = layer(480, 96);
+        let tip = Tip {
+            size,
+            ..Tip::default()
+        };
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.0; 3], false);
+        let mut stabilizer = Stabilizer::new(40, false);
+        let mut raw = [0.0, 0.0];
+        for step in 0..30 {
+            raw = [40.0 + step as f32 * 8.0, 48.0];
+            let at = stabilizer.sample(raw, 1.0, 0.016);
+            stroke.to(&mut raster, at, 0.3, None);
+        }
+        raw[0] += 3.0;
+        let rest = stabilizer.catch_up(raw);
+        assert!(rest.len() > 4, "the brush trails the pen: {rest:?}");
+        for at in rest {
+            stroke.to(&mut raster, at, lift, None);
+        }
+        stroke.end(&mut raster, Finish::default(), None);
+        let mut body = widths(&raster, 80..200);
+        body.sort_unstable();
+        let median = body[body.len() / 2];
+        assert!(median > 0, "the body was painted");
+        let last = (raw[0] + size * 0.5) as u32 + 2;
+        let end = widths(&raster, last - 2 * size as u32..last)
+            .into_iter()
+            .max()
+            .unwrap_or(0);
+        (median, end)
+    }
+
+    /// The rasterizer paints an end as wide as the pressure it is handed
+    /// and no wider: a stroke's end is bigger than its body only when the
+    /// input side hands the catch-up points more pressure than the pen had.
+    #[test]
+    fn a_strokes_end_is_never_wider_than_its_body_at_the_pens_own_pressure() {
+        let (body, end) = body_and_end(0.3);
+        assert!(
+            end <= body + 255,
+            "caught up at the pen's pressure: the end {end} over the body {body}"
+        );
+        // The full-pressure fallback, as a lifted pen without pressure got
+        // it: the same engine paints the blob, so the blame is the input's.
+        let (body, blob) = body_and_end(1.0);
+        assert!(
+            blob > body * 3 / 2,
+            "caught up at full pressure: the end {blob} over the body {body}"
+        );
+    }
+
+    /// A 40 pixel brush whose line ends in a 28 pixel hook, leaving the
+    /// line at a little more than a right angle and reaching into the next
+    /// row of tiles. The hook is trimmed when the pen lifts, so every pixel
+    /// of it has to go, also those in a tile the finished line comes
+    /// nowhere near.
+    fn hooked(whole: bool) -> RasterTile2D {
+        let mut raster = layer(512, 320);
+        let tip = Tip {
+            taper_start: 20.0,
+            taper_end: 20.0,
+            taper_by_speed: true,
+            ..flat_pen(40.0)
+        };
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.1, 0.2, 0.3], false);
+        stroke.whole = whole;
+        stroke.set_speed(0.1);
+        // The line, level at y 146, 2 pixels a point.
+        for step in 0..=180 {
+            stroke.to(&mut raster, [40.0 + step as f32 * 2.0, 146.0], 1.0, None);
+        }
+        // The hook: 28 pixels down and a little back, to y 172.8. The
+        // brush's edge there is past y 192, where the next tiles begin.
+        let (dx, dy) = (-0.287_f32, 0.958_f32);
+        for step in 1..=14 {
+            let far = step as f32 * 2.0;
+            stroke.to(&mut raster, [400.0 + dx * far, 146.0 + dy * far], 1.0, None);
+        }
+        stroke.end(&mut raster, Finish::default(), None);
+        raster
+    }
+
+    #[test]
+    fn a_hooked_end_across_a_tile_border_redraws_as_the_whole_stroke_does() {
+        let (quick, full) = (hooked(false), hooked(true));
+        // The hook was trimmed: nothing of it is left under the line.
+        let below = |raster: &RasterTile2D| {
+            (170..320)
+                .flat_map(|y| (0..512).map(move |x| (x, y)))
+                .filter(|(x, y)| alpha(raster, *x, *y) > 0)
+                .count()
+        };
+        assert_eq!(below(&full), 0, "a whole redraw leaves no hook");
+        assert_eq!(below(&quick), 0, "redrawing the ends leaves no hook");
+        let differing = quick
+            .bytes()
+            .unwrap()
+            .iter()
+            .zip(full.bytes().unwrap())
+            .filter(|(a, b)| a != b)
+            .count();
+        assert_eq!(differing, 0, "bytes that differ from a whole redraw");
+    }
+
+    /// The same line ending in one long jump back, as a fast mouse reports
+    /// a jerk at the lift: a single 200 pixel step, trimmed as a hook. It
+    /// crosses rows of tiles that neither the finished line's end nor the
+    /// jump's own end comes near.
+    fn jerked(whole: bool) -> RasterTile2D {
+        let mut raster = layer(512, 448);
+        let tip = Tip {
+            taper_start: 20.0,
+            taper_end: 20.0,
+            taper_by_speed: true,
+            ..flat_pen(40.0)
+        };
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.1, 0.2, 0.3], false);
+        stroke.whole = whole;
+        stroke.set_speed(0.1);
+        for step in 0..=180 {
+            stroke.to(&mut raster, [40.0 + step as f32 * 2.0, 146.0], 1.0, None);
+        }
+        stroke.to(&mut raster, [400.0 - 57.4, 146.0 + 191.6], 1.0, None);
+        stroke.end(&mut raster, Finish::default(), None);
+        raster
+    }
+
+    #[test]
+    fn a_long_jump_trimmed_at_the_lift_leaves_nothing_in_the_tiles_it_crossed() {
+        let (quick, full) = (jerked(false), jerked(true));
+        let below = |raster: &RasterTile2D| {
+            (170..448)
+                .flat_map(|y| (0..512).map(move |x| (x, y)))
+                .filter(|(x, y)| alpha(raster, *x, *y) > 0)
+                .count()
+        };
+        assert_eq!(below(&full), 0, "a whole redraw trims the jump");
+        assert_eq!(below(&quick), 0, "redrawing the ends leaves no jump");
+        assert!(
+            quick.bytes().unwrap() == full.bytes().unwrap(),
+            "the same bytes as a whole redraw"
         );
     }
 }

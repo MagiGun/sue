@@ -11,6 +11,11 @@
 //! (Wayland's tablet-v2) it also queues one [`Sample`] for each of them,
 //! so a stroke can give every point the pressure and tilt the pen had
 //! there ([`take_samples`]) rather than the frame's last.
+//!
+//! A pen's driver says that the tip has lifted before the window hands
+//! over the button's release, often within one frame. So the pressure the
+//! pen had as it lifted stays readable until that frame has run: the
+//! stroke's last points are drawn with it, not at full size.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -32,6 +37,9 @@ pub enum PenSource {
 
 /// The pressure's bits, or `u32::MAX` while no pen touches.
 static PRESSURE: AtomicU32 = AtomicU32::new(u32::MAX);
+/// The bits of the pressure a pen had as it lifted, until a frame has run
+/// since; `u32::MAX` otherwise.
+static LIFT: AtomicU32 = AtomicU32::new(u32::MAX);
 /// The last [`PenSource`] seen: 0 none, 1 WinTab, 2 a browser, 3 XInput2,
 /// 4 Wayland's tablet-v2.
 static SOURCE: AtomicU8 = AtomicU8::new(0);
@@ -42,17 +50,105 @@ static TILT_Y: AtomicU32 = AtomicU32::new(u32::MAX);
 /// `true` while the pen's eraser end is the one in use.
 static ERASER: AtomicBool = AtomicBool::new(false);
 
-/// The pen's pressure, 0 to 1, while it touches; `None` when no such pen
-/// touches.
+/// What a pen last reported: its pressure while its tip touches, and once
+/// it has lifted the pressure it had, until a frame has run.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Contact {
+    /// The pressure, 0 to 1, while the tip touches.
+    touching: Option<f32>,
+    /// After the tip lifted: the pressure it had, for the frame that
+    /// draws the stroke's end.
+    lift: Option<f32>,
+}
+
+impl Contact {
+    /// What [`pressure`] answers.
+    fn read(self) -> Option<f32> {
+        self.touching.or(self.lift)
+    }
+
+    /// This after the pen of `from` reports `pressure` (`None`: it does
+    /// not touch). A tip that lifts leaves its pressure behind; Wayland's
+    /// tablet keeps its own (`wayland_pen.rs`), so none is kept for it.
+    fn report(self, from: PenSource, pressure: Option<f32>) -> Self {
+        let pressure = pressure.map(|value| value.clamp(0.0, 1.0));
+        let lift = match (pressure, self.touching) {
+            (Some(_), _) => None,
+            (None, Some(last)) if from != PenSource::WaylandTablet => Some(last),
+            (None, Some(_)) => None,
+            (None, None) => self.lift,
+        };
+        Self {
+            touching: pressure,
+            lift,
+        }
+    }
+
+    /// This once a frame has run: a lifted tip's pressure goes.
+    fn frame_done(self) -> Self {
+        Self { lift: None, ..self }
+    }
+
+    /// The real pen's, as the statics have it.
+    fn load() -> Self {
+        let read = |bits: u32| (bits != u32::MAX).then(|| f32::from_bits(bits));
+        Self {
+            touching: read(PRESSURE.load(Ordering::Relaxed)),
+            lift: read(LIFT.load(Ordering::Relaxed)),
+        }
+    }
+
+    /// Makes this the real pen's.
+    fn store(self) {
+        let bits = |value: Option<f32>| value.map_or(u32::MAX, f32::to_bits);
+        PRESSURE.store(bits(self.touching), Ordering::Relaxed);
+        LIFT.store(bits(self.lift), Ordering::Relaxed);
+    }
+}
+
+/// The pen's pressure, 0 to 1, while it touches, and the pressure it had
+/// as it lifted until the frame after has run (a stroke's last points are
+/// drawn in that frame); `None` when no such pen touches.
 #[must_use]
 pub fn pressure() -> Option<f32> {
-    let bits = PRESSURE.load(Ordering::Relaxed);
-    (bits != u32::MAX).then(|| f32::from_bits(bits))
+    if let Some((_, pen)) = TEST_PEN.get() {
+        return pen.read();
+    }
+    Contact::load().read()
+}
+
+thread_local! {
+    /// A test's own pen on its own thread (see [`set_for_test`]): where it
+    /// comes from and what it last reported, read instead of the real
+    /// pen's.
+    static TEST_PEN: std::cell::Cell<Option<(PenSource, Contact)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// For tests that drive a studio as a pen of `source` would, without the
+/// tablet: the pen reports `pressure` as a driver would, and from now on
+/// this thread reads it (and `source`) instead of the real pen's, until
+/// [`forget_for_test`]. Other threads, and so other tests, see nothing of
+/// it. No frame of the host ends for it, so a lifted pen's pressure stays
+/// until it is forgotten.
+#[doc(hidden)]
+pub fn set_for_test(source: PenSource, pressure: Option<f32>) {
+    let pen = TEST_PEN.get().map_or_else(Contact::default, |(_, pen)| pen);
+    TEST_PEN.set(Some((source, pen.report(source, pressure))));
+}
+
+/// Ends [`set_for_test`]: this thread reads the real pen again.
+#[doc(hidden)]
+pub fn forget_for_test() {
+    TEST_PEN.set(None);
 }
 
 /// Where pen pressure last came from, once a pen has been seen.
 #[must_use]
 pub fn source() -> Option<PenSource> {
+    if let Some((source, _)) = TEST_PEN.get() {
+        return Some(source);
+    }
     match SOURCE.load(Ordering::Relaxed) {
         1 => Some(PenSource::WinTab),
         2 => Some(PenSource::Browser),
@@ -82,7 +178,9 @@ pub fn eraser() -> bool {
 
 /// Records what the pen does now: its pressure while it touches, else
 /// `None`. Only Windows' tablet driver, XInput2 and the browser report
-/// pressure this way.
+/// pressure this way. Called once for each reading in its order (not only
+/// a frame's last), a touch and a lift between two frames still leave the
+/// pressure of the touch for the frame that draws it.
 #[cfg_attr(
     not(any(
         target_os = "windows",
@@ -105,8 +203,7 @@ pub(crate) fn set(from: PenSource, pressure: Option<f32>) {
         },
         Ordering::Relaxed,
     );
-    let bits = pressure.map_or(u32::MAX, |value| value.clamp(0.0, 1.0).to_bits());
-    PRESSURE.store(bits, Ordering::Relaxed);
+    Contact::load().report(from, pressure).store();
 }
 
 /// Records which end of the pen is in use and how far it leans (`None`
@@ -210,8 +307,10 @@ pub(crate) fn push_sample(mut sample: Sample) {
     }
 }
 
-/// A frame has run: the samples nobody took go with it.
+/// A frame has run: the samples nobody took go with it, and so does the
+/// pressure of a pen that lifted before it.
 pub(crate) fn end_frame() {
+    Contact::load().frame_done().store();
     if let Ok(mut samples) = SAMPLES.lock()
         && !samples.is_empty()
     {
@@ -223,8 +322,15 @@ pub(crate) fn end_frame() {
 mod tests {
     use super::*;
 
+    /// Held by each test that reads or ends a frame of the real pen, which
+    /// all tests share: one at a time.
+    static REAL_PEN: Mutex<()> = Mutex::new(());
+
     #[test]
     fn samples_queue_in_order_until_taken_or_the_frame_ends() {
+        let _alone = REAL_PEN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let sample = |kind, x: f32, pressure| Sample {
             kind,
             pos: [x, 2.0],
@@ -264,17 +370,81 @@ mod tests {
 
     #[test]
     fn the_pens_pressure_reads_back_until_it_lifts() {
+        let _alone = REAL_PEN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         set(PenSource::WinTab, Some(0.42));
         assert_eq!(pressure(), Some(0.42));
         assert_eq!(source(), Some(PenSource::WinTab));
         set(PenSource::Browser, Some(3.0));
         assert_eq!(pressure(), Some(1.0), "clamped");
         set(PenSource::Browser, None);
-        assert_eq!(pressure(), None);
+        assert_eq!(pressure(), Some(1.0), "lifted: kept for the frame");
         assert_eq!(source(), Some(PenSource::Browser));
+        end_frame();
+        assert_eq!(pressure(), None, "the frame has run");
+        end_frame();
+        assert_eq!(pressure(), None);
         set(PenSource::XInput, Some(0.5));
         assert_eq!(source(), Some(PenSource::XInput));
+        end_frame();
+        assert_eq!(
+            pressure(),
+            Some(0.5),
+            "a frame takes nothing while it touches"
+        );
         set(PenSource::XInput, None);
+        assert_eq!(pressure(), Some(0.5));
+        end_frame();
+        assert_eq!(pressure(), None);
+        // Wayland's tablet holds its own lift and says when it is over.
+        set(PenSource::WaylandTablet, Some(0.6));
+        set(PenSource::WaylandTablet, None);
+        assert_eq!(pressure(), None);
+    }
+
+    #[test]
+    fn a_lifted_pens_pressure_stays_for_one_frame() {
+        let pen = Contact::default();
+        assert_eq!(pen.read(), None);
+        for from in [PenSource::WinTab, PenSource::XInput, PenSource::Browser] {
+            let down = pen.report(from, Some(0.4));
+            assert_eq!(down.read(), Some(0.4));
+            // Lifted: the stroke's last frame still reads what it had.
+            let up = down.report(from, None);
+            assert_eq!(up.read(), Some(0.4), "{from:?}");
+            // Hovering on in that frame changes nothing.
+            assert_eq!(up.report(from, None).read(), Some(0.4), "{from:?}");
+            // The frame has run: gone.
+            assert_eq!(up.frame_done().read(), None, "{from:?}");
+            // A frame's end while it touches takes nothing away.
+            assert_eq!(down.frame_done().read(), Some(0.4));
+            // Touching again before that frame: the new pressure.
+            assert_eq!(up.report(from, Some(0.7)).read(), Some(0.7));
+            assert_eq!(up.report(from, Some(0.7)).frame_done().lift, None);
+            // A touch and a lift between two frames: the touch's pressure.
+            let tap = pen.report(from, Some(0.2)).report(from, None);
+            assert_eq!(tap.read(), Some(0.2), "{from:?}");
+        }
+        // Wayland's tablet holds its own lift, and says when it is over.
+        let wayland = PenSource::WaylandTablet;
+        let up = pen.report(wayland, Some(0.4)).report(wayland, None);
+        assert_eq!(up.read(), None);
+    }
+
+    #[test]
+    fn a_tests_own_pen_is_read_on_its_thread_only() {
+        set_for_test(PenSource::WinTab, Some(0.3));
+        assert_eq!(pressure(), Some(0.3));
+        assert_eq!(source(), Some(PenSource::WinTab));
+        let elsewhere = std::thread::spawn(|| TEST_PEN.get().is_some())
+            .join()
+            .unwrap();
+        assert!(!elsewhere, "another thread reads the real pen");
+        set_for_test(PenSource::WinTab, None);
+        assert_eq!(pressure(), Some(0.3), "lifted, kept for the last frame");
+        forget_for_test();
+        assert!(TEST_PEN.get().is_none());
     }
 
     #[test]
