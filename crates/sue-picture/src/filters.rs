@@ -968,22 +968,14 @@ impl Filter {
                 brightness,
                 contrast,
             } => {
-                let gain = if contrast >= 0.0 {
-                    1.0 / (1.0 - contrast.min(0.99))
-                } else {
-                    1.0 + contrast
-                };
-                rgb.map(|value| (value + brightness * 0.5 - 0.5) * gain + 0.5)
+                sue_io::picture_ops::brightness_contrast(rgb, brightness, contrast)
             }
             Self::HueSaturation {
                 hue,
                 saturation,
                 luminosity,
             } => {
-                let mut hsv = crate::color::Hsv::from_rgb(rgb);
-                hsv.h += hue;
-                hsv.s = (hsv.s * (1.0 + saturation)).clamp(0.0, 1.0);
-                let turned = hsv.to_rgb();
+                let turned = sue_io::picture_ops::hue_saturation(rgb, hue, saturation);
                 if luminosity >= 0.0 {
                     turned.map(|value| value + (1.0 - value) * luminosity)
                 } else {
