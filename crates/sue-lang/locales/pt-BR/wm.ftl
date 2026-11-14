@@ -91,6 +91,10 @@ entities = { $count ->
 }
 curve-pen-pressure = Pressão da caneta
 curve-output = Saída
+window-minimize = Minimizar
+window-maximize = Maximizar
+window-restore = Restaurar
+window-close = Fechar
 pick-a-color = Escolher uma cor
 undo = Desfazer
 nothing-to-undo = Nada para desfazer

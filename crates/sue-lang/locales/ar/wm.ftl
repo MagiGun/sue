@@ -107,6 +107,10 @@ entities = { $count ->
 }
 curve-pen-pressure = ضغط القلم
 curve-output = المخرج
+window-minimize = تصغير
+window-maximize = تكبير
+window-restore = استعادة
+window-close = إغلاق
 pick-a-color = اختر لونا
 undo = تراجع
 nothing-to-undo = لا يوجد شيء للتراجع عنه

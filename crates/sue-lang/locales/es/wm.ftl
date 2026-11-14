@@ -80,6 +80,10 @@ pick-a-color = Elegir un color
 none = Ninguno
 curve-pen-pressure = Presión del lápiz
 curve-output = Salida
+window-minimize = Minimizar
+window-maximize = Maximizar
+window-restore = Restaurar
+window-close = Cerrar
 
 ## Las listas del Hub
 

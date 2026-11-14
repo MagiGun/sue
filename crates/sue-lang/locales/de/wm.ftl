@@ -76,6 +76,10 @@ pick-a-color = Farbe auswählen
 none = Keine
 curve-pen-pressure = Stiftdruck
 curve-output = Ausgabe
+window-minimize = Minimieren
+window-maximize = Maximieren
+window-restore = Verkleinern
+window-close = Schließen
 
 ## Hub-Listen
 open-recent = Zuletzt geöffnete Dateien

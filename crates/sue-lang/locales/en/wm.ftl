@@ -85,6 +85,10 @@ pick-a-color = Pick a color
 none = None
 curve-pen-pressure = Pen pressure
 curve-output = Output
+window-minimize = Minimize
+window-maximize = Maximize
+window-restore = Restore Down
+window-close = Close
 
 ## shell.rs
 

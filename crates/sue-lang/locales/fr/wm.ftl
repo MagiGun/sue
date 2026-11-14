@@ -76,6 +76,10 @@ pick-a-color = Choisir une couleur
 none = Aucun
 curve-pen-pressure = Pression du stylet
 curve-output = Sortie
+window-minimize = Réduire
+window-maximize = Agrandir
+window-restore = Niveau inférieur
+window-close = Fermer
 
 ## Listes du Hub
 open-recent = Ouvrir les fichiers récents

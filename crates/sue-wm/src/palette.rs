@@ -1,8 +1,9 @@
 //! The command palette (`Tab` or `/`): a centered floating search box that
 //! filters every workspace action, mode and entity operation, fuzzily.
 
-use egui::{Align2, Id, Key, Order, Rect, RichText, Sense, TextEdit, vec2};
+use egui::{Align2, Id, Key, Rect, RichText, Sense, TextEdit, vec2};
 
+use crate::ui::{Density, Layer, Radius, Space, TextRole, nested_radius};
 use crate::{PaletteEntry, SpringDamper, SpringMode, SpringParams, Theme, widgets};
 
 /// How well `query` matches `label`: every query character must appear in
@@ -118,8 +119,9 @@ impl Palette {
         theme: &Theme,
     ) -> PaletteOutcome {
         let appear = self.appear.position().clamp(0.0, 1.0);
-        let width = (area.width() - 32.0).clamp(240.0, 560.0);
-        let top = area.top() + area.height() * 0.14 - (1.0 - appear) * 12.0;
+        let width = (area.width() - 2.0 * theme.dialog_margin()).clamp(240.0, 560.0);
+        // It drops into place from a little above as it appears.
+        let top = area.top() + area.height() * 0.14 - (1.0 - appear) * theme.space(Space::S5);
         let matches = self.matches(entries);
         self.selected = self.selected.min(matches.len().saturating_sub(1));
         let mut outcome = PaletteOutcome::Open;
@@ -146,21 +148,29 @@ impl Palette {
             }
         }
         egui::Area::new(Id::unique("sue-palette"))
-            .order(Order::Foreground)
+            .order(Layer::Dialog.order())
             .fixed_pos(egui::pos2(area.center().x - width / 2.0, top))
             .interactable(!self.closing)
             .show(ctx, |ui| {
                 ui.set_opacity(appear);
+                let row_height = Density::of(ui).row();
+                let inset = theme.space(Space::S1);
+                // The chosen row's corners follow the window's, inset.
+                let row_corner =
+                    nested_radius(theme.radius(Radius::Xl), inset).min(theme.radius(Radius::Sm));
+                let text_inset = theme.space(Space::S5);
                 widgets::window_frame(theme).show(ui, |ui| {
                     ui.set_width(width);
                     egui::Frame::new()
-                        .inner_margin(egui::Margin::same((theme.padding).clamp(0.0, 127.0) as i8))
+                        .inner_margin(egui::Margin::same(
+                            theme.space(Space::S4).clamp(0.0, 127.0) as i8
+                        ))
                         .show(ui, |ui| {
                             let edit = TextEdit::singleline(&mut self.query)
                                 .hint_text(tr!("type-command-mode-entity-action"))
                                 .desired_width(f32::INFINITY)
                                 .frame(egui::Frame::NONE)
-                                .font(theme.font(theme.ui_size * 1.15));
+                                .font(theme.text_font(TextRole::Title));
                             let response = ui.add(edit);
                             if !self.focused {
                                 response.request_focus();
@@ -170,10 +180,11 @@ impl Palette {
                                 self.selected = 0;
                             }
                         });
-                    ui.add_space(1.0);
-                    let (line, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
+                    ui.add_space(inset);
+                    let hairline = theme.border_width.max(1.0);
+                    let (line, _) = ui.allocate_exact_size(vec2(width, hairline), Sense::hover());
                     ui.painter().rect_filled(line, 0.0, theme.border);
-                    let row_height = theme.ui_size * 2.2;
+                    ui.add_space(inset);
                     for (row, index) in matches.iter().take(9).enumerate() {
                         let entry = &entries[*index];
                         let (rect, response) =
@@ -182,23 +193,36 @@ impl Palette {
                         if response.hovered() {
                             self.selected = row;
                         }
+                        let fill = theme.fill_hover();
                         if chosen {
-                            ui.painter().rect_filled(rect.shrink(3.0), 4.0, theme.hover);
+                            ui.painter().rect_filled(
+                                rect.shrink2(vec2(theme.space(Space::S2), inset)),
+                                row_corner,
+                                fill,
+                            );
                         }
                         ui.painter().text(
-                            rect.left_center() + vec2(theme.padding * 1.5, 0.0),
+                            rect.left_center() + vec2(text_inset, 0.0),
                             Align2::LEFT_CENTER,
                             &entry.label,
-                            theme.font(theme.ui_size),
-                            if chosen { theme.text } else { theme.muted },
+                            theme.text_font(TextRole::Body),
+                            if chosen {
+                                theme.text
+                            } else {
+                                theme.text_muted()
+                            },
                         );
                         if !entry.hint.is_empty() {
                             ui.painter().text(
-                                rect.right_center() - vec2(theme.padding * 1.5, 0.0),
+                                rect.right_center() - vec2(text_inset, 0.0),
                                 Align2::RIGHT_CENTER,
                                 &entry.hint,
-                                theme.mono(theme.small_size),
-                                theme.muted,
+                                theme.mono(theme.text_size(TextRole::Caption)),
+                                if chosen {
+                                    theme.text_muted_on(fill)
+                                } else {
+                                    theme.text_muted()
+                                },
                             );
                         }
                         if response.clicked() {
@@ -206,13 +230,18 @@ impl Palette {
                         }
                     }
                     if matches.is_empty() {
-                        ui.add_space(theme.padding);
+                        ui.add_space(theme.space(Space::S4));
                         ui.horizontal(|ui| {
-                            ui.add_space(theme.padding * 1.5);
-                            ui.label(RichText::new(tr!("nothing-matches")).color(theme.muted));
+                            ui.add_space(text_inset);
+                            ui.label(
+                                RichText::new(tr!("nothing-matches"))
+                                    .font(theme.text_font(TextRole::Body))
+                                    .color(theme.text_muted()),
+                            );
                         });
+                        ui.add_space(theme.space(Space::S4));
                     }
-                    ui.add_space(theme.padding * 0.5);
+                    ui.add_space(theme.space(Space::S2));
                 });
             });
         if !matches!(outcome, PaletteOutcome::Open) {

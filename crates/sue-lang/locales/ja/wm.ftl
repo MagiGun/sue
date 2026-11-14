@@ -77,6 +77,10 @@ pick-a-color = 色を選ぶ
 none = なし
 curve-pen-pressure = 筆圧
 curve-output = 出力
+window-minimize = 最小化
+window-maximize = 最大化
+window-restore = 元のサイズに戻す
+window-close = 閉じる
 
 ## ハブの一覧
 
