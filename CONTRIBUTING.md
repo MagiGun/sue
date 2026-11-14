@@ -212,9 +212,10 @@ four checks, and make sure it did not touch the backbone without tests.
 
 - **A filter or adjustment in Sue Paint**: a `Filter` variant in
   `crates/sue-picture/src/filters.rs` (its label, its `apply`), its sliders in
-  `dialogs.rs`, the command in `crates/sue-paint/src/commands/filter.rs`
-  (its arm and its entry in the table, which names its label and key) and
-  its place in `menus.rs`. Add a test in `filters.rs`.
+  `crates/sue-paint/src/dialogs/filter.rs`, the command in
+  `crates/sue-paint/src/commands/filter.rs` (its arm and its entry in the
+  table, which names its label and key) and its place in `menus.rs`. Add a
+  test in `filters.rs`.
 - **A file format**: a handler in `crates/sue-io` registered in the
   `FormatRegistry`, with a round trip test, and a decoder that refuses bad
   input with a reason instead of panicking.
