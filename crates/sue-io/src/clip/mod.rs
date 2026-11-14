@@ -23,7 +23,10 @@ mod read;
 mod schema;
 mod write;
 
-pub use container::sniff;
+pub use container::{Chunk, Layout, layout, sniff};
+pub use offscreen::{
+    AttributePart, BitmapSurvey, Block, BlockList, attribute_parts, survey_bitmap,
+};
 pub use read::decode_clip;
 pub use write::encode_clip;
 

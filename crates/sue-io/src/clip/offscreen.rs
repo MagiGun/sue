@@ -256,3 +256,265 @@ pub(super) fn encode_bitmap(layer: &PsdLayer, width: u32, height: u32) -> (Vec<u
     }
     (out, sizes)
 }
+
+// ----- Looking at a bitmap without decoding it --------------------------------
+
+/// One named part of an attribute blob: its name and the numbers after it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttributePart {
+    /// The part's name, such as `Parameter`, `InitColor` or `BlockSize`.
+    pub name: String,
+    /// The 32-bit numbers that follow the name.
+    pub values: Vec<u32>,
+    /// Bytes left at the end that do not fill a number.
+    pub rest: Vec<u8>,
+}
+
+/// A counted UTF-16 name of letters and digits at `at`, and where it ends.
+fn name_at(bytes: &[u8], at: usize) -> Option<(String, usize)> {
+    let len = be32(bytes, at)? as usize;
+    if len == 0 || len > 256 {
+        return None;
+    }
+    let end = at.checked_add(4 + 2 * len)?;
+    let raw = bytes.get(at + 4..end)?;
+    let units: Vec<u16> = raw
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_be_bytes(*pair))
+        .collect();
+    let name = String::from_utf16(&units).ok()?;
+    name.chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        .then_some((name, end))
+}
+
+/// Reads a blob laid out as an offscreen's `Attribute` is: the length of
+/// a list of part sizes, the sizes, then the parts, each a UTF-16 name
+/// followed by 32-bit numbers. `None` when `blob` is not laid out so.
+#[must_use]
+pub fn attribute_parts(blob: &[u8]) -> Option<Vec<AttributePart>> {
+    let head = be32(blob, 0)? as usize;
+    if head < 8 || !head.is_multiple_of(4) || head > 1024 || head > blob.len() {
+        return None;
+    }
+    let sizes: Vec<usize> = (1..head / 4)
+        .map(|i| be32(blob, i * 4).map(|size| size as usize))
+        .collect::<Option<_>>()?;
+    let total = sizes
+        .iter()
+        .try_fold(head, |sum, size| sum.checked_add(*size))?;
+    if total != blob.len() {
+        return None;
+    }
+    let mut at = head;
+    let mut parts = Vec::new();
+    for size in sizes {
+        let part = blob.get(at..at + size)?;
+        let (name, after) = name_at(part, 0)?;
+        let (numbers, rest) = part[after..].as_chunks::<4>();
+        parts.push(AttributePart {
+            name,
+            values: numbers.iter().map(|raw| u32::from_be_bytes(*raw)).collect(),
+            rest: rest.to_vec(),
+        });
+        at += size;
+    }
+    Some(parts)
+}
+
+/// One block (tile) of a stored bitmap, as its header describes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Block {
+    /// The block's number in the grid.
+    pub index: u32,
+    /// The size the header gives for the block's pixels before compression.
+    pub raw_size: u32,
+    /// The two numbers after it (256 and 256 in what Sue writes).
+    pub size: [u32; 2],
+    /// The length of the compressed data, when the block has any.
+    pub compressed: Option<usize>,
+    /// What the data inflates to: 327,680 bytes for color with alpha,
+    /// 65,536 for one channel. `None` without data, when it was not
+    /// asked for, or when the data does not inflate.
+    pub inflated: Option<usize>,
+}
+
+/// One list after the blocks of a stored bitmap, such as `BlockStatus`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockList {
+    /// Its name.
+    pub name: String,
+    /// The three numbers of its header (12, the count, 4 in what Sue
+    /// writes).
+    pub head: [u32; 3],
+    /// Its values, one per block.
+    pub values: Vec<u32>,
+}
+
+/// What a stored bitmap's payload holds, block by block.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BitmapSurvey {
+    /// The blocks, in file order.
+    pub blocks: Vec<Block>,
+    /// The lists after the blocks.
+    pub lists: Vec<BlockList>,
+    /// Bytes at the end that are neither.
+    pub leftover: usize,
+}
+
+/// The most a block may inflate to here: four times a color tile.
+const INFLATE_LIMIT: usize = TILE * TILE * 5 * 4;
+
+/// Walks the payload of a stored bitmap (an `Exta` chunk's) and says what
+/// is in it, without building any picture. With `inflate` each block's
+/// data is decompressed to learn its real size.
+#[must_use]
+pub fn survey_bitmap(payload: &[u8], inflate: bool) -> BitmapSurvey {
+    let begin = utf16(BEGIN);
+    let mut survey = BitmapSurvey::default();
+    let mut at = 0;
+    while payload.get(at + 8..at + 8 + begin.len()) == Some(begin.as_slice()) {
+        let Some(tile) = be32(payload, at)
+            .map(|size| size as usize)
+            .filter(|size| *size >= 8 + begin.len())
+            .and_then(|size| payload.get(at..at.checked_add(size)?))
+        else {
+            break;
+        };
+        let body = &tile[8 + begin.len()..];
+        let number = |i: usize| be32(body, i * 4).unwrap_or(0);
+        let data = (number(4) == 1)
+            .then(|| body.get(28..24 + number(5) as usize))
+            .flatten();
+        survey.blocks.push(Block {
+            index: number(0),
+            raw_size: number(1),
+            size: [number(2), number(3)],
+            compressed: data.map(<[u8]>::len),
+            inflated: data.filter(|_| inflate).and_then(|data| {
+                miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(data, INFLATE_LIMIT)
+                    .ok()
+                    .map(|raw| raw.len())
+            }),
+        });
+        at += tile.len();
+    }
+    while let Some((name, after)) = name_at(payload, at) {
+        let (Some(a), Some(count), Some(b)) = (
+            be32(payload, after),
+            be32(payload, after + 4),
+            be32(payload, after + 8),
+        ) else {
+            break;
+        };
+        let Some(raw) = (count as usize)
+            .checked_mul(4)
+            .and_then(|len| payload.get(after + 12..(after + 12).checked_add(len)?))
+        else {
+            break;
+        };
+        survey.lists.push(BlockList {
+            name,
+            head: [a, count, b],
+            values: raw
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|raw| u32::from_be_bytes(*raw))
+                .collect(),
+        });
+        at = after + 12 + raw.len();
+    }
+    survey.leftover = payload.len().saturating_sub(at);
+    survey
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dots(width: u32, height: u32) -> PsdLayer {
+        let mut pixels = vec![0_u8; (width * height * 4) as usize];
+        // One dot in the first tile and one in the last.
+        for at in [0, pixels.len() - 4] {
+            pixels[at..at + 4].copy_from_slice(&[10, 20, 30, 255]);
+        }
+        PsdLayer::pixels("Dots", 0, 0, width, height, pixels)
+    }
+
+    #[test]
+    fn an_attribute_reads_as_its_named_parts() {
+        let (_, sizes) = encode_bitmap(&dots(600, 300), 600, 300);
+        let blob = attribute(600, 300, true, &sizes);
+        let parts = attribute_parts(&blob).unwrap();
+        let names: Vec<&str> = parts.iter().map(|part| part.name.as_str()).collect();
+        assert_eq!(names, ["Parameter", "InitColor", "BlockSize"]);
+        assert_eq!(parts[0].values[..4], [600, 300, 3, 2]);
+        assert_eq!(parts[0].values.len(), 20);
+        assert_eq!(parts[1].values[..2], [20, 1]);
+        assert_eq!(parts[2].values[..3], [12, 6, 4]);
+        assert_eq!(parts[2].values[3..], sizes);
+        assert!(parts.iter().all(|part| part.rest.is_empty()));
+        // What the reader takes from the same blob.
+        let bitmap = bitmap_of(&blob).unwrap();
+        assert_eq!(
+            (bitmap.width, bitmap.height, bitmap.columns, bitmap.rows),
+            (600, 300, 3, 2)
+        );
+        assert_eq!((bitmap.channels, bitmap.fill), (4, [255; 4]));
+
+        // Anything else is not taken for one, whatever its bytes.
+        assert_eq!(attribute_parts(b""), None);
+        assert_eq!(attribute_parts(b"extrnlid0123456789"), None);
+        assert_eq!(attribute_parts(&blob[..blob.len() - 1]), None);
+        assert_eq!(attribute_parts(&[0xff; 64]), None);
+        let mut unnamed = blob.clone();
+        unnamed[16..20].copy_from_slice(&0_u32.to_be_bytes());
+        assert_eq!(attribute_parts(&unnamed), None);
+    }
+
+    #[test]
+    fn a_bitmap_is_surveyed_block_by_block() {
+        let (payload, sizes) = encode_bitmap(&dots(600, 300), 600, 300);
+        let survey = survey_bitmap(&payload, true);
+        assert_eq!(survey.blocks.len(), 6);
+        assert_eq!(survey.leftover, 0);
+        for (i, block) in survey.blocks.iter().enumerate() {
+            assert_eq!(block.index as usize, i);
+            assert_eq!((block.raw_size, block.size), (327_680, [256, 256]));
+            let has = i == 0 || i == 5;
+            assert_eq!(block.compressed.is_some(), has, "block {i}");
+            assert_eq!(block.inflated, has.then_some(327_680), "block {i}");
+            if has {
+                assert_eq!(block.compressed, Some(sizes[i] as usize));
+            }
+        }
+        let lists: Vec<(&str, [u32; 3], &[u32])> = survey
+            .lists
+            .iter()
+            .map(|list| (list.name.as_str(), list.head, list.values.as_slice()))
+            .collect();
+        assert_eq!(
+            lists,
+            [
+                ("BlockStatus", [12, 6, 4], [1; 6].as_slice()),
+                ("BlockCheckSum", [12, 6, 4], [0; 6].as_slice()),
+            ]
+        );
+        assert_eq!(survey_bitmap(&payload, false).blocks[0].inflated, None);
+
+        // Cut anywhere, or not a bitmap at all: an answer, never a crash.
+        for cut in (0..payload.len()).step_by(97) {
+            let part = survey_bitmap(&payload[..cut], true);
+            assert!(part.blocks.len() <= 6);
+        }
+        let junk = survey_bitmap(b"not a bitmap", true);
+        assert_eq!((junk.blocks.len(), junk.leftover), (0, 12));
+        let mut bad = payload.clone();
+        let data = 8 + utf16(BEGIN).len() + 28;
+        bad[data..data + 8].copy_from_slice(&[0xff; 8]);
+        assert_eq!(survey_bitmap(&bad, true).blocks[0].inflated, None);
+    }
+}
