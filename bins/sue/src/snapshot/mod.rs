@@ -6,14 +6,20 @@
 //! The scenes are one tour: each starts where the one before it left Sue.
 //! They live in `scenes/`, one file per area, and `scenes::run` holds
 //! their order.
+//!
+//! A run can be scaled ([`Options::scale`], the display's pixels per
+//! point) and themed ([`Options::preset`]); the pictures keep their
+//! names, so `compare` can set any two runs side by side.
 
+pub mod compare;
 mod scenes;
 
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::time::Duration;
 
 use egui::{Pos2, Rect, vec2};
-use sue_core::{EntityId, PCMFloat1D, PixelFormat, RasterTile2D};
+use sue_core::{EntityId, PCMFloat1D, PixelFormat, RasterTile2D, ReversibleTransaction};
 use sue_io::{JxlPipeline, NativeJxlPipeline, encode_png, encode_png_rgba, encode_wav};
 use sue_platform::time::Instant;
 use sue_platform::{
@@ -102,11 +108,20 @@ fn write_samples(home: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The size in pixels of a window of `size` points at `scale` pixels per
+/// point.
+fn pixel_size(size: [u32; 2], scale: f32) -> [u32; 2] {
+    size.map(|points| ((points as f32 * scale).round() as u32).max(1))
+}
+
 /// Drives the runtime with egui frames and paints the last one.
 struct Camera2 {
     ctx: egui::Context,
     painter: EguiPainter,
+    /// The size of the window, in points.
     size: [u32; 2],
+    /// Pixels per point: the picture is `size` times this, in pixels.
+    scale: f32,
     start: Instant,
     now: Instant,
     /// Input for the coming frames, one list per frame.
@@ -114,8 +129,13 @@ struct Camera2 {
 }
 
 impl Camera2 {
+    /// The size of the picture, in pixels.
+    fn pixels(&self) -> [u32; 2] {
+        pixel_size(self.size, self.scale)
+    }
+
     fn frame(&mut self, runtime: &mut Runtime) -> egui::FullOutput {
-        let raw = egui::RawInput {
+        let mut raw = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(
                 Pos2::ZERO,
                 vec2(self.size[0] as f32, self.size[1] as f32),
@@ -129,6 +149,10 @@ impl Camera2 {
             },
             ..egui::RawInput::default()
         };
+        raw.viewports
+            .entry(raw.viewport_id)
+            .or_default()
+            .native_pixels_per_point = Some(self.scale);
         let now = self.now;
         let output = self
             .ctx
@@ -186,15 +210,16 @@ impl Camera2 {
     /// Paints one frame into a PNG.
     fn paint(&mut self, runtime: &mut Runtime, path: &Path) -> Result<(), String> {
         let output = self.frame(runtime);
+        let size = self.pixels();
         let pixels = self.painter.paint_offscreen(
             &self.ctx,
-            self.size,
+            size,
             runtime.theme().void,
             output.shapes,
             output.textures_delta,
             output.pixels_per_point,
         )?;
-        std::fs::write(path, encode_png_rgba(self.size[0], self.size[1], &pixels)?)
+        std::fs::write(path, encode_png_rgba(size[0], size[1], &pixels)?)
             .map_err(|error| error.to_string())
     }
 }
@@ -321,16 +346,203 @@ fn online() -> bool {
     std::env::var_os("SUE_SNAPSHOT_ONLINE").is_some()
 }
 
+/// The smallest and largest scale a run can ask for.
+const SCALES: std::ops::RangeInclusive<f32> = 0.5..=4.0;
+
+/// A file the harness puts in its profile folder, so that it never
+/// removes a folder it did not make.
+const PROFILE_MARK: &str = "sue-snapshot-profile";
+
+/// How a snapshot run differs from the plain one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Options {
+    /// Pixels per point, as a display's scale setting gives it. Scenes
+    /// keep their size in points, so a picture is this many times larger
+    /// in pixels. 1.0 is the plain run.
+    pub scale: f32,
+    /// The id of a built-in theme preset (`void`, `graphite`, `paper`
+    /// and so on) applied before the first scene. `None` leaves the
+    /// defaults.
+    pub preset: Option<String>,
+    /// Where the throwaway profile goes. `None` puts it in the output
+    /// folder, as `profile`. A few scenes draw paths inside the profile,
+    /// so two runs that are to be compared need the same profile folder.
+    pub profile: Option<PathBuf>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            preset: None,
+            profile: None,
+        }
+    }
+}
+
+impl Options {
+    /// Reads `--scale <n>`, `--preset <id>` and `--profile <dir>`.
+    ///
+    /// # Errors
+    /// An option it does not know, a missing value, a scale outside 0.5
+    /// to 4, or a preset Sue does not have.
+    pub fn parse(args: &[&str]) -> Result<Self, String> {
+        let mut options = Self::default();
+        let mut args = args.iter();
+        while let Some(option) = args.next() {
+            if !matches!(*option, "--scale" | "--preset" | "--profile") {
+                return Err(format!("--snapshot has no option {option}"));
+            }
+            let value = args
+                .next()
+                .ok_or_else(|| format!("{option} needs a value"))?;
+            match *option {
+                "--scale" => {
+                    options.scale = value
+                        .parse()
+                        .ok()
+                        .filter(|scale| SCALES.contains(scale))
+                        .ok_or_else(|| {
+                            format!("--scale takes a number from 0.5 to 4, not {value}")
+                        })?;
+                }
+                "--preset" => {
+                    preset(value)?;
+                    options.preset = Some((*value).to_owned());
+                }
+                _ => options.profile = Some(PathBuf::from(value)),
+            }
+        }
+        Ok(options)
+    }
+}
+
+/// The built-in theme preset with this id.
+fn preset(id: &str) -> Result<sue_rice::ThemePreset, String> {
+    let presets = sue_rice::builtin_presets();
+    let known = presets
+        .iter()
+        .map(|preset| preset.id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    presets
+        .into_iter()
+        .find(|preset| preset.id == id)
+        .ok_or_else(|| format!("there is no theme preset {id}; Sue has {known}"))
+}
+
+/// Runs `sue --snapshot <dir>` with the options after the folder.
+#[must_use]
+pub fn cli(dir: &str, options: &[&str]) -> ExitCode {
+    let options = match Options::parse(options) {
+        Ok(options) => options,
+        Err(error) => {
+            eprintln!("sue: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    match write_snapshots_with(Path::new(dir), 1440, 900, &options) {
+        Ok(paths) => {
+            for path in paths {
+                println!("{}", path.display());
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("snapshot failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Reads what follows the two folders of `--snapshot-compare`: any
+/// number of `--changed <scene>`.
+fn changed_scenes(args: &[&str]) -> Result<Vec<String>, String> {
+    args.chunks(2)
+        .map(|pair| match pair {
+            ["--changed", scene] => Ok((*scene).to_owned()),
+            _ => Err(
+                "after the two folders --snapshot-compare takes only --changed <scene>".to_owned(),
+            ),
+        })
+        .collect()
+}
+
+/// Runs `sue --snapshot-compare <before> <after> [--changed <scene>]...`:
+/// prints how each scene of the second folder stands against the first.
+/// Fails (exit code 1) when a scene differs that no `--changed` names;
+/// exit code 2 means the comparison could not be made.
+#[must_use]
+pub fn compare_cli(args: &[&str]) -> ExitCode {
+    let [before, after, rest @ ..] = args else {
+        eprintln!("sue: --snapshot-compare needs two folders");
+        return ExitCode::from(2);
+    };
+    let scenes = changed_scenes(rest).and_then(|changed| {
+        compare::compare_folders(Path::new(before), Path::new(after), &changed)
+    });
+    match scenes {
+        Ok(scenes) => {
+            print!("{}", compare::report(&scenes));
+            if scenes.iter().any(compare::Scene::unexpected) {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
+        }
+        Err(error) => {
+            eprintln!("sue: {error}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// Makes the empty folder the throwaway profile lives in. A folder the
+/// caller named is removed only when an earlier run left it behind.
+fn fresh_profile(dir: &Path, options: &Options) -> Result<PathBuf, String> {
+    let root = match &options.profile {
+        Some(root) => {
+            if root.exists() && !root.join(PROFILE_MARK).is_file() {
+                return Err(format!(
+                    "{} exists and is not a snapshot profile; name a folder that does not exist",
+                    root.display()
+                ));
+            }
+            root.clone()
+        }
+        None => dir.join("profile"),
+    };
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    std::fs::write(root.join(PROFILE_MARK), b"").map_err(|error| error.to_string())?;
+    Ok(root)
+}
+
 /// Renders the shell's main scenes into `dir` as PNG files and returns
-/// their paths.
+/// their paths: the plain run, at scale 1.0 with the default theme.
 ///
 /// # Errors
 /// GPU, boot or file-system failures.
 pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBuf>, String> {
+    write_snapshots_with(dir, width, height, &Options::default())
+}
+
+/// Renders the shell's main scenes into `dir` as PNG files and returns
+/// their paths. `width` and `height` are the desktop window's size in
+/// points.
+///
+/// # Errors
+/// GPU, boot or file-system failures, or a preset Sue does not have.
+pub fn write_snapshots_with(
+    dir: &Path,
+    width: u32,
+    height: u32,
+    options: &Options,
+) -> Result<Vec<PathBuf>, String> {
+    let theme = options.preset.as_deref().map(preset).transpose()?;
     std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
     let gpu = GpuContext::headless().map_err(|error| error.to_string())?;
-    let root = dir.join("profile");
-    let _ = std::fs::remove_dir_all(&root);
+    let root = fresh_profile(dir, options)?;
     let paths = PlatformPaths {
         config_dir: root.join("config"),
         data_dir: root.join("data"),
@@ -344,19 +556,28 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
         HardwareCapabilities::probe_portable(),
         paths.clone(),
     );
-    let options = BootOptions {
+    let boot = BootOptions {
         audio_devices: Vec::new(),
         gpu_label: Some(gpu.adapter_label()),
         gpu_kind: Some(gpu.adapter_kind().to_owned()),
         gpus: gpu.available().to_vec(),
     };
     // It remembers work in the throwaway profile, for the Hub's lists.
-    let runtime = Runtime::new(Engine::boot_with(&host, options)?)?.remembering(true);
+    let mut runtime = Runtime::new(Engine::boot_with(&host, boot)?)?.remembering(true);
+    if let Some(theme) = theme {
+        // Outside the history, so that no scene's Undo takes it back.
+        let rice = &mut runtime.engine.world.rice;
+        theme
+            .transaction(rice)
+            .apply(rice)
+            .map_err(|error| error.to_string())?;
+    }
     let start = Instant::now();
     let camera = Camera2 {
         ctx: egui::Context::default(),
         painter: EguiPainter::new(&gpu, wgpu::TextureFormat::Rgba8UnormSrgb),
         size: [width, height],
+        scale: options.scale,
         start,
         now: start,
         input: Vec::new(),
@@ -383,4 +604,102 @@ pub fn write_snapshots(dir: &Path, width: u32, height: u32) -> Result<Vec<PathBu
     written.extend(entering);
     let _ = std::fs::remove_dir_all(&root);
     Ok(written)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_plain_run_has_scale_one_and_no_preset() {
+        assert_eq!(Options::parse(&[]), Ok(Options::default()));
+        assert_eq!(Options::default().scale, 1.0);
+    }
+
+    #[test]
+    fn options_are_read_in_any_order() {
+        let options =
+            Options::parse(&["--preset", "paper", "--scale", "1.5", "--profile", "p"]).unwrap();
+        assert_eq!(
+            options,
+            Options {
+                scale: 1.5,
+                preset: Some("paper".to_owned()),
+                profile: Some(PathBuf::from("p")),
+            }
+        );
+    }
+
+    #[test]
+    fn wrong_options_are_refused_with_the_reason() {
+        for (args, reason) in [
+            (&["--scale"][..], "--scale needs a value"),
+            (&["--scale", "0"], "from 0.5 to 4"),
+            (&["--scale", "nan"], "from 0.5 to 4"),
+            (&["--scale", "big"], "from 0.5 to 4"),
+            (&["--preset", "no-such"], "there is no theme preset no-such"),
+            (&["--zoom", "2"], "no option --zoom"),
+        ] {
+            let error = Options::parse(args).unwrap_err();
+            assert!(error.contains(reason), "{args:?}: {error}");
+        }
+    }
+
+    #[test]
+    fn every_built_in_preset_can_be_asked_for() {
+        let presets = sue_rice::builtin_presets();
+        assert!(presets.len() > 1);
+        for preset in presets {
+            assert!(Options::parse(&["--preset", &preset.id]).is_ok());
+        }
+    }
+
+    #[test]
+    fn a_scaled_picture_keeps_its_points() {
+        assert_eq!(pixel_size([1440, 900], 1.0), [1440, 900]);
+        assert_eq!(pixel_size([1440, 900], 1.5), [2160, 1350]);
+        assert_eq!(pixel_size([430, 932], 2.0), [860, 1864]);
+        assert_eq!(pixel_size([393, 851], 1.5), [590, 1277]);
+    }
+
+    #[test]
+    fn only_changed_follows_the_two_folders() {
+        assert_eq!(changed_scenes(&[]), Ok(Vec::new()));
+        assert_eq!(
+            changed_scenes(&["--changed", "00-hub", "--changed", "20-*"]),
+            Ok(vec!["00-hub".to_owned(), "20-*".to_owned()])
+        );
+        assert!(changed_scenes(&["--changed"]).is_err());
+        assert!(changed_scenes(&["--same", "00-hub"]).is_err());
+    }
+
+    #[test]
+    fn a_named_profile_folder_that_is_not_ours_is_left_alone() {
+        let dir = std::env::temp_dir().join(format!("sue-snapshot-profile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let theirs = dir.join("theirs");
+        std::fs::create_dir_all(&theirs).unwrap();
+        std::fs::write(theirs.join("keep.txt"), "keep").unwrap();
+        let named = |root: &Path| Options {
+            profile: Some(root.to_path_buf()),
+            ..Options::default()
+        };
+        assert!(fresh_profile(&dir, &named(&theirs)).is_err());
+        assert!(theirs.join("keep.txt").is_file());
+
+        // One the harness made is emptied and used again.
+        let ours = dir.join("ours");
+        assert_eq!(fresh_profile(&dir, &named(&ours)), Ok(ours.clone()));
+        std::fs::write(ours.join("left-over.txt"), "x").unwrap();
+        assert_eq!(fresh_profile(&dir, &named(&ours)), Ok(ours.clone()));
+        assert!(!ours.join("left-over.txt").exists());
+        assert!(ours.join(PROFILE_MARK).is_file());
+
+        // Without a name it is `profile` in the output folder.
+        assert_eq!(
+            fresh_profile(&dir, &Options::default()),
+            Ok(dir.join("profile"))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
