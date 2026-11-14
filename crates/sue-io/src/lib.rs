@@ -33,6 +33,7 @@ mod raster;
 mod sniff;
 pub mod sqlite;
 pub mod svg;
+pub mod text_ops;
 mod tile_cache;
 mod video;
 pub mod zip;
