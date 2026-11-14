@@ -13,9 +13,10 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use egui::containers::scroll_area::{ScrollAreaOutput, ScrollBarVisibility};
+use egui::layers::ShapeIdx;
 use egui::style::{ScrollFadeStyle, ScrollStyle};
 use egui::{
-    Color32, CornerRadius, Direction, Id, Margin, Rect, ScrollArea, Shape, Style, Ui, Vec2,
+    Color32, Direction, Id, Margin, Painter, Rect, ScrollArea, Shape, Style, Ui, Vec2, pos2,
 };
 
 use super::list::{ground, salted};
@@ -175,10 +176,12 @@ impl ScrollView {
         theme: &Theme,
         add_contents: impl FnOnce(&mut Ui) -> R,
     ) -> ScrollAreaOutput<R> {
-        self.run(ui, theme, |area, ui, inside| {
+        self.run(ui, theme, |area, ui, inside, slot| {
             area.show(ui, |ui| {
                 ui.set_style(inside);
-                add_contents(ui)
+                let inner = add_contents(ui);
+                *slot = Some(FadeSlot::after(ui));
+                inner
             })
         })
     }
@@ -195,22 +198,26 @@ impl ScrollView {
         total_rows: usize,
         add_contents: impl FnOnce(&mut Ui, Range<usize>) -> R,
     ) -> ScrollAreaOutput<R> {
-        self.run(ui, theme, |area, ui, inside| {
+        self.run(ui, theme, |area, ui, inside, slot| {
             area.show_rows(ui, row_height, total_rows, |ui, rows| {
                 ui.set_style(inside);
-                add_contents(ui, rows)
+                let inner = add_contents(ui, rows);
+                *slot = Some(FadeSlot::after(ui));
+                inner
             })
         })
     }
 
     /// Runs the egui scroll area `show` shows, in Sue's look, and paints
-    /// the fades over it. `show` gets the style what is inside goes back
-    /// to: the bars' look is the area's own.
+    /// the fades into the slot `show` leaves after the content: over the
+    /// content and under the bars, which egui draws after it. `show` gets
+    /// the style what is inside goes back to: the bars' look is the
+    /// area's own.
     fn run<R>(
         self,
         ui: &mut Ui,
         theme: &Theme,
-        show: impl FnOnce(ScrollArea, &mut Ui, Arc<Style>) -> ScrollAreaOutput<R>,
+        show: impl FnOnce(ScrollArea, &mut Ui, Arc<Style>, &mut Option<FadeSlot>) -> ScrollAreaOutput<R>,
     ) -> ScrollAreaOutput<R> {
         let density = Density::of(ui);
         let surface = self.on.unwrap_or_else(|| ground(ui, theme));
@@ -242,60 +249,231 @@ impl ScrollView {
         if let Some(height) = self.max_size[1] {
             area = area.max_height(height);
         }
-        let output = show(area, ui, outside.clone());
+        let mut slot = None;
+        let output = show(area, ui, outside.clone(), &mut slot);
         ui.set_style(outside);
-        if self.fades {
+        if self.fades
+            && let Some(slot) = slot
+        {
             let offset = output.state.clamped_offset();
-            paint_fades(
-                ui,
+            let fades = fades(
                 output.inner_rect,
                 (output.content_size, offset),
                 surface,
                 Self::fade_reach(theme),
             );
+            if !fades.is_empty() {
+                slot.painter.set(slot.index, Shape::Vec(fades));
+            }
         }
         output
     }
 }
 
-/// Paints the fades of an area that shows `view` of content
-/// `content_size` large, scrolled by `offset`, into `surface`.
-fn paint_fades(
-    ui: &Ui,
+/// The place among the shapes of an area where its fades go: after its
+/// content, before its bars.
+struct FadeSlot {
+    painter: Painter,
+    index: ShapeIdx,
+}
+
+impl FadeSlot {
+    /// A slot after what `ui`, the area's content, has drawn so far.
+    fn after(ui: &Ui) -> Self {
+        let painter = ui.painter().clone();
+        let index = painter.add(Shape::Noop);
+        Self { painter, index }
+    }
+}
+
+/// The fades of an area that shows `view` of content `content_size`
+/// large, scrolled by `offset`, into `surface`: a band at each edge the
+/// content runs out of.
+fn fades(
     view: Rect,
     (content_size, offset): (Vec2, Vec2),
     surface: Color32,
     reach: f32,
-) {
-    if !ui.is_rect_visible(view) {
-        return;
-    }
-    let painter = ui.painter().with_clip_rect(view.intersect(ui.clip_rect()));
+) -> Vec<Shape> {
     let clear = Color32::TRANSPARENT;
     let tint = |strength: f32| surface.gamma_multiply(strength);
     let [top, bottom] = ScrollView::fade_strength(offset.y, content_size.y, view.height(), reach);
     let [left, right] = ScrollView::fade_strength(offset.x, content_size.x, view.width(), reach);
     let band = |rect: Rect, direction: Direction, colors: [Color32; 2]| {
-        let mut shape = Shape::gradient_rect(rect, direction, colors);
-        if let Shape::Rect(rect) = &mut shape {
-            rect.corner_radius = CornerRadius::ZERO;
-        }
-        painter.add(shape);
+        Shape::gradient_rect(rect, direction, colors)
     };
+    let mut shapes = Vec::new();
     if top > 0.0 {
-        let rect = Rect::from_min_max(view.min, egui::pos2(view.right(), view.top() + reach));
-        band(rect, Direction::TopDown, [tint(top), clear]);
+        let rect = Rect::from_min_max(view.min, pos2(view.right(), view.top() + reach));
+        shapes.push(band(rect, Direction::TopDown, [tint(top), clear]));
     }
     if bottom > 0.0 {
-        let rect = Rect::from_min_max(egui::pos2(view.left(), view.bottom() - reach), view.max);
-        band(rect, Direction::TopDown, [clear, tint(bottom)]);
+        let rect = Rect::from_min_max(pos2(view.left(), view.bottom() - reach), view.max);
+        shapes.push(band(rect, Direction::TopDown, [clear, tint(bottom)]));
     }
     if left > 0.0 {
-        let rect = Rect::from_min_max(view.min, egui::pos2(view.left() + reach, view.bottom()));
-        band(rect, Direction::LeftToRight, [tint(left), clear]);
+        let rect = Rect::from_min_max(view.min, pos2(view.left() + reach, view.bottom()));
+        shapes.push(band(rect, Direction::LeftToRight, [tint(left), clear]));
     }
     if right > 0.0 {
-        let rect = Rect::from_min_max(egui::pos2(view.right() - reach, view.top()), view.max);
-        band(rect, Direction::LeftToRight, [clear, tint(right)]);
+        let rect = Rect::from_min_max(pos2(view.right() - reach, view.top()), view.max);
+        shapes.push(band(rect, Direction::LeftToRight, [clear, tint(right)]));
+    }
+    shapes
+}
+
+#[cfg(test)]
+mod tests {
+    use egui::{Event, MouseWheelSource, MouseWheelUnit, TouchPhase, vec2};
+
+    use super::super::list::harness::Run;
+    use super::*;
+
+    #[test]
+    fn an_edge_fades_only_where_the_content_runs_out() {
+        // Content that fits: no fades at all.
+        assert_eq!(
+            ScrollView::fade_strength(0.0, 100.0, 200.0, 16.0),
+            [0.0, 0.0]
+        );
+        // At the top of a long list: only the end fades.
+        assert_eq!(
+            ScrollView::fade_strength(0.0, 1000.0, 200.0, 16.0),
+            [0.0, 1.0]
+        );
+        // A little way in: the start fades in step with the distance.
+        assert_eq!(
+            ScrollView::fade_strength(4.0, 1000.0, 200.0, 16.0),
+            [0.25, 1.0]
+        );
+        // At the end: only the start fades.
+        assert_eq!(
+            ScrollView::fade_strength(800.0, 1000.0, 200.0, 16.0),
+            [1.0, 0.0]
+        );
+        // No reach, no fade.
+        assert_eq!(
+            ScrollView::fade_strength(10.0, 1000.0, 200.0, 0.0),
+            [0.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn the_bars_take_no_room_and_show_faintly_only_where_nothing_hovers() {
+        let theme = Run::new().theme;
+        for density in Density::ALL {
+            let style = ScrollView::style(&theme, density, false);
+            assert!(style.floating);
+            assert_eq!(style.floating_allocated_width, 0.0);
+            let resting = style.dormant_handle_opacity;
+            if density == Density::Touch {
+                assert!(resting > 0.0, "on touch nothing hovers to show the bar");
+            } else {
+                assert_eq!(resting, 0.0);
+            }
+            assert!(ScrollView::style(&theme, density, true).dormant_handle_opacity > 0.0);
+            assert!(style.handle_min_length >= density.min_hit());
+        }
+    }
+
+    /// Thirty rows in an area 100 points high; the shapes of the frame.
+    fn list(run: &mut Run, events: Vec<Event>) -> (Rect, Vec<Shape>) {
+        let draw = |ui: &mut Ui, theme: &Theme| {
+            ScrollView::vertical("list")
+                .max_height(100.0)
+                .always_bars(true)
+                .show(ui, theme, |ui| {
+                    for row in 0..30 {
+                        ui.label(format!("Row {row}"));
+                    }
+                })
+                .inner_rect
+        };
+        let (view, _) = run.frame(events, draw);
+        let theme = run.theme.clone();
+        let output = run.ctx.run_ui(egui::RawInput::default(), |ui| {
+            let _ = draw(ui, &theme);
+        });
+        let shapes = output
+            .shapes
+            .into_iter()
+            .map(|clipped| clipped.shape)
+            .collect();
+        (view, shapes)
+    }
+
+    /// The gradient bands among `shapes`, by their top edge.
+    fn bands(shapes: &[Shape]) -> Vec<f32> {
+        let mut found = Vec::new();
+        for shape in shapes {
+            match shape {
+                Shape::Vec(inner) => found.extend(bands(inner)),
+                Shape::Mesh(mesh)
+                    if mesh.vertices.len() == 4
+                        && mesh.texture_id == egui::TextureId::default() =>
+                {
+                    let top = mesh
+                        .vertices
+                        .iter()
+                        .map(|vertex| vertex.pos.y)
+                        .fold(f32::INFINITY, f32::min);
+                    found.push(top);
+                }
+                _ => {}
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn a_long_list_fades_at_its_end_and_at_its_start_once_scrolled() {
+        let mut run = Run::new();
+        let (view, shapes) = list(&mut run, Vec::new());
+        let reach = ScrollView::fade_reach(&run.theme);
+        assert_eq!(bands(&shapes), [view.bottom() - reach], "only the end");
+        let wheel = Event::MouseWheel {
+            unit: MouseWheelUnit::Point,
+            delta: vec2(0.0, -60.0),
+            phase: TouchPhase::Move,
+            source: MouseWheelSource::Wheel,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let _ = list(&mut run, vec![Event::PointerMoved(view.center())]);
+        let _ = list(&mut run, vec![wheel]);
+        let (view, shapes) = run_settled(&mut run);
+        let mut seen = bands(&shapes);
+        seen.sort_by(f32::total_cmp);
+        assert_eq!(seen, [view.top(), view.bottom() - reach], "both ends");
+    }
+
+    fn run_settled(run: &mut Run) -> (Rect, Vec<Shape>) {
+        let mut last = list(run, Vec::new());
+        for _ in 0..20 {
+            last = list(run, Vec::new());
+        }
+        last
+    }
+
+    #[test]
+    fn the_fades_lie_under_the_bars() {
+        let mut run = Run::new();
+        let _ = list(&mut run, Vec::new());
+        let (view, shapes) = list(&mut run, Vec::new());
+        let fade = shapes
+            .iter()
+            .position(|shape| !bands(std::slice::from_ref(shape)).is_empty())
+            .expect("a long list fades");
+        // The bar, always shown here, is a plain rectangle along the
+        // right edge of the view.
+        let bar = shapes
+            .iter()
+            .rposition(|shape| {
+                matches!(shape, Shape::Rect(rect)
+                    if rect.fill.a() > 0
+                        && rect.rect.left() > view.right() - 12.0
+                        && rect.rect.right() <= view.right() + 0.5)
+            })
+            .expect("the bar");
+        assert!(fade < bar, "a fade drawn over the bar dims it");
     }
 }
