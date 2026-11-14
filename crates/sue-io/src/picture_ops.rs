@@ -166,10 +166,23 @@ fn listed(extension: &str) -> Option<PictureFormat> {
     PictureFormat::from_extension(&plain(extension))
 }
 
-/// `true` when files of `extension` cannot hold transparency.
-fn flattens(extension: &str) -> bool {
+/// `true` when files of `extension` cannot hold transparency, so an
+/// export lays the picture over its background whatever was chosen.
+#[must_use]
+pub fn flattens(extension: &str) -> bool {
     matches!(plain(extension).as_str(), "jpg" | "jpeg")
         || listed(extension).is_some_and(|format| !format.keeps_alpha())
+}
+
+/// `true` when [`read_picture`] takes a file of this name: its extension
+/// names a picture format Sue reads.
+#[must_use]
+pub fn reads(path: &Path) -> bool {
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "jxl") || listed(&extension).is_some()
 }
 
 /// Reads a picture file's bytes into RGBA8 pixels. The extension of
@@ -658,6 +671,12 @@ mod tests {
     fn pictures_convert_to_every_picture_format() {
         let png = crate::encode_png(&picture(20, 10)).unwrap();
         let source = read_picture(Path::new("card.png"), &png).unwrap();
+        for name in ["card.PNG", "a.jpeg", "b.jxl", "c.webp", "d.tif", "e.pgm"] {
+            assert!(reads(Path::new(name)), "{name}");
+        }
+        for name in ["notes.txt", "song.wav", "picture", "art.clip"] {
+            assert!(!reads(Path::new(name)), "{name}");
+        }
         let options = PictureOptions {
             resize: Resize::Width(10),
             grayscale: true,
@@ -740,8 +759,8 @@ mod tests {
         let green = hue_saturation([1.0, 0.0, 0.0], 120.0, 0.0);
         assert!((green[1] - 1.0).abs() < 1e-6 && green[0].abs() < 1e-6);
         // The batch conversion uses them: a lighter, grayer picture.
-        let tile = RasterTile2D::from_bytes(1, 1, PixelFormat::Rgba8, vec![153, 102, 51, 255])
-            .unwrap();
+        let tile =
+            RasterTile2D::from_bytes(1, 1, PixelFormat::Rgba8, vec![153, 102, 51, 255]).unwrap();
         let options = PictureOptions {
             brightness: 0.2,
             saturation: -1.0,
