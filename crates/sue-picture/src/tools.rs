@@ -209,15 +209,15 @@ impl Tool {
         };
 
         match self {
-            Self::Zoom => vec![plain(&tr!("zoom-in-2"), 0), plain(&tr!("zoom-out-2"), 1)],
-            Self::Hand => vec![plain(&tr!("hand"), 0), plain(&tr!("rotate"), 1)],
-            Self::MoveLayer => vec![plain(&tr!("move-layer"), 0)],
+            Self::Zoom => vec![plain("Zoom In", 0), plain("Zoom Out", 1)],
+            Self::Hand => vec![plain("Hand", 0), plain("Rotate", 1)],
+            Self::MoveLayer => vec![plain("Move Layer", 0)],
             // Clip Studio Paint's Selection area sub tools.
             Self::Select => vec![
-                plain(&tr!("rectangle"), 0),
-                plain(&tr!("ellipse"), 1),
-                plain(&tr!("lasso"), 2),
-                plain(&tr!("polyline"), 3),
+                plain("Rectangle", 0),
+                plain("Ellipse", 1),
+                plain("Lasso", 2),
+                plain("Polyline", 3),
                 SubTool::new(
                     self,
                     "Selection pen",
@@ -232,12 +232,12 @@ impl Tool {
                 ),
             ],
             Self::AutoSelect => vec![
-                plain(&tr!("refer-only-editing-layer"), 0).tolerance(0.1),
-                plain(&tr!("refer-other-layers"), 1).tolerance(0.1),
+                plain("Refer Only Editing Layer", 0).tolerance(0.1),
+                plain("Refer Other Layers", 1).tolerance(0.1),
             ],
             Self::Eyedropper => vec![
-                plain(&tr!("obtain-display-color-2"), 0),
-                plain(&tr!("obtain-layer-color-2"), 1),
+                plain("Obtain Display Color", 0),
+                plain("Obtain Layer Color", 1),
             ],
             // Clip Studio Paint's Pen tool: its sub tools in its order, with
             // its default settings (size, opacity, hardness, density,
@@ -686,17 +686,17 @@ impl Tool {
                 .stabilization(2),
             ],
             Self::Fill => vec![
-                plain(&tr!("refer-only-editing-layer"), 0).tolerance(0.1),
+                plain("Refer Only Editing Layer", 0).tolerance(0.1),
                 // Encircle lines: the areas they close off fill.
-                plain(&tr!("close-and-fill"), CLOSE_AND_FILL).tolerance(0.1),
-                plain(&tr!("refer-other-layers"), 1).tolerance(0.1),
+                plain("Close and fill", CLOSE_AND_FILL).tolerance(0.1),
+                plain("Refer Other Layers", 1).tolerance(0.1),
                 // Draw round colored areas: the gaps left in them fill.
-                plain(&tr!("paint-unpainted-area"), PAINT_UNPAINTED),
+                plain("Paint unpainted area", PAINT_UNPAINTED),
             ],
             Self::Gradient => vec![
-                plain(&tr!("drawing-color-to-transparent"), 0),
-                plain(&tr!("main-to-sub-color"), 1),
-                plain(&tr!("radial"), 2),
+                plain("Drawing Color to Transparent", 0),
+                plain("Main to Sub Color", 1),
+                plain("Radial", 2),
             ],
             Self::Figure => {
                 let line = tip(6.0, |t| {
@@ -722,9 +722,9 @@ impl Tool {
             }
             // Clip Studio Paint's order: rectangle, polyline, then cut.
             Self::Frame => vec![
-                plain(&tr!("rectangle-frame"), 0),
-                plain(&tr!("polyline-frame"), POLYLINE_FRAME),
-                plain(&tr!("frame-border-division"), 1),
+                plain("Rectangle Frame", 0),
+                plain("Polyline frame", POLYLINE_FRAME),
+                plain("Frame Border Division", 1),
             ],
             Self::Balloon => {
                 let outline = tip(3.0, |t| {
@@ -745,15 +745,15 @@ impl Tool {
             }
             // Clip Studio Paint's Create ruler group, in its order.
             Self::Ruler => vec![
-                plain(&tr!("linear-ruler"), 5),
-                plain(&tr!("curve-ruler"), 6),
-                plain(&tr!("figure-ruler"), 7),
-                plain(&tr!("ruler-pen"), 8),
-                plain(&tr!("special-ruler-2"), 2),
-                plain(&tr!("perspective-ruler"), 1),
+                plain("Linear Ruler", 5),
+                plain("Curve Ruler", 6),
+                plain("Figure Ruler", 7),
+                plain("Ruler Pen", 8),
+                plain("Special Ruler", 2),
+                plain("Perspective Ruler", 1),
                 SubTool {
                     lines: 2,
-                    ..plain(&tr!("symmetrical-ruler"), 0)
+                    ..plain("Symmetrical Ruler", 0)
                 },
             ],
             // Clip Studio Paint's Text: 48 pixel words, across; and words
@@ -764,7 +764,7 @@ impl Tool {
                     ..Tip::default()
                 };
                 vec![
-                    SubTool::new(self, &tr!("text"), 0, words),
+                    SubTool::new(self, "Text", 0, words),
                     SubTool::new(self, "Text on Curve", 1, words),
                 ]
             }
@@ -797,11 +797,11 @@ impl Tool {
                     })
                 };
                 vec![
-                    plain(&tr!("control-point"), 0),
+                    plain("Control point", 0),
                     SubTool {
                         level: 2,
                         amount: 30.0,
-                        ..plain(&tr!("pinch-vector-line"), 1)
+                        ..plain("Pinch vector line", 1)
                     },
                     SubTool {
                         level: 2,
@@ -812,16 +812,16 @@ impl Tool {
                         amount: 1.0,
                         ..SubTool::new(self, "Adjust line width", 4, brush(40.0))
                     },
-                    plain(&tr!("redraw-vector-line"), 5).stabilization(6),
+                    plain("Redraw vector line", 5).stabilization(6),
                     SubTool::new(self, "Redraw vector line width", 6, brush(10.0)),
                     SubTool {
                         amount: 10.0,
-                        ..plain(&tr!("remove-dust-2"), 7)
+                        ..plain("Remove dust", 7)
                     },
                 ]
             }
             // Clip Studio Paint's Operation group.
-            Self::Operation => vec![plain(&tr!("object"), 0), plain(&tr!("select-layer"), 1)],
+            Self::Operation => vec![plain("Object", 0), plain("Select layer", 1)],
             // Clip Studio Paint's Decoration tool: shapes scattered about the
             // stroke, or running along it and turning with it.
             Self::Decoration => {
