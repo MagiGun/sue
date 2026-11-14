@@ -60,9 +60,11 @@ pub(super) const DOC_COMIC: Art = Art {
 pub(super) const DOC_PRINT_BOOK: Art = Art {
     keyline: Keyline::Tall,
     line: &[
-        Part::Stroke(PAGE),
-        Part::Stroke("M8.75 2.75 V21.25"),
-        Part::Stroke("M12.25 7.75 H16.25"),
+        Part::Stroke(
+            "M19.25 16.25 V4.75 A2 2 0 0 0 17.25 2.75 H7.25 A2.5 2.5 0 0 0 4.75 5.25 V18.75",
+        ),
+        Part::Stroke("M19.25 16.25 H7.25 A2.5 2.5 0 0 0 7.25 21.25 H19.25"),
+        Part::Stroke("M9.75 7.75 H14.25"),
     ],
     solid: &[],
 };
@@ -123,24 +125,35 @@ pub(super) const MATERIAL_PATTERN: Art = Art {
     solid: &[],
 };
 
+/// The dots of screentone on a tile: three rows of three, small at the
+/// upper left and growing toward the lower right.
+const TONE_DOTS: &str = "M15.25 16.25 A1.5 1.5 0 0 0 18.25 16.25 A1.5 1.5 0 0 0 15.25 16.25 Z \
+                         M15.55 12 A1.2 1.2 0 0 0 17.95 12 A1.2 1.2 0 0 0 15.55 12 Z M11.05 \
+                         16.25 A1.2 1.2 0 0 0 13.45 16.25 A1.2 1.2 0 0 0 11.05 16.25 Z M15.85 \
+                         7.75 A0.9 0.9 0 0 0 17.65 7.75 A0.9 0.9 0 0 0 15.85 7.75 Z M11.35 12 \
+                         A0.9 0.9 0 0 0 13.15 12 A0.9 0.9 0 0 0 11.35 12 Z M6.85 16.25 A0.9 \
+                         0.9 0 0 0 8.65 16.25 A0.9 0.9 0 0 0 6.85 16.25 Z M11.6 7.75 A0.65 \
+                         0.65 0 0 0 12.9 7.75 A0.65 0.65 0 0 0 11.6 7.75 Z M7.1 12 A0.65 0.65 \
+                         0 0 0 8.4 12 A0.65 0.65 0 0 0 7.1 12 Z M7.35 7.75 A0.4 0.4 0 0 0 \
+                         8.15 7.75 A0.4 0.4 0 0 0 7.35 7.75 Z";
+
 pub(super) const MATERIAL_TONE: Art = Art {
     keyline: Keyline::Square,
-    line: &[
-        Part::Stroke(TILE),
-        Part::Fill(
-            "M6.25 8 A1.75 1.75 0 0 1 9.75 8 A1.75 1.75 0 0 1 6.25 8 Z M10.6 8 A1.4 1.4 0 0 1 13.4              8 A1.4 1.4 0 0 1 10.6 8 Z M15 8 A1 1 0 0 1 17 8 A1 1 0 0 1 15 8 Z M6.6 12 A1.4 1.4 0              0 1 9.4 12 A1.4 1.4 0 0 1 6.6 12 Z M11 12 A1 1 0 0 1 13 12 A1 1 0 0 1 11 12 Z M7 16 A1              1 0 0 1 9 16 A1 1 0 0 1 7 16 Z",
-        ),
-    ],
+    line: &[Part::Stroke(TILE), Part::Fill(TONE_DOTS)],
     solid: &[],
 };
+
+/// The tuft of the brush tip, under its metal band.
+const TIP_TUFT: &str =
+    "M7.75 8.75 H16.25 C18.75 12.5 16.5 16.5 12 21.25 C7.5 16.5 5.25 12.5 7.75 8.75 Z";
 
 pub(super) const MATERIAL_BRUSH_TIP: Art = Art {
     keyline: Keyline::Tall,
     line: &[
         Part::Stroke("M7.75 8.75 V3.75 A1 1 0 0 1 8.75 2.75 H15.25 A1 1 0 0 1 16.25 3.75 V8.75"),
-        Part::Stroke(
-            "M7.75 8.75 H16.25 C18.75 12.5 16.5 16.5 12 21.25 C7.5 16.5 5.25 12.5 7.75 8.75 Z",
-        ),
+        Part::Stroke("M7.75 5.75 H16.25"),
+        Part::Fill(TIP_TUFT),
+        Part::Stroke(TIP_TUFT),
     ],
     solid: &[],
 };
@@ -173,7 +186,8 @@ pub(super) const PROJECTS: Art = Art {
     keyline: Keyline::Wide,
     line: &[
         Part::Stroke(
-            "M4.75 10.75 H19.25 A2 2 0 0 1 21.25 12.75 V17.25 A2 2 0 0 1 19.25 19.25 H4.75 A2 2              0 0 1 2.75 17.25 V12.75 A2 2 0 0 1 4.75 10.75 Z",
+            "M4.75 10.75 H19.25 A2 2 0 0 1 21.25 12.75 V17.25 A2 2 0 0 1 19.25 19.25 H4.75 A2 2 \
+             0 0 1 2.75 17.25 V12.75 A2 2 0 0 1 4.75 10.75 Z",
         ),
         Part::Stroke("M4.75 7.75 H19.25"),
         Part::Stroke("M6.75 4.75 H17.25"),

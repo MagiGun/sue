@@ -427,11 +427,11 @@ icons! {
     Play = "play" => animation::PLAY,
     /// A square. Stop playing.
     Stop = "stop" => animation::STOP,
-    /// Two triangles that point to the left, the one at the front
+    /// Two solid triangles that point to the left, the one at the front
     /// touching the back of the other, at an upright bar they run into.
     /// Go to the first frame.
     FrameFirst = "frame-first" => animation::FRAME_FIRST,
-    /// Two triangles that point to the right, the one at the front
+    /// Two solid triangles that point to the right, the one at the front
     /// touching the back of the other, at an upright bar they run into.
     /// Go to the last frame.
     FrameLast = "frame-last" => animation::FRAME_LAST,
@@ -455,13 +455,13 @@ icons! {
     /// timeline, where its lower right corner would be. This frame shows
     /// this cel.
     CelSpecify = "cel-specify" => animation::CEL_SPECIFY,
-    /// An onion: a round bulb with a pointed top and a sprout, and two
-    /// skins drawn inside it from the top down to the root. Onion skin,
-    /// the frames before and after shown through.
+    /// A solid ball, and behind it on the left the edges of the same
+    /// ball where it was the two frames before. Onion skin, the frames
+    /// before and after shown through.
     OnionSkin = "onion-skin" => animation::ONION_SKIN,
-    /// A track with two solid diamonds on it, the keys of a timeline, a
-    /// shorter track under it, and a plus in the lower right corner. A
-    /// new timeline.
+    /// A long track crossed by a playhead with a solid head, a shorter
+    /// track under it, and a plus in the lower right corner. A new
+    /// timeline.
     TimelineNew = "timeline-new" => animation::TIMELINE_NEW,
     /// A folder with a small solid triangle that points to the right in
     /// it. An animation folder, the folder that holds the cels of one
@@ -478,9 +478,9 @@ icons! {
     /// A page cut into three panels: one across the top and two below it
     /// with a slanted gutter between them. A comic, a story of pages.
     DocComic = "doc-comic" => documents::DOC_COMIC,
-    /// A booklet seen from the front: a cover with the line of its spine
-    /// near the left edge and a line of title. Pages sized for a printed
-    /// book.
+    /// A closed book seen from the front: a cover with a line of title,
+    /// over the block of its pages, which curls round at the spine. Pages
+    /// sized for a printed book.
     DocPrintBook = "doc-print-book" => documents::DOC_PRINT_BOOK,
     /// A page with two panels across its top and a solid gear where its
     /// lower right corner would be. A comic with every setting shown.
@@ -496,13 +496,13 @@ icons! {
     /// A square tile laid with bricks: three rows, the joints of each row
     /// halfway between those of the next. A pattern that repeats.
     MaterialPattern = "material-pattern" => documents::MATERIAL_PATTERN,
-    /// A square swatch of screentone: solid dots in the top left half,
-    /// large in the corner and smaller toward the middle, so that the
-    /// tone fades. A tone.
+    /// A square swatch of screentone: three rows of three solid dots,
+    /// small at the upper left and growing toward the lower right, so
+    /// that the tone fades. A tone.
     MaterialTone = "material-tone" => documents::MATERIAL_TONE,
     /// The head of a brush seen from the side, pointing down: the metal
-    /// band and under it a tuft that swells and ends in a point. A brush
-    /// tip.
+    /// band with a crimp across it and under it a solid tuft that swells
+    /// and ends in a point. A brush tip.
     MaterialBrushTip = "material-brush-tip" => documents::MATERIAL_BRUSH_TIP,
     /// A drawing figure in a pose: a round head, a body, one arm up and
     /// one down, the legs in a stride. A pose for a 3D figure.

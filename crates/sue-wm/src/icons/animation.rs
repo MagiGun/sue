@@ -25,22 +25,28 @@ pub(super) const STOP: Art = Art {
     solid: &[],
 };
 
+/// The two solid triangles of first frame, pointing to the left.
+const TWO_LEFT: &str = "M9.25 12 L14.25 7.5 V16.5 Z M14.25 12 L19.25 7.5 V16.5 Z";
+
 pub(super) const FRAME_FIRST: Art = Art {
     keyline: Keyline::Square,
     line: &[
         Part::Stroke("M5.75 7 V17"),
-        Part::Stroke("M9.25 12 L14.25 7.5 V16.5 Z"),
-        Part::Stroke("M14.25 12 L19.25 7.5 V16.5 Z"),
+        Part::Fill(TWO_LEFT),
+        Part::Stroke(TWO_LEFT),
     ],
     solid: &[],
 };
+
+/// The two solid triangles of last frame, pointing to the right.
+const TWO_RIGHT: &str = "M14.75 12 L9.75 7.5 V16.5 Z M9.75 12 L4.75 7.5 V16.5 Z";
 
 pub(super) const FRAME_LAST: Art = Art {
     keyline: Keyline::Square,
     line: &[
         Part::Stroke("M18.25 7 V17"),
-        Part::Stroke("M14.75 12 L9.75 7.5 V16.5 Z"),
-        Part::Stroke("M9.75 12 L4.75 7.5 V16.5 Z"),
+        Part::Fill(TWO_RIGHT),
+        Part::Stroke(TWO_RIGHT),
     ],
     solid: &[],
 };
@@ -130,31 +136,31 @@ pub(super) const CEL_SPECIFY: Art = Art {
     solid: &[],
 };
 
-/// The bulb of the onion.
-const BULB: &str = "M12 5.75 C13 8.25 19.25 9.5 19.25 14.25 C19.25 18.25 16 21.25 12 21.25 C8 \
-                    21.25 4.75 18.25 4.75 14.25 C4.75 9.5 11 8.25 12 5.75 Z";
+/// The ball as it is now, solid in front of where it was.
+const BALL: &str = "M11 12 A5 5 0 0 1 21 12 A5 5 0 0 1 11 12 Z";
 
 pub(super) const ONION_SKIN: Art = Art {
-    keyline: Keyline::Tall,
+    keyline: Keyline::Wide,
     line: &[
-        Part::Stroke(BULB),
-        Part::Stroke("M12 5.75 V2.75"),
-        Part::Stroke("M12 5.75 C7.5 11 7.5 17 12 21.25 M12 5.75 C16.5 11 16.5 17 12 21.25"),
+        Part::Stroke("M5.13 7.91 A5 5 0 0 0 5.13 16.09"),
+        Part::Stroke("M9.13 7.91 A5 5 0 0 0 9.13 16.09"),
+        Part::Fill(BALL),
+        Part::Stroke(BALL),
     ],
     solid: &[],
 };
 
-/// The two keys on the track of a new timeline.
-const KEYS: &str = "M7 6.25 L9.5 8.75 L7 11.25 L4.5 8.75 Z M15 6.25 L17.5 8.75 L15 11.25 L12.5 \
-                    8.75 Z";
+/// The head of the playhead on the track of a new timeline.
+const PLAYHEAD: &str = "M12.25 4.75 H16.25 V6.75 L14.25 8.75 L12.25 6.75 Z";
 
 pub(super) const TIMELINE_NEW: Art = Art {
     keyline: Keyline::Wide,
     line: &[
-        Part::Stroke("M2.75 8.75 H21.25"),
-        Part::Fill(KEYS),
-        Part::Stroke(KEYS),
-        Part::Stroke("M2.75 16.25 H12.25"),
+        Part::Stroke("M2.75 10.75 H21.25 M2.75 15.25 H10.25"),
+        Part::Clear("M14.25 8.75 V13.25"),
+        Part::Stroke("M14.25 8.75 V13.25"),
+        Part::Fill(PLAYHEAD),
+        Part::Stroke(PLAYHEAD),
         Part::Stroke(PLUS),
     ],
     solid: &[],
