@@ -3909,6 +3909,7 @@ version = "0.0.75"
 dependencies = [
  "egui",
  "sue-core",
+ "sue-io",
  "sue-lang",
  "sue-model",
  "sue-platform",

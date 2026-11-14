@@ -13,15 +13,26 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use egui::{Id, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
-use sue_core::{EntityId, JobHandle, JobPool, Properties};
+use egui::{Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
+use sue_core::{EntityId, Properties};
+use sue_wm::files::browser::{
+    COLUMN, lay_out, preview, show, sort_buttons, toolbar_frame, view_buttons,
+};
+use sue_wm::files::thumbs::shrink;
+use sue_wm::files::{Studio, Thumb, Thumbnailer, transfers_popup};
 use sue_wm::start::{
     self as page, Card, CardClick, Category, CategoryClick, Chosen, Glyph, PopupOutcome, RailItem,
     Row, Trailing,
 };
 use sue_wm::{
-    AppletContext, AppletId, FilePick, LabelEdit, ShellRequest, Theme, TransferKind, TransferState,
-    ago, unix_now,
+    AppletContext, AppletId, FilePick, ShellRequest, Theme, TransferKind, TransferState, ago,
+    unix_now,
+};
+
+// The files browser moved to `sue_wm::files`; the start page draws it
+// from there until the Hub's Files place replaces the start page.
+pub(crate) use sue_wm::files::{
+    Item, ProjectKey, ProjectsState, Shelf, Thumbs, Type, View, forget, shown, texture_key,
 };
 
 use crate::materials::Library;
@@ -37,7 +48,6 @@ const FEEDBACK: &str = "https://github.com/MagiGun/sue/issues/new?template=featu
 
 /// How wide the rail and the category column are.
 const RAIL: f32 = 84.0;
-const COLUMN: f32 = 210.0;
 
 /// What the main area shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -66,174 +76,25 @@ pub(crate) enum Popup {
     Material(EntityId),
 }
 
-/// How the cards lie.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum View {
-    /// Large cards.
-    #[default]
-    Large,
-    /// Small cards.
-    Small,
-    /// Rows.
-    List,
-}
-
-/// Which projects show.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) enum Shelf {
-    /// Every one.
-    #[default]
-    All,
-    /// The favorites.
-    Favorite,
-    /// The ones wearing a label.
-    Label(String),
-}
-
-/// What a project card stands for.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum ProjectKey {
-    /// A picture or project file.
-    File(PathBuf),
-    /// Work Sue kept while it was not saved, by its id.
-    Kept(String),
-}
-
-/// What kind of project a card is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Type {
-    /// A picture file.
-    Picture,
-    /// A Sue project.
-    Project,
-    /// Work kept while it was not saved.
-    Unsaved,
-}
-
-impl Type {
-    const ALL: [Self; 3] = [Self::Picture, Self::Project, Self::Unsaved];
-
-    fn label(self) -> String {
-        match self {
-            Self::Picture => tr!("start-type-picture"),
-            Self::Project => tr!("start-type-project"),
-            Self::Unsaved => tr!("start-type-unsaved"),
-        }
+/// Sue Paint as the files browser lists it: its pictures, its projects
+/// and the work it kept.
+fn studio() -> Studio<'static> {
+    Studio {
+        id: me(),
+        name: tr!("applet-name"),
+        opens: Some(&crate::studio::opens),
     }
-
-    fn glyph(self) -> Glyph {
-        match self {
-            Self::Picture => Glyph::Picture,
-            Self::Project => Glyph::Projects,
-            Self::Unsaved => Glyph::Clock,
-        }
-    }
-}
-
-/// One project on the start page.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Item {
-    pub(crate) key: ProjectKey,
-    /// The file (the kept project for unsaved work).
-    pub(crate) path: PathBuf,
-    pub(crate) title: String,
-    /// When it was last opened, saved or kept.
-    pub(crate) when: u64,
-    pub(crate) kind: Type,
-    pub(crate) favorite: bool,
 }
 
 /// The projects of Sue Paint in the work Sue remembers: pictures, Sue
 /// Paint projects and its kept work.
 pub(crate) fn items(work: &sue_wm::WorkList) -> Vec<Item> {
-    let paint = AppletId::new(crate::ID).ok();
-    let mut items: Vec<Item> = work
-        .recent()
-        .filter_map(|file| {
-            let kind = if file.is_project() {
-                (file.page == paint).then_some(Type::Project)?
-            } else if crate::studio::opens(&file.path) {
-                Type::Picture
-            } else {
-                return None;
-            };
-            Some(Item {
-                key: ProjectKey::File(file.path.clone()),
-                path: file.path.clone(),
-                title: file.title(),
-                when: file.last(),
-                kind,
-                favorite: work.is_favorite(&file.path),
-            })
-        })
-        .collect();
-    items.extend(
-        work.unsaved()
-            .filter(|kept| kept.page == paint)
-            .map(|kept| Item {
-                key: ProjectKey::Kept(kept.id.clone()),
-                path: kept.file.clone(),
-                title: kept.title(),
-                when: kept.at,
-                kind: Type::Unsaved,
-                favorite: work.is_favorite(&kept.file),
-            }),
-    );
-    items
+    sue_wm::files::items(work, &[studio()])
 }
 
-/// The projects `state` shows, in its order.
-pub(crate) fn shown(items: &[Item], state: &ProjectsState, work: &sue_wm::WorkList) -> Vec<Item> {
-    let needle = state.search.trim().to_lowercase();
-    let mut shown: Vec<Item> = items
-        .iter()
-        .filter(|item| match &state.shelf {
-            Shelf::All => true,
-            Shelf::Favorite => item.favorite,
-            Shelf::Label(label) => work.has_label(&item.path, label),
-        })
-        .filter(|item| state.types.is_empty() || state.types.contains(&(item.kind as u8)))
-        .filter(|item| needle.is_empty() || item.title.to_lowercase().contains(&needle))
-        .cloned()
-        .collect();
-    match state.sort {
-        1 => shown.sort_by_cached_key(|item| item.title.to_lowercase()),
-        _ => shown.sort_by_key(|item| std::cmp::Reverse(item.when)),
-    }
-    if state.reversed {
-        shown.reverse();
-    }
-    shown
-}
-
-impl ProjectsState {
-    /// Every project on `shelf`, newest first.
-    pub(crate) fn on_shelf(shelf: Shelf) -> Self {
-        Self {
-            shelf,
-            ..Self::default()
-        }
-    }
-}
-
-/// The Projects page's state.
-#[derive(Debug, Default)]
-pub(crate) struct ProjectsState {
-    pub(crate) shelf: Shelf,
-    pub(crate) search: String,
-    /// 0 by date modified (newest first), 1 by name.
-    pub(crate) sort: usize,
-    pub(crate) reversed: bool,
-    pub(crate) view: View,
-    /// The type chips that are on (none: every type).
-    pub(crate) types: HashSet<u8>,
-    pub(crate) chosen: HashSet<ProjectKey>,
-    /// A label being renamed, and its new name so far.
-    renaming: Option<(String, String)>,
-    /// A label just added, to rename once it shows.
-    adding: Option<String>,
-    /// Remove from List was clicked once and asks again.
-    armed: bool,
+/// How Sue Paint makes a project card's picture in the background.
+pub(crate) fn thumbnailer() -> Thumbnailer {
+    Thumbnailer::new(thumbnail)
 }
 
 /// A branch of the materials tree.
@@ -283,77 +144,13 @@ impl Default for MaterialsState {
     }
 }
 
-/// A picture made small for a card.
-#[derive(Clone, Debug)]
-pub(crate) struct Thumb {
-    pub(crate) size: [u32; 2],
-    pub(crate) pixels: Vec<u8>,
-}
-
-/// Project thumbnails, made in the background.
-#[derive(Debug, Default)]
-pub(crate) struct Thumbs {
-    pool: Option<JobPool>,
-    jobs: HashMap<PathBuf, (u64, JobHandle<Thumb>)>,
-    done: HashMap<PathBuf, (u64, Option<Thumb>)>,
-}
-
-/// When `path` last changed, in seconds since 1970 (0: unknown).
-fn stamp(path: &Path) -> u64 {
-    sue_platform::fs::metadata(path)
-        .ok()
-        .and_then(|metadata| metadata.modified())
-        .and_then(|time| time.duration_since(sue_platform::time::UNIX_EPOCH).ok())
-        .map_or(0, |since| since.as_secs())
-}
-
-impl Thumbs {
-    /// The thumbnail of `path`, starting it in the background if it is
-    /// new or changed.
-    pub(crate) fn get(&mut self, path: &Path) -> Option<(u64, &Thumb)> {
-        let now = stamp(path);
-        let fresh = self.done.get(path).is_some_and(|(at, _)| *at == now);
-        if !fresh && !self.jobs.contains_key(path) {
-            let pool = self.pool.get_or_insert_with(|| JobPool::new(1));
-            let file = path.to_path_buf();
-            let job = pool.spawn(tr!("start-thumbnail"), move |job| {
-                thumbnail(&file, 256, job).ok_or_else(String::new)
-            });
-            self.jobs.insert(path.to_path_buf(), (now, job));
-        }
-        self.done
-            .get(path)
-            .and_then(|(at, thumb)| thumb.as_ref().map(|thumb| (*at, thumb)))
-    }
-
-    /// Takes in what the background finished. Returns `true` while any
-    /// still runs.
-    pub(crate) fn poll(&mut self) -> bool {
-        let mut finished = Vec::new();
-        for (path, (at, job)) in &mut self.jobs {
-            if let Some(result) = job.try_take() {
-                finished.push((path.clone(), *at, result.ok()));
-            }
-        }
-        for (path, at, thumb) in finished {
-            self.jobs.remove(&path);
-            self.done.insert(path, (at, thumb));
-        }
-        !self.jobs.is_empty()
-    }
-
-    fn clear(&mut self) {
-        self.done.clear();
-    }
-}
-
-/// A picture file or a Sue project made at most `side` pixels on its long
-/// edge: the picture, or the project's first picture flattened.
-fn thumbnail(path: &Path, side: u32, job: &sue_core::JobContext) -> Option<Thumb> {
-    let bytes = sue_platform::fs::read(path).ok()?;
+/// A picture file or a Sue project (whose bytes are `bytes`) made at most
+/// `side` pixels on its long edge: the picture, or the project's first
+/// picture flattened.
+fn thumbnail(path: &Path, bytes: &[u8], side: u32, job: &sue_core::JobContext) -> Option<Thumb> {
     job.set_progress(0.3);
-    let raster = if sue_core::SueFile::sniff(&bytes) {
-        let arena = sue_core::SueFile::from_bytes(&bytes)
+    let raster = if sue_core::SueFile::sniff(bytes) {
+        let arena = sue_core::SueFile::from_bytes(bytes)
             .ok()?
             .arena(&sue_model::registry())
             .ok()?;
@@ -369,8 +166,8 @@ fn thumbnail(path: &Path, side: u32, job: &sue_core::JobContext) -> Option<Thumb
                 drafts: false,
             },
         )?
-    } else if sue_io::clip::sniff(&bytes) {
-        let (arena, picture) = crate::clip_io::picture_arena(&bytes)?;
+    } else if sue_io::clip::sniff(bytes) {
+        let (arena, picture) = crate::clip_io::picture_arena(bytes)?;
         crate::composite::flatten(
             &arena,
             picture,
@@ -380,7 +177,7 @@ fn thumbnail(path: &Path, side: u32, job: &sue_core::JobContext) -> Option<Thumb
             },
         )?
     } else if bytes.starts_with(b"8BPS") {
-        let psd = sue_io::psd::decode_psd(&bytes).ok()?;
+        let psd = sue_io::psd::decode_psd(bytes).ok()?;
         sue_core::RasterTile2D::from_bytes(
             psd.width,
             psd.height,
@@ -393,7 +190,7 @@ fn thumbnail(path: &Path, side: u32, job: &sue_core::JobContext) -> Option<Thumb
             .file_name()
             .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
         let bundle = sue_io::formats(sue_model::registry())
-            .import(&bytes, &file, &Properties::new())
+            .import(bytes, &file, &Properties::new())
             .ok()?;
         bundle
             .entities
@@ -410,63 +207,8 @@ fn thumbnail(path: &Path, side: u32, job: &sue_core::JobContext) -> Option<Thumb
     Some(shrink(&rgba, side))
 }
 
-/// `tile` (RGBA8) box-filtered down to at most `side` on its long edge.
-fn shrink(tile: &sue_core::RasterTile2D, side: u32) -> Thumb {
-    let (width, height) = (tile.width().max(1), tile.height().max(1));
-    let scale = (side as f32 / width.max(height) as f32).min(1.0);
-    let (w, h) = (
-        ((width as f32 * scale).round() as u32).max(1),
-        ((height as f32 * scale).round() as u32).max(1),
-    );
-    let bytes = tile.bytes().unwrap_or(&[]);
-    let mut pixels = Vec::with_capacity((w * h * 4) as usize);
-    for y in 0..h {
-        let (y0, y1) = (
-            y * height / h,
-            ((y + 1) * height / h).max(y * height / h + 1),
-        );
-        for x in 0..w {
-            let (x0, x1) = (x * width / w, ((x + 1) * width / w).max(x * width / w + 1));
-            let mut sum = [0_u64; 4];
-            let mut count = 0_u64;
-            // At most a 4 by 4 sample of the box, so big pictures stay quick.
-            let step_y = ((y1 - y0) / 4).max(1);
-            let step_x = ((x1 - x0) / 4).max(1);
-            for sy in (y0..y1.min(height)).step_by(step_y as usize) {
-                for sx in (x0..x1.min(width)).step_by(step_x as usize) {
-                    let at = ((sy * width + sx) * 4) as usize;
-                    if let Some(pixel) = bytes.get(at..at + 4) {
-                        // Over white, as on paper.
-                        let alpha = u64::from(pixel[3]);
-                        for channel in 0..3 {
-                            sum[channel] +=
-                                (u64::from(pixel[channel]) * alpha + 255 * (255 - alpha)) / 255;
-                        }
-                        sum[3] += 255;
-                        count += 1;
-                    }
-                }
-            }
-            let count = count.max(1);
-            pixels.extend(sum.map(|value| (value / count) as u8));
-        }
-    }
-    Thumb {
-        size: [w, h],
-        pixels,
-    }
-}
-
-/// A texture key for `text`, apart from the canvases' keys.
-pub(crate) fn texture_key(text: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    ("sue-paint-start", text).hash(&mut hasher);
-    hasher.finish()
-}
-
 /// Everything the start page keeps between frames.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct StartPage {
     /// File, Start Page asked for it over open canvases.
     pub(crate) forced: bool,
@@ -489,6 +231,26 @@ pub(crate) struct StartPage {
     pub(crate) screen: [u32; 2],
     /// The cache was looked through for what older versions left in it.
     cache_checked: bool,
+}
+
+impl Default for StartPage {
+    fn default() -> Self {
+        Self {
+            forced: false,
+            tab: Tab::default(),
+            popup: None,
+            projects: ProjectsState::default(),
+            materials: MaterialsState::default(),
+            library: None,
+            thumbs: Thumbs::new(Some(thumbnailer())),
+            copies: Vec::new(),
+            armed: false,
+            full: false,
+            new_canvas: None,
+            screen: [0, 0],
+            cache_checked: false,
+        }
+    }
 }
 
 /// The folder in Sue's cache where versions before 0.0.8 kept pages and
@@ -849,7 +611,7 @@ impl SuePaint {
     }
 
     /// The projects: labels on the left; search, type chips, the toolbar
-    /// and the cards on the right.
+    /// and the cards on the right (the shared files browser).
     pub(crate) fn projects_ui(
         &mut self,
         ui: &mut Ui,
@@ -859,404 +621,22 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let all = items(cx.work);
-        let state = &mut start.projects;
-        // A label just added is renamed once it shows.
-        if let Some(name) = state.adding.take() {
-            if cx.work.labels().contains(&name) {
-                state.shelf = Shelf::Label(name.clone());
-                state.renaming = Some((name.clone(), name));
-            } else {
-                state.adding = Some(name);
-            }
-        }
-        if let Shelf::Label(label) = &state.shelf
-            && !cx.work.labels().contains(label)
-            && state.adding.is_none()
-        {
-            state.shelf = Shelf::All;
-        }
-
-        // The label column.
-        let column = Rect::from_min_size(
-            body.min + vec2(10.0, 10.0),
-            vec2(COLUMN, body.height() - 20.0),
-        );
-        let mut col = ui.new_child(
-            UiBuilder::new()
-                .max_rect(column)
-                .layout(egui::Layout::top_down(egui::Align::Min)),
-        );
-        let label = match &state.shelf {
-            Shelf::Label(label) => Some(label.clone()),
-            _ => None,
-        };
-        col.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            let size = Vec2::splat(28.0);
-            let (add, _) = ui.allocate_exact_size(size, Sense::hover());
-            if page::icon_button(ui, add, Glyph::Add, &tr!("start-add-label"), false, theme)
-                .clicked()
-            {
-                let mut name = tr!("start-new-label");
-                let mut n = 2;
-                while cx.work.labels().contains(&name) {
-                    name = format!("{} {n}", tr!("start-new-label"));
-                    n += 1;
-                }
-                cx.request(ShellRequest::Labels(LabelEdit::Add(name.clone())));
-                state.adding = Some(name);
-            }
-            let (delete, _) = ui.allocate_exact_size(size, Sense::hover());
-            if page::icon_button_enabled(
-                ui,
-                delete,
-                Glyph::Delete,
-                &tr!("start-delete-label"),
-                false,
-                label.is_some(),
-                theme,
-            )
-            .clicked()
-                && let Some(label) = &label
-            {
-                cx.request(ShellRequest::Labels(LabelEdit::Remove(label.clone())));
-                state.shelf = Shelf::All;
-            }
-            let (rename, _) = ui.allocate_exact_size(size, Sense::hover());
-            if page::icon_button_enabled(
-                ui,
-                rename,
-                Glyph::Rename,
-                &tr!("start-rename-label"),
-                false,
-                label.is_some(),
-                theme,
-            )
-            .clicked()
-                && let Some(label) = &label
-            {
-                state.renaming = Some((label.clone(), label.clone()));
-            }
-        });
-        col.add_space(6.0);
-        col.spacing_mut().item_spacing.y = 3.0;
-        let mut shelves = vec![
-            (Shelf::All, Glyph::All, tr!("start-all")),
-            (Shelf::Favorite, Glyph::Heart, tr!("start-favorite")),
-        ];
-        shelves.extend(
-            cx.work
-                .labels()
-                .iter()
-                .map(|label| (Shelf::Label(label.clone()), Glyph::Tag, label.clone())),
-        );
-        let width = column.width();
-        for (shelf, glyph, name) in shelves {
-            if let (Shelf::Label(label), Some((from, text))) = (&shelf, state.renaming.as_mut())
-                && *label == *from
-            {
-                let response = col.add_sized(
-                    vec2(width, 26.0),
-                    egui::TextEdit::singleline(text).font(theme.font(theme.ui_size)),
-                );
-                response.request_focus();
-                let enter = col.input(|input| input.key_pressed(egui::Key::Enter));
-                let escape = col.input(|input| input.key_pressed(egui::Key::Escape));
-                if enter || (response.lost_focus() && !escape) {
-                    let to = text.trim().to_owned();
-                    if !to.is_empty() && to != *from {
-                        cx.request(ShellRequest::Labels(LabelEdit::Rename {
-                            from: from.clone(),
-                            to: to.clone(),
-                        }));
-                        state.shelf = Shelf::Label(to);
-                    }
-                    state.renaming = None;
-                } else if escape {
-                    state.renaming = None;
-                }
-                continue;
-            }
-            let row = Category {
-                glyph: Some(glyph),
-                label: name,
-                depth: 0,
-                open: None,
-            };
-            let (click, response) =
-                page::category(&mut col, width, &row, state.shelf == shelf, theme);
-            if click.is_some() {
-                state.shelf = shelf.clone();
-                state.chosen.clear();
-                state.armed = false;
-            }
-            if let Shelf::Label(label) = &shelf {
-                // Chosen projects drop onto a label with a right click.
-                response.context_menu(|ui| {
-                    if ui
-                        .add_enabled(
-                            !state.chosen.is_empty(),
-                            egui::Button::new(tr!("start-move-chosen-here")),
-                        )
-                        .clicked()
-                    {
-                        for key in &state.chosen {
-                            if let Some(item) = all.iter().find(|item| &item.key == key) {
-                                cx.request(ShellRequest::Labels(LabelEdit::Mark {
-                                    path: item.path.clone(),
-                                    label: label.clone(),
-                                    on: true,
-                                }));
-                            }
-                        }
-                        ui.close();
-                    }
-                    if ui.button(tr!("start-rename-label")).clicked() {
-                        state.renaming = Some((label.clone(), label.clone()));
-                        ui.close();
-                    }
-                    if ui.button(tr!("start-delete-label")).clicked() {
-                        cx.request(ShellRequest::Labels(LabelEdit::Remove(label.clone())));
-                        ui.close();
-                    }
-                });
-            }
-        }
-
-        // Search, chips and the toolbar.
-        let right = Rect::from_min_max(
-            pos2(column.right() + 12.0, body.top() + 10.0),
-            pos2(body.right() - 12.0, body.bottom()),
-        );
-        let mut area = ui.new_child(
-            UiBuilder::new()
-                .max_rect(right)
-                .layout(egui::Layout::top_down(egui::Align::Min)),
-        );
-        area.set_clip_rect(right.intersect(ui.clip_rect()));
-        page::search_box(
-            &mut area,
-            &mut state.search,
-            &tr!("start-search-projects"),
-            right.width(),
+        let studios = [studio()];
+        let events = sue_wm::files::projects_ui(
+            ui,
+            body,
+            &mut start.projects,
+            &mut start.thumbs,
+            &studios,
+            cx,
             theme,
         );
-        area.add_space(8.0);
-        area.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(tr!("start-type"))
-                    .color(theme.muted)
-                    .size(theme.small_size + 1.0),
-            );
-            ui.add_space(6.0);
-            for kind in Type::ALL {
-                let on = state.types.contains(&(kind as u8));
-                if page::chip(ui, &kind.label(), on, theme).clicked() {
-                    if on {
-                        state.types.remove(&(kind as u8));
-                    } else {
-                        state.types.insert(kind as u8);
-                    }
-                }
-            }
-        });
-        area.add_space(8.0);
-        let shown = shown(&all, state, cx.work);
-        state
-            .chosen
-            .retain(|key| all.iter().any(|item| &item.key == key));
-        let chosen: Vec<Item> = shown
-            .iter()
-            .filter(|item| state.chosen.contains(&item.key))
-            .cloned()
-            .collect();
-        toolbar_frame(&mut area, right.width(), theme, |ui| {
-            let mark = match chosen.len() {
-                0 => Chosen::None,
-                n if n == shown.len() => Chosen::All,
-                _ => Chosen::Some,
-            };
-            if page::check(ui, &tr!("start-select-all"), mark, theme).clicked() {
-                if mark == Chosen::All {
-                    state.chosen.clear();
-                } else {
-                    state
-                        .chosen
-                        .extend(shown.iter().map(|item| item.key.clone()));
-                }
-            }
-            ui.add_space(8.0);
-            let some = !chosen.is_empty();
-            let move_to = page::action(ui, Glyph::Move, &tr!("start-move-to"), some, false, theme);
-            egui::Popup::menu(&move_to).show(|ui| {
-                for label in cx.work.labels() {
-                    if ui.button(label).clicked() {
-                        for item in &chosen {
-                            cx.request(ShellRequest::Labels(LabelEdit::Mark {
-                                path: item.path.clone(),
-                                label: label.clone(),
-                                on: true,
-                            }));
-                        }
-                    }
-                }
-                if ui.button(tr!("start-favorite")).clicked() {
-                    for item in &chosen {
-                        cx.request(ShellRequest::Labels(LabelEdit::Favorite {
-                            path: item.path.clone(),
-                            on: true,
-                        }));
-                    }
-                }
-            });
-            if let Shelf::Label(label) = &state.shelf
-                && page::action(
-                    ui,
-                    Glyph::Tag,
-                    &tr!("start-take-off-label"),
-                    some,
-                    false,
-                    theme,
-                )
-                .clicked()
-            {
-                for item in &chosen {
-                    cx.request(ShellRequest::Labels(LabelEdit::Mark {
-                        path: item.path.clone(),
-                        label: label.clone(),
-                        on: false,
-                    }));
-                }
-            }
-            let text = if state.armed {
-                tr!("start-really-remove")
-            } else {
-                tr!("start-remove-from-list")
-            };
-            let remove = page::action(ui, Glyph::Delete, &text, some, state.armed, theme)
-                .on_hover_text(tr!("start-remove-hint"));
-            if remove.clicked() {
-                if state.armed {
-                    for item in &chosen {
-                        forget(item, cx);
-                    }
-                    state.chosen.clear();
-                    state.armed = false;
-                } else {
-                    state.armed = true;
-                }
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                view_buttons(ui, &mut state.view, false, theme);
-                ui.add_space(6.0);
-                sort_buttons(
-                    ui,
-                    "sue-paint-start-project-sort",
-                    &mut state.sort,
-                    &mut state.reversed,
-                    &[tr!("start-date-modified"), tr!("start-name")],
-                    theme,
-                );
-            });
-        });
-        area.add_space(10.0);
-
-        // The cards.
-        let now = unix_now();
-        if shown.is_empty() {
-            let message = if all.is_empty() {
-                tr!("start-no-projects")
-            } else {
-                tr!("start-none-match")
-            };
-            area.add_space(40.0);
-            area.vertical_centered(|ui| {
-                ui.label(
-                    egui::RichText::new(message)
-                        .color(theme.muted)
-                        .size(theme.ui_size),
-                );
-            });
-            return;
-        }
-        let mut clicks = Vec::new();
-        egui::ScrollArea::vertical()
-            .id_salt("sue-paint-start-projects")
-            .auto_shrink([false, false])
-            .show(&mut area, |ui| {
-                let width = ui.available_width();
-                let cards: Vec<Card> = shown
-                    .iter()
-                    .map(|item| {
-                        let picture = start.thumbs.get(&item.path).and_then(|(at, thumb)| {
-                            let key = texture_key(&item.path.display().to_string());
-                            cx.textures
-                                .texture(key, at.max(1), thumb.size, 4, &thumb.pixels, false)
-                                .map(|texture| (texture, thumb.size))
-                        });
-                        Card {
-                            title: item.title.clone(),
-                            detail: format!("{}  {}", item.kind.label(), ago(item.when, now)),
-                            picture,
-                            placeholder: item.kind.glyph(),
-                            favorite: Some(item.favorite),
-                            chosen: start.projects.chosen.contains(&item.key),
-                            hover: item.path.display().to_string(),
-                        }
-                    })
-                    .collect();
-                lay_out(
-                    ui,
-                    width,
-                    start.projects.view,
-                    &cards,
-                    theme,
-                    |index, click, response| {
-                        if let Some(click) = click {
-                            clicks.push((index, click));
-                        }
-                        let item = &shown[index];
-                        response.context_menu(|ui| {
-                            if ui.button(tr!("start-open")).clicked() {
-                                clicks.push((index, CardClick::Open));
-                                ui.close();
-                            }
-                            if ui.button(tr!("start-show-in-folder")).clicked() {
-                                cx.request(ShellRequest::Command(format!(
-                                    "reveal-file:{}",
-                                    item.path.display()
-                                )));
-                                ui.close();
-                            }
-                            if ui.button(tr!("start-details")).clicked() {
-                                clicks.push((index, CardClick::Details));
-                                ui.close();
-                            }
-                        });
-                    },
-                );
-            });
-        let state = &mut start.projects;
-        for (index, click) in clicks {
-            let Some(item) = shown.get(index) else {
-                continue;
-            };
-            match click {
-                CardClick::Open => acts.push(Act::Open(item.clone())),
-                CardClick::Choose => {
-                    if !state.chosen.remove(&item.key) {
-                        state.chosen.insert(item.key.clone());
-                    }
-                    state.armed = false;
-                }
-                CardClick::Favorite => cx.request(ShellRequest::Labels(LabelEdit::Favorite {
-                    path: item.path.clone(),
-                    on: !item.favorite,
-                })),
-                CardClick::Details => {
+        for event in events {
+            match event {
+                sue_wm::files::Event::Open(item) => acts.push(Act::Open(item)),
+                sue_wm::files::Event::Details(key) => {
                     start.armed = false;
-                    start.popup = Some(Popup::Project(item.key.clone()));
+                    start.popup = Some(Popup::Project(key));
                 }
             }
         }
@@ -1956,117 +1336,21 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) -> PopupOutcome {
-        let now = unix_now();
-        let full = start.full;
-        let mut close = false;
-        let picture = start.thumbs.get(&item.path).and_then(|(at, thumb)| {
-            cx.textures
-                .texture(
-                    texture_key(&item.path.display().to_string()),
-                    at.max(1),
-                    thumb.size,
-                    4,
-                    &thumb.pixels,
-                    false,
-                )
-                .map(|texture| (texture, thumb.size))
-        });
-        let armed = start.armed;
-        let mut arm = None;
-        let outcome = show(
-            full,
+        let studios = [studio()];
+        let (outcome, open) = sue_wm::files::project_popup(
             ctx,
-            "project",
-            &item.title,
-            vec2(480.0, 620.0),
+            start.full,
+            item,
+            &mut start.thumbs,
+            &mut start.armed,
+            &studios,
+            cx,
             theme,
-            |ui| {
-                preview(ui, picture, item.kind.glyph(), theme);
-                page::gap(ui);
-                let rows = [
-                    Row::new(Some(Glyph::Draw), tr!("start-open"), Trailing::More),
-                    Row::new(
-                        Some(Glyph::Folder),
-                        tr!("start-show-in-folder"),
-                        Trailing::External,
-                    ),
-                ];
-                match page::group(ui, &rows, theme) {
-                    Some(0) => {
-                        acts.push(Act::Open(item.clone()));
-                        close = true;
-                    }
-                    Some(1) => cx.request(ShellRequest::Command(format!(
-                        "reveal-file:{}",
-                        item.path.display()
-                    ))),
-                    _ => {}
-                }
-                page::gap(ui);
-                let mut rows = vec![Row::new(
-                    Some(Glyph::Heart),
-                    tr!("start-favorite"),
-                    Trailing::Switch(item.favorite),
-                )];
-                let labels = cx.work.labels().to_vec();
-                rows.extend(labels.iter().map(|label| {
-                    Row::new(
-                        Some(Glyph::Tag),
-                        label.clone(),
-                        Trailing::Switch(cx.work.has_label(&item.path, label)),
-                    )
-                }));
-                match page::group(ui, &rows, theme) {
-                    Some(0) => cx.request(ShellRequest::Labels(LabelEdit::Favorite {
-                        path: item.path.clone(),
-                        on: !item.favorite,
-                    })),
-                    Some(index) => {
-                        if let Some(label) = labels.get(index - 1) {
-                            cx.request(ShellRequest::Labels(LabelEdit::Mark {
-                                path: item.path.clone(),
-                                label: label.clone(),
-                                on: !cx.work.has_label(&item.path, label),
-                            }));
-                        }
-                    }
-                    None => {}
-                }
-                page::gap(ui);
-                let rows = [
-                    Row::new(None, tr!("start-kind"), Trailing::Text(item.kind.label())),
-                    Row::new(
-                        None,
-                        tr!("start-last-worked-on"),
-                        Trailing::Text(ago(item.when, now)),
-                    ),
-                    Row::new(None, tr!("start-where"), Trailing::None)
-                        .detail(item.path.display().to_string()),
-                ];
-                page::group(ui, &rows, theme);
-                page::gap(ui);
-                let text = match (item.kind, armed) {
-                    (Type::Unsaved, false) => tr!("start-discard"),
-                    (Type::Unsaved, true) => tr!("start-really-discard"),
-                    (_, false) => tr!("start-remove-from-list"),
-                    (_, true) => tr!("start-really-remove"),
-                };
-                let rows = [Row::new(Some(Glyph::Delete), text, Trailing::None)
-                    .detail(tr!("start-remove-hint"))];
-                if page::group(ui, &rows, theme).is_some() {
-                    if armed {
-                        forget(item, cx);
-                        close = true;
-                    } else {
-                        arm = Some(true);
-                    }
-                }
-            },
         );
-        if let Some(on) = arm {
-            start.armed = on;
+        if open {
+            acts.push(Act::Open(item.clone()));
         }
-        if close { PopupOutcome::Closed } else { outcome }
+        outcome
     }
 
     /// What a material is, with what can be done to it.
@@ -2223,15 +1507,6 @@ fn me() -> AppletId {
     AppletId::new(crate::ID).expect("a valid id")
 }
 
-/// Forgets a project in the work Sue remembers (files stay on disk), or
-/// throws away kept work.
-pub(crate) fn forget(item: &Item, cx: &mut AppletContext<'_>) {
-    match &item.key {
-        ProjectKey::File(path) => cx.request(ShellRequest::Forget(path.clone())),
-        ProjectKey::Kept(id) => cx.request(ShellRequest::Discard(id.clone())),
-    }
-}
-
 /// Deletes the material files of `ids` (only ones people added).
 fn delete_materials(
     entries: &[crate::materials::Entry],
@@ -2252,148 +1527,6 @@ fn start_rescan(thumbs: &mut HashMap<u64, Vec<u8>>) {
     thumbs.clear();
 }
 
-/// A toolbar's band, `width` wide.
-fn toolbar_frame(ui: &mut Ui, width: f32, theme: &Theme, add: impl FnOnce(&mut Ui)) {
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 36.0), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, theme.panel);
-    let mut band = ui.new_child(
-        UiBuilder::new()
-            .max_rect(rect.shrink2(vec2(8.0, 5.0)))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-    );
-    band.spacing_mut().item_spacing.x = 4.0;
-    add(&mut band);
-}
-
-/// The view toggles (`small` adds small cards), right to left.
-fn view_buttons(ui: &mut Ui, view: &mut View, small: bool, theme: &Theme) {
-    let mut views = vec![(View::List, Glyph::List, tr!("start-view-list"))];
-    if small {
-        views.push((View::Small, Glyph::GridSmall, tr!("start-view-small")));
-    }
-    views.push((View::Large, Glyph::Grid, tr!("start-view-large")));
-    for (which, glyph, hint) in views {
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::hover());
-        if page::icon_button(ui, rect, glyph, &hint, *view == which, theme).clicked() {
-            *view = which;
-        }
-    }
-}
-
-/// The sort dropdown and its direction, right to left.
-fn sort_buttons(
-    ui: &mut Ui,
-    id: &str,
-    sort: &mut usize,
-    reversed: &mut bool,
-    options: &[String],
-    theme: &Theme,
-) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::hover());
-    let glyph = if *reversed {
-        Glyph::SortUp
-    } else {
-        Glyph::SortDown
-    };
-    if page::icon_button(ui, rect, glyph, &tr!("start-sort-direction"), false, theme).clicked() {
-        *reversed = !*reversed;
-    }
-    page::dropdown(ui, Id::unique(id), sort, options, 150.0, theme);
-}
-
-/// Lays `cards` out as `view` says in `width`, calling `each` with every
-/// card's click, if any, and its response (for a context menu).
-fn lay_out(
-    ui: &mut Ui,
-    width: f32,
-    view: View,
-    cards: &[Card],
-    theme: &Theme,
-    mut each: impl FnMut(usize, Option<CardClick>, &egui::Response),
-) {
-    let mut report = |index: usize, (click, response): (Option<CardClick>, egui::Response)| {
-        each(index, click, &response);
-    };
-    match view {
-        View::List => {
-            ui.spacing_mut().item_spacing.y = 4.0;
-            for (index, card) in cards.iter().enumerate() {
-                let shown = page::list_row(ui, width - 4.0, card, theme);
-                report(index, shown);
-            }
-        }
-        View::Large | View::Small => {
-            let size = if view == View::Large {
-                vec2(150.0, 196.0)
-            } else {
-                vec2(100.0, 122.0)
-            };
-            let gap = 10.0;
-            let columns = ((width + gap) / (size.x + gap)).floor().max(1.0) as usize;
-            for (row, chunk) in cards.chunks(columns).enumerate() {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    for (column, card) in chunk.iter().enumerate() {
-                        let shown = page::card(ui, size, card, theme);
-                        report(row * columns + column, shown);
-                    }
-                });
-                ui.add_space(gap);
-            }
-        }
-    }
-}
-
-/// A popup in the middle of the page, or a sheet over the whole screen
-/// (`full`, on phones and tablets).
-fn show(
-    full: bool,
-    ctx: &egui::Context,
-    id: &str,
-    title: &str,
-    size: Vec2,
-    theme: &Theme,
-    body: impl FnOnce(&mut Ui),
-) -> PopupOutcome {
-    if full {
-        page::sheet(ctx, id, title, theme, body)
-    } else {
-        page::popup(ctx, id, title, size, theme, body)
-    }
-}
-
-/// A large picture at the top of a popup.
-fn preview(
-    ui: &mut Ui,
-    picture: Option<(egui::TextureId, [u32; 2])>,
-    placeholder: Glyph,
-    theme: &Theme,
-) {
-    let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 180.0), Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, theme.void);
-    match picture {
-        Some((texture, [w, h])) if w > 0 && h > 0 => {
-            let inner = rect.shrink(8.0);
-            let scale = (inner.width() / w as f32).min(inner.height() / h as f32);
-            painter.image(
-                texture,
-                Rect::from_center_size(inner.center(), vec2(w as f32 * scale, h as f32 * scale)),
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-        }
-        _ => page::glyph(
-            painter,
-            Rect::from_center_size(rect.center(), Vec2::splat(56.0)),
-            placeholder,
-            theme.muted,
-        ),
-    }
-    painter.rect_stroke(rect, 0.0, theme.hairline(), egui::StrokeKind::Inside);
-}
-
 /// A group of rows that open web pages.
 fn link_group(ui: &mut Ui, rows: &[(Row, &str)], cx: &mut AppletContext<'_>, theme: &Theme) {
     let shown: Vec<Row> = rows.iter().map(|(row, _)| row.clone()).collect();
@@ -2404,148 +1537,10 @@ fn link_group(ui: &mut Ui, rows: &[(Row, &str)], cx: &mut AppletContext<'_>, the
     }
 }
 
-/// The Data Transfers popup: what Sue brought in, wrote out and copied in
-/// this run, still going or done.
-fn transfers_popup(
-    full: bool,
-    ctx: &egui::Context,
-    cx: &mut AppletContext<'_>,
-    theme: &Theme,
-) -> PopupOutcome {
-    let now = unix_now();
-    show(
-        full,
-        ctx,
-        "transfers",
-        &tr!("start-data-transfers"),
-        vec2(760.0, 560.0),
-        theme,
-        |ui| {
-            let finished = cx
-                .transfers
-                .list()
-                .iter()
-                .filter(|transfer| transfer.finished())
-                .count();
-            ui.horizontal(|ui| {
-                if page::action(
-                    ui,
-                    Glyph::Delete,
-                    &tr!("start-clear-completed"),
-                    finished > 0,
-                    false,
-                    theme,
-                )
-                .clicked()
-                {
-                    cx.transfers.clear_completed();
-                }
-            });
-            ui.add_space(12.0);
-            if cx.transfers.list().is_empty() {
-                ui.add_space(30.0);
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        egui::RichText::new(tr!("start-no-transfers"))
-                            .color(theme.muted)
-                            .size(theme.ui_size),
-                    );
-                });
-                return;
-            }
-            let width = ui.available_width();
-            let mut cancel = None;
-            for transfer in cx.transfers.list() {
-                let (rect, _) = ui.allocate_exact_size(vec2(width, 46.0), Sense::hover());
-                let painter = ui.painter();
-                painter.rect(
-                    rect,
-                    0.0,
-                    theme.pill,
-                    theme.hairline(),
-                    egui::StrokeKind::Inside,
-                );
-                let glyph = match transfer.kind {
-                    TransferKind::Import => Glyph::Folder,
-                    TransferKind::Export => Glyph::External,
-                    TransferKind::Copy => Glyph::Transfers,
-                };
-                page::glyph(
-                    painter,
-                    Rect::from_center_size(
-                        pos2(rect.left() + 20.0, rect.center().y),
-                        Vec2::splat(18.0),
-                    ),
-                    glyph,
-                    theme.text,
-                );
-                painter.with_clip_rect(rect.shrink(1.0)).text(
-                    pos2(rect.left() + 40.0, rect.top() + 15.0),
-                    egui::Align2::LEFT_CENTER,
-                    format!("{}  {}", transfer.kind.label(), transfer.label),
-                    theme.font(theme.ui_size),
-                    theme.text,
-                );
-                let place = transfer
-                    .path
-                    .as_ref()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_default();
-                painter
-                    .with_clip_rect(Rect::from_min_max(
-                        rect.min,
-                        pos2(rect.right() - 200.0, rect.bottom()),
-                    ))
-                    .text(
-                        pos2(rect.left() + 40.0, rect.top() + 32.0),
-                        egui::Align2::LEFT_CENTER,
-                        place,
-                        theme.font(theme.small_size),
-                        theme.muted,
-                    );
-                let state = match &transfer.state {
-                    TransferState::Running(_) => tr!("start-transfer-running"),
-                    TransferState::Done => {
-                        tr!("start-transfer-done", when = ago(transfer.started, now))
-                    }
-                    TransferState::Failed(why) => tr!("start-transfer-failed", why = why.clone()),
-                    TransferState::Cancelled => tr!("start-transfer-cancelled"),
-                };
-                painter.text(
-                    pos2(rect.right() - 14.0, rect.top() + 15.0),
-                    egui::Align2::RIGHT_CENTER,
-                    state,
-                    theme.font(theme.small_size),
-                    theme.muted,
-                );
-                if let TransferState::Running(fraction) = transfer.state {
-                    let mut bar = ui.new_child(UiBuilder::new().max_rect(Rect::from_min_size(
-                        pos2(rect.right() - 190.0, rect.top() + 29.0),
-                        vec2(140.0, 8.0),
-                    )));
-                    page::progress(&mut bar, 140.0, fraction, theme);
-                    let stop = Rect::from_center_size(
-                        pos2(rect.right() - 24.0, rect.top() + 32.0),
-                        Vec2::splat(18.0),
-                    );
-                    if page::icon_button(ui, stop, Glyph::Close, &tr!("start-cancel"), false, theme)
-                        .clicked()
-                    {
-                        cancel = Some(transfer.id);
-                    }
-                }
-                ui.add_space(4.0);
-            }
-            if let Some(id) = cancel {
-                cx.transfers.cancel(id);
-            }
-        },
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sue_core::ReversibleTransaction;
 
     fn temp(tag: &str) -> PathBuf {
         let dir =
@@ -2556,9 +1551,9 @@ mod tests {
     }
 
     #[test]
-    fn projects_come_from_the_shared_work_and_sort_and_filter() {
+    fn the_start_page_lists_only_sue_paints_work() {
         let root = temp("items");
-        let paint = AppletId::new(crate::ID).unwrap();
+        let paint = me();
         let writer = AppletId::new("sue-writer").unwrap();
         let cat = root.join("cat.png");
         let comic = root.join("Comic.sue");
@@ -2568,90 +1563,76 @@ mod tests {
             sue_platform::fs::write(file, b"x").unwrap();
         }
         let mut work = sue_wm::WorkList::open(root.join("work"));
-        work.remember(&cat, false, Some(paint.clone()), 100)
-            .unwrap();
+        // A picture is Sue Paint's wherever it was opened last.
+        work.remember(&cat, false, None, 100).unwrap();
         work.remember(&comic, true, Some(paint.clone()), 300)
             .unwrap();
-        work.remember(&story, true, Some(writer), 400).unwrap();
-        work.remember(&notes, false, None, 500).unwrap();
-        work.keep(b"SUE", None, "Sketch", Some(paint), 200).unwrap();
+        work.remember(&story, true, Some(writer.clone()), 400)
+            .unwrap();
+        work.remember(&notes, false, Some(writer.clone()), 500)
+            .unwrap();
+        work.keep(b"SUE", None, "Sketch", Some(paint.clone()), 200)
+            .unwrap();
         work.start_over();
-        work.edit_labels(&LabelEdit::Favorite {
-            path: cat.clone(),
-            on: true,
-        })
-        .unwrap();
-        let label = work.labels()[0].clone();
-        work.edit_labels(&LabelEdit::Mark {
-            path: comic.clone(),
-            label: label.clone(),
-            on: true,
-        })
-        .unwrap();
+        work.keep(b"SUE", None, "Draft", Some(writer), 250).unwrap();
+        work.start_over();
 
-        // A Writer project and a text file are not Sue Paint's.
         let all = items(&work);
-        let titles = |shown: &[Item]| {
-            shown
-                .iter()
-                .map(|item| item.title.clone())
-                .collect::<Vec<_>>()
-        };
-        let mut state = ProjectsState::default();
+        assert_eq!(work.unsaved().count(), 2);
+        let mut titles: Vec<(String, Type)> = all
+            .iter()
+            .map(|item| (item.title.clone(), item.kind))
+            .collect();
+        titles.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(
-            titles(&shown(&all, &state, &work)),
-            ["Comic", "Sketch", "cat"]
+            titles,
+            [
+                ("Comic".to_owned(), Type::Project),
+                ("Sketch".to_owned(), Type::Unsaved),
+                ("cat".to_owned(), Type::Picture),
+            ]
         );
-        state.sort = 1;
-        assert_eq!(
-            titles(&shown(&all, &state, &work)),
-            ["cat", "Comic", "Sketch"]
-        );
-        state.reversed = true;
-        assert_eq!(
-            titles(&shown(&all, &state, &work)),
-            ["Sketch", "Comic", "cat"]
-        );
-        state.reversed = false;
-        state.shelf = Shelf::Favorite;
-        assert_eq!(titles(&shown(&all, &state, &work)), ["cat"]);
-        state.shelf = Shelf::Label(label);
-        assert_eq!(titles(&shown(&all, &state, &work)), ["Comic"]);
-        state.shelf = Shelf::All;
-        state.types.insert(Type::Unsaved as u8);
-        assert_eq!(titles(&shown(&all, &state, &work)), ["Sketch"]);
-        state.types.clear();
-        state.search = "CO".to_owned();
-        assert_eq!(titles(&shown(&all, &state, &work)), ["Comic"]);
+        assert!(all.iter().all(|item| item.studio.as_ref() == Some(&paint)));
         let _ = sue_platform::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn thumbnails_shrink_to_fit_over_white() {
-        let mut pixels = Vec::new();
-        for _ in 0..(400 * 200) {
-            pixels.extend([255, 0, 0, 0]);
-        }
-        let tile =
-            sue_core::RasterTile2D::from_bytes(400, 200, sue_core::PixelFormat::Rgba8, pixels)
-                .unwrap();
-        let thumb = shrink(&tile, 100);
-        assert_eq!(thumb.size, [100, 50]);
-        // Clear pixels show the paper.
-        assert_eq!(&thumb.pixels[..4], &[255, 255, 255, 255]);
-        // A real picture file comes back small in the background.
+    fn the_start_page_draws_a_project_without_a_preview_of_its_own() {
+        // A Sue Paint project holds no THMB preview yet, so its card's
+        // picture comes from Sue Paint's thumbnailer.
         let root = temp("thumb");
-        let png = sue_io::encode_png_rgba(64, 32, &vec![0; 64 * 32 * 4]).unwrap();
-        let path = root.join("small.png");
-        sue_platform::fs::write(&path, png).unwrap();
-        let mut thumbs = Thumbs::default();
-        assert!(thumbs.get(&path).is_none());
-        let start = std::time::Instant::now();
-        while thumbs.poll() {
-            assert!(start.elapsed().as_secs() < 20);
+        let mut arena = sue_core::Arena::new();
+        let (mut edit, picture) = crate::doc::create(&crate::doc::NewPicture {
+            name: "Card".to_owned(),
+            width: 40,
+            height: 20,
+            ..crate::doc::NewPicture::default()
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        assert!(arena.get_by_id(picture).is_ok());
+        let mut file = sue_core::SueFile::new();
+        file.set_arena(&arena);
+        let project = root.join("Card.sue");
+        sue_platform::fs::write(&project, file.to_bytes()).unwrap();
+
+        let mut start = StartPage::default();
+        assert!(start.thumbs.get(&project).is_none());
+        let begun = std::time::Instant::now();
+        while start.thumbs.poll() {
+            assert!(begun.elapsed().as_secs() < 20);
             std::thread::yield_now();
         }
-        assert_eq!(thumbs.get(&path).unwrap().1.size, [64, 32]);
+        let (_, thumb) = start.thumbs.get(&project).expect("Sue Paint's picture");
+        assert_eq!(thumb.size, [40, 20]);
+        assert_eq!(&thumb.pixels[..4], &[255, 255, 255, 255], "white paper");
+        // Without Sue Paint's thumbnailer the shared browser has none.
+        let mut plain = Thumbs::default();
+        assert!(plain.get(&project).is_none());
+        while plain.poll() {
+            std::thread::yield_now();
+        }
+        assert!(plain.get(&project).is_none());
         let _ = sue_platform::fs::remove_dir_all(&root);
     }
 

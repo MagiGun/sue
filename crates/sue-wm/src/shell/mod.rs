@@ -223,6 +223,9 @@ pub struct Shell {
     /// The kept work whose Discard was clicked once and asks again.
     discard_armed: Option<String>,
     booted: bool,
+    /// The Hub's place [`ShellRequest::HubPlace`] asked for last (`None`:
+    /// its Home).
+    hub_place: Option<String>,
     /// The languages in use when the fonts last covered them, and the
     /// characters they (and every language's name) need.
     scripts: (Vec<String>, String),
@@ -294,6 +297,7 @@ impl Shell {
             hub_rows: Vec::new(),
             discard_armed: None,
             booted: false,
+            hub_place: None,
             scripts: (Vec::new(), String::new()),
             config,
             theme,
@@ -409,6 +413,13 @@ impl Shell {
     #[must_use]
     pub fn hub_rows(&self) -> &[(HubRow, Rect)] {
         &self.hub_rows
+    }
+
+    /// The Hub's place [`ShellRequest::HubPlace`] asked for last, by its
+    /// id (`None`: the Hub's Home, as [`ShellRequest::Hub`] leaves it).
+    #[must_use]
+    pub fn hub_place(&self) -> Option<&str> {
+        self.hub_place.as_deref()
     }
 
     /// The studio or tool filling the page (`None` on the Hub, and as soon
@@ -784,7 +795,14 @@ impl Shell {
             }
             ShellRequest::Palette => self.open_palette(),
             ShellRequest::Open(id) => self.open(id, io.applets),
-            ShellRequest::Hub => self.hub(),
+            ShellRequest::Hub => {
+                self.hub_place = None;
+                self.hub();
+            }
+            ShellRequest::HubPlace(place) => {
+                self.hub_place = Some(place);
+                self.hub();
+            }
             ShellRequest::Pin(id) => self.pin(id, io),
             ShellRequest::Language(setting) => self.set_language(&setting, io),
             ShellRequest::Interface(setting) => self.set_interface(&setting, io),
