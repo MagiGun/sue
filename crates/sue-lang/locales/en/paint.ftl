@@ -2368,3 +2368,19 @@ tone-shape-line = Line
 tone-shape-cross = Cross
 tone-shape-noise = Noise
 layer-sub-color = Sub Color
+clip-folders-too-deep = The file's folders are nested too deep to open
+clip-layer-too-big = A layer of the file is too big to open
+clip-report-own-copy = opened from the copy of the Sue project it carries
+clip-report-stale-copy = the copy of the Sue project inside does not match the layers (they were changed after Sue saved it), so it opened from the layers
+clip-report-exact = { $count ->
+    [one] 1 layer converted exactly
+   *[other] { $count } layers converted exactly
+}
+clip-report-approximated = approximated: { $names }
+clip-report-kept = kept as Clip Studio data: { $names }
+clip-report-flattened = written as their pixels: { $names }
+clip-report-left-out = left out: { $names }
+clip-report-canvas-dropped = the canvas changed size, so what the file held beyond its layers was left behind
+clip-report-empty = nothing to convert
+clip-report-unnamed = (no name)
+clip-report-more = { $names } and { $count } more
