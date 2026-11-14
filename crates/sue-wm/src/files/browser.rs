@@ -248,14 +248,40 @@ pub fn projects_ui(
         theme,
     );
     area.add_space(8.0);
-    if studios.len() > 1 {
-        area.horizontal(|ui| {
+    // With two rows of chips, both rows start where the wider name ends.
+    let names = (studios.len() > 1).then(|| {
+        let font = theme.font(theme.small_size + 1.0);
+        let width = [tr!("start-studio"), tr!("start-type")]
+            .into_iter()
+            .map(|name| {
+                area.painter()
+                    .layout_no_wrap(name, font.clone(), theme.muted)
+                    .size()
+                    .x
+            })
+            .fold(0.0, f32::max);
+        // As far from the chips as a lone name is: its gap and a spacing.
+        width + 6.0 + area.spacing().item_spacing.x
+    });
+    let name = |ui: &mut Ui, text: String| {
+        if let Some(width) = names {
+            let galley =
+                ui.painter()
+                    .layout_no_wrap(text, theme.font(theme.small_size + 1.0), theme.muted);
+            let (rect, _) = ui.allocate_exact_size(vec2(width, galley.size().y), Sense::hover());
+            ui.painter().galley(rect.min, galley, theme.muted);
+        } else {
             ui.label(
-                egui::RichText::new(tr!("start-studio"))
+                egui::RichText::new(text)
                     .color(theme.muted)
                     .size(theme.small_size + 1.0),
             );
             ui.add_space(6.0);
+        }
+    };
+    if studios.len() > 1 {
+        area.horizontal(|ui| {
+            name(ui, tr!("start-studio"));
             for studio in studios {
                 let on = state.studios.contains(&studio.id);
                 if page::chip(ui, &studio.name, on, theme).clicked() {
@@ -270,12 +296,7 @@ pub fn projects_ui(
         area.add_space(8.0);
     }
     area.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(tr!("start-type"))
-                .color(theme.muted)
-                .size(theme.small_size + 1.0),
-        );
-        ui.add_space(6.0);
+        name(ui, tr!("start-type"));
         for kind in Type::ALL {
             let on = state.types.contains(&(kind as u8));
             if page::chip(ui, &type_label(kind, studios), on, theme).clicked() {
