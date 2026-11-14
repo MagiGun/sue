@@ -10,6 +10,7 @@ use super::{doc_open, flag, when};
 use crate::dialogs::Dialog;
 use crate::doc;
 use crate::filters::Filter;
+use crate::select::{Op, Selection};
 use crate::studio::SuePaint;
 
 /// Runs a Layer command by its name: Window, Layer Property runs Layer
@@ -46,6 +47,10 @@ fn masked(paint: &SuePaint, facts: &Facts<'_>) -> bool {
 /// Works on a raster layer.
 fn on_raster(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
     when(raster(paint, facts))
+}
+
+fn overlap_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(selection(paint) && raster(paint, facts))
 }
 
 fn merge_selected_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
@@ -748,6 +753,57 @@ fn new_folder(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     folder(paint, cx, false);
 }
 
+/// What a layer whose pixels start at `offset` covers on a canvas of
+/// `size`: one byte per canvas pixel, its alpha where it lies and 0
+/// elsewhere.
+fn on_canvas(alpha: &Selection, [ox, oy]: [i64; 2], [width, height]: [u32; 2]) -> Vec<u8> {
+    let [layer_width, layer_height] = alpha.size();
+    let mut drawn = vec![0_u8; width as usize * height as usize];
+    for y in 0..layer_height {
+        for x in 0..layer_width {
+            let (px, py) = (i64::from(x) + ox, i64::from(y) + oy);
+            if px >= 0 && py >= 0 && px < i64::from(width) && py < i64::from(height) {
+                drawn[py as usize * width as usize + px as usize] =
+                    alpha.mask()[y as usize * layer_width as usize + x as usize];
+            }
+        }
+    }
+    drawn
+}
+
+/// Select Overlapping Area (Selection from Layer): the selection keeps
+/// only where the current layer has something drawn, as much as it is
+/// drawn there. The layer's pixels are read where the layer lies on the
+/// canvas.
+fn select_overlapping(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let arena = &cx.world.arena;
+    let Some(info) = paint.layer_info(arena) else {
+        return;
+    };
+    let Some([width, height]) = paint
+        .picture()
+        .and_then(|picture| arena.get_by_id(picture).ok())
+        .and_then(picture::size)
+    else {
+        return;
+    };
+    let Some(raster) = doc::raster(arena, info.id) else {
+        return;
+    };
+    let drawn = on_canvas(
+        &Selection::from_alpha(raster),
+        info.style.offset,
+        [width, height],
+    );
+    if let Some(doc) = paint.doc_mut()
+        && let Some(mut selection) = doc.selection.clone()
+        && selection.size() == [width, height]
+    {
+        selection.apply_mask(&drawn, Op::Intersect);
+        doc.set_selection(Some(selection));
+    }
+}
+
 /// Where Move Up, Move Down, Bring to Front and Send to Back take the
 /// current layer.
 #[derive(Clone, Copy)]
@@ -1252,6 +1308,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         .keys("Alt+["),
     c("layer.select_all", "select-all-layers", select_all).icon("all"),
     c("layer.select_none", "deselect-layers", select_none).icon("deselect"),
+    c(
+        "layer.selection.overlap",
+        "select-overlapping-area",
+        select_overlapping,
+    )
+    .icon("select-shrink")
+    .state(overlap_state),
     c("layer.order.front", "bring-to-front", order_front).icon("sort-up"),
     c("layer.order.up", "move-up", order_up)
         .icon("arrow-up")
@@ -1308,8 +1371,30 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::COMMANDS;
+    use super::{COMMANDS, on_canvas};
+    use crate::select::{Op, Selection};
     use sue_wm::Flags;
+
+    #[test]
+    fn select_overlapping_area_keeps_what_the_layer_covers() {
+        // A layer of 2 by 2 pixels, one empty and one half drawn, lying
+        // one pixel in from the top left of a 3 by 3 canvas.
+        let alpha = Selection::from_mask(2, 2, vec![255, 0, 128, 255]).expect("a mask");
+        let drawn = on_canvas(&alpha, [1, 1], [3, 3]);
+        assert_eq!(drawn, [0, 0, 0, 0, 255, 0, 0, 128, 255]);
+        // Pushed off the canvas, only what still lies on it counts.
+        assert_eq!(
+            on_canvas(&alpha, [-1, 1], [3, 3]),
+            [0, 0, 0, 0, 0, 0, 255, 0, 0]
+        );
+        // The selection (its middle column at half) keeps the overlap,
+        // as much as both cover.
+        let mut selection =
+            Selection::from_mask(3, 3, vec![255, 128, 255, 255, 128, 255, 255, 128, 255])
+                .expect("a selection");
+        selection.apply_mask(&drawn, Op::Intersect);
+        assert_eq!(selection.mask(), [0, 0, 0, 0, 128, 0, 0, 128, 255]);
+    }
 
     #[test]
     fn every_layer_command_has_an_icon_of_the_shared_set() {

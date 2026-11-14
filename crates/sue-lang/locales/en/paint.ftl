@@ -2344,3 +2344,4 @@ zoom-200-percent = 200%
 paste-material = Paste Material
 cancel-transform = Cancel Transform
 switch-using-layer-color = Switch Using Layer Color
+select-overlapping-area = Select Overlapping Area
