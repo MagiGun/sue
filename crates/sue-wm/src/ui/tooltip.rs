@@ -240,8 +240,8 @@ fn held_open(response: &Response) -> bool {
 
 /// Gives the control behind `response` the tooltip `tip`: shown when the
 /// pointer rests on it, and on a touch screen when it is pressed and held
-/// (the control has to sense clicks for that). Also tells screen readers
-/// what the control is when nothing else has.
+/// (the control has to sense clicks for that). What screen readers say
+/// stays the control's own `widget_info`.
 pub fn tooltip(response: Response, tip: &Tip<'_>, theme: &Theme) -> Response {
     if tip.is_empty() {
         return response;
