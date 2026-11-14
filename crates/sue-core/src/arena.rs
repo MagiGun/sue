@@ -25,6 +25,20 @@ pub struct Entity {
     properties: Properties,
     ext: BTreeMap<String, Box<dyn Component>>,
     revision: u64,
+    unread: Unread,
+}
+
+/// What a newer Sue wrote into an entity and this build cannot read. It is
+/// kept as bytes and written back where it stood (Rule 3).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Unread {
+    /// Built-in components whose payload this build does not know (a
+    /// raster in a pixel format of a later version), by kind.
+    components: BTreeMap<ComponentKind, Vec<u8>>,
+    /// The kind among them that the file names as the entity's base.
+    base: Option<ComponentKind>,
+    /// Bytes after the last field this build knows.
+    tail: Vec<u8>,
 }
 
 impl PartialEq for Entity {
@@ -38,6 +52,7 @@ impl PartialEq for Entity {
             && self.components == other.components
             && self.metadata == other.metadata
             && self.properties == other.properties
+            && self.unread == other.unread
             && self.ext.len() == other.ext.len()
             && self
                 .ext
@@ -78,6 +93,7 @@ impl Entity {
             properties: Properties::new(),
             ext: BTreeMap::new(),
             revision: 0,
+            unread: Unread::default(),
         }
     }
 
@@ -319,18 +335,76 @@ impl Entity {
             .map(ComponentData::heap_bytes)
             .sum::<usize>()
             + self.ext.values().map(|ext| ext.heap_bytes()).sum::<usize>()
+            + self.unread.components.values().map(Vec::len).sum::<usize>()
+            + self.unread.tail.len()
+    }
+
+    /// The payload of a built-in component of `kind` that a newer Sue
+    /// wrote and this build cannot read, exactly as the file holds it. Such
+    /// a component is no projection of the entity: nothing shows or edits
+    /// it, and saving writes it back.
+    #[must_use]
+    pub fn unread_component(&self, kind: ComponentKind) -> Option<&[u8]> {
+        if self.components.contains_key(&kind) {
+            return None;
+        }
+        self.unread.components.get(&kind).map(Vec::as_slice)
+    }
+
+    /// The bytes a newer Sue wrote after the fields this build knows.
+    /// Saving writes them back.
+    #[must_use]
+    pub fn unread_tail(&self) -> &[u8] {
+        &self.unread.tail
+    }
+
+    /// `true` if the entity carries anything this build could not read (an
+    /// unread component or a tail), which may refer to data elsewhere in
+    /// the file that must then be kept too.
+    #[must_use]
+    pub fn holds_unread(&self) -> bool {
+        !self.unread.tail.is_empty()
+            || self
+                .unread
+                .components
+                .keys()
+                .any(|kind| !self.components.contains_key(kind))
     }
 
     /// Writes the entity (everything but its revision).
     pub fn encode(&self, out: &mut Writer) {
+        // A component attached since the load replaces an unread one of
+        // its kind.
+        let unread: Vec<(ComponentKind, &[u8])> = self
+            .unread
+            .components
+            .iter()
+            .filter(|(kind, _)| !self.components.contains_key(kind))
+            .map(|(kind, bytes)| (*kind, bytes.as_slice()))
+            .collect();
+        let base = self.base.or_else(|| {
+            self.unread
+                .base
+                .filter(|base| unread.iter().any(|(kind, _)| kind == base))
+        });
         out.raw(&self.id.to_bytes());
         out.str(&self.name);
         out.str(&self.class);
-        out.str(self.base.map_or("", ComponentKind::name));
-        out.len(self.components.len());
+        out.str(base.map_or("", ComponentKind::name));
+        out.len(self.components.len() + unread.len());
+        // In the order of the kinds, as one map of both would be written.
+        let mut unread = unread.into_iter().peekable();
         for component in self.components.values() {
+            while let Some((kind, bytes)) = unread.next_if(|(kind, _)| *kind < component.kind()) {
+                out.str(kind.name());
+                out.bytes(bytes);
+            }
             out.str(component.kind().name());
             out.nested(|out| component.encode(out));
+        }
+        for (kind, bytes) in unread {
+            out.str(kind.name());
+            out.bytes(bytes);
         }
         out.len(self.metadata.len());
         for (key, value) in &self.metadata {
@@ -344,10 +418,15 @@ impl Entity {
             out.varint(u64::from(component.version()));
             out.nested(|out| component.encode(out));
         }
+        out.raw(&self.unread.tail);
     }
 
-    /// Reads an entity. Extension components decode through `registry`;
-    /// unknown ones are kept opaque.
+    /// Reads an entity from a reader of its own (see [`Reader::nested`]),
+    /// to the reader's end. Extension components decode through `registry`;
+    /// unknown ones are kept opaque. A raster in a pixel format this build
+    /// does not know is kept as bytes and is no projection of the entity
+    /// ([`Self::unread_component`]). Whatever follows the last field this
+    /// build knows is kept as the entity's tail ([`Self::unread_tail`]).
     ///
     /// # Errors
     /// If the bytes are malformed.
@@ -364,15 +443,28 @@ impl Entity {
             let kind = ComponentKind::from_name(&name)
                 .ok_or_else(|| input.error(format!("unknown built-in component {name}")))?;
             let mut body = input.nested()?;
-            let component = ComponentData::decode(kind, &mut body)?;
-            entity.projections.insert(Projection::of_kind(kind));
-            entity.components.insert(kind, component);
+            match ComponentData::decode_if_known(kind, &mut body)? {
+                Some(component) => {
+                    entity.projections.insert(Projection::of_kind(kind));
+                    entity.components.insert(kind, component);
+                }
+                None => {
+                    entity.unread.components.insert(kind, body.rest().to_vec());
+                }
+            }
         }
         if !base.is_empty() {
             let kind = ComponentKind::from_name(&base)
-                .filter(|kind| entity.components.contains_key(kind))
+                .filter(|kind| {
+                    entity.components.contains_key(kind)
+                        || entity.unread.components.contains_key(kind)
+                })
                 .ok_or_else(|| input.error(format!("missing base component {base}")))?;
-            entity.base = Some(kind);
+            if entity.components.contains_key(&kind) {
+                entity.base = Some(kind);
+            } else {
+                entity.unread.base = Some(kind);
+            }
         }
         for _ in 0..input.len(2)? {
             let key = input.str()?;
@@ -387,6 +479,7 @@ impl Entity {
             let component = registry.decode(&name, version, bytes)?;
             entity.ext.insert(name, component);
         }
+        entity.unread.tail = input.rest().to_vec();
         Ok(entity)
     }
 }

@@ -113,6 +113,10 @@ follow [Semantic Versioning](https://semver.org/).
   never worked with; its one setting did nothing.
 - A damaged `.clip` whose sizes are too large to add up is refused with a
   plain message instead of being read from the wrong place.
+- A `.sue` file that a later version of Sue saved opens even when a layer
+  holds pixels in a format this version does not know: that layer is not
+  drawn, the rest is, and saving the file again keeps the layer and
+  everything else the later version wrote that this one cannot read.
 
 ## [0.0.75] - 2026-11-09
 

@@ -10,3 +10,11 @@ license-file.workspace = true
 
 [lints]
 workspace = true
+
+# Only the tile codec benchmark (tests/codec_bench.rs) uses these; the
+# kernel itself depends on nothing.
+[dev-dependencies]
+jxl-oxide.workspace = true
+miniz_oxide.workspace = true
+zune-core.workspace = true
+zune-jpegxl.workspace = true

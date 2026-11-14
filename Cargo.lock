@@ -3738,6 +3738,12 @@ dependencies = [
 [[package]]
 name = "sue-core"
 version = "0.0.75"
+dependencies = [
+ "jxl-oxide",
+ "miniz_oxide 0.8.9",
+ "zune-core",
+ "zune-jpegxl",
+]
 
 [[package]]
 name = "sue-io"

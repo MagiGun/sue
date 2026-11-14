@@ -318,6 +318,27 @@ pub enum PixelFormat {
 }
 
 impl PixelFormat {
+    /// The byte that names this format in a file. Codes are never reused.
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::Gray8 => 0,
+            Self::Rgba8 => 1,
+            Self::RgbaF32 => 2,
+        }
+    }
+
+    /// The format a file's code names, if this build knows it.
+    #[must_use]
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::Gray8),
+            1 => Some(Self::Rgba8),
+            2 => Some(Self::RgbaF32),
+            _ => None,
+        }
+    }
+
     /// Channels per pixel.
     #[must_use]
     pub const fn channels(self) -> usize {
@@ -854,11 +875,7 @@ impl ComponentData {
             Self::RasterTile2D(tile) => {
                 out.u32(tile.width);
                 out.u32(tile.height);
-                out.u8(match tile.format {
-                    PixelFormat::Gray8 => 0,
-                    PixelFormat::Rgba8 => 1,
-                    PixelFormat::RgbaF32 => 2,
-                });
+                out.u8(tile.format.code());
                 match &tile.pixels {
                     PixelStorage::U8(bytes) => out.bytes(bytes),
                     PixelStorage::F32(samples) => out.f32s(samples),
@@ -883,6 +900,29 @@ impl ComponentData {
                     .for_each(|child| out.raw(&child.to_bytes()));
             }
         }
+    }
+
+    /// As [`Self::decode`], but a payload this build cannot read because a
+    /// newer Sue wrote it gives `None` and leaves `input` where it was, so
+    /// the caller can keep the bytes and write them back (Rule 3). Today
+    /// that is a raster whose pixel format code is not one of
+    /// [`PixelFormat`]'s.
+    ///
+    /// # Errors
+    /// If the bytes are malformed or break an invariant.
+    pub fn decode_if_known(
+        kind: ComponentKind,
+        input: &mut Reader<'_>,
+    ) -> Result<Option<Self>, CodecError> {
+        if kind == ComponentKind::RasterTile2D {
+            // Width, height, then the format code.
+            let mut peek = input.clone();
+            let code = peek.raw(8).and_then(|_| peek.u8());
+            if code.is_ok_and(|code| PixelFormat::from_code(code).is_none()) {
+                return Ok(None);
+            }
+        }
+        Self::decode(kind, input).map(Some)
     }
 
     /// Reads a payload of `kind` written by [`Self::encode`], checking every
@@ -917,21 +957,16 @@ impl ComponentData {
             }
             ComponentKind::RasterTile2D => {
                 let (width, height) = (input.u32()?, input.u32()?);
-                let tile = match input.u8()? {
-                    0 => RasterTile2D::from_bytes(
-                        width,
-                        height,
-                        PixelFormat::Gray8,
-                        input.bytes()?.to_vec(),
-                    ),
-                    1 => RasterTile2D::from_bytes(
-                        width,
-                        height,
-                        PixelFormat::Rgba8,
-                        input.bytes()?.to_vec(),
-                    ),
-                    2 => RasterTile2D::from_f32(width, height, input.f32s()?),
-                    other => return Err(input.error(format!("unknown pixel format {other}"))),
+                let code = input.u8()?;
+                let tile = match PixelFormat::from_code(code) {
+                    Some(format @ (PixelFormat::Gray8 | PixelFormat::Rgba8)) => {
+                        RasterTile2D::from_bytes(width, height, format, input.bytes()?.to_vec())
+                    }
+                    Some(PixelFormat::RgbaF32) => {
+                        RasterTile2D::from_f32(width, height, input.f32s()?)
+                    }
+                    // `decode_if_known` keeps such a raster as it is.
+                    None => return Err(input.error(format!("unknown pixel format {code}"))),
                 };
                 Self::RasterTile2D(tile.map_err(|error| invalid(input, &error))?)
             }

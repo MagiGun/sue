@@ -10,10 +10,22 @@
 //!
 //! The chunk framing never changes. Each chunk carries its own version, so
 //! a part can evolve without touching the others, and a reader keeps every
-//! chunk it does not understand and writes it back unchanged. Built-in tags:
-//! [`ARENA`] (entities and relations), [`META`] (document properties) and
-//! [`PRESETS`] (a preset library). Features add their own, e.g. the shell's
-//! `SCNE` (canvas layout).
+//! chunk it does not understand and writes it back unchanged. The same
+//! holds for the header: a file of a later container version keeps its
+//! version number and its header extension when this build saves it again.
+//! Built-in tags: [`ARENA`] (entities and relations), [`META`] (document
+//! properties) and [`PRESETS`] (a preset library). Features add their own,
+//! e.g. the shell's `SCNE` (canvas layout).
+//!
+//! A file can be read whole ([`SueFile::from_bytes`]) or looked into
+//! without loading it: [`SueFile::scan`] reads only the header and the
+//! frame of each chunk and returns a [`Directory`] that says where every
+//! payload lies, and [`Directory::read`] then fetches the one chunk that
+//! is wanted. [`SueFile::write_to`] writes a file piece by piece into any
+//! [`Write`], so saving needs no second copy of the document in memory.
+
+use std::convert::Infallible;
+use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use crate::codec::{CodecError, Reader, Writer, crc32};
 use crate::{Arena, ComponentRegistry, PresetLibrary, Properties};
@@ -32,6 +44,30 @@ pub const PRESETS: [u8; 4] = *b"PRST";
 pub const THUMBNAIL: [u8; 4] = *b"THMB";
 const END: [u8; 4] = *b"END\0";
 const ARENA_VERSION: u32 = 1;
+/// Tag, version and length: what stands before a chunk's payload.
+const FRAME: usize = 16;
+
+fn tag_name(tag: [u8; 4]) -> String {
+    String::from_utf8_lossy(&tag)
+        .trim_end_matches('\0')
+        .to_owned()
+}
+
+fn damaged(tag: [u8; 4], offset: usize) -> CodecError {
+    CodecError::new(
+        format!("the {} part of the document is damaged", tag_name(tag)),
+        offset,
+    )
+}
+
+fn unreadable(error: &io::Error, offset: usize) -> CodecError {
+    CodecError::new(format!("the document cannot be read: {error}"), offset)
+}
+
+/// A file offset as the `usize` a [`CodecError`] carries.
+fn offset_of(at: u64) -> usize {
+    usize::try_from(at).unwrap_or(usize::MAX)
+}
 
 /// One tagged, versioned part of a file.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,16 +84,165 @@ impl Chunk {
     /// The tag as text, for messages.
     #[must_use]
     pub fn tag_name(&self) -> String {
-        String::from_utf8_lossy(&self.tag)
-            .trim_end_matches('\0')
-            .to_owned()
+        tag_name(self.tag)
     }
 }
 
-/// A `.sue` file in memory: its chunks, in order.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Where one chunk lies in a file, from [`SueFile::scan`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChunkEntry {
+    /// Four-byte tag, e.g. `ARNA`.
+    pub tag: [u8; 4],
+    /// The payload's own version.
+    pub version: u32,
+    /// Where the payload starts, in bytes from the start of the file.
+    pub offset: u64,
+    /// The payload's length in bytes.
+    pub len: u64,
+    /// The CRC-32 the file holds for the payload. A scan does not read the
+    /// payload, so it has not checked this; [`Directory::read`] does.
+    pub checksum: u32,
+}
+
+impl ChunkEntry {
+    /// The tag as text, for messages.
+    #[must_use]
+    pub fn tag_name(&self) -> String {
+        tag_name(self.tag)
+    }
+}
+
+/// The header and the chunk list of a file, read without its payloads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Directory {
+    /// The container version the file was written with.
+    pub version: u32,
+    /// The header extension (empty in version 1).
+    pub extension: Vec<u8>,
+    /// Every chunk in file order, without the end mark.
+    pub chunks: Vec<ChunkEntry>,
+}
+
+impl Directory {
+    /// The first chunk tagged `tag`.
+    #[must_use]
+    pub fn chunk(&self, tag: [u8; 4]) -> Option<&ChunkEntry> {
+        self.chunks.iter().find(|chunk| chunk.tag == tag)
+    }
+
+    /// Reads the payload of `entry` from the file it was scanned from and
+    /// checks it against its checksum.
+    ///
+    /// # Errors
+    /// If the file cannot be read, ends early, or the payload is damaged.
+    pub fn read<R: Read + Seek>(input: &mut R, entry: &ChunkEntry) -> Result<Chunk, CodecError> {
+        let at = offset_of(entry.offset);
+        input
+            .seek(SeekFrom::Start(entry.offset))
+            .map_err(|error| unreadable(&error, at))?;
+        let mut payload = Vec::new();
+        // `take` bounds the read, so a wrong length cannot ask for more
+        // memory than the file has bytes.
+        input
+            .by_ref()
+            .take(entry.len)
+            .read_to_end(&mut payload)
+            .map_err(|error| unreadable(&error, at))?;
+        if payload.len() as u64 != entry.len {
+            return Err(CodecError::new(
+                format!("needs {} bytes, {} left", entry.len, payload.len()),
+                at,
+            ));
+        }
+        if crc32(&payload) != entry.checksum {
+            return Err(damaged(entry.tag, at));
+        }
+        Ok(Chunk {
+            tag: entry.tag,
+            version: entry.version,
+            payload,
+        })
+    }
+}
+
+/// Reads from a stream whose length is known, counting the offset, so a
+/// file that ends early is reported the way [`Reader`] reports it.
+struct Scanner<'a, R> {
+    input: &'a mut R,
+    at: u64,
+    total: u64,
+}
+
+impl<R: Read + Seek> Scanner<'_, R> {
+    fn left(&self) -> u64 {
+        self.total - self.at
+    }
+
+    fn error(&self, message: impl Into<String>) -> CodecError {
+        CodecError::new(message, offset_of(self.at))
+    }
+
+    fn fill(&mut self, buffer: &mut [u8]) -> Result<(), CodecError> {
+        if buffer.len() as u64 > self.left() {
+            return Err(self.error(format!(
+                "needs {} bytes, {} left",
+                buffer.len(),
+                self.left()
+            )));
+        }
+        self.input
+            .read_exact(buffer)
+            .map_err(|error| unreadable(&error, offset_of(self.at)))?;
+        self.at += buffer.len() as u64;
+        Ok(())
+    }
+
+    fn array<const N: usize>(&mut self) -> Result<[u8; N], CodecError> {
+        let mut out = [0; N];
+        self.fill(&mut out)?;
+        Ok(out)
+    }
+
+    fn varint(&mut self) -> Result<u64, CodecError> {
+        let mut value = 0_u64;
+        for shift in (0..64).step_by(7) {
+            let [byte] = self.array()?;
+            value |= u64::from(byte & 0x7F) << shift;
+            if byte & 0x80 == 0 {
+                return Ok(value);
+            }
+        }
+        Err(self.error("varint overflows 64 bits"))
+    }
+
+    fn skip(&mut self, len: u64) -> Result<(), CodecError> {
+        if len > self.left() {
+            return Err(self.error(format!("needs {len} bytes, {} left", self.left())));
+        }
+        self.at += len;
+        self.input
+            .seek(SeekFrom::Start(self.at))
+            .map_err(|error| unreadable(&error, offset_of(self.at)))?;
+        Ok(())
+    }
+}
+
+/// A `.sue` file in memory: its header and its chunks, in order.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SueFile {
+    version: u32,
+    extension: Vec<u8>,
     chunks: Vec<Chunk>,
+}
+
+impl Default for SueFile {
+    fn default() -> Self {
+        Self {
+            version: CONTAINER_VERSION,
+            extension: Vec::new(),
+            chunks: Vec::new(),
+        }
+    }
 }
 
 impl SueFile {
@@ -71,6 +256,21 @@ impl SueFile {
     #[must_use]
     pub fn sniff(bytes: &[u8]) -> bool {
         bytes.starts_with(&MAGIC)
+    }
+
+    /// The container version: [`CONTAINER_VERSION`] for a new file, and
+    /// for a file that was read the version it was written with, which
+    /// saving keeps.
+    #[must_use]
+    pub fn container_version(&self) -> u32 {
+        self.version
+    }
+
+    /// The header extension: empty in version 1. What a later version put
+    /// there is kept and written back.
+    #[must_use]
+    pub fn header_extension(&self) -> &[u8] {
+        &self.extension
     }
 
     /// The chunk tagged `tag`.
@@ -184,25 +384,68 @@ impl SueFile {
             })
     }
 
+    /// The file in pieces, in order: the header, then for each chunk its
+    /// frame, its payload and its checksum, then the end mark. Every way
+    /// of writing a file goes through here, so they cannot differ.
+    fn pieces<E>(&self, mut put: impl FnMut(&[u8]) -> Result<(), E>) -> Result<(), E> {
+        let mut header = Writer::new();
+        header.raw(&MAGIC);
+        header.u32(self.version);
+        header.bytes(&self.extension);
+        put(header.as_bytes())?;
+        let mut chunk = |tag: [u8; 4], version: u32, payload: &[u8]| {
+            let mut frame = Writer::new();
+            frame.raw(&tag);
+            frame.u32(version);
+            frame.u64(payload.len() as u64);
+            put(frame.as_bytes())?;
+            put(payload)?;
+            put(&crc32(payload).to_le_bytes())
+        };
+        for part in self.chunks.iter().filter(|chunk| chunk.tag != END) {
+            chunk(part.tag, part.version, &part.payload)?;
+        }
+        chunk(END, 0, &[])
+    }
+
     /// The file's bytes.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Writer::new();
-        out.raw(&MAGIC);
-        out.u32(CONTAINER_VERSION);
-        out.bytes(&[]);
-        for chunk in self.chunks.iter().filter(|chunk| chunk.tag != END) {
-            out.raw(&chunk.tag);
-            out.u32(chunk.version);
-            out.u64(chunk.payload.len() as u64);
-            out.raw(&chunk.payload);
-            out.u32(crc32(&chunk.payload));
+        let mut bytes = Vec::with_capacity(self.encoded_len());
+        let written: Result<(), Infallible> = self.pieces(|piece| {
+            bytes.extend_from_slice(piece);
+            Ok(())
+        });
+        match written {
+            Ok(()) => bytes,
+            Err(never) => match never {},
         }
-        out.raw(&END);
-        out.u32(0);
-        out.u64(0);
-        out.u32(crc32(&[]));
-        out.into_bytes()
+    }
+
+    /// How many bytes [`Self::to_bytes`] and [`Self::write_to`] produce.
+    #[must_use]
+    pub fn encoded_len(&self) -> usize {
+        let mut len = 0;
+        let counted: Result<(), Infallible> = self.pieces(|piece| {
+            len += piece.len();
+            Ok(())
+        });
+        match counted {
+            Ok(()) => len,
+            Err(never) => match never {},
+        }
+    }
+
+    /// Writes the file into `out`, the same bytes as [`Self::to_bytes`],
+    /// without building them in memory first. Wrap a file in a
+    /// [`std::io::BufWriter`]: the frames are small writes.
+    ///
+    /// # Errors
+    /// Whatever `out` reports. What was written until then is not a whole
+    /// file: a save writes into a new file and renames it over the old one
+    /// only when this has returned.
+    pub fn write_to(&self, out: &mut impl Write) -> io::Result<()> {
+        self.pieces(|piece| out.write_all(piece))
     }
 
     /// Reads a file.
@@ -214,8 +457,9 @@ impl SueFile {
         if input.raw(MAGIC.len()).ok() != Some(&MAGIC[..]) {
             return Err(CodecError::new("not a Sue document", 0));
         }
-        let _container_version = input.u32()?;
-        let _extension = input.bytes()?;
+        // This build reads neither past version 1 and writes both back.
+        let version = input.u32()?;
+        let extension = input.bytes()?.to_vec();
         let mut chunks = Vec::new();
         loop {
             let mut tag = [0; 4];
@@ -225,23 +469,82 @@ impl SueFile {
             let at = input.offset();
             let payload = input.raw(len)?;
             let checksum = input.u32()?;
-            let chunk = Chunk {
-                tag,
-                version,
-                payload: payload.to_vec(),
-            };
             if crc32(payload) != checksum {
-                return Err(CodecError::new(
-                    format!("the {} part of the document is damaged", chunk.tag_name()),
-                    at,
-                ));
+                return Err(damaged(tag, at));
             }
             if tag == END {
                 break;
             }
-            chunks.push(chunk);
+            chunks.push(Chunk {
+                tag,
+                version,
+                payload: payload.to_vec(),
+            });
         }
-        Ok(Self { chunks })
+        Ok(Self {
+            version,
+            extension,
+            chunks,
+        })
+    }
+
+    /// Reads the header and the frame of every chunk of a file and seeks
+    /// over the payloads: a few small reads per chunk, however large the
+    /// file. Wrap a file in a [`std::io::BufReader`].
+    ///
+    /// The payloads are not read, so their checksums are not checked here;
+    /// [`Directory::read`] checks the one it fetches. A file that ends
+    /// before its end mark is an error, as in [`Self::from_bytes`].
+    ///
+    /// # Errors
+    /// Not a `.sue` file, truncated, or unreadable.
+    pub fn scan<R: Read + Seek>(input: &mut R) -> Result<Directory, CodecError> {
+        let total = input
+            .seek(SeekFrom::End(0))
+            .and_then(|total| input.seek(SeekFrom::Start(0)).map(|_| total))
+            .map_err(|error| unreadable(&error, 0))?;
+        let mut input = Scanner {
+            input,
+            at: 0,
+            total,
+        };
+        if input.array().ok() != Some(MAGIC) {
+            return Err(CodecError::new("not a Sue document", 0));
+        }
+        let version = u32::from_le_bytes(input.array()?);
+        let len = input.varint()?;
+        if len > input.left() {
+            return Err(input.error(format!("length {len} exceeds the input")));
+        }
+        // No longer than the file, so this cannot ask for absurd memory.
+        let mut extension = vec![0; offset_of(len)];
+        input.fill(&mut extension)?;
+        let mut chunks = Vec::new();
+        loop {
+            let frame: [u8; FRAME] = input.array()?;
+            let mut frame = Reader::new(&frame);
+            let mut tag = [0; 4];
+            tag.copy_from_slice(frame.raw(4)?);
+            let (version, len) = (frame.u32()?, frame.u64()?);
+            let offset = input.at;
+            input.skip(len)?;
+            let checksum = u32::from_le_bytes(input.array()?);
+            if tag == END {
+                break;
+            }
+            chunks.push(ChunkEntry {
+                tag,
+                version,
+                offset,
+                len,
+                checksum,
+            });
+        }
+        Ok(Directory {
+            version,
+            extension,
+            chunks,
+        })
     }
 }
 
@@ -324,5 +627,21 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn a_new_file_is_version_one_with_no_extension() {
+        let file = SueFile::new();
+        assert_eq!(file.container_version(), CONTAINER_VERSION);
+        assert!(file.header_extension().is_empty());
+        assert_eq!(file.encoded_len(), file.to_bytes().len());
+        // The bytes 0.0.75 wrote for an empty document.
+        let mut old = Vec::new();
+        old.extend_from_slice(&MAGIC);
+        old.extend_from_slice(&1_u32.to_le_bytes());
+        old.push(0);
+        old.extend_from_slice(b"END\0");
+        old.extend_from_slice(&[0; 16]);
+        assert_eq!(file.to_bytes(), old);
     }
 }
