@@ -274,3 +274,44 @@ fn the_sue_menus_layout_changes_what_every_studio_draws() {
         ["Automatic (Phone)", "Tablet", "Phone"]
     );
 }
+
+#[test]
+fn a_hub_place_request_goes_to_the_hub_and_remembers_the_place() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut launchpad = Launchpad::new();
+    let probe = Arc::clone(&seen);
+    launchpad
+        .register(move || Box::new(Layouts(Arc::clone(&probe))))
+        .unwrap();
+    let mut rig = Rig::new(&launchpad);
+    let mut shell = Shell::new(
+        WmConfig::from_rice(&rig.world.rice).unwrap(),
+        Theme::from_rice(&rig.world.rice),
+        HardwareProfile::Balanced,
+        60,
+        FormFactor::Desktop,
+    );
+    let studio = AppletId::new("layouts").unwrap();
+    shell.open(studio.clone(), &rig.applets);
+    rig.frames(&mut shell);
+    assert_eq!(shell.page(), Some(&studio));
+    assert_eq!(shell.hub_place(), None);
+
+    // A studio's link to one of the Hub's places leaves the studio for it.
+    let left = rig.with(|io| {
+        shell.handle(
+            ShellRequest::HubPlace("materials".to_owned()),
+            io,
+            Instant::now(),
+        )
+    });
+    assert_eq!(left, None, "the shell's own request");
+    assert_eq!(shell.page(), None);
+    assert_eq!(shell.hub_place(), Some("materials"));
+
+    // Back to the Hub plainly is its Home.
+    shell.open(studio, &rig.applets);
+    rig.with(|io| shell.handle(ShellRequest::Hub, io, Instant::now()));
+    assert_eq!(shell.page(), None);
+    assert_eq!(shell.hub_place(), None);
+}

@@ -16,7 +16,11 @@ use sue_core::{Arena, AssetHandle, CoreError, Entity, ReversibleTransaction, Txn
 use sue_platform::{AudioSink, FormFactor, TextureUpload};
 use sue_rice::{HardwareProfile, RiceDeclaration, RiceSchema, SetRiceValue};
 
-use crate::{Catalog, RiceEdit, Theme, Transport, Typing, WmError, WorkList, World};
+use crate::files::Thumbnailer;
+use crate::icons::Icon;
+use crate::{
+    Catalog, Choice, RiceEdit, SettingsPage, Theme, Transport, Typing, WmError, WorkList, World,
+};
 
 /// An applet's unique id: `[a-z][a-z0-9-]*`, e.g. `paint`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -234,6 +238,10 @@ pub enum ShellRequest {
     Open(AppletId),
     /// Go back to the Hub.
     Hub,
+    /// Go to the Hub and show one of its places: a place an applet adds
+    /// ([`SueApplet::hub_places`], by its [`HubPlace::id`]), or one of the
+    /// Hub's own, such as `files`.
+    HubPlace(String),
     /// Pin a studio or tool, so Sue opens straight into it at launch, or
     /// take the pin away (`None`: Sue opens on the Hub).
     Pin(Option<AppletId>),
@@ -506,6 +514,30 @@ impl SueAction {
     }
 }
 
+/// A place an applet adds to the Hub, beside Home and Files: Sue Paint's
+/// materials, for example. The applet draws it ([`SueApplet::hub_ui`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HubPlace {
+    /// Its id, unique within the applet, e.g. `materials`. It is what
+    /// [`ShellRequest::HubPlace`] and [`SueApplet::hub_ui`] name.
+    pub id: String,
+    /// What people read, in the language in use, e.g. `Materials`.
+    pub label: String,
+    /// Its icon in the Hub's rail or tab bar.
+    pub icon: Icon,
+}
+
+impl HubPlace {
+    /// A place.
+    pub fn new(id: impl Into<String>, label: impl Into<String>, icon: Icon) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            icon,
+        }
+    }
+}
+
 /// What an applet's tick asks for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Tick {
@@ -735,6 +767,41 @@ pub trait SueApplet: Send {
         Vec::new()
     }
 
+    /// The applet's own page of Settings, if it has one, so Settings is
+    /// built from what applets register instead of a list kept by hand.
+    fn settings_page(&self) -> Option<SettingsPage> {
+        None
+    }
+
+    /// Live choices for its settings, as (rice path, choices) pairs: what a
+    /// drop-down in Settings offers for that path, where a choice may be
+    /// shown but not chosen ([`Choice::enabled`]).
+    fn setting_choices(&self) -> Vec<(String, Vec<Choice>)> {
+        Vec::new()
+    }
+
+    /// The places this applet adds to the Hub (Sue Paint's materials). Each
+    /// is drawn by [`Self::hub_ui`] and reached with
+    /// [`ShellRequest::HubPlace`].
+    fn hub_places(&self) -> Vec<HubPlace> {
+        Vec::new()
+    }
+
+    /// Draws the Hub place `place` (an id from [`Self::hub_places`]) in
+    /// `ui`, which covers the Hub's pane.
+    fn hub_ui(&mut self, place: &str, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        let _ = (place, ui, cx);
+    }
+
+    /// How this applet makes a small picture of one of its files for the
+    /// Hub's cards when the file holds none of its own (a `.sue` file's
+    /// `THMB` part is read without asking). The [`Thumbnailer`] runs in
+    /// the background, so the Hub never waits for it. `None`: the Hub
+    /// draws only the pictures Sue reads by itself.
+    fn thumbnail(&self) -> Option<Thumbnailer> {
+        None
+    }
+
     /// `true` if this studio or tool works on `entity`: a file opened
     /// anywhere goes to the first that takes it, and the Sue menu's Send To
     /// offers every other one.
@@ -911,5 +978,27 @@ mod tests {
         assert!(save.takes(Path::new("c.jpg")));
         let folder = FilePick::open(None, "folder", "Choose a Folder").folder();
         assert!(folder.folders);
+    }
+
+    /// An applet that says only who it is.
+    struct Bare;
+
+    impl SueApplet for Bare {
+        fn manifest(&self) -> AppletManifest {
+            AppletManifest::new("bare", "Bare", AppletRole::Studio, "*")
+        }
+    }
+
+    #[test]
+    fn the_hub_and_settings_hooks_do_nothing_unless_an_applet_fills_them() {
+        let bare = Bare;
+        assert!(bare.settings_page().is_none());
+        assert!(bare.setting_choices().is_empty());
+        assert!(bare.hub_places().is_empty());
+        assert!(bare.thumbnail().is_none());
+        let place = HubPlace::new("materials", "Materials", Icon::Folder);
+        assert_eq!(place.id, "materials");
+        assert_eq!(place.label, "Materials");
+        assert_eq!(place.icon, Icon::Folder);
     }
 }

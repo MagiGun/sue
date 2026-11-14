@@ -1297,6 +1297,11 @@ pub trait SueApplet: Send {
     fn take_entity(&mut self, purpose: &str, entity: EntityId, cx: &mut AppletContext<'_>) {}
     fn opens_file(&self, path: &Path) -> bool { false }
     fn reserved_keys(&self) -> Vec<Keybind> { Vec::new() }
+    fn settings_page(&self) -> Option<SettingsPage> { None }       // its own page of Settings
+    fn setting_choices(&self) -> Vec<(String, Vec<Choice>)> { Vec::new() }
+    fn hub_places(&self) -> Vec<HubPlace> { Vec::new() }            // places it adds to the Hub
+    fn hub_ui(&mut self, place: &str, ui: &mut Ui, cx: &mut AppletContext<'_>) {}
+    fn thumbnail(&self) -> Option<Thumbnailer> { None }             // card pictures of its files
 }
 ```
 
@@ -1306,6 +1311,33 @@ file or an entity (the Image Viewer, the Converter). Both fill the **page**
 under the top bar (`page_ui`) and put their menus in the bar after the Sue
 button (`bar_ui`), so a tool opens exactly like a studio. A `Window` (Settings)
 floats over the page. There are no side panels.
+
+Five hooks let applets reach the Hub and Settings without the shell
+naming them; each does nothing until an applet fills it. `settings_page`
+and `setting_choices` give Settings an applet's own page and its live
+choices (a choice can show grayed out). `hub_places` adds places to the
+Hub beside Home and Files (`HubPlace`: an id, a label, an icon), drawn
+by `hub_ui` and reached with `ShellRequest::HubPlace(id)`, which leaves
+the open page for the Hub and remembers the place (`Shell::hub_place`;
+a plain `ShellRequest::Hub` is Home). `thumbnail` hands the Hub a
+`Thumbnailer`, how the studio turns one of its files into a card picture
+in the background.
+
+**The files browser** (`sue_wm::files`) lists the work Sue remembers as
+cards, for one studio or for several: `items(work, studios)` takes each
+studio's Sue projects (by the studio they were last worked on in), the
+other files it takes (`Studio::opens`, or else the files last worked on
+in it) and its kept work; `shown` filters them by shelf (all, favorites,
+a label), type, studio and search, and sorts them. `projects_ui` draws
+the page (labels, search, type chips, a studio chip each when more than
+one studio shows, the toolbar, the cards), `project_popup` what one
+project is, `transfers_popup` the Data Transfers; the host does what
+the returned `Event`s ask. `Thumbs` makes the cards' pictures on a
+background job, kept until the file changes: a `.sue` file's own
+preview (its `THMB` part, read without decoding the document) first,
+else the studio's `Thumbnailer`, else the picture formats `sue-io`
+reads. Sue Paint's start page draws its Projects page and popups from
+it until the Hub's Files place replaces that page.
 
 **The Hub** is the page Sue opens on, a full page and not an overlay: a
 heading **Studios** with a box for every `Studio` manifest, then **Tools** with

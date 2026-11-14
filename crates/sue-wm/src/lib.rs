@@ -58,6 +58,7 @@ pub mod widgets;
 mod work;
 mod world;
 
+pub use applet::HubPlace;
 pub use applet::{
     AppletContext, AppletError, AppletId, AppletManifest, AppletRole, FilePick, FileTemplate,
     FileType, PaletteEntry, ShellRequest, ShellView, SueAction, SueApplet, Tick, sue_menu,
