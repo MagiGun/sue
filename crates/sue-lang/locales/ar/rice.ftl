@@ -264,16 +264,6 @@ sue_writer-spell_check = التدقيق الإملائي
 sue_writer-language = اللغة
     .description = اللغة: sue تتبع لغة Sue، أو علامة لغة لتمييز هذا الاستوديو
 
-## [image_viewer]
-
-image_viewer-language = اللغة
-    .description = اللغة: sue تتبع لغة Sue، أو علامة لغة لتمييز هذا الاستوديو
-
-## [convert]
-
-convert-language = اللغة
-    .description = اللغة: sue تتبع لغة Sue، أو علامة لغة لتمييز هذا الاستوديو
-
 ## [keys]
 
 keys-command_palette = لوحة الأوامر
@@ -515,28 +505,7 @@ sue_writer_keys-format_shrink = تنسيق تصغير الخط
 sue_writer_keys-insert_mark_nbsp = إدراج مسافة غير منقسمة
     .description = مسافة غير منقسمة
 
-## [image_viewer_keys]
-
-image_viewer_keys-viewer_next = عارض التالي
-    .description = الصورة التالية
-image_viewer_keys-viewer_previous = عارض السابق
-    .description = الصورة السابقة
-image_viewer_keys-viewer_fit = عارض ملاءمة
-    .description = ملاءمة للنافذة
-image_viewer_keys-viewer_actual = عارض الحجم الفعلي
-    .description = الحجم الفعلي
-image_viewer_keys-viewer_zoom_in = عارض تكبير
-    .description = تكبير
-image_viewer_keys-viewer_zoom_out = عارض تصغير
-    .description = تصغير
-image_viewer_keys-viewer_rotate_right = عارض تدوير لليمين
-    .description = تدوير لليمين
-image_viewer_keys-viewer_rotate_left = عارض تدوير لليسار
-    .description = تدوير لليسار
-image_viewer_keys-viewer_crop = عارض قص
-    .description = قص
-image_viewer_keys-viewer_save_as = عارض حفظ باسم
-    .description = حفظ باسم
+## [layout]
 
 
 layout-bar_height = ارتفاع الشريط
@@ -558,13 +527,13 @@ input-wheel_line_px = خط عجلة التمرير (بكسل)
     .description = البكسلات التي يتم تمريرها لكل حركة لعجلة الفأرة في القوائم
 
 io-jxl_effort = جهد JPEG XL
-    .description = جهد JPEG XL للتحويلات (الأعلى أصغر وأبطأ)
+    .description = جهد JPEG XL عند التصدير (الأعلى أصغر وأبطأ)
 
 io-jpeg_lossless_transcode = تحويل JPEG دون فقدان
     .description = إعادة ضغط JPEG إلى JPEG XL بدقة البت عند تثبيت برنامج ترميز
 
 io-jpeg_quality = جودة JPEG
-    .description = جودة JPEG للتحويلات إلى jpg.
+    .description = جودة JPEG عند التصدير إلى jpg.
 
 io-byte_map_width = عرض خريطة البايتات
     .description = الأعمدة في خريطة البايتات للملفات غير المعروفة
@@ -573,7 +542,7 @@ io-max_ingest_mib = أقصى حجم للإدخال (ميغابايت)
     .description = أكبر ملف يمكن لـ Sue فتحه (ميغابايت)
 
 io-convert_dir = مجلد التحويل
-    .description = مجلد حفظ الملفات المحولة (الفارغ يحفظ بجانب المصدر)
+    .description = مجلد الملفات المصدرة والمحولة دفعة واحدة (الفارغ يحفظ بجانب المصدر)
 
 audio-output_device = جهاز الإخراج
     .description = جهاز إخراج الصوت (الفارغ يستخدم الافتراضي للنظام)

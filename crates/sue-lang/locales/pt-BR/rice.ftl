@@ -264,16 +264,6 @@ sue_writer-spell_check = Verificacao ortografica
 sue_writer-language = Idioma
     .description = Idioma: sue segue o idioma do Sue, ou defina um dedicado
 
-## [image_viewer]
-
-image_viewer-language = Idioma
-    .description = Idioma: sue segue o idioma do Sue, ou defina um dedicado
-
-## [convert]
-
-convert-language = Idioma
-    .description = Idioma: sue segue o idioma do Sue, ou defina um dedicado
-
 ## [keys]
 
 keys-command_palette = Paleta de comandos
@@ -515,28 +505,7 @@ sue_writer_keys-format_shrink = Formatar diminuir fonte
 sue_writer_keys-insert_mark_nbsp = Inserir espaco inseparavel
     .description = Espaco inseparavel
 
-## [image_viewer_keys]
-
-image_viewer_keys-viewer_next = Visualizador proxima
-    .description = Proxima imagem
-image_viewer_keys-viewer_previous = Visualizador anterior
-    .description = Imagem anterior
-image_viewer_keys-viewer_fit = Visualizador ajustar
-    .description = Ajustar a janela
-image_viewer_keys-viewer_actual = Visualizador tamanho real
-    .description = Tamanho real
-image_viewer_keys-viewer_zoom_in = Visualizador ampliar
-    .description = Ampliar
-image_viewer_keys-viewer_zoom_out = Visualizador reduzir
-    .description = Reduzir
-image_viewer_keys-viewer_rotate_right = Visualizador girar para a direita
-    .description = Girar para a direita
-image_viewer_keys-viewer_rotate_left = Visualizador girar para a esquerda
-    .description = Girar para a esquerda
-image_viewer_keys-viewer_crop = Visualizador recortar
-    .description = Recortar
-image_viewer_keys-viewer_save_as = Visualizador salvar como
-    .description = Salvar como
+## [layout]
 
 
 layout-bar_height = Altura da barra
@@ -558,13 +527,13 @@ input-wheel_line_px = Linha da roda (px)
     .description = Pixels rolados por entalhe da roda do mouse em listas
 
 io-jxl_effort = Esforco JPEG XL
-    .description = Esforco de JPEG XL para conversoes (maior e menor e mais lento)
+    .description = Esforco de JPEG XL para exportacoes (maior e menor e mais lento)
 
 io-jpeg_lossless_transcode = Transcodificacao JPEG sem perdas
     .description = Recomprimir JPEG para JPEG XL bit a bit quando houver codec instalado
 
 io-jpeg_quality = Qualidade JPEG
-    .description = Qualidade JPEG para conversoes para .jpg
+    .description = Qualidade JPEG para exportacoes para .jpg
 
 io-byte_map_width = Largura do mapa de bytes
     .description = Colunas no mapa de bytes de arquivos desconhecidos
@@ -573,7 +542,7 @@ io-max_ingest_mib = Ingestao maxima (MiB)
     .description = Maior arquivo que o Sue abre (MiB)
 
 io-convert_dir = Pasta de conversao
-    .description = Pasta para arquivos convertidos (vazio salva ao lado da fonte)
+    .description = Pasta para arquivos exportados e convertidos em lote (vazio salva ao lado da fonte)
 
 audio-output_device = Dispositivo de saida
     .description = Dispositivo de saida (vazio usa o padrao do sistema)

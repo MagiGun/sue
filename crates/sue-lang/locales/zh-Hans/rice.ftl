@@ -264,16 +264,6 @@ sue_writer-spell_check = 拼写检查
 sue_writer-language = 语言
     .description = 语言：sue 跟随 Sue 语言，也可单独指定
 
-## [image_viewer]
-
-image_viewer-language = 语言
-    .description = 语言：sue 跟随 Sue 语言，也可单独指定
-
-## [convert]
-
-convert-language = 语言
-    .description = 语言：sue 跟随 Sue 语言，也可单独指定
-
 ## [keys]
 
 keys-command_palette = 命令面板
@@ -515,28 +505,7 @@ sue_writer_keys-format_shrink = 格式 减小字号
 sue_writer_keys-insert_mark_nbsp = 插入 不换行空格
     .description = 不换行空格
 
-## [image_viewer_keys]
-
-image_viewer_keys-viewer_next = 查看器 下一张
-    .description = 下一张图片
-image_viewer_keys-viewer_previous = 查看器 上一张
-    .description = 上一张图片
-image_viewer_keys-viewer_fit = 查看器 适应窗口
-    .description = 适应窗口
-image_viewer_keys-viewer_actual = 查看器 实际大小
-    .description = 实际大小
-image_viewer_keys-viewer_zoom_in = 查看器 放大
-    .description = 放大
-image_viewer_keys-viewer_zoom_out = 查看器 缩小
-    .description = 缩小
-image_viewer_keys-viewer_rotate_right = 查看器 向右旋转
-    .description = 向右旋转
-image_viewer_keys-viewer_rotate_left = 查看器 向左旋转
-    .description = 向左旋转
-image_viewer_keys-viewer_crop = 查看器 裁剪
-    .description = 裁剪
-image_viewer_keys-viewer_save_as = 查看器 另存为
-    .description = 另存为
+## [layout]
 
 
 layout-bar_height = 顶栏高度
@@ -558,13 +527,13 @@ input-wheel_line_px = 滚轮滚动像素
     .description = 列表中鼠标滚轮每刻度滚动的像素数
 
 io-jxl_effort = JPEG XL 编码算力
-    .description = 转换时的 JPEG XL 算力消耗（越高文件越小且耗时越长）
+    .description = 导出时的 JPEG XL 算力消耗（越高文件越小且耗时越长）
 
 io-jpeg_lossless_transcode = JPEG 无损转码
     .description = 安装重压缩编解码器后按位将 JPEG 无损重压缩为 JPEG XL
 
 io-jpeg_quality = JPEG 质量
-    .description = 转换为 .jpg 时的 JPEG 图像质量
+    .description = 导出为 .jpg 时的 JPEG 图像质量
 
 io-byte_map_width = 字节图宽度
     .description = 未知文件字节图的列数
@@ -573,7 +542,7 @@ io-max_ingest_mib = 最大导入大小 (MiB)
     .description = Sue 能够打开的最大文件大小 (MiB)
 
 io-convert_dir = 转换保存文件夹
-    .description = 转换后文件的保存目录（留空则保存在源文件旁边）
+    .description = 导出文件和批量转换文件的保存目录（留空则保存在源文件旁边）
 
 audio-output_device = 输出设备
     .description = 音频输出设备（留空使用系统默认）

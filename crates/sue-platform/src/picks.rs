@@ -100,8 +100,7 @@ pub(crate) trait System: Send + Sync + 'static {
     }
 }
 
-/// The most files of a chosen folder copied into Sue's cache, as many as
-/// the Converter adds from a folder.
+/// The most files of a chosen folder copied into Sue's cache.
 const FOLDER_FILES: usize = 500;
 
 /// Where a staged file is handed back to.

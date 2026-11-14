@@ -19,7 +19,6 @@ mod paint_tools;
 mod paint_touch;
 mod settings;
 mod shell;
-mod tools;
 mod writer_compile;
 mod writer_corkboard;
 mod writer_document;
@@ -41,10 +40,6 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
 
     // 04 and 05. Settings in a computer's window.
     settings::desktop(tour)?;
-
-    // 06 and 07. The two tools.
-    tools::image_viewer(tour)?;
-    tools::converter(tour)?;
 
     // 08a to 08z. Sue Paint with no canvas open: its start page.
     paint_start::desktop(tour)?;

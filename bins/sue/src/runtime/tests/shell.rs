@@ -95,16 +95,6 @@ fn files_open_through_the_system_dialog_in_the_studio_or_tool_that_takes_them() 
         Some(picture.display().to_string().as_str()),
         "Sue Paint shows the file"
     );
-    let viewer = AppletId::new(crate::viewer::ID).unwrap();
-    assert!(
-        runtime
-            .applets
-            .get(&viewer)
-            .and_then(|applet| applet.focus())
-            .is_none(),
-        "the Image Viewer was not handed it"
-    );
-
     // Text goes to Sue Writer.
     let notes = root.join("notes.md");
     std::fs::write(&notes, "# Hello\n\nSome *words*.\n").unwrap();
@@ -123,18 +113,17 @@ fn files_open_through_the_system_dialog_in_the_studio_or_tool_that_takes_them() 
     let (message, error) = runtime.shell.message().unwrap();
     assert!(error && message.contains("data.bin"), "{message}");
 
-    // A folder is asked for as a folder.
-    let convert = AppletId::new(crate::convert::ID).unwrap();
+    // A folder is asked for as a folder (Sue Paint's batch import).
     runtime.request(
         ShellRequest::AppletCommand {
-            applet: convert.clone(),
-            command: "convert.folder".to_owned(),
+            applet: paint.clone(),
+            command: "file.import.batch".to_owned(),
         },
         &mut NoTextures,
         start,
     );
     assert!(runtime.pending_pick().is_some_and(|pick| pick.folders));
-    assert_eq!(runtime.shell.page(), Some(&convert));
+    assert_eq!(runtime.shell.page(), Some(&paint));
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -196,7 +185,6 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
     for wanted in [
         "Hub",
         "Studios",
-        "Tools",
         "New",
         "File",
         "Project",
@@ -217,10 +205,12 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
         runtime.shell.sue_menu_labels(&["Studios"]),
         ["Sue Paint", "Sue Writer"]
     );
-    assert_eq!(
-        runtime.shell.sue_menu_labels(&["Tools"]),
-        ["Image Viewer", "Converter"]
+    // Sue ships no tool, so the menu has no empty Tools entry.
+    assert!(
+        !first.iter().any(|label| label == "Tools"),
+        "Tools in {first:?}"
     );
+    assert_eq!(runtime.shell.sue_menu_labels(&["Tools"]), [""; 0]);
     assert_eq!(
         runtime.shell.sue_menu_labels(&["New"]),
         ["Picture", "Writing"]
@@ -254,12 +244,7 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
     // In Sue Paint: Send To offers the others, and the pin.
     runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
     let send = runtime.shell.sue_menu_labels(&["Send To"]);
-    assert!(
-        send.iter().any(|label| label == "Converter")
-            && send.iter().any(|label| label == "Sue Writer")
-            && !send.iter().any(|label| label == "Sue Paint"),
-        "{send:?}"
-    );
+    assert_eq!(send, ["Sue Writer"], "the other studio, and only it");
     assert!(
         runtime
             .shell
@@ -268,35 +253,20 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
             .any(|label| label == "Open Sue Paint at Launch")
     );
 
-    // The picture goes to the Converter, flattened into a PNG.
+    // The picture goes to Sue Writer by its id: no file is written.
+    let files_before =
+        std::fs::read_dir(&runtime.engine.catalog.folders["home"]).map_or(0, Iterator::count);
     let sent = runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
-        shell.sue_menu_pick(&["Send To", "Converter"], io, now)
+        shell.sue_menu_pick(&["Send To", "Sue Writer"], io, now)
     });
     assert!(sent);
-    let convert = AppletId::new(crate::convert::ID).unwrap();
-    assert_eq!(runtime.shell.page(), Some(&convert));
-    runtime.request(
-        ShellRequest::AppletCommand {
-            applet: convert,
-            command: "convert.run".to_owned(),
-        },
-        &mut NoTextures,
-        start,
-    );
-    let home = runtime.engine.catalog.folders["home"].clone();
-    let written = std::fs::read_dir(&home)
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .find(|path| path.extension().is_some_and(|extension| extension == "png"))
-        .expect("the flattened picture was written");
-    let png = sue_io::decode_png(&std::fs::read(&written).unwrap()).unwrap();
-    let pixels =
-        sue_model::picture::size(runtime.engine.world.arena.get_by_id(picture).unwrap()).unwrap();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    let writer = AppletId::new(sue_writer::ID).unwrap();
+    assert_eq!(runtime.shell.page(), Some(&writer));
     assert_eq!(
-        [png.tile.width(), png.tile.height()],
-        pixels,
-        "the whole picture, flattened"
+        std::fs::read_dir(&runtime.engine.catalog.folders["home"]).map_or(0, Iterator::count),
+        files_before,
+        "sending work exports nothing"
     );
 
     // Open In goes back to Sue Paint on the very same picture; the Hub
@@ -458,22 +428,22 @@ fn the_sue_menu_changes_the_language_and_a_tool_can_keep_its_own() {
     assert!(labels.contains(&settings), "{labels:?}");
     runtime.shell.dismiss_overlays();
 
-    // The Image Viewer set apart in Spanish: what it says is Spanish,
-    // while Sue's own menu stays Japanese.
-    let viewer = AppletId::new(crate::viewer::ID).unwrap();
+    // Sue Writer set apart in Spanish: what it says is Spanish, while
+    // Sue's own menu stays Japanese.
+    let writer = AppletId::new(sue_writer::ID).unwrap();
     runtime
         .engine
         .world
         .rice
         .set(
-            &sue_wm::language_key(&viewer),
+            &sue_wm::language_key(&writer),
             sue_rice::RiceValue::Text("es".to_owned()),
         )
         .unwrap();
     frames(&mut runtime, &ctx, size, start, |_| Vec::new());
     runtime.request(
         ShellRequest::AppletCommand {
-            applet: viewer,
+            applet: writer,
             command: "no.such.command".to_owned(),
         },
         &mut NoTextures,

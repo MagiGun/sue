@@ -114,7 +114,7 @@ miniz_oxide = "0.8"
 ttf-parser = "0.25"
 regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
 
-# The converter: more picture formats in and out, and FLAC out.
+# Export: more picture formats in and out, and FLAC out.
 flacenc = { version = "0.5", default-features = false }
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "ico", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
 

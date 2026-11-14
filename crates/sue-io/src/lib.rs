@@ -7,7 +7,7 @@
 //! decodes with `jxl-oxide`, rebuilds recompressed JPEGs bit for bit, and
 //! encodes losslessly with `zune-jpegxl`. PNG and JPEG decode with `zune`,
 //! audio (MP3, FLAC, WAV, Ogg Vorbis, AAC) with `symphonia`; [`encode_png`]
-//! and [`encode_wav`] write the converter's other targets. [`TileCache`] keeps
+//! and [`encode_wav`] write pictures and sound out. [`TileCache`] keeps
 //! encoded tiles under a byte budget, and [`byte_map_tile`] turns raw bytes
 //! into a zero-copy `Gray8` raster.
 //!

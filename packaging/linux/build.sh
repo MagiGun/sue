@@ -75,8 +75,8 @@ Depends: libc6, libasound2 | libasound2t64, libxkbcommon0, libwayland-client0
 Recommends: libvulkan1, libegl1, xdg-desktop-portal
 Description: Sue, the Singular Unified Engine
  One creative environment: painting and illustration, comics and
- animation, writing and publishing, sound, and a file manager and
- converter, all on the same data.
+ animation, writing and publishing, sound, and a file manager, all on
+ the same data.
 CONTROL
 dpkg-deb --build --root-owner-group "$deb" "$out/Sue-$version-linux-$deb_arch.deb"
 
@@ -97,7 +97,7 @@ Recommends: vulkan-loader, mesa-libEGL, xdg-desktop-portal
 
 %description
 One creative environment: painting and illustration, comics and animation,
-writing and publishing, sound, and a file manager and converter.
+writing and publishing, sound, and a file manager.
 
 %install
 cp -a $rpm/root/. %{buildroot}/

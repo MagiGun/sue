@@ -1800,7 +1800,49 @@ fn settings_of_format_6_keep_what_was_changed() {
 /// Names that left on purpose, each with the package that retired it and
 /// what stands in its place. A name leaves a ledger only by being listed
 /// here: the ledger files themselves are never edited.
-const RETIRED: &[(&str, &str)] = &[];
+const RETIRED: &[(&str, &str)] = &[
+    // P2-4: the Image Viewer and the Converter left Sue. Pictures open in
+    // Sue Paint, whose own language and keys cover what the two had.
+    ("image_viewer.language", "P2-4: sue_paint.language"),
+    ("convert.language", "P2-4: sue_paint.language"),
+    (
+        "image_viewer_keys.viewer_next",
+        "P2-4: none, Sue Paint's canvas tabs",
+    ),
+    (
+        "image_viewer_keys.viewer_previous",
+        "P2-4: none, Sue Paint's canvas tabs",
+    ),
+    ("image_viewer_keys.viewer_fit", "P2-4: Sue Paint's view.fit"),
+    (
+        "image_viewer_keys.viewer_actual",
+        "P2-4: Sue Paint's view.actual",
+    ),
+    (
+        "image_viewer_keys.viewer_zoom_in",
+        "P2-4: Sue Paint's view.zoom_in",
+    ),
+    (
+        "image_viewer_keys.viewer_zoom_out",
+        "P2-4: Sue Paint's view.zoom_out",
+    ),
+    (
+        "image_viewer_keys.viewer_rotate_right",
+        "P2-4: Sue Paint's Rotate/Flip Canvas",
+    ),
+    (
+        "image_viewer_keys.viewer_rotate_left",
+        "P2-4: Sue Paint's Rotate/Flip Canvas",
+    ),
+    (
+        "image_viewer_keys.viewer_crop",
+        "P2-4: Sue Paint's edit.crop",
+    ),
+    (
+        "image_viewer_keys.viewer_save_as",
+        "P2-4: Sue Paint's file.save_as",
+    ),
+];
 
 /// The lines of ledger `name` that have not been retired.
 fn ledger(name: &str) -> Vec<String> {

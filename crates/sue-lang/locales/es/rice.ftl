@@ -144,17 +144,17 @@ input-wheel_line_px = Línea de rueda (px)
 ## [io]
 
 io-jxl_effort = Esfuerzo JPEG XL
-    .description = Esfuerzo de JPEG XL en las conversiones (más alto da archivos más pequeños y más lentos)
+    .description = Esfuerzo de JPEG XL al exportar (más alto da archivos más pequeños y más lentos)
 io-jpeg_lossless_transcode = Transcodificación JPEG sin pérdidas
     .description = Recomprimir JPEG a JPEG XL bit a bit cuando hay un códec de recompresión instalado
 io-jpeg_quality = Calidad JPEG
-    .description = Calidad JPEG en las conversiones a .jpg
+    .description = Calidad JPEG al exportar a .jpg
 io-byte_map_width = Ancho del mapa de bytes
     .description = Columnas del mapa de bytes de los archivos desconocidos
 io-max_ingest_mib = Tamaño máximo (MiB)
     .description = El archivo más grande que abre Sue (MiB)
 io-convert_dir = Carpeta de conversión
-    .description = Carpeta para los archivos convertidos (vacío guarda junto al original)
+    .description = Carpeta para los archivos exportados y convertidos por lotes (vacío guarda junto al original)
 
 ## [audio]
 
@@ -188,11 +188,6 @@ sue_paint-dpi = PPP
 
 ## [sue_writer]
 
-
-## [image_viewer] y [convert]
-
-convert-language = Idioma
-    .description = Idioma: sue sigue el idioma de Sue; una etiqueta de idioma le da uno propio
 
 ## [keys]
 
@@ -340,11 +335,6 @@ sue_writer-dark_paper = Papel oscuro
 sue_writer-spell_check = Corrector ortografico
     .description = Subrayar palabras mal escritas al teclear
 sue_writer-language = Idioma
-    .description = Idioma: sue sigue el idioma de Sue, una etiqueta de idioma distingue este
-
-## [image_viewer]
-
-image_viewer-language = Idioma
     .description = Idioma: sue sigue el idioma de Sue, una etiqueta de idioma distingue este
 
 ## [sue_paint_keys]
@@ -566,26 +556,3 @@ sue_writer_keys-format_shrink = Formato encoger
     .description = Reducir fuente
 sue_writer_keys-insert_mark_nbsp = Insertar espacio de no separacion
     .description = Espacio de no separacion
-
-## [image_viewer_keys]
-
-image_viewer_keys-viewer_next = Visor siguiente
-    .description = Imagen siguiente
-image_viewer_keys-viewer_previous = Visor anterior
-    .description = Imagen anterior
-image_viewer_keys-viewer_fit = Visor ajustar
-    .description = Ajustar a la ventana
-image_viewer_keys-viewer_actual = Visor real
-    .description = Tamano real
-image_viewer_keys-viewer_zoom_in = Visor acercar
-    .description = Acercar
-image_viewer_keys-viewer_zoom_out = Visor alejar
-    .description = Alejar
-image_viewer_keys-viewer_rotate_right = Visor rotar derecha
-    .description = Girar a la derecha
-image_viewer_keys-viewer_rotate_left = Visor rotar izquierda
-    .description = Girar a la izquierda
-image_viewer_keys-viewer_crop = Visor recortar
-    .description = Recortar
-image_viewer_keys-viewer_save_as = Visor guardar como
-    .description = Guardar como

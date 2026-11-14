@@ -19,7 +19,6 @@ mod paint_palettes;
 mod paint_rulers;
 mod paint_vector_3d;
 mod shell;
-mod tools;
 mod writer;
 
 pub(crate) fn runtime(tag: &str) -> (Runtime, PathBuf) {
