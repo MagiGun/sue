@@ -184,10 +184,10 @@ fn flatten(nodes: &[Node<'_>], visible: bool, opacity: f64, out: &mut Vec<Entity
     }
 }
 
-/// A fingerprint of the layers of a picture: their order, names, styles
-/// and pixels.
+/// A fingerprint of a picture: its size and resolution, and its layers'
+/// order, names, styles and pixels.
 #[allow(clippy::cast_possible_wrap)]
-fn fingerprint(layers: &[&Entity]) -> i64 {
+fn fingerprint(size: [u32; 2], dpi: Option<f64>, layers: &[&Entity]) -> i64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     let mut eat = |bytes: &[u8]| {
         for byte in bytes {
@@ -195,6 +195,9 @@ fn fingerprint(layers: &[&Entity]) -> i64 {
         }
         hash = (hash ^ bytes.len() as u64).wrapping_mul(0x0000_0100_0000_01b3);
     };
+    eat(&size[0].to_le_bytes());
+    eat(&size[1].to_le_bytes());
+    eat(&dpi.unwrap_or(0.0).to_bits().to_le_bytes());
     for layer in layers {
         eat(layer.name().as_bytes());
         eat(layer.class().as_bytes());
@@ -294,6 +297,11 @@ fn records(arena: &Arena, id: EntityId, size: [u32; 2]) -> Result<Psd, FormatErr
         record.visible = style.visible;
         record.clip = style.clip;
         record.blend = blend_key(&camel(style.blend.name()));
+        // A layer that is not clipped is the new base, outside its pixels
+        // and while hidden too.
+        if !style.clip {
+            base.fill(0.0);
+        }
         if style.visible {
             let (left, top, w) = (record.left, record.top, record.width as usize);
             let clipped = style.clip;
@@ -386,7 +394,12 @@ impl FormatHandler for LayeredFormat {
         };
         let mut layers = Vec::new();
         flatten(&tree(&psd.layers), true, 1.0, &mut layers);
-        let print = fingerprint(&layers.iter().collect::<Vec<_>>());
+        let dpi = dpi.filter(|dpi| *dpi > 0.0);
+        let print = fingerprint(
+            [psd.width, psd.height],
+            dpi,
+            &layers.iter().collect::<Vec<_>>(),
+        );
         let info = self.info();
         let mut image = Entity::empty(name, class::IMAGE)
             .with_property(picture::WIDTH, i64::from(psd.width))
@@ -397,7 +410,7 @@ impl FormatHandler for LayeredFormat {
             .with_meta(meta::BYTES, bytes.len().to_string())
             .with_meta(meta::WIDTH, psd.width.to_string())
             .with_meta(meta::HEIGHT, psd.height.to_string());
-        if let Some(dpi) = dpi.filter(|dpi| *dpi > 0.0) {
+        if let Some(dpi) = dpi {
             image = image.with_property(picture::DPI, dpi);
         }
         let orders = OrderKey::sequence(None, layers.len());
@@ -445,17 +458,17 @@ impl FormatHandler for LayeredFormat {
             .iter()
             .filter_map(|child| arena.get_by_id(*child).ok())
             .collect();
-        let unchanged = entity
-            .property(IMPORT_FINGERPRINT)
-            .and_then(Value::as_i64)
-            .is_some_and(|print| print == fingerprint(&layers));
-        if let Some(encoded) = original.filter(|_| unchanged) {
-            return Ok(encoded.bytes.to_vec());
-        }
         let dpi = entity
             .property(picture::DPI)
             .and_then(Value::as_f64)
             .filter(|dpi| *dpi > 0.0);
+        let unchanged = entity
+            .property(IMPORT_FINGERPRINT)
+            .and_then(Value::as_i64)
+            .is_some_and(|print| print == fingerprint(size, dpi, &layers));
+        if let Some(encoded) = original.filter(|_| unchanged) {
+            return Ok(encoded.bytes.to_vec());
+        }
         let psd = records(arena, id, size)?;
         match self.kind {
             Kind::Clip => {
@@ -563,6 +576,16 @@ mod tests {
         // Untouched, the original comes back byte for byte.
         let again = format.export(&arena, &[id], &Properties::new()).unwrap();
         assert_eq!(again, bytes);
+        // A new resolution alone is a change too.
+        let mut arena = arena;
+        let handle = arena.handle_of(id).unwrap();
+        arena
+            .get_mut(handle)
+            .unwrap()
+            .properties_mut()
+            .set(picture::DPI, 600.0);
+        let written = format.export(&arena, &[id], &Properties::new()).unwrap();
+        assert_eq!(crate::psd::psd_info(&written).unwrap().dpi, Some(600.0));
     }
 
     #[test]
@@ -661,6 +684,50 @@ mod tests {
                 .import(&clip[..clip.len() / 2], "cut", &Properties::new())
                 .is_err()
         );
+    }
+
+    /// A clipped layer shows only through the layer right below it that
+    /// is not clipped: never through an older one, and not at all when
+    /// that layer is hidden.
+    #[test]
+    fn clipped_layers_merge_through_their_own_base_only() {
+        let red = [255, 0, 0, 255];
+        let mut over = square("Over", 0, 4, [0, 0, 255, 255]);
+        over.clip = true;
+        let mut hidden_base = square("Hidden base", 3, 1, red);
+        hidden_base.visible = false;
+        let mut over_hidden = square("Over hidden", 0, 4, [0, 255, 0, 255]);
+        over_hidden.clip = true;
+        let psd = Psd {
+            width: 4,
+            height: 4,
+            layers: vec![
+                // A wide base on rows 1 to 3, then a one pixel base at
+                // (2, 1).
+                square("Wide", 0, 4, red),
+                square("Dot", 2, 1, red),
+                over,
+                hidden_base,
+                over_hidden,
+            ],
+            merged: vec![0; 64],
+        };
+        let bytes = crate::psd::encode_psd(&psd, false).unwrap();
+        let format = LayeredFormat::psd();
+        let (mut arena, id) = insert(format.import(&bytes, "clip", &Properties::new()).unwrap());
+        // Written from its layers, not given back as it came.
+        let handle = arena.handle_of(id).unwrap();
+        arena
+            .get_mut(handle)
+            .unwrap()
+            .properties_mut()
+            .remove(IMPORT_FINGERPRINT);
+        let written = format.export(&arena, &[id], &Properties::new()).unwrap();
+        let merged = crate::psd::decode_psd(&written).unwrap().merged;
+        let at = |x: usize, y: usize| &merged[(y * 4 + x) * 4..(y * 4 + x) * 4 + 4];
+        assert_eq!(at(2, 1), &[0, 0, 255, 255], "blue over the dot");
+        assert_eq!(at(0, 1), &[255, 0, 0, 255], "the wide layer is no base");
+        assert_eq!(at(3, 1), &[255, 0, 0, 255], "nothing over a hidden base");
     }
 
     #[test]
