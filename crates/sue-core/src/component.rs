@@ -1081,6 +1081,37 @@ mod tests {
     }
 
     #[test]
+    fn a_raster_is_written_as_size_format_and_samples() {
+        // The bytes 0.0.75 wrote, by hand: two little-endian u32, the
+        // format code, a varint count, then the samples.
+        let encode = |tile: RasterTile2D| {
+            let mut out = Writer::new();
+            ComponentData::from(tile).encode(&mut out);
+            out.into_bytes()
+        };
+        let rgba = RasterTile2D::from_bytes(2, 1, PixelFormat::Rgba8, (1..=8).collect()).unwrap();
+        assert_eq!(
+            encode(rgba),
+            [2, 0, 0, 0, 1, 0, 0, 0, 1, 8, 1, 2, 3, 4, 5, 6, 7, 8]
+        );
+        let gray = RasterTile2D::from_bytes(3, 1, PixelFormat::Gray8, vec![9, 8, 7]).unwrap();
+        assert_eq!(encode(gray), [3, 0, 0, 0, 1, 0, 0, 0, 0, 3, 9, 8, 7]);
+        let float = RasterTile2D::from_f32(1, 1, vec![0.0, 1.0, -2.0, 0.5]).unwrap();
+        assert_eq!(
+            encode(float),
+            [
+                1, 0, 0, 0, 1, 0, 0, 0, 2, 4, 0, 0, 0, 0, 0, 0, 0x80, 0x3F, 0, 0, 0, 0xC0, 0, 0, 0,
+                0x3F
+            ]
+        );
+        // A count above 127 takes two varint bytes.
+        let wide = RasterTile2D::from_bytes(6, 6, PixelFormat::Rgba8, vec![7; 144]).unwrap();
+        let bytes = encode(wide);
+        assert_eq!(bytes[..11], [6, 0, 0, 0, 6, 0, 0, 0, 1, 0x90, 0x01]);
+        assert_eq!(bytes[11..], [7; 144]);
+    }
+
+    #[test]
     fn mesh_indices_are_checked() {
         assert!(MeshBuffer3D::new(vec![[0.0; 3]; 3], vec![0, 1]).is_err());
         assert!(MeshBuffer3D::new(vec![[0.0; 3]; 3], vec![0, 1, 3]).is_err());
