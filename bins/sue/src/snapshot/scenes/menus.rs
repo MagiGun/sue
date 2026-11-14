@@ -28,7 +28,7 @@ fn typed(text: &str) -> Vec<Event> {
     vec![Event::Text(text.to_owned())]
 }
 
-/// Scenes 29a to 29e.
+/// Scenes 29a to 29e, and 33a to 33d.
 pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     let before = tour.camera.size;
     tour.camera.size = SIZE;
@@ -39,6 +39,7 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.camera.size = SIZE;
     note(tour)?;
     tip(tour)?;
+    clip_studio_order(tour)?;
     tour.camera.size = before;
     Ok(())
 }
@@ -207,5 +208,22 @@ fn shoot_ui(
     std::fs::write(&path, encode_png_rgba(size[0], size[1], &pixels)?)
         .map_err(|error| error.to_string())?;
     tour.written.push(path);
+    Ok(())
+}
+
+/// Scenes 33a to 33d. Sue Paint's File, Animation, Window and Help menus
+/// in Clip Studio Paint's order, Title Case, with the keys that run them.
+fn clip_studio_order(tour: &mut Tour<'_>) -> Result<(), String> {
+    for (menu, name) in [
+        ("File", "33a-menu-file"),
+        ("Animation", "33b-menu-animation"),
+        ("Window", "33c-menu-window"),
+        ("Help", "33d-menu-help"),
+    ] {
+        tour.paint_go(&[&format!("menu/{menu}")]);
+        tour.shoot(name)?;
+        tour.camera.input.push(key(Key::Escape));
+        tour.settle();
+    }
     Ok(())
 }
