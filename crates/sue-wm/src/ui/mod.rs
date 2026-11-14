@@ -15,6 +15,8 @@
 //! The components built on these (buttons, fields, menus, dialogs) get one
 //! file each beside these three.
 //!
+//! - [`tabs`]: the tab strip (icons and names, folding to icons, dragged
+//!   to reorder and torn off) and the column of side tabs.
 //! - [`mod@card`]: cards, groups and sections, tiles and thumbnail cards.
 //! - [`list`]: list rows, tree rows, the empty state, dividers and
 //!   headings.
@@ -25,6 +27,7 @@ pub mod focus;
 pub mod list;
 pub mod motion;
 pub mod progress;
+pub mod tabs;
 pub mod tokens;
 
 pub use card::{
@@ -40,6 +43,7 @@ pub use motion::{Motion, Pace};
 pub use progress::{
     ProgressBar, Skeleton, Spinner, paint_skeleton, progress_bar, skeleton, spinner,
 };
+pub use tabs::{SideOutput, SidebarTabs, Tab, TabStrip, TabsOutput, sidebar_tabs, tab_strip};
 pub use tokens::{
     Density, EDGE_CONTRAST, Elevation, Layer, MIN_TEXT_SIZE, Radius, Space, TEXT_CONTRAST,
     TextRole, contrast, nested_radius,
