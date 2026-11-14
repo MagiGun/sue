@@ -8,6 +8,7 @@
 
 mod hub;
 mod icons;
+mod menus;
 mod paint_canvas;
 mod paint_color;
 mod paint_dialogs;
@@ -102,6 +103,10 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
 
     // 27. The icons: the reference sheet, then every icon.
     icons::contact_sheets(tour)?;
+
+    // 29a to 29e. Menus walked with the keyboard, a menu taller than the
+    // window, the note of a row and tooltips.
+    menus::scenes(tour)?;
     Ok(())
 }
 

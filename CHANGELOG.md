@@ -31,6 +31,13 @@ follow [Semantic Versioning](https://semver.org/).
   `CREATE` text, row count and rows), and `sue-cli clip diff <before>
   <after>` prints what differs between two such files. For people
   working on the converter; neither changes a file.
+- The Sue menu and the menus along the top answer the keyboard: Up and
+  Down walk the items, Home and End jump to the first and the last,
+  Right and Left open and leave a nested menu (on the menu bar they go
+  to the menu beside), Enter or Space runs the item, Escape closes, and
+  typing the start of an item's name goes to it. A menu taller than the
+  window scrolls (with the wheel, by resting the pointer on the arrow at
+  its end, or by itself to follow the keys) instead of being cut off.
 
 ### Changed
 
