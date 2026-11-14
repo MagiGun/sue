@@ -620,8 +620,9 @@ pub fn swatch(ui: &mut Ui, rect: Rect, rgba: [u8; 4], theme: &Theme) {
 
 /// A swatch button that opens the color wheel (and the opacity bar when
 /// `alpha`) in a popup next to it, with the color's numbers underneath.
-/// It is as tall as the least hit target of its [`Density`] and twice as
-/// wide.
+/// It is as tall as the other controls of its row, so it never makes a
+/// toolbar or a settings row taller (a touch layout makes the whole row
+/// taller, not one swatch), and twice as wide.
 pub fn color_button(
     ui: &mut Ui,
     id_salt: impl std::hash::Hash + std::fmt::Debug,
@@ -629,7 +630,7 @@ pub fn color_button(
     alpha: bool,
     theme: &Theme,
 ) -> ColorPick {
-    let height = Density::of(ui).min_hit();
+    let height = ui.spacing().interact_size.y.round();
     let (rect, response) = ui.allocate_exact_size(vec2(height * 2.0, height), Sense::click());
     let corner = theme.radius(Radius::Md);
     let edge = if response.hovered() {
