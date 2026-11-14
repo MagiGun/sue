@@ -188,6 +188,7 @@ layer_select_above = "Alt+]"   # @keybind Select Layer Above
 layer_select_below = "Alt+["   # @keybind Select Layer Below
 layer_order_up = "Ctrl+]"      # @keybind Move Up
 layer_order_down = "Ctrl+["    # @keybind Move Down
+layer_toggle_layer_color = "Ctrl+B" # @keybind Switch Using Layer Color
 select_again = "Ctrl+Shift+D"  # @keybind Reselect
 select_all = "Ctrl+A"          # @keybind Select All
 select_none = "Ctrl+D"         # @keybind Deselect

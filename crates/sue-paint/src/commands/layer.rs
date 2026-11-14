@@ -102,6 +102,21 @@ fn lock_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
         .map_or(ItemState::off(), |info| flag(info.locked))
 }
 
+/// Checked while the current layer is shown in its layer color.
+fn layer_color_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    paint.layer().map_or(ItemState::off(), |layer| {
+        flag(
+            facts
+                .arena
+                .get_by_id(layer)
+                .ok()
+                .and_then(|entity| entity.property(crate::effects::COLOR))
+                .and_then(sue_core::Value::as_bool)
+                .unwrap_or(false),
+        )
+    })
+}
+
 fn reference_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
     paint
         .layer_info(facts.arena)
@@ -640,6 +655,13 @@ fn toggle_lock(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 
 fn toggle_lock_alpha(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.toggle_layer(cx, picture::ALPHA_LOCKED, false);
+}
+
+/// Switch Using Layer Color: the current layer drawn in its layer color
+/// (blue unless Layer Property says otherwise), or in its own colors
+/// again, as the Layer color button of Layer Property does.
+fn toggle_layer_color(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.toggle_layer(cx, crate::effects::COLOR, false);
 }
 
 /// The Layer palette, on its Layer Property tab.
@@ -1212,6 +1234,14 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     )
     .icon("layer-lock-alpha")
     .state(on_raster),
+    c(
+        "layer.toggle.layer_color",
+        "switch-using-layer-color",
+        toggle_layer_color,
+    )
+    .icon("layer-color")
+    .keys("Ctrl+B")
+    .state(layer_color_state),
     c("layer.properties", "layer-property", properties).icon("layer-property"),
     c("layer.comps", "layer-comps-ellipsis", comps).icon("layers"),
     c("layer.select_above", "select-layer-above", select_above)

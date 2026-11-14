@@ -2343,3 +2343,4 @@ zoom-100-percent = 100%
 zoom-200-percent = 200%
 paste-material = Paste Material
 cancel-transform = Cancel Transform
+switch-using-layer-color = Switch Using Layer Color
