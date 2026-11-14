@@ -371,9 +371,8 @@ fn edit_margin(left: f32, right: f32) -> Margin {
 
 /// The text field's caret, drawn in a review sheet where no text edit
 /// draws its own.
-fn paint_caret(painter: &Painter, x: f32, rect: Rect, theme: &Theme, density: Density) {
+fn paint_caret(painter: &Painter, x: f32, rect: Rect, theme: &Theme) {
     let height = theme.text_size(TextRole::Body) * 1.2;
-    let _ = density;
     painter.line_segment(
         [
             pos2(x, rect.center().y - height / 2.0),
@@ -2233,13 +2232,7 @@ fn paint_text_sample(
         ink,
     );
     if typing {
-        paint_caret(
-            painter,
-            rect.left() + left + width + 1.0,
-            rect,
-            theme,
-            density,
-        );
+        paint_caret(painter, rect.left() + left + width + 1.0, rect, theme);
     }
     if clearable {
         let square = trailing_square(rect);
@@ -2322,7 +2315,7 @@ pub(super) fn paint_number_sample(
         },
     );
     if invalid {
-        paint_caret(painter, text_rect.right() + 1.0, rect, theme, density);
+        paint_caret(painter, text_rect.right() + 1.0, rect, theme);
         paint_invalid_mark(painter, rect, theme, density);
     }
 }

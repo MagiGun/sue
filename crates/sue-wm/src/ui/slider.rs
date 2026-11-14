@@ -756,6 +756,12 @@ fn paint_tall(painter: &Painter, geometry: &TallGeometry, t: f32, theme: &Theme,
     let y = track.bottom() - t.clamp(0.0, 1.0) * track.height();
     if geometry.fading {
         paint_fade(painter, track, geometry.cell, look.enabled);
+        if !look.enabled {
+            // A checkerboard is the loudest thing on a panel: a disabled
+            // one sinks under a veil of the panel, as the other tracks
+            // turn gray.
+            painter.rect_filled(track, 0.0, theme.surface(1).gamma_multiply(0.6));
+        }
         painter.rect_stroke(
             track,
             0.0,
@@ -1026,6 +1032,9 @@ impl<'a> RangeSlider<'a> {
                 self.set(high, value, scale);
             }
         }
+        // Its two ends, as assistive technology reads them out.
+        let start = tr!("range-start", name = self.label.to_owned());
+        let end = tr!("range-end", name = self.label.to_owned());
         if self.fields {
             for (high, place) in [(false, low_field), (true, high_field)] {
                 let mut typed = if high { *self.high } else { *self.low };
@@ -1034,7 +1043,7 @@ impl<'a> RangeSlider<'a> {
                     .decimals(self.decimals)
                     .step(self.step.unwrap_or(10_f64.powi(-(self.decimals as i32))))
                     .suffix(self.suffix)
-                    .label(self.label)
+                    .label(if high { &end } else { &start })
                     .enabled(enabled)
                     .show_at(ui, place, theme);
                 if field.changed() {
@@ -1074,8 +1083,6 @@ impl<'a> RangeSlider<'a> {
         let changed = *self.low != old_low || *self.high != old_high;
         let label = self.label;
         let (low, high) = (*self.low, *self.high);
-        let start = tr!("range-start", name = label.to_owned());
-        let end = tr!("range-end", name = label.to_owned());
         low_handle.widget_info(|| WidgetInfo::slider(enabled, low, &start));
         high_handle.widget_info(|| WidgetInfo::slider(enabled, high, &end));
         response.widget_info(|| WidgetInfo::labeled(Role::Group, enabled, label));
