@@ -154,7 +154,14 @@ pub fn resize_canvas(
             [shift[0] as f32, shift[1] as f32],
             [1.0, 1.0],
         );
-        edit = mask_resized(arena, info.id, edit, |mask, at| {
+        // Every 8-bit raster layer ends at the canvas's corner.
+        let placed =
+            if raster(arena, info.id).is_some_and(|tile| tile.format() == PixelFormat::Rgba8) {
+                [0, 0]
+            } else {
+                info.style.offset
+            };
+        edit = mask_resized(arena, info.id, edit, placed, |mask, at| {
             let pixels = placed_cover(mask, [at[0] + shift[0], at[1] + shift[1]], size);
             Some((pixels, size))
         })?;
@@ -257,7 +264,17 @@ pub fn resample(
         .then(SetProperty::new(picture, picture::DPI, dpi));
     for info in layers(arena, picture) {
         edit = live_moved(arena, info.id, edit, [0.0, 0.0], scale);
-        edit = mask_resized(arena, info.id, edit, |mask, at| {
+        // Where the layer sits after: its place scaled with the pixels.
+        let placed =
+            if raster(arena, info.id).is_some_and(|tile| tile.format() == PixelFormat::Rgba8) {
+                [
+                    (info.style.offset[0] as f32 * scale[0]).round() as i64,
+                    (info.style.offset[1] as f32 * scale[1]).round() as i64,
+                ]
+            } else {
+                info.style.offset
+            };
+        edit = mask_resized(arena, info.id, edit, placed, |mask, at| {
             let full = placed_cover(mask, at, [old_w, old_h]);
             let rgba: Vec<u8> = full
                 .iter()
@@ -471,10 +488,13 @@ fn placed_cover(mask: &RasterTile2D, at: [i64; 2], size: [u32; 2]) -> Vec<u8> {
 /// `edit` followed by giving `layer`'s mask, if it has one, the cover
 /// `remake` makes of it (from its raster and where it sits) as a raster
 /// over the whole new canvas, at its corner, in the mask's own format.
+/// `placed` is where the layer sits once the edit is done: a linked
+/// mask's place is relative to it.
 fn mask_resized(
     arena: &Arena,
     layer: EntityId,
     mut edit: Edit,
+    placed: [i64; 2],
     remake: impl Fn(&RasterTile2D, [i64; 2]) -> Option<(Vec<u8>, [u32; 2])>,
 ) -> Result<Edit, String> {
     let (Some(mask), Some(at)) = (mask_of(arena, layer), super::mask_offset(arena, layer)) else {
@@ -506,14 +526,20 @@ fn mask_resized(
         fresh,
         tr!("change-canvas-size"),
     ));
-    // At the canvas's corner; a linked mask's place is its layer's, and
-    // every layer is at the corner after this too.
-    for key in [picture::X, picture::Y] {
-        if arena
-            .get_by_id(mask)
-            .is_ok_and(|entity| entity.property(key).is_some())
+    // At the canvas's corner: a linked mask's place is relative to its
+    // layer's, so it is the layer's place taken back.
+    let own = if super::mask_linked(arena, layer) {
+        [-placed[0], -placed[1]]
+    } else {
+        [0, 0]
+    };
+    for (key, value) in [(picture::X, own[0]), (picture::Y, own[1])] {
+        if value != 0
+            || arena
+                .get_by_id(mask)
+                .is_ok_and(|entity| entity.property(key).is_some())
         {
-            edit = edit.then(SetProperty::new(mask, key, 0_i64));
+            edit = edit.then(SetProperty::new(mask, key, value));
         }
     }
     Ok(edit)

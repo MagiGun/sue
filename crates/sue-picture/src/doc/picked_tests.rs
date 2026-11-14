@@ -489,3 +489,56 @@ fn masks_and_live_layers_follow_the_canvas_size_and_resolution() {
     let line = Gradient::of(arena.get_by_id(live).unwrap()).line;
     assert_eq!(line, [[4.0, 0.0], [12.0, 0.0]]);
 }
+
+#[test]
+fn a_mask_stays_on_its_layer_when_a_moved_layer_changes_resolution() {
+    // An 8 by 2 picture: the layer moved two pixels right, its mask
+    // showing it at picture x 2 and 3 only.
+    let (mut arena, picture, mut history, first) = picture_of(8, 2);
+    fill(&mut arena, first, [0, 0, 0, 255]);
+    history
+        .apply(&mut arena, set(first, picture::X, 2_i64))
+        .unwrap();
+    let (edit, _) = new_mask(
+        &arena,
+        first,
+        |x, _| {
+            if (2..4).contains(&x) { 1.0 } else { 0.0 }
+        },
+    )
+    .unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let alpha = |arena: &Arena, width: u32| -> Vec<u8> {
+        render(
+            arena,
+            picture,
+            [0, 0, width, 2],
+            RenderOptions {
+                paper: false,
+                drafts: true,
+            },
+        )
+        .iter()
+        .skip(3)
+        .step_by(4)
+        .take(width as usize)
+        .copied()
+        .collect()
+    };
+    assert_eq!(alpha(&arena, 8), [0, 0, 255, 255, 0, 0, 0, 0]);
+    // Twice the resolution: the layer sits at x 4, and its mask still
+    // shows it at picture x 4 to 7 (smoothed at the edges), not further
+    // right by the layer's offset.
+    let edit = resample(&arena, picture, [16, 4], 144.0).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    let wide = alpha(&arena, 16);
+    assert_eq!(&wide[..3], &[0, 0, 0], "{wide:?}");
+    assert!(wide[5] == wide[6] && wide[5] > 100, "{wide:?}");
+    assert_eq!(&wide[9..], &[0; 7], "{wide:?}");
+    // Back to the first canvas, cut two pixels on the left: the mask
+    // keeps to the drawing there too.
+    history.undo(&mut arena).unwrap();
+    let edit = resize_canvas(&arena, picture, [6, 2], [-2, 0]).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    assert_eq!(alpha(&arena, 6), [255, 255, 0, 0, 0, 0]);
+}
