@@ -73,5 +73,21 @@ pub(crate) fn shortcut_table() -> &'static [sue_wm::shortcuts::Shortcut] {
     })
 }
 
+/// The rows of the Keyboard Shortcuts list: each command as the menus
+/// name it in the language in use, and its keys as set in `rice` now.
+pub(crate) fn shortcut_rows(rice: &sue_rice::RiceSchema) -> Vec<(String, String)> {
+    let table = shortcut_table();
+    sue_wm::shortcuts::rows(rice, KEYS_SECTION, table)
+        .into_iter()
+        .zip(table)
+        .map(|((label, keys), shortcut)| {
+            let named = registry()
+                .label(shortcut.command)
+                .map_or(label, |name| name.trim_end_matches("...").to_owned());
+            (named, keys)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;

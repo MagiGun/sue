@@ -160,6 +160,40 @@ fn the_shortcuts_keep_the_keys_they_had() {
 }
 
 #[test]
+fn keyboard_shortcuts_names_every_command_as_the_menus_do() {
+    let rice = RiceSchema::new();
+    for language in ["en", "de", "ja"] {
+        let _scope = sue_lang::scope(language);
+        let rows = super::shortcut_rows(&rice);
+        assert_eq!(rows.len(), shortcut_table().len());
+        for ((label, _), shortcut) in rows.iter().zip(shortcut_table()) {
+            let named = registry().label(shortcut.command).expect("a label");
+            assert_eq!(label, named.trim_end_matches("..."), "{language}");
+        }
+    }
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let rows = super::shortcut_rows(&rice);
+    assert!(
+        rows.contains(&("Export as PDF".to_owned(), "Ctrl+P".to_owned())),
+        "{rows:?}"
+    );
+    assert!(rows.contains(&("Title Style".to_owned(), "None".to_owned())));
+    // A command without a default key is named in the language in use too,
+    // not in the English of the settings declarations.
+    let _german = sue_lang::scope("de");
+    let rows = super::shortcut_rows(&rice);
+    assert!(
+        rows.iter()
+            .any(|(label, _)| label == "Als Word-Dokument exportieren"),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter().all(|(label, _)| label != "Title Style"),
+        "{rows:?}"
+    );
+}
+
+#[test]
 fn the_palette_offers_what_it_did() {
     let _english = sue_lang::scope(sue_lang::ENGLISH);
     let entries: Vec<(String, String, String)> = registry()

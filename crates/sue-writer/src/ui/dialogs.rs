@@ -28,13 +28,8 @@ impl SueWriter {
         };
         let mut keep = true;
         let mut after: Option<After> = None;
-        let keys = matches!(dialog, Dialog::Shortcuts).then(|| {
-            sue_wm::shortcuts::rows(
-                cx.rice(),
-                crate::studio::KEYS_SECTION,
-                crate::studio::shortcut_table(),
-            )
-        });
+        let keys =
+            matches!(dialog, Dialog::Shortcuts).then(|| crate::commands::shortcut_rows(cx.rice()));
         let title = match &dialog {
             Dialog::NewProject { .. } => tr!("new-project"),
             Dialog::Compile(_) => tr!("compile"),
