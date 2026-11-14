@@ -21,12 +21,15 @@
 //! - [`list`]: list rows, tree rows, the empty state, dividers and
 //!   headings.
 //! - [`progress`]: the progress bar, the spinner and the skeleton.
+//! - [`scroll`]: the scroll view, with thin bars over its content and
+//!   edges that fade where there is more.
 
 pub mod card;
 pub mod focus;
 pub mod list;
 pub mod motion;
 pub mod progress;
+pub mod scroll;
 pub mod tabs;
 pub mod tokens;
 
@@ -43,6 +46,7 @@ pub use motion::{Motion, Pace};
 pub use progress::{
     ProgressBar, Skeleton, Spinner, paint_skeleton, progress_bar, skeleton, spinner,
 };
+pub use scroll::ScrollView;
 pub use tabs::{SideOutput, SidebarTabs, Tab, TabStrip, TabsOutput, sidebar_tabs, tab_strip};
 pub use tokens::{
     Density, EDGE_CONTRAST, Elevation, Layer, MIN_TEXT_SIZE, Radius, Space, TEXT_CONTRAST,
