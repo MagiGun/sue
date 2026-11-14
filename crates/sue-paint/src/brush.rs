@@ -1527,28 +1527,33 @@ impl Stroke {
         }
         let reach = tip.size + tip.aa.edge() + 3.0;
         let mut keys = std::collections::BTreeSet::new();
-        let mut s = 0.0;
-        let mut last: Option<[f32; 2]> = None;
-        for point in path {
-            if let Some(last) = last {
-                s += distance(last, point.at);
-            }
-            last = Some(point.at);
-            if s > head && s < total - tail {
-                continue;
-            }
-            let [x, y] = point.at;
-            let (x0, y0) = (
-                ((x - reach).max(0.0) as u32) / TILE,
-                ((y - reach).max(0.0) as u32) / TILE,
-            );
-            let (x1, y1) = (
-                ((x + reach).max(0.0) as u32) / TILE,
-                ((y + reach).max(0.0) as u32) / TILE,
-            );
-            for ty in y0..=y1 {
-                for tx in x0..=x1 {
-                    keys.insert((ty, tx));
+        // The finished path's ends, and the ends of the line as it was
+        // drawn: a hook trimmed off the path was painted too, and may
+        // reach a tile the finished path comes nowhere near.
+        for (points, total) in [(path, total), (&self.samples[..], length(&self.samples))] {
+            let mut s = 0.0;
+            let mut last: Option<[f32; 2]> = None;
+            for point in points {
+                if let Some(last) = last {
+                    s += distance(last, point.at);
+                }
+                last = Some(point.at);
+                if s > head && s < total - tail {
+                    continue;
+                }
+                let [x, y] = point.at;
+                let (x0, y0) = (
+                    ((x - reach).max(0.0) as u32) / TILE,
+                    ((y - reach).max(0.0) as u32) / TILE,
+                );
+                let (x1, y1) = (
+                    ((x + reach).max(0.0) as u32) / TILE,
+                    ((y + reach).max(0.0) as u32) / TILE,
+                );
+                for ty in y0..=y1 {
+                    for tx in x0..=x1 {
+                        keys.insert((ty, tx));
+                    }
                 }
             }
         }
