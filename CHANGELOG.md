@@ -16,6 +16,12 @@ follow [Semantic Versioning](https://semver.org/).
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
+- `sue --snapshot <dir>` takes `--scale <n>` (pixels per point, as on a
+  display set to 150 % or 200 %), `--preset <id>` (a theme preset) and
+  `--profile <dir>`, and `sue --snapshot-compare <before> <after>` counts,
+  scene by scene, the pixels that differ between two snapshot folders, so a
+  change to how Sue looks can be checked against the scenes it was meant to
+  touch.
 
 ### Changed
 

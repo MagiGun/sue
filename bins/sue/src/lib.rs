@@ -36,6 +36,13 @@ Usage: sue [--self-check | --snapshot <dir> | --version | --help]
   (no flags)        Open the Sue window (the Hub)
   --self-check      Boot every subsystem headlessly and verify they work together
   --snapshot <dir>  Render the shell offscreen into PNG files in <dir>
+  --snapshot <dir> [--scale <n>] [--preset <id>] [--profile <dir>]
+                    The same at <n> pixels per point (0.5 to 4), in a theme
+                    preset, with the throwaway profile in a folder you name
+  --snapshot-compare <before> <after> [--changed <scene>]...
+                    Count, scene by scene, the pixels that differ between
+                    two snapshot folders; fails when a scene differs that
+                    no --changed names (a name, or its start and a *)
   --version         Print the version
   --help            Print this help
   lang list         List Sue's languages and how much of each is translated
@@ -143,6 +150,8 @@ pub fn cli(args: &[String]) -> ExitCode {
         },
         ["--self-check"] => self_check(),
         ["--snapshot", dir] => snapshots(PathBuf::from(dir)),
+        ["--snapshot", dir, options @ ..] => snapshot::cli(dir, options),
+        ["--snapshot-compare", folders @ ..] => snapshot::compare_cli(folders),
         ["--version" | "-V"] => {
             println!("sue {SUE_VERSION} \"{SUE_CODENAME}\"");
             ExitCode::SUCCESS
