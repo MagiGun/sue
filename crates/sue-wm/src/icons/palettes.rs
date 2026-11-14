@@ -80,8 +80,7 @@ pub(super) const PALETTE_TOOL_PROPERTY: Art = Art {
 pub(super) const PALETTE_BRUSH_SIZE: Art = Art {
     keyline: Keyline::Wide,
     line: &[Part::Fill(
-        "M3.5 12 A1 1 0 0 1 5.5 12 A1 1 0 0 1 3.5 12 Z M7.75 12 A2 2 0 0 1 11.75 12 A2 2 0 0 \
-            1 7.75 12 Z M14 12 A3.25 3.25 0 0 1 20.5 12 A3.25 3.25 0 0 1 14 12 Z",
+        "M2 12 A1.5 1.5 0 0 1 5 12 A1.5 1.5 0 0 1 2 12 Z M6.5 12 A2.75 2.75 0 0 1 12 12 A2.75             2.75 0 0 1 6.5 12 Z M13.5 12 A4.25 4.25 0 0 1 22 12 A4.25 4.25 0 0 1 13.5 12 Z",
     )],
     solid: &[],
 };
@@ -163,11 +162,11 @@ pub(super) const PALETTE_COLOR_SET: Art = Art {
 pub(super) const PALETTE_INTERMEDIATE: Art = Art {
     keyline: Keyline::Wide,
     line: &[
+        Part::Fill("M8.75 6.75 H15.25 V17.25 H8.75 V6.75 Z"),
         Part::Stroke(
-            "M3 12 A5.75 5.75 0 0 1 14.5 12 A5.75 5.75 0 0 1 3 12 Z M9.5 12 A5.75 5.75 0 0 1 21 \
-            12 A5.75 5.75 0 0 1 9.5 12 Z",
+            "M2.75 8.75 A2 2 0 0 1 4.75 6.75 H19.25 A2 2 0 0 1 21.25 8.75 V15.25 A2 2 0 0 1             19.25 17.25 H4.75 A2 2 0 0 1 2.75 15.25 V8.75 Z",
         ),
-        Part::Fill("M12 7.21 A5.75 5.75 0 0 1 12 16.79 A5.75 5.75 0 0 1 12 7.21 Z"),
+        Part::Stroke("M8.75 6.75 V17.25 M15.25 6.75 V17.25"),
     ],
     solid: &[],
 };
@@ -188,11 +187,12 @@ pub(super) const PALETTE_APPROXIMATE: Art = Art {
 pub(super) const PALETTE_COLOR_HISTORY: Art = Art {
     keyline: Keyline::Square,
     line: &[
-        Part::Stroke("M5.68 17.3 A8.25 8.25 0 1 0 4.417 8.75"),
-        Part::Stroke("M3.75 4.25 V8.75 H8.75"),
+        Part::Stroke("M20.25 7.75 H3.75 M7.25 4.25 L3.75 7.75 L7.25 11.25"),
         Part::Fill(
-            "M9.25 10.25 A1 1 0 0 1 10.25 9.25 H13.75 A1 1 0 0 1 14.75 10.25 V13.75 A1 1 0 0 1 \
-            13.75 14.75 H10.25 A1 1 0 0 1 9.25 13.75 V10.25 Z",
+            "M3 14.75 A1.25 1.25 0 0 1 4.25 13.5 H6.25 A1.25 1.25 0 0 1 7.5 14.75 V19.75 A1.25             1.25 0 0 1 6.25 21 H4.25 A1.25 1.25 0 0 1 3 19.75 V14.75 Z",
+        ),
+        Part::Stroke(
+            "M10.75 15.25 A1 1 0 0 1 11.75 14.25 H12.25 A1 1 0 0 1 13.25 15.25 V19.25 A1 1 0 0 1             12.25 20.25 H11.75 A1 1 0 0 1 10.75 19.25 V15.25 Z M17.25 15.25 A1 1 0 0 1 18.25             14.25 H19.25 A1 1 0 0 1 20.25 15.25 V19.25 A1 1 0 0 1 19.25 20.25 H18.25 A1 1 0 0 1             17.25 19.25 V15.25 Z",
         ),
     ],
     solid: &[],
@@ -249,11 +249,11 @@ pub(super) const PALETTE_HISTORY: Art = Art {
     keyline: Keyline::Square,
     line: &[
         Part::Stroke(
-            "M4.4 5.75 A1.6 1.6 0 0 1 7.6 5.75 A1.6 1.6 0 0 1 4.4 5.75 Z M4.4 12 A1.6 1.6 0 0 1 \
-            7.6 12 A1.6 1.6 0 0 1 4.4 12 Z",
+            "M3.75 5.75 A2 2 0 0 1 7.75 5.75 A2 2 0 0 1 3.75 5.75 Z M3.75 12 A2 2 0 0 1 7.75 12 A2             2 0 0 1 3.75 12 Z",
         ),
-        Part::Fill("M3.8 18.25 A2.2 2.2 0 0 1 8.2 18.25 A2.2 2.2 0 0 1 3.8 18.25 Z"),
-        Part::Stroke("M10.75 5.75 H20.25 M10.75 12 H18.25 M10.75 18.25 H20.25"),
+        Part::Stroke("M5.75 7.75 V10 M5.75 14 V15.5"),
+        Part::Fill("M3 18.25 A2.75 2.75 0 0 1 8.5 18.25 A2.75 2.75 0 0 1 3 18.25 Z"),
+        Part::Stroke("M11.25 5.75 H20.25 M11.25 12 H17.25 M11.25 18.25 H20.25"),
     ],
     solid: &[],
 };

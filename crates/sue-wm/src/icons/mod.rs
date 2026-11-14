@@ -507,7 +507,8 @@ icons! {
     PaletteSubTools = "palette-sub-tools" => palettes::PALETTE_SUB_TOOLS,
     /// Three upright sliders with round knobs at different heights: the settings of the tool.
     PaletteToolProperty = "palette-tool-property" => palettes::PALETTE_TOOL_PROPERTY,
-    /// Three solid dots in a row, growing from small to large: the brush sizes.
+    /// Three solid dots in a row, each much larger than the one before, filling the width: the
+    /// brush sizes.
     PaletteBrushSize = "palette-brush-size" => palettes::PALETTE_BRUSH_SIZE,
     /// Four rings of four sizes laid out in a square: the brush sizes as a grid.
     PaletteBrushGrid = "palette-brush-grid" => palettes::PALETTE_BRUSH_GRID,
@@ -518,12 +519,14 @@ icons! {
     PaletteColorSliders = "palette-color-sliders" => palettes::PALETTE_COLOR_SLIDERS,
     /// Three color cards fanned out from one rivet: a set of colors to pick from.
     PaletteColorSet = "palette-color-set" => palettes::PALETTE_COLOR_SET,
-    /// Two rings that overlap, the shared part solid: a color made between two colors.
+    /// A strip cut into three cells, the middle one solid: a color that lies between the colors
+    /// on either side of it.
     PaletteIntermediate = "palette-intermediate" => palettes::PALETTE_INTERMEDIATE,
     /// A square cut into three by three cells, the middle one solid: colors close to the current
     /// one.
     PaletteApproximate = "palette-approximate" => palettes::PALETTE_APPROXIMATE,
-    /// An arrow turning back round a solid color chip: the colors used before.
+    /// An arrow pointing back to the left over a row of three color chips, the first one solid:
+    /// the colors used before.
     PaletteColorHistory = "palette-color-history" => palettes::PALETTE_COLOR_HISTORY,
     /// A frame with a smaller frame inside it, up and to the right: the part of the picture the
     /// view shows.
@@ -532,8 +535,8 @@ icons! {
     PaletteSubView = "palette-sub-view" => palettes::PALETTE_SUB_VIEW,
     /// A ball, a block and a cone standing on a shelf: the materials kept for use in pictures.
     PaletteMaterials = "palette-materials" => palettes::PALETTE_MATERIALS,
-    /// Three steps in a column, each a ring with its line of text, the last one solid: what was
-    /// done, in order.
+    /// Three steps in a column, each a ring with its line of text, the rings joined by a line and
+    /// the last one solid: what was done, in order.
     PaletteHistory = "palette-history" => palettes::PALETTE_HISTORY,
     /// A solid play mark beside three lines: a list of steps that run by themselves.
     PaletteAutoAction = "palette-auto-action" => palettes::PALETTE_AUTO_ACTION,
