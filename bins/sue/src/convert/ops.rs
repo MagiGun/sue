@@ -307,7 +307,6 @@ pub struct Options {
     pub text: TextOptions,
 }
 
-// ----- Pictures ----------------------------------------------------------------
 /// A message of `sue-io` in the language in use.
 fn io_text(error: String) -> String {
     sue_lang::translate("io", &error)
@@ -960,7 +959,7 @@ pub fn convert(
         }
         _ => match kind {
             Kind::Picture => {
-                let tile = read_picture(path, &bytes)?;
+                let tile = read_picture(path, &bytes).map_err(io_text)?;
                 let changed = transform_picture(&tile, &options.picture, target)?;
                 let note = tr!(
                     "by-pixels",
