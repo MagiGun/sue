@@ -29,6 +29,7 @@ mod format;
 mod handle;
 mod id;
 mod jobs;
+pub mod journal;
 mod operator;
 pub mod pixels;
 mod projection;
