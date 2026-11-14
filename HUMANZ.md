@@ -2700,8 +2700,8 @@ Tests check that the shipped `default.suerice` matches the declarations key for
 key, description included, and that it holds no undeclared key.
 
 **Format and migration.** The shipped file declares its format in its header
-(`# sue-rice format 5`). Each released default is frozen in `rice/history/`
-(`v1` to `v4`). At boot, `migrate` brings an older file up to date: a value
+(`# sue-rice format 7`). Each released default is frozen in `rice/history/`
+(`v1` to `v6`). At boot, `migrate` brings an older file up to date: a value
 still equal to the old default takes the new default (so the purple and gold
 palette of format 1 and the blue `#3b82f6` accent of format 2 become the
 monochrome palette), a value the user changed is carried over when its key
@@ -2715,6 +2715,13 @@ so a tinted color never survives a start. The old file is kept as
 `default.suerice.v<format>.bak`. A file that does not parse is moved to
 `default.suerice.broken` and the defaults are used, so a typo never stops Sue
 from starting.
+
+**Format 7.** The shipped file is format 7 since 0.0.8, and the default of
+0.0.75 is frozen as `rice/history/v6.suerice` (a test holds that every earlier
+format has its frozen file). The bump is made once for the whole release:
+every default that changes in 0.0.8 rides on it. A file that is already format
+7 is never migrated again, so a build made between two such changes is tried
+with a fresh `SUE_HOME`, or with a copy of a 0.0.75 settings folder.
 
 ---
 

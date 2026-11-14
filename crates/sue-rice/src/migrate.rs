@@ -9,8 +9,8 @@
 use crate::{DEFAULT_RICE, RiceError, RiceSchema, RiceValue};
 
 /// The format of [`DEFAULT_RICE`], declared in its header as
-/// `# sue-rice format 6`.
-pub const RICE_FORMAT: u32 = 6;
+/// `# sue-rice format 7`.
+pub const RICE_FORMAT: u32 = 7;
 
 const MARKER: &str = "# sue-rice format ";
 
@@ -21,6 +21,7 @@ const HISTORY: &[(u32, &str)] = &[
     (3, include_str!("../rice/history/v3.suerice")),
     (4, include_str!("../rice/history/v4.suerice")),
     (5, include_str!("../rice/history/v5.suerice")),
+    (6, include_str!("../rice/history/v6.suerice")),
 ];
 
 /// Keys that moved, as (old path, new path, old values that mean "no
@@ -71,9 +72,16 @@ fn chromatic(value: &RiceValue) -> bool {
 /// # Errors
 /// If `text` does not parse; the caller then falls back to the default.
 pub fn migrate(text: &str) -> Result<Option<Migration>, RiceError> {
+    migrate_onto(text, DEFAULT_RICE)
+}
+
+/// Migrates `text` onto `current`, a default file of a newer format. The
+/// shipped default is the only `current` outside the tests; they pass a
+/// default with changes that have not shipped yet.
+fn migrate_onto(text: &str, current: &str) -> Result<Option<Migration>, RiceError> {
     let from = format_of(text);
     let user = RiceSchema::parse(text)?;
-    if from >= RICE_FORMAT {
+    if from >= format_of(current) {
         return Ok(None);
     }
     let tinted_era = from < 3;
@@ -82,7 +90,7 @@ pub fn migrate(text: &str) -> Result<Option<Migration>, RiceError> {
         .find(|(format, _)| *format == from)
         .map(|(_, source)| RiceSchema::parse(source))
         .transpose()?;
-    let mut migrated = RiceSchema::parse(DEFAULT_RICE)?;
+    let mut migrated = RiceSchema::parse(current)?;
     let (mut kept, mut dropped, mut purged) = (Vec::new(), Vec::new(), Vec::new());
     for entry in user.entries() {
         let value = entry.parameter().value();
@@ -131,6 +139,59 @@ mod tests {
     const V3: &str = include_str!("../rice/history/v3.suerice");
     const V4: &str = include_str!("../rice/history/v4.suerice");
     const V5: &str = include_str!("../rice/history/v5.suerice");
+    const V6: &str = include_str!("../rice/history/v6.suerice");
+
+    /// The frozen format 6 default as a format 7 file with `changes` made
+    /// to it: what the shipped default may become. It starts from the
+    /// frozen file, so it stays the same when the shipped default moves.
+    fn next_default(changes: &[(&str, &str)]) -> String {
+        let header = [("# sue-rice format 6", "# sue-rice format 7")];
+        header
+            .iter()
+            .chain(changes)
+            .fold(V6.to_owned(), |text, (old, new)| {
+                assert_eq!(text.matches(old).count(), 1, "{old} is there once");
+                text.replace(old, new)
+            })
+    }
+
+    /// `text` without the table `[name]` and its keys.
+    fn without_section(text: &str, name: &str) -> String {
+        let header = format!("[{name}]");
+        let mut inside = false;
+        let mut out = String::new();
+        for line in text.split_inclusive('\n') {
+            if line.trim_start().starts_with('[') {
+                inside = line.trim() == header;
+            }
+            if !inside {
+                out.push_str(line);
+            }
+        }
+        assert_ne!(out, text, "{name} is a section");
+        out
+    }
+
+    /// `text` with `language` of the table `[section]` set to `tag`.
+    fn with_language(text: &str, section: &str, tag: &str) -> String {
+        let header = format!("[{section}]");
+        let mut inside = false;
+        let mut found = false;
+        let mut out = String::new();
+        for line in text.split_inclusive('\n') {
+            if line.trim_start().starts_with('[') {
+                inside = line.trim() == header;
+            }
+            if inside && line.starts_with("language = \"sue\"") {
+                found = true;
+                out.push_str(&line.replacen("\"sue\"", &format!("\"{tag}\""), 1));
+            } else {
+                out.push_str(line);
+            }
+        }
+        assert!(found, "{section} has a language");
+        out
+    }
 
     #[test]
     fn the_shipped_default_is_current() {
@@ -140,7 +201,108 @@ mod tests {
         assert_eq!(format_of(V3), 3);
         assert_eq!(format_of(V4), 4);
         assert_eq!(format_of(V5), 5);
+        assert_eq!(format_of(V6), 6);
         assert_eq!(migrate(DEFAULT_RICE).unwrap(), None);
+    }
+
+    #[test]
+    fn every_earlier_format_has_its_frozen_default() {
+        let formats: Vec<u32> = HISTORY.iter().map(|(format, _)| *format).collect();
+        assert_eq!(formats, (1..RICE_FORMAT).collect::<Vec<_>>());
+        for (format, source) in HISTORY {
+            assert_eq!(format_of(source), *format);
+            assert!(RiceSchema::parse(source).is_ok(), "format {format} reads");
+        }
+    }
+
+    #[test]
+    fn an_untouched_format_6_file_takes_the_new_defaults() {
+        let migration = migrate(V6).unwrap().unwrap();
+        assert_eq!(migration.from, 6);
+        assert_eq!(migration.text, DEFAULT_RICE.replace("\r\n", "\n"));
+        assert!(migration.kept.is_empty());
+        assert!(migration.dropped.is_empty());
+        assert!(migration.purged.is_empty());
+        assert_eq!(migrate(&migration.text).unwrap(), None);
+        // A default that changes later in format 7 reaches the file too.
+        let next = next_default(&[
+            ("small_size = 11 ", "small_size = 12 "),
+            ("confirm_on_exit = false", "confirm_on_exit = true "),
+        ]);
+        let migration = migrate_onto(V6, &next).unwrap().unwrap();
+        assert_eq!(migration.text, next.replace("\r\n", "\n"));
+        assert!(migration.kept.is_empty());
+        assert!(migration.dropped.is_empty());
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert_eq!(schema.get_i64("typography.small_size"), Some(12));
+        assert_eq!(schema.get_bool("general.confirm_on_exit"), Some(true));
+    }
+
+    #[test]
+    fn a_value_changed_in_format_6_is_kept() {
+        let custom = V6
+            .replace("ui_size = 13 ", "ui_size = 15 ")
+            .replace("small_size = 11 ", "small_size = 10 ");
+        assert_ne!(custom, V6);
+        let migration = migrate(&custom).unwrap().unwrap();
+        assert_eq!(
+            migration.kept,
+            ["typography.ui_size", "typography.small_size"]
+        );
+        assert!(migration.dropped.is_empty());
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert_eq!(schema.get_i64("typography.ui_size"), Some(15));
+        assert_eq!(schema.get_i64("typography.small_size"), Some(10));
+        assert_eq!(format_of(&migration.text), RICE_FORMAT);
+        // Also where the default of that very key changes: the choice
+        // wins, and the untouched key beside it follows the new default.
+        let next = next_default(&[
+            ("small_size = 11 ", "small_size = 12 "),
+            ("ui_size = 13 ", "ui_size = 14 "),
+        ]);
+        let custom = V6.replace("small_size = 11 ", "small_size = 10 ");
+        let migration = migrate_onto(&custom, &next).unwrap().unwrap();
+        assert_eq!(migration.kept, ["typography.small_size"]);
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert_eq!(schema.get_i64("typography.small_size"), Some(10));
+        assert_eq!(schema.get_i64("typography.ui_size"), Some(14));
+        // A choice that happens to be the new default is nothing to carry.
+        let custom = V6.replace("small_size = 11 ", "small_size = 12 ");
+        let migration = migrate_onto(&custom, &next).unwrap().unwrap();
+        assert!(migration.kept.is_empty());
+        assert_eq!(migration.text, next.replace("\r\n", "\n"));
+    }
+
+    #[test]
+    fn a_section_removed_after_format_6_is_reported_as_dropped() {
+        let next = without_section(
+            &without_section(&next_default(&[]), "convert"),
+            "image_viewer",
+        );
+        // Nobody changed anything in them: the sections go without a word.
+        let migration = migrate_onto(V6, &next).unwrap().unwrap();
+        assert_eq!(migration.text, next.replace("\r\n", "\n"));
+        assert!(migration.dropped.is_empty());
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert!(schema.get("convert.language").is_none());
+        assert!(schema.get("image_viewer.language").is_none());
+        assert!(schema.get("image_viewer_keys.viewer_next").is_some());
+        // A value someone set in them cannot be carried and is reported.
+        let custom = with_language(&with_language(V6, "convert", "de"), "image_viewer", "ja")
+            .replace("ui_size = 13 ", "ui_size = 15 ");
+        let schema = RiceSchema::parse(&custom).unwrap();
+        assert_eq!(schema.get_str("convert.language"), Some("de"));
+        assert_eq!(schema.get_str("image_viewer.language"), Some("ja"));
+        let migration = migrate_onto(&custom, &next).unwrap().unwrap();
+        assert_eq!(
+            migration.dropped,
+            ["image_viewer.language", "convert.language"]
+        );
+        assert_eq!(migration.kept, ["typography.ui_size"]);
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert!(schema.get("convert.language").is_none());
+        assert!(schema.get("image_viewer.language").is_none());
+        assert_eq!(schema.get_i64("typography.ui_size"), Some(15));
     }
 
     #[test]

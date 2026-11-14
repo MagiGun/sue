@@ -32,6 +32,9 @@ follow [Semantic Versioning](https://semver.org/).
   out of `bins/sue/src/runtime.rs` into `bins/sue/src/runtime/tests/`,
   one file for each area, with shared helpers that find what to click
   by where it was drawn.
+- Your settings file moves to format 7 the first time this version
+  starts (the old one is kept as `default.suerice.v6.bak`). Everything
+  you changed in Settings stays as you set it.
 
 ### Fixed
 

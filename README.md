@@ -158,7 +158,8 @@ Support/Sue` on macOS, `~/.config/sue` on Linux). The first launch creates it as
 a copy of the shipped defaults. A file from an older release, or one with any
 color that is not a gray, is migrated on the next start: Sue keeps the values
 you changed (except tinted colors) and saves the old file beside it as
-`default.suerice.v4.bak` (or `.v1.bak` to `.v3.bak`).
+`default.suerice.v6.bak` (the number is the format the old file had, `v1` to
+`v6`).
 
 `--self-check` boots every subsystem headlessly and prints a diagnostics log:
 the Arena, the rice introspection, the sniffer, the package manager, the AI
