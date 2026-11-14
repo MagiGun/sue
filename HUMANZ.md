@@ -1574,7 +1574,30 @@ one text setting, `<section>.custom` (`shortcuts::SparseKeys`, written
 `view.grid=F7 or F8 layer.merge_down=Ctrl+E`); `shortcuts::bind` says
 where a new key goes, `shortcuts::conflicts` finds a chord two commands
 hold as set now, and `show_in_menus` also writes the shell's own keys
-beside Undo, Redo, Open, Save and Quit. No studio reads the registry yet.
+beside Undo, Redo, Open, Save and Quit. Sue Paint reads the registry
+(below).
+
+**Sue Paint's commands.** `crates/sue-paint/src/commands` holds Sue
+Paint's registry: one file per group (`file.rs`, `edit.rs`, `story.rs`,
+`anim.rs`, `layer.rs`, `select.rs`, `view.rs`, `filter.rs`,
+`window.rs`, `help.rs`, `canvas.rs`, `figure.rs`, `tool.rs`), each with
+its `const` table and the arms that do its commands (`run_<group>`) and
+say how their items look (`state_<group>`, from the `Basis` every
+state looks at). `mod.rs` builds the registry and holds what every
+command does first: `SuePaint::run` keeps words being typed, picks a
+tool for a tool key, closes a torn-off palette, follows Studio Mode's
+keys, records Auto Actions and hands Story and Animation commands to
+their own match before the registry runs the rest; `SuePaint::state`
+grays a name that is not registered and checks a torn-off palette's
+item. The menus (`menus.rs`) are a tree of names with labels from the
+registry and keys from the settings; the shortcut table is a row for
+every command but the five the shell's keys run (`edit.undo`,
+`edit.redo`, `file.open`, `file.save`, `app.quit`) and the hidden ones;
+the command palette lists those flagged `PALETTE`. The studio's state
+and its applet live in `crates/sue-paint/src/studio/` (`mod.rs` with
+the types, `applet.rs`, `frame.rs`, `files.rs`, `clipboard.rs`,
+`layers.rs`, `edit.rs`, `rulers.rs`, `three.rs`, `media.rs`,
+`materials.rs`).
 
 **Sue's icon.** `assets/icons` holds the app icon and the bare silhouette,
 each as SVG (the source), PNG and JPEG XL at 1024 pixels, and a Windows
