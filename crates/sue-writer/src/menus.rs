@@ -4,75 +4,93 @@
 //! formats under Format, Text, and alignment, spacing and lists in their
 //! own submenus, so that each menu stays short. The toolbar holds what
 //! Word's mini toolbar and LibreOffice's single toolbar keep at hand.
+//!
+//! The menus hold the tree of command names. A command's label comes from
+//! the registry ([`crate::commands`]), its key from the settings (the
+//! studio writes them in each frame), its state from the registry too.
+//! Items of a submenu that names what they do ("Delete", "Export As")
+//! keep a shorter label of their own.
 
 use sue_wm::{Menu, MenuItem};
 
+use crate::commands::registry;
 use crate::compile::{self, FORMATS};
 use crate::project::{LABELS, STATUSES};
+
+/// An item for `command`, labeled as the registry labels it.
+fn item(command: &str) -> MenuItem {
+    let label = registry()
+        .label(command)
+        .unwrap_or_else(|| command.to_owned());
+    MenuItem::action(label, command)
+}
+
+/// An item for `command` with a label of its own, for a submenu whose
+/// title says the rest.
+fn named(label: impl Into<String>, command: impl Into<String>) -> MenuItem {
+    MenuItem::action(label, command)
+}
 
 /// Every menu of the bar.
 #[must_use]
 pub fn menus() -> Vec<Menu> {
-    fn item(label: impl Into<String>, command: impl Into<String>) -> MenuItem {
-        MenuItem::action(label, command)
-    }
-    let mut export: Vec<MenuItem> = FORMATS
+    let export: Vec<MenuItem> = FORMATS
         .iter()
-        .map(|(key, _, _)| item(compile::format_name(key), format!("compile.{key}")))
+        .map(|(key, _, _)| named(compile::format_name(key), format!("compile.{key}")))
         .collect();
-    export[0] = export[0].clone().key("Ctrl+P");
     vec![
         Menu::new(
             tr!("file"),
             vec![
-                item(tr!("new-project-ellipsis"), "file.new"),
-                item(tr!("new-document"), "binder.new_doc").key("Ctrl+N"),
-                item(tr!("new-folder"), "binder.new_folder").key("Ctrl+Shift+N"),
+                item("file.new"),
+                item("binder.new_doc"),
+                item("binder.new_folder"),
                 MenuItem::Separator,
-                item(tr!("import-a-document-ellipsis"), "file.import").key("Ctrl+O"),
+                // The shell's Open key runs `file.open`, so the item shows it.
+                item("file.open"),
                 MenuItem::Separator,
-                item(tr!("save-as-template"), "file.save_template"),
-                item(tr!("templates-folder"), "file.templates_folder"),
+                item("file.save_template"),
+                item("file.templates_folder"),
                 MenuItem::Separator,
-                item(tr!("compile-ellipsis"), "compile.open").key("Ctrl+Shift+E"),
+                item("compile.open"),
                 MenuItem::sub(tr!("export-as"), export),
                 MenuItem::Separator,
-                item(tr!("project-settings-ellipsis"), "project.settings"),
-                item(tr!("back-to-the-hub"), "studio.leave"),
+                item("project.settings"),
+                item("studio.leave"),
             ],
         ),
         Menu::new(
             tr!("edit"),
             vec![
-                item(tr!("undo"), "edit.undo").key("Ctrl+Z"),
-                item(tr!("redo"), "edit.redo").key("Ctrl+Shift+Z"),
+                item("edit.undo"),
+                item("edit.redo"),
                 MenuItem::Separator,
-                item(tr!("find-ellipsis"), "edit.find").key("Ctrl+F"),
-                item(tr!("replace-ellipsis"), "edit.replace").key("Ctrl+H"),
+                item("edit.find"),
+                item("edit.replace"),
             ],
         ),
         Menu::new(
             tr!("view"),
             vec![
-                item(tr!("text"), "view.document").key("Ctrl+1"),
-                item(tr!("corkboard"), "view.corkboard").key("Ctrl+2"),
-                item(tr!("outliner"), "view.outliner").key("Ctrl+3"),
+                item("view.document"),
+                item("view.corkboard"),
+                item("view.outliner"),
                 MenuItem::Separator,
-                item(tr!("page-view"), "view.page"),
-                item(tr!("draft-view"), "view.draft"),
+                item("view.page"),
+                item("view.draft"),
                 MenuItem::Separator,
-                item(tr!("binder"), "view.binder"),
-                item(tr!("inspector"), "view.inspector"),
+                item("view.binder"),
+                item("view.inspector"),
                 MenuItem::Separator,
-                item(tr!("composition-mode"), "view.composition").key("F11"),
-                item(tr!("typewriter-scrolling"), "view.typewriter"),
+                item("view.composition"),
+                item("view.typewriter"),
                 MenuItem::sub(
                     tr!("zoom"),
                     vec![
-                        item(tr!("zoom-in"), "view.zoom_in"),
-                        item(tr!("zoom-out"), "view.zoom_out"),
-                        item(tr!("actual-size"), "view.zoom_reset"),
-                        item(tr!("fit-to-window"), "view.zoom_fit"),
+                        item("view.zoom_in"),
+                        item("view.zoom_out"),
+                        item("view.zoom_reset"),
+                        item("view.zoom_fit"),
                     ],
                 ),
             ],
@@ -80,23 +98,23 @@ pub fn menus() -> Vec<Menu> {
         Menu::new(
             tr!("insert"),
             vec![
-                item(tr!("page-break"), "insert.page_break").key("Ctrl+Enter"),
-                item(tr!("scene-break"), "insert.scene_break"),
-                item(tr!("footnote-ellipsis"), "insert.footnote").key("Ctrl+Alt+F"),
-                item(tr!("endnote-ellipsis"), "insert.endnote").key("Ctrl+Alt+D"),
-                item(tr!("header-and-footer-ellipsis"), "insert.header_footer"),
-                item(tr!("table-of-contents-ellipsis"), "insert.contents"),
-                item(tr!("link-ellipsis"), "insert.link").key("Ctrl+K"),
-                item(tr!("picture-ellipsis"), "insert.picture"),
-                item(tr!("todays-date"), "insert.date"),
+                item("insert.page_break"),
+                item("insert.scene_break"),
+                item("insert.footnote"),
+                item("insert.endnote"),
+                item("insert.header_footer"),
+                item("insert.contents"),
+                item("insert.link"),
+                item("insert.picture"),
+                item("insert.date"),
                 MenuItem::sub(
                     tr!("formatting-mark"),
                     vec![
-                        item(tr!("non-breaking-space"), "insert.mark.nbsp").key("Ctrl+Shift+Space"),
-                        item(tr!("non-breaking-hyphen"), "insert.mark.nbhyphen"),
-                        item(tr!("soft-hyphen"), "insert.mark.soft_hyphen"),
-                        item(tr!("narrow-non-breaking-space"), "insert.mark.narrow"),
-                        item(tr!("zero-width-space"), "insert.mark.zwsp"),
+                        item("insert.mark.nbsp"),
+                        item("insert.mark.nbhyphen"),
+                        item("insert.mark.soft_hyphen"),
+                        item("insert.mark.narrow"),
+                        item("insert.mark.zwsp"),
                     ],
                 ),
             ],
@@ -107,24 +125,24 @@ pub fn menus() -> Vec<Menu> {
                 MenuItem::sub(
                     tr!("text"),
                     vec![
-                        item(tr!("bold"), "format.bold").key("Ctrl+B"),
-                        item(tr!("italic"), "format.italic").key("Ctrl+I"),
-                        item(tr!("underline"), "format.underline").key("Ctrl+U"),
-                        item(tr!("strikethrough"), "format.strike").key("Ctrl+Shift+X"),
-                        item(tr!("superscript"), "format.superscript").key("Ctrl+Shift+="),
-                        item(tr!("subscript"), "format.subscript").key("Ctrl+="),
-                        item(tr!("small-capitals"), "format.small_caps"),
-                        item(tr!("all-capitals"), "format.caps"),
-                        item(tr!("grow-font"), "format.grow").key("Ctrl+]"),
-                        item(tr!("shrink-font"), "format.shrink").key("Ctrl+["),
-                        item(tr!("code"), "format.code"),
+                        item("format.bold"),
+                        item("format.italic"),
+                        item("format.underline"),
+                        item("format.strike"),
+                        item("format.superscript"),
+                        item("format.subscript"),
+                        item("format.small_caps"),
+                        item("format.caps"),
+                        item("format.grow"),
+                        item("format.shrink"),
+                        item("format.code"),
                         MenuItem::Separator,
                         MenuItem::sub(
                             tr!("change-case"),
                             sue_type::case::Case::ALL
                                 .iter()
                                 .map(|(_, key, name)| {
-                                    item(
+                                    named(
                                         sue_lang::translate("type", name),
                                         format!("format.case.{key}"),
                                     )
@@ -136,114 +154,111 @@ pub fn menus() -> Vec<Menu> {
                 MenuItem::sub(
                     tr!("text-color"),
                     vec![
-                        item(tr!("automatic"), "format.color.none"),
-                        item(tr!("red"), "format.color.c0392b"),
-                        item(tr!("blue"), "format.color.1f5fbf"),
-                        item(tr!("green"), "format.color.2e7d32"),
-                        item(tr!("gray"), "format.color.6b6b6b"),
+                        named(tr!("automatic"), "format.color.none"),
+                        named(tr!("red"), "format.color.c0392b"),
+                        named(tr!("blue"), "format.color.1f5fbf"),
+                        named(tr!("green"), "format.color.2e7d32"),
+                        named(tr!("gray"), "format.color.6b6b6b"),
                     ],
                 ),
                 MenuItem::sub(
                     tr!("highlight"),
                     vec![
-                        item(tr!("yellow"), "format.highlight.yellow"),
-                        item(tr!("green"), "format.highlight.green"),
-                        item(tr!("blue"), "format.highlight.blue"),
-                        item(tr!("pink"), "format.highlight.pink"),
-                        item(tr!("none"), "format.highlight.none"),
+                        named(tr!("yellow"), "format.highlight.yellow"),
+                        named(tr!("green"), "format.highlight.green"),
+                        named(tr!("blue"), "format.highlight.blue"),
+                        named(tr!("pink"), "format.highlight.pink"),
+                        named(tr!("none"), "format.highlight.none"),
                     ],
                 ),
                 MenuItem::Separator,
                 MenuItem::sub(
                     tr!("align-text"),
                     vec![
-                        item(tr!("left"), "align.left").key("Ctrl+L"),
-                        item(tr!("center"), "align.center").key("Ctrl+E"),
-                        item(tr!("right"), "align.right").key("Ctrl+R"),
-                        item(tr!("justify"), "align.justify").key("Ctrl+J"),
+                        item("align.left"),
+                        item("align.center"),
+                        item("align.right"),
+                        item("align.justify"),
                     ],
                 ),
                 MenuItem::sub(
                     tr!("line-spacing"),
                     vec![
-                        item(tr!("single"), "spacing.1"),
-                        item("1.15", "spacing.1.15"),
-                        item("1.5", "spacing.1.5"),
-                        item(tr!("double"), "spacing.2"),
+                        named(tr!("single"), "spacing.1"),
+                        named("1.15", "spacing.1.15"),
+                        named("1.5", "spacing.1.5"),
+                        named(tr!("double"), "spacing.2"),
                     ],
                 ),
                 MenuItem::sub(
                     tr!("lists"),
                     vec![
-                        item(tr!("bulleted-list"), "list.bullet").key("Ctrl+Shift+L"),
-                        item(tr!("numbered-list"), "list.number"),
-                        item(tr!("increase-indent"), "indent.more"),
-                        item(tr!("decrease-indent"), "indent.less"),
+                        item("list.bullet"),
+                        item("list.number"),
+                        item("indent.more"),
+                        item("indent.less"),
                     ],
                 ),
                 MenuItem::Separator,
-                item(tr!("clear-direct-formatting"), "format.clear").key("Ctrl+Space"),
+                item("format.clear"),
             ],
         ),
         Menu::new(
             tr!("table"),
             vec![
-                item(tr!("insert-table-ellipsis"), "table.insert").key("Ctrl+F12"),
+                item("table.insert"),
                 MenuItem::Separator,
                 MenuItem::sub(
                     tr!("insert"),
                     vec![
-                        item(tr!("rows-above"), "table.row_above"),
-                        item(tr!("rows-below"), "table.row_below"),
-                        item(tr!("columns-before"), "table.column_left"),
-                        item(tr!("columns-after"), "table.column_right"),
+                        named(tr!("rows-above"), "table.row_above"),
+                        named(tr!("rows-below"), "table.row_below"),
+                        named(tr!("columns-before"), "table.column_left"),
+                        named(tr!("columns-after"), "table.column_right"),
                     ],
                 ),
                 MenuItem::sub(
                     tr!("delete"),
                     vec![
-                        item(tr!("rows"), "table.delete_row"),
-                        item(tr!("columns"), "table.delete_column"),
-                        item(tr!("table"), "table.delete"),
+                        named(tr!("rows"), "table.delete_row"),
+                        named(tr!("columns"), "table.delete_column"),
+                        named(tr!("table"), "table.delete"),
                     ],
                 ),
-                item(tr!("heading-row"), "table.header"),
+                item("table.header"),
                 MenuItem::Separator,
                 MenuItem::sub(
                     tr!("convert"),
-                    vec![
-                        item(tr!("text-to-table"), "table.from_text"),
-                        item(tr!("table-to-text"), "table.to_text"),
-                    ],
+                    vec![item("table.from_text"), item("table.to_text")],
                 ),
             ],
         ),
         Menu::new(
             tr!("review"),
             vec![
-                item(tr!("check-spelling"), "review.spelling"),
-                item(tr!("next-misspelling"), "review.next_misspelling").key("F7"),
+                item("review.spelling"),
+                item("review.next_misspelling"),
                 MenuItem::Separator,
-                item(tr!("new-comment-ellipsis"), "review.comment").key("Ctrl+Alt+C"),
-                item(tr!("previous-comment"), "review.previous_comment"),
-                item(tr!("next-comment"), "review.next_comment"),
-                item(tr!("resolve-comment"), "review.resolve"),
-                item(tr!("delete-comment"), "review.delete_comment"),
-                item(tr!("delete-all-comments"), "review.delete_all_comments"),
+                item("review.comment"),
+                item("review.previous_comment"),
+                item("review.next_comment"),
+                item("review.resolve"),
+                item("review.delete_comment"),
+                item("review.delete_all_comments"),
                 MenuItem::Separator,
-                item(tr!("comments"), "review.comments"),
+                item("review.comments"),
                 MenuItem::sub(
                     tr!("track-changes"),
                     vec![
-                        item(tr!("record-changes"), "review.track").key("Ctrl+Shift+C"),
+                        item("review.track"),
                         MenuItem::Separator,
-                        item(tr!("previous-change"), "review.previous_change"),
-                        item(tr!("next-change"), "review.next_change"),
-                        item(tr!("accept-change"), "review.accept"),
-                        item(tr!("reject-change"), "review.reject"),
+                        item("review.previous_change"),
+                        item("review.next_change"),
+                        item("review.accept"),
+                        item("review.reject"),
                         MenuItem::Separator,
-                        item(tr!("accept-all"), "review.accept_all"),
-                        item(tr!("reject-all"), "review.reject_all"),
+                        item("review.accept_all"),
+                        item("review.reject_all"),
                     ],
                 ),
             ],
@@ -251,25 +266,25 @@ pub fn menus() -> Vec<Menu> {
         Menu::new(
             tr!("project"),
             vec![
-                item(tr!("split-at-selection"), "project.split").key("Ctrl+Shift+K"),
-                item(tr!("merge-with-next"), "project.merge"),
-                item(tr!("duplicate"), "project.duplicate"),
-                item(tr!("move-to-trash"), "project.trash"),
-                item(tr!("empty-trash"), "project.empty_trash"),
+                item("project.split"),
+                item("project.merge"),
+                item("project.duplicate"),
+                item("project.trash"),
+                item("project.empty_trash"),
                 MenuItem::Separator,
-                item(tr!("take-snapshot"), "project.snapshot").key("Ctrl+5"),
-                item(tr!("include-in-compile"), "project.include"),
+                item("project.snapshot"),
+                item("project.include"),
                 MenuItem::sub(
                     tr!("status"),
                     STATUSES
                         .iter()
                         .map(|status| {
-                            item(
+                            named(
                                 crate::project::status_text(status),
                                 format!("status.{status}"),
                             )
                         })
-                        .chain([item(tr!("no-status"), "status.none")])
+                        .chain([named(tr!("no-status"), "status.none")])
                         .collect(),
                 ),
                 MenuItem::sub(
@@ -277,19 +292,16 @@ pub fn menus() -> Vec<Menu> {
                     LABELS
                         .iter()
                         .map(|(label, _)| {
-                            item(crate::project::label_text(label), format!("label.{label}"))
+                            named(crate::project::label_text(label), format!("label.{label}"))
                         })
-                        .chain([item(tr!("no-label"), "label.none")])
+                        .chain([named(tr!("no-label"), "label.none")])
                         .collect(),
                 ),
                 MenuItem::Separator,
-                item(tr!("writing-statistics-ellipsis"), "project.statistics"),
+                item("project.statistics"),
             ],
         ),
-        Menu::new(
-            tr!("help"),
-            vec![item(tr!("keyboard-shortcuts"), "help.shortcuts")],
-        ),
+        Menu::new(tr!("help"), vec![item("help.shortcuts")]),
     ]
 }
 

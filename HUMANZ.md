@@ -1677,8 +1677,8 @@ one text setting, `<section>.custom` (`shortcuts::SparseKeys`, written
 `view.grid=F7 or F8 layer.merge_down=Ctrl+E`); `shortcuts::bind` says
 where a new key goes, `shortcuts::conflicts` finds a chord two commands
 hold as set now, and `show_in_menus` also writes the shell's own keys
-beside Undo, Redo, Open, Save and Quit. Sue Paint reads the registry
-(below).
+beside Undo, Redo, Open, Save and Quit. Sue Paint and Sue Writer read
+the registry (below).
 
 **Sue Paint's commands.** `crates/sue-paint/src/commands` holds Sue
 Paint's registry: one file per group (`file.rs`, `edit.rs`, `story.rs`,
@@ -1713,6 +1713,21 @@ lifts; `pick.rs` finds the color, layer or figure part under the pen;
 its tone overlay, page frames, edge rulers and scrollbars; `overlays.rs`
 draws selections, previews, the brush outline, rulers, the selection
 launcher and puppet warp over it; `status.rs` is the strip below.
+
+**Sue Writer's commands.** `crates/sue-writer/src/commands` holds Sue
+Writer's registry: one file per menu (`file.rs`, `edit.rs`, `view.rs`,
+`insert.rs`, `format.rs`, `table.rs`, `review.rs`, `project.rs`,
+`help.rs`), each with its `const` table, a `run` that does the menu's
+commands and a `state` that says when they work. The menus
+(`menus.rs`) hold names and take labels from the registry, keys from
+the settings; the shortcut table is a row for every command but the
+three the shell's keys run (`edit.undo`, `edit.redo`, `file.open`); the
+command palette lists the commands flagged `PALETTE`. Each paragraph
+style of the built-in style sheets and each export format is a command
+of its own, and a test holds both lists to `sue_type::StyleSheet` and
+`compile::FORMATS`. Open-ended choices stay families (`format.case.`,
+`format.color.`, `format.highlight.`, `status.`, `label.`, and the
+hidden `table.insert.` that takes a size such as `3x4`).
 
 **Sue's icon.** `assets/icons` holds the app icon and the bare silhouette,
 each as SVG (the source), PNG and JPEG XL at 1024 pixels, and a Windows

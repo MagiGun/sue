@@ -39,6 +39,11 @@ follow [Semantic Versioning](https://semver.org/).
   (`sue_paint_keys.custom`, for example `layer.merge_visible=Ctrl+M`).
   Keyboard Shortcuts (Help) lists every command that has a key, in the
   order of the menus.
+- Every Sue Writer command can be given a key, not only the ones that
+  come with one: each paragraph style, each export format, line spacing,
+  the table edits, the review and project commands. Keyboard Shortcuts
+  (Help) lists them all, and a key for one without a default goes in
+  Settings, Keymaps, Sue Writer (`sue_writer_keys.custom`).
 
 ### Changed
 
@@ -129,6 +134,9 @@ follow [Semantic Versioning](https://semver.org/).
 - Swap Main and Sub Color, Drawing or Transparent Color, Smaller Brush
   and Bigger Brush do their work when Auto Actions or Studio Mode's keys
   run them, as their keys always did.
+- Sue Writer's entries in the command palette name the studio once
+  ("Sue Writer: New Project..."), not twice.
+- Ctrl+F12 inserts a table in Sue Writer, as its Table menu always said.
 
 ### Removed
 

@@ -4,7 +4,7 @@
 
 use egui::{Color32, Rect, Sense, Ui, UiBuilder, pos2, vec2};
 use sue_model::manuscript::{self, role};
-use sue_wm::{AppletContext, AppletId, ItemState};
+use sue_wm::{AppletContext, AppletId, Facts, ItemState};
 
 use crate::project;
 use crate::studio::{ID, SueWriter, View};
@@ -342,86 +342,10 @@ impl SueWriter {
         }
     }
 
-    /// Whether a menu item works, and its check mark.
+    /// Whether a menu item works, and its check mark, as the registry
+    /// says.
     fn item_state(&self, command: &str, cx: &AppletContext<'_>) -> ItemState {
-        let has_project = self.project.is_some();
-        let has_text = self.editor.current().is_some();
-        match command {
-            "view.page" => ItemState::check(self.pages_shown() && self.view == View::Document),
-            "view.draft" => ItemState::check(!self.pages_shown() && self.view == View::Document),
-            "view.document" => ItemState::check(self.view == View::Document),
-            "view.corkboard" => ItemState {
-                enabled: has_project,
-                checked: Some(self.view == View::Corkboard),
-            },
-            "view.outliner" => ItemState {
-                enabled: has_project,
-                checked: Some(self.view == View::Outliner),
-            },
-            "view.composition" => ItemState::check(self.composition),
-            "view.typewriter" => ItemState::check(self.typewriter),
-            "view.binder" => ItemState {
-                enabled: has_project,
-                checked: Some(self.binder_shown()),
-            },
-            "view.inspector" => ItemState::check(self.inspector && !self.comments),
-            "review.comments" => ItemState::check(self.inspector && self.comments),
-            "review.track" => ItemState::check(self.tracking(cx)),
-            "review.spelling" => ItemState::check(self.spell_check(cx)),
-            "project.include" => ItemState {
-                enabled: self.selected.is_some(),
-                checked: self
-                    .selected
-                    .and_then(|id| cx.arena().get_by_id(id).ok())
-                    .map(manuscript::included),
-            },
-            "binder.new_doc"
-            | "binder.new_folder"
-            | "project.duplicate"
-            | "project.trash"
-            | "project.empty_trash"
-            | "project.merge"
-            | "project.statistics"
-            | "project.settings" => {
-                if has_project {
-                    ItemState::on()
-                } else {
-                    ItemState::off()
-                }
-            }
-            command if command.starts_with("status.") || command.starts_with("label.") => {
-                if has_project {
-                    ItemState::on()
-                } else {
-                    ItemState::off()
-                }
-            }
-            command
-                if command.starts_with("format.")
-                    || command.starts_with("align.")
-                    || command.starts_with("insert.")
-                    || command.starts_with("style.")
-                    || command.starts_with("list.")
-                    || command.starts_with("indent.")
-                    || command.starts_with("spacing.")
-                    || command == "project.split"
-                    || command == "project.snapshot" =>
-            {
-                if has_text {
-                    ItemState::on()
-                } else {
-                    ItemState::off()
-                }
-            }
-            command if command.starts_with("compile.") => {
-                if has_project || has_text {
-                    ItemState::on()
-                } else {
-                    ItemState::off()
-                }
-            }
-            _ => ItemState::on(),
-        }
+        crate::commands::registry().state(self, &Facts::of(cx), command)
     }
 
     // ----- Toolbar -------------------------------------------------------------
