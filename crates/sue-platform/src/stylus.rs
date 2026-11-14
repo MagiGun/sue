@@ -322,8 +322,15 @@ pub(crate) fn end_frame() {
 mod tests {
     use super::*;
 
+    /// Held by each test that reads or ends a frame of the real pen, which
+    /// all tests share: one at a time.
+    static REAL_PEN: Mutex<()> = Mutex::new(());
+
     #[test]
     fn samples_queue_in_order_until_taken_or_the_frame_ends() {
+        let _alone = REAL_PEN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let sample = |kind, x: f32, pressure| Sample {
             kind,
             pos: [x, 2.0],
@@ -363,16 +370,37 @@ mod tests {
 
     #[test]
     fn the_pens_pressure_reads_back_until_it_lifts() {
+        let _alone = REAL_PEN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         set(PenSource::WinTab, Some(0.42));
         assert_eq!(pressure(), Some(0.42));
         assert_eq!(source(), Some(PenSource::WinTab));
         set(PenSource::Browser, Some(3.0));
         assert_eq!(pressure(), Some(1.0), "clamped");
         set(PenSource::Browser, None);
+        assert_eq!(pressure(), Some(1.0), "lifted: kept for the frame");
         assert_eq!(source(), Some(PenSource::Browser));
+        end_frame();
+        assert_eq!(pressure(), None, "the frame has run");
+        end_frame();
+        assert_eq!(pressure(), None);
         set(PenSource::XInput, Some(0.5));
         assert_eq!(source(), Some(PenSource::XInput));
+        end_frame();
+        assert_eq!(
+            pressure(),
+            Some(0.5),
+            "a frame takes nothing while it touches"
+        );
         set(PenSource::XInput, None);
+        assert_eq!(pressure(), Some(0.5));
+        end_frame();
+        assert_eq!(pressure(), None);
+        // Wayland's tablet holds its own lift and says when it is over.
+        set(PenSource::WaylandTablet, Some(0.6));
+        set(PenSource::WaylandTablet, None);
+        assert_eq!(pressure(), None);
     }
 
     #[test]
