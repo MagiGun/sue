@@ -1,0 +1,37 @@
+[package]
+name = "sue-windows"
+description = "Sue on Windows: the audited calls into Windows' own components that have no safe route, behind safe functions sue-platform uses (Media Foundation for MP4 movies)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+license-file.workspace = true
+
+# Media Foundation: the Sink Writer, Windows' own H.264 and AAC encoders,
+# the MPEG-4 file sink and the Source Reader that reads a movie back.
+# No new dependency, only features of the windows crate the workspace
+# already has.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = [
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
+] }
+
+# Media Foundation is COM, and every COM call is unsafe in the windows
+# crate: this crate (part of sue-platform, backbone rule 6) relaxes the
+# workspace's `forbid` to `deny` so that audited items may allow it, each
+# with a `// SAFETY:` comment (held by `undocumented_unsafe_blocks`) and
+# tests. This is under the maintainer's standing approval of 2026-11-13
+# ("allow all unsafe if they are benefit to the software"), rule 13 of the
+# v0.0.8 plan, and the owner's yes to MP4 through Windows' own encoder
+# (Q15) and to Obtain Screen Color (Q11, the module `screen` to come).
+[lints.rust]
+unsafe_code = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+undocumented_unsafe_blocks = "deny"

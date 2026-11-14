@@ -3853,8 +3853,11 @@ dependencies = [
  "semver",
  "serde_json",
  "sha2",
+ "sue-core",
+ "sue-io",
  "sue-ios",
  "sue-wayland",
+ "sue-windows",
  "sys-locale",
  "ureq",
  "wasm-bindgen",
@@ -3901,6 +3904,13 @@ dependencies = [
  "raw-window-handle",
  "wayland-backend",
  "wayland-client",
+]
+
+[[package]]
+name = "sue-windows"
+version = "0.0.75"
+dependencies = [
+ "windows 0.62.2",
 ]
 
 [[package]]
