@@ -4,8 +4,19 @@ use super::super::Tour;
 use super::open_paint;
 
 /// 08a to 08f. Sue Paint opens on its start page while no canvas is open:
-/// the projects, the materials and the popups.
+/// the projects, the materials and the popups. Open asks the system's
+/// dialog first, answered here with a picture that is then closed, so
+/// that the projects have one to list.
 pub(super) fn desktop(tour: &mut Tour<'_>) -> Result<(), String> {
+    tour.paint_command("file.open");
+    let picture = tour.home.join("test-card.jxl");
+    if !tour
+        .runtime
+        .answer_pick(&picture, &mut tour.camera.painter, tour.camera.now)
+    {
+        return Err("Open did not ask for a file".to_owned());
+    }
+    tour.paint_command("file.close");
     open_paint(tour);
     for (target, name) in [
         ("start/projects", "08a-paint-start-projects"),
