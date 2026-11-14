@@ -170,3 +170,33 @@ field-clear = Leeren
 field-choices = Auswahl
 range-start = Anfang von { $name }
 range-end = Ende von { $name }
+
+## menubar.rs: the menus every studio shares, and notes on menu items
+
+menu-edit = Bearbeiten
+menu-view = Ansicht
+menu-window = Fenster
+menu-help = Hilfe
+menu-new = Neu...
+menu-open = Öffnen...
+menu-open-recent = Zuletzt geöffnet
+menu-close = Schließen
+menu-save = Speichern
+menu-save-as = Speichern unter...
+menu-export = Exportieren...
+menu-print = Drucken...
+menu-settings = Einstellungen...
+menu-back-to-hub = Zurück zum Hub
+menu-quit = Sue beenden
+menu-undo = Rückgängig
+menu-redo = Wiederholen
+menu-cut = Ausschneiden
+menu-copy = Kopieren
+menu-paste = Einfügen
+menu-select-all = Alles auswählen
+menu-guide = Anleitung zu { $studio }
+menu-keyboard-shortcuts = Tastenkürzel
+menu-check-for-updates = Nach Updates suchen
+menu-about = Über { $studio }
+menu-note-coming-later = Kommt später
+menu-note-needs-selection = Braucht eine Auswahl

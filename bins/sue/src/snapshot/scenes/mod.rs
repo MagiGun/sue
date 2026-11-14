@@ -8,6 +8,7 @@
 
 mod hub;
 mod icons;
+mod menus;
 mod paint_canvas;
 mod paint_color;
 mod paint_dialogs;
@@ -104,6 +105,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     ui_buttons::sheets(tour)?;
     // 28 to 28d. The inputs and sliders of the component library.
     ui_inputs::sheets(tour)?;
+    // 29a to 29e. Menus walked with the keyboard, a menu taller than the
+    // window, the note of a row and tooltips.
+    menus::scenes(tour)?;
     Ok(())
 }
 

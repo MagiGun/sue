@@ -131,6 +131,14 @@ The Sue button opens the **Sue menu**, for Sue as a whole:
 - **Open ... at Launch**: pin what is open, as the Hub's pin does;
 - the command palette, **Check for Updates**, Settings and Quit Sue.
 
+The Sue menu and the menus along the top work from the keyboard too: Up and
+Down walk the items, Home and End jump to the first and the last, Right
+opens a nested menu and Left leaves it (on the bar they go to the menu
+beside), Enter or Space runs the item and Escape closes. Typing the start of
+an item's name goes to it. A menu taller than the window scrolls instead of
+being cut off: with the wheel, by resting the pointer on the arrow at its
+top or bottom, or by itself as the keys move.
+
 ### Keeping Sue up to date
 
 When Sue starts it looks for a newer release, at most once a day, without

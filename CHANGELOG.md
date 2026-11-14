@@ -44,6 +44,13 @@ follow [Semantic Versioning](https://semver.org/).
   the table edits, the review and project commands. Keyboard Shortcuts
   (Help) lists them all, and a key for one without a default goes in
   Settings, Keymaps, Sue Writer (`sue_writer_keys.custom`).
+- The Sue menu and the menus along the top answer the keyboard: Up and
+  Down walk the items, Home and End jump to the first and the last,
+  Right and Left open and leave a nested menu (on the menu bar they go
+  to the menu beside), Enter or Space runs the item, Escape closes, and
+  typing the start of an item's name goes to it. A menu taller than the
+  window scrolls (with the wheel, by resting the pointer on the arrow at
+  its end, or by itself to follow the keys) instead of being cut off.
 
 ### Changed
 

@@ -35,6 +35,7 @@ pub mod choice;
 pub mod focus;
 pub mod input;
 pub mod list;
+pub mod menu;
 pub mod motion;
 pub mod progress;
 pub mod scroll;
@@ -42,6 +43,7 @@ pub mod slider;
 pub mod splitter;
 pub mod tabs;
 pub mod tokens;
+pub mod tooltip;
 
 pub use button::{
     Button, ButtonKind, IconButton, Link, Sheet, SplitButton, SplitResponse, button, icon_button,
@@ -64,6 +66,7 @@ pub use list::{
     EmptyState, Leading, ListRow, RowAction, RowOutput, TreeOutput, TreeRow, divider, empty_state,
     heading, list_row, tree_row,
 };
+pub use menu::{MenuEvent, MenuRequest, MenuState, context_menu, popover};
 pub use motion::{Motion, Pace};
 pub use progress::{
     ProgressBar, Skeleton, Spinner, paint_skeleton, progress_bar, skeleton, spinner,
@@ -78,3 +81,4 @@ pub use tokens::{
     Density, EDGE_CONTRAST, Elevation, Layer, MIN_TEXT_SIZE, Radius, Space, TEXT_CONTRAST,
     TextRole, contrast, nested_radius,
 };
+pub use tooltip::{Side, Tip, tip_beside, tooltip};
