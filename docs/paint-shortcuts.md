@@ -45,7 +45,7 @@ with the shell's `keys` where shared) and the menu defaults in
 | Cut | Ctrl+X or F2 | Ctrl+X or F2 | yes |
 | Copy | Ctrl+C or F3 | Ctrl+C or F3 | yes |
 | Paste | Ctrl+V or F4 | Ctrl+V or F4 | yes |
-| Paste to shown position | Ctrl+Shift+V | the command exists, no key | missing in Sue |
+| Paste to shown position | Ctrl+Shift+V | Ctrl+Shift+V | yes |
 | Delete | Delete, Backspace, Ctrl+Delete, Ctrl+Backspace | Delete, Backspace, Ctrl+Delete, Ctrl+Backspace | yes |
 | Delete Outside Selection | Shift+Delete, Shift+Backspace | Shift+Delete in the menu; the keymap gives Shift+Delete to Fill | differs |
 | Fill | Alt+Delete, Alt+Backspace | Alt+Delete or Alt+Backspace, and Shift+Delete or Shift+Backspace | differs, Sue adds Shift+Delete |
@@ -208,7 +208,7 @@ default key, and neither does its opposite number in Sue.
    keys are missing.
 6. Brush density (Ctrl+Shift+O and P) and particle density
    (Ctrl+Shift+K and L) are missing.
-7. Paste to shown position, Ctrl+Shift+V, is missing.
+7. Paste to shown position, Ctrl+Shift+V: settled, Sue has it too.
 8. Reset display (Ctrl+@) and Toggle special ruler snapping (Ctrl+4)
    are missing.
 9. Modifier Key Settings (Ctrl+Shift+Alt+Y) is missing, and Sue has no
