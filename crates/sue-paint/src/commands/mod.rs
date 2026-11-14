@@ -106,9 +106,6 @@ impl SuePaint {
             return;
         }
         self.record_auto(command);
-        if command.starts_with("story.") && self.story_command(command, cx) {
-            return;
-        }
         if (command.starts_with("anim.")
             || command.starts_with("file.export.gif")
             || command == "file.export.apng"

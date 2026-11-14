@@ -160,6 +160,12 @@ follow [Semantic Versioning](https://semver.org/).
   you pressed on even when the hand moves quickly, instead of adding a
   second point beside it.
 - The opacity bar's handle shows on light themes too.
+- Sue Paint's Story menu grays out what cannot work on the page shown:
+  First and Previous Page on the first page, Next and Last Page on the
+  last, Delete Page on a story's only page, Combine Pages on a page that
+  faces none, Split Pages on a page that is no spread, and Change Page
+  Settings and Export All Pages on a picture that is no story. Before,
+  they looked ready and did nothing or only said why.
 
 ### Removed
 

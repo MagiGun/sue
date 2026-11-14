@@ -4,15 +4,21 @@
 //! `state`. Clip Studio Paint ships no default key for any of them, so
 //! none has a chord here; people give them keys in Settings.
 
-use sue_wm::{AppletContext, Call, Command};
+use sue_core::{Arena, EntityId};
+use sue_wm::{AppletContext, Call, Command, Facts, ItemState};
 
+use super::when;
 use crate::dialogs::{Dialog, PagesDialog};
 use crate::doc;
 use crate::story;
 use crate::studio::SuePaint;
 
 impl SuePaint {
-    /// Runs a Story menu command; `false` if `command` is not one.
+    /// Runs the Story command `command` straight away, without asking its
+    /// state first, as the Page Manager's buttons do: a page button that
+    /// cannot work says why instead of doing nothing. `false` if
+    /// `command` is not a Story command. Menus, keys and Auto Actions go
+    /// through [`SuePaint::run`], which grays out what cannot work.
     pub(crate) fn story_command(&mut self, command: &str, cx: &mut AppletContext<'_>) -> bool {
         let Some((entry, call)) = super::registry().find(command) else {
             return false;
@@ -23,6 +29,53 @@ impl SuePaint {
         (entry.run)(self, cx, call);
         true
     }
+}
+
+/// Works while the picture shown is a page of a story.
+fn in_story(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(paint.story_here(facts.arena).is_some())
+}
+
+/// First and Previous Page work when a page comes before the one shown,
+/// Next and Last Page when one comes after it.
+fn step_state(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    when(
+        paint
+            .story_here(facts.arena)
+            .is_some_and(|(_, pages, index)| match call.name {
+                "story.first" | "story.previous" => index > 0,
+                _ => index + 1 < pages.len(),
+            }),
+    )
+}
+
+/// Delete Page works while the story keeps a page after it.
+fn delete_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(
+        paint
+            .story_here(facts.arena)
+            .is_some_and(|(_, pages, _)| pages.len() > 1),
+    )
+}
+
+/// Combine Pages works when the page shown faces another page.
+fn combine_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(
+        paint
+            .story_here(facts.arena)
+            .is_some_and(|(story, pages, index)| {
+                facing(facts.arena, story, &pages, index).is_some()
+            }),
+    )
+}
+
+/// Split Pages works on a spread.
+fn separate_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(
+        paint
+            .story_here(facts.arena)
+            .is_some_and(|(_, pages, index)| is_spread(facts.arena, pages[index])),
+    )
 }
 
 /// Page Manager, Page Reordering, Open Page and Change Project Settings:
@@ -123,12 +176,7 @@ fn delete(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 
 /// Where the page at `index` of `pages` is among the spreads of `story`:
 /// the index of the page it faces, if it faces one.
-fn facing(
-    arena: &sue_core::Arena,
-    story: sue_core::EntityId,
-    pages: &[sue_core::EntityId],
-    index: usize,
-) -> Option<usize> {
+fn facing(arena: &Arena, story: EntityId, pages: &[EntityId], index: usize) -> Option<usize> {
     story::spreads_from(
         pages.len(),
         story::bound_right(arena, story),
@@ -169,7 +217,7 @@ fn combine(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 }
 
 /// `true` if `page` is a spread that Combine Pages made.
-fn is_spread(arena: &sue_core::Arena, page: sue_core::EntityId) -> bool {
+fn is_spread(arena: &Arena, page: EntityId) -> bool {
     arena
         .get_by_id(page)
         .ok()
@@ -327,21 +375,21 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "doc-comic",
         manager,
     ),
-    c("story.first", "first-page", "chevrons-left", step),
-    c("story.previous", "previous-page", "chevron-left", step),
-    c("story.next", "next-page", "chevron-right", step),
-    c("story.last", "last-page", "chevrons-right", step),
+    c("story.first", "first-page", "chevrons-left", step).state(step_state),
+    c("story.previous", "previous-page", "chevron-left", step).state(step_state),
+    c("story.next", "next-page", "chevron-right", step).state(step_state),
+    c("story.last", "last-page", "chevrons-right", step).state(step_state),
     c("story.add", "add-page-ellipsis", "file-new", add),
     c("story.insert", "add-page-advanced-ellipsis", "plus", add),
-    c("story.delete", "delete-page", "delete", delete),
+    c("story.delete", "delete-page", "delete", delete).state(delete_state),
     c(
         "story.order",
         "page-reordering-ellipsis",
         "move-to",
         manager,
     ),
-    c("story.combine", "combine-pages", "book", combine),
-    c("story.separate", "split-pages", "cut", separate),
+    c("story.combine", "combine-pages", "book", combine).state(combine_state),
+    c("story.separate", "split-pages", "cut", separate).state(separate_state),
     c(
         "story.work_settings",
         "change-project-settings-ellipsis",
@@ -353,7 +401,8 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "change-page-settings-ellipsis",
         "doc-comic-settings",
         page_settings,
-    ),
+    )
+    .state(in_story),
     c(
         "story.info",
         "change-story-information-ellipsis",
@@ -385,5 +434,188 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "export-all-pages-ellipsis",
         "export",
         export_pages,
-    ),
+    )
+    .state(in_story),
 ];
+
+#[cfg(test)]
+mod tests {
+    use sue_core::{Arena, EntityId, UndoStack};
+    use sue_wm::{AppletContext, Facts, World};
+
+    use crate::doc::{self, NewPicture};
+    use crate::studio::SuePaint;
+
+    /// Runs `work` with a studio and an applet context of its own.
+    fn with_studio<R>(work: impl FnOnce(&mut SuePaint, &mut AppletContext<'_>) -> R) -> R {
+        let rice = sue_rice::RiceSchema::new();
+        let theme = sue_wm::Theme::from_rice(&rice);
+        let mut world = World {
+            arena: Arena::new(),
+            rice,
+        };
+        let mut history = UndoStack::new();
+        let mut typing = sue_wm::Typing::default();
+        let mut requests = Vec::new();
+        let catalog = sue_wm::Catalog::default();
+        let mut textures = sue_platform::NoTextures;
+        let mut transport = sue_wm::Transport::default();
+        let work_list = sue_wm::WorkList::default();
+        let mut transfers = sue_wm::Transfers::default();
+        let mut cx = AppletContext {
+            world: &mut world,
+            history: &mut history,
+            sue_history: None,
+            typing: &mut typing,
+            requests: &mut requests,
+            catalog: &catalog,
+            theme: &theme,
+            textures: &mut textures,
+            audio: None,
+            transport: &mut transport,
+            work: &work_list,
+            transfers: &mut transfers,
+            view: sue_wm::ShellView {
+                form_factor: sue_platform::FormFactor::Desktop,
+                profile: sue_rice::HardwareProfile::Balanced,
+                now: std::time::Instant::now(),
+                dt: 0.0,
+                page: None,
+                reveal: 1.0,
+                interactive: false,
+            },
+        };
+        let mut paint = SuePaint::default();
+        work(&mut paint, &mut cx)
+    }
+
+    /// A picture of 40 by 30, open and shown.
+    fn picture(paint: &mut SuePaint, cx: &mut AppletContext<'_>) -> EntityId {
+        let (edit, picture) = doc::create(&NewPicture {
+            name: "Page".to_owned(),
+            width: 40,
+            height: 30,
+            ..NewPicture::default()
+        })
+        .expect("a picture");
+        assert!(SuePaint::apply(cx, edit));
+        paint.activate(&cx.world.arena, picture);
+        assert_eq!(paint.picture(), Some(picture));
+        picture
+    }
+
+    fn enabled(paint: &SuePaint, cx: &AppletContext<'_>, command: &str) -> bool {
+        paint.state(command, &Facts::of(cx)).enabled
+    }
+
+    fn pages(paint: &SuePaint, cx: &AppletContext<'_>) -> Vec<EntityId> {
+        paint
+            .story_here(&cx.world.arena)
+            .map(|(_, pages, _)| pages)
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn without_a_canvas_every_story_command_is_grayed() {
+        with_studio(|paint, cx| {
+            for command in super::COMMANDS {
+                assert!(!enabled(paint, cx, command.name), "{}", command.name);
+            }
+        });
+    }
+
+    #[test]
+    fn story_commands_gray_out_where_they_cannot_work() {
+        with_studio(|paint, cx| {
+            picture(paint, cx);
+            // A lone picture: what makes it a story works, what needs
+            // pages does not.
+            for command in [
+                "story.manager",
+                "story.add",
+                "story.insert",
+                "story.duplicate_page",
+                "story.info",
+                "story.editor",
+                "story.import_text",
+                "story.export_page",
+            ] {
+                assert!(enabled(paint, cx, command), "{command}");
+            }
+            for command in [
+                "story.first",
+                "story.previous",
+                "story.next",
+                "story.last",
+                "story.delete",
+                "story.combine",
+                "story.separate",
+                "story.page_settings",
+                "story.export_pages",
+            ] {
+                assert!(!enabled(paint, cx, command), "{command}");
+            }
+            // Two pages, the second shown: back, not on.
+            paint.run("story.add", cx);
+            assert_eq!(pages(paint, cx).len(), 2);
+            assert_eq!(
+                paint.story_here(&cx.world.arena).map(|here| here.2),
+                Some(1)
+            );
+            assert!(enabled(paint, cx, "story.first"));
+            assert!(enabled(paint, cx, "story.previous"));
+            assert!(!enabled(paint, cx, "story.next"));
+            assert!(!enabled(paint, cx, "story.last"));
+            assert!(enabled(paint, cx, "story.delete"));
+            assert!(enabled(paint, cx, "story.page_settings"));
+            assert!(enabled(paint, cx, "story.export_pages"));
+            assert!(!enabled(paint, cx, "story.separate"), "not a spread");
+            // Bound on the left and starting alone, page 2 faces page 3.
+            assert!(
+                !enabled(paint, cx, "story.combine"),
+                "page 2 faces none yet"
+            );
+            paint.run("story.add", cx);
+            paint.run("story.previous", cx);
+            assert_eq!(
+                paint.story_here(&cx.world.arena).map(|here| here.2),
+                Some(1)
+            );
+            assert!(enabled(paint, cx, "story.next"));
+            assert!(enabled(paint, cx, "story.combine"));
+            paint.run("story.combine", cx);
+            assert_eq!(pages(paint, cx).len(), 2);
+            assert!(enabled(paint, cx, "story.separate"), "a spread");
+            paint.run("story.first", cx);
+            assert!(!enabled(paint, cx, "story.first"));
+            assert!(!enabled(paint, cx, "story.previous"));
+            assert!(!enabled(paint, cx, "story.separate"));
+        });
+    }
+
+    #[test]
+    fn a_grayed_command_does_nothing_and_the_page_buttons_still_explain() {
+        with_studio(|paint, cx| {
+            picture(paint, cx);
+            paint.run("story.add", cx);
+            paint.run("story.delete", cx);
+            assert_eq!(pages(paint, cx).len(), 1);
+            let depth = cx.history.depth();
+            cx.requests.clear();
+            // The menu item is grayed: run through the studio, nothing.
+            paint.run("story.delete", cx);
+            assert_eq!(cx.history.depth(), depth);
+            assert!(cx.requests.is_empty(), "{:?}", cx.requests);
+            // The Page Manager's button says why.
+            assert!(paint.story_command("story.delete", cx));
+            assert_eq!(cx.history.depth(), depth);
+            assert!(
+                matches!(cx.requests.last(), Some(sue_wm::ShellRequest::Fail(_))),
+                "{:?}",
+                cx.requests
+            );
+            assert!(!paint.story_command("layer.new", cx));
+            assert!(!paint.story_command("story.nothing", cx));
+        });
+    }
+}
