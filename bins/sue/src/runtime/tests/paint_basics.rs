@@ -245,17 +245,25 @@ fn sue_paint_every_menu_command_and_tool_works() {
         }
     }
     // Every command in the menus, as Clip Studio Paint's are laid out.
-    let menus = include_str!("../../../../../crates/sue-paint/src/menus.rs");
-    let mut commands: Vec<String> = menus
-        .split("act(")
-        .skip(1)
-        .filter_map(|call| {
-            let after = call.split_once("),")?.1;
-            let name = after.trim_start().strip_prefix('"')?.split('"').next()?;
-            Some(name.to_owned())
-        })
-        .collect();
-    commands.dedup();
+    // First the entries the studio adds while it runs (Open Recent's
+    // last item and Window, Workspace), then the menu bar itself.
+    let mut commands: Vec<String> = [
+        "file.recent.clear",
+        "window.workspace.save",
+        "window.workspace.manage",
+        "window.workspace.default",
+        "window.workspace.reset",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    let menus = sue_paint::menus();
+    commands.extend(
+        menus
+            .iter()
+            .flat_map(|menu| &menu.items)
+            .flat_map(sue_wm::MenuItem::commands)
+            .map(str::to_owned),
+    );
     assert!(commands.len() > 300, "{}", commands.len());
     // Leaving, quitting, printing and help go outside the canvas.
     let outside = [
