@@ -159,6 +159,13 @@ follow [Semantic Versioning](https://semver.org/).
   Hand Scanners, given a key or run by an Auto Action, are off where there
   is no 3D drawing figure (or hand) to pose, instead of only saying so,
   and a pose number the figure does not have no longer resets its pose.
+- In Sue Paint, X switches between the main and the sub color, as in
+  Clip Studio Paint: the other color becomes the one you draw with and
+  both keep their values. It used to swap the two colors. The arrow
+  button beside the colors still swaps them.
+- Sue Paint's Drawing Color to Transparent and Radial gradients start
+  at the color you draw with. They always used the main color, even
+  while the sub color was picked.
 - Instant transitions and Animation speed (Settings, Motion) now reach
   the switches in Settings and on the start pages and everything else
   the interface toolkit animates by itself: they used to keep their own

@@ -18,6 +18,7 @@ mod paint_cmd_layer;
 mod paint_cmd_help;
 mod paint_cmd_canvas;
 mod paint_cmd_figure;
+mod paint_cmd_tool;
 mod paint_comic;
 mod paint_edit;
 mod paint_files;
