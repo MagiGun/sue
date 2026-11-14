@@ -1000,6 +1000,8 @@ impl<P: DockPanel> DockLayout<P> {
     /// existed. Palettes closed for good (here or in `model`) and optional
     /// ones stay away; one `model` lacks becomes an icon.
     pub fn fill_missing_from(&mut self, model: &Self) {
+        // A side people closed stays closed: the palette waits in it.
+        let hidden = self.hidden;
         for &panel in P::all() {
             if self.has(panel)
                 || self.is_closed(panel)
@@ -1021,6 +1023,7 @@ impl<P: DockPanel> DockLayout<P> {
                 },
             }
         }
+        self.hidden = hidden;
     }
 
     // ----- Lines ------------------------------------------------------------
@@ -2757,6 +2760,14 @@ mod tests {
         // Older lines without close lines refill as before.
         let old = DockLayout::<Pane>::from_lines(&["column left 46 1:tools".to_owned()]).unwrap();
         assert!(old.has(Pane::History) && old.has(Pane::Layers));
+        // Refilling a closed side puts the palette there and keeps the
+        // side closed.
+        let read = DockLayout::<Pane>::from_lines(
+            &["column left 46 1:tools", "hide left"].map(String::from),
+        )
+        .unwrap();
+        assert_eq!(read.side_of(Pane::Brush), Some(Side::Left));
+        assert!(read.hidden[Side::Left.index()], "the side stays closed");
     }
 
     #[test]
