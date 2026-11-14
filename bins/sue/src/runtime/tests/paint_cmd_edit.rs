@@ -16,7 +16,7 @@ fn arena_bytes(arena: &sue_core::Arena) -> Vec<u8> {
             (entity.id().to_bytes(), out.into_bytes())
         })
         .collect();
-    entities.sort_by(|a, b| a.0.cmp(&b.0));
+    entities.sort_by_key(|(id, _)| *id);
     let mut bytes: Vec<u8> = entities.into_iter().flat_map(|(_, bytes)| bytes).collect();
     let mut out = sue_core::codec::Writer::new();
     arena.relations().encode(&mut out);
