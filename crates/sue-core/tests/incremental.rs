@@ -338,3 +338,59 @@ fn a_snapshot_keeps_its_revisions_and_writes_mark_only_their_tiles() {
     raster.bytes_mut().unwrap();
     assert!(raster.tile_revisions().iter().all(|r| !before.contains(r)));
 }
+
+/// Save times and sizes of an A4 page at 350 dpi with 20 layers (paper,
+/// a sketch of lines, flat fills, noise brush work and 16 empty layers):
+/// a full save, a save with nothing changed, and one after a one-tile
+/// patch. Run it in a release build:
+///
+/// ```text
+/// cargo test --release -p sue-core --test incremental -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore = "a benchmark; run it in a release build"]
+fn benchmark_full_and_incremental_saves() {
+    use std::time::Instant;
+    let (width, height) = (2894, 4093);
+    let mut random = Seeded(99);
+    let mut arena = Arena::new();
+    let mut ids = Vec::new();
+    for index in 0..20 {
+        let mut raster = RasterTile2D::new(width, height, PixelFormat::Rgba8).unwrap();
+        let bytes = raster.bytes_mut().unwrap();
+        for (at, pixel) in bytes.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let (x, y) = (at as u32 % width, at as u32 / width);
+            *pixel = match index {
+                0 => [255, 255, 255, 255],
+                1 if (x + y) % 97 < 3 || x.abs_diff(y) < 2 => [20, 20, 20, 255],
+                2 if (x / 400 + y / 500) % 3 == 0 => [200, 120, 80, 255],
+                3 if x > width / 3 && y < height / 2 => {
+                    [(random.next() >> 58) as u8 + 100, 90, 140, 200]
+                }
+                _ => continue,
+            };
+        }
+        let handle = arena.insert(Entity::new(format!("Layer {index}"), raster));
+        ids.push(arena.get(handle).unwrap().id());
+    }
+    let mut file = SueFile::new();
+    let started = Instant::now();
+    file.set_arena(&arena);
+    let full = started.elapsed();
+    let size = file.to_bytes().len();
+    let started = Instant::now();
+    file.set_arena(&arena);
+    let unchanged = started.elapsed();
+    raster_mut(&mut arena, ids[3])
+        .bytes_mut_in([1000, 1000, 50, 50])
+        .unwrap()[1000 * 2894 * 4 + 4000] ^= 0xff;
+    let started = Instant::now();
+    file.set_arena(&arena);
+    let one_tile = started.elapsed();
+    let stats = file.last_save();
+    println!(
+        "| A4 350 dpi, 20 layers | {} KiB | full {full:?} | nothing changed {unchanged:?} | one tile {one_tile:?} ({} encoded) |",
+        size / 1024,
+        stats.encoded
+    );
+}
