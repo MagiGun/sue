@@ -2548,6 +2548,33 @@ it opens and saves today, through the same model (`write::document_of`).
 `clip::testkit` builds the documents the tests run over, with foreign
 data under names no code knows.
 
+The model types every other kind a `.clip` carries (`clip/kinds.rs`):
+`ClipLayer::content` is a fill, a gradient, a correction with its
+settings, text, vector lines, a frame border folder, a balloon, a 3D
+layer, an animation folder with its cels or the 2D camera, beside the
+layer's effects, palette color, rulers and thumbnail; the document has
+its layer comps, the timeline (tracks, keyframes, sound) and the canvas
+preview. Layers elsewhere are named by `ClipLayerPath`, never a row id.
+Until the survey shows how Clip Studio stores these, they live in Sue's
+own `SueLayerPart` and `SueDocumentPart` tables, one versioned part per
+row (`clip/parts.rs`, described in `docs/clip-sue-tables.md`); Clip
+Studio sees each layer's pixels. A part of an unknown kind or a newer
+version, or one that does not decode, stays as it was and is written
+back. `ClipNative` points at the two blobs of Clip Studio's own
+generated layers Sue can find (`FilterLayerInfo`, `GradationFillInfo`)
+without reading them. A test reads and rewrites every `.clip` under the
+folder `SUE_CLIP_CORPUS` names, when it is set, and prints what the
+model does not type yet.
+
+`.clip` and `.psd` are in the `FormatRegistry` as `LayeredFormat`
+(`crates/sue-io/src/layered.rs`): import gives a layered picture with
+folders folded into their layers and the original file kept as
+`Encoded`, and export gives that file back while the layers' fingerprint
+(`import.fingerprint`) still matches, otherwise writes the layers. The
+`.psd` codec reads 8 and 16 bits a channel (raw, RLE, zip), layer masks
+(`PsdMask`) and the resolution (`psd_info`), and writes masks and, with
+`encode_psd_at`, the resolution.
+
 ---
 
 ### 3.8 Sue Writer (`sue-writer`) and typography (`sue-type`)
