@@ -2343,3 +2343,6 @@ zoom-100-percent = 100%
 zoom-200-percent = 200%
 paste-material = Paste Material
 cancel-transform = Cancel Transform
+webtoon-reading-direction = Webtoon Reading Direction
+webtoon-reading-right-to-left = Webtoon Reading Direction: Right to Left
+webtoon-reading-left-to-right = Webtoon Reading Direction: Left to Right

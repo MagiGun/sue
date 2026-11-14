@@ -13,6 +13,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: Webtoon Reading Direction, Right to Left or Left to Right,
+  from the command palette (a key can be given in Settings). The choice
+  is saved with the comic and undoes like any change; until it is made
+  it follows the binding. The Page Manager lays a webtoon's columns out
+  by it once its webtoon view arrives.
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.

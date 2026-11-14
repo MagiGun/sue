@@ -356,6 +356,57 @@ fn export_pages(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.ask_export_pages(cx);
 }
 
+/// The story property that says which way a webtoon's columns of pages
+/// read in the Page Manager: `"right"` (right to left) or `"left"` (left
+/// to right). Saved with the work; unset, it follows the binding
+/// (`story.binding`). Saved data: never renamed without a migration.
+pub(crate) const WEBTOON_READING: &str = "story.webtoon_reading";
+
+/// `true` when the webtoon columns of `story` read right to left.
+pub(crate) fn webtoon_right_to_left(arena: &Arena, story: EntityId) -> bool {
+    match arena
+        .get_by_id(story)
+        .ok()
+        .and_then(|entity| entity.property(WEBTOON_READING))
+        .and_then(sue_core::Value::as_str)
+    {
+        Some("right") => true,
+        Some("left") => false,
+        _ => story::bound_right(arena, story),
+    }
+}
+
+/// Webtoon Reading Direction, Right to Left or Left to Right: one undo
+/// step, none when it already reads that way.
+fn webtoon(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let Some((story, _, _)) = paint.story_here(&cx.world.arena) else {
+        return;
+    };
+    let right = call.name == "story.webtoon.right_to_left";
+    if webtoon_right_to_left(&cx.world.arena, story) == right {
+        return;
+    }
+    let edit =
+        doc::Edit::new(tr!("webtoon-reading-direction")).then(sue_core::txn::SetProperty::new(
+            story,
+            WEBTOON_READING,
+            if right { "right" } else { "left" },
+        ));
+    SuePaint::apply(cx, edit);
+}
+
+/// The direction the webtoon reads now carries the check.
+fn webtoon_state(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    paint
+        .story_here(facts.arena)
+        .map_or_else(ItemState::off, |(story, _, _)| {
+            super::flag(
+                webtoon_right_to_left(facts.arena, story)
+                    == (call.name == "story.webtoon.right_to_left"),
+            )
+        })
+}
+
 /// A command of this group that Auto Actions may record: it changes the
 /// pages or which page is shown, or opens a dialog on them.
 const fn c(
@@ -449,6 +500,23 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         export_pages,
     )
     .state(in_story),
+    // The Page Manager's Webtoon reading direction (CTV-6).
+    c(
+        "story.webtoon.right_to_left",
+        "webtoon-reading-right-to-left",
+        "doc-webtoon",
+        webtoon,
+    )
+    .state(webtoon_state)
+    .with(Flags::PALETTE),
+    c(
+        "story.webtoon.left_to_right",
+        "webtoon-reading-left-to-right",
+        "doc-webtoon",
+        webtoon,
+    )
+    .state(webtoon_state)
+    .with(Flags::PALETTE),
 ];
 
 #[cfg(test)]
@@ -457,6 +525,7 @@ mod tests {
     use sue_wm::{AppletContext, Facts, Flags, World};
 
     use crate::doc::{self, NewPicture};
+    use crate::story;
     use crate::studio::SuePaint;
 
     /// Runs `work` with a studio and an applet context of its own.
@@ -664,6 +733,66 @@ mod tests {
             );
             assert!(!paint.story_command("layer.new", cx));
             assert!(!paint.story_command("story.nothing", cx));
+        });
+    }
+
+    /// The checks of the two Webtoon Reading Direction items.
+    fn webtoon_checks(paint: &SuePaint, cx: &AppletContext<'_>) -> [Option<bool>; 2] {
+        ["story.webtoon.right_to_left", "story.webtoon.left_to_right"]
+            .map(|command| paint.state(command, &Facts::of(cx)).checked)
+    }
+
+    #[test]
+    fn webtoon_reading_direction_is_one_undo_step_on_the_story() {
+        with_studio(|paint, cx| {
+            picture(paint, cx);
+            assert!(!enabled(paint, cx, "story.webtoon.right_to_left"));
+            assert!(!enabled(paint, cx, "story.webtoon.left_to_right"));
+            paint.run("story.add", cx);
+            let story = paint.story_here(&cx.world.arena).expect("a story").0;
+            // Bound on the left, it reads left to right until told.
+            assert_eq!(webtoon_checks(paint, cx), [Some(false), Some(true)]);
+            let depth = cx.history.depth();
+            paint.run("story.webtoon.left_to_right", cx);
+            assert_eq!(cx.history.depth(), depth, "already so: no step");
+            paint.run("story.webtoon.right_to_left", cx);
+            assert_eq!(cx.history.depth(), depth + 1);
+            assert_eq!(webtoon_checks(paint, cx), [Some(true), Some(false)]);
+            let reading = |cx: &AppletContext<'_>| {
+                cx.world
+                    .arena
+                    .get_by_id(story)
+                    .ok()
+                    .and_then(|entity| entity.property(super::WEBTOON_READING))
+                    .and_then(sue_core::Value::as_str)
+                    .map(str::to_owned)
+            };
+            assert_eq!(reading(cx).as_deref(), Some("right"));
+            assert!(cx.history.undo(cx.world).expect("undo"));
+            assert_eq!(reading(cx), None, "undo takes the property away");
+            assert_eq!(webtoon_checks(paint, cx), [Some(false), Some(true)]);
+            assert!(cx.history.redo(cx.world).expect("redo"));
+            assert_eq!(reading(cx).as_deref(), Some("right"));
+            // Set, it no longer follows the binding.
+            assert!(!story::bound_right(&cx.world.arena, story));
+            paint.run("story.webtoon.left_to_right", cx);
+            assert_eq!(reading(cx).as_deref(), Some("left"));
+            assert_eq!(webtoon_checks(paint, cx), [Some(false), Some(true)]);
+        });
+    }
+
+    #[test]
+    fn webtoon_reading_follows_the_binding_until_set() {
+        with_studio(|paint, cx| {
+            picture(paint, cx);
+            paint.run("story.add", cx);
+            let story = paint.story_here(&cx.world.arena).expect("a story").0;
+            assert!(SuePaint::apply(
+                cx,
+                doc::set(story, story::BINDING, "right")
+            ));
+            assert!(super::webtoon_right_to_left(&cx.world.arena, story));
+            assert_eq!(webtoon_checks(paint, cx), [Some(true), Some(false)]);
         });
     }
 }

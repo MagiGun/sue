@@ -333,6 +333,8 @@ fn the_palette_offers_what_it_offered() {
             "file.new",
             "file.open",
             "file.export.png",
+            "story.webtoon.right_to_left",
+            "story.webtoon.left_to_right",
             "help.shortcuts"
         ]
     );
