@@ -8,8 +8,9 @@
 //! given one in the shortcut settings, the hidden pose commands too
 //! through Auto Actions and scripts.
 
+use sue_core::Arena;
 use sue_wm::icons::Icon;
-use sue_wm::{AppletContext, Call, Command, Flags};
+use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
 use crate::studio::SuePaint;
 
@@ -63,7 +64,47 @@ fn reset(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 /// `figure.preset.<n>`: the figure in its kind's preset pose `n`.
 fn preset(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
     let index = call.arg.parse::<usize>().ok();
-    paint.pose_figure(cx, |_, body| index.map(|index| body.preset(index)));
+    paint.pose_figure(cx, |_, body| {
+        index
+            .filter(|index| *index < body.presets().len())
+            .map(|index| body.preset(index))
+    });
+}
+
+/// The body of the drawing figure, hand or head on the current layer.
+fn current_body(paint: &SuePaint, arena: &Arena) -> Option<crate::figure::Body> {
+    let model = crate::figure::of_layer(arena, paint.layer()?)?;
+    arena.get_by_id(model).ok().map(crate::figure::Body::of)
+}
+
+/// Works while the current layer holds a drawing figure, hand or head.
+fn on_figure(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    super::when(current_body(paint, facts.arena).is_some())
+}
+
+/// Works while the current layer holds a whole drawing figure.
+fn on_body(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    super::when(
+        current_body(paint, facts.arena).is_some_and(|body| body.kind == crate::figure::Kind::Body),
+    )
+}
+
+/// Works while the current layer holds a 3D hand.
+fn on_hand(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    super::when(
+        current_body(paint, facts.arena).is_some_and(|body| body.kind == crate::figure::Kind::Hand),
+    )
+}
+
+/// `figure.preset.<n>` works while the current layer's figure, hand or
+/// head has a preset `n`.
+fn on_preset(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    let index = call.arg.parse::<usize>().ok();
+    super::when(
+        current_body(paint, facts.arena)
+            .zip(index)
+            .is_some_and(|(body, index)| index < body.presets().len()),
+    )
 }
 
 impl SuePaint {
@@ -97,18 +138,18 @@ impl SuePaint {
     }
 }
 
-/// A command of this group, recordable, that works while a canvas is
-/// open.
+/// A command of this group, recordable, that works as `state` says.
 const fn c(
     name: &'static str,
     label: &'static str,
     icon: Icon,
     run: fn(&mut SuePaint, &mut AppletContext<'_>, Call<'_>),
+    state: fn(&SuePaint, &Facts<'_>, Call<'_>) -> ItemState,
 ) -> Command<SuePaint> {
     Command::new(name, label, "figure", run)
         .icon(icon.name())
         .with(Flags::RECORDABLE)
-        .state(super::doc_open)
+        .state(state)
 }
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[
@@ -117,23 +158,39 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "register-pose-as-material",
         Icon::MaterialPose,
         register_pose,
+        on_figure,
     ),
     c(
         "figure.pose_scanner",
         "pose-scanner",
         Icon::Picture,
         pose_scanner,
+        on_body,
     ),
     c(
         "figure.hand_scanner",
         "hand-scanner",
         Icon::Picture,
         hand_scanner,
+        on_hand,
     ),
-    c("figure.flip", "flip-pose", Icon::FlipHorizontal, flip).with(Flags::HIDDEN),
-    c("figure.reset", "reset-pose", Icon::Reset, reset).with(Flags::HIDDEN),
-    c("figure.preset.", "poses", Icon::MaterialPose, preset)
-        .with(Flags::FAMILY.with(Flags::HIDDEN)),
+    c(
+        "figure.flip",
+        "flip-pose",
+        Icon::FlipHorizontal,
+        flip,
+        on_figure,
+    )
+    .with(Flags::HIDDEN),
+    c("figure.reset", "reset-pose", Icon::Reset, reset, on_figure).with(Flags::HIDDEN),
+    c(
+        "figure.preset.",
+        "poses",
+        Icon::MaterialPose,
+        preset,
+        on_preset,
+    )
+    .with(Flags::FAMILY.with(Flags::HIDDEN)),
 ];
 
 #[cfg(test)]
