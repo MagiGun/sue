@@ -1,7 +1,8 @@
 //! The Help menu's commands: the guide, the keys, updates and About.
 //!
 //! None of them changes the picture, so none is `RECORDABLE`: an Auto
-//! Action never keeps one.
+//! Action never keeps one. Each opens a window or a notice over the
+//! canvas, so none is `LEAVES_CANVAS` either.
 
 use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
@@ -60,7 +61,7 @@ const fn c(
 }
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[
-    c("help.guide", "sue-paint-guide", "book", guide, with_canvas).with(Flags::LEAVES_CANVAS),
+    c("help.guide", "sue-paint-guide", "book", guide, with_canvas),
     c(
         "help.shortcuts",
         "keyboard-shortcuts",
@@ -76,8 +77,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "update",
         updates,
         with_canvas,
-    )
-    .with(Flags::LEAVES_CANVAS),
+    ),
     c("help.about", "about-sue-paint", "info", about, always),
 ];
 
@@ -99,6 +99,13 @@ mod tests {
         // What an Auto Action records changes the picture or the view;
         // Help does neither.
         assert!(flagged(Flags::RECORDABLE).is_empty());
+    }
+
+    #[test]
+    fn no_help_command_leaves_the_canvas() {
+        // The guide and the update notes are windows over the canvas,
+        // not a browser: the run of every command on a canvas runs them.
+        assert!(flagged(Flags::LEAVES_CANVAS).is_empty());
     }
 
     #[test]
