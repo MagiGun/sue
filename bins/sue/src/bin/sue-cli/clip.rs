@@ -23,7 +23,7 @@ use sue_io::sqlite::{BlobRef, Database, LazyTable, LazyValue};
 /// How to use the `clip` subcommands.
 pub const USAGE: &str = "\
 Usage: sue-cli clip dump <file> [--bytes <n>] [--nulls] [--no-inflate]
-       sue-cli clip diff <before> <after> [--bytes <n>] [--no-inflate]
+       sue-cli clip diff <before> <after> [--bytes <n>] [--nulls] [--no-inflate]
 
   clip dump         Print what a Clip Studio file holds: its chunks, what
                     each stored bitmap is made of, and every table of its
@@ -65,30 +65,55 @@ const MAX_RUNS: usize = 48;
 /// The most characters of a text value printed.
 const MAX_TEXT: usize = 200;
 
-/// Runs `sue-cli clip <args>`.
-pub fn run(args: &[String]) -> ExitCode {
+/// What `sue-cli clip <args>` was asked to do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Command<'a> {
+    /// Print how the subcommands are used.
+    Help,
+    /// Print what one file holds.
+    Dump(&'a str),
+    /// Print what differs between two files.
+    Diff(&'a str, &'a str),
+}
+
+/// Reads the words after `clip`. `None` when they are not a command.
+fn parse(args: &[String]) -> Option<(Command<'_>, Options)> {
     let mut options = Options::default();
     let mut words = Vec::new();
     let mut rest = args.iter().map(String::as_str);
     while let Some(arg) = rest.next() {
         match arg {
+            "--help" | "-h" => return Some((Command::Help, options)),
             "--nulls" => options.nulls = true,
             "--no-inflate" => options.inflate = false,
-            "--bytes" => match rest.next().and_then(|n| n.parse().ok()) {
-                Some(n) => options.bytes = n,
-                None => return usage(),
-            },
-            flag if flag.starts_with("--") => return usage(),
+            "--bytes" => options.bytes = rest.next()?.parse().ok()?,
+            flag if flag.starts_with("--") => return None,
             word => words.push(word),
         }
     }
-    let result = match words.as_slice() {
-        ["dump", file] => read(file).and_then(|bytes| dump(file, &bytes, options)),
-        ["diff", before, after] => read(before).and_then(|a| {
+    let command = match words.as_slice() {
+        ["dump", file] => Command::Dump(file),
+        ["diff", before, after] => Command::Diff(before, after),
+        _ => return None,
+    };
+    Some((command, options))
+}
+
+/// Runs `sue-cli clip <args>`.
+pub fn run(args: &[String]) -> ExitCode {
+    let Some((command, options)) = parse(args) else {
+        return usage();
+    };
+    let result = match command {
+        Command::Help => {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        Command::Dump(file) => read(file).and_then(|bytes| dump(file, &bytes, options)),
+        Command::Diff(before, after) => read(before).and_then(|a| {
             let b = read(after)?;
             diff((before, &a), (after, &b), options)
         }),
-        _ => return usage(),
     };
     match result {
         Ok(text) => {
@@ -288,6 +313,33 @@ fn printable(bytes: &[u8]) -> bool {
         && bytes
             .iter()
             .all(|byte| byte.is_ascii_graphic() || *byte == b' ')
+}
+
+/// The first byte at which `x` and `y` differ, when they do: the end of
+/// the shorter one when it is the start of the other.
+fn first_mismatch(x: &[u8], y: &[u8]) -> Option<usize> {
+    x.iter()
+        .zip(y)
+        .position(|(p, q)| p != q)
+        .or_else(|| (x.len() != y.len()).then_some(x.len().min(y.len())))
+}
+
+/// Where a window of bytes around byte `at` starts: a line of sixteen
+/// before the line `at` is on.
+fn window_start(at: usize) -> usize {
+    at.saturating_sub(16) / 16 * 16
+}
+
+/// The chunks of each kind in `opened`, in file order.
+fn chunks_by_kind<'a>(opened: &Opened<'a>) -> BTreeMap<String, Vec<&'a [u8]>> {
+    let mut kinds: BTreeMap<String, Vec<&'a [u8]>> = BTreeMap::new();
+    for chunk in &opened.layout.chunks {
+        kinds
+            .entry(kind_text(chunk.kind))
+            .or_default()
+            .push(chunk.data);
+    }
+    kinds
 }
 
 /// One value on one line.
@@ -664,36 +716,63 @@ impl Diff<'_> {
         let _ = writeln!(self.out, "    {line}");
     }
 
-    fn chunks(&mut self) {
-        let kinds = |opened: &Opened<'_>| {
-            let mut kinds: BTreeMap<String, (usize, usize)> = BTreeMap::new();
-            for chunk in &opened.layout.chunks {
-                let entry = kinds.entry(kind_text(chunk.kind)).or_default();
-                entry.0 += 1;
-                entry.1 += chunk.data.len();
+    /// Details the bytes of both sides from byte `from` of what they are
+    /// part of, as many as `--bytes` allows and 64 at most.
+    fn around(&mut self, from: usize, before: &[u8], after: &[u8]) {
+        let window = self.options.bytes.min(64);
+        for (label, bytes) in [("before:", before), ("after: ", after)] {
+            let mut text = String::new();
+            hex_lines(&mut text, "", from, &bytes[..bytes.len().min(window)]);
+            for line in text.lines() {
+                self.detail(&format!("{label} {line}"));
             }
-            kinds
-        };
-        let (a, b) = (kinds(&self.a), kinds(&self.b));
+        }
+    }
+
+    fn chunks(&mut self) {
+        let (a, b) = (chunks_by_kind(&self.a), chunks_by_kind(&self.b));
         let names: Vec<&String> = a
             .keys()
             .chain(b.keys().filter(|k| !a.contains_key(*k)))
             .collect();
         for name in names {
             let (before, after) = (
-                a.get(name).copied().unwrap_or_default(),
-                b.get(name).copied().unwrap_or_default(),
+                a.get(name).map_or(&[][..], Vec::as_slice),
+                b.get(name).map_or(&[][..], Vec::as_slice),
             );
-            if before.0 != after.0 {
+            if before.len() != after.len() {
                 self.note(&format!(
                     "chunks: {name}: {} before, {} after",
-                    before.0, after.0
+                    before.len(),
+                    after.len()
                 ));
-            } else if before.1 != after.1 && name != "SQLi" && name != "Exta" {
+                continue;
+            }
+            // The database is compared table by table, and a stored
+            // bitmap where a row names it.
+            if name == "SQLi" || name == "Exta" {
+                continue;
+            }
+            for (number, (x, y)) in (1..).zip(before.iter().zip(after)) {
+                let Some(at) = first_mismatch(x, y) else {
+                    continue;
+                };
+                let which = if before.len() > 1 {
+                    format!(" (number {number} of its kind)")
+                } else {
+                    String::new()
+                };
                 self.note(&format!(
-                    "chunks: {name}: {} bytes before, {} after",
-                    before.1, after.1
+                    "chunks: {name}{which}: {} bytes before, {} after, first difference at byte {at}",
+                    x.len(),
+                    y.len()
                 ));
+                let from = window_start(at);
+                self.around(
+                    from,
+                    x.get(from..).unwrap_or_default(),
+                    y.get(from..).unwrap_or_default(),
+                );
             }
         }
         for (label, x, y) in [
@@ -744,18 +823,28 @@ impl Diff<'_> {
     fn blobs(&mut self, place: &str, x: &BlobRef, y: &BlobRef) {
         // Two ids of stored bitmaps are only names: compare the bitmaps.
         if let (Some(before), Some(after)) = (self.a.named_bitmap(x), self.b.named_bitmap(y)) {
-            let (before, after) = (
+            let Some(at) = first_mismatch(before, after) else {
+                return;
+            };
+            self.note(&format!("{place}: the stored bitmap it names differs"));
+            let (p, q) = (
                 bitmap_lines(before, self.options),
                 bitmap_lines(after, self.options),
             );
-            if before != after {
-                self.note(&format!("{place}: the stored bitmap it names differs"));
-                for line in before {
-                    self.detail(&format!("before: {line}"));
-                }
-                for line in after {
-                    self.detail(&format!("after:  {line}"));
-                }
+            if p == q {
+                // The same blocks and lists: only what the blocks hold.
+                self.detail(&format!(
+                    "the same blocks and lists, other data: {} bytes before, {} after, first difference at byte {at}",
+                    before.len(),
+                    after.len()
+                ));
+                return;
+            }
+            for line in p {
+                self.detail(&format!("before: {line}"));
+            }
+            for line in q {
+                self.detail(&format!("after:  {line}"));
             }
             return;
         }
@@ -793,24 +882,16 @@ impl Diff<'_> {
         }
         // Unknown layouts: the bytes around the first difference.
         let window = self.options.bytes.min(64);
-        if window == 0 {
-            return;
-        }
-        let from = at.saturating_sub(16) / 16 * 16;
-        let mut lines = Vec::new();
-        for (label, opened, blob) in [("before", &self.a, x), ("after: ", &self.b, y)] {
-            let bytes = opened
+        let from = window_start(at);
+        let part = |opened: &Opened<'_>, blob: &BlobRef| {
+            opened
                 .database
                 .as_ref()
                 .and_then(|database| database.blob_range(blob, from, window).ok())
-                .unwrap_or_default();
-            let mut text = String::new();
-            hex_lines(&mut text, "", from, &bytes);
-            lines.extend(text.lines().map(|line| format!("{label} {line}")));
-        }
-        for line in lines {
-            self.detail(&line);
-        }
+                .unwrap_or_default()
+        };
+        let (before, after) = (part(&self.a, x), part(&self.b, y));
+        self.around(from, &before, &after);
     }
 
     fn rows(&mut self, name: &str, before: &LazyTable, after: &LazyTable) {
@@ -887,6 +968,42 @@ impl Diff<'_> {
         }
     }
 
+    /// Compares what the schemas hold beside tables: indexes, views and
+    /// triggers, by kind and name.
+    fn other_entries(&mut self) {
+        let others = |opened: &Opened<'_>| -> BTreeMap<(String, String), String> {
+            opened
+                .database
+                .iter()
+                .flat_map(|database| database.schema())
+                .filter(|entry| entry.kind != "table")
+                .map(|entry| {
+                    let about = format!("on {}: {}", entry.table, entry.sql);
+                    ((entry.kind.clone(), entry.name.clone()), about)
+                })
+                .collect()
+        };
+        let (a, b) = (others(&self.a), others(&self.b));
+        for (key, before) in &a {
+            let (kind, name) = key;
+            match b.get(key) {
+                None => self.note(&format!("schema: {kind} {name}: only before, {before}")),
+                Some(after) if after != before => {
+                    self.note(&format!("schema: {kind} {name} differs"));
+                    self.detail(&format!("before: {before}"));
+                    self.detail(&format!("after:  {after}"));
+                }
+                Some(_) => {}
+            }
+        }
+        for (key, after) in &b {
+            if !a.contains_key(key) {
+                let (kind, name) = key;
+                self.note(&format!("schema: {kind} {name}: only after, {after}"));
+            }
+        }
+    }
+
     fn tables(&mut self) {
         if self.a.database.is_none() || self.b.database.is_none() {
             let problems = (
@@ -908,6 +1025,7 @@ impl Diff<'_> {
             ));
             return;
         }
+        self.other_entries();
         let names_a: Vec<String> = self.a.tables().into_iter().map(str::to_owned).collect();
         let names_b: Vec<String> = self.b.tables().into_iter().map(str::to_owned).collect();
         for name in &names_a {
@@ -1199,13 +1317,91 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("    before 0003e0  00 00 00 00 00 00 00 00 01 00"),
+            text.contains("    before: 0003e0  00 00 00 00 00 00 00 00 01 00"),
             "{text}"
         );
         assert!(
             text.contains("    after:  0003e0  00 00 00 00 00 00 00 00 02 00"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn a_diff_sees_bytes_that_change_where_the_shape_does_not() {
+        // The same square in another color: the same blocks, other pixels.
+        let before = picture();
+        let mut after = picture();
+        after.layers[0] = square("Back", 0, 280, [10, 200, 10]);
+        let (a, b) = (file(&before, None), file(&after, None));
+        let text = diff(("a.clip", &a), ("b.clip", &b), Options::default()).unwrap();
+        assert!(
+            text.contains(
+                "BlockData: the stored bitmap it names differs\n    \
+                 the same blocks and lists, other data: "
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("no differences"), "{text}");
+
+        // A chunk that is neither the database nor a bitmap, changed in
+        // place: named, with the bytes around the change.
+        let mut c = a.clone();
+        c[24 + 16 + 33] ^= 0x40;
+        let text = diff(("a.clip", &a), ("c.clip", &c), Options::default()).unwrap();
+        assert!(
+            text.contains(
+                "chunks: Head: 40 bytes before, 40 after, first difference at byte 33\n    \
+                 before: 000010  "
+            ),
+            "{text}"
+        );
+        assert!(text.contains("\n    after:  000010  "), "{text}");
+        assert!(text.trim_end().ends_with("\n1 differences"), "{text}");
+        // With no bytes asked for, the line alone.
+        let none = Options {
+            bytes: 0,
+            ..Options::default()
+        };
+        let text = diff(("a.clip", &a), ("c.clip", &c), none).unwrap();
+        assert!(text.contains("chunks: Head: 40 bytes"), "{text}");
+        assert!(!text.contains("000010"), "{text}");
+    }
+
+    #[test]
+    fn the_words_after_clip_are_read_as_a_command() {
+        let words =
+            |text: &str| -> Vec<String> { text.split_whitespace().map(str::to_owned).collect() };
+        let plain = Options::default();
+        assert_eq!(
+            parse(&words("dump a.clip")),
+            Some((Command::Dump("a.clip"), plain))
+        );
+        let asked = Options {
+            bytes: 0,
+            nulls: true,
+            inflate: false,
+        };
+        assert_eq!(
+            parse(&words("--no-inflate diff a.clip --bytes 0 b.clip --nulls")),
+            Some((Command::Diff("a.clip", "b.clip"), asked))
+        );
+        for help in ["--help", "-h", "dump --help", "diff a b -h"] {
+            assert_eq!(parse(&words(help)).map(|(c, _)| c), Some(Command::Help));
+        }
+        for wrong in [
+            "",
+            "dump",
+            "dump a b",
+            "diff a",
+            "diff a b c",
+            "list a",
+            "dump a --bytes",
+            "dump a --bytes many",
+            "dump a --bytes -1",
+            "dump a --loud",
+        ] {
+            assert_eq!(parse(&words(wrong)), None, "{wrong:?}");
+        }
     }
 
     #[test]
