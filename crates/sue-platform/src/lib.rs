@@ -34,6 +34,7 @@ mod input;
 #[cfg(target_os = "ios")]
 mod ios;
 mod locale;
+pub mod movie;
 mod os;
 mod paint;
 mod paths;
