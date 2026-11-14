@@ -66,6 +66,9 @@ pub(crate) struct ToolFrame {
     pub(crate) tilt: Option<[f64; 2]>,
     /// Barrel buttons (Linux key codes) pressed or released.
     pub(crate) buttons: Vec<(u32, bool)>,
+    /// When it happened, in milliseconds on the compositor's clock (the
+    /// `frame` event's own time).
+    pub(crate) time: Option<u32>,
 }
 
 /// A pointer event of the pen's, for the surface it is over.
@@ -137,6 +140,93 @@ pub(crate) struct PenEvent {
     pub(crate) surface: usize,
     pub(crate) pointer: PenPointer,
     pub(crate) reading: Reading,
+    /// When, in milliseconds on the compositor's clock, where the frame
+    /// it came in said.
+    pub(crate) time: Option<u32>,
+}
+
+impl PenEvent {
+    /// The pen's pressure once this event has happened, while its tip
+    /// touches: none after the tip's release (whose reading keeps the
+    /// pressure the tip had) and for a pen going away.
+    pub(crate) fn touching(&self) -> Option<f32> {
+        match self.pointer {
+            PenPointer::Button {
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                ..
+            }
+            | PenPointer::Gone => None,
+            _ => self.reading.pressure,
+        }
+    }
+}
+
+/// The pen's sample for the egui event `egui` made from `event`, at
+/// `time` (seconds on the stream's clock), and the kind of pointer event
+/// it goes with for code that reads the pen by pointer events; none for a
+/// pen going away. The sample is at the egui event's own position. The
+/// tip going down and up are the stream's down and up; a barrel button is
+/// a move in place, since it draws nothing.
+pub(crate) fn pen_sample(
+    egui: &egui::Event,
+    event: PenEvent,
+    time: f64,
+) -> Option<(crate::stylus::PenSample, crate::stylus::SampleKind)> {
+    use crate::stylus::{PenKind, PenSample, PenSource, SampleKind};
+    let (kind, paired, pos) = match *egui {
+        egui::Event::PointerMoved(pos) => (PenKind::Move, SampleKind::Move, pos),
+        egui::Event::PointerButton {
+            pos,
+            pressed,
+            button,
+            ..
+        } => {
+            let primary = button == egui::PointerButton::Primary;
+            match (pressed, primary) {
+                (true, true) => (PenKind::Down, SampleKind::Press, pos),
+                (false, true) => (PenKind::Up, SampleKind::Release, pos),
+                (true, false) => (PenKind::Move, SampleKind::Press, pos),
+                (false, false) => (PenKind::Move, SampleKind::Release, pos),
+            }
+        }
+        _ => return None,
+    };
+    let sample = PenSample {
+        pos: [pos.x, pos.y],
+        time,
+        pressure: event.reading.pressure,
+        tilt: event.reading.tilt,
+        twist: None,
+        kind,
+        source: PenSource::WaylandTablet,
+        eraser: event.reading.eraser,
+    };
+    Some((sample, paired))
+}
+
+/// An XInput2 pen's raw event as a reading for the pen's stream: at
+/// `time` (seconds on the stream's clock) the pen pressed with `pressure`
+/// (its latest), `tip` saying whether its tip is down once its button has
+/// been seen (see [`contact`]), leaning `tilt` where the device says.
+/// Raw events do not say where the pen is in the window: the stream
+/// places it along the pointer's path.
+pub(crate) fn xinput_reading(
+    time: f64,
+    pressure: f32,
+    tip: Option<bool>,
+    tilt: Option<[f32; 2]>,
+    eraser: bool,
+) -> crate::stylus::Reading {
+    crate::stylus::Reading {
+        source: crate::stylus::PenSource::XInput,
+        time,
+        pressure: contact(pressure, tip),
+        tilt,
+        twist: None,
+        eraser,
+        at: None,
+    }
 }
 
 /// A pen as its tablet-v2 frames left it.
@@ -155,6 +245,8 @@ pub(crate) struct PenTrack {
     pub(crate) eraser: bool,
     /// Its barrel buttons held, as pointer buttons.
     held: Vec<egui::PointerButton>,
+    /// The time of the frame being taken, where it said.
+    time: Option<u32>,
 }
 
 impl PenTrack {
@@ -166,6 +258,7 @@ impl PenTrack {
     /// the pressure or the lean of a touching tip moves it where it is,
     /// so pressing harder in place still reaches the stroke.
     pub(crate) fn apply(&mut self, frame: &ToolFrame, out: &mut Vec<PenEvent>) {
+        self.time = frame.time;
         if let Some(surface) = frame.enter {
             self.surface = Some(surface);
         }
@@ -266,6 +359,7 @@ impl PenTrack {
                 tilt: self.tilt,
                 eraser: self.eraser,
             },
+            time: self.time,
         });
     }
 }
@@ -690,6 +784,209 @@ mod tests {
             &mut out,
         );
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn a_scripted_pen_comes_out_as_the_same_sample_list() {
+        use crate::stylus::{DeviceClock, PenKind, SampleKind, Stream};
+        let mut pen = PenTrack::default();
+        let mut out = Vec::new();
+        // Near, down, three moves with their own pressures, a barrel
+        // button, the lift, and away: frames 5 ms apart.
+        let at = |time: u32, frame: ToolFrame| ToolFrame {
+            time: Some(time),
+            ..frame
+        };
+        let script = [
+            at(
+                9_000,
+                ToolFrame {
+                    enter: Some(1),
+                    position: Some([10.0, 10.0]),
+                    tilt: Some([45.0, 0.0]),
+                    ..frame()
+                },
+            ),
+            at(
+                9_005,
+                ToolFrame {
+                    down: Some(true),
+                    pressure: Some(13107),
+                    ..frame()
+                },
+            ),
+            at(
+                9_010,
+                ToolFrame {
+                    position: Some([12.0, 10.0]),
+                    pressure: Some(39321),
+                    ..frame()
+                },
+            ),
+            at(
+                9_015,
+                ToolFrame {
+                    position: Some([14.0, 10.0]),
+                    pressure: Some(26214),
+                    buttons: vec![(0x14b, true)],
+                    ..frame()
+                },
+            ),
+            at(
+                9_020,
+                ToolFrame {
+                    down: Some(false),
+                    position: Some([16.0, 10.0]),
+                    pressure: Some(0),
+                    ..frame()
+                },
+            ),
+            at(
+                9_025,
+                ToolFrame {
+                    leave: true,
+                    ..frame()
+                },
+            ),
+        ];
+        for frame in &script {
+            pen.apply(frame, &mut out);
+        }
+        // What the host does with them: egui events, and for each one a
+        // sample at the frame's own time.
+        let mut clock = DeviceClock::default();
+        clock.sync(out.last().and_then(|event| event.time).unwrap(), 3.0);
+        let mut stream = Stream::new();
+        let mut events = 0;
+        for event in &out {
+            let egui = event.pointer.to_egui(2.0, egui::Modifiers::default());
+            let time = clock.seconds(event.time.unwrap());
+            if let Some((sample, kind)) = pen_sample(&egui, *event, time) {
+                stream.push_with_event(sample, kind);
+                events += 1;
+            }
+        }
+        let samples = stream.take();
+        assert_eq!(samples.len(), events, "one for each pointer event");
+        let read: Vec<_> = samples
+            .iter()
+            .map(|sample| {
+                (
+                    sample.kind,
+                    sample.pos[0],
+                    sample.pressure.map(|value| (value * 10.0).round()),
+                    ((sample.time - 3.0) * 1000.0).round(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            read,
+            [
+                (PenKind::Move, 20.0, None, -25.0),
+                (PenKind::Down, 20.0, Some(2.0), -20.0),
+                (PenKind::Move, 24.0, Some(6.0), -15.0),
+                (PenKind::Move, 28.0, Some(4.0), -10.0),
+                // The barrel button: a move in place.
+                (PenKind::Move, 28.0, Some(4.0), -10.0),
+                (PenKind::Move, 32.0, Some(4.0), -5.0),
+                // The up carries its place only.
+                (PenKind::Up, 32.0, None, -5.0),
+                // The barrel button let go as the pen went away.
+                (PenKind::Move, 32.0, None, 0.0),
+            ]
+        );
+        assert_eq!(samples[6].tilt, None);
+        assert_eq!(samples[5].tilt, Some([0.5, 0.0]));
+        // Code that reads the pen by pointer events finds for each event
+        // exactly the reading the pen's track made for it, the release
+        // with the pressure the tip had.
+        let paired = crate::stylus::tests_paired(&mut stream);
+        let made: Vec<_> = out
+            .iter()
+            .filter(|event| event.pointer != PenPointer::Gone)
+            .collect();
+        assert_eq!(paired.len(), made.len());
+        for (sample, event) in paired.iter().zip(made) {
+            assert_eq!(sample.pressure, event.reading.pressure);
+            assert_eq!(sample.tilt, event.reading.tilt);
+            assert_eq!(sample.eraser, event.reading.eraser);
+        }
+        assert_eq!(paired[6].kind, SampleKind::Release);
+        // What a pen over another of Sue's windows tells the stream: its
+        // pressure while it touches, none once the tip has lifted.
+        let touching: Vec<_> = out
+            .iter()
+            .map(|event| event.touching().map(|value| (value * 10.0).round()))
+            .collect();
+        assert_eq!(
+            touching,
+            [
+                None,
+                Some(2.0),
+                Some(6.0),
+                Some(4.0),
+                Some(4.0),
+                Some(4.0),
+                None,
+                None,
+                None
+            ]
+        );
+        assert!((paired[6].pressure.unwrap() - 0.4).abs() < 1e-3);
+        // The latest pressure stays for the frame that draws the end.
+        assert!((stream.pressure().unwrap() - 0.4).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_scripted_xinput_pen_comes_out_as_the_same_sample_list() {
+        use crate::stylus::{PenKind, PenSource, Router, Stream};
+        let mut router = Router::default();
+        let mut stream = Stream::new();
+        router.moved([0.0, 0.0], 0.99);
+        router.flush(&mut stream, &[]);
+        stream.take();
+        // Raw events 4 ms apart: near, the tip's button, harder, lighter,
+        // the button's release with the pressure still up, then 0.
+        let lean = Some([0.2, -0.1]);
+        let script = [
+            xinput_reading(1.000, 0.0, None, lean, false),
+            xinput_reading(1.004, 0.3, Some(true), lean, false),
+            xinput_reading(1.008, 0.8, Some(true), lean, false),
+            xinput_reading(1.012, 0.5, Some(true), lean, false),
+            xinput_reading(1.016, 0.5, Some(false), lean, false),
+            xinput_reading(1.020, 0.0, Some(false), lean, false),
+        ];
+        // The pointer went 12 points in three moves meanwhile.
+        router.moved([4.0, 0.0], 1.02);
+        router.button(true, true, 1.02);
+        router.moved([8.0, 0.0], 1.02);
+        router.moved([12.0, 0.0], 1.02);
+        router.button(true, false, 1.02);
+        router.flush(&mut stream, &script);
+        let samples = stream.take();
+        assert_eq!(samples.len(), script.len(), "one for each raw event");
+        let read: Vec<_> = samples
+            .iter()
+            .map(|sample| (sample.kind, sample.pos[0], sample.pressure, sample.time))
+            .collect();
+        assert_eq!(
+            read,
+            [
+                (PenKind::Move, 2.0, None, 1.000),
+                (PenKind::Down, 4.0, Some(0.3), 1.004),
+                (PenKind::Move, 6.0, Some(0.8), 1.008),
+                (PenKind::Move, 8.0, Some(0.5), 1.012),
+                (PenKind::Up, 10.0, None, 1.016),
+                (PenKind::Move, 12.0, None, 1.020),
+            ]
+        );
+        assert!(
+            samples
+                .iter()
+                .all(|sample| sample.source == PenSource::XInput)
+        );
+        assert_eq!(samples[3].tilt, lean);
+        assert_eq!(stream.pressure(), Some(0.5), "what the tip had");
     }
 
     #[test]

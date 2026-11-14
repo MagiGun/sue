@@ -746,6 +746,7 @@ the `PlatformHost` trait and the portable services next to it:
 | `stays_in_cache` | `true` for a path under the staging folder that stands for nothing people chose (beside an opened document's copy), so a write there never leaves Sue's cache; always `false` on desktops |
 | `stylus::{pressure, source, tilt, eraser}` | A pen's pressure (0 to 1, while it touches), tilt (-1 to 1 each way) and eraser end where the window's touch events do not carry them, refreshed every frame from the `PenSource`: WinTab on Windows, Wayland's tablet-v2 or XInput2 on Linux and the BSDs, the page's pointer events in the browser (see "Pen tablets" below) |
 | `stylus::{take_samples, Sample, SampleKind}` | The reading of each pointer event the host makes for a pen this frame (Wayland's tablet-v2), in order; `Sample::is_for` pairs one with its egui event by kind and position |
+| `stylus::{take_pen_samples, PenSample, PenKind, PenSource}` | The pen's sample stream: one `PenSample` for each packet of every device that can draw (a WinTab, XInput2, Wayland or browser pen, the window's touches, a mouse), oldest first, with its place in the main window, its time (the device's own steps on Sue's monotonic clock, never backwards), pressure, tilt, twist, eraser end and `PenKind` (`Down`, `Move`, `Up`). An `Up` carries its place and time only; a mouse presses 1 while its main button is held; a touch without force has no pressure. Whoever takes a frame's samples has them; the rest go when the frame has run. The calls in the two rows above are readers of this stream, kept until the canvas draws from the samples |
 
 Path resolution is a pure function of the OS and an injected environment lookup,
 so it can be tested without touching the real environment:
@@ -784,6 +785,30 @@ Two hosts implement the trait:
 pointer, so its motion, tip and barrel buttons reach Sue as mouse events;
 what else it measures comes per system into `stylus`. On Windows a WinTab
 driver's packets (`wintab_pen`), drained every frame.
+
+**The pen's sample stream.** Every source feeds one queue in `stylus`
+(`Stream`), which keeps it sound whatever a driver sends: a source goes
+down once before it moves touching and up once after, only a touching
+sample has a pressure, and time never runs backwards. A WinTab packet
+(`pkTime`, x and y on the tablet, tip pressure, orientation as tilt and
+twist), an XInput2 raw event and a browser's pen event do not say where
+the pen is in Sue's window, so each is queued as a `Reading` and the
+host's `stylus::Router` joins a frame's readings with the path the
+pointer took in that frame (`CursorMoved` and `MouseInput` of the main
+window): one sample for each packet, as far along the path as the pen
+had travelled on its device when the packet was made, or evenly where
+packets do not say. `DeviceClock` carries a device's millisecond stamps
+over to Sue's clock, keeps their steps, survives a 32-bit wrap and lines
+up again after a driver restarts. Pointer events of a frame without
+packets are a mouse's samples, unless a pen spoke within a quarter of a
+second, still touches or pressed the button being let go. Touch events
+are samples as they come (the first touch to land; the others belong to
+gestures); a pen heard both as a touch and through WinTab is in the
+stream once, as the touch. A Wayland pen's pointer events are samples at
+their tablet frame's time. For the readers that go by pointer events
+(`take_samples`) the router queues, for each pointer event of a pen, the
+reading of the packet made where that event is, so WinTab, XInput2 and
+browser strokes take each point's own pressure too.
 
 Under Wayland, winit 0.30 does not speak the tablet protocol (`tablet-v2`),
 and a compositor sends a pen only to the client owning the surface under

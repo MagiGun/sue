@@ -16,9 +16,10 @@
 //!
 //! A pen over the main window becomes its pointer (moving, the tip as the
 //! primary button, the barrel buttons) whether or not the compositor also
-//! turns it into a mouse, and its pressure, tilt and eraser go to
-//! [`crate::stylus`], with one sample for each of its pointer events, so
-//! every point of a stroke has its own pressure. Each global is bound at
+//! turns it into a mouse, and each of those pointer events is one sample
+//! of the pen's stream ([`crate::stylus`]), with the pressure, tilt and
+//! eraser the pen had there and the time of the tablet frame it came in,
+//! so every point of a stroke has its own. Each global is bound at
 //! the lower of the version the compositor offers and the one Sue's
 //! protocol tables know, never higher.
 //!
@@ -53,7 +54,7 @@ use wayland_protocols::wp::tablet::zv2::client::{
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
-use crate::stylus::{self, PenSource, Sample, SampleKind};
+use crate::stylus::{self, DeviceClock, PenSource};
 use crate::tablets::{PenEvent, PenPointer, PenTrack, Socket, ToolFrame, Watch, Watched};
 
 /// `true` when the session's compositor offers tablet-v2, asked on a
@@ -113,8 +114,8 @@ pub(crate) struct Tablet {
     main: usize,
     /// Its pointer events, until a frame takes them.
     pending: Vec<PenEvent>,
-    /// The pressure a tip had as it lifted, until a frame has drawn it.
-    lift: Option<f32>,
+    /// The compositor's clock (a tablet frame's time) on Sue's.
+    clock: DeviceClock,
     /// The cursor Sue shows for the mouse over the main window.
     cursor: egui::CursorIcon,
 }
@@ -159,10 +160,6 @@ struct State {
     tools: Vec<Tool>,
     /// Pointer events since the last poll, with their surfaces.
     out: Vec<PenEvent>,
-    /// The tool that last finished a frame.
-    active: Option<usize>,
-    /// The pressure of a tip that lifted since the last poll.
-    lifted: Option<f32>,
 }
 
 impl State {
@@ -198,7 +195,7 @@ impl Tablet {
             },
             main,
             pending: Vec::new(),
-            lift: None,
+            clock: DeviceClock::default(),
             cursor: egui::CursorIcon::Default,
         })
     }
@@ -248,8 +245,10 @@ impl Tablet {
         }
     }
 
-    /// Handles the pens' events that arrived, without waiting for more,
-    /// and refreshes the stylus state. `Some(true)` when there were any
+    /// Handles the pens' events that arrived, without waiting for more.
+    /// Those for the main window wait for the frame that takes them;
+    /// those for Sue's other windows go to them, and the pen's stream
+    /// hears what the pen read there. `Some(true)` when there were any
     /// (draw a frame), `None` once the connection has failed (drop the
     /// tablet).
     pub(crate) fn poll(&mut self) -> Option<bool> {
@@ -274,13 +273,17 @@ impl Tablet {
             if event.surface == self.main {
                 self.pending.push(event);
             } else {
+                // Not in the main window: no place in the stream, but
+                // whoever reads the pen's latest pressure hears it.
+                stylus::push_unplaced(
+                    PenSource::WaylandTablet,
+                    crate::time::since_start().as_secs_f64(),
+                    event.touching(),
+                    (event.reading.tilt, event.reading.eraser),
+                );
                 others(event.surface, event.pointer);
             }
         }
-        if let Some(pressure) = self.state.lifted.take() {
-            self.lift = Some(pressure);
-        }
-        self.publish();
         Some(handled > 0)
     }
 
@@ -301,76 +304,33 @@ impl Tablet {
     }
 
     /// The main window's pointer events since the last frame, as egui
-    /// events (`scale` egui points per logical pixel); each one's reading
-    /// goes to [`crate::stylus`] as a sample, in the same order.
+    /// events (`scale` egui points per logical pixel); each one goes to
+    /// the pen's stream ([`crate::stylus`]) as a sample, in the same
+    /// order, at the time of the tablet frame it came in. The stream
+    /// keeps the pressure a tip had as it lifted for the frame that
+    /// draws the stroke's end.
     pub(crate) fn take_events(
         &mut self,
         scale: f32,
         modifiers: egui::Modifiers,
     ) -> Vec<egui::Event> {
+        let now = crate::time::since_start().as_secs_f64();
+        if let Some(newest) = self.pending.iter().rev().find_map(|event| event.time) {
+            self.clock.sync(newest, now);
+        }
+        let clock = &mut self.clock;
         self.pending
             .drain(..)
             .map(|event| {
                 let egui = event.pointer.to_egui(scale, modifiers);
-                if let Some(sample) = sample(&egui, event) {
-                    stylus::push_sample(sample);
+                let time = event.time.map_or(now, |ms| clock.seconds(ms));
+                if let Some((sample, kind)) = crate::tablets::pen_sample(&egui, event, time) {
+                    stylus::push_with_event(sample, kind);
                 }
                 egui
             })
             .collect()
     }
-
-    /// A frame has drawn the events taken: a lifted tip's pressure, kept
-    /// for the stroke's last points, goes.
-    pub(crate) fn frame_done(&mut self) {
-        if self.lift.take().is_some() {
-            self.publish();
-        }
-    }
-
-    /// Puts the active pen's state in [`crate::stylus`]: while the tip
-    /// touches, its pressure; after it lifts, the pressure it had, until a
-    /// frame has drawn the stroke's end; then none.
-    fn publish(&self) {
-        let Some(tool) = self
-            .state
-            .active
-            .and_then(|index| self.state.tools.get(index))
-        else {
-            return;
-        };
-        let pressure = if tool.track.down {
-            Some(tool.track.pressure)
-        } else {
-            self.lift
-        };
-        stylus::set(PenSource::WaylandTablet, pressure);
-        stylus::set_tool(tool.track.tilt, tool.track.eraser);
-    }
-}
-
-/// The sample for the egui event made from `event`; none for a pen going
-/// away.
-fn sample(egui: &egui::Event, event: PenEvent) -> Option<Sample> {
-    let (kind, pos) = match *egui {
-        egui::Event::PointerMoved(pos) => (SampleKind::Move, pos),
-        egui::Event::PointerButton { pos, pressed, .. } => (
-            if pressed {
-                SampleKind::Press
-            } else {
-                SampleKind::Release
-            },
-            pos,
-        ),
-        _ => return None,
-    };
-    Some(Sample {
-        kind,
-        pos: [pos.x, pos.y],
-        pressure: event.reading.pressure,
-        tilt: event.reading.tilt,
-        eraser: event.reading.eraser,
-    })
 }
 
 /// `true` when `socket` has bytes to read now (a `poll` that never waits).
@@ -683,16 +643,10 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
                 button,
                 pressed == WEnum::Value(zwp_tablet_tool_v2::ButtonState::Pressed),
             )),
-            Event::Frame { .. } => {
-                let frame = std::mem::take(&mut tool.frame);
-                let touching = tool.track.down.then_some(tool.track.pressure);
+            Event::Frame { time } => {
+                let mut frame = std::mem::take(&mut tool.frame);
+                frame.time = Some(time);
                 tool.track.apply(&frame, &mut state.out);
-                if !tool.track.down
-                    && let Some(pressure) = touching
-                {
-                    state.lifted = Some(pressure);
-                }
-                state.active = Some(index);
             }
             Event::Removed => {
                 if let Some(device) = tool.shape_device.take() {
@@ -700,7 +654,6 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
                 }
                 proxy.destroy();
                 state.tools.remove(index);
-                state.active = None;
             }
             _ => {}
         }
@@ -821,55 +774,6 @@ mod tests {
         let known = ZwpTabletManagerV2::interface().version;
         assert_eq!(version(known + 3, known), known, "never above Sue's tables");
         assert_eq!(version(1, known), 1);
-    }
-
-    #[test]
-    fn each_pen_event_becomes_one_sample_for_its_egui_event() {
-        use crate::tablets::Reading;
-        let reading = Reading {
-            pressure: Some(0.4),
-            tilt: Some([0.1, 0.2]),
-            eraser: true,
-        };
-        let modifiers = egui::Modifiers::default();
-        let pointers = [
-            (PenPointer::Move([2.0, 4.0]), Some(SampleKind::Move)),
-            (
-                PenPointer::Button {
-                    button: egui::PointerButton::Primary,
-                    pressed: true,
-                    at: [2.0, 4.0],
-                },
-                Some(SampleKind::Press),
-            ),
-            (
-                PenPointer::Button {
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    at: [2.0, 4.0],
-                },
-                Some(SampleKind::Release),
-            ),
-            (PenPointer::Gone, None),
-        ];
-        for (pointer, kind) in pointers {
-            let event = PenEvent {
-                surface: 1,
-                pointer,
-                reading,
-            };
-            let egui = pointer.to_egui(1.5, modifiers);
-            let made = sample(&egui, event);
-            assert_eq!(made.map(|sample| sample.kind), kind);
-            if let Some(made) = made {
-                // At the egui event's own position, so a studio can pair
-                // them.
-                assert!(made.is_for(made.kind, [3.0, 6.0]));
-                assert_eq!(made.pressure, Some(0.4));
-                assert_eq!(made.tilt, Some([0.1, 0.2]));
-                assert!(made.eraser);
-            }
-        }
     }
 
     #[test]

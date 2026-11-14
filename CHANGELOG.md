@@ -46,6 +46,11 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint's 3D controls (camera, light, shadow, shapes and body
   shape) are translated into German, French, Spanish, Italian,
   Brazilian Portuguese, Japanese, Simplified Chinese and Arabic.
+- A pen on a tablet whose driver has Windows Ink turned off (WinTab):
+  every point of a stroke now takes the pressure the pen had at that
+  point. All the points drawn within one frame used to share the frame's
+  last pressure, which stepped a line's width on fast strokes. The pen's
+  tilt reaches Sue Paint's tilt settings on this route as well.
 - For contributors: the tests that drive real frames through Sue moved
   out of `bins/sue/src/runtime.rs` into `bins/sue/src/runtime/tests/`,
   one file for each area, with shared helpers that find what to click
