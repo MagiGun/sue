@@ -114,7 +114,9 @@ pub fn setting(section: &str, command: &str) -> String {
 
 /// The key, in a studio's section, of the one setting that holds the keys
 /// of every command without a default chord. A command's own setting has
-/// an underscore where its name has a dot, so the two never meet.
+/// an underscore where its name has a dot, so the two meet only for a
+/// command named `custom` with no dot at all, which
+/// `CommandRegistry::problems` reports.
 pub const SPARSE_KEY: &str = "custom";
 
 /// The setting that holds the keys of commands without a default chord,
@@ -147,8 +149,17 @@ impl SparseKeys {
                 after_or = false;
                 if let (Some((_, chords)), Ok(chord)) = (entry.as_mut(), word.parse()) {
                     chords.push(chord);
+                    continue;
                 }
-                continue;
+                // No chord after `or`: a word that is an entry starts the
+                // next command (its key is not lost to a stray `or`), any
+                // other word is left out.
+                if !word
+                    .split_once('=')
+                    .is_some_and(|(name, _)| Self::holds(name))
+                {
+                    continue;
+                }
             }
             if word == "or" && entry.is_some() {
                 after_or = true;
@@ -158,7 +169,7 @@ impl SparseKeys {
                 keys.set(&name, chords);
             }
             entry = match word.split_once('=') {
-                Some((name, chord)) if !name.is_empty() => {
+                Some((name, chord)) if Self::holds(name) => {
                     let mut chords = Keybinds::default();
                     if let Ok(chord) = chord.parse() {
                         chords.push(chord);
@@ -192,9 +203,25 @@ impl SparseKeys {
             .map(|(_, chords)| chords)
     }
 
+    /// `true` if the text can hold `name`: it is not empty, is not the
+    /// word `or`, and has no space and no `=` in it. Every command name is
+    /// like that (`CommandRegistry::problems` checks the tables); whoever
+    /// makes names from what people type (an Auto Action's title) makes
+    /// them so.
+    #[must_use]
+    pub fn holds(name: &str) -> bool {
+        !name.is_empty()
+            && name != "or"
+            && !name.contains(|ch: char| ch.is_whitespace() || ch == '=')
+    }
+
     /// Gives `command` these chords, in its old place if it had some; no
-    /// chords takes it out.
+    /// chords takes it out. A name the text cannot hold ([`Self::holds`])
+    /// is left out: written, it would read back as another command's key.
     pub fn set(&mut self, command: &str, chords: Keybinds) {
+        if !Self::holds(command) {
+            return;
+        }
         // A chord is one word here, as every chord a key press makes is.
         let chords = Keybinds::new(
             chords
@@ -893,6 +920,20 @@ mod tests {
         assert_eq!(odd.to_string(), "c.d=F5 e.f=F3 or F4");
         assert!(SparseKeys::parse("").is_empty());
         assert!(SparseKeys::parse("or or or").is_empty());
+        // A stray `or` before an entry does not cost that entry its key.
+        assert_eq!(
+            SparseKeys::parse("a.b=F1 or c.d=F2 or e.f== or=F6").to_string(),
+            "a.b=F1 c.d=F2 e.f=="
+        );
+        // A name the text cannot hold is never written: it would read
+        // back as a key of another command.
+        let mut keys = SparseKeys::parse("a.b=F1");
+        for name in ["my action", "a=b", "or", "", "tab\tbed"] {
+            assert!(!SparseKeys::holds(name), "{name:?}");
+            keys.set(name, binds("F9"));
+        }
+        assert!(SparseKeys::holds("auto.play.3"));
+        assert_eq!(keys.to_string(), "a.b=F1");
         // No chords takes a command out; the others keep their order.
         let mut keys = SparseKeys::parse("a.b=F1 c.d=F2 e.f=F3");
         keys.set("c.d", Keybinds::default());
@@ -993,6 +1034,34 @@ mod tests {
             Some("anim.next_frame=. subtool.g_pen=Ctrl+=")
         );
         assert!(chords(&back, "demo_keys", &table[2]).is_empty());
+    }
+
+    #[test]
+    fn keys_a_settings_file_must_escape_come_back_as_they_were() {
+        let table = every_command();
+        let mut rice = RiceSchema::new();
+        rice.register_all(&declarations("demo_keys", &table))
+            .unwrap();
+        let given = [
+            ("view.grid", "Ctrl+\""),
+            ("layer.merge_down", "\\ or Alt+#"),
+            ("anim.next_frame", "' or Shift+Space"),
+        ];
+        for (command, chords) in given {
+            let (path, value) = bind(&rice, "demo_keys", command, &binds(chords));
+            assert_eq!(path, "demo_keys.custom");
+            rice.set(&path, value).unwrap();
+        }
+        let written = rice.to_suerice();
+        let mut back = RiceSchema::parse(&written).unwrap();
+        back.register_all(&declarations("demo_keys", &table))
+            .unwrap();
+        let keys = SparseKeys::read(&back, "demo_keys");
+        assert_eq!(keys.len(), 3, "{written}");
+        for (command, chords) in given {
+            assert_eq!(keys.get(command), Some(&binds(chords)), "{written}");
+        }
+        assert_eq!(back.to_suerice(), written);
     }
 
     #[test]

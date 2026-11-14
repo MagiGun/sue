@@ -420,8 +420,9 @@ impl<S: 'static> CommandRegistry<S> {
     /// What is wrong with the tables, one line each (none in a good
     /// build): a name used twice, a name the shortcut settings cannot
     /// hold, chords that do not parse, a label with no English message, a
-    /// family whose prefix shadows a plain name, and one default chord
-    /// held by two commands.
+    /// family whose prefix shadows a plain name, two names whose keys
+    /// would live in one setting, and one default chord held by two
+    /// commands.
     #[must_use]
     pub fn problems(&self) -> Vec<String> {
         let mut problems = Vec::new();
@@ -432,10 +433,7 @@ impl<S: 'static> CommandRegistry<S> {
             if seen[name] == 2 {
                 problems.push(format!("{name}: the name is used twice"));
             }
-            if name.is_empty()
-                || name == "or"
-                || name.contains(|ch: char| ch.is_whitespace() || ch == '=')
-            {
+            if !shortcuts::SparseKeys::holds(name) {
                 problems.push(format!(
                     "{name:?}: a name is not empty, not \"or\", and has no space and no ="
                 ));
@@ -462,6 +460,28 @@ impl<S: 'static> CommandRegistry<S> {
                         command.name
                     ));
                 }
+            }
+        }
+        // A command's keys live in the setting its name maps to, so two
+        // names with one setting would share their keys, and the setting
+        // of the keys without a default is nobody's own.
+        let sparse = shortcuts::sparse_setting(self.keys_section);
+        let mut settings: HashMap<String, &str> = HashMap::new();
+        for command in self.listed() {
+            let setting = shortcuts::setting(self.keys_section, command.name);
+            if setting == sparse {
+                problems.push(format!(
+                    "{}: its setting {setting} is the one that holds the keys without a default",
+                    command.name
+                ));
+            }
+            if let Some(first) = settings.get(setting.as_str()) {
+                problems.push(format!(
+                    "{}: its setting {setting} is the setting of {first} too",
+                    command.name
+                ));
+            } else {
+                settings.insert(setting, command.name);
             }
         }
         let defaults: Vec<(&str, Keybinds)> = self
@@ -820,6 +840,9 @@ mod tests {
         Command::new("layer.copy", "none", "layer", broken).keys("F5 or Ctrl+Shift+N"),
         Command::new("view.fit", "none", "view", broken).keys("Super+S"),
         Command::new("view grid", "none", "view", broken),
+        Command::new("file.save_as", "none", "file", broken),
+        Command::new("file.save.as", "none", "file", broken),
+        Command::new("custom", "none", "file", broken),
     ];
 
     #[test]
@@ -856,7 +879,19 @@ mod tests {
             "{problems:?}"
         );
         assert!(has("\"view grid\": a name is not empty"), "{problems:?}");
-        assert_eq!(problems.len(), 8, "{problems:?}");
+        // Names are told apart by their settings too: a dot and an
+        // underscore are one there, and `custom` is taken.
+        assert!(
+            has(
+                "file.save.as: its setting toy_keys.file_save_as is the setting of file.save_as too"
+            ),
+            "{problems:?}"
+        );
+        assert!(
+            has("custom: its setting toy_keys.custom is the one that holds the keys"),
+            "{problems:?}"
+        );
+        assert_eq!(problems.len(), 10, "{problems:?}");
         // The first of a name is the one that runs, and a plain name wins
         // over a family.
         assert_eq!(registry.find("file.save").unwrap().0.chords, "Ctrl+S");

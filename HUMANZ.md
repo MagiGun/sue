@@ -1446,7 +1446,8 @@ then the longest family prefix), runs it, says how its item looks, lists
 the palette's entries and a `Shortcut` row for every command that can
 have a key, and names what is wrong with the tables (`problems`: a name
 twice, chords that do not parse, a label without an English message, a
-family that shadows a name, one chord on two commands). Commands without
+family that shadows a name, two names with one setting, one chord on two
+commands). Commands without
 a default chord get no setting each: the keys people give them live in
 one text setting, `<section>.custom` (`shortcuts::SparseKeys`, written
 `view.grid=F7 or F8 layer.merge_down=Ctrl+E`); `shortcuts::bind` says
