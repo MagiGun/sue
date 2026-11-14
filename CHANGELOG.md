@@ -51,6 +51,10 @@ follow [Semantic Versioning](https://semver.org/).
   typing the start of an item's name goes to it. A menu taller than the
   window scrolls (with the wheel, by resting the pointer on the arrow at
   its end, or by itself to follow the keys) instead of being cut off.
+- Every color wheel can show a triangle instead of the square: the
+  small button at the wheel's bottom right switches between a square of
+  saturation and value (HSV) and a triangle between the hue, white and
+  black (HLS), and the numbers under the wheel follow it.
 
 ### Changed
 
@@ -100,6 +104,10 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint's entries in the command palette show the key each one
   has, Keyboard Shortcuts too, and New is named as in the File menu
   ("Sue Paint: New...").
+- Window title bars, the color wheel's popup, the command palette and
+  the font list follow the theme's spacing, corners and type sizes. The
+  title bar's buttons light up smoothly under the pointer and tell a
+  screen reader their names.
 
 ### Fixed
 
@@ -144,6 +152,10 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Writer's entries in the command palette name the studio once
   ("Sue Writer: New Project..."), not twice.
 - Ctrl+F12 inserts a table in Sue Writer, as its Table menu always said.
+- The response curve graph (pen pressure and the like) moves the point
+  you pressed on even when the hand moves quickly, instead of adding a
+  second point beside it.
+- The opacity bar's handle shows on light themes too.
 
 ### Removed
 

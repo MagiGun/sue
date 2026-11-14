@@ -107,6 +107,12 @@ entities = { $count ->
 }
 curve-pen-pressure = ضغط القلم
 curve-output = المخرج
+color-wheel-show-triangle = إظهار مثلث HLS
+color-wheel-show-square = إظهار مربع HSV
+window-minimize = تصغير
+window-maximize = تكبير
+window-restore = استعادة
+window-close = إغلاق
 pick-a-color = اختر لونا
 undo = تراجع
 nothing-to-undo = لا يوجد شيء للتراجع عنه

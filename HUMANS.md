@@ -1169,6 +1169,8 @@ controls for it in **Settings**:
 - numbers with a range become **sliders** with their value beside them,
 - colors become **swatches**: click one and a color wheel opens next to it.
   Turn the ring for the hue, pick in the square for how strong and how light,
+  (the small button at the wheel's corner turns the square into a triangle
+  of lightness and saturation in every wheel, and back again),
   slide the bar for how see-through, or click one of the grays below. You
   never type a color code. Letting go of a drag is one `Ctrl+Z` step,
 - short lists of choices become **side-by-side buttons**, longer ones

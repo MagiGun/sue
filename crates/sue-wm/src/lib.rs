@@ -68,7 +68,8 @@ pub use catalog::{
     SettingsItem, SettingsPage,
 };
 pub use color_pick::{
-    ColorPick, alpha_bar, checker_fill, color_button, color_wheel, hsv_of, rgb_of, swatch,
+    ColorPick, WheelShape, alpha_bar, checker_fill, color_button, color_wheel, hls_of, hsv_of,
+    rgb_of, set_wheel_shape, swatch, wheel_shape,
 };
 pub use commands::{Call, Command, CommandRegistry, Facts, Flags};
 pub use config::{

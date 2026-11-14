@@ -461,10 +461,22 @@ pub fn preview_family(ctx: &egui::Context, name: &str) -> FontFamily {
     }
 }
 
+/// How much larger than interface text a font list draws each name, so
+/// its face shows: the title step of the type scale over the body step at
+/// the default sizes (15 over 13).
+const LIST_NAME_SCALE: f32 = 15.0 / 13.0;
+
+/// How many rows a font list shows before it scrolls.
+const LIST_ROWS: f32 = 12.0;
+
 /// The installed families as a list for a font menu, each name drawn in
 /// its own font, filtered by `filter` (any case) and with `selected`
-/// marked. Only the rows on screen are laid out and loaded. Answers the
+/// marked. Rows are as tall as list rows of the [`Density`] the list is
+/// drawn at (taller when a name needs it), and twelve show before it
+/// scrolls. Only the rows on screen are laid out and loaded. Answers the
 /// family clicked.
+///
+/// [`Density`]: crate::ui::Density
 pub fn list_ui(ui: &mut egui::Ui, selected: &str, filter: &str) -> Option<String> {
     let needle = filter.to_lowercase();
     let names: Vec<String> = families()
@@ -472,12 +484,13 @@ pub fn list_ui(ui: &mut egui::Ui, selected: &str, filter: &str) -> Option<String
         .filter(|name| needle.is_empty() || name.to_lowercase().contains(&needle))
         .collect();
     let selected = canonical(selected);
-    let size = ui.style().text_styles[&egui::TextStyle::Body].size * 1.15;
-    let row = (size * 1.6).max(ui.spacing().interact_size.y);
+    // The body size egui was given is the theme's body step.
+    let size = ui.style().text_styles[&egui::TextStyle::Body].size * LIST_NAME_SCALE;
+    let row = crate::ui::Density::of(ui).row().max(size * 1.6);
     let mut picked = None;
     egui::ScrollArea::vertical()
         .id_salt("sue-font-list")
-        .max_height(340.0)
+        .max_height(row * LIST_ROWS)
         .auto_shrink([false, true])
         .show_rows(ui, row, names.len(), |ui, rows| {
             let shown = &names[rows];

@@ -85,6 +85,12 @@ pick-a-color = Pick a color
 none = None
 curve-pen-pressure = Pen pressure
 curve-output = Output
+color-wheel-show-triangle = Show the HLS triangle
+color-wheel-show-square = Show the HSV square
+window-minimize = Minimize
+window-maximize = Maximize
+window-restore = Restore Down
+window-close = Close
 
 ## shell.rs
 

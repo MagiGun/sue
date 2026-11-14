@@ -80,6 +80,12 @@ pick-a-color = Elegir un color
 none = Ninguno
 curve-pen-pressure = Presión del lápiz
 curve-output = Salida
+color-wheel-show-triangle = Mostrar el triángulo HLS
+color-wheel-show-square = Mostrar el cuadrado HSV
+window-minimize = Minimizar
+window-maximize = Maximizar
+window-restore = Restaurar
+window-close = Cerrar
 
 ## Las listas del Hub
 
