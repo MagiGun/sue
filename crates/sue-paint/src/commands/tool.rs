@@ -59,12 +59,12 @@ const fn c(
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     c("tool.zoom", "zoom-tool", |paint, _, _| {
-        paint.toolbox.cycle('/')
+        paint.toolbox.cycle('/');
     })
     .keys("/")
     .icon("tool-zoom"),
     c("tool.hand", "hand-tool", |paint, _, _| {
-        paint.toolbox.cycle('H')
+        paint.toolbox.cycle('H');
     })
     .keys("H")
     .icon("tool-hand"),
@@ -108,7 +108,9 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     c(
         "tool.brush",
         "brush-airbrush-and-decoration-tools",
-        |paint, _, _| paint.toolbox.cycle('B'),
+        |paint, _, _| {
+            paint.toolbox.cycle('B');
+        },
     )
     .keys("B")
     .icon("tool-brush"),
@@ -118,7 +120,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     .keys("E")
     .icon("tool-eraser"),
     c("tool.blend", "blend-tool", |paint, _, _| {
-        paint.toolbox.cycle('J')
+        paint.toolbox.cycle('J');
     })
     .keys("J")
     .icon("tool-blend"),
@@ -130,7 +132,9 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     c(
         "tool.figure",
         "figure-frame-border-ruler-tools",
-        |paint, _, _| paint.toolbox.cycle('U'),
+        |paint, _, _| {
+            paint.toolbox.cycle('U');
+        },
     )
     .keys("U")
     .icon("tool-figure"),
