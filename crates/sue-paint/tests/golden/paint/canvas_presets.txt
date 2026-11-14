@@ -1,0 +1,2 @@
+Webtoon strip	800	12800	144	1
+Sticker	370	320	72	0

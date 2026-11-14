@@ -1,0 +1,5 @@
+# Sue autosave, format 1
+at=1760000400
+project=C:\Users\artist\Documents\The Lighthouse Keeper.sue
+name=The Lighthouse Keeper
+page=sue-writer

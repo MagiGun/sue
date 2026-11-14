@@ -1,0 +1,24 @@
+general.confirm_on_exit	true
+general.autosave_seconds	120
+launchpad.pinned	sue-paint
+display.ui_scale	1.25
+motion.animation_speed	1.5
+layout.padding	12
+colors.void	#101010
+sue_paint.width	2480
+sue_paint.height	3508
+sue_paint.dpi	350
+sue_paint.save_format	sue
+sue_paint.touch_mode	studio
+sue_paint.custom_key_1	view.fit
+sue_paint.custom_key_7	layer.merge_down
+sue_paint.theme	paper
+sue_paint.pen_pressure	0,0 0.3,0.6 0.7,0.9 1,1
+sue_paint.shift_line	false
+sue_paint.remember_layout	false
+keys.command_palette_alt	
+keys.undo	Ctrl+Z or Alt+Backspace
+sue_paint_keys.file_save_as	Ctrl+Shift+S
+sue_paint_keys.view_fit	Ctrl+0 or F
+sue_paint_keys.tool_pen	P or N
+sue_writer_keys.format_bold	Ctrl+B or Ctrl+Shift+B

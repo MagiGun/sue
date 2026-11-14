@@ -1,0 +1,70 @@
+# kernel.sue, as Sue 0.0.75 wrote it
+entities 11
+entity 0efe21f1-4ac6-43c1-a9ba-a91480f18c4d class "sue.image" name "Picture"
+  property layer.opacity = float 0.5
+  base pixels 2 by 2 Rgba8: ff0000ff00ff00800000ff4000000000
+entity 39763e77-d1e4-41fe-b30d-c334a15d5ef8 class "sue.node" name "Node"
+  base node "root" over 0..0, children []
+entity 4b40450f-2293-466f-a5c5-18942dc2ff12 class "sue.mesh" name "Mesh"
+  base mesh positions (0 0 0) (2 0 0) (2 1 0) (0 1 0), indices [0, 1, 2, 0, 2, 3]
+entity 790ee86b-6e5f-4cd7-b799-25daebe7f794 class "sue.vector" name "Spline"
+  base spline closed true, knots (0 0) (1 2) (3 2) (4 0)
+entity 7fc249c2-0c0a-4175-872d-749ecef77454 class "sue.image" name "Gray"
+  base pixels 3 by 1 Gray8: 007fff
+entity 82a1c421-0d3a-4dbc-9d68-4327d6ea4630 class "golden.folder" name "Folder"
+  meta note = "two lines\nof text"
+  meta source = "made by the generator"
+  property a.bool = bool true
+  property a.bytes = bytes 000102feff
+  property a.color = color 1 0.5019608 0 alpha 1 in srgb
+  property a.entity = entity ecff36cf-0be2-4e56-837f-3f0ae051eb1b
+  property a.float = float 0.1
+  property a.int = int -42
+  property a.list = list [int 1, text "two", bool false]
+  property a.map = map {"depth": int 2, "label": text "inner"}
+  property a.newer = opaque tag 200 090807
+  property a.quantity = quantity 12.5 mm
+  property a.text = text "Text with \"quotes\" and a tab\there"
+  property a.time = time 1058400000 flicks
+  property a.vec2 = vec2 1.5 -2
+  property a.vec3 = vec3 0 1 2.5
+  property a.vec4 = vec4 0.25 0.5 0.75 1
+  property a.wide_color = color 0.5 0.25 0.125 alpha 0.5 in display-p3
+entity 87fa5cf3-7eb5-4103-84f7-16a1bb300938 class "sue.audio" name "Sound"
+  base sound 8000 Hz, 2 channels, 3 frames, samples 0 0.5 -0.5 1 -1 0.25
+entity a9878171-2c04-45b4-be10-abe6140a8c5c class "sue.span" name "Span"
+  base span from 705600 for 1411200 flicks
+entity aa53b508-11d6-4368-bf3b-fd0650596c02 class "sue.image" name "Light"
+  base pixels 1 by 1 RgbaF32: 1.5 0.25 0 1
+entity bc103a05-df1c-4083-881c-baae8bdf29ba class "sue.text" name "Text"
+  base text "It was a dark night."
+  also node "paragraph" over 0..20, children [ecff36cf-0be2-4e56-837f-3f0ae051eb1b]
+  extension golden.note: text "Check the weather", pin ecff36cf-0be2-4e56-837f-3f0ae051eb1b, weight 0.75
+entity ecff36cf-0be2-4e56-837f-3f0ae051eb1b class "golden.pin" name "Pin"
+tree kinds golden.part sue.child
+relations 12
+relation 4b40450f-2293-466f-a5c5-18942dc2ff12 golden.part a9878171-2c04-45b4-be10-abe6140a8c5c order "i"
+relation 82a1c421-0d3a-4dbc-9d68-4327d6ea4630 sue.child bc103a05-df1c-4083-881c-baae8bdf29ba order "i"
+relation 82a1c421-0d3a-4dbc-9d68-4327d6ea4630 sue.child 87fa5cf3-7eb5-4103-84f7-16a1bb300938 order "r"
+relation 82a1c421-0d3a-4dbc-9d68-4327d6ea4630 sue.child 790ee86b-6e5f-4cd7-b799-25daebe7f794 order "w"
+relation 82a1c421-0d3a-4dbc-9d68-4327d6ea4630 sue.child 0efe21f1-4ac6-43c1-a9ba-a91480f18c4d order "y"
+relation 82a1c421-0d3a-4dbc-9d68-4327d6ea4630 sue.child 7fc249c2-0c0a-4175-872d-749ecef77454 order "z"
+relation 82a1c421-0d3a-4dbc-9d68-4327d6ea4630 sue.child aa53b508-11d6-4368-bf3b-fd0650596c02 order "zi"
+relation 82a1c421-0d3a-4dbc-9d68-4327d6ea4630 sue.child 4b40450f-2293-466f-a5c5-18942dc2ff12 order "zr"
+relation 82a1c421-0d3a-4dbc-9d68-4327d6ea4630 sue.child a9878171-2c04-45b4-be10-abe6140a8c5c order "zw"
+relation 82a1c421-0d3a-4dbc-9d68-4327d6ea4630 sue.child 39763e77-d1e4-41fe-b30d-c334a15d5ef8 order "zy"
+relation 87fa5cf3-7eb5-4103-84f7-16a1bb300938 golden.cable 790ee86b-6e5f-4cd7-b799-25daebe7f794 order "i"
+  property gain = float 0.5
+  property port = text "left"
+relation bc103a05-df1c-4083-881c-baae8bdf29ba sue.ref 0efe21f1-4ac6-43c1-a9ba-a91480f18c4d order "i"
+document
+  property doc.author = text "Sue 0.0.75"
+  property doc.created = time 42336000000 flicks
+  property doc.title = text "Golden"
+preset "Print" for "export.pdf"
+  property bleed = bool true
+  property dpi = int 300
+preset "Voice" for "audio.compress"
+  property ratio = float 4
+thumbnail 89504e470d0a1a0a
+unknown chunk GOLD version 3: 6b657074206173206974206973

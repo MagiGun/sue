@@ -1,0 +1,6 @@
+# sue paint color sets 1
+Default	#000000 #ffffff #f03c5a #fa6e46 #ff8c00 #ffcd00 #fffad2 #ffffeb #ffff00 #ffff8c #bef05a #28aa28 #1e6e32 #3cbe96 #00e6e6 #b4ffff #ffffff #bee6ff #46aafa #3278f0 #0046ff #8278ff #8228e6 #faa0ff #be46e6 #ffb4ff #ffd2fa #fa64c8 #eb3c6e #eb968c #a04632 #6e3c28 #ffa06e #ffc8aa #ffe1d2 #fff5e6 #ffebc8 #ffd2a0 #fab978 #f0a05a #ff8c96 #ffaaa0 #ffc8b9 #fadcc8 #e6bea0 #d2a082 #b48264 #966450 #404040 #606060 #808080 #a0a0a0 #c0c0c0 #d2d2d2 #e6e6e6 #f5f5f5
+Grays	#000000 #0f0f0f #1f1f1f #2f2f2f #3f3f3f #4f4f4f #5f5f5f #6f6f6f #7f7f7f #8f8f8f #9f9f9f #afafaf #bfbfbf #cfcfcf #dfdfdf #efefef #ffffff
+Skin Tones	#ffe0c4 #fad0b0 #f1c2a0 #e0ac87 #c68d68 #a87050 #8d583c #71442d #563424 #3c261c #ffc8be #e6a096
+Pastels	#ffd1dc #ffe4c4 #fffacd #d6f5d6 #ccecff #ddd6ff #f5d6ff #ffecec #e6fff5 #f0f0ff
+My inks	#14141c #781e28 #f0ecdc

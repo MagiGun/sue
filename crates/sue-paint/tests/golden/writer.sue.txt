@@ -1,0 +1,119 @@
+# writer.sue, as Sue 0.0.75 wrote it
+chunk GOLD version 3: 6b657074206173206974206973
+chunk ARNA version 1
+entities 17
+entity 1cfe2900-c170-4683-aaa4-da8b81ebe062 class "sue.document" name "Scene 1"
+  property doc.label = text "Scene"
+  property doc.status = text "First Draft"
+  property doc.synopsis = text "A stranger washes up."
+  base text "By morning the sea had laid a man on the north beach, breathing.\n"
+  marks: 1
+    54..63 bold = bool true, grows
+entity 2aa10e8a-9431-4f4f-8502-6eed830c4a11 class "sue.comment" name "Comment"
+  property sue.comment.author = text "A. Writer"
+  property sue.comment.date = text "2026-10-29"
+  base text "Plant the bell earlier, in chapter one?"
+entity 386b8659-d321-4d0f-83e7-e1527916d437 class "sue.manuscript" name "The Lighthouse Keeper"
+  property doc.author = text "A. Writer"
+  property doc.target_words = int 80000
+  property doc.title = text "The Lighthouse Keeper"
+  property sue_writer.font = text "Georgia"
+  property sue_writer.header = text "\t\tWriter / {title} / {page}"
+  property sue_writer.heading_font = text "Georgia"
+  property sue_writer.margin = float 72
+  property sue_writer.page = text "Letter"
+  property sue_writer.session_target = int 750
+  property sue_writer.sheet = text "manuscript"
+  property sue_writer.simple = bool false
+  property sue_writer.size = float 12
+  property sue_writer.template = text "novel"
+entity 503a180f-28d5-4040-add8-fc5d272a5d90 class "sue.folder" name "Characters"
+entity 5b5c8b08-16bc-4428-8ec6-fdb47fa92a5d class "sue.comment" name "Comment"
+  property sue.comment.author = text "Editor"
+  property sue.comment.date = text "2026-10-30"
+  base text "Yes, in the storm."
+entity 60c49e9c-76bf-43c3-b406-98eff3b825f5 class "sue.folder" name "Manuscript"
+  property manuscript.role = text "draft"
+entity 618e2122-5398-4b57-92b6-537a61c52cc3 class "sue.text_table" name "Table"
+  property sue.table.header_rows = int 1
+  table: 2 rows, 2 columns
+    ["Night", "Weather"]
+    ["Monday", "Fog"]
+entity 63491c3d-2f84-4e85-9839-ec696edf910d class "sue.document" name "Character Sketch"
+  property doc.synopsis = text "Copy this sheet for each character."
+  base text "Name\n\nRole in the story\n\nWhat they want\n\nWhat stands in the way\n\nHow they change\n\n"
+  marks: 5
+    0..5 style = text "heading2", grows
+    6..24 style = text "heading3", grows
+    25..40 style = text "heading3", grows
+    41..64 style = text "heading3", grows
+    65..81 style = text "heading3", grows
+entity 7b2862c5-3d7a-4940-b7f0-67f749e059f3 class "sue.document" name "Notes"
+  base text "\n"
+  marks: 0
+entity 86cba2d3-9161-4e95-8104-be9163e5cbbb class "sue.document" name "Scene 1"
+  property doc.label = text "Scene"
+  property doc.status = text "Revised Draft"
+  property doc.synopsis = text "The storm, and a new sound."
+  base text "The storm came in off the water a little after six.\nMara had kept the light for eleven years. Tonight it made a new one.\nA lamp with oil for three nights\nHer father's logbook\n￼\nSomewhere below, a bell rang once.\n"
+  marks: 6
+    80..92 footnote = text "Since the winter her father died.", grows
+    112..119 italic = bool true, grows
+    121..154 list = text "bullet", grows
+    154..175 list = text "bullet", grows
+    175..178 embed = entity 618e2122-5398-4b57-92b6-537a61c52cc3, grows
+    196..212 comment = entity 2aa10e8a-9431-4f4f-8502-6eed830c4a11
+entity 8f83a035-b1a4-4739-ab75-6194c70e8d86 class "sue.folder" name "Trash"
+  property manuscript.role = text "trash"
+entity 967d5c8b-600a-4c5a-8d19-e1a9dc20b071 class "sue.document" name "Scene 2"
+  property doc.include = bool false
+  property doc.keywords = text "storm, bell"
+  property doc.notes = text "Cut unless the middle drags."
+  base text "An idea to keep.\n"
+  marks: 0
+entity 9ca81e19-7145-497f-8b93-64cad90204c8 class "sue.folder" name "Places"
+entity be56955b-e40c-4504-9881-012a9046991b class "sue.document" name "Setting Sketch"
+  property doc.synopsis = text "Copy this sheet for each place."
+  base text "Place\n\nSights, sounds and smells\n\nWhy it matters\n\n"
+  marks: 3
+    0..6 style = text "heading2", grows
+    7..33 style = text "heading3", grows
+    34..49 style = text "heading3", grows
+entity cf9ea069-64bc-483b-9c1f-a15dcd190965 class "sue.folder" name "Chapter 2"
+entity d644f606-ab28-4bdc-ab1b-020e3789e32c class "sue.folder" name "Research"
+  property manuscript.role = text "research"
+entity e42148ac-b593-491e-9ee5-3cf5751a4ee4 class "sue.folder" name "Chapter 1"
+tree kinds sue.child
+relations 14
+relation 2aa10e8a-9431-4f4f-8502-6eed830c4a11 sue.comment.reply 5b5c8b08-16bc-4428-8ec6-fdb47fa92a5d order "i"
+relation 386b8659-d321-4d0f-83e7-e1527916d437 sue.child 60c49e9c-76bf-43c3-b406-98eff3b825f5 order "i"
+relation 386b8659-d321-4d0f-83e7-e1527916d437 sue.child d644f606-ab28-4bdc-ab1b-020e3789e32c order "r"
+relation 386b8659-d321-4d0f-83e7-e1527916d437 sue.child 8f83a035-b1a4-4739-ab75-6194c70e8d86 order "w"
+relation 503a180f-28d5-4040-add8-fc5d272a5d90 sue.child 63491c3d-2f84-4e85-9839-ec696edf910d order "i"
+relation 60c49e9c-76bf-43c3-b406-98eff3b825f5 sue.child e42148ac-b593-491e-9ee5-3cf5751a4ee4 order "i"
+relation 60c49e9c-76bf-43c3-b406-98eff3b825f5 sue.child cf9ea069-64bc-483b-9c1f-a15dcd190965 order "r"
+relation 9ca81e19-7145-497f-8b93-64cad90204c8 sue.child be56955b-e40c-4504-9881-012a9046991b order "i"
+relation cf9ea069-64bc-483b-9c1f-a15dcd190965 sue.child 1cfe2900-c170-4683-aaa4-da8b81ebe062 order "i"
+relation cf9ea069-64bc-483b-9c1f-a15dcd190965 sue.child 967d5c8b-600a-4c5a-8d19-e1a9dc20b071 order "r"
+relation d644f606-ab28-4bdc-ab1b-020e3789e32c sue.child 503a180f-28d5-4040-add8-fc5d272a5d90 order "i"
+relation d644f606-ab28-4bdc-ab1b-020e3789e32c sue.child 9ca81e19-7145-497f-8b93-64cad90204c8 order "r"
+relation d644f606-ab28-4bdc-ab1b-020e3789e32c sue.child 7b2862c5-3d7a-4940-b7f0-67f749e059f3 order "w"
+relation e42148ac-b593-491e-9ee5-3cf5751a4ee4 sue.child 86cba2d3-9161-4e95-8104-be9163e5cbbb order "i"
+manuscript 386b8659-d321-4d0f-83e7-e1527916d437 "The Lighthouse Keeper": 82 words to publish
+  draft folder 60c49e9c-76bf-43c3-b406-98eff3b825f5
+  research folder d644f606-ab28-4bdc-ab1b-020e3789e32c
+  trash folder 8f83a035-b1a4-4739-ab75-6194c70e8d86
+  folder 60c49e9c-76bf-43c3-b406-98eff3b825f5 "Manuscript": 0 words, included true
+    folder e42148ac-b593-491e-9ee5-3cf5751a4ee4 "Chapter 1": 0 words, included true
+      document 86cba2d3-9161-4e95-8104-be9163e5cbbb "Scene 1": 41 words, included true
+    folder cf9ea069-64bc-483b-9c1f-a15dcd190965 "Chapter 2": 0 words, included true
+      document 1cfe2900-c170-4683-aaa4-da8b81ebe062 "Scene 1": 13 words, included true
+      document 967d5c8b-600a-4c5a-8d19-e1a9dc20b071 "Scene 2": 4 words, included false
+  folder d644f606-ab28-4bdc-ab1b-020e3789e32c "Research": 0 words, included true
+    folder 503a180f-28d5-4040-add8-fc5d272a5d90 "Characters": 0 words, included true
+      document 63491c3d-2f84-4e85-9839-ec696edf910d "Character Sketch": 16 words, included true
+    folder 9ca81e19-7145-497f-8b93-64cad90204c8 "Places": 0 words, included true
+      document be56955b-e40c-4504-9881-012a9046991b "Setting Sketch": 8 words, included true
+    document 7b2862c5-3d7a-4940-b7f0-67f749e059f3 "Notes": 0 words, included true
+  folder 8f83a035-b1a4-4739-ab75-6194c70e8d86 "Trash": 0 words, included true
+  publishes 60c49e9c-76bf-43c3-b406-98eff3b825f5 e42148ac-b593-491e-9ee5-3cf5751a4ee4 86cba2d3-9161-4e95-8104-be9163e5cbbb cf9ea069-64bc-483b-9c1f-a15dcd190965 1cfe2900-c170-4683-aaa4-da8b81ebe062 d644f606-ab28-4bdc-ab1b-020e3789e32c 503a180f-28d5-4040-add8-fc5d272a5d90 63491c3d-2f84-4e85-9839-ec696edf910d 9ca81e19-7145-497f-8b93-64cad90204c8 be56955b-e40c-4504-9881-012a9046991b 7b2862c5-3d7a-4940-b7f0-67f749e059f3 8f83a035-b1a4-4739-ab75-6194c70e8d86

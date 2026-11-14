@@ -1,0 +1,1 @@
+hide edit.redohide file.saveadd view.flip_hadd layer.new

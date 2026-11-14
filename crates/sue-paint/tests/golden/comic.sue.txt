@@ -1,0 +1,192 @@
+# comic.sue, as Sue 0.0.75 wrote it
+chunk GOLD version 3: 6b657074206173206974206973
+chunk ARNA version 1
+entities 16
+entity 04316961-515a-4c36-97eb-ff1d26ebebf0 class "sue.layer" name "Layer 1"
+  base pixels 64 by 64 Rgba8, 538 not clear, fnv 612b803f3b53a4b7
+entity 0d9739ae-a45f-4cd6-a71f-b2e636d0a31b class "sue.paint.frame" name "Frame"
+  property frame.border = float 1.5
+  property frame.gutter = float 3
+  property frame.panels = text "4,4 31,4 31,31 4,31;34,4 60,4 60,31 34,31;4,34 60,34 60,60 4,60"
+  base pixels 64 by 64 Rgba8, 1842 not clear, fnv 912f17bf2d504015
+entity 123877ce-e117-4a0e-bfbc-128ea34ce43f class "sue.image" name "Page 2"
+  property image.dpi = float 600
+  property image.height = int 64
+  property image.width = int 64
+  property page.bleed = float 3
+  property page.inner = float 5
+  property timelapse.record = bool false
+entity 242d1e06-2420-4e8e-8e0c-839d8a20a606 class "sue.paint.balloon" name "Balloon"
+  property balloon.line = float 1
+  property balloon.shapes = text "e:8,6,30,22;t:16,15,22,13,26,30;c:36,6,58,22;d:40,40,56,42,50,56,38,52;e:43,23,47,26;e:43,27,46,30;e:43,32,45,33"
+  base pixels 64 by 64 Rgba8, 1090 not clear, fnv c611baa1fb64796d
+entity 2efddf42-8ad2-4df2-9d8b-a69f16f31f61 class "sue.layer" name "Color"
+  base pixels 64 by 64 Rgba8, 4096 not clear, fnv b0420426dd53723d
+entity 5e21e69c-6c1f-4cf3-a0ff-9da6fefc0609 class "sue.layer" name "Layer 1"
+  property effect.border = bool true
+  property effect.border.color = color 1 1 0 alpha 1 in srgb
+  property effect.border.width = float 2
+  property effect.color = bool true
+  property effect.color.value = color 0.78431374 0.11764706 0.11764706 alpha 1 in srgb
+  property effect.expression = int 1
+  property effect.threshold = float 0.4
+  property effect.tone = bool true
+  property effect.tone.angle = float 15
+  property effect.tone.lines = float 30
+  base pixels 64 by 64 Rgba8, 268 not clear, fnv 0b7a766d21e568c9
+entity 70b6830f-09cf-493c-abe4-33e9e590fc29 class "sue.folder" name "Folder 1"
+  property layer.open = bool true
+  property style.opacity = float 0.5
+entity 7df71bb7-3c81-4800-bd13-4996fd035f85 class "sue.layer.paper" name "Paper"
+  property layer.color = color 1 1 1 alpha 1 in srgb
+entity 8171df5b-0e93-465b-9954-0e99a86ae822 class "sue.layer.paper" name "Paper"
+  property layer.color = color 1 1 1 alpha 1 in srgb
+entity 930c59c8-51fe-45da-8f60-682e8f778e11 class "sue.model" name "Cube"
+  geometry: 24 points fnv 179fe97d61f533a5, 6 primitives
+    6 polygons, 0 polylines, 0 curves
+entity b3adf89f-4b63-4ba9-9654-f472baf01431 class "sue.folder" name "Folder 2"
+  property layer.open = bool false
+entity b4f8bc90-e475-4445-a25c-97f204f605d3 class "sue.paint.layer3d" name "Cube"
+  property view3d.ambient = float 0.25
+  property view3d.crease = float 40
+  property view3d.distance = float 5
+  property view3d.fog = float 0
+  property view3d.fog_height = float 0.5
+  property view3d.follow_light = bool false
+  property view3d.fov = float 40
+  property view3d.intensity = float 1
+  property view3d.light = float 45
+  property view3d.line_color = int 0
+  property view3d.line_opacity = float 1
+  property view3d.line_width = float 1.5
+  property view3d.pan_x = float 0
+  property view3d.pan_y = float 0
+  property view3d.pitch = float 25
+  property view3d.shadows = bool false
+  property view3d.style = int 2
+  property view3d.yaw = float 40
+  base pixels 64 by 64 Rgba8, 2138 not clear, fnv 11feb34cbe3ac05d
+entity c01e93fa-c781-44a9-8c62-e13abc5998c1 class "sue.paint.text" name "Hi"
+  property text.box = text "3.9695,-2.5185006,15.435501,16.84"
+  property text.center = bool true
+  property text.color = color 0.078431375 0.078431375 0.23529412 alpha 1 in srgb
+  property text.content = text "Hi\nyou"
+  property text.font = text ""
+  property text.justify = text "middle"
+  property text.leading = float 1.100000023841858
+  property text.path = text ""
+  property text.ruby = text "0,2,hai"
+  property text.size = float 7
+  property text.tracking = float 0.05000000074505806
+  property text.vertical = bool false
+  property text.x = float 10
+  property text.y = float 9
+  base pixels 64 by 64 Rgba8, 77 not clear, fnv decd436fce49f462
+entity c22f9a8c-ea42-4af0-95cc-98e1f5ca0fcf class "sue.paint.story" name "Golden story"
+  property story.author = text "A. Artist"
+  property story.binding = text "right"
+  property story.first_number = int 3
+  property story.folio = bool true
+  property story.folio_place = text "center"
+  property story.folio_size = float 7
+  property story.start = text "paired"
+entity ed50065e-c3a5-4e88-9b12-8787fc662a2c class "sue.paint.correction" name "Brightness/Contrast"
+  property correction.filter = text "brightness:0.2,-0.1"
+entity f01a2068-ce93-42fe-803e-46d8ae8ee0b5 class "sue.image" name "Page 1"
+  property image.dpi = float 600
+  property image.height = int 64
+  property image.width = int 64
+  property page.bleed = float 3
+  property page.inner = float 5
+  property picture.layer_comps = text "Everything\t7df71bb7-3c81-4800-bd13-4996fd035f85,1,1,normal;5e21e69c-6c1f-4cf3-a0ff-9da6fefc0609,1,1,normal;2efddf42-8ad2-4df2-9d8b-a69f16f31f61,1,1,normal;b3adf89f-4b63-4ba9-9654-f472baf01431,1,1,normal;70b6830f-09cf-493c-abe4-33e9e590fc29,1,0.5,normal;ed50065e-c3a5-4e88-9b12-8787fc662a2c,1,1,normal;0d9739ae-a45f-4cd6-a71f-b2e636d0a31b,1,1,normal;242d1e06-2420-4e8e-8e0c-839d8a20a606,1,1,normal;c01e93fa-c781-44a9-8c62-e13abc5998c1,1,1,normal;b4f8bc90-e475-4445-a25c-97f204f605d3,1,1,normal\nFaint balloons\t7df71bb7-3c81-4800-bd13-4996fd035f85,1,1,normal;5e21e69c-6c1f-4cf3-a0ff-9da6fefc0609,1,1,normal;2efddf42-8ad2-4df2-9d8b-a69f16f31f61,1,1,normal;b3adf89f-4b63-4ba9-9654-f472baf01431,1,1,normal;70b6830f-09cf-493c-abe4-33e9e590fc29,1,0.5,normal;ed50065e-c3a5-4e88-9b12-8787fc662a2c,1,1,normal;0d9739ae-a45f-4cd6-a71f-b2e636d0a31b,1,1,normal;242d1e06-2420-4e8e-8e0c-839d8a20a606,0,0.5,multiply;c01e93fa-c781-44a9-8c62-e13abc5998c1,1,1,normal;b4f8bc90-e475-4445-a25c-97f204f605d3,1,1,normal"
+  property ruler.linear = text "4,60,60,50"
+  property ruler.paths = text "o:6,6 7.107422,6.544922 8.609375,7.359375 10.400391,8.337891 12.375,9.375 14.427734,10.365234 16.453125,11.203125 18.345703,11.783203 20,12 22.01389,11.625 24,10.666666 25.875,9.375 27.555555,8 28.958334,6.791667 30,6|c:56,46 55.982872,46.392418 55.93156,46.783157 55.846283,47.170544 55.727406,47.552914 55.57544,47.92864 55.391037,48.2961 55.17498,48.653732 54.928204,49 54.651756,49.33342 54.346825,49.65257 54.014717,49.956074 53.656853,50.24264 53.274765,50.51104 52.87009,50.76012 52.44456,50.98882 52,51.19615 51.53831,51.381237 51.061466,51.543278 50.571514,51.68158 50.070553,51.795555 49.560722,51.884712 49.04421,51.94867 48.523224,51.987152 48,52 47.476776,51.987152 46.95579,51.94867 46.439278,51.884712 45.929447,51.795555 45.428486,51.68158 44.938534,51.543278 44.461693,51.381237 44,51.19615 43.555435,50.988815 43.12991,50.76012 42.72523,50.51104 42.343147,50.24264 41.985283,49.956074 41.653175,49.65257 41.348244,49.33342 41.071796,49 40.82502,48.653732 40.608963,48.2961 40.42456,47.92864 40.272594,47.552914 40.153717,47.170544 40.068443,46.783157 40.017128,46.392418 40,46 40.017128,45.60758 40.068443,45.216843 40.153717,44.829456 40.272594,44.447086 40.42456,44.071365 40.608963,43.7039 40.82502,43.346268 41.071796,43 41.348244,42.66658 41.65317,42.34743 41.985283,42.043926 42.343147,41.75736 42.725235,41.48896 43.12991,41.23988 43.55544,41.01118 44,40.80385 44.46169,40.618763 44.938534,40.456722 45.428486,40.31842 45.929447,40.204445 46.439278,40.115288 46.95579,40.05133 47.476776,40.012848 48,40 48.523228,40.012848 49.044212,40.05133 49.560722,40.115288 50.070553,40.204445 50.571514,40.31842 51.06147,40.456722 51.53831,40.618763 52.000004,40.80385 52.444565,41.011185 52.870094,41.23988 53.274765,41.48896 53.656857,41.757362 54.014717,42.043922 54.34683,42.34743 54.65176,42.66658 54.928204,43 55.174984,43.346268 55.391037,43.7039 55.575443,44.071365 55.727406,44.447083 55.846283,44.82946 55.93156,45.216846 55.982872,45.607582"
+  property ruler.perspective = text "0,32;64,32"
+  property ruler.special = text "radial:32,20"
+  property ruler.symmetry = text "32,32,0.5"
+  property timelapse.record = bool false
+tree kinds sue.child
+relations 18
+relation 123877ce-e117-4a0e-bfbc-128ea34ce43f sue.child 8171df5b-0e93-465b-9954-0e99a86ae822 order "i"
+relation 123877ce-e117-4a0e-bfbc-128ea34ce43f sue.child 04316961-515a-4c36-97eb-ff1d26ebebf0 order "r"
+relation 70b6830f-09cf-493c-abe4-33e9e590fc29 sue.paint.member 2efddf42-8ad2-4df2-9d8b-a69f16f31f61 order "i"
+relation 70b6830f-09cf-493c-abe4-33e9e590fc29 sue.paint.member b3adf89f-4b63-4ba9-9654-f472baf01431 order "i"
+relation b3adf89f-4b63-4ba9-9654-f472baf01431 sue.paint.member 5e21e69c-6c1f-4cf3-a0ff-9da6fefc0609 order "i"
+relation b4f8bc90-e475-4445-a25c-97f204f605d3 sue.ref 930c59c8-51fe-45da-8f60-682e8f778e11 order "i"
+relation c22f9a8c-ea42-4af0-95cc-98e1f5ca0fcf sue.child f01a2068-ce93-42fe-803e-46d8ae8ee0b5 order "i"
+relation c22f9a8c-ea42-4af0-95cc-98e1f5ca0fcf sue.child 123877ce-e117-4a0e-bfbc-128ea34ce43f order "r"
+relation f01a2068-ce93-42fe-803e-46d8ae8ee0b5 sue.child 7df71bb7-3c81-4800-bd13-4996fd035f85 order "i"
+relation f01a2068-ce93-42fe-803e-46d8ae8ee0b5 sue.child 5e21e69c-6c1f-4cf3-a0ff-9da6fefc0609 order "r"
+relation f01a2068-ce93-42fe-803e-46d8ae8ee0b5 sue.child 2efddf42-8ad2-4df2-9d8b-a69f16f31f61 order "t"
+relation f01a2068-ce93-42fe-803e-46d8ae8ee0b5 sue.child b3adf89f-4b63-4ba9-9654-f472baf01431 order "u"
+relation f01a2068-ce93-42fe-803e-46d8ae8ee0b5 sue.child 70b6830f-09cf-493c-abe4-33e9e590fc29 order "w"
+relation f01a2068-ce93-42fe-803e-46d8ae8ee0b5 sue.child ed50065e-c3a5-4e88-9b12-8787fc662a2c order "y"
+relation f01a2068-ce93-42fe-803e-46d8ae8ee0b5 sue.child 0d9739ae-a45f-4cd6-a71f-b2e636d0a31b order "z"
+relation f01a2068-ce93-42fe-803e-46d8ae8ee0b5 sue.child 242d1e06-2420-4e8e-8e0c-839d8a20a606 order "zi"
+relation f01a2068-ce93-42fe-803e-46d8ae8ee0b5 sue.child c01e93fa-c781-44a9-8c62-e13abc5998c1 order "zr"
+relation f01a2068-ce93-42fe-803e-46d8ae8ee0b5 sue.child b4f8bc90-e475-4445-a25c-97f204f605d3 order "zw"
+picture 123877ce-e117-4a0e-bfbc-128ea34ce43f "Page 2": 64 by 64
+  layer 8171df5b-0e93-465b-9954-0e99a86ae822 "Paper" paper: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+  layer 04316961-515a-4c36-97eb-ff1d26ebebf0 "Layer 1" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+picture f01a2068-ce93-42fe-803e-46d8ae8ee0b5 "Page 1": 64 by 64
+  layer 7df71bb7-3c81-4800-bd13-4996fd035f85 "Paper" paper: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+  layer 5e21e69c-6c1f-4cf3-a0ff-9da6fefc0609 "Layer 1" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    in folder b3adf89f-4b63-4ba9-9654-f472baf01431
+    effects: border 2 wide in 1 1 0, watercolor edge off, extract line off, tone 20 0.2617994, layer color 0.78431374 0.11764706 0.11764706, expression 1, threshold 0.4
+  layer 2efddf42-8ad2-4df2-9d8b-a69f16f31f61 "Color" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    in folder 70b6830f-09cf-493c-abe4-33e9e590fc29
+  layer b3adf89f-4b63-4ba9-9654-f472baf01431 "Folder 2" other: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    in folder 70b6830f-09cf-493c-abe4-33e9e590fc29
+    a folder, open false
+  layer 70b6830f-09cf-493c-abe4-33e9e590fc29 "Folder 1" other: visible true, opacity 0.5, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    a folder, open true
+  layer ed50065e-c3a5-4e88-9b12-8787fc662a2c "Brightness/Contrast" other: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    a correction layer: brightness 0.2, contrast -0.1
+  layer 0d9739ae-a45f-4cd6-a71f-b2e636d0a31b "Frame" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    frame borders: 3 panels
+      panel 4 4 | 31 4 | 31 31 | 4 31
+      panel 34 4 | 60 4 | 60 31 | 34 31
+      panel 4 34 | 60 34 | 60 60 | 4 60
+  layer 242d1e06-2420-4e8e-8e0c-839d8a20a606 "Balloon" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    balloons: 7 shapes
+      ellipse 8 6 30 22
+      tail 16 15 22 13 26 30
+      cloud 36 6 58 22
+      drawn 40 40 56 42 50 56 38 52
+      ellipse 43 23 47 26
+      ellipse 43 27 46 30
+      ellipse 43 32 45 33
+  layer c01e93fa-c781-44a9-8c62-e13abc5998c1 "Hi" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    words "Hi\nyou" in font "" at 7 pixels, color 20 20 60, at 10 9, centered true, vertical false, tracking 0.05, leading 1.1, justified middle, on a path of 0 points, ruby [0..2 "hai"], box 3.9695 -2.5185006 15.435501 16.84
+  layer b4f8bc90-e475-4445-a25c-97f204f605d3 "Cube" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    a 3D layer of model 930c59c8-51fe-45da-8f60-682e8f778e11: yaw 40, pitch 25, distance 5, style 2, lines 1.5 wide
+  linear ruler from 4 60 to 60 50
+  special ruler: radial lines from 32 20
+  perspective ruler, vanishing points 0 32 | 64 32
+  symmetrical ruler through 32 32 at 0.5
+  ruler path of 15 points, closed false, from 6 6 to 30 6, fnv 7d71bab73f9ee325
+  ruler path of 96 points, closed true, from 56 46 to 55.982872 45.607582, fnv acbab2378b582956
+  layer comp "Everything"
+    7df71bb7-3c81-4800-bd13-4996fd035f85 visible true, opacity 1, blend normal
+    5e21e69c-6c1f-4cf3-a0ff-9da6fefc0609 visible true, opacity 1, blend normal
+    2efddf42-8ad2-4df2-9d8b-a69f16f31f61 visible true, opacity 1, blend normal
+    b3adf89f-4b63-4ba9-9654-f472baf01431 visible true, opacity 1, blend normal
+    70b6830f-09cf-493c-abe4-33e9e590fc29 visible true, opacity 0.5, blend normal
+    ed50065e-c3a5-4e88-9b12-8787fc662a2c visible true, opacity 1, blend normal
+    0d9739ae-a45f-4cd6-a71f-b2e636d0a31b visible true, opacity 1, blend normal
+    242d1e06-2420-4e8e-8e0c-839d8a20a606 visible true, opacity 1, blend normal
+    c01e93fa-c781-44a9-8c62-e13abc5998c1 visible true, opacity 1, blend normal
+    b4f8bc90-e475-4445-a25c-97f204f605d3 visible true, opacity 1, blend normal
+  layer comp "Faint balloons"
+    7df71bb7-3c81-4800-bd13-4996fd035f85 visible true, opacity 1, blend normal
+    5e21e69c-6c1f-4cf3-a0ff-9da6fefc0609 visible true, opacity 1, blend normal
+    2efddf42-8ad2-4df2-9d8b-a69f16f31f61 visible true, opacity 1, blend normal
+    b3adf89f-4b63-4ba9-9654-f472baf01431 visible true, opacity 1, blend normal
+    70b6830f-09cf-493c-abe4-33e9e590fc29 visible true, opacity 0.5, blend normal
+    ed50065e-c3a5-4e88-9b12-8787fc662a2c visible true, opacity 1, blend normal
+    0d9739ae-a45f-4cd6-a71f-b2e636d0a31b visible true, opacity 1, blend normal
+    242d1e06-2420-4e8e-8e0c-839d8a20a606 visible false, opacity 0.5, blend multiply
+    c01e93fa-c781-44a9-8c62-e13abc5998c1 visible true, opacity 1, blend normal
+    b4f8bc90-e475-4445-a25c-97f204f605d3 visible true, opacity 1, blend normal
+story c22f9a8c-ea42-4af0-95cc-98e1f5ca0fcf "Golden story": bound right true, starts paired true, folio shown true at 7 points, centered true, first number 3
+  pages f01a2068-ce93-42fe-803e-46d8ae8ee0b5 123877ce-e117-4a0e-bfbc-128ea34ce43f

@@ -1,0 +1,4 @@
+# Sue recent files, format 1
+1760000300	1760000000	sue-writer	C:\Users\artist\Documents\The Lighthouse Keeper.sue
+1760000200	0		D:\Scans\page 01.png
+1760000100	0	sue-paint	C:\Users\artist\Pictures\cat.clip

@@ -1,0 +1,9 @@
+keys.command_palette
+keys.command_palette_alt
+keys.open_file
+keys.open_settings
+keys.quit
+keys.redo
+keys.redo_alt
+keys.save
+keys.undo

@@ -3792,6 +3792,7 @@ dependencies = [
  "sue-rice",
  "sue-type",
  "sue-wm",
+ "sue-writer",
 ]
 
 [[package]]
