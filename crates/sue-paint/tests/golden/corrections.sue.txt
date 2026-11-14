@@ -1,0 +1,44 @@
+# corrections.sue, as Sue 0.0.75 wrote it
+chunk GOLD version 3: 6b657074206173206974206973
+chunk ARNA version 1
+entities 8
+entity 3652f0e0-194f-494f-ad6f-1d3abdea5160 class "sue.image" name "Golden levels"
+  property image.dpi = float 72
+  property image.height = int 16
+  property image.width = int 16
+  property timelapse.record = bool false
+entity 4dcf9222-90c9-488c-968d-5589f1516920 class "sue.image" name "Golden gradient map"
+  property image.dpi = float 72
+  property image.height = int 16
+  property image.width = int 16
+  property timelapse.record = bool false
+entity 83e4e01d-3418-46dc-82a9-3ca6c8eecd62 class "sue.layer" name "Layer 1"
+  base pixels 16 by 16 Rgba8, 256 not clear, fnv 583d86ce98571b25
+entity 9aa7b111-26c3-4bc1-8d3b-7b1fa7972f20 class "sue.layer.paper" name "Paper"
+  property layer.color = color 1 1 1 alpha 1 in srgb
+entity d4aa4330-b36d-4123-97a3-621ad9d45371 class "sue.layer.paper" name "Paper"
+  property layer.color = color 1 1 1 alpha 1 in srgb
+entity d4d1ca6a-1ec9-4bc7-979c-bd6f7b97df17 class "sue.paint.correction" name "Level Correction"
+  property correction.filter = text "levels:0.1,0.8,1.5,0.05,0.9"
+entity f81c0c86-e478-4ac9-8576-c4757a2e0b1c class "sue.layer" name "Layer 1"
+  base pixels 16 by 16 Rgba8, 256 not clear, fnv 583d86ce98571b25
+entity f94867af-7e7a-4c8e-be12-034f188957f1 class "sue.paint.correction" name "Gradient Map"
+  property correction.filter = text "gradient:201e50,f0e6c8"
+tree kinds sue.child
+relations 6
+relation 3652f0e0-194f-494f-ad6f-1d3abdea5160 sue.child 9aa7b111-26c3-4bc1-8d3b-7b1fa7972f20 order "i"
+relation 3652f0e0-194f-494f-ad6f-1d3abdea5160 sue.child f81c0c86-e478-4ac9-8576-c4757a2e0b1c order "r"
+relation 3652f0e0-194f-494f-ad6f-1d3abdea5160 sue.child d4d1ca6a-1ec9-4bc7-979c-bd6f7b97df17 order "w"
+relation 4dcf9222-90c9-488c-968d-5589f1516920 sue.child d4aa4330-b36d-4123-97a3-621ad9d45371 order "i"
+relation 4dcf9222-90c9-488c-968d-5589f1516920 sue.child 83e4e01d-3418-46dc-82a9-3ca6c8eecd62 order "r"
+relation 4dcf9222-90c9-488c-968d-5589f1516920 sue.child f94867af-7e7a-4c8e-be12-034f188957f1 order "w"
+picture 3652f0e0-194f-494f-ad6f-1d3abdea5160 "Golden levels": 16 by 16
+  layer 9aa7b111-26c3-4bc1-8d3b-7b1fa7972f20 "Paper" paper: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+  layer f81c0c86-e478-4ac9-8576-c4757a2e0b1c "Layer 1" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+  layer d4d1ca6a-1ec9-4bc7-979c-bd6f7b97df17 "Level Correction" other: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    a correction layer: levels, input black 0.1, white 0.8, gamma 1.5, output black 0.05, white 0.9
+picture 4dcf9222-90c9-488c-968d-5589f1516920 "Golden gradient map": 16 by 16
+  layer d4aa4330-b36d-4123-97a3-621ad9d45371 "Paper" paper: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+  layer 83e4e01d-3418-46dc-82a9-3ca6c8eecd62 "Layer 1" raster: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+  layer f94867af-7e7a-4c8e-be12-034f188957f1 "Gradient Map" other: visible true, opacity 1, blend normal, clip false, offset 0 0, draft false, locked false, alpha locked false
+    a correction layer: gradient map from 32 30 80 to 240 230 200

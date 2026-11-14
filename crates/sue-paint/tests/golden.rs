@@ -23,6 +23,8 @@
 //! - `comic.sue`: a story of two pages with nested folders, a correction
 //!   layer, words, frame borders, balloons, rulers, layer effects, layer
 //!   comps and a 3D layer.
+//! - `corrections.sue`: a Level Correction layer and a Gradient Map
+//!   layer, each over a ramp of grays, with the colors they drew.
 //! - `writer.sue`: a Sue Writer project.
 //! - `clip-picture.txt`: what Sue Paint reads from the `.clip` in
 //!   `crates/sue-io/tests/golden`.
@@ -805,6 +807,19 @@ fn layer_extras(
                 brightness,
                 contrast,
             } => format!("brightness {brightness}, contrast {contrast}"),
+            crate::filters::Filter::Levels {
+                black,
+                white,
+                gamma,
+                out_black,
+                out_white,
+            } => format!(
+                "levels, input black {black}, white {white}, gamma {gamma}, output black \
+                 {out_black}, white {out_white}"
+            ),
+            crate::filters::Filter::GradientMap { from, to } => {
+                format!("gradient map from {} to {}", numbers(&from), numbers(&to))
+            }
             other => panic!("a correction the description does not know yet: {other:?}"),
         };
         let _ = writeln!(out, "    a correction layer: {what}");
@@ -1315,6 +1330,66 @@ fn a_comic_from_0_0_75_loads_to_the_same_ids_counts_and_pixels() {
         );
         assert_eq!(flat.len(), 64 * 64 * 4);
     }
+}
+
+/// What the two pictures of `corrections.sue` drew in 0.0.75, first row,
+/// left to right: the ramp of grays under Level Correction (every channel
+/// the same), and under Gradient Map.
+const LEVELS_ROW: [u8; 16] = [
+    13, 13, 41, 72, 96, 117, 136, 154, 170, 186, 201, 216, 230, 230, 230, 230,
+];
+const GRADIENT_ROW: [[u8; 3]; 16] = [
+    [32, 30, 80],
+    [46, 43, 88],
+    [60, 57, 96],
+    [74, 70, 104],
+    [87, 83, 112],
+    [101, 97, 120],
+    [115, 110, 128],
+    [129, 123, 136],
+    [143, 137, 144],
+    [157, 150, 152],
+    [171, 163, 160],
+    [185, 177, 168],
+    [198, 190, 176],
+    [212, 203, 184],
+    [226, 217, 192],
+    [240, 230, 200],
+];
+
+#[test]
+fn corrections_from_0_0_75_load_and_correct_as_they_did() {
+    let arena = check_sue("corrections.sue");
+    let picture = |name: &str| {
+        arena
+            .iter()
+            .map(|(_, entity)| entity)
+            .find(|entity| picture::is_picture(entity) && entity.name() == name)
+            .unwrap_or_else(|| panic!("the picture {name} is there"))
+            .id()
+    };
+    // A correction kept in the short text of 0.0.75 means what it meant:
+    // the same colors come out, give or take one step of rounding.
+    let near = |found: &[[u8; 3]], expected: &[[u8; 3]], what: &str| {
+        assert_eq!(found.len(), expected.len(), "{what}");
+        for (at, (found, expected)) in found.iter().zip(expected).enumerate() {
+            assert!(
+                found.iter().zip(expected).all(|(a, b)| a.abs_diff(*b) <= 1),
+                "{what}: pixel {at} draws as {found:?}, 0.0.75 drew {expected:?}"
+            );
+        }
+    };
+    let levels: Vec<[u8; 3]> = LEVELS_ROW.iter().map(|gray| [*gray; 3]).collect();
+    near(
+        &first_row(&arena, picture("Golden levels")),
+        &levels,
+        "Level Correction",
+    );
+    near(
+        &first_row(&arena, picture("Golden gradient map")),
+        &GRADIENT_ROW,
+        "Gradient Map",
+    );
 }
 
 #[test]
@@ -1845,6 +1920,14 @@ const LEDGER: &[(&str, &str)] = &[
     (
         "comic.sue.txt",
         "fa1e23ce74ed1b6b18557a10203cbc17ebdf9c3d91e3ebc13f9f79cb5564b469",
+    ),
+    (
+        "corrections.sue",
+        "15a38ea1c178b1d29079a6b0f79d1ffda3b74524d584d6ddd82a1c9ee75898c0",
+    ),
+    (
+        "corrections.sue.txt",
+        "009e0740f9cb87222b99bfe768d9cb161f0ee4ea30d5e6043b5ae11877258309",
     ),
     (
         "ledger/paint-commands.txt",
@@ -2644,6 +2727,87 @@ fn generate_the_comic() {
         &wave(side, 20.0, 5.0),
     );
     write_sue("comic.sue", &arena);
+}
+
+/// The first row of `picture` as it draws: one color for each pixel.
+fn first_row(arena: &Arena, picture: EntityId) -> Vec<[u8; 3]> {
+    let flat = crate::composite::render(
+        arena,
+        picture,
+        [0, 0, RAMP, 1],
+        crate::composite::RenderOptions::default(),
+    );
+    flat.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| [pixel[0], pixel[1], pixel[2]])
+        .collect()
+}
+
+/// How wide the pictures of `corrections.sue` are: one step of gray for
+/// each pixel across.
+const RAMP: u32 = 16;
+
+/// (l) Two pictures, each a ramp from black to white under one correction
+/// layer: Level Correction on the first, Gradient Map on the second. The
+/// stored text of both grows in 0.0.8; these are the short ones.
+#[test]
+#[ignore = "generator: the golden files are committed and never rewritten"]
+fn generate_the_corrections() {
+    use crate::filters::Filter;
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut arena = Arena::new();
+    for (name, filter) in [
+        (
+            "Golden levels",
+            Filter::Levels {
+                black: 0.1,
+                white: 0.8,
+                gamma: 1.5,
+                out_black: 0.05,
+                out_white: 0.9,
+            },
+        ),
+        (
+            "Golden gradient map",
+            Filter::GradientMap {
+                from: [32, 30, 80],
+                to: [240, 230, 200],
+            },
+        ),
+    ] {
+        let (edit, picture) = doc::create(&NewPicture {
+            name: name.to_owned(),
+            width: RAMP,
+            height: RAMP,
+            dpi: 72.0,
+            paper: Some(Color::srgb8(255, 255, 255)),
+            timelapse: false,
+        })
+        .expect("a picture of this size");
+        apply(&mut arena, edit);
+        let ramp = doc::layers(&arena, picture).last().expect("one layer").id;
+        let bytes = doc::raster_mut(&mut arena, ramp)
+            .and_then(|raster| raster.bytes_mut())
+            .expect("a layer with 8-bit pixels");
+        for (index, pixel) in bytes.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let gray = (index as u32 % RAMP * 17) as u8;
+            *pixel = [gray, gray, gray, 255];
+        }
+        let plain = first_row(&arena, picture);
+        let (edit, _) = doc::new_correction(
+            &arena,
+            picture,
+            Some(ramp),
+            &filter.label(),
+            &filter.to_text().expect("a correction that can be kept"),
+        );
+        apply(&mut arena, edit);
+        let corrected = first_row(&arena, picture);
+        assert_ne!(plain, corrected, "the correction changes the picture");
+        println!("{name} draws its first row as {corrected:?}");
+    }
+    write_sue("corrections.sue", &arena);
 }
 
 /// (c) The brush of every built-in sub tool, as the text a vector line
