@@ -556,13 +556,9 @@ pub fn rasterize_any(
                 super::MASK_ON,
                 super::mask_on(arena, layer),
             ));
-        if let Some(at) = super::mask_offset(arena, layer) {
-            // The new layer sits at the picture's corner: the mask keeps
-            // its place on the canvas.
-            edit = edit
-                .then(SetProperty::new(mask, picture::X, at[0]))
-                .then(SetProperty::new(mask, picture::Y, at[1]));
-        }
+        // The new layer sits at the picture's corner: the mask keeps its
+        // place on the canvas, remade over the canvas like the layer.
+        edit = mask_over_canvas(arena, picture, layer, edit)?;
     }
     for id in with_members(arena, picture, &[layer]).iter().rev() {
         // The layer's own mask went over to the new one.
@@ -631,15 +627,10 @@ pub(super) fn merge_down_baked(
         ))
         .then(SetProperty::new(below, picture::X, 0_i64))
         .then(SetProperty::new(below, picture::Y, 0_i64));
-    if let Some(at) = super::mask_offset(arena, below)
-        && super::mask_linked(arena, below)
-        && let Some(mask) = mask_of(arena, below)
-    {
-        // The layer moves to the picture's corner; its mask stays put.
-        edit = edit
-            .then(SetProperty::new(mask, picture::X, at[0]))
-            .then(SetProperty::new(mask, picture::Y, at[1]));
-    }
+    // The layer moves to the picture's corner and takes its size; its
+    // mask stays where it is on the canvas, remade over the canvas so it
+    // lies over the layer's pixels as painting a mask expects.
+    edit = mask_over_canvas(arena, picture, below, edit)?;
     for (key, _) in entity.properties().iter() {
         if key.starts_with("effect.") {
             edit = edit.then(SetProperty::remove(below, key));
@@ -652,6 +643,21 @@ pub(super) fn merge_down_baked(
         edit = edit.then(DespawnEntity::new(*id));
     }
     Ok(edit)
+}
+
+/// `edit` followed by remaking `layer`'s mask, if it has one, over the
+/// whole canvas at its corner, where a layer made of what the picture
+/// shows sits: the mask shows the same on the canvas as before.
+fn mask_over_canvas(
+    arena: &Arena,
+    picture: EntityId,
+    layer: EntityId,
+    edit: Edit,
+) -> Result<Edit, String> {
+    let size = size_of(arena, picture)?;
+    super::convert::mask_resized(arena, layer, edit, [0, 0], [0, 0], |mask, at| {
+        Some((super::convert::placed_cover(mask, at, size), size))
+    })
 }
 
 /// The entities that belong to `layer` alone and go where it goes (its

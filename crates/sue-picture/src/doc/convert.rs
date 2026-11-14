@@ -515,7 +515,7 @@ pub fn vectorize(
 
 /// The cover of `mask` (placed with its top left at picture pixel `at`)
 /// over a picture of `size`, one byte a pixel: 0 where it does not reach.
-fn placed_cover(mask: &RasterTile2D, at: [i64; 2], size: [u32; 2]) -> Vec<u8> {
+pub(super) fn placed_cover(mask: &RasterTile2D, at: [i64; 2], size: [u32; 2]) -> Vec<u8> {
     let mut out = vec![0_u8; (size[0] * size[1]) as usize];
     for y in 0..size[1] {
         for x in 0..size[0] {
@@ -531,7 +531,7 @@ fn placed_cover(mask: &RasterTile2D, at: [i64; 2], size: [u32; 2]) -> Vec<u8> {
 /// whose top left sits at picture pixel `corner`, in the mask's own
 /// format. `placed` is where the layer sits once the edit is done: a
 /// linked mask's place is relative to it.
-fn mask_resized(
+pub(super) fn mask_resized(
     arena: &Arena,
     layer: EntityId,
     mut edit: Edit,

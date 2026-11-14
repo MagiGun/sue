@@ -620,3 +620,70 @@ fn a_quarter_turn_turns_moved_layers_with_their_masks() {
         history.undo(&mut arena).unwrap();
     }
 }
+
+#[test]
+fn a_moved_layers_mask_keeps_to_it_through_merge_down_and_rasterize() {
+    // The mask lies over the layer's pixels, their size, as painting a
+    // mask expects, and the picture shows the same.
+    fn aligned(arena: &Arena, layer: EntityId) {
+        let mask = mask_of(arena, layer).unwrap();
+        let (pixels, cover) = (raster(arena, layer).unwrap(), raster(arena, mask).unwrap());
+        let at = picture::LayerStyle::of(arena.get_by_id(layer).unwrap()).offset;
+        assert_eq!(mask_offset(arena, layer), Some(at));
+        assert_eq!(
+            [pixels.width(), pixels.height()],
+            [cover.width(), cover.height()]
+        );
+    }
+    let (mut arena, picture, mut history, first) = picture_of(6, 2);
+    fill(&mut arena, first, [10, 20, 30, 255]);
+    history
+        .apply(&mut arena, set(first, picture::X, 2_i64))
+        .unwrap();
+    let (edit, _) = new_mask(&arena, first, |x, _| if x < 4 { 1.0 } else { 0.0 }).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    // Over it a layer with a layer color: merging it down bakes.
+    let (spawn, top) = add_raster_layer(
+        &arena,
+        picture,
+        Some(first),
+        "Top".to_owned(),
+        Some([200, 200, 200, 128]),
+    )
+    .unwrap();
+    history
+        .apply(&mut arena, Edit::new("Add").then(spawn))
+        .unwrap();
+    history
+        .apply(&mut arena, set(top, crate::effects::COLOR, true))
+        .unwrap();
+    let shown = |arena: &Arena| render(arena, picture, [0, 0, 6, 2], RenderOptions::default());
+    let before = shown(&arena);
+    let (edit, into) = merge_down(&arena, picture, top).unwrap();
+    assert_eq!(into, first);
+    undo_pair(&mut arena, &mut history, edit);
+    // The layer below keeps its mask, so what the top layer showed
+    // outside it is gone (as before 0.0.8); inside it, nothing changed.
+    let after = shown(&arena);
+    for row in 0..2 {
+        let inside = (row * 6 + 2) * 4..(row * 6 + 4) * 4;
+        assert_eq!(after[inside.clone()], before[inside]);
+    }
+    aligned(&arena, first);
+    // A vector layer moved and masked, rasterized.
+    let (spawn, ink) = add_vector_layer(&arena, picture, Some(first), "Ink".to_owned()).unwrap();
+    history
+        .apply(&mut arena, Edit::new("Add").then(spawn))
+        .unwrap();
+    fill(&mut arena, ink, [0, 0, 0, 255]);
+    history
+        .apply(&mut arena, set(ink, picture::Y, 1_i64))
+        .unwrap();
+    let (edit, _) = new_mask(&arena, ink, |x, _| if x % 2 == 0 { 1.0 } else { 0.0 }).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let before = shown(&arena);
+    let (edit, flat) = rasterize(&arena, picture, ink).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    assert_eq!(shown(&arena), before);
+    aligned(&arena, flat);
+}
