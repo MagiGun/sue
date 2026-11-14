@@ -227,6 +227,9 @@ pub struct Planner {
     /// and the dabs it has sprayed since.
     held_from: f64,
     held: u64,
+    /// The largest dab laid since the pen last moved: a pen pressing
+    /// harder where it stands lays a larger one.
+    still: f32,
 }
 
 impl Planner {
@@ -254,6 +257,7 @@ impl Planner {
             picks: 0,
             held_from: f64::NEG_INFINITY,
             held: 0,
+            still: 0.0,
         }
     }
 
@@ -348,7 +352,16 @@ impl Planner {
             },
         );
         self.walker = walker;
+        // Dabs follow the distance the pen goes, so a pen that presses
+        // harder where it stands (a tap that lands lightly) would keep
+        // the first, smaller dab: one grown larger is laid again there.
+        if length > 0.0 {
+            self.still = 0.0;
+        } else if stamped.is_empty() && b.size > self.still {
+            stamped.push(b);
+        }
         for p in stamped {
+            self.still = self.still.max(p.size);
             self.place(&p, out);
         }
         self.last = Some(b);
@@ -565,6 +578,23 @@ mod tests {
             p.push(&point(x, 10.0), &mut out);
         }
         out
+    }
+
+    #[test]
+    fn a_tap_that_presses_harder_where_it_stands_grows() {
+        // A pen lands lightly and presses on without moving: the dot is
+        // as large as the hardest press, not the first.
+        let mut p = planner(PlanSettings::default());
+        let mut out = Vec::new();
+        for size in [4.0, 7.0, 6.0, 9.0, 9.0] {
+            p.push(&point(0.0, size), &mut out);
+        }
+        let sizes: Vec<f32> = out.iter().map(|d| d.disc.radius * 2.0).collect();
+        assert_eq!(sizes, [4.0, 7.0, 9.0], "a dab each time it grew");
+        // Once it moves, dabs follow the distance again.
+        p.push(&point(0.5, 9.0), &mut out);
+        p.push(&point(0.5, 9.5), &mut out);
+        assert!(out.len() <= 5, "{}", out.len());
     }
 
     #[test]
