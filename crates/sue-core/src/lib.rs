@@ -59,6 +59,7 @@ pub use registry::{
 };
 pub use relation::{CHILD, OrderKey, REF, Relation, RelationError, RelationStore};
 pub use shared::Shared;
+pub use shared::copies as shared_copies;
 pub use time::{Rate, Time, Timecode};
 pub use undo::{NodeId, ReversibleTransaction, TxnError, UndoStack};
 pub use units::{Dimension, DimensionMismatch, Quantity, UNITS, Unit};
