@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use sue_core::{Arena, ComponentKind, EntityId, PixelFormat, RasterTile2D};
 use sue_model::picture::{self, LayerKind, LayerStyle};
 
-use super::{Compositor, FrameView, RenderOptions, workers};
+use super::{Compositor, FrameView, LiveStroke, RenderOptions, split};
 
 /// A correction layer's change, ready for every pixel: a table a channel
 /// for corrections that treat channels apart, else the filter itself.
@@ -79,6 +79,29 @@ pub(super) struct Layer<'a> {
     /// Which tiles of the picture it has pixels in, when known for its
     /// current pixels.
     pub(super) occupancy: Option<std::sync::Arc<Occupancy>>,
+    /// The stroke being painted on it, not in its pixels yet.
+    pub(super) live: Option<std::sync::Arc<dyn LiveStroke>>,
+}
+
+impl<'a> Layer<'a> {
+    /// A layer showing `source` as it is, with `style`: no mask, camera,
+    /// tint or effect.
+    pub(super) fn new(source: Source<'a>, style: LayerStyle) -> Self {
+        Self {
+            id: None,
+            source,
+            style,
+            tint: None,
+            mask: None,
+            warp: None,
+            effects: crate::effects::Effects::default(),
+            edge: None,
+            rim: None,
+            lines: None,
+            occupancy: None,
+            live: None,
+        }
+    }
 }
 
 /// Side of an [`Occupancy`] tile.
@@ -205,6 +228,7 @@ impl Layer<'_> {
     /// (a camera, an effect, a border) could show there anyway.
     pub(super) fn empty_at(&self, x: u32, y: u32) -> bool {
         matches!(self.source, Source::Raster { .. })
+            && self.live.is_none()
             && self.warp.is_none()
             && self.effects.is_plain()
             && self
@@ -265,8 +289,21 @@ impl Layer<'_> {
         (wx >= 0.0 && wy >= 0.0).then_some((wx as u32, wy as u32))
     }
 
-    /// The layer's straight RGBA at picture pixel `(x, y)`, as it is.
+    /// The layer's straight RGBA at picture pixel `(x, y)`, as it is, with
+    /// the stroke being painted on it.
     fn texel(&self, x: i64, y: i64) -> [f32; 4] {
+        let own = self.own_texel(x, y);
+        match (&self.live, &self.source) {
+            (Some(live), Source::Raster { offset, .. }) => {
+                live.over(x - offset[0], y - offset[1], own)
+            }
+            _ => own,
+        }
+    }
+
+    /// The layer's straight RGBA at picture pixel `(x, y)`, from its own
+    /// pixels.
+    fn own_texel(&self, x: i64, y: i64) -> [f32; 4] {
         match &self.source {
             Source::Paper(rgb) => [rgb[0], rgb[1], rgb[2], 1.0],
             // A correction has no pixels of its own.
@@ -400,16 +437,11 @@ pub(super) fn gather_view<'a>(
             };
             Some(Layer {
                 id: Some(entity.id()),
-                source,
-                style,
                 tint,
                 mask,
                 warp,
                 effects,
-                edge: None,
-                rim: None,
-                lines: None,
-                occupancy: None,
+                ..Layer::new(source, style)
             })
         })
         .collect()
@@ -432,6 +464,13 @@ impl Compositor {
     /// full composite does; a stroke's refresh does not, so the layer being
     /// painted is read everywhere.
     pub(super) fn attach(&mut self, arena: &Arena, layers: &mut [Layer<'_>], find: bool) {
+        if let Some(live) = &self.live {
+            for layer in layers.iter_mut() {
+                if layer.id == Some(live.layer()) {
+                    layer.live = Some(live.clone());
+                }
+            }
+        }
         let size = self.size;
         let mut missing = Vec::new();
         for (index, layer) in layers.iter_mut().enumerate() {
@@ -460,24 +499,9 @@ impl Compositor {
                 _ => None,
             })
             .collect();
-        let found: Vec<Option<Occupancy>> = if rasters.len() > 1 && workers() > 1 {
-            std::thread::scope(|scope| {
-                let jobs: Vec<_> = rasters
-                    .iter()
-                    .map(|(raster, offset)| {
-                        scope.spawn(move || Occupancy::of(raster, *offset, size))
-                    })
-                    .collect();
-                jobs.into_iter()
-                    .map(|job| job.join().ok().flatten())
-                    .collect()
-            })
-        } else {
-            rasters
-                .iter()
-                .map(|(raster, offset)| Occupancy::of(raster, *offset, size))
-                .collect()
-        };
+        let found: Vec<Option<Occupancy>> = split(&rasters, |(raster, offset)| {
+            Occupancy::of(raster, *offset, size)
+        });
         for ((index, id, revision, offset), tiles) in missing.into_iter().zip(found) {
             if let Some(tiles) = tiles {
                 let tiles = std::sync::Arc::new(tiles);

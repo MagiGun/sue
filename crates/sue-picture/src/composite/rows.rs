@@ -155,6 +155,7 @@ impl Layer<'_> {
             }
         };
         source
+            && self.live.is_none()
             && self.warp.is_none()
             && self.tint.is_none()
             && self.effects.is_plain()
