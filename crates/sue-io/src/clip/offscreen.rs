@@ -131,6 +131,44 @@ fn list_at(payload: &[u8], at: usize) -> Option<(BlockList, usize)> {
     (again.as_slice() == payload.get(at..start + len)?).then_some((list, start + len - at))
 }
 
+/// The blocks with data at the start of `bytes` that begin with the
+/// block name but are not laid out exactly as [`block_bytes`] lays one
+/// out, as Sue's reader has always taken them: the size, the name, the
+/// block's number, and the data after the "has data" flag and its
+/// lengths, whatever follows it in the block.
+///
+/// # Errors
+/// When a block runs past the payload or its data past the block.
+fn loose_blocks(bytes: &[u8]) -> Result<Vec<(u32, &[u8])>, String> {
+    let begin = utf16(BEGIN);
+    let mut at = 0;
+    let mut out = Vec::new();
+    while at + 8 < bytes.len() {
+        if bytes.get(at + 8..at + 8 + begin.len()) != Some(begin.as_slice()) {
+            break;
+        }
+        let size = be32(bytes, at).ok_or("a tile is short")? as usize;
+        if size == 0 {
+            return Err("a tile is short".to_owned());
+        }
+        let tile = at
+            .checked_add(size)
+            .and_then(|end| bytes.get(at..end))
+            .ok_or("a tile runs past its chunk")?;
+        let body = tile.get(8 + begin.len()..).ok_or("a tile is short")?;
+        let index = be32(body, 0).ok_or("a tile is short")?;
+        if be32(body, 16).ok_or("a tile is short")? == 1 {
+            let len = be32(body, 20).ok_or("a tile is short")? as usize;
+            let data = body
+                .get(28..24usize.saturating_add(len))
+                .ok_or("a tile's data runs past it")?;
+            out.push((index, data));
+        }
+        at += size;
+    }
+    Ok(out)
+}
+
 /// The blocks and lists of a bitmap chunk's payload. What does not read
 /// as either stays in `tail`, so [`payload_bytes`] gives `payload` back
 /// whatever it holds.
@@ -384,11 +422,22 @@ impl ClipBitmap {
         let mut out = vec![fill; width * height * usize::from(channels)];
         let area = TILE * TILE;
         let need = if channels == 4 { area * 5 } else { area };
-        for block in self.blocks.iter().flat_map(|blocks| &blocks.blocks) {
-            let Some(data) = &block.data else {
-                continue;
-            };
-            let index = block.index as usize;
+        // The blocks laid out exactly as Sue writes them, then any more in
+        // the tail that are laid out a little differently (not yet seen in
+        // a file Clip Studio wrote): those are read as Sue always read
+        // them, so their pixels are not lost.
+        let mut tiles: Vec<(u32, &[u8])> = Vec::new();
+        if let Some(blocks) = &self.blocks {
+            tiles.extend(
+                blocks
+                    .blocks
+                    .iter()
+                    .filter_map(|block| Some((block.index, block.data.as_deref()?))),
+            );
+            tiles.extend(loose_blocks(&blocks.tail)?);
+        }
+        for (index, data) in tiles {
+            let index = index as usize;
             if columns == 0 || index >= columns.saturating_mul(rows) {
                 continue;
             }
@@ -777,6 +826,35 @@ mod tests {
         let empty = ClipBitmap::empty(3, 2);
         assert!(empty.blocks.is_none());
         assert_eq!(empty.decode().unwrap().data, [0; 24]);
+    }
+
+    #[test]
+    fn blocks_laid_out_a_little_differently_still_decode() {
+        // Four more bytes before the end name of the first block: the
+        // payload no longer parses block by block, but its pixels are read
+        // as Sue's reader has always read them, and its bytes are kept.
+        let bitmap = dots();
+        let payload = payload_bytes(bitmap.blocks.as_ref().unwrap());
+        let size = be32(&payload, 0).unwrap() as usize;
+        let end_name = size - 4 - 2 * END.len();
+        let mut odd = payload[..end_name].to_vec();
+        odd.extend_from_slice(&[0; 4]);
+        odd.extend_from_slice(&payload[end_name..]);
+        odd[..4].copy_from_slice(&(size as u32 + 4).to_be_bytes());
+        let blocks = parse_payload(&odd);
+        assert!(blocks.blocks.is_empty());
+        assert_eq!(payload_bytes(&blocks), odd);
+        let read = ClipBitmap {
+            blocks: Some(blocks),
+            ..bitmap.clone()
+        };
+        assert_eq!(read.decode().unwrap(), bitmap.decode().unwrap());
+        // A block that runs past the payload is refused.
+        let cut = ClipBitmap {
+            blocks: Some(parse_payload(&odd[..size])),
+            ..bitmap
+        };
+        assert!(cut.decode().is_err());
     }
 
     #[test]

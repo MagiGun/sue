@@ -844,6 +844,30 @@ mod tests {
     }
 
     #[test]
+    fn a_bitmap_chunk_whose_length_does_not_match_keeps_its_pixels() {
+        let doc = raster_subset(40, 30, 7);
+        let mut bytes = write(&doc).unwrap();
+        let want = decode_clip(&bytes).unwrap();
+        let layout = crate::clip::layout(&bytes).unwrap();
+        let exta: Vec<usize> = layout
+            .chunks
+            .iter()
+            .filter(|chunk| &chunk.kind == b"Exta")
+            .map(|chunk| chunk.offset)
+            .collect();
+        assert!(!exta.is_empty());
+        for offset in exta {
+            // The payload's length sits after the 16 bytes of the chunk's
+            // mark, the id's length and the id.
+            let id_len = u64::from_be_bytes(bytes[offset + 16..offset + 24].try_into().unwrap());
+            let at = offset + 24 + usize::try_from(id_len).unwrap();
+            let len = u64::from_be_bytes(bytes[at..at + 8].try_into().unwrap());
+            bytes[at..at + 8].copy_from_slice(&(len - 1).to_be_bytes());
+        }
+        assert_eq!(decode_clip(&bytes).unwrap(), want);
+    }
+
+    #[test]
     fn documents_that_cannot_be_written_say_why() {
         assert!(write(&ClipDocument::new(0, 5, 72.0)).is_err());
         assert!(write(&ClipDocument::new(300_001, 5, 72.0)).is_err());

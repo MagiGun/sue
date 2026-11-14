@@ -361,8 +361,12 @@ pub fn read(bytes: &[u8]) -> Result<ClipDocument, String> {
             b"SQLi" if database.is_none() => database = Some(i),
             b"Foot" if foot.is_none() => foot = Some(i),
             b"Exta" => {
-                // Only a chunk laid out exactly as the writer lays one out
-                // is taken apart; any other stays whole.
+                // A chunk whose id is text is taken apart, its payload
+                // being everything after the payload's length, as Sue's
+                // reader has always taken it: a length that does not match
+                // (not yet seen in a file Clip Studio wrote) must not cost
+                // the layer its pixels. It is written back with the length
+                // of what it holds. Any other chunk stays whole.
                 if let Ok((_, payload)) = chunk.external()
                     && let Some(id_len) =
                         be64(chunk.data, 0).and_then(|len| usize::try_from(len).ok())
@@ -370,8 +374,6 @@ pub fn read(bytes: &[u8]) -> Result<ClipDocument, String> {
                         .data
                         .get(8..8 + id_len)
                         .map(|raw| std::str::from_utf8(raw).map(str::to_owned))
-                    && be64(chunk.data, 8 + id_len).and_then(|len| usize::try_from(len).ok())
-                        == Some(payload.len())
                     && !stored.contains_key(&id)
                 {
                     stored.insert(id, Stored { chunk: i, payload });
