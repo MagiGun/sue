@@ -589,7 +589,12 @@ fn playback_fps(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
 
 /// Turns the picture's special ruler snap off or on again, as an edit.
 fn special_snap(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    let Some(picture) = paint.picture() else {
+    // Grayed without a special ruler: nothing to switch, no empty step
+    // (Auto Actions run a command without asking its item).
+    let Some(picture) = paint
+        .picture()
+        .filter(|picture| has_special_ruler(&cx.world.arena, *picture))
+    else {
         return;
     };
     let value = special_snaps(&cx.world.arena, picture).then(|| "off".to_owned());
@@ -996,6 +1001,9 @@ mod tests {
             let none = crate::rulers::edit(picture, crate::rulers::SYMMETRY, None, "ruler");
             assert!(SuePaint::apply(cx, none));
             assert!(!item(paint, cx, "view.special_ruler_snapping").enabled);
+            let depth = cx.history.depth();
+            super::super::registry().run(paint, cx, "view.special_ruler_snapping");
+            assert_eq!(cx.history.depth(), depth, "grayed, it does nothing");
         });
     }
 
