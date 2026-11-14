@@ -105,29 +105,55 @@ fn grain(side: usize) -> Vec<f32> {
     out
 }
 
-/// A woven canvas: threads across and along, each passing over and
-/// under the other in turn, with a little noise in the threads.
+/// A woven canvas, as primed artist's canvas looks under a dry brush:
+/// a plain weave of round threads, each passing over one crossing
+/// thread and under the next, sinking where it dives under; dark
+/// pores where four threads meet; threads that swell and thin a little
+/// along their length (slubs) and a fine tooth of priming on top.
 fn canvas(side: usize) -> Vec<f32> {
-    // A thread is 8 texels wide; a field of 256 holds 32 of them.
-    const THREAD: usize = 8;
-    let slub = value_noise(side, 16, 21);
+    // A thread and its gap repeat every 8 texels: 32 threads across a
+    // field of 256, an even count, so the weave repeats without a seam.
+    const PITCH: f32 = 8.0;
+    let threads = (side as f32 / PITCH) as i64;
+    // Each thread's own thickness, drifting slowly along its length.
+    let slub_warp = value_noise(side, 8, 21);
+    let slub_weft = value_noise(side, 8, 22);
+    let tooth = fbm(side, 128, 1, 23);
+    // A thread's round profile across it, 1 at its middle, 0 at its
+    // edge, for `f` from 0 to 1 across one pitch; `width` is the share
+    // of the pitch the thread fills (the rest is the gap).
+    let across = |f: f32, width: f32| {
+        let u = ((f - 0.5) * 2.0 / width).abs();
+        if u >= 1.0 {
+            0.0
+        } else {
+            (1.0 - u * u).max(0.0)
+        }
+    };
+    // How high a thread rides at `t` (in pitches along it): 1 over the
+    // middle of a crossing thread it passes over, 0 under the next.
+    // Even `t + phase` is over, odd is under, eased in between.
+    let ride = |t: f32, phase: i64| {
+        let k = t - 0.5 + phase as f32;
+        let m = k.rem_euclid(2.0);
+        let tri = if m < 1.0 { 1.0 - m } else { m - 1.0 };
+        fade(tri)
+    };
     let mut out = Vec::with_capacity(side * side);
     for y in 0..side {
         for x in 0..side {
-            let (cx, cy) = (x / THREAD, y / THREAD);
-            // How far across its thread a texel is, 0 at the middle.
-            let across = |n: usize| {
-                let u = ((n % THREAD) as f32 + 0.5) / THREAD as f32 * 2.0 - 1.0;
-                1.0 - u * u
-            };
-            let weft_on_top = (cx + cy) % 2 == 0;
-            let (top, under) = if weft_on_top {
-                (across(y), across(x))
-            } else {
-                (across(x), across(y))
-            };
-            let thread = top.max(under * 0.55);
-            out.push(thread * (0.85 + 0.15 * slub[y * side + x]));
+            let (u, v) = ((x as f32 + 0.5) / PITCH, (y as f32 + 0.5) / PITCH);
+            let (i, j) = (u.floor() as i64, v.floor() as i64);
+            let (fu, fv) = (u - u.floor(), v - v.floor());
+            let n = y * side + x;
+            let warp_width = 0.72 + 0.2 * slub_warp[n];
+            let weft_width = 0.72 + 0.2 * slub_weft[n];
+            // The warp runs up and down (column i), the weft across
+            // (row j); they cross over and under in turn.
+            let warp = across(fu, warp_width) * (0.45 + 0.55 * ride(v, i.rem_euclid(threads)));
+            let weft = across(fv, weft_width) * (0.45 + 0.55 * ride(u, j.rem_euclid(threads) + 1));
+            let surface = warp.max(weft);
+            out.push(surface * 0.9 + tooth[n] * 0.1);
         }
     }
     out
