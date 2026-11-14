@@ -16,7 +16,13 @@
 //!   mip-mapped dab, the ribbon) and the premultiplied row kernels.
 //! - [`buffer`]: the tiled stroke buffer, with committed and tail tiles,
 //!   that a stroke paints into and that merges into the layer on lift.
+//! - [`paint`]: the paint behaviours (mixing, spray, several tips, the
+//!   dual brush, the watercolor edge, tone scraping, blend modes, the
+//!   erasers) and the stroke that brings them together.
+//! - [`texture`]: paper textures, Sue's own and a person's pictures.
 
 pub mod buffer;
 pub mod input;
+pub mod paint;
 pub mod raster;
+pub mod texture;
