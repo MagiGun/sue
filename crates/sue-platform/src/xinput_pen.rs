@@ -9,7 +9,9 @@
 //! the pure Rust `x11rb` (no `unsafe`, no extra permissions): raw XInput2
 //! events, selected on the root window, which arrive whatever window the
 //! pen is over and while a button is held. Its queue is drained every
-//! frame and the latest state goes to [`crate::stylus`].
+//! frame and every raw event of a pen goes to the pen's stream
+//! ([`crate::stylus`]) as one reading, at the X server's own time for it;
+//! the stream places it along the path the pointer took.
 
 use winit::event_loop::EventLoopBuilder;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -20,7 +22,7 @@ use x11rb::protocol::xinput::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::{self, ConnectionExt as _};
 use x11rb::rust_connection::RustConnection;
 
-use crate::stylus::{self, PenSource};
+use crate::stylus::{self, DeviceClock};
 use crate::tablets::{self, DisplayServer};
 
 /// Picks the display server before the event loop opens: Wayland as winit
@@ -102,6 +104,20 @@ struct Pen {
     tip: Option<bool>,
 }
 
+/// One raw event of a pen: when it was, on the X server's clock in
+/// milliseconds, and what the pen read then.
+#[derive(Clone, Copy, Debug)]
+struct Seen {
+    time: u32,
+    /// Its latest pressure, 0 to 1.
+    pressure: f32,
+    /// Whether its tip is down, once its button has been seen.
+    tip: Option<bool>,
+    /// Its lean, where it has the axes.
+    tilt: Option<[f32; 2]>,
+    eraser: bool,
+}
+
 /// The atoms XInput2 labels pen axes with.
 #[derive(Clone, Copy, Debug)]
 struct Labels {
@@ -115,6 +131,8 @@ pub(crate) struct Tablet {
     connection: RustConnection,
     labels: Labels,
     pens: Vec<Pen>,
+    /// The X server's clock (an event's time) on Sue's.
+    clock: DeviceClock,
 }
 
 impl std::fmt::Debug for Tablet {
@@ -173,6 +191,7 @@ impl Tablet {
             connection,
             labels,
             pens: Vec::new(),
+            clock: DeviceClock::default(),
         };
         tablet.scan();
         Some(tablet)
@@ -248,16 +267,17 @@ impl Tablet {
     /// Takes the events since the last frame. `false` once the X server
     /// has gone, and the tablet with it.
     pub(crate) fn poll(&mut self) -> bool {
-        let mut latest = None;
-        loop {
+        // The pens' raw events, oldest first.
+        let mut seen: Vec<Seen> = Vec::new();
+        let alive = loop {
             match self.connection.poll_for_event() {
                 Ok(Some(event)) => match event {
-                    Event::XinputRawMotion(raw) => latest = self.take(&raw, None).or(latest),
+                    Event::XinputRawMotion(raw) => seen.extend(self.take(&raw, None)),
                     Event::XinputRawButtonPress(raw) if raw.detail == 1 => {
-                        latest = self.take(&raw, Some(true)).or(latest);
+                        seen.extend(self.take(&raw, Some(true)));
                     }
                     Event::XinputRawButtonRelease(raw) if raw.detail == 1 => {
-                        latest = self.take(&raw, Some(false)).or(latest);
+                        seen.extend(self.take(&raw, Some(false)));
                     }
                     // At once, so the new pen's next events are read. A
                     // master switching between its mouse and its pen
@@ -270,29 +290,30 @@ impl Tablet {
                     }
                     _ => {}
                 },
-                Ok(None) => break,
-                Err(_) => return false,
+                Ok(None) => break true,
+                Err(_) => break false,
             }
+        };
+        // One reading for each, in their order, the newest about now.
+        if let Some(newest) = seen.last() {
+            self.clock
+                .sync(newest.time, crate::time::since_start().as_secs_f64());
         }
-        if let Some(id) = latest
-            && let Some(pen) = self.pens.iter().find(|pen| pen.id == id)
-        {
-            stylus::set(
-                PenSource::XInput,
-                tablets::contact(pen.last_pressure, pen.tip),
-            );
-            stylus::set_tool(pen.tilt.map(|_| pen.last_tilt), pen.eraser);
+        for event in seen {
+            stylus::queue_reading(tablets::xinput_reading(
+                self.clock.seconds(event.time),
+                event.pressure,
+                event.tip,
+                event.tilt,
+                event.eraser,
+            ));
         }
-        true
+        alive
     }
 
     /// Takes one raw event of a pen (`tip` for its tip's button), and says
-    /// which pen it was.
-    fn take(
-        &mut self,
-        raw: &xinput::RawButtonPressEvent,
-        tip: Option<bool>,
-    ) -> Option<xinput::DeviceId> {
+    /// when it was and what the pen read then.
+    fn take(&mut self, raw: &xinput::RawButtonPressEvent, tip: Option<bool>) -> Option<Seen> {
         let pen = self
             .pens
             .iter_mut()
@@ -317,7 +338,13 @@ impl Tablet {
         if tip.is_some() {
             pen.tip = tip;
         }
-        Some(pen.id)
+        Some(Seen {
+            time: raw.time,
+            pressure: pen.last_pressure,
+            tip: pen.tip,
+            tilt: pen.tilt.map(|_| pen.last_tilt),
+            eraser: pen.eraser,
+        })
     }
 }
 

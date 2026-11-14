@@ -231,8 +231,11 @@ pub struct DesktopHost {
     /// Dialogs and floating palettes in windows of their own.
     #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
     viewports: crate::viewports::Shared,
-    /// A WinTab tablet's pen pressure (see `crate::stylus`): `None` until
-    /// the first frame looks for one, then whether there is one.
+    /// Joins the window's pointer and touch events with the pens' packets
+    /// for the pen's sample stream (see `crate::stylus`).
+    pen: crate::stylus::Router,
+    /// A WinTab tablet's pen (see `crate::wintab_pen`): `None` until the
+    /// first frame looks for one, then whether there is one.
     #[cfg(target_os = "windows")]
     tablet: Option<Option<crate::wintab_pen::Tablet>>,
     /// A pen tablet's pressure, tilt and eraser through XInput2 (see
@@ -477,6 +480,7 @@ impl DesktopHost {
             exit_requested: false,
             #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
             viewports,
+            pen: crate::stylus::Router::default(),
             #[cfg(target_os = "windows")]
             tablet: None,
             #[cfg(any(
@@ -593,10 +597,76 @@ impl DesktopHost {
         }
     }
 
+    /// Hands one of the main window's mouse or touch events to the pen's
+    /// sample stream, as egui will see it (in its points), with the time
+    /// it arrived: a mouse and a touch are sources of the stream too, and
+    /// a pen whose packets do not say where it is in the window is placed
+    /// along the pointer's path.
+    fn route_pointer(&mut self, event: &OsWindowEvent) {
+        use winit::event::{ElementState, Force, MouseButton, TouchPhase};
+        let relevant = matches!(
+            event,
+            OsWindowEvent::CursorMoved { .. }
+                | OsWindowEvent::CursorLeft { .. }
+                | OsWindowEvent::MouseInput { .. }
+                | OsWindowEvent::Touch(_)
+        );
+        if !relevant {
+            return;
+        }
+        let now = crate::time::since_start().as_secs_f64();
+        let scale = egui_winit::pixels_per_point(&self.ctx, &self.window);
+        let point =
+            |at: winit::dpi::PhysicalPosition<f64>| [at.x as f32 / scale, at.y as f32 / scale];
+        match event {
+            OsWindowEvent::CursorMoved { position, .. } => self.pen.moved(point(*position), now),
+            OsWindowEvent::CursorLeft { .. } => self.pen.left(),
+            OsWindowEvent::MouseInput { state, button, .. } => {
+                // The buttons egui makes pointer events of.
+                if matches!(
+                    button,
+                    MouseButton::Left
+                        | MouseButton::Right
+                        | MouseButton::Middle
+                        | MouseButton::Back
+                        | MouseButton::Forward
+                ) {
+                    self.pen.button(
+                        *button == MouseButton::Left,
+                        *state == ElementState::Pressed,
+                        now,
+                    );
+                }
+            }
+            OsWindowEvent::Touch(touch) => {
+                let phase = match touch.phase {
+                    TouchPhase::Started => egui::TouchPhase::Start,
+                    TouchPhase::Moved => egui::TouchPhase::Move,
+                    TouchPhase::Ended => egui::TouchPhase::End,
+                    TouchPhase::Cancelled => egui::TouchPhase::Cancel,
+                };
+                // The force as egui reads it.
+                let force = match touch.force {
+                    Some(Force::Normalized(force)) => Some(force as f32),
+                    Some(Force::Calibrated {
+                        force,
+                        max_possible_force,
+                        ..
+                    }) => Some((force / max_possible_force) as f32),
+                    None => None,
+                };
+                let at = point(touch.location);
+                let pen = &mut self.pen;
+                crate::stylus::real(|stream| pen.touch(stream, touch.id, phase, at, force, now));
+            }
+            _ => {}
+        }
+    }
+
     /// Builds, paints and presents one frame.
     fn frame<A: DesktopApp>(&mut self, app: &mut A) {
-        // A WinTab tablet's pen pressure for this frame. The context opens
-        // on the first frame, once the window is shown.
+        // A WinTab tablet's packets since the last frame. The context
+        // opens on the first frame, once the window is shown.
         #[cfg(target_os = "windows")]
         {
             let window = &self.window;
@@ -604,7 +674,7 @@ impl DesktopHost {
                 .tablet
                 .get_or_insert_with(|| crate::wintab_pen::Tablet::open(window));
             if let Some(tablet) = tablet {
-                tablet.poll();
+                tablet.poll(crate::time::since_start().as_secs_f64());
             }
         }
         // A pen tablet under X11 or XWayland, the same way.
@@ -682,6 +752,9 @@ impl DesktopHost {
             let modifiers = self.ctx.input(|input| input.modifiers);
             raw.events.extend(pen.take_events(scale, modifiers));
         }
+        // Everything the pointer, the touches and the pens did since the
+        // last frame becomes this frame's pen samples.
+        self.pen.flush_frame();
         let ctx = self.ctx.clone();
         let output = ctx.run_ui(raw, |ui| app.ui(ui, self));
         // The pen's samples went with this frame's events.
@@ -694,7 +767,6 @@ impl DesktopHost {
             target_os = "dragonfly"
         ))]
         if let Some(Some(pen)) = self.wayland_pen.as_mut() {
-            pen.frame_done();
             // A pen near the window shows the cursor the mouse would.
             pen.set_cursor(output.platform_output.cursor_icon);
         }
@@ -1355,6 +1427,7 @@ impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
             }
             return;
         }
+        host.route_pointer(&event);
         let response = host.egui.on_window_event(&host.window, &event);
         // egui asks to repaint after any event, the redraw itself included;
         // answering that one would draw forever.

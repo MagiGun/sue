@@ -546,13 +546,20 @@ pub(crate) fn connect(waker: impl Fn() + 'static, let_through: impl Fn(bool) + '
     let Some(window) = web_sys::window() else {
         return;
     };
-    // A pen's pressure: winit hands a pen to Sue as a mouse, without it.
+    // A pen's pressure, lean and twist: winit hands a pen to Sue as a
+    // mouse, without them. Each of the page's pen events is one reading
+    // of the pen's stream, at the event's own time; the stream places it
+    // along the path the pointer took.
+    let clock = std::rc::Rc::new(std::cell::RefCell::new(
+        crate::stylus::DeviceClock::default(),
+    ));
     for (kind, lifts) in [
         ("pointerdown", false),
         ("pointermove", false),
         ("pointerup", true),
         ("pointercancel", true),
     ] {
+        let clock = std::rc::Rc::clone(&clock);
         listen(&window, kind, true, move |event| {
             let Some(pointer) = event.dyn_ref::<web_sys::PointerEvent>() else {
                 return;
@@ -561,10 +568,16 @@ pub(crate) fn connect(waker: impl Fn() + 'static, let_through: impl Fn(bool) + '
                 return;
             }
             let touching = !lifts && pointer.buttons() & 1 != 0;
-            crate::stylus::set(
-                crate::stylus::PenSource::Browser,
-                touching.then(|| pointer.pressure()),
-            );
+            let now = crate::time::since_start().as_secs_f64();
+            let time = clock.borrow_mut().seconds_of(pointer.time_stamp(), now);
+            crate::stylus::queue_reading(crate::stylus::Reading::of_browser_pen(
+                time,
+                touching,
+                pointer.pressure(),
+                [pointer.tilt_x(), pointer.tilt_y()],
+                pointer.twist(),
+                [pointer.client_x(), pointer.client_y()],
+            ));
         });
     }
     let Some(document) = window.document() else {
