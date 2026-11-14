@@ -79,7 +79,7 @@ fn run(writer: &mut SueWriter, cx: &mut AppletContext<'_>, call: Call<'_>) {
             let pick = FilePick::open(Some(me()), "import", &tr!("import-a-document"))
                 .extensions(&[
                     "docx", "dotx", "odt", "ott", "pdf", "md", "markdown", "txt", "html", "htm",
-                    "fountain",
+                    "fountain", "csv", "tsv", "tab",
                 ])
                 .starting_in(SueWriter::export_dir(cx));
             cx.request(ShellRequest::PickFile(pick));
