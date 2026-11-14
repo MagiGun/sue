@@ -101,6 +101,8 @@ follow [Semantic Versioning](https://semver.org/).
 - Undo, Redo, Open, Save and Quit show in a studio's menus the keys they
   really have: change one in Settings (Keymaps) and the menu follows, as
   it already did for the studio's own commands.
+- Sue Writer's entries in the command palette name the studio once
+  ("Sue Writer: New Project..."), not twice.
 
 ### Removed
 

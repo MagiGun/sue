@@ -559,3 +559,4 @@ quick-page-break = فاصل صفحات
 quick-page-view = عرض الصفحة
 quick-draft-view = عرض المسودة
 quick-export-pdf = حفظ كـ PDF
+export-as-pdf-ellipsis = تصدير كـ PDF...

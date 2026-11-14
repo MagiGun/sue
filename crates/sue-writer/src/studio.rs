@@ -2129,34 +2129,15 @@ impl SueApplet for SueWriter {
     }
 
     fn commands(&self) -> Vec<PaletteEntry> {
+        // The palette says whose command it is ("Sue Writer: ...").
         [
-            (tr!("sue-writer-new-project-ellipsis"), "file.new", ""),
-            (
-                tr!("sue-writer-import-a-document-ellipsis"),
-                "file.import",
-                "",
-            ),
-            (
-                tr!("sue-writer-compile-ellipsis"),
-                "compile.open",
-                "Ctrl+Shift+E",
-            ),
-            (
-                tr!("sue-writer-export-as-pdf-ellipsis"),
-                "compile.pdf",
-                "Ctrl+P",
-            ),
-            (
-                tr!("sue-writer-composition-mode"),
-                "view.composition",
-                "F11",
-            ),
-            (
-                tr!("sue-writer-writing-statistics"),
-                "project.statistics",
-                "",
-            ),
-            (tr!("sue-writer-keyboard-shortcuts"), "help.shortcuts", ""),
+            (tr!("new-project-ellipsis"), "file.new", ""),
+            (tr!("import-a-document-ellipsis"), "file.import", ""),
+            (tr!("compile-ellipsis"), "compile.open", "Ctrl+Shift+E"),
+            (tr!("export-as-pdf-ellipsis"), "compile.pdf", "Ctrl+P"),
+            (tr!("composition-mode"), "view.composition", "F11"),
+            (tr!("writing-statistics-ellipsis"), "project.statistics", ""),
+            (tr!("keyboard-shortcuts"), "help.shortcuts", ""),
         ]
         .into_iter()
         .map(|(label, command, hint)| PaletteEntry {

@@ -554,3 +554,4 @@ quick-page-break = 改ページ
 quick-page-view = ページ表示
 quick-draft-view = ドラフト表示
 quick-export-pdf = PDFとして保存
+export-as-pdf-ellipsis = PDFとしてエクスポート...

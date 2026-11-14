@@ -573,3 +573,4 @@ quick-page-break = Page Break
 quick-page-view = Page View
 quick-draft-view = Draft View
 quick-export-pdf = Save as PDF
+export-as-pdf-ellipsis = Export as PDF...

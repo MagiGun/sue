@@ -555,3 +555,4 @@ quick-page-break = Salto de pagina
 quick-page-view = Vista de pagina
 quick-draft-view = Vista de borrador
 quick-export-pdf = Guardar como PDF
+export-as-pdf-ellipsis = Exportar como PDF...

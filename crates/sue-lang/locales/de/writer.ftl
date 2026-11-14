@@ -512,3 +512,4 @@ words-a-day = Wörter pro Tag
 words-by-day = Wörter nach Tag
 words-percent-there = { $target } Wörter, { $value } % erreicht
 your-comment = Dein Kommentar
+export-as-pdf-ellipsis = Als PDF exportieren...

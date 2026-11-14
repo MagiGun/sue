@@ -512,3 +512,4 @@ words-a-day = Mots par jour
 words-by-day = Mots par jour
 words-percent-there = { $target } mots, { $value } % de l’objectif
 your-comment = Votre commentaire
+export-as-pdf-ellipsis = exporter en PDF...
