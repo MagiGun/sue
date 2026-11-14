@@ -24,6 +24,37 @@ const HISTORY: &[(u32, &str)] = &[
     (6, include_str!("../rice/history/v6.suerice")),
 ];
 
+/// The theme presets as they shipped from format 3 to format 6, by id.
+/// Format 7 raised their secondary text to a readable contrast and parted
+/// their hairlines from the hover color, so a file that wore one of them
+/// takes the preset as it ships now: its old colors are no choice of the
+/// person's, only the preset they picked.
+const OLD_PRESETS: &[(&str, &str)] = &[
+    (
+        "void",
+        include_str!("../rice/history/presets-v6/void.suerice"),
+    ),
+    (
+        "graphite",
+        include_str!("../rice/history/presets-v6/graphite.suerice"),
+    ),
+    (
+        "paper",
+        include_str!("../rice/history/presets-v6/paper.suerice"),
+    ),
+    (
+        "gray",
+        include_str!("../rice/history/presets-v6/gray.suerice"),
+    ),
+];
+
+/// The formats that shipped [`OLD_PRESETS`].
+const OLD_PRESET_FORMATS: std::ops::RangeInclusive<u32> = 3..=6;
+
+/// How many colors of a preset a person may have changed after picking it
+/// and still be said to wear it.
+const PRESET_SLACK: usize = 3;
+
 /// Keys that moved, as (old path, new path, old values that mean "no
 /// value" and do not carry over). Sue's boot mode became the Hub's pin: a
 /// studio chosen on purpose stays pinned, the Hub and the canvas mean none.
@@ -58,6 +89,29 @@ pub struct Migration {
     /// Colors reset because they were not gray: Sue's palette is pure
     /// monochrome, so a tinted color from an older release is replaced.
     pub purged: Vec<String>,
+    /// Colors of a theme preset the file wore, moved to that preset as it
+    /// ships now (the old preset's values are not the person's choice).
+    pub restyled: Vec<String>,
+}
+
+/// The old preset `user` wears, if any: the one whose colors it holds,
+/// all but at most [`PRESET_SLACK`] of them, the closest first. Gives the
+/// preset's id and its old values.
+fn worn_preset(user: &RiceSchema) -> Result<Option<(&'static str, RiceSchema)>, RiceError> {
+    let mut best: Option<(usize, &'static str, RiceSchema)> = None;
+    for (id, source) in OLD_PRESETS {
+        let old = RiceSchema::parse(source)?;
+        let total = old.entries().len();
+        let same = old
+            .entries()
+            .iter()
+            .filter(|entry| user.get(entry.path()) == Some(entry.parameter().value()))
+            .count();
+        if same + PRESET_SLACK >= total && best.as_ref().is_none_or(|(most, ..)| same > *most) {
+            best = Some((same, id, old));
+        }
+    }
+    Ok(best.map(|(_, id, old)| (id, old)))
 }
 
 /// `true` for a color that is not a gray.
@@ -121,12 +175,40 @@ fn migrate_onto(text: &str, current: &str) -> Result<Option<Migration>, RiceErro
             dropped.push(entry.path().to_owned());
         }
     }
+    // A preset worn before format 7 is worn as it ships now: each color
+    // still at the old preset's value takes the new one.
+    let mut restyled = Vec::new();
+    if OLD_PRESET_FORMATS.contains(&from)
+        && let Some((id, old)) = worn_preset(&user)?
+        && let Some(new) = crate::builtin_presets()
+            .into_iter()
+            .find(|preset| preset.id == id)
+    {
+        for (path, value) in &new.values {
+            let was = old.get(path);
+            // A color still at the old default follows the default (Void
+            // was the default), as every untouched value does.
+            let untouched = old_defaults
+                .as_ref()
+                .is_some_and(|defaults| defaults.get(path) == was);
+            if was.is_some()
+                && !untouched
+                && user.get(path) == was
+                && migrated.get(path).as_ref() != Some(value)
+                && migrated.set(path, value.clone()).is_ok()
+            {
+                kept.retain(|kept| kept != path);
+                restyled.push(path.clone());
+            }
+        }
+    }
     Ok(Some(Migration {
         from,
         text: migrated.to_suerice(),
         kept,
         dropped,
         purged,
+        restyled,
     }))
 }
 
@@ -439,6 +521,111 @@ mod tests {
         assert_eq!(schema.get_str("launchpad.pinned"), Some(""));
         assert!(schema.get("canvas.zoom_min").is_none());
         assert!(schema.get("notes.font_size").is_none());
+    }
+
+    /// `text` with the colors of `[colors]` set to those of `preset`
+    /// (`.suerice` text), each line's comment kept.
+    fn wearing(text: &str, preset: &str) -> String {
+        let preset = RiceSchema::parse(preset).unwrap();
+        let mut inside = false;
+        let mut out = String::new();
+        for line in text.split_inclusive('\n') {
+            if line.trim_start().starts_with('[') {
+                inside = line.trim() == "[colors]";
+            }
+            let key = line.split('=').next().unwrap_or("").trim();
+            match preset.get(&format!("colors.{key}")) {
+                Some(RiceValue::Color(color)) if inside && line.contains('=') => {
+                    let start = line.find('"').unwrap();
+                    let end = start + 1 + line[start + 1..].find('"').unwrap();
+                    out.push_str(&line[..=start]);
+                    out.push_str(&color.to_string());
+                    out.push_str(&line[end..]);
+                }
+                _ => out.push_str(line),
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_preset_worn_before_format_7_is_worn_as_it_ships_now() {
+        let presets = crate::builtin_presets();
+        let graphite = presets.iter().find(|p| p.id == "graphite").unwrap();
+        let old = OLD_PRESETS
+            .iter()
+            .find(|(id, _)| *id == "graphite")
+            .unwrap()
+            .1;
+        let file = wearing(V6, old);
+        assert_ne!(file, V6);
+        let user = RiceSchema::parse(&file).unwrap();
+        assert!(
+            !graphite.is_active(&user),
+            "the old Graphite is not the new one"
+        );
+        let migration = migrate(&file).unwrap().unwrap();
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        // The defect: the old muted text and hairline stayed as if the
+        // person had picked them, and no preset read as worn.
+        assert!(graphite.is_active(&schema), "{}", migration.text);
+        assert_eq!(
+            migration.restyled,
+            ["colors.border", "colors.muted"],
+            "only what format 7 changed in Graphite moves"
+        );
+        assert!(
+            migration
+                .kept
+                .iter()
+                .all(|path| !migration.restyled.contains(path)),
+            "{:?}",
+            migration.kept
+        );
+        assert!(migration.kept.iter().any(|path| path == "colors.void"));
+        // Every preset of format 6: worn, it migrates to itself as it is
+        // now.
+        for (id, old) in OLD_PRESETS {
+            let migration = migrate(&wearing(V6, old)).unwrap().unwrap();
+            let schema = RiceSchema::parse(&migration.text).unwrap();
+            let now = presets.iter().find(|p| p.id == *id).unwrap();
+            assert!(now.is_active(&schema), "{id}");
+        }
+        // Also from format 4 and 5, which shipped the same presets.
+        for older in [V4, V5] {
+            let migration = migrate(&wearing(older, old)).unwrap().unwrap();
+            let schema = RiceSchema::parse(&migration.text).unwrap();
+            assert!(graphite.is_active(&schema));
+        }
+    }
+
+    #[test]
+    fn a_color_picked_on_top_of_an_old_preset_stays() {
+        let old = OLD_PRESETS
+            .iter()
+            .find(|(id, _)| *id == "graphite")
+            .unwrap()
+            .1;
+        // Graphite, with the muted text picked by hand.
+        let file = wearing(V6, old).replace("muted = \"#8c8c8c\"", "muted = \"#b0b0b0\"");
+        let schema = RiceSchema::parse(&file).unwrap();
+        assert_eq!(schema.get("colors.muted").unwrap().to_string(), "#b0b0b0");
+        let migration = migrate(&file).unwrap().unwrap();
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert_eq!(schema.get("colors.muted").unwrap().to_string(), "#b0b0b0");
+        assert_eq!(migration.restyled, ["colors.border"]);
+        assert!(migration.kept.iter().any(|path| path == "colors.muted"));
+        // Colors of no preset at all are the person's own and stay.
+        let own = V6
+            .replace("muted = \"#808080\"", "muted = \"#777777\"")
+            .replace("void = \"#0a0a0a\"", "void = \"#050505\"")
+            .replace("panel = \"#111111\"", "panel = \"#151515\"")
+            .replace("pill = \"#181818\"", "pill = \"#1b1b1b\"")
+            .replace("border = \"#262626\"", "border = \"#222222\"");
+        let migration = migrate(&own).unwrap().unwrap();
+        assert!(migration.restyled.is_empty(), "{:?}", migration.restyled);
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert_eq!(schema.get("colors.muted").unwrap().to_string(), "#777777");
     }
 
     #[test]

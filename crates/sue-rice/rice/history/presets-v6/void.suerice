@@ -1,0 +1,15 @@
+# Void: Sue's default, pure black to white.
+[colors]
+void = "#0a0a0a"
+panel = "#111111"
+pill = "#181818"
+hover = "#262626"
+active = "#333333"
+border = "#262626"
+border_active = "#ffffff"
+text = "#ffffff"
+muted = "#808080"
+selection = "#404040"
+selection_text = "#ffffff"
+grid = "#262626"
+shadow = "#000000"
