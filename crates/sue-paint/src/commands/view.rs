@@ -789,7 +789,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     )
     .state(playback_fps_on),
     c(
-        "view.special_snap",
+        "view.special_ruler_snapping",
         "toggle-special-ruler-snapping",
         "snap-ruler",
         special_snap,
@@ -974,12 +974,15 @@ mod tests {
                 entities
             };
             let before = state(cx);
-            assert_eq!(item(paint, cx, "view.special_snap"), ItemState::check(true));
+            assert_eq!(
+                item(paint, cx, "view.special_ruler_snapping"),
+                ItemState::check(true)
+            );
             assert!(special_snaps(&cx.world.arena, picture));
-            super::super::registry().run(paint, cx, "view.special_snap");
+            super::super::registry().run(paint, cx, "view.special_ruler_snapping");
             assert!(!special_snaps(&cx.world.arena, picture));
             assert_eq!(
-                item(paint, cx, "view.special_snap"),
+                item(paint, cx, "view.special_ruler_snapping"),
                 ItemState::check(false)
             );
             let after = state(cx);
@@ -992,7 +995,7 @@ mod tests {
             // Without a special ruler the item is grayed.
             let none = crate::rulers::edit(picture, crate::rulers::SYMMETRY, None, "ruler");
             assert!(SuePaint::apply(cx, none));
-            assert!(!item(paint, cx, "view.special_snap").enabled);
+            assert!(!item(paint, cx, "view.special_ruler_snapping").enabled);
         });
     }
 

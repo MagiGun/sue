@@ -277,7 +277,7 @@ fn the_shortcuts_keep_the_keys_and_names_they_had() {
         ("view.snap_special", "Ctrl+2", "Snap to Special Ruler"),
         ("view.snap_grid", "Ctrl+3", "Snap to Grid"),
         (
-            "view.special_snap",
+            "view.special_ruler_snapping",
             "Ctrl+4",
             "Toggle Special Ruler Snapping",
         ),

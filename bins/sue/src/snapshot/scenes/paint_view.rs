@@ -9,9 +9,9 @@ const LINES: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1600" hei
 <path d="M420 780 L 1180 780 L 1180 960 L 420 960 Z" fill="none" stroke="#202020" stroke-width="6"/>
 </svg>"##;
 
-/// 31a. View, Safety Margin on a page, and Show Vector Paths with every
-/// control point on a vector layer of lines. 31c. The View menu with
-/// them on. 31b. Show Playback FPS while the timeline plays. Everything
+/// 32a. View, Safety Margin on a page, and Show Vector Paths with every
+/// control point on a vector layer of lines. 32b. The View menu with
+/// them on. 32c. Show Playback FPS while the timeline plays. Everything
 /// is turned back off and the layer deleted after, so the scenes after
 /// look as they did.
 pub(super) fn marks(tour: &mut Tour<'_>) -> Result<(), String> {
@@ -49,16 +49,16 @@ pub(super) fn marks(tour: &mut Tour<'_>) -> Result<(), String> {
     for command in marks {
         tour.paint_command(command);
     }
-    tour.shoot("31a-sue-paint-view-marks")?;
+    tour.shoot("32a-sue-paint-view-marks")?;
     tour.paint_go(&["menu/View"]);
-    tour.shoot("31c-sue-paint-view-menu")?;
+    tour.shoot("32b-sue-paint-view-menu")?;
     tour.paint_go(&["dialog/close"]);
     for command in marks {
         tour.paint_command(command);
     }
     tour.paint_command("view.playback_fps");
     tour.paint_command("anim.play");
-    let path = tour.dir.join("31b-sue-paint-playback-fps.png");
+    let path = tour.dir.join("32c-sue-paint-playback-fps.png");
     tour.camera.shoot_after(&mut tour.runtime, &path, 90)?;
     tour.written.push(path);
     tour.paint_command("anim.play");

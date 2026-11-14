@@ -649,7 +649,7 @@ pub fn menus() -> Vec<Menu> {
                         item("view.snap_ruler"),
                         item("view.snap_special"),
                         item("view.snap_grid"),
-                        item("view.special_snap"),
+                        item("view.special_ruler_snapping"),
                     ],
                 ),
                 sub(
