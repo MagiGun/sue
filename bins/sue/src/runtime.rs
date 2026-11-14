@@ -1220,7 +1220,7 @@ impl Runtime {
     ) {
         match pick.purpose.as_str() {
             "open" => self.open_path(path, textures, now),
-            "save-project" => self.start_save(path),
+            "save-project" => self.save_to(path),
             "export-rice" => {
                 let text = self.engine.world.rice.to_suerice();
                 match write_atomic(path, text.as_bytes()) {
@@ -1359,7 +1359,19 @@ impl Runtime {
                 return;
             }
         };
-        self.start_save(&path);
+        self.save_to(&path);
+    }
+
+    /// Saves the project to `path`: on a job when people work in Sue's
+    /// window ([`Self::start_save`]), before it returns in a scripted run
+    /// (tests, the self-check, snapshots), whose next step reads the file.
+    fn save_to(&mut self, path: &Path) {
+        if self.interactive {
+            self.start_save(path);
+        } else {
+            // A failure is said by `saved`.
+            let _ = self.save_project_to(path);
+        }
     }
 
     /// Starts writing the project to `path` on a job, from a snapshot of
