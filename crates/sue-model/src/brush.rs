@@ -880,6 +880,7 @@ impl BrushPreset {
         let mut pick = Pick::default();
         let mut keep_colors = false;
         let mut images = false;
+        let mut parts: Vec<(&str, &[u8])> = Vec::new();
         let mut seen: Vec<&str> = Vec::new();
         for (key, payload) in fields(input)? {
             // A field counts once: a second one of the same key is kept
@@ -893,6 +894,9 @@ impl BrushPreset {
                 continue;
             }
             seen.push(known);
+            if PARTS.contains(&known) {
+                parts.push((known, payload));
+            }
             match known {
                 "id" => preset.id = text(known, payload)?,
                 "name" => preset.name = text(known, payload)?,
@@ -1006,6 +1010,19 @@ impl BrushPreset {
                 other => unreachable!("{other} is in KEYS and has no reader"),
             }
         }
+        // A part without its whole (the pictures of a round tip, a scale
+        // with no texture, a blur with no mixing) has no place in the
+        // preset. It is kept as it was read and written back, not dropped.
+        for (key, payload) in parts {
+            let whole = match key.split_once('.') {
+                Some(("tip", _)) => images,
+                Some(("texture", _)) => textured,
+                _ => mixing,
+            };
+            if !whole {
+                preset.extra.push((key.to_owned(), payload.to_vec()));
+            }
+        }
         if images {
             preset.tip = TipSource::Images {
                 pictures,
@@ -1067,6 +1084,21 @@ const KEYS: &[&str] = &[
     "input.post_correction",
     "input.flick",
     "input.smart_shape",
+];
+
+/// The keys of [`KEYS`] that say something only beside another: a picture
+/// tip (`tip` is `images`), a texture (`texture.source`), a mixing
+/// (`mix.amount`).
+const PARTS: &[&str] = &[
+    "tip.pictures",
+    "tip.pick",
+    "tip.keep_colors",
+    "texture.scale",
+    "texture.rotation",
+    "texture.mode",
+    "mix.load",
+    "mix.pull",
+    "mix.blur",
 ];
 
 /// Every key [`Binding`] writes.
@@ -1853,6 +1885,54 @@ mod tests {
         let read = BrushPreset::from_bytes(out.as_bytes()).unwrap();
         assert_eq!(read.texture, Some(Texture::new(TextureSource::Grain)));
         assert_eq!(read.mix, Some(Mixing::new(0.5)));
+    }
+
+    #[test]
+    fn a_part_without_its_whole_is_kept_and_written_back() {
+        // The scale of a texture that is not there, the blur of a mixing
+        // that is not there, and the pictures' colors of a round tip.
+        let mut out = Writer::new();
+        out.varint(u64::from(BrushPreset::FORMAT));
+        put_number(&mut out, "texture.scale", 2.0);
+        put_number(&mut out, "mix.blur", 0.5);
+        put_flag(&mut out, "tip.keep_colors", true);
+        put_text(&mut out, "tip", "round");
+        let read = BrushPreset::from_bytes(out.as_bytes()).unwrap();
+        assert_eq!(read.texture, None);
+        assert_eq!(read.mix, None);
+        assert_eq!(read.tip, TipSource::Round);
+        let mut scale = Writer::new();
+        scale.f32(2.0);
+        assert_eq!(read.extra("texture.scale"), Some(scale.as_bytes()));
+        assert!(read.extra("mix.blur").is_some());
+        assert!(read.extra("tip.keep_colors").is_some());
+        assert_eq!(read.extra.len(), 3);
+        let bytes = read.to_bytes();
+        let again = BrushPreset::from_bytes(&bytes).unwrap();
+        assert_eq!(again, read);
+        assert_eq!(again.to_bytes(), bytes);
+
+        // Beside its whole a part is a field, wherever the whole comes.
+        let mut out = Writer::new();
+        out.varint(u64::from(BrushPreset::FORMAT));
+        put_number(&mut out, "texture.scale", 2.0);
+        put_flag(&mut out, "tip.keep_colors", true);
+        put_text(&mut out, "tip", "images");
+        put(&mut out, "texture.source", |out| out.str("grain"));
+        let read = BrushPreset::from_bytes(out.as_bytes()).unwrap();
+        assert!(read.extra.is_empty());
+        assert_eq!(
+            read.texture.as_ref().map(|texture| texture.scale),
+            Some(2.0)
+        );
+        assert_eq!(
+            read.tip,
+            TipSource::Images {
+                pictures: Vec::new(),
+                pick: Pick::Random,
+                keep_colors: true,
+            }
+        );
     }
 
     #[test]
