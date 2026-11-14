@@ -248,9 +248,9 @@ pub enum Layer {
     Popover,
     /// Dialogs and sheets, over their scrim.
     Dialog,
-    /// Notices. They can hold a button, so they take clicks.
+    /// Notices. The tooltip of a button in one lies over it.
     Toast,
-    /// Tooltips. Nothing in them takes a click.
+    /// Tooltips, over everything but what is dragged.
     Tooltip,
     /// What is being dragged, and where it would land.
     Drag,
@@ -912,8 +912,11 @@ mod tests {
         // What is dragged is over the tooltips, and those over the rest.
         assert!(Layer::Drag.order() > Layer::Tooltip.order());
         assert!(Layer::Tooltip.order() > Layer::Toast.order());
-        // Toasts can hold a button: egui's tooltip order takes no clicks.
-        assert!(Layer::Toast.order().allow_interaction());
+        // Popovers, dialogs and toasts share an order: the one opened
+        // last is on top.
+        assert_eq!(Layer::Popover.order(), Layer::Toast.order());
+        assert_eq!(Layer::Page.order(), egui::Order::Background);
+        assert_eq!(Layer::FloatingPalette.order(), egui::Order::Middle);
         assert_eq!(
             Layer::Dialog.id(egui::Id::unique("x")).order,
             egui::Order::Foreground

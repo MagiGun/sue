@@ -19,7 +19,7 @@ pub mod focus;
 pub mod motion;
 pub mod tokens;
 
-pub use focus::{FocusScope, Roving, focus_ring, focus_visible, paint_focus_ring};
+pub use focus::{FocusScope, Roving, focus_ring, focus_visible, paint_focus_ring, watch_focus};
 pub use motion::{Motion, Pace};
 pub use tokens::{
     Density, EDGE_CONTRAST, Elevation, Layer, MIN_TEXT_SIZE, Radius, Space, TEXT_CONTRAST,

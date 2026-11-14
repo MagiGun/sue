@@ -347,8 +347,9 @@ impl Theme {
     /// Applies the theme to `ctx`: visuals, spacing, text styles and the
     /// motion settings (egui's own animations take the base pace, or no
     /// time at all when transitions are instant; [`crate::ui::motion`]
-    /// reads the rest from `ctx`). Fonts change only when the interface
-    /// font does.
+    /// reads the rest from `ctx`), and makes `ctx` watch whether focus last
+    /// moved by keyboard, for the focus ring. Fonts change only when the
+    /// interface font does.
     pub fn apply(
         &self,
         ctx: &egui::Context,
@@ -358,6 +359,7 @@ impl Theme {
         let visuals = self.visuals(caret_blink);
         let theme = self.clone();
         self.motion.store(ctx);
+        crate::ui::watch_focus(ctx);
         ctx.all_styles_mut(move |style| {
             style.visuals = visuals.clone();
             style.animation_time = theme.motion.seconds(Pace::Base);
@@ -369,9 +371,9 @@ impl Theme {
                 (TextStyle::Monospace, theme.text_font(TextRole::Mono)),
             ]
             .into();
-            let margin = |space: Space| {
-                egui::Margin::same(theme.space(space).round().clamp(0.0, 127.0) as i8)
-            };
+            // Whole points, rounded down as before the tokens.
+            let margin =
+                |space: Space| egui::Margin::same(theme.space(space).clamp(0.0, 127.0) as i8);
             let spacing = &mut style.spacing;
             spacing.item_spacing = egui::vec2(theme.space(Space::S3), theme.space(Space::S2));
             spacing.button_padding = egui::vec2(theme.space(Space::S4), theme.space(Space::S2));
@@ -658,6 +660,18 @@ mod tests {
         assert_eq!(style.text_styles[&TextStyle::Small].size, 11.0);
         assert_eq!(style.text_styles[&TextStyle::Body].size, 13.0);
         assert_eq!(style.text_styles[&TextStyle::Heading].size, 18.0);
+        // A padding whose share is not whole: the margin rounds down, as
+        // it did.
+        let odd = Theme {
+            padding: 10.0,
+            ..theme.clone()
+        };
+        odd.apply(&ctx, None, Some(&theme));
+        assert_eq!(
+            ctx.global_style().spacing.menu_margin,
+            egui::Margin::same(7)
+        );
+        theme.apply(&ctx, None, Some(&odd));
         // Faster animations are shorter, and instant ones take no time:
         // a toggle switch then lands in the frame it was clicked.
         rice.set("motion.animation_speed", sue_rice::RiceValue::Float(2.0))

@@ -28,12 +28,18 @@ struct Visible {
 }
 
 /// `true` while keyboard focus should show: the last thing that could
-/// move it was a key (Tab, an arrow, any other key) and not a click or a
-/// tap. Something has to ask every frame for this to follow the input;
-/// [`focus_ring`] does.
+/// move it was a key (Tab, an arrow, a letter) and not a click or a tap.
+/// A shortcut (a key with Ctrl, Alt or Command) is not such a key: saving
+/// with Ctrl+S puts no ring on the button that was clicked last.
+///
+/// This follows the input only in frames in which it is asked.
+/// [`watch_focus`] asks in every frame, and
+/// [`Theme::apply`](crate::Theme::apply) sets that up; [`focus_ring`] asks
+/// too.
 pub fn focus_visible(ctx: &Context) -> bool {
     let frame = ctx.cumulative_frame_nr();
-    let id = Id::unique("sue-focus-visible");
+    // Each window has its own input and its own focus.
+    let id = Id::unique("sue-focus-visible").with(ctx.viewport_id());
     let known: Option<Visible> = ctx.data(|data| data.get_temp(id));
     if let Some(known) = known
         && known.frame == frame
@@ -41,13 +47,16 @@ pub fn focus_visible(ctx: &Context) -> bool {
         return known.by_keyboard;
     }
     let (key, press) = ctx.input(|input| {
-        let key = input
-            .events
-            .iter()
-            .any(|event| matches!(event, egui::Event::Key { pressed: true, .. }));
+        let key = input.events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key { pressed: true, modifiers, .. }
+                    if !(modifiers.ctrl || modifiers.alt || modifiers.command || modifiers.mac_cmd)
+            )
+        });
         (key, input.pointer.any_pressed())
     });
-    // A press wins over a key held with it (Ctrl and click).
+    // A press wins over a key held with it (Shift and click).
     let by_keyboard = if press {
         false
     } else {
@@ -55,6 +64,23 @@ pub fn focus_visible(ctx: &Context) -> bool {
     };
     ctx.data_mut(|data| data.insert_temp(id, Visible { by_keyboard, frame }));
     by_keyboard
+}
+
+/// Makes `ctx` follow the input for [`focus_visible`] in every frame,
+/// whether or not anything draws a focus ring in it: a click on a page
+/// without rings still ends the showing of keyboard focus. Asking twice
+/// sets it up once.
+pub fn watch_focus(ctx: &Context) {
+    let id = Id::unique("sue-focus-watch");
+    let watched = ctx.data_mut(|data| std::mem::replace(data.get_temp_mut_or(id, false), true));
+    if !watched {
+        ctx.on_begin_pass(
+            "sue-focus-visible",
+            std::sync::Arc::new(|ui: &mut Ui| {
+                focus_visible(ui.ctx());
+            }),
+        );
+    }
 }
 
 /// Paints the focus ring around `rect`, whose corners have `radius`, at
@@ -397,6 +423,62 @@ mod tests {
         assert_eq!(frame(&ctx, press(Key::ArrowUp), Some(menu)), Some(0));
         assert_eq!(frame(&ctx, Vec::new(), Some(menu)), Some(0));
         assert_eq!(frame(&ctx, press(Key::ArrowDown), Some(menu)), Some(1));
+    }
+
+    #[test]
+    fn a_watched_context_follows_the_input_with_no_ring_drawn() {
+        let ctx = Context::default();
+        // Twice: it is set up once all the same.
+        watch_focus(&ctx);
+        watch_focus(&ctx);
+        let run = |events: Vec<Event>| {
+            let mut seen = None;
+            let mut output = ctx.run_ui(
+                RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |_| {},
+            );
+            output.textures_delta.clear();
+            // Asked in the next frame only: what it knows of this one, it
+            // learned by watching.
+            let mut output = ctx.run_ui(RawInput::default(), |ui| {
+                seen = Some(focus_visible(ui.ctx()));
+            });
+            output.textures_delta.clear();
+            seen.unwrap()
+        };
+        assert!(!run(Vec::new()));
+        // A shortcut is not a move of focus.
+        assert!(!run(vec![key(Key::S, Modifiers::CTRL)]));
+        assert!(!run(vec![key(Key::S, Modifiers::COMMAND)]));
+        assert!(!run(vec![key(Key::F, Modifiers::ALT)]));
+        assert!(run(vec![key(Key::Tab, Modifiers::SHIFT)]));
+        assert!(run(Vec::new()));
+        let click = Event::PointerButton {
+            pos: egui::pos2(40.0, 30.0),
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        };
+        assert!(!run(vec![click]));
+        // Without the watch, a frame nobody asks in is not seen.
+        let blind = Context::default();
+        let mut output = blind.run_ui(
+            RawInput {
+                events: vec![key(Key::Tab, Modifiers::NONE)],
+                ..Default::default()
+            },
+            |_| {},
+        );
+        output.textures_delta.clear();
+        let mut seen = None;
+        let mut output = blind.run_ui(RawInput::default(), |ui| {
+            seen = Some(focus_visible(ui.ctx()));
+        });
+        output.textures_delta.clear();
+        assert_eq!(seen, Some(false));
     }
 
     #[test]
