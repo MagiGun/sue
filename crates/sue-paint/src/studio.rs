@@ -6730,6 +6730,8 @@ impl SuePaint {
             self.shown = true;
         }
         self.sync_docs(&cx.world.arena);
+        self.start
+            .forget_old_cache(cx.catalog.folders.get("cache").map(PathBuf::as_path));
         self.poll_scans(cx);
         self.animate(cx, &ui.ctx().clone());
         self.record_timelapse(cx, &ui.ctx().clone());

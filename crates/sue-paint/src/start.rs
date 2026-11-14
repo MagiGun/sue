@@ -487,6 +487,20 @@ pub(crate) struct StartPage {
     pub(crate) new_canvas: Option<usize>,
     /// The device's screen in pixels, for the Screen size template.
     pub(crate) screen: [u32; 2],
+    /// The cache was looked through for what older versions left in it.
+    cache_checked: bool,
+}
+
+/// The folder in Sue's cache where versions before 0.0.8 kept pages and
+/// pictures read from another company's site. Nothing reads it any more.
+const OLD_CACHE: &str = "sue-paint-assets";
+
+/// Deletes [`OLD_CACHE`] from the cache folder `cache`, with everything
+/// in it. Returns `true` when there was one and it is gone. Nothing else
+/// in the cache is touched.
+fn forget_old_cache(cache: &Path) -> bool {
+    let old = cache.join(OLD_CACHE);
+    sue_platform::fs::is_dir(&old) && sue_platform::fs::remove_dir_all(&old).is_ok()
 }
 
 /// What the start page asks the studio for, after drawing.
@@ -513,6 +527,17 @@ impl StartPage {
     /// Start Page asked for it.
     pub(crate) fn shows(&self, no_canvas: bool) -> bool {
         no_canvas || self.forced
+    }
+
+    /// Once in a run, deletes what versions before 0.0.8 kept in the
+    /// cache folder from another company's site.
+    pub(crate) fn forget_old_cache(&mut self, cache: Option<&Path>) {
+        if std::mem::replace(&mut self.cache_checked, true) {
+            return;
+        }
+        if let Some(cache) = cache {
+            forget_old_cache(cache);
+        }
     }
 
     /// The materials changed on disk; find them again.
@@ -2628,6 +2653,44 @@ mod tests {
         }
         assert_eq!(thumbs.get(&path).unwrap().1.size, [64, 32]);
         let _ = sue_platform::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_old_cache_of_another_site_is_deleted_once_and_nothing_else() {
+        let cache = temp("old-cache");
+        let old = cache.join(OLD_CACHE);
+        sue_platform::fs::create_dir_all(old.join("deeper")).unwrap();
+        sue_platform::fs::write(old.join("page"), b"<html>").unwrap();
+        sue_platform::fs::write(old.join("deeper").join("picture"), b"png").unwrap();
+        // What else lives in the cache stays: other folders, and a file
+        // whose name only starts the same way.
+        let models = cache.join("models");
+        sue_platform::fs::create_dir_all(&models).unwrap();
+        sue_platform::fs::write(models.join("pose"), b"model").unwrap();
+        let near = cache.join("sue-paint-assets.txt");
+        sue_platform::fs::write(&near, b"mine").unwrap();
+
+        let mut start = StartPage::default();
+        // No cache folder known: nothing happens, and it is not tried again.
+        start.forget_old_cache(None);
+        assert!(sue_platform::fs::is_dir(&old));
+        start.forget_old_cache(Some(&cache));
+        assert!(sue_platform::fs::is_dir(&old), "one look in a run");
+
+        let mut start = StartPage::default();
+        start.forget_old_cache(Some(&cache));
+        assert!(!sue_platform::fs::exists(&old));
+        assert_eq!(
+            sue_platform::fs::read(models.join("pose")).unwrap(),
+            b"model"
+        );
+        assert_eq!(sue_platform::fs::read(&near).unwrap(), b"mine");
+        // Gone already: asking again is no error and removes nothing.
+        assert!(!forget_old_cache(&cache));
+        assert!(sue_platform::fs::is_dir(&models));
+        // A cache folder that does not exist is no error either.
+        assert!(!forget_old_cache(&cache.join("missing")));
+        let _ = sue_platform::fs::remove_dir_all(&cache);
     }
 
     #[test]
