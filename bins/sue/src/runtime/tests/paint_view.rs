@@ -40,7 +40,7 @@ fn sue_paint_runs_every_view_command() {
         .filter(|command| command.group == "view")
         .map(|command| command.name)
         .collect();
-    assert_eq!(names.len(), 35, "{names:?}");
+    assert_eq!(names.len(), 42, "{names:?}");
     let paper = |runtime: &Runtime| {
         sue_paint::doc::layers(&runtime.engine.world.arena, picture)
             .into_iter()
@@ -67,7 +67,8 @@ fn sue_paint_runs_every_view_command() {
             "{name}: {:?}",
             runtime.shell.message()
         );
-        // Only Paper changes the picture.
+        // Only Paper changes the picture (and Toggle Special Ruler
+        // Snapping, which a picture without a special ruler grays).
         let steps = usize::from(*name == "view.paper");
         assert_eq!(runtime.engine.history.depth(), depth + steps, "{name}");
         // Esc closes what opened (Preview Settings).
@@ -80,5 +81,98 @@ fn sue_paint_runs_every_view_command() {
         now += Duration::from_millis(8);
     }
     assert_eq!(paper(&runtime), Some(false), "View, Paper hid the paper");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn ctrl_4_turns_the_pictures_special_ruler_snapping_off_and_undo_back_on() {
+    let (mut runtime, root) = runtime("paint-view-special-snap");
+    let ctx = egui::Context::default();
+    let (mut now, picture) = paint_with_picture(&mut runtime, &ctx);
+    let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+        frame_with(runtime, &ctx, now, events);
+        now += Duration::from_millis(8);
+    };
+    let plain = egui::Modifiers::NONE;
+    let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+        .last()
+        .unwrap()
+        .id;
+    let ink = |runtime: &Runtime, columns: std::ops::Range<u32>, rows: std::ops::Range<u32>| {
+        let raster = sue_paint::doc::raster(&runtime.engine.world.arena, layer).unwrap();
+        let bytes = raster.bytes().unwrap();
+        rows.flat_map(|y| columns.clone().map(move |x| (x, y)))
+            .map(|(x, y)| u32::from(bytes[((y * raster.width() + x) * 4 + 3) as usize]))
+            .sum::<u32>()
+    };
+    let press = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let middle = paint_middle(&runtime);
+    // The Symmetrical Ruler, laid upright through the middle.
+    for _ in 0..3 {
+        step(&mut runtime, vec![key(egui::Key::U, plain)]);
+    }
+    step(&mut runtime, vec![key(egui::Key::Comma, plain)]);
+    step(
+        &mut runtime,
+        vec![egui::Event::PointerMoved(middle), press(middle, true)],
+    );
+    step(&mut runtime, vec![press(middle, false)]);
+    step(&mut runtime, vec![key(egui::Key::P, plain)]);
+    let stroke =
+        |step: &mut dyn FnMut(&mut Runtime, Vec<egui::Event>), runtime: &mut Runtime, y: f32| {
+            let (a, b) = (middle + vec2(-80.0, y), middle + vec2(-30.0, y));
+            step(runtime, vec![egui::Event::PointerMoved(a), press(a, true)]);
+            step(
+                runtime,
+                vec![
+                    egui::Event::PointerMoved(middle + vec2(-55.0, y)),
+                    egui::Event::PointerMoved(b),
+                ],
+            );
+            step(runtime, vec![press(b, false)]);
+        };
+    let snaps = |runtime: &Runtime| {
+        runtime
+            .engine
+            .world
+            .arena
+            .get_by_id(picture)
+            .unwrap()
+            .property("ruler.special.snap")
+            .is_none()
+    };
+    assert!(snaps(&runtime));
+    stroke(&mut step, &mut runtime, 0.0);
+    assert!(ink(&runtime, 860..950, 580..620) > 0, "mirrored");
+    // Ctrl+4: the picture's switch goes off, one step of its own; the
+    // next stroke stays on its side.
+    let depth = runtime.engine.history.depth();
+    step(
+        &mut runtime,
+        vec![key(egui::Key::Num4, egui::Modifiers::COMMAND)],
+    );
+    step(&mut runtime, Vec::new());
+    assert!(!snaps(&runtime), "Ctrl+4 switched it off");
+    assert_eq!(runtime.engine.history.depth(), depth + 1);
+    stroke(&mut step, &mut runtime, 60.0);
+    assert!(ink(&runtime, 650..740, 640..1100) > 0);
+    assert_eq!(ink(&runtime, 860..950, 640..1100), 0, "no mirror");
+    // Undo takes the stroke back, then the switch.
+    for _ in 0..2 {
+        step(
+            &mut runtime,
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)],
+        );
+    }
+    step(&mut runtime, Vec::new());
+    assert!(snaps(&runtime), "undone, it snaps again");
+    assert_eq!(ink(&runtime, 650..740, 640..1100), 0, "the stroke undone");
+    stroke(&mut step, &mut runtime, 120.0);
+    assert!(ink(&runtime, 860..950, 640..1100) > 0, "mirrored once more");
     let _ = std::fs::remove_dir_all(&root);
 }

@@ -10,15 +10,248 @@
 //! leaves the canvas ([`Flags::LEAVES_CANVAS`]): Color Profile, Preview
 //! Settings opens a dialog of the studio, which Esc closes.
 
-use egui::pos2;
-use sue_core::{Arena, Value};
+use std::collections::VecDeque;
+
+use egui::{Color32, Pos2, Rect, Shape, Stroke, Ui, pos2, vec2};
+use sue_core::{Arena, EntityId, Value};
 use sue_model::picture::{self, LayerKind};
-use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
+use sue_platform::time::Instant;
+use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState, Theme};
 
 use super::{flag, when};
 use crate::dialogs::Dialog;
 use crate::doc;
 use crate::studio::SuePaint;
+
+// ----- What the View menu shows on the canvas ------------------------------
+
+/// The picture's switch for snapping to its special rulers (special,
+/// perspective and symmetrical), kept on the picture so it undoes, saves
+/// and opens again with it: `off` while they do not snap, absent while
+/// they do. View, Snap to Special Ruler is the view's own switch; a
+/// stroke follows these rulers only while both are on.
+pub(crate) const SPECIAL_SNAP: &str = "ruler.special.snap";
+
+/// How far inside the finished page the safety margin runs, in
+/// millimeters: what is inside it is never cut off by a trim that is a
+/// little off.
+pub(crate) const SAFETY_MARGIN_MM: f32 = 5.0;
+
+/// Which layers show the paths of their vector lines (View, Show Vector
+/// Paths).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PathsOn {
+    /// None.
+    #[default]
+    Off,
+    /// The current layer and the layers picked with it.
+    Selected,
+    /// Every visible vector layer.
+    All,
+}
+
+/// Which control points the shown paths mark.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum PointsOn {
+    /// None.
+    #[default]
+    Off,
+    /// Where each line begins and ends.
+    Ends,
+    /// Every control point.
+    All,
+}
+
+/// What the View menu adds over the picture: the safety margin, the
+/// paths of vector lines and the playback rate.
+#[derive(Debug, Default)]
+pub(crate) struct ViewMarks {
+    /// View, Safety Margin.
+    pub safety_margin: bool,
+    /// View, Show Vector Paths: which layers.
+    pub paths: PathsOn,
+    /// View, Show Vector Paths: which control points.
+    pub points: PointsOn,
+    /// View, Show Playback FPS.
+    pub playback_fps: bool,
+    /// When the frames shown during playback changed, and to which, over
+    /// about the last second.
+    shown: VecDeque<(Instant, u32)>,
+}
+
+impl ViewMarks {
+    /// How many frames a second playback showed, over about the last
+    /// second; `None` until two frames were seen.
+    pub(crate) fn rate(&self) -> Option<f64> {
+        let (first, _) = *self.shown.front()?;
+        let (last, _) = *self.shown.back()?;
+        let seconds = last.saturating_duration_since(first).as_secs_f64();
+        (self.shown.len() > 1 && seconds > 0.0).then(|| (self.shown.len() - 1) as f64 / seconds)
+    }
+
+    /// Notes the frame on show at `now` (`None` while nothing plays).
+    pub(crate) fn note(&mut self, now: Instant, frame: Option<u32>) {
+        let Some(frame) = frame else {
+            self.shown.clear();
+            return;
+        };
+        if self.shown.back().is_some_and(|(_, last)| *last == frame) {
+            return;
+        }
+        self.shown.push_back((now, frame));
+        while self.shown.len() > 2
+            && self
+                .shown
+                .front()
+                .is_some_and(|(at, _)| now.saturating_duration_since(*at).as_secs_f64() > 1.0)
+        {
+            self.shown.pop_front();
+        }
+    }
+}
+
+/// `true` while strokes may snap to the special rulers of `picture`, as
+/// far as the picture's own switch goes.
+pub(crate) fn special_snaps(arena: &Arena, picture: EntityId) -> bool {
+    arena
+        .get_by_id(picture)
+        .ok()
+        .and_then(|entity| entity.property(SPECIAL_SNAP))
+        .and_then(Value::as_str)
+        != Some("off")
+}
+
+/// `true` when `picture` has a special, perspective or symmetrical ruler.
+fn has_special_ruler(arena: &Arena, picture: EntityId) -> bool {
+    let rulers = crate::rulers::Rulers::of(arena, picture);
+    rulers.special.is_some() || rulers.perspective.is_some() || rulers.symmetry.is_some()
+}
+
+/// The layer ids under `parent`, folders opened, bottom first.
+fn all_layers(arena: &Arena, parent: EntityId, out: &mut Vec<EntityId>) {
+    for child in arena.relations().children(parent) {
+        out.push(child);
+        all_layers(arena, child, out);
+    }
+}
+
+impl SuePaint {
+    /// What the View menu adds over the picture: the safety margin of a
+    /// page, the paths of vector lines and their control points, and the
+    /// rate playback shows.
+    pub(crate) fn view_marks(
+        &mut self,
+        ui: &Ui,
+        viewport: Rect,
+        size: [u32; 2],
+        cx: &AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let Some(doc) = self.docs.get(self.active) else {
+            return;
+        };
+        let arena = &cx.world.arena;
+        let view = doc.view;
+        let screen = |[x, y]: [f32; 2]| view.to_screen(viewport, size, pos2(x, y));
+        let painter = ui.painter().with_clip_rect(viewport);
+        if self.view_marks.safety_margin && crate::story::story_of(arena, doc.picture).is_some() {
+            let number = |key: &str| {
+                arena
+                    .get_by_id(doc.picture)
+                    .ok()
+                    .and_then(|entity| entity.property(key))
+                    .and_then(Value::as_f64)
+            };
+            let mm = number(picture::DPI).unwrap_or(72.0) as f32 / 25.4;
+            let bleed =
+                number(crate::story::PAGE_BLEED).map_or(3.0 * mm, |value| value as f32 * mm);
+            let inset = bleed + SAFETY_MARGIN_MM * mm;
+            let (w, h) = (size[0] as f32, size[1] as f32);
+            if w > 2.0 * inset && h > 2.0 * inset {
+                let corners = [
+                    [inset, inset],
+                    [w - inset, inset],
+                    [w - inset, h - inset],
+                    [inset, h - inset],
+                ];
+                // Dark under light dashes, so it reads on any picture.
+                let mut around = corners.map(screen).to_vec();
+                around.push(around[0]);
+                painter.add(Shape::line(around.clone(), Stroke::new(1.0, theme.void)));
+                painter.extend(Shape::dashed_line(
+                    &around,
+                    Stroke::new(1.0, theme.text),
+                    4.0,
+                    4.0,
+                ));
+            }
+        }
+        if self.view_marks.paths != PathsOn::Off {
+            let layers: Vec<EntityId> = match self.view_marks.paths {
+                PathsOn::Selected => doc.layer.into_iter().chain(doc.picked.clone()).collect(),
+                _ => {
+                    let mut out = Vec::new();
+                    all_layers(arena, doc.picture, &mut out);
+                    out.retain(|layer| {
+                        arena
+                            .get_by_id(*layer)
+                            .is_ok_and(|entity| picture::LayerStyle::of(entity).visible)
+                    });
+                    out
+                }
+            };
+            let line = Stroke::new(1.0, theme.border_active);
+            for layer in layers {
+                if !crate::vector::is_vector(arena, layer) {
+                    continue;
+                }
+                let offset = arena
+                    .get_by_id(layer)
+                    .map_or([0, 0], |entity| picture::LayerStyle::of(entity).offset);
+                let shift = |[x, y]: [f32; 2]| screen([x + offset[0] as f32, y + offset[1] as f32]);
+                for vector in crate::vector::lines(&crate::vector::geometry(arena, layer)) {
+                    let points: Vec<Pos2> = vector
+                        .samples
+                        .iter()
+                        .map(|sample| shift(sample.at))
+                        .collect();
+                    if points.len() > 1 {
+                        painter.add(Shape::line(points, line));
+                    }
+                    let marks: Vec<usize> = match self.view_marks.points {
+                        PointsOn::Off => Vec::new(),
+                        PointsOn::Ends => match vector.samples.len() {
+                            0 => Vec::new(),
+                            1 => vec![0],
+                            n => vec![0, n - 1],
+                        },
+                        PointsOn::All => vector.controls(),
+                    };
+                    for index in marks {
+                        let at = shift(vector.samples[index].at);
+                        let rect = Rect::from_center_size(at, vec2(5.0, 5.0));
+                        painter.rect_filled(rect, 0.0, theme.panel);
+                        painter.rect_stroke(rect, 0.0, line, egui::StrokeKind::Inside);
+                    }
+                }
+            }
+        }
+        let playing = doc.playing.map(|_| doc.frame);
+        self.view_marks.note(cx.view.now, playing);
+        if self.view_marks.playback_fps
+            && playing.is_some()
+            && let Some(rate) = self.view_marks.rate()
+        {
+            let text = tr!("playback-fps-shown", fps = format!("{rate:.1}"));
+            let font = theme.font(theme.small_size);
+            let at = viewport.left_top() + vec2(8.0, 8.0);
+            let galley = painter.layout_no_wrap(text, font, theme.text);
+            let back = Rect::from_min_size(at, galley.size()).expand(4.0);
+            painter.rect_filled(back, 3.0, theme.panel.gamma_multiply(0.85));
+            painter.galley(at, galley, Color32::PLACEHOLDER);
+        }
+    }
+}
 
 // ----- How the items look -----------------------------------------------------
 
@@ -100,6 +333,74 @@ fn flip_v_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
 
 fn paper_on(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
     paper(paint, facts.arena).map_or(ItemState::off(), |paper| flag(paper.style.visible))
+}
+
+/// Safety Margin: on a page of a story, which has a trim to keep inside.
+fn safety_margin_on(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    let page = paint
+        .picture()
+        .is_some_and(|picture| crate::story::story_of(facts.arena, picture).is_some());
+    if page {
+        flag(paint.view_marks.safety_margin)
+    } else {
+        ItemState::off()
+    }
+}
+
+fn paths_selected_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    paths_item(paint, PathsOn::Selected)
+}
+
+fn paths_all_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    paths_item(paint, PathsOn::All)
+}
+
+fn paths_item(paint: &SuePaint, which: PathsOn) -> ItemState {
+    if paint.doc().is_some() {
+        flag(paint.view_marks.paths == which)
+    } else {
+        ItemState::off()
+    }
+}
+
+fn points_ends_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    points_item(paint, PointsOn::Ends)
+}
+
+fn points_all_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    points_item(paint, PointsOn::All)
+}
+
+/// Control points show on the paths shown, so they wait for those.
+fn points_item(paint: &SuePaint, which: PointsOn) -> ItemState {
+    if paint.doc().is_some() && paint.view_marks.paths != PathsOn::Off {
+        flag(paint.view_marks.points == which)
+    } else {
+        ItemState::off()
+    }
+}
+
+/// Show Playback FPS: on a picture with a timeline.
+fn playback_fps_on(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    let animated = paint
+        .picture()
+        .is_some_and(|picture| crate::anim::timeline(facts.arena, picture).is_some());
+    if animated {
+        flag(paint.view_marks.playback_fps)
+    } else {
+        ItemState::off()
+    }
+}
+
+/// Toggle Special Ruler Snapping: on a picture with a special ruler,
+/// checked while it snaps.
+fn special_snap_on(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    match paint.picture() {
+        Some(picture) if has_special_ruler(facts.arena, picture) => {
+            flag(special_snaps(facts.arena, picture))
+        }
+        _ => ItemState::off(),
+    }
 }
 
 // ----- What the items do ------------------------------------------------------
@@ -240,6 +541,63 @@ fn print_size(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
         .unwrap_or(72.0) as f32;
     // A screen shows about 96 points an inch.
     zoom_to(paint, cx, 96.0 / dpi.max(1.0));
+}
+
+fn safety_margin(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.view_marks.safety_margin = !paint.view_marks.safety_margin;
+}
+
+/// Shows the paths of `which` layers, or none when they show already.
+fn show_paths(paint: &mut SuePaint, which: PathsOn) {
+    let marks = &mut paint.view_marks;
+    marks.paths = if marks.paths == which {
+        PathsOn::Off
+    } else {
+        which
+    };
+}
+
+fn paths_selected(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    show_paths(paint, PathsOn::Selected);
+}
+
+fn paths_all(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    show_paths(paint, PathsOn::All);
+}
+
+/// Marks `which` control points, or none when they show already.
+fn show_points(paint: &mut SuePaint, which: PointsOn) {
+    let marks = &mut paint.view_marks;
+    marks.points = if marks.points == which {
+        PointsOn::Off
+    } else {
+        which
+    };
+}
+
+fn points_ends(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    show_points(paint, PointsOn::Ends);
+}
+
+fn points_all(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    show_points(paint, PointsOn::All);
+}
+
+fn playback_fps(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.view_marks.playback_fps = !paint.view_marks.playback_fps;
+}
+
+/// Turns the picture's special ruler snap off or on again, as an edit.
+fn special_snap(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let Some(picture) = paint.picture() else {
+        return;
+    };
+    let value = special_snaps(&cx.world.arena, picture).then(|| "off".to_owned());
+    let label = tr!("switch-special-ruler-snap");
+    SuePaint::apply(
+        cx,
+        crate::rulers::edit(picture, SPECIAL_SNAP, value, &label),
+    );
 }
 
 // ----- The table --------------------------------------------------------------
@@ -387,13 +745,61 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "settings",
         profile_settings,
     ),
+    // New in 0.0.8 (gap FGV-51 of the tutorial ledger).
+    c(
+        "view.safety_margin",
+        "safety-margin",
+        "doc-print-book",
+        safety_margin,
+    )
+    .state(safety_margin_on),
+    c(
+        "view.vector_paths.selected",
+        "show-vector-paths-on-selected-layers",
+        "layer-new-vector",
+        paths_selected,
+    )
+    .state(paths_selected_on),
+    c(
+        "view.vector_paths.all",
+        "show-all-vector-paths-on-vector-layers",
+        "layers",
+        paths_all,
+    )
+    .state(paths_all_on),
+    c(
+        "view.vector_paths.ends",
+        "show-control-points-at-beginning-and-end",
+        "tool-correct-line",
+        points_ends,
+    )
+    .state(points_ends_on),
+    c(
+        "view.vector_paths.points",
+        "show-all-control-points",
+        "tool-correct-line",
+        points_all,
+    )
+    .state(points_all_on),
+    c(
+        "view.playback_fps",
+        "show-playback-fps",
+        "play",
+        playback_fps,
+    )
+    .state(playback_fps_on),
+    c(
+        "view.special_snap",
+        "toggle-special-ruler-snapping",
+        "snap-ruler",
+        special_snap,
+    )
+    .keys("Ctrl+4")
+    .state(special_snap_on),
 ];
 
 #[cfg(test)]
 mod tests {
-    use sue_core::EntityId;
-    use sue_platform::time::Instant;
-
     use super::*;
 
     #[test]
@@ -515,7 +921,10 @@ mod tests {
                 registry.run(paint, cx, command.name);
                 let after = item(paint, cx, command.name);
                 // A switch that works now shows the other side; the rest
-                // (the view commands) keep how they look.
+                // keep how they look (the view commands, and the items a
+                // plain picture grays: Safety Margin wants a page, Show
+                // Playback FPS a timeline, the control points shown
+                // paths).
                 match before.checked {
                     Some(on) if before.enabled => {
                         assert_eq!(after.checked, Some(!on), "{}", command.name);
@@ -525,6 +934,82 @@ mod tests {
                 // Esc closes what opened (Preview Settings).
                 paint.dialog = None;
             }
+            for name in ["view.safety_margin", "view.playback_fps"] {
+                assert!(!item(paint, cx, name).enabled, "{name}");
+            }
         });
+    }
+
+    #[test]
+    fn the_control_points_follow_the_paths_shown_and_each_pair_is_one_choice() {
+        with_picture(|paint, cx, _| {
+            let registry = super::super::registry();
+            assert!(!item(paint, cx, "view.vector_paths.ends").enabled);
+            registry.run(paint, cx, "view.vector_paths.selected");
+            assert_eq!(paint.view_marks.paths, PathsOn::Selected);
+            registry.run(paint, cx, "view.vector_paths.all");
+            assert_eq!(paint.view_marks.paths, PathsOn::All, "one or the other");
+            assert!(item(paint, cx, "view.vector_paths.ends").enabled);
+            registry.run(paint, cx, "view.vector_paths.ends");
+            registry.run(paint, cx, "view.vector_paths.points");
+            assert_eq!(paint.view_marks.points, PointsOn::All);
+            registry.run(paint, cx, "view.vector_paths.points");
+            assert_eq!(paint.view_marks.points, PointsOn::Off, "picked again, off");
+            registry.run(paint, cx, "view.vector_paths.all");
+            assert_eq!(paint.view_marks.paths, PathsOn::Off);
+        });
+    }
+
+    #[test]
+    fn toggle_special_ruler_snapping_is_an_edit_that_undoes_and_redoes() {
+        with_picture(|paint, cx, picture| {
+            let state = |cx: &AppletContext<'_>| {
+                let mut entities: Vec<String> = cx
+                    .world
+                    .arena
+                    .iter()
+                    .map(|(_, entity)| format!("{:?} {:?}", entity.id(), entity.properties()))
+                    .collect();
+                entities.sort();
+                entities
+            };
+            let before = state(cx);
+            assert_eq!(item(paint, cx, "view.special_snap"), ItemState::check(true));
+            assert!(special_snaps(&cx.world.arena, picture));
+            super::super::registry().run(paint, cx, "view.special_snap");
+            assert!(!special_snaps(&cx.world.arena, picture));
+            assert_eq!(
+                item(paint, cx, "view.special_snap"),
+                ItemState::check(false)
+            );
+            let after = state(cx);
+            assert_ne!(before, after);
+            cx.history.undo(cx.world).expect("one step to undo");
+            assert_eq!(state(cx), before, "undone, as before, ids and all");
+            assert!(special_snaps(&cx.world.arena, picture));
+            cx.history.redo(cx.world).expect("one step to redo");
+            assert_eq!(state(cx), after, "redone, as after");
+            // Without a special ruler the item is grayed.
+            let none = crate::rulers::edit(picture, crate::rulers::SYMMETRY, None, "ruler");
+            assert!(SuePaint::apply(cx, none));
+            assert!(!item(paint, cx, "view.special_snap").enabled);
+        });
+    }
+
+    #[test]
+    fn the_playback_rate_counts_the_frames_shown_over_a_second() {
+        let mut marks = ViewMarks::default();
+        let start = Instant::now();
+        assert_eq!(marks.rate(), None);
+        for frame in 0..=24_u32 {
+            let at = start + std::time::Duration::from_millis(u64::from(frame) * 1000 / 24);
+            marks.note(at, Some(frame));
+            // A repaint that shows the same frame again is no new frame.
+            marks.note(at, Some(frame));
+        }
+        let rate = marks.rate().expect("frames were shown");
+        assert!((rate - 24.0).abs() < 0.5, "{rate}");
+        marks.note(start, None);
+        assert_eq!(marks.rate(), None, "stopping forgets the rate");
     }
 }
