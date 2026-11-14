@@ -13,6 +13,9 @@ mod folders;
 mod layers;
 mod masks;
 mod order;
+mod picked;
+#[cfg(test)]
+mod picked_tests;
 
 pub use convert::{
     fitted, rasterize, resample, resize_canvas, resize_rgba, rotate_canvas, vectorize,
@@ -31,7 +34,11 @@ pub use masks::{
     mask_offset, mask_on, new_mask, set_mask_linked, shown_at,
 };
 pub(crate) use order::key_above;
-pub use order::{key_below, keys_above, move_block, reorder};
+pub use order::{key_below, keys_above, landing, move_block, reorder};
+pub use picked::{
+    delete_layers, duplicate_layers, folder_insert, merge_picked, move_layers, outermost,
+    rasterize_any, rasterizes, set_layers, with_members,
+};
 
 use sue_core::txn::{Batch, RasterEdit, RasterPatch, Relate, SetProperty, SpawnEntity};
 use sue_core::{

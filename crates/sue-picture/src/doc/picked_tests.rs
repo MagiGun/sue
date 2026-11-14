@@ -1,0 +1,439 @@
+//! The picture model's edits of several layers and of folders, each with
+//! its undo pair: done, undone (the arena as before, ids included) and
+//! redone (the arena as after).
+
+use sue_core::{
+    Arena, Color, ComponentKind, EntityId, PixelFormat, RasterTile2D, ReversibleTransaction,
+    UndoStack, Value,
+};
+use sue_model::picture;
+
+use super::*;
+use crate::composite::{RenderOptions, render};
+
+/// Everything an edit can change, in an order that does not depend on
+/// where entities sit in the arena: each entity (id, name, class,
+/// properties, pixels) and each relation.
+fn state(arena: &Arena) -> (Vec<String>, Vec<String>) {
+    let mut entities: Vec<String> = arena
+        .iter()
+        .map(|(_, entity)| {
+            let mut properties: Vec<String> = entity
+                .properties()
+                .iter()
+                .map(|(key, value)| format!("{key}={value:?}"))
+                .collect();
+            properties.sort();
+            let pixels = entity
+                .component(ComponentKind::RasterTile2D)
+                .and_then(|component| component.as_raster())
+                .map(|raster| {
+                    (
+                        raster.width(),
+                        raster.height(),
+                        raster.bytes().map(<[u8]>::to_vec),
+                    )
+                });
+            format!(
+                "{:?} {} {} {properties:?} {pixels:?}",
+                entity.id(),
+                entity.name(),
+                entity.class()
+            )
+        })
+        .collect();
+    entities.sort();
+    let mut relations: Vec<String> = arena
+        .relations()
+        .iter()
+        .map(|relation| {
+            format!(
+                "{:?} {} {:?} {:?}",
+                relation.from, relation.kind, relation.to, relation.order
+            )
+        })
+        .collect();
+    relations.sort();
+    (entities, relations)
+}
+
+/// Applies `edit`, then checks its undo pair: undone, the arena is as
+/// before; redone, as after.
+fn undo_pair(arena: &mut Arena, history: &mut UndoStack<Arena>, edit: Edit) {
+    let before = state(arena);
+    history.apply(arena, edit).unwrap();
+    let after = state(arena);
+    assert_ne!(before, after, "the edit changes something");
+    history.undo(arena).unwrap();
+    assert_eq!(state(arena), before, "undo is exact");
+    history.redo(arena).unwrap();
+    assert_eq!(state(arena), after, "redo is exact");
+}
+
+fn picture_of(width: u32, height: u32) -> (Arena, EntityId, UndoStack<Arena>, EntityId) {
+    let mut arena = Arena::new();
+    let mut history = UndoStack::new();
+    let (edit, picture) = create(&NewPicture {
+        width,
+        height,
+        paper: Some(Color::srgb8(255, 255, 255)),
+        ..NewPicture::default()
+    })
+    .unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let first = layers(&arena, picture).last().unwrap().id;
+    (arena, picture, history, first)
+}
+
+fn ids(arena: &Arena, picture: EntityId) -> Vec<EntityId> {
+    layers(arena, picture).iter().map(|info| info.id).collect()
+}
+
+fn fill(arena: &mut Arena, layer: EntityId, rgba: [u8; 4]) {
+    for pixel in raster_mut(arena, layer)
+        .unwrap()
+        .bytes_mut()
+        .unwrap()
+        .as_chunks_mut::<4>()
+        .0
+    {
+        *pixel = rgba;
+    }
+}
+
+#[test]
+fn new_layers_land_in_the_picked_folder() {
+    let (mut arena, picture, mut history, first) = picture_of(4, 2);
+    let (edit, folder) = new_folder(&arena, picture, Some(first), true);
+    history.apply(&mut arena, edit).unwrap();
+    // The folder picked: a new layer goes in it, on top of what it holds.
+    let (spawn, raster_layer) =
+        add_raster_layer(&arena, picture, Some(folder), "In".to_owned(), None).unwrap();
+    undo_pair(&mut arena, &mut history, Edit::new("Add").then(spawn));
+    assert_eq!(folder_of(&arena, raster_layer), Some(folder));
+    let stack = ids(&arena, picture);
+    assert_eq!(&stack[1..], &[first, raster_layer, folder]);
+    // A layer in it picked: right above that layer, in the same folder.
+    let (spawn, vector) = add_vector_layer(&arena, picture, Some(first), "Ink".to_owned()).unwrap();
+    history
+        .apply(&mut arena, Edit::new("Add").then(spawn))
+        .unwrap();
+    assert_eq!(folder_of(&arena, vector), Some(folder));
+    assert_eq!(
+        &ids(&arena, picture)[1..],
+        &[first, vector, raster_layer, folder]
+    );
+    let (edit, correction) = new_correction(&arena, picture, Some(vector), "Fix", "invert");
+    history.apply(&mut arena, edit).unwrap();
+    assert_eq!(folder_of(&arena, correction), Some(folder));
+    let tile = || RasterTile2D::new(4, 2, PixelFormat::Rgba8).unwrap();
+    let (spawns, made) = add_layers_pixels(
+        &arena,
+        picture,
+        Some(folder),
+        vec![("A".to_owned(), tile()), ("B".to_owned(), tile())],
+    )
+    .unwrap();
+    let mut edit = Edit::new("Add");
+    for spawn in spawns {
+        edit = edit.then(spawn);
+    }
+    history.apply(&mut arena, edit).unwrap();
+    assert!(made.iter().all(|id| folder_of(&arena, *id) == Some(folder)));
+    let stack = ids(&arena, picture);
+    assert_eq!(&stack[stack.len() - 3..], &[made[0], made[1], folder]);
+    // A new folder with a member picked goes in that member's folder.
+    let (edit, inner) = new_folder(&arena, picture, Some(first), false);
+    history.apply(&mut arena, edit).unwrap();
+    assert_eq!(folder_of(&arena, inner), Some(folder));
+    // Nothing picked: on top, in no folder.
+    let (spawn, loose) = add_layer_pixels(&arena, picture, None, "Top".to_owned(), tile()).unwrap();
+    history
+        .apply(&mut arena, Edit::new("Add").then(spawn))
+        .unwrap();
+    assert_eq!(folder_of(&arena, loose), None);
+    assert_eq!(ids(&arena, picture).last(), Some(&loose));
+}
+
+#[test]
+fn a_folder_duplicates_with_what_it_holds_masks_and_track() {
+    let (mut arena, picture, mut history, first) = picture_of(4, 2);
+    fill(&mut arena, first, [10, 20, 30, 255]);
+    let (edit, _) = new_mask(&arena, first, |x, _| if x < 2 { 1.0 } else { 0.0 }).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let (edit, inner) = new_folder(&arena, picture, Some(first), true);
+    history.apply(&mut arena, edit).unwrap();
+    let (edit, outer) = new_folder(&arena, picture, Some(inner), true);
+    history.apply(&mut arena, edit).unwrap();
+    history
+        .apply(&mut arena, set(outer, picture::BLEND, "multiply"))
+        .unwrap();
+    let shown = |arena: &Arena| render(arena, picture, [0, 0, 4, 2], RenderOptions::default());
+    let before_pixels = shown(&arena);
+    let (edit, copy) = duplicate(&arena, picture, outer).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    // The copy sits right above the original, outside it, and holds
+    // copies of all it held, under new ids.
+    let stack = ids(&arena, picture);
+    let at = stack.iter().position(|id| *id == outer).unwrap();
+    assert_eq!(stack.last(), Some(&copy));
+    assert_eq!(stack.len(), at + 4);
+    assert_eq!(folder_of(&arena, copy), None);
+    let held = members(&arena, picture, copy);
+    assert_eq!(held.len(), 2, "a folder and a layer");
+    assert!(held.iter().all(|id| *id != first && *id != inner));
+    let copied_layer = held[0];
+    assert_eq!(folder_of(&arena, copied_layer), Some(held[1]));
+    assert_eq!(folder_of(&arena, held[1]), Some(copy));
+    assert_eq!(
+        raster(&arena, copied_layer).unwrap().bytes(),
+        raster(&arena, first).unwrap().bytes()
+    );
+    let (mask, copied_mask) = (mask_of(&arena, first), mask_of(&arena, copied_layer));
+    assert!(copied_mask.is_some() && copied_mask != mask, "its own mask");
+    assert_eq!(folder_blend(&arena, copy), sue_model::BlendMode::Multiply);
+    assert_eq!(arena.get_by_id(copy).unwrap().name(), "Folder 2 copy");
+    // The original is as it was, and the picture looks the same twice.
+    assert_eq!(members(&arena, picture, outer), vec![first, inner]);
+    // The copy multiplies over the original where the mask shows it; the
+    // paper elsewhere stays white.
+    let now = shown(&arena);
+    assert_eq!(&now[8..16], &before_pixels[8..16]);
+    assert_eq!(&now[..4], &[0, 2, 4, 255], "10, 20, 30 times themselves");
+    // An animation folder's copy gets a track of its own showing its cels.
+    let (edit, animation, track) = crate::anim::add_folder(&arena, picture, None);
+    history.apply(&mut arena, edit).unwrap();
+    let (edit, cel) = crate::anim::new_cel(&arena, picture, animation, 0).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let (edit, twin) = duplicate(&arena, picture, animation).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    let sequence = crate::anim::timeline(&arena, picture).unwrap();
+    let copied = crate::anim::track_of(sequence, twin).expect("a track for the copy");
+    assert_eq!(copied, track + 1, "right after the original's");
+    let twin_cel = members(&arena, picture, twin)[0];
+    assert_ne!(twin_cel, cel);
+    assert_eq!(
+        sequence.tracks[copied]
+            .clips()
+            .iter()
+            .map(|clip| clip.source)
+            .collect::<Vec<_>>(),
+        vec![twin_cel]
+    );
+}
+
+#[test]
+fn picked_layers_show_hide_lock_and_go_together() {
+    let (mut arena, picture, mut history, first) = picture_of(4, 2);
+    let (spawn, second) =
+        add_raster_layer(&arena, picture, Some(first), "Two".to_owned(), None).unwrap();
+    history
+        .apply(&mut arena, Edit::new("Add").then(spawn))
+        .unwrap();
+    let (edit, folder) = new_folder(&arena, picture, Some(second), true);
+    history.apply(&mut arena, edit).unwrap();
+    let picked = [first, folder];
+    let edit = set_layers(&arena, &picked, picture::LOCKED, true).unwrap();
+    assert_eq!(edit.label(), "Lock Layer");
+    undo_pair(&mut arena, &mut history, edit);
+    assert!(
+        picked
+            .iter()
+            .all(|id| picture::is_locked(arena.get_by_id(*id).unwrap()))
+    );
+    assert!(set_layers(&arena, &picked, picture::LOCKED, true).is_none());
+    let edit = set_layers(&arena, &picked, picture::VISIBLE, false).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    // Deleting a folder takes what it holds; the paper keeps the picture.
+    let edit = delete_layers(&arena, picture, &picked).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    assert_eq!(layers(&arena, picture).len(), 1, "only the paper");
+    assert!(arena.get_by_id(second).is_err());
+    history.undo(&mut arena).unwrap();
+    let paper = layers(&arena, picture)[0].id;
+    assert!(
+        delete_layers(&arena, picture, &[paper, first, folder]).is_err(),
+        "something stays"
+    );
+}
+
+#[test]
+fn create_folder_and_insert_layer_takes_every_picked_layer() {
+    let (mut arena, picture, mut history, first) = picture_of(4, 2);
+    let mut made = vec![first];
+    for name in ["Two", "Three", "Four"] {
+        let (spawn, id) =
+            add_raster_layer(&arena, picture, made.last().copied(), name.to_owned(), None).unwrap();
+        history
+            .apply(&mut arena, Edit::new("Add").then(spawn))
+            .unwrap();
+        made.push(id);
+    }
+    // Pick One and Three: they go into a new folder above Three, in their
+    // order; Two stays where it is.
+    let (edit, folder) = folder_insert(&arena, picture, &[made[2], made[0]]).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    let paper = layers(&arena, picture)[0].id;
+    assert_eq!(
+        ids(&arena, picture),
+        vec![paper, made[1], made[0], made[2], folder, made[3]]
+    );
+    assert_eq!(members(&arena, picture, folder), vec![made[0], made[2]]);
+    // Again with the folder and Four: a folder inside a new folder.
+    let (edit, outer) = folder_insert(&arena, picture, &[folder, made[3]]).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    assert_eq!(folders_around(&arena, made[0]), vec![folder, outer]);
+    assert_eq!(folder_of(&arena, made[3]), Some(outer));
+    assert_eq!(ids(&arena, picture).last(), Some(&outer));
+}
+
+#[test]
+fn move_layer_moves_every_picked_layer_and_what_folders_hold() {
+    let (mut arena, picture, mut history, first) = picture_of(4, 2);
+    let (spawn, second) =
+        add_raster_layer(&arena, picture, Some(first), "Two".to_owned(), None).unwrap();
+    history
+        .apply(&mut arena, Edit::new("Add").then(spawn))
+        .unwrap();
+    let (edit, folder) = new_folder(&arena, picture, Some(second), true);
+    history.apply(&mut arena, edit).unwrap();
+    let edit = move_layers(&arena, picture, &[first, folder], [3, -1]).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    for id in [first, second] {
+        assert_eq!(
+            sue_model::picture::LayerStyle::of(arena.get_by_id(id).unwrap()).offset,
+            [3, -1]
+        );
+    }
+    assert!(move_layers(&arena, picture, &[first], [0, 0]).is_none());
+}
+
+#[test]
+fn merging_a_folder_bakes_it_into_one_layer() {
+    // As in the Crash Course: group, duplicate, hide the original, Merge
+    // Selected Layers on the copy: one raster layer with the copy's name,
+    // the masks applied, the original untouched.
+    let (mut arena, picture, mut history, first) = picture_of(4, 1);
+    fill(&mut arena, first, [200, 0, 0, 255]);
+    let (edit, _) = new_mask(&arena, first, |x, _| if x < 2 { 1.0 } else { 0.0 }).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let (edit, folder) = new_folder(&arena, picture, Some(first), true);
+    history.apply(&mut arena, edit).unwrap();
+    let (edit, copy) = duplicate(&arena, picture, folder).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    history
+        .apply(&mut arena, set(folder, picture::VISIBLE, false))
+        .unwrap();
+    let before = render(&arena, picture, [0, 0, 4, 1], RenderOptions::default());
+    let (edit, merged) = merge_layers(&arena, picture, &[copy]).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    assert!(arena.get_by_id(copy).is_err());
+    assert!(!is_folder(&arena, merged));
+    assert_eq!(arena.get_by_id(merged).unwrap().name(), "Folder 1 copy");
+    assert_eq!(mask_of(&arena, merged), None, "the mask is in the pixels");
+    let alpha: Vec<u8> = raster(&arena, merged)
+        .unwrap()
+        .bytes()
+        .unwrap()
+        .iter()
+        .skip(3)
+        .step_by(4)
+        .copied()
+        .collect();
+    assert_eq!(alpha, [255, 255, 0, 0]);
+    assert_eq!(
+        render(&arena, picture, [0, 0, 4, 1], RenderOptions::default()),
+        before,
+        "it looks the same"
+    );
+    assert_eq!(members(&arena, picture, folder), vec![first]);
+    // Merge Down on a folder lays it on the layer below.
+    let (spawn, base) = add_layer_pixels(
+        &arena,
+        picture,
+        Some(layers(&arena, picture)[0].id),
+        "Base".to_owned(),
+        RasterTile2D::from_bytes(4, 1, PixelFormat::Rgba8, [0, 0, 255, 255].repeat(4)).unwrap(),
+    )
+    .unwrap();
+    history
+        .apply(&mut arena, Edit::new("Add").then(spawn))
+        .unwrap();
+    history
+        .apply(&mut arena, set(folder, picture::VISIBLE, true))
+        .unwrap();
+    let before = render(&arena, picture, [0, 0, 4, 1], RenderOptions::default());
+    let (edit, into) = merge_down(&arena, picture, folder).unwrap();
+    assert_eq!(into, base);
+    undo_pair(&mut arena, &mut history, edit);
+    assert!(arena.get_by_id(folder).is_err() && arena.get_by_id(first).is_err());
+    let pixels = raster(&arena, base).unwrap().bytes().unwrap().to_vec();
+    assert_eq!(&pixels[..4], &[200, 0, 0, 255]);
+    assert_eq!(&pixels[8..12], &[0, 0, 255, 255]);
+    assert_eq!(
+        render(&arena, picture, [0, 0, 4, 1], RenderOptions::default()),
+        before
+    );
+}
+
+#[test]
+fn rasterize_bakes_the_effects_of_any_layer() {
+    let (mut arena, picture, mut history, first) = picture_of(5, 1);
+    raster_mut(&mut arena, first).unwrap().bytes_mut().unwrap()[8..12]
+        .copy_from_slice(&[0, 0, 0, 255]);
+    // A white border round the one black pixel, and half opacity.
+    history
+        .apply(&mut arena, set(first, crate::effects::BORDER, true))
+        .unwrap();
+    history
+        .apply(&mut arena, set(first, crate::effects::BORDER_WIDTH, 1.0))
+        .unwrap();
+    history
+        .apply(
+            &mut arena,
+            set(first, crate::effects::BORDER_COLOR, Color::srgb8(255, 0, 0)),
+        )
+        .unwrap();
+    history
+        .apply(&mut arena, set(first, picture::OPACITY, 0.5))
+        .unwrap();
+    assert!(rasterizes(&arena, first));
+    let before = render(&arena, picture, [0, 0, 5, 1], RenderOptions::default());
+    let (edit, flat) = rasterize(&arena, picture, first).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    let entity = arena.get_by_id(flat).unwrap();
+    assert!(
+        entity
+            .properties()
+            .iter()
+            .all(|(key, _)| !key.starts_with("effect.")),
+        "the effects are in the pixels"
+    );
+    assert_eq!(entity.property(picture::OPACITY), Some(&Value::from(0.5)));
+    assert!(!rasterizes(&arena, flat));
+    let pixels = raster(&arena, flat).unwrap().bytes().unwrap().to_vec();
+    assert_eq!(&pixels[8..12], &[0, 0, 0, 255], "the layer's own pixel");
+    assert!(
+        pixels[4] == 255 && pixels[5] == 0 && pixels[7] > 0,
+        "the border, red: {pixels:?}"
+    );
+    assert_eq!(
+        render(&arena, picture, [0, 0, 5, 1], RenderOptions::default()),
+        before,
+        "it looks the same"
+    );
+    // A folder rasterizes into one layer of what it shows.
+    let (edit, folder) = new_folder(&arena, picture, Some(flat), true);
+    history.apply(&mut arena, edit).unwrap();
+    let (edit, whole) = rasterize(&arena, picture, folder).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    assert!(arena.get_by_id(folder).is_err() && arena.get_by_id(flat).is_err());
+    // The folder's composite holds the layer's half opacity now: the same
+    // picture, give or take the rounding of one more step.
+    let now = render(&arena, picture, [0, 0, 5, 1], RenderOptions::default());
+    assert!(
+        now.iter().zip(&before).all(|(a, b)| a.abs_diff(*b) <= 1),
+        "{now:?} against {before:?}"
+    );
+    assert_eq!(arena.get_by_id(whole).unwrap().name(), "Folder 1");
+}

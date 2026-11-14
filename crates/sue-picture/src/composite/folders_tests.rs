@@ -37,7 +37,8 @@ fn blank(width: u32, paper: Option<Color>) -> (Arena, EntityId, UndoStack<Arena>
     (arena, picture, history)
 }
 
-/// A raster layer on top holding `pixels` (straight RGBA, one a column).
+/// A raster layer on top of the picture, in no folder, holding `pixels`
+/// (straight RGBA, one a column).
 fn layer(
     arena: &mut Arena,
     history: &mut UndoStack<Arena>,
@@ -47,9 +48,8 @@ fn layer(
     let raster =
         RasterTile2D::from_bytes(pixels.len() as u32, 1, PixelFormat::Rgba8, pixels.concat())
             .unwrap();
-    let top = doc::layers(arena, picture).last().map(|info| info.id);
     let (spawn, id) =
-        doc::add_layer_pixels(arena, picture, top, format!("L{}", pixels.len()), raster).unwrap();
+        doc::add_layer_pixels(arena, picture, None, format!("L{}", pixels.len()), raster).unwrap();
     history
         .apply(arena, doc::Edit::new("Add").then(spawn))
         .unwrap();

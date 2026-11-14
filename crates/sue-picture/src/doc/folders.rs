@@ -94,14 +94,18 @@ pub fn new_folder(
     let folder =
         Entity::empty(tr!("folder", value = count + 1), class::FOLDER).with_property(OPEN, true);
     let id = folder.id();
+    if !insert {
+        // Where a new layer would go: in the picked folder, or beside the
+        // picked layer in its folder.
+        let edit = Edit::new(tr!("new-layer-folder"))
+            .then(super::layers::landed(arena, picture, layer, folder));
+        return (edit, id);
+    }
     let order = key_above(arena, picture, layer);
-    let mut edit = Edit::new(if insert {
-        tr!("create-folder-and-insert-layer")
-    } else {
-        tr!("new-layer-folder")
-    })
-    .then(SpawnEntity::new(folder).with_relation(Relation::new(picture, CHILD, id).ordered(order)));
-    if let Some(layer) = layer.filter(|_| insert) {
+    let mut edit = Edit::new(tr!("create-folder-and-insert-layer")).then(
+        SpawnEntity::new(folder).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
+    );
+    if let Some(layer) = layer {
         if let Some(outer) = folder_of(arena, layer) {
             // The new folder takes the layer's place in its folder.
             edit = edit

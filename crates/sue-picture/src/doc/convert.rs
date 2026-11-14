@@ -3,7 +3,6 @@
 
 use sue_core::txn::{Relate, SetProperty, SpawnEntity};
 use sue_core::{Arena, CHILD, Entity, EntityId, PixelFormat, RasterTile2D, Relation, Value};
-use sue_model::class;
 use sue_model::picture::{self, LayerStyle};
 
 use super::{
@@ -282,37 +281,19 @@ pub fn resample(
     Ok(edit)
 }
 
-/// The edit that turns vector `layer` into a raster layer in its place
-/// (Rasterize): its pixels, name, properties and folder kept, its lines
-/// let go. Returns the new layer too.
+/// The edit that turns `layer` into a raster layer in its place
+/// (Rasterize): a vector, text, frame, 3D or paper layer, a folder, or a
+/// raster layer with effects, its effects baked (see
+/// [`super::rasterize_any`]). Returns the new layer.
 ///
 /// # Errors
-/// If `layer` is not a vector layer with pixels.
+/// If `layer` is a plain raster layer already, a correction, or locked.
 pub fn rasterize(
     arena: &Arena,
     picture: EntityId,
     layer: EntityId,
 ) -> Result<(Edit, EntityId), String> {
-    if !crate::vector::is_vector(arena, layer) {
-        return Err(tr!("only-vector-layers-rasterize"));
-    }
-    let entity = arena.get_by_id(layer).map_err(|error| error.to_string())?;
-    let raster = raster(arena, layer)
-        .ok_or(tr!("the-layer-has-no-pixels"))?
-        .clone();
-    let mut fresh = Entity::new(entity.name(), raster).with_class(class::LAYER);
-    for (key, value) in entity.properties().iter() {
-        fresh = fresh.with_property(key, value.clone());
-    }
-    let id = fresh.id();
-    let order = key_above(arena, picture, Some(layer));
-    let mut edit = Edit::new(tr!("rasterize")).then(
-        SpawnEntity::new(fresh).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
-    );
-    if let Some(folder) = folder_of(arena, layer) {
-        edit = edit.then(Relate::new(Relation::new(folder, MEMBER, id)));
-    }
-    Ok((edit.then(delete(layer)), id))
+    super::rasterize_any(arena, picture, layer)
 }
 
 /// The edit that turns `picture` a quarter turn (Rotate 90 Degrees Right
