@@ -64,9 +64,12 @@ Sue's built-in brushes are written by hand in
 
 Sue 0.0.75 kept a person's own sub tools in `item_bank.txt`, one a line:
 the tool's name, the sub tool's name, its stabilization and its brush as
-text, tab separated. The first library a person gets has them moved in,
-read through `BrushPreset::from_legacy_text`, in a set named `Custom` for
-each tool. The old file is only read and stays as a backup.
+text, tab separated. The tool's name is in the language Sue showed when
+the line was written, so it is recognised in each language 0.0.75 had.
+The first library a person gets has them moved in, read through
+`BrushPreset::from_legacy_text`, in a set named `Custom` for each tool
+(a sub tool of a tool that does not paint goes to a set named `Custom:`
+and the tool's name). The old file is only read and stays as a backup.
 
 ## Clip Studio Paint sub tools (`.sut`)
 
@@ -134,5 +137,8 @@ What a `.sut` cannot say the same way:
   targets). They are kept, not mapped.
 - Sue's own papers are made by rule and have no file, so a brush on one
   of them goes out without a paper.
+- The Decoration tool's own shapes (stars, chain, lace and the rest) are
+  made by rule too, so a decoration brush goes out with a round tip; the
+  `SueBrush` table brings the shape back when Sue reads the file.
 - Files written by Sue for Clip Studio have not yet been opened in Clip
   Studio itself.
