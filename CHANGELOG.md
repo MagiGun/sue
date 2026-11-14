@@ -22,6 +22,10 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint's 3D controls (camera, light, shadow, shapes and body
   shape) are translated into German, French, Spanish, Italian,
   Brazilian Portuguese, Japanese, Simplified Chinese and Arabic.
+- For contributors: the tests that drive real frames through Sue moved
+  out of `bins/sue/src/runtime.rs` into `bins/sue/src/runtime/tests/`,
+  one file for each area, with shared helpers that find what to click
+  by where it was drawn.
 
 ### Fixed
 
