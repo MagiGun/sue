@@ -55,8 +55,13 @@ const ARENA_VERSION: u32 = 2;
 /// The arena version of 0.0.75 and older: every raster inline.
 const ARENA_VERSION_INLINE: u32 = 1;
 /// The tags this build knows. Any other chunk may point at blobs of the
-/// pixel store, so they are kept (Rule 3).
+/// pixel store, so they are kept (Rule 3). A chunk a feature of this build
+/// adds must be named here, or no save drops a blob again.
 const KNOWN: [[u8; 4]; 5] = [ARENA, META, PRESETS, THUMBNAIL, PIXELS];
+/// Chunks only builds older than the pixel store wrote (the canvas layout
+/// of the builds before the Hub). This build does not read them and keeps
+/// them, but they cannot point at a blob, so they keep no blob alive.
+const OLDER_THAN_PIXELS: [[u8; 4]; 1] = [*b"SCNE"];
 /// Tag, version and length: what stands before a chunk's payload.
 const FRAME: usize = 16;
 
@@ -354,8 +359,10 @@ impl SueFile {
             .iter_mut()
             .find(|chunk| chunk.tag == PIXELS)
             .map(|chunk| (chunk.version, std::mem::take(&mut chunk.payload)));
-        let unknown = self.chunks.iter().any(|chunk| !KNOWN.contains(&chunk.tag))
-            || arena
+        let unknown =
+            self.chunks.iter().any(|chunk| {
+                !KNOWN.contains(&chunk.tag) && !OLDER_THAN_PIXELS.contains(&chunk.tag)
+            }) || arena
                 .iter()
                 .any(|(_, entity)| keep(entity) && may_refer_to_blobs(entity));
         let mut out = Writer::new();

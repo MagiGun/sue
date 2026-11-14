@@ -565,3 +565,27 @@ fn a_save_that_fails_at_any_byte_leaves_the_old_file_whole() {
     same(&second, &loaded);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn the_canvas_layout_of_older_builds_keeps_no_blob_alive() {
+    let mut arena = Arena::new();
+    layer(&mut arena, "Kept", line_art(300, 300, 3));
+    let gone = layer(&mut arena, "Deleted", line_art(300, 300, 4));
+    let mut file = SueFile::new();
+    // Written by the builds before the Hub, long before the pixel store.
+    file.set(Chunk {
+        tag: *b"SCNE",
+        version: 1,
+        payload: vec![7, 1],
+    });
+    file.set_arena(&arena);
+    let file = SueFile::from_bytes(&file.to_bytes()).unwrap();
+    let blobs = store_len(&file);
+    let mut smaller = file.arena(&registry()).unwrap();
+    smaller.despawn(smaller.handle_of(gone).unwrap()).unwrap();
+    let mut again = file.clone();
+    again.set_arena(&smaller);
+    assert!(store_len(&again) < blobs, "the deleted layer's blobs go");
+    assert_eq!(again.chunk(*b"SCNE").unwrap().payload, [7, 1]);
+    same(&smaller, &again.arena(&registry()).unwrap());
+}
