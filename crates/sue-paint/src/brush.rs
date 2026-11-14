@@ -4364,6 +4364,46 @@ mod tests {
             .count();
         assert_eq!(differing, 0, "bytes that differ from a whole redraw");
     }
+
+    /// The same line ending in one long jump back, as a fast mouse reports
+    /// a jerk at the lift: a single 200 pixel step, trimmed as a hook. It
+    /// crosses rows of tiles that neither the finished line's end nor the
+    /// jump's own end comes near.
+    fn jerked(whole: bool) -> RasterTile2D {
+        let mut raster = layer(512, 448);
+        let tip = Tip {
+            taper_start: 20.0,
+            taper_end: 20.0,
+            taper_by_speed: true,
+            ..flat_pen(40.0)
+        };
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.1, 0.2, 0.3], false);
+        stroke.whole = whole;
+        stroke.set_speed(0.1);
+        for step in 0..=180 {
+            stroke.to(&mut raster, [40.0 + step as f32 * 2.0, 146.0], 1.0, None);
+        }
+        stroke.to(&mut raster, [400.0 - 57.4, 146.0 + 191.6], 1.0, None);
+        stroke.end(&mut raster, Finish::default(), None);
+        raster
+    }
+
+    #[test]
+    fn a_long_jump_trimmed_at_the_lift_leaves_nothing_in_the_tiles_it_crossed() {
+        let (quick, full) = (jerked(false), jerked(true));
+        let below = |raster: &RasterTile2D| {
+            (170..448)
+                .flat_map(|y| (0..512).map(move |x| (x, y)))
+                .filter(|(x, y)| alpha(raster, *x, *y) > 0)
+                .count()
+        };
+        assert_eq!(below(&full), 0, "a whole redraw trims the jump");
+        assert_eq!(below(&quick), 0, "redrawing the ends leaves no jump");
+        assert!(
+            quick.bytes().unwrap() == full.bytes().unwrap(),
+            "the same bytes as a whole redraw"
+        );
+    }
 }
 
 #[cfg(test)]
