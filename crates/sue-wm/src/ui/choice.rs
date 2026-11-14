@@ -922,16 +922,10 @@ impl<'a> Chip<'a> {
         let (label, on) = (self.label, self.on);
         response.widget_info(|| WidgetInfo::selected(Role::Button, enabled, on, label));
         // The cross is sensed after the chip, so it lies above it.
+        // Like every control, the cross is never harder to hit than the
+        // density allows, though it is drawn smaller than that.
         let cross = self.remove.map(|name| {
-            let cross = ui.interact(
-                Self::cross(rect),
-                id.with("sue-chip-remove"),
-                if enabled {
-                    egui::Sense::click()
-                } else {
-                    egui::Sense::hover()
-                },
-            );
+            let cross = interact(ui, Self::cross(rect), id.with("sue-chip-remove"), enabled);
             cross.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, name));
             if name.is_empty() {
                 cross
@@ -1386,11 +1380,21 @@ mod tests {
         for density in Density::ALL {
             let ((marks, strip, wide, room), _) = bench.frame(density, Vec::new(), |ui, theme| {
                 let room = ui.available_width();
+                // Kept off the top edge, where the window would clip
+                // the grown hit area of a chip lower than it.
+                ui.add_space(theme.space(Space::S4));
+                let removable = chip("ink", "ink", false)
+                    .removable("Remove the tag")
+                    .show(ui, theme);
+                let cross = ui
+                    .ctx()
+                    .read_response(removable.response.id.with("sue-chip-remove"));
                 let marks = [
                     checkbox("grid", "Grid", true).show(ui, theme),
                     radio("one", "One", true).show(ui, theme),
                     switch("auto", "Auto", true).show(ui, theme),
                     chip("tag", "Tag", false).show(ui, theme).response,
+                    cross.expect("the cross was sensed"),
                 ]
                 .map(|response| (response.rect, response.interact_rect));
                 let strip = segmented("views", &["A", "B"], Some(0))
