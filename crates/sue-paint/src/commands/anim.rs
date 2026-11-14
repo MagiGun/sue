@@ -271,7 +271,7 @@ fn cel_new(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 
 /// Assign Animation Cel and Add Keyframe: the current track shows the
 /// current layer from the current frame on.
-fn cel_assign(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+fn cel_assign(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
     let Some(here) = paint.here(&cx.world.arena) else {
         return;
     };
@@ -293,7 +293,13 @@ fn cel_assign(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
         here.picture,
         length,
     );
-    SuePaint::apply(cx, anim::set(here.picture, sequence, "Specify Cel"));
+    // The undo step reads as the menu item that made it.
+    let label = if call.name == "anim.key.add" {
+        tr!("add-keyframe")
+    } else {
+        tr!("assign-animation-cel")
+    };
+    SuePaint::apply(cx, anim::set(here.picture, sequence, &label));
 }
 
 /// Delete Keyframe: the current track's key on the current frame goes.
@@ -303,7 +309,10 @@ fn key_delete(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     };
     if let Some((sequence, length)) = here.timeline {
         let sequence = anim::unassign(&sequence, here.track, here.frame, length);
-        SuePaint::apply(cx, anim::set(here.picture, sequence, "Delete Key"));
+        SuePaint::apply(
+            cx,
+            anim::set(here.picture, sequence, &tr!("delete-keyframe")),
+        );
     }
 }
 
