@@ -1592,6 +1592,10 @@ writes `<id>.sue` whole, later ones append a record of what changed to
 `<id>.journal`, and a journal larger than the whole file (or 4 MiB) or of
 256 records is compacted into a new whole file. Whether the work changed is
 the arena's revision at the snapshot (`saved_at`, `kept_at`).
+The project's `SueFile` is held in an `Arc`, so the first keep after a
+save or an open starts from it with the copy made on the keep's job. A
+keep that ends after a save of the same or a later revision is let go at
+once, so saved work is never offered as unsaved.
 `save_project_to` does the same work before it returns; quitting, opening
 another project and recovering wait for running jobs first.
 
