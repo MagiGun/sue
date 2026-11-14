@@ -6,19 +6,38 @@ use super::{Shell, ShellIo, split};
 use crate::{ShellRequest, keys};
 
 impl Shell {
+    /// The chords the open studio or tool uses itself: they stay with it,
+    /// so Sue's keys that share them do nothing while it is open.
+    pub(super) fn reserved_keys(&self, io: &ShellIo<'_>) -> Vec<sue_rice::Keybind> {
+        self.page
+            .as_ref()
+            .and_then(|page| io.applets.get(page))
+            .map(|applet| applet.reserved_keys())
+            .unwrap_or_default()
+    }
+
+    /// The chord a menu or the palette shows for one of Sue's keys (its
+    /// chords, then those of its alternative): the first that works where
+    /// Sue is now, or nothing when the open studio or tool keeps them all.
+    pub(super) fn shown_key(
+        reserved: &[sue_rice::Keybind],
+        binds: &[&sue_rice::Keybinds],
+    ) -> String {
+        binds
+            .iter()
+            .flat_map(|bind| bind.chords())
+            .find(|chord| !reserved.contains(chord))
+            .map(ToString::to_string)
+            .unwrap_or_default()
+    }
+
     pub(super) fn global_keys(&mut self, ctx: &egui::Context, io: &mut ShellIo<'_>, now: Instant) {
         if io.applets.captures_keys() {
             return;
         }
         let keymap = self.config.keymap.clone();
         let typing = ctx.text_edit_focused();
-        // Chords the open studio uses itself stay with it.
-        let reserved: Vec<sue_rice::Keybind> = self
-            .page
-            .as_ref()
-            .and_then(|page| io.applets.get(page))
-            .map(|applet| applet.reserved_keys())
-            .unwrap_or_default();
+        let reserved = self.reserved_keys(io);
         let take = |input: &mut egui::InputState, bind: &sue_rice::Keybinds| {
             keys::consume_except(input, bind, &reserved)
         };

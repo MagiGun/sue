@@ -18,27 +18,24 @@ open-project-ellipsis = Open Project...
 save-project = Save Project
 save-project-as = Save Project As
 save-project-as-ellipsis = Save Project As...
-open-at-launch = Open { $name } at Launch
-command-palette = Command Palette ({ $command_palette })
 check-for-updates = Check for Updates
 settings = Settings
 quit-sue = Quit Sue
-# The Sue menu's language submenu. Other languages add the English word in
-# brackets, so someone who chose a language by mistake finds the way back.
-language-menu = Language
+command-palette-item = Command Palette
+# Sue's language, chosen in Settings.
 language-system = System ({ $language })
 language-follow-sue = Follow Sue ({ $language })
 language-changed = Sue speaks { $language }
 could-not-change-language = Could not change the language: { $error }
-# The Sue menu's layout submenu: which layout the whole app uses.
-layout-menu = Layout
+# The Sue menu's Interface submenu: which layout the whole app uses.
+interface-menu = Interface
+interface-changed = Sue uses the { $interface } interface
+could-not-change-interface = Could not change the interface: { $error }
 layout-automatic = Automatic ({ $layout })
 layout-desktop = Desktop
 layout-tablet = Tablet
 layout-phone = Phone
 layout-phone-shaped = Phone Shaped
-layout-changed = Sue uses the { $layout } layout
-could-not-change-layout = Could not change the layout: { $error }
 
 ## The Hub and the pin
 
@@ -96,8 +93,8 @@ window-close = Close
 
 in-folder = { $lead } in { $folder }
 saved-in-folder = {" "}in { $folder }
-click-to-show-it = {"."} Click to show it
-saved = Saved { $name }{ $note }{ $folder }{ $click }
+saved-file = Saved { $name }{ $note }{ $folder }
+show-in-folder = Show in Folder
 open-recent = Open Recent
 recent = Recent
 files-projects-you-open-save-show = Files and projects you open or save show up here.

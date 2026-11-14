@@ -210,7 +210,7 @@ impl Rig {
 }
 
 #[test]
-fn the_sue_menus_layout_changes_what_every_studio_draws() {
+fn the_sue_menus_interface_changes_what_every_studio_draws() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let mut launchpad = Launchpad::new();
     let probe = Arc::clone(&seen);
@@ -233,31 +233,31 @@ fn the_sue_menus_layout_changes_what_every_studio_draws() {
     // A computer offers every layout, Automatic naming its own.
     rig.with(|io| shell.open_sue_menu(io));
     assert_eq!(
-        shell.sue_menu_labels(&["Layout"]),
+        shell.sue_menu_labels(&["Interface"]),
         ["Automatic (Desktop)", "Desktop", "Tablet", "Phone"]
     );
-    rig.pick(&mut shell, &["Layout", "Phone"]);
+    rig.pick(&mut shell, &["Interface", "Phone"]);
     assert_eq!(rig.world.rice.get_str(INTERFACE_KEY), Some("phone"));
     assert_eq!(shell.form_factor(), FormFactor::Mobile);
     assert_eq!(shell.device_form_factor(), FormFactor::Desktop);
     assert_eq!(last(&seen), (FormFactor::Mobile, 1440.0));
 
     // Phone shaped keeps the whole app to a phone-wide column.
-    rig.pick(&mut shell, &["Layout", "Phone Shaped"]);
+    rig.pick(&mut shell, &["Interface", "Phone Shaped"]);
     assert_eq!(last(&seen), (FormFactor::Mobile, PHONE_FRAME_WIDTH));
     assert!(
         shell.sue_button().left() > 500.0,
         "{:?}",
         shell.sue_button()
     );
-    rig.pick(&mut shell, &["Layout", "Tablet"]);
+    rig.pick(&mut shell, &["Interface", "Tablet"]);
     assert_eq!(last(&seen), (FormFactor::Tablet, 1440.0));
 
     // One undo step each, like any other change.
     rig.with(|io| shell.undo(io, false));
     rig.frames(&mut shell);
     assert_eq!(rig.world.rice.get_str(INTERFACE_KEY), Some("phone"));
-    rig.pick(&mut shell, &["Layout", "Automatic (Desktop)"]);
+    rig.pick(&mut shell, &["Interface", "Automatic (Desktop)"]);
     assert_eq!(last(&seen), (FormFactor::Desktop, 1440.0));
 
     // A phone or tablet switches only between its two.
@@ -270,7 +270,7 @@ fn the_sue_menus_layout_changes_what_every_studio_draws() {
     );
     rig.with(|io| phone.open_sue_menu(io));
     assert_eq!(
-        phone.sue_menu_labels(&["Layout"]),
+        phone.sue_menu_labels(&["Interface"]),
         ["Automatic (Phone)", "Tablet", "Phone"]
     );
 }

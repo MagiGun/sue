@@ -229,6 +229,10 @@ pub struct Shell {
     /// The languages in use when the fonts last covered them, and the
     /// characters they (and every language's name) need.
     scripts: (Vec<String>, String),
+    /// The notices on screen (each [`notify`](Self::notify) puts one up).
+    toasts: crate::ui::Toasts,
+    /// The notice of the last saved file, and the file its button shows.
+    revealed: Option<(crate::ui::ToastId, PathBuf)>,
 }
 
 impl std::fmt::Debug for Shell {
@@ -299,6 +303,8 @@ impl Shell {
             booted: false,
             hub_place: None,
             scripts: (Vec::new(), String::new()),
+            toasts: crate::ui::Toasts::new("sue-notices"),
+            revealed: None,
             config,
             theme,
             applied_theme: None,
@@ -507,11 +513,10 @@ impl Shell {
 
     /// Shows a status message.
     pub fn notify(&mut self, text: impl Into<String>, error: bool) {
-        self.message = Some((
-            text.into(),
-            error,
-            Instant::now() + self.config.message_duration,
-        ));
+        let text = text.into();
+        let stay = self.config.message_duration;
+        self.push_notice(&text, error, stay, None);
+        self.message = Some((text, error, Instant::now() + stay));
         self.message_path = None;
         self.touch();
     }
@@ -540,23 +545,13 @@ impl Shell {
         let folder = folder.map_or_else(String::new, |folder| {
             tr!("saved-in-folder", folder = folder)
         });
+        // Where the system has a file manager, the notice's button shows
+        // the file in it.
         let reveal = sue_platform::file_manager().is_some();
-        let click = if reveal {
-            tr!("click-to-show-it")
-        } else {
-            String::new()
-        };
-        self.message = Some((
-            tr!(
-                "saved",
-                name = name,
-                note = note,
-                folder = folder,
-                click = click
-            ),
-            false,
-            Instant::now() + self.config.message_duration.max(Duration::from_secs(10)),
-        ));
+        let text = tr!("saved-file", name = name, note = note, folder = folder);
+        let stay = self.config.message_duration.max(Duration::from_secs(10));
+        self.push_notice(&text, false, stay, reveal.then(|| path.to_path_buf()));
+        self.message = Some((text, false, Instant::now() + stay));
         self.message_path = reveal.then(|| path.to_path_buf());
         self.touch();
     }
@@ -1076,9 +1071,8 @@ impl Shell {
         });
         if layout.status.height() >= 1.0 {
             self.status_ui(root, layout.status, io, &theme);
-        } else {
-            self.notice_ui(&ctx, root.max_rect(), io, &theme);
         }
+        self.notice_ui(&ctx, layout.page, io, &theme);
         self.palette_ui(&ctx, io, &theme, now);
         self.window_ui(&ctx, frame, io, &theme, now, dt);
         self.quit_ui(&ctx, io, &theme, now);
