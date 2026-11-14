@@ -2384,3 +2384,6 @@ swap-main-and-sub-color-values = Swap main and sub color
 rename-in-timeline-order = Rename in Timeline Order
 rename-in-layer-order = Rename in Layer Order
 no-animation-folder-to-rename-cels = The timeline has no animation folder whose cels could be renamed
+webtoon-reading-direction = Webtoon Reading Direction
+webtoon-reading-right-to-left = Webtoon Reading Direction: Right to Left
+webtoon-reading-left-to-right = Webtoon Reading Direction: Left to Right

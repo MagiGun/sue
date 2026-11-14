@@ -108,9 +108,6 @@ impl SuePaint {
             return;
         }
         self.record_auto(command);
-        if command.starts_with("story.") && self.story_command(command, cx) {
-            return;
-        }
         if (command.starts_with("anim.")
             || command.starts_with("file.export.gif")
             || command == "file.export.apng"
@@ -239,7 +236,7 @@ pub(super) fn doc_open(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemStat
     when(paint.doc().is_some())
 }
 
-/// A command the studio runs before the registry: Story and Animation
+/// A command the studio runs before the registry: Animation
 /// commands by their own match. Through the registry they do nothing,
 /// as they did through the one match.
 pub(super) fn nothing(_: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {}
