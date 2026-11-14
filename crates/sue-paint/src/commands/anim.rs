@@ -632,7 +632,93 @@ fn light_clear(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     }
 }
 
+// ----- Run: naming cels --------------------------------------------------------
+
+/// The cels of `folder` in timeline order: those its track shows, in the
+/// order they first show, then the ones it does not show, bottom first.
+fn in_timeline_order(
+    arena: &Arena,
+    picture: EntityId,
+    sequence: &Sequence,
+    folder: EntityId,
+) -> Vec<EntityId> {
+    let cels = anim::cels(arena, picture, folder);
+    let mut order: Vec<EntityId> = Vec::with_capacity(cels.len());
+    if let Some(track) = anim::track_of(sequence, folder) {
+        for (_, cel) in anim::keys(&sequence.tracks[track], sequence.rate) {
+            if let Some(cel) = cel
+                && cels.contains(&cel)
+                && !order.contains(&cel)
+            {
+                order.push(cel);
+            }
+        }
+    }
+    let unshown: Vec<EntityId> = cels
+        .into_iter()
+        .filter(|cel| !order.contains(cel))
+        .collect();
+    order.extend(unshown);
+    order
+}
+
+/// The edit that names `cels` 1, 2, 3 and so on in their order, leaving
+/// alone a cel that already has its number; empty when every one has.
+fn numbered(arena: &Arena, cels: &[EntityId], label: &str) -> Edit {
+    let mut edit = Edit::new(label);
+    for (index, cel) in cels.iter().enumerate() {
+        let name = (index + 1).to_string();
+        if arena
+            .get_by_id(*cel)
+            .is_ok_and(|entity| entity.name() != name)
+        {
+            edit = edit.then(sue_core::txn::Rename::new(*cel, name));
+        }
+    }
+    edit
+}
+
+/// Rename in Timeline Order and Rename in Layer Order: the cels of the
+/// animation folder picked (or of the current track's) are named 1, 2, 3
+/// and so on, as one undo step. In timeline order the cels the track
+/// shows come first, in the order they first show; in layer order the
+/// bottom cel is 1.
+fn rename_cels(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let Some(here) = paint.here(&cx.world.arena) else {
+        return;
+    };
+    let Some((sequence, _)) = &here.timeline else {
+        cx.fail(tr!("make-timeline-first-animation-timeline-new"));
+        return;
+    };
+    let arena = &cx.world.arena;
+    let Some(folder) = paint.cel_target(arena, sequence, here.track) else {
+        cx.notify(tr!("pick-animation-folder-to-rename-cels"));
+        return;
+    };
+    let (cels, label) = if call.name == "anim.cel.rename_layer" {
+        (
+            anim::cels(arena, here.picture, folder),
+            tr!("rename-in-layer-order"),
+        )
+    } else {
+        (
+            in_timeline_order(arena, here.picture, sequence, folder),
+            tr!("rename-in-timeline-order"),
+        )
+    };
+    let edit = numbered(arena, &cels, &label);
+    if !edit.is_empty() {
+        SuePaint::apply(cx, edit);
+    }
+}
+
 // ----- State -----------------------------------------------------------------
+
+/// Works while the canvas has a timeline.
+fn on_timeline(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    super::when(paint.timeline_here(facts.arena).is_some())
+}
 
 /// Checked while the timeline is on.
 fn timeline_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
@@ -882,6 +968,24 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "chevron-right",
         cel_step,
     ),
+    // In the command palette until the Animation menu's Edit Track
+    // lists them (P3-2).
+    c(
+        "anim.cel.rename_timeline",
+        "rename-in-timeline-order",
+        "rename",
+        rename_cels,
+    )
+    .state(on_timeline)
+    .with(Flags::PALETTE),
+    c(
+        "anim.cel.rename_layer",
+        "rename-in-layer-order",
+        "rename",
+        rename_cels,
+    )
+    .state(on_timeline)
+    .with(Flags::PALETTE),
 ];
 
 #[cfg(test)]

@@ -2343,3 +2343,6 @@ zoom-100-percent = 100%
 zoom-200-percent = 200%
 paste-material = Paste Material
 cancel-transform = Cancel Transform
+rename-in-timeline-order = Rename in Timeline Order
+rename-in-layer-order = Rename in Layer Order
+pick-animation-folder-to-rename-cels = Pick an animation folder or one of its cels first

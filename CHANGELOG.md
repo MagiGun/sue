@@ -59,6 +59,10 @@ follow [Semantic Versioning](https://semver.org/).
   small button at the wheel's bottom right switches between a square of
   saturation and value (HSV) and a triangle between the hue, white and
   black (HLS), and the numbers under the wheel follow it.
+- Sue Paint renames an animation folder's cels 1, 2, 3 in the order
+  the timeline shows them (Rename in Timeline Order) or in the order of
+  the layers (Rename in Layer Order), as one undo step; both are in the
+  command palette until the Animation menu lists them.
 
 ### Changed
 
