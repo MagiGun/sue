@@ -60,6 +60,10 @@ Each part's `Data` is a run of these, in the order given:
 | stops | a count, then per stop a float (0 to 1) and a color |
 | path | a count, then that many numbers: where a layer is in the tree, as its index among the root's layers (bottom first), then among that folder's layers, and so on |
 
+A byte of bits uses only the bits named for it, and a choice only the
+values listed. A reader that meets another bit or value, or bytes left
+after the part, does not read the part and keeps its row as it was.
+
 ## Layer parts
 
 ### Content parts

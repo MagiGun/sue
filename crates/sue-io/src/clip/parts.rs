@@ -155,6 +155,9 @@ fn read_text(r: &mut Reader<'_>) -> Result<ClipText> {
         let size = r.f32()?;
         let color = read_rgba(r)?;
         let style = r.u8()?;
+        if style > 3 {
+            return Err(r.error("a text style is not known"));
+        }
         runs.push(ClipTextRun {
             text,
             font,
@@ -668,6 +671,9 @@ pub fn decode_rulers(bytes: &[u8]) -> Result<Vec<ClipRuler>> {
         let list = read_points(r)?;
         let lines = read_u32(r)?;
         let flags = r.u8()?;
+        if flags > 3 {
+            return Err(r.error("a ruler setting is not known"));
+        }
         rulers.push(ClipRuler {
             kind,
             points: list,

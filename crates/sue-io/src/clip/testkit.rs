@@ -1718,6 +1718,46 @@ mod tests {
         assert!(p::decode_color(&[1, 2]).is_err());
     }
 
+    /// A flag this build does not know is never dropped by reading the
+    /// part: the part is refused, so its row is kept as it was.
+    #[test]
+    fn a_part_with_a_flag_this_build_does_not_know_is_refused() {
+        use super::super::parts as p;
+        let text = ClipContent::Text(crate::clip::ClipText {
+            runs: vec![crate::clip::ClipTextRun {
+                text: String::new(),
+                font: String::new(),
+                size: 12.0,
+                color: [0, 0, 0, 255],
+                bold: true,
+                italic: true,
+            }],
+            at: [0.0, 0.0],
+            frame: None,
+            vertical: false,
+            align: crate::clip::ClipAlign::Start,
+            line_spacing: 1.0,
+        });
+        let mut bytes = p::encode_content(&text);
+        // One run, two empty strings, the size and the color: the style
+        // byte is the twelfth.
+        assert_eq!(bytes[11], 3);
+        assert_eq!(p::decode_content("text", &bytes).unwrap(), text);
+        bytes[11] = 7;
+        assert!(p::decode_content("text", &bytes).is_err());
+        let rulers = every_kind(20, 10, 3)
+            .all_layers()
+            .into_iter()
+            .find(|layer| !layer.rulers.is_empty())
+            .map(|layer| layer.rulers.clone())
+            .unwrap();
+        let mut bytes = p::encode_rulers(&rulers[..1]);
+        let last = bytes.len() - 1;
+        assert!(bytes[last] <= 3);
+        bytes[last] |= 4;
+        assert!(p::decode_rulers(&bytes).is_err());
+    }
+
     /// Every `.clip` in the folder `SUE_CLIP_CORPUS` names (the owner's
     /// own files, never in the repository) is read, written and read
     /// again: the second read must equal the first, and what the model
