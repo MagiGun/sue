@@ -1475,6 +1475,28 @@ chords the open page keeps for itself (`SueApplet::reserved_keys`). The
 shell's own keys (`[keys]`: the palette, Settings, open, save, quit, undo
 and redo) work the same way; `Ctrl+O` asks the open page first.
 
+**Commands.** `sue_wm::commands` is one registry per studio: a
+`Command<S>` has a stable name (saved data: shortcut settings, Auto
+Actions and custom keys store it), a label in the studio's language
+namespace, a group, default chords, an icon name, `Flags` (`FAMILY` for a
+prefix such as `file.recent.open.`, `PALETTE`, `RECORDABLE`,
+`LEAVES_CANVAS`, `HIDDEN`) and two function pointers, `state` and `run`,
+which both get the `Call` (the full name and, for a family, what follows
+the prefix). Modules keep their commands in `const` tables and the studio
+adds them to a `CommandRegistry`, which finds a name (a plain name first,
+then the longest family prefix), runs it, says how its item looks, lists
+the palette's entries and a `Shortcut` row for every command that can
+have a key, and names what is wrong with the tables (`problems`: a name
+twice, chords that do not parse, a label without an English message, a
+family that shadows a name, two names with one setting, one chord on two
+commands). Commands without
+a default chord get no setting each: the keys people give them live in
+one text setting, `<section>.custom` (`shortcuts::SparseKeys`, written
+`view.grid=F7 or F8 layer.merge_down=Ctrl+E`); `shortcuts::bind` says
+where a new key goes, `shortcuts::conflicts` finds a chord two commands
+hold as set now, and `show_in_menus` also writes the shell's own keys
+beside Undo, Redo, Open, Save and Quit. No studio reads the registry yet.
+
 **Sue's icon.** `assets/icons` holds the app icon and the bare silhouette,
 each as SVG (the source), PNG and JPEG XL at 1024 pixels, and a Windows
 `.ico` with six sizes, plus inverted and black versions. `sue_wm::brand`

@@ -30,6 +30,7 @@ mod applet;
 pub mod brand;
 mod catalog;
 mod color_pick;
+pub mod commands;
 mod config;
 pub mod cover;
 pub mod dock;
@@ -66,6 +67,7 @@ pub use catalog::{
 pub use color_pick::{
     ColorPick, alpha_bar, checker_fill, color_button, color_wheel, hsv_of, rgb_of, swatch,
 };
+pub use commands::{Call, Command, CommandRegistry, Facts, Flags};
 pub use config::{
     CARET_GLIDE_KEY, Keymap, SMOOTH_CARET_KEY, WmConfig, register_rice, rice_declarations,
 };

@@ -138,3 +138,4 @@ unsaved-save-it = { $name } has been changed. Do you want to save it?
 do-not-save = Do Not Save
 save = Save
 cancel = Cancel
+shortcuts-custom = Keys of commands that have no default key
