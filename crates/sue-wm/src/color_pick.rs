@@ -564,11 +564,20 @@ pub fn alpha_bar(ui: &mut Ui, rgba: &mut [u8; 4], width: f32) -> ColorPick {
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
     ui.painter().add(Shape::mesh(mesh));
+    // The handle, white over black like the wheel's marks, so it shows on
+    // the light checkerboard of a light theme too.
     let x = bar.left() + f32::from(rgba[3]) / 255.0 * bar.width();
+    let handle = Rect::from_center_size(pos2(x, bar.center().y), vec2(5.0, bar.height() + 4.0));
     ui.painter().rect_stroke(
-        Rect::from_center_size(pos2(x, bar.center().y), vec2(5.0, bar.height() + 4.0)),
+        handle,
         1.0,
         Stroke::new(1.5, Color32::WHITE),
+        StrokeKind::Middle,
+    );
+    ui.painter().rect_stroke(
+        handle.expand(1.0),
+        2.0,
+        Stroke::new(1.0, Color32::BLACK),
         StrokeKind::Middle,
     );
     let mut pick = ColorPick {
