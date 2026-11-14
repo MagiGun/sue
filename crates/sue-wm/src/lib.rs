@@ -35,6 +35,7 @@ mod config;
 pub mod cover;
 pub mod dock;
 mod error;
+pub mod files;
 pub mod fonts;
 pub mod icons;
 pub mod keys;
