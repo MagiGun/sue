@@ -1,0 +1,19 @@
+[package]
+name = "sue-brush"
+description = "Sue's brush engine: pen samples in, pixels out, for every studio that paints. No interface, no platform code, no document beyond the rasters it is handed."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+license-file.workspace = true
+
+# The engine replays strokes in tests without a window and in the browser,
+# so it stands on the kernel and the shared models and on nothing else:
+# never on sue-platform, sue-picture or a studio (tests/manifest.rs).
+[dependencies]
+sue-core.workspace = true
+sue-model.workspace = true
+
+[lints]
+workspace = true

@@ -19,6 +19,7 @@ sue-pkg = { path = "crates/sue-pkg" }
 sue-ai = { path = "crates/sue-ai" }
 sue-wm = { path = "crates/sue-wm" }
 sue-model = { path = "crates/sue-model" }
+sue-brush = { path = "crates/sue-brush" }
 sue-paint = { path = "crates/sue-paint" }
 sue-type = { path = "crates/sue-type" }
 sue-writer = { path = "crates/sue-writer" }
@@ -146,6 +147,9 @@ opt-level = 3
 [profile.web.package.sue-model]
 opt-level = 3
 
+[profile.web.package.sue-brush]
+opt-level = 3
+
 [profile.web.package.sue-core]
 opt-level = 3
 
@@ -160,6 +164,9 @@ opt-level = 3
 opt-level = 3
 
 [profile.dev.package.sue-model]
+opt-level = 3
+
+[profile.dev.package.sue-brush]
 opt-level = 3
 
 # The interface, the project file reader and the format codecs run on every

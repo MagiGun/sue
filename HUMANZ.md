@@ -43,6 +43,7 @@ sue-ai        ──► sue-platform, sue-core
 sue-rice      ──► sue-platform, sue-core
 sue-io        ──► sue-model, sue-core                 + jxl-oxide, zune-jpegxl, zune-png, zune-jpeg, jpeg-encoder, symphonia, image, flacenc, miniz_oxide, ttf-parser
 sue-model     ──► sue-core
+sue-brush     ──► sue-model, sue-core                 (the brush engine: no egui, no platform, no studio; empty until the 0.0.8 engine lands)
 sue-pkg       ──► sha2, ed25519-dalek, semver         (no engine crates)
 sue-core      ──► nothing                              (leaf)
 sue-platform  ──► winit, wgpu, egui, egui-winit, egui-wgpu, arboard, pollster, cpal, audio_thread_priority, rfd, open, sys-locale; in the browser wasm-bindgen, web-sys, js-sys, web-time   (no engine crates)
@@ -523,6 +524,7 @@ extension components (`sue_model::register`):
 | `Geometry`, `Transform` | `sue.geometry`, `sue.transform` | Double-precision points, polygons, polylines and Bezier prims with attributes per domain; placement | 3D, CAD, BIM, vector art, rigging, game levels |
 | `PageLayout` | `sue.layout` | Pages (size, margins, bleed, masters) and frames showing other entities | publishing, books, slides, PDF pages, drawing sheets |
 | `Encoded` | `sue.encoded` | The original bytes of a file Sue cannot decode yet | every format before its decoder exists |
+| `BrushPreset`, `BrushRegistry` (`sue_model::brush`) | `sue.brush` | One brush: what lays the paint down (a swept stroke, dabs, a ribbon, a blend), the tip (a disc, or pictures named by the SHA-256 of their files), a value per parameter key (`size`, `opacity`, `flow`, `hardness`, `spacing`, `angle`, `scatter` and more) and a list of bindings, each making one parameter follow one input key (`pressure`, `speed`, `tilt`, `direction`, `random` and more) through a `Response` between a minimum and a maximum; starting and ending, color jitter, mixing, texture, stabilization. Parameters and inputs register in a `BrushRegistry`, and a preset keeps keys no build knows. The encoding leads with its version, then every field is a key and its bytes with their length: unknown fields are kept and written back. `BrushPreset::from_legacy_text` reads the brushes Sue 0.0.75 kept as text | every studio that paints: brushes and brush sets as entities (class `sue.brush`, a set is a folder), stored strokes, the brush engine (`sue-brush`) |
 
 Three shared shapes need no component of their own:
 
@@ -2930,6 +2932,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §1.8 `RasterEdit` (pixel rectangles before and after) | **Implemented**; Sue Paint records every stroke, fill and filter with it | `sue-core/src/txn.rs` |
 | §1.13 Shared models (text marks, table, curves, sequence, notes, graph, geometry, layout, encoded) | **Implemented** as data with tests; no applet edits them yet | `sue-model` |
 | §1.13 Layered pictures and blend modes | **Implemented**; Sue Paint makes and edits them | `sue-model/src/picture.rs`, `blend.rs` |
+| §1.13 The brush model (`sue.brush`) | **Implemented** as data with tests (round trip, unknown fields, a version 1 fixture, every built-in brush of 0.0.75 read from its text); Sue Paint still paints from its own `Tip` until the 0.0.8 engine lands | `sue-model/src/brush.rs`, `sue-model/tests/brush.rs`, `sue-brush` |
 | §3.8 Rich text with paragraph marks, manuscripts | **Implemented**; Sue Writer edits them | `sue-model/src/text.rs`, `manuscript.rs` |
 | §3.8 Installed fonts | **Implemented** (a background scan; faces installed into egui on first use) | `sue-wm/src/fonts.rs`, `sue-platform/src/paths.rs` |
 | §3.8 Rich text editor, styles, page layout, typesetting | **Implemented**; the caret glides and blinks at rest (`sue-type/src/caret.rs`) | `sue-type` |
