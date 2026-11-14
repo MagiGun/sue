@@ -12,5 +12,8 @@
 //!
 //! - [`raster`]: the rasterizer primitives (the exact uneven capsule, the
 //!   mip-mapped dab, the ribbon) and the premultiplied row kernels.
+//! - [`buffer`]: the tiled stroke buffer, with committed and tail tiles,
+//!   that a stroke paints into and that merges into the layer on lift.
 
+pub mod buffer;
 pub mod raster;
