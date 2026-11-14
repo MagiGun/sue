@@ -20,6 +20,8 @@ mod settings;
 mod snapshot;
 #[cfg(test)]
 mod style;
+#[cfg(test)]
+mod ui_lint;
 mod update;
 mod util;
 
