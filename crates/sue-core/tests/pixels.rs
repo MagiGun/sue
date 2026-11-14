@@ -623,3 +623,30 @@ fn a_store_with_narrow_keys_is_kept_as_it_is_and_the_save_ends() {
     assert_eq!(reread.chunk(ARENA).unwrap().version, 1);
     same(&arena, &reread.arena(&registry()).unwrap());
 }
+
+#[test]
+fn an_opaque_value_keeps_every_old_blob() {
+    let mut arena = Arena::new();
+    layer(&mut arena, "Kept", line_art(300, 300, 3));
+    let gone = layer(&mut arena, "Deleted", line_art(300, 300, 4));
+    let file = saved(&arena);
+    let blobs = store_len(&file);
+    let mut smaller = file.arena(&registry()).unwrap();
+    smaller.despawn(smaller.handle_of(gone).unwrap()).unwrap();
+    // A value a later Sue wrote, nested in a list: it may name a blob.
+    let kept = smaller.iter().next().unwrap().0;
+    smaller.get_mut(kept).unwrap().properties_mut().set(
+        "later",
+        sue_core::Value::List(vec![sue_core::Value::Opaque {
+            tag: 200,
+            bytes: vec![1, 2],
+        }]),
+    );
+    let mut again = file.clone();
+    again.set_arena(&smaller);
+    assert_eq!(store_len(&again), blobs);
+    assert_eq!(
+        again.chunk(PIXELS).unwrap().payload,
+        file.chunk(PIXELS).unwrap().payload
+    );
+}
