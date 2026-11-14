@@ -921,7 +921,12 @@ impl SueWriter {
 
     /// `true` while misspelled words are underlined.
     pub(crate) fn spell_check(&self, cx: &AppletContext<'_>) -> bool {
-        cx.rice().get_bool(SPELL_CHECK).unwrap_or(true)
+        Self::spell_check_in(cx.rice())
+    }
+
+    /// `true` while `rice` has misspelled words underlined.
+    pub(crate) fn spell_check_in(rice: &sue_rice::RiceSchema) -> bool {
+        rice.get_bool(SPELL_CHECK).unwrap_or(true)
     }
 
     /// The words the project's (or the open file's) own dictionary holds.
@@ -986,9 +991,15 @@ impl SueWriter {
 
     /// `true` while the project (or the open file) records its changes.
     pub(crate) fn tracking(&self, cx: &AppletContext<'_>) -> bool {
+        self.tracking_in(cx.arena())
+    }
+
+    /// `true` while the project (or the open file) in `arena` records its
+    /// changes.
+    pub(crate) fn tracking_in(&self, arena: &sue_core::Arena) -> bool {
         self.project
             .or(self.editor.current())
-            .and_then(|id| cx.arena().get_by_id(id).ok())
+            .and_then(|id| arena.get_by_id(id).ok())
             .and_then(|entity| entity.property(sue_model::changes::TRACK))
             .and_then(Value::as_bool)
             .unwrap_or(false)
@@ -1123,11 +1134,16 @@ impl SueWriter {
     // ----- Commands ----------------------------------------------------------------
 
     /// Runs `command`. Returns `false` if there is no such command.
+    pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) -> bool {
+        crate::commands::registry().run(self, cx, command)
+    }
+
+    /// Does what `command` does, as the registry's commands ask.
     #[allow(
         clippy::too_many_lines,
         reason = "one match over the studio's commands"
     )]
-    pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) -> bool {
+    pub(crate) fn dispatch(&mut self, command: &str, cx: &mut AppletContext<'_>) -> bool {
         let sheet = self.sheet(cx);
         match command {
             "file.new" => {
@@ -1861,57 +1877,6 @@ impl SueWriter {
 
     // ----- Keys -------------------------------------------------------------------
 
-    /// The studio's shortcuts, Word's and Scrivener's.
-    pub(crate) fn shortcuts() -> Vec<(Modifiers, Key, &'static str)> {
-        let command = Modifiers::COMMAND;
-        let shift = Modifiers::COMMAND | Modifiers::SHIFT;
-        let alt = Modifiers::COMMAND | Modifiers::ALT;
-        vec![
-            (shift, Key::N, "binder.new_folder"),
-            (command, Key::N, "binder.new_doc"),
-            (shift, Key::E, "compile.open"),
-            (command, Key::P, "compile.pdf"),
-            (command, Key::B, "format.bold"),
-            (command, Key::I, "format.italic"),
-            (command, Key::U, "format.underline"),
-            (shift, Key::X, "format.strike"),
-            (shift, Key::K, "project.split"),
-            (shift, Key::Plus, "format.superscript"),
-            (shift, Key::Equals, "format.superscript"),
-            (command, Key::Equals, "format.subscript"),
-            (command, Key::Space, "format.clear"),
-            (command, Key::E, "align.center"),
-            (command, Key::L, "align.left"),
-            (command, Key::R, "align.right"),
-            (command, Key::J, "align.justify"),
-            (alt, Key::Num1, "style.heading1"),
-            (alt, Key::Num2, "style.heading2"),
-            (alt, Key::Num3, "style.heading3"),
-            (alt, Key::Num0, "style.body"),
-            (alt, Key::F, "insert.footnote"),
-            (alt, Key::C, "review.comment"),
-            (alt, Key::D, "insert.endnote"),
-            (shift, Key::C, "review.track"),
-            (command, Key::CloseBracket, "format.grow"),
-            (command, Key::OpenBracket, "format.shrink"),
-            (shift, Key::Space, "insert.mark.nbsp"),
-            (Modifiers::NONE, Key::F7, "review.next_misspelling"),
-            (command, Key::Enter, "insert.page_break"),
-            (command, Key::K, "insert.link"),
-            (command, Key::F, "edit.find"),
-            (command, Key::H, "edit.replace"),
-            (Modifiers::SHIFT, Key::F3, "edit.find_previous"),
-            (Modifiers::NONE, Key::F3, "edit.find_next"),
-            (Modifiers::NONE, Key::F11, "view.composition"),
-            (command, Key::Num1, "view.document"),
-            (command, Key::Num2, "view.corkboard"),
-            (command, Key::Num3, "view.outliner"),
-            (command, Key::Num5, "project.snapshot"),
-            (shift, Key::L, "list.bullet"),
-            (command, Key::F12, "table.insert"),
-        ]
-    }
-
     pub(crate) fn keys(&mut self, ctx: &egui::Context, cx: &mut AppletContext<'_>) {
         if self.dialog.is_some() || self.menubar.is_open() || self.renaming.is_some() {
             return;
@@ -1964,40 +1929,7 @@ fn read_picture(bytes: &[u8]) -> Result<sue_core::RasterTile2D, String> {
 /// The settings section Sue Writer's shortcuts live in.
 pub(crate) const KEYS_SECTION: &str = "sue_writer_keys";
 
-/// Sue Writer's shortcuts with their default chords, each command once,
-/// labeled as its menu item.
-pub(crate) fn shortcut_table() -> &'static [sue_wm::shortcuts::Shortcut] {
-    static TABLE: std::sync::OnceLock<Vec<sue_wm::shortcuts::Shortcut>> =
-        std::sync::OnceLock::new();
-    TABLE.get_or_init(|| {
-        let menus = crate::menus::menus();
-        fn find(items: &[sue_wm::MenuItem], command: &str) -> Option<String> {
-            items.iter().find_map(|item| match item {
-                sue_wm::MenuItem::Action {
-                    label,
-                    command: found,
-                    ..
-                } if found == command => Some(label.trim_end_matches("...").to_owned()),
-                sue_wm::MenuItem::Sub { items, .. } => find(items, command),
-                _ => None,
-            })
-        }
-        sue_wm::shortcuts::table(SueWriter::shortcuts(), |command| {
-            menus
-                .iter()
-                .find_map(|menu| find(&menu.items, command))
-                .unwrap_or_else(|| match command {
-                    "style.heading1" => tr!("heading-1"),
-                    "style.heading2" => tr!("heading-2"),
-                    "style.heading3" => tr!("heading-3"),
-                    "style.body" => tr!("body-text"),
-                    "edit.find_next" => tr!("find-next"),
-                    "edit.find_previous" => tr!("find-previous"),
-                    other => other.to_owned(),
-                })
-        })
-    })
-}
+pub(crate) use crate::commands::shortcut_table;
 
 /// A file name made of `title`.
 pub(crate) fn sanitize(title: &str) -> String {
@@ -2130,23 +2062,9 @@ impl SueApplet for SueWriter {
     }
 
     fn commands(&self) -> Vec<PaletteEntry> {
-        // The palette says whose command it is ("Sue Writer: ...").
-        [
-            (tr!("new-project-ellipsis"), "file.new", ""),
-            (tr!("import-a-document-ellipsis"), "file.import", ""),
-            (tr!("compile-ellipsis"), "compile.open", "Ctrl+Shift+E"),
-            (tr!("export-as-pdf-ellipsis"), "compile.pdf", "Ctrl+P"),
-            (tr!("composition-mode"), "view.composition", "F11"),
-            (tr!("writing-statistics-ellipsis"), "project.statistics", ""),
-            (tr!("keyboard-shortcuts"), "help.shortcuts", ""),
-        ]
-        .into_iter()
-        .map(|(label, command, hint)| PaletteEntry {
-            label: label.to_owned(),
-            command: command.to_owned(),
-            hint: hint.to_owned(),
-        })
-        .collect()
+        // The palette says whose command it is ("Sue Writer: ..."). It has
+        // no settings at hand here, so it shows the default keys.
+        crate::commands::registry().palette(&sue_rice::RiceSchema::new())
     }
 
     fn command(&mut self, name: &str, cx: &mut AppletContext<'_>) -> bool {

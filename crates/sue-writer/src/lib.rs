@@ -27,6 +27,7 @@ macro_rules! tr {
     ($($arg:tt)*) => { sue_lang::tr!("writer", $($arg)*) };
 }
 
+mod commands;
 mod compile;
 mod menus;
 mod project;

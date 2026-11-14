@@ -31,6 +31,11 @@ follow [Semantic Versioning](https://semver.org/).
   `CREATE` text, row count and rows), and `sue-cli clip diff <before>
   <after>` prints what differs between two such files. For people
   working on the converter; neither changes a file.
+- Every Sue Writer command can be given a key, not only the ones that
+  come with one: each paragraph style, each export format, line spacing,
+  the table edits, the review and project commands. Keyboard Shortcuts
+  (Help) lists them all, and a key for one without a default goes in
+  Settings, Keymaps, Sue Writer (`sue_writer_keys.custom`).
 
 ### Changed
 

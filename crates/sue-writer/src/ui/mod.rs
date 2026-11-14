@@ -4,7 +4,7 @@
 
 use egui::{Color32, Rect, Sense, Ui, UiBuilder, pos2, vec2};
 use sue_model::manuscript::{self, role};
-use sue_wm::{AppletContext, AppletId, ItemState};
+use sue_wm::{AppletContext, AppletId, Facts, ItemState};
 
 use crate::project;
 use crate::studio::{ID, SueWriter, View};
@@ -342,8 +342,14 @@ impl SueWriter {
         }
     }
 
-    /// Whether a menu item works, and its check mark.
+    /// Whether a menu item works, and its check mark, as the registry
+    /// says.
     fn item_state(&self, command: &str, cx: &AppletContext<'_>) -> ItemState {
+        crate::commands::registry().state(self, &Facts::of(cx), command)
+    }
+
+    /// Whether `command` works now, and its check mark.
+    pub(crate) fn command_state(&self, command: &str, facts: &Facts<'_>) -> ItemState {
         let has_project = self.project.is_some();
         let has_text = self.editor.current().is_some();
         match command {
@@ -366,13 +372,13 @@ impl SueWriter {
             },
             "view.inspector" => ItemState::check(self.inspector && !self.comments),
             "review.comments" => ItemState::check(self.inspector && self.comments),
-            "review.track" => ItemState::check(self.tracking(cx)),
-            "review.spelling" => ItemState::check(self.spell_check(cx)),
+            "review.track" => ItemState::check(self.tracking_in(facts.arena)),
+            "review.spelling" => ItemState::check(SueWriter::spell_check_in(facts.rice)),
             "project.include" => ItemState {
                 enabled: self.selected.is_some(),
                 checked: self
                     .selected
-                    .and_then(|id| cx.arena().get_by_id(id).ok())
+                    .and_then(|id| facts.arena.get_by_id(id).ok())
                     .map(manuscript::included),
             },
             "binder.new_doc"
