@@ -321,3 +321,31 @@ fn the_menus_label_items_as_the_registry_does() {
         Some("Export as PNG...")
     );
 }
+
+#[test]
+fn a_key_given_to_a_command_without_one_runs_it() {
+    let table = shortcut_table();
+    let section = super::KEYS_SECTION;
+    let mut rice = sue_rice::RiceSchema::new();
+    rice.register_all(&sue_wm::shortcuts::declarations(section, table))
+        .expect("the key settings register");
+    let (setting, value) = sue_wm::shortcuts::bind(
+        &rice,
+        section,
+        "layer.merge_visible",
+        &"Ctrl+M".parse().expect("a chord"),
+    );
+    assert_eq!(setting, "sue_paint_keys.custom");
+    rice.set(&setting, value)
+        .expect("the text setting takes it");
+    let chords = sue_wm::shortcuts::resolve(&rice, section, table);
+    let at = table
+        .iter()
+        .position(|row| row.command == "layer.merge_visible")
+        .expect("Merge Visible to New Layer has a row");
+    assert_eq!(chords[at].to_string(), "Ctrl+M");
+    assert!(
+        sue_wm::shortcuts::conflicts(&rice, section, table).is_empty(),
+        "Ctrl+M is free"
+    );
+}
