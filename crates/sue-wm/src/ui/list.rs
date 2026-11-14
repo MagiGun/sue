@@ -164,15 +164,16 @@ impl<'a> RowAction<'a> {
 }
 
 /// Draws `actions` leftward from `right`, each in a square `side` wide
-/// with its middle on `y`, over a fill `under`. Returns the one clicked
-/// and where the first of them begins.
+/// with its middle on `y`, over the fill `under` (the chosen fill when
+/// `under_selected`). Returns the one clicked and where the first of
+/// them begins.
 pub(super) fn actions_ui(
     ui: &Ui,
     theme: &Theme,
     owner: Id,
     actions: &[RowAction<'_>],
     (right, y, side): (f32, f32, f32),
-    under_selected: bool,
+    (under, under_selected): (Color32, bool),
     enabled: bool,
 ) -> (Option<usize>, f32) {
     let density = Density::of(ui);
@@ -205,7 +206,7 @@ pub(super) fn actions_ui(
                 .rect_filled(hit, radius, blend(Color32::TRANSPARENT, fill, lit));
         }
         let ink = if !enabled {
-            theme.text_disabled(ground(ui, theme))
+            theme.text_disabled(under)
         } else if action.on {
             theme.text
         } else {
@@ -398,6 +399,12 @@ impl<'a> ListRow<'a> {
             left += side + gap;
         }
         let radius = theme.radius(Radius::Lg).min(height * 0.3);
+        // What the row's text and icons lie on, for the disabled ink.
+        let under = if self.selected {
+            theme.fill_selected()
+        } else {
+            ground(ui, theme)
+        };
         // The row's fill goes under its actions, which are drawn first so
         // that a click on one of them is theirs.
         let under_actions = ui.painter().add(egui::Shape::Noop);
@@ -407,7 +414,7 @@ impl<'a> ListRow<'a> {
             self.id,
             self.actions,
             (rect.right() - gap, middle, density.min_hit().min(height)),
-            self.selected,
+            (under, self.selected),
             enabled,
         );
         if ui.is_rect_visible(rect) {
@@ -423,7 +430,6 @@ impl<'a> ListRow<'a> {
             if fill != Color32::TRANSPARENT {
                 painter.set(under_actions, egui::Shape::rect_filled(rect, radius, fill));
             }
-            let under = ground(ui, theme);
             let lit = self.selected || (enabled && response.is_pointer_button_down_on());
             let (ink, soft) = if !enabled {
                 let faint = theme.text_disabled(under);

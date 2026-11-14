@@ -20,8 +20,8 @@ use egui::{
 
 use super::focus::focus_ring;
 use super::list::{
-    DISABLED_PICTURE, ListRow, RowAction, actions_ui, blend, ground, heading, one_line, paint_line,
-    salted, scoped, state_fill, under_pointer,
+    DISABLED_PICTURE, ListRow, RowAction, actions_ui, blend, heading, one_line, paint_line, salted,
+    scoped, state_fill, under_pointer,
 };
 use super::motion;
 use super::progress::paint_skeleton;
@@ -139,16 +139,11 @@ pub fn section<R>(
     })
 }
 
-/// The box of a tile or a thumbnail card: its shadow, fill and outline
-/// for the state it is in.
-fn paint_box(
-    ui: &Ui,
-    response: &Response,
-    theme: &Theme,
-    (selected, enabled): (bool, bool),
-) -> Color32 {
+/// The box of a tile or a thumbnail card for the state it is in: its
+/// shadow and its fill. Returns the fill and how far the box is lifted,
+/// for [`paint_outline`], which goes over whatever is drawn inside it.
+fn paint_box(ui: &Ui, response: &Response, theme: &Theme, enabled: bool) -> (Color32, f32) {
     let rect = response.rect;
-    let radius = theme.radius(Radius::Lg);
     let painter = ui.painter();
     let over = enabled && under_pointer(response);
     let lift = motion::hover_t(ui.ctx(), response.id.with("sue-lift"), over);
@@ -158,7 +153,14 @@ fn paint_box(
         painter.add(shadow.as_shape(rect, theme.corner(Radius::Lg)));
     }
     let fill = state_fill(ui, response, theme, theme.surface(2), false, enabled);
-    painter.rect_filled(rect, radius, fill);
+    painter.rect_filled(rect, theme.radius(Radius::Lg), fill);
+    (fill, lift)
+}
+
+/// The outline of a tile or a thumbnail card, drawn over its fill and
+/// its picture so that the chosen one's strong line is as thick all
+/// round.
+fn paint_outline(ui: &Ui, rect: Rect, theme: &Theme, (fill, lift): (Color32, f32), selected: bool) {
     let stroke = if selected {
         theme.selected_stroke()
     } else {
@@ -167,8 +169,8 @@ fn paint_box(
             blend(theme.border, theme.border_strong_on(fill), lift),
         )
     };
-    painter.rect_stroke(rect, radius, stroke, StrokeKind::Inside);
-    fill
+    ui.painter()
+        .rect_stroke(rect, theme.radius(Radius::Lg), stroke, StrokeKind::Inside);
 }
 
 /// A box to click: a picture over a name.
@@ -253,13 +255,14 @@ impl<'a> Tile<'a> {
         if !ui.is_rect_visible(rect) {
             return response;
         }
-        let under = ground(ui, theme);
-        let fill = paint_box(ui, &response, theme, (self.selected, enabled));
+        let lit = paint_box(ui, &response, theme, enabled);
+        paint_outline(ui, rect, theme, lit, self.selected);
+        let fill = lit.0;
         let painter = ui.painter();
         let (ink, soft) = if enabled {
             (theme.text, theme.text_muted_on(fill))
         } else {
-            let faint = theme.text_disabled(under);
+            let faint = theme.text_disabled(fill);
             (faint, faint)
         };
         let pad = theme.space(Space::S4);
@@ -440,11 +443,13 @@ impl<'a> ThumbnailCard<'a> {
         let footer_rect = Rect::from_min_max(pos2(rect.left(), rect.bottom() - footer), rect.max);
         let picture = Rect::from_min_max(rect.min, pos2(rect.right(), footer_rect.top()));
         let visible = ui.is_rect_visible(rect);
-        let mut fill = theme.surface(2);
+        let mut lit = (theme.surface(2), 0.0);
         if visible {
-            fill = paint_box(ui, &response, theme, (self.selected, enabled));
+            lit = paint_box(ui, &response, theme, enabled);
             self.paint_picture(ui, picture, theme, enabled);
+            paint_outline(ui, rect, theme, lit, self.selected);
         }
+        let fill = lit.0;
         // The tick box and the actions come after the card, so a click
         // on one of them is theirs.
         let ticked = self.tick_ui(ui, &response, theme, picture, enabled);
@@ -458,7 +463,7 @@ impl<'a> ThumbnailCard<'a> {
                 footer_rect.center().y,
                 density.min_hit().min(footer),
             ),
-            false,
+            (fill, false),
             enabled,
         );
         if visible {
@@ -466,7 +471,7 @@ impl<'a> ThumbnailCard<'a> {
             let (ink, soft) = if enabled {
                 (theme.text, theme.text_muted_on(fill))
             } else {
-                let faint = theme.text_disabled(ground(ui, theme));
+                let faint = theme.text_disabled(fill);
                 (faint, faint)
             };
             let left = rect.left() + pad;
@@ -769,5 +774,34 @@ mod tests {
         assert_eq!(plain.stroke, Stroke::NONE);
         assert_eq!(plain.fill, theme.surface(3));
         assert_eq!(f32::from(plain.inner_margin.left), theme.space(Space::S6));
+    }
+
+    #[test]
+    fn the_chosen_cards_outline_lies_over_its_picture() {
+        let mut run = Run::new();
+        let theme = run.theme.clone();
+        let draw = |ui: &mut Ui, theme: &Theme| {
+            ThumbnailCard::new("chosen", "Chosen")
+                .thumbnail(Thumbnail::Placeholder(Icon::Picture))
+                .selected(true)
+                .show(ui, theme)
+        };
+        let _ = run.settle(draw);
+        let output = run.ctx.run_ui(egui::RawInput::default(), |ui| {
+            let _ = draw(ui, &theme);
+        });
+        let shapes: Vec<&egui::Shape> =
+            output.shapes.iter().map(|clipped| &clipped.shape).collect();
+        let place = |wanted: &dyn Fn(&egui::epaint::RectShape) -> bool| {
+            shapes
+                .iter()
+                .position(|shape| matches!(shape, egui::Shape::Rect(rect) if wanted(rect)))
+        };
+        let picture = place(&|rect| rect.fill == theme.surface(0)).expect("the picture's ground");
+        let outline = place(&|rect| rect.stroke == theme.selected_stroke()).expect("the outline");
+        assert!(
+            outline > picture,
+            "the picture would hide half of the outline's strong line"
+        );
     }
 }
