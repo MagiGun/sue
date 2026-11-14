@@ -1024,14 +1024,15 @@ pub(super) fn paint_inner_ring(
         ink.gamma_multiply(opacity.min(1.0)),
     );
     let gap = INNER_RING_GAP;
+    // Where the part meets its neighbour it has no corner of its own,
+    // but a ring with a sharp corner there reads as a mistake: it is
+    // rounded as the small radius, like every other corner of the ring.
+    let least = theme.radius(Radius::Sm);
     let inner = |radius: u8| {
-        if radius == 0 {
-            0
-        } else {
-            nested_radius(f32::from(radius), gap)
-                .round()
-                .clamp(0.0, 255.0) as u8
-        }
+        nested_radius(f32::from(radius), gap)
+            .max(least)
+            .round()
+            .clamp(0.0, 255.0) as u8
     };
     painter.rect_stroke(
         rect.shrink(gap),
