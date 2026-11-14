@@ -5,7 +5,7 @@ use sue_core::Value;
 use sue_io::text_ops::Endings;
 use sue_model::manuscript;
 use sue_model::mark_kind as kind;
-use sue_wm::ui::{self, Space};
+use sue_wm::ui::{self, Roving, Space};
 use sue_wm::{AppletContext, ShellRequest, Theme, widgets};
 
 use crate::compile::{FORMATS, Separator, Titles};
@@ -119,65 +119,112 @@ impl SueWriter {
                     }
                     Dialog::Compile(choices) => {
                         widgets::heading(ui, &tr!("format"), theme);
+                        // Two columns of formats, each with its extension,
+                        // so the whole dialog fits a laptop's window.
+                        let mut formats = Vec::with_capacity(FORMATS.len());
+                        let mut format = None;
                         egui::Grid::new("writer-formats")
-                            .num_columns(2)
+                            .num_columns(4)
+                            .spacing([theme.space(Space::S6), theme.space(Space::S1)])
                             .show(ui, |ui| {
                                 for (index, (key, _, ext)) in FORMATS.iter().enumerate() {
-                                    ui.radio_value(
-                                        &mut choices.format,
-                                        index,
-                                        crate::compile::format_name(key),
-                                    );
+                                    let name = crate::compile::format_name(key);
+                                    let response = ui::radio(
+                                        ("writer-format", index),
+                                        &name,
+                                        choices.format == index,
+                                    )
+                                    .show(ui, theme);
+                                    if response.clicked() {
+                                        format = Some(index);
+                                    }
+                                    formats.push(response);
                                     ui.label(RichText::new(format!(".{ext}")).color(theme.muted));
-                                    ui.end_row();
+                                    if index % 2 == 1 {
+                                        ui.end_row();
+                                    }
                                 }
                             });
-                        ui.add_space(6.0);
-                        widgets::heading(ui, &tr!("what"), theme);
-                        if self.project.is_some() {
-                            ui.radio_value(&mut choices.whole, true, tr!("the-whole-manuscript"));
-                            ui.radio_value(&mut choices.whole, false, tr!("what-is-open-now"));
+                        if let Some(index) = ui::rove(ui, &formats, Roving::Both).or(format) {
+                            choices.format = index;
                         }
-                        ui.add_space(6.0);
+                        if self.project.is_some() {
+                            ui.add_space(theme.space(Space::S4));
+                            widgets::heading(ui, &tr!("what"), theme);
+                            let whole = [tr!("the-whole-manuscript"), tr!("what-is-open-now")];
+                            if let Some(index) = radios(
+                                ui,
+                                theme,
+                                "writer-what",
+                                &whole,
+                                usize::from(!choices.whole),
+                            ) {
+                                choices.whole = index == 0;
+                            }
+                        }
+                        ui.add_space(theme.space(Space::S4));
                         widgets::heading(ui, &tr!("titles"), theme);
-                        ui.radio_value(
-                            &mut choices.titles,
-                            Titles::Folders,
+                        let titles = [Titles::Folders, Titles::All, Titles::None];
+                        let names = [
                             tr!("folders-become-chapter-titles"),
-                        );
-                        ui.radio_value(
-                            &mut choices.titles,
-                            Titles::All,
                             tr!("folders-and-documents-both"),
-                        );
-                        ui.radio_value(
-                            &mut choices.titles,
-                            Titles::None,
                             tr!("no-titles-just-the-text"),
-                        );
-                        ui.add_space(6.0);
+                        ];
+                        let on = titles.iter().position(|one| *one == choices.titles);
+                        if let Some(index) =
+                            radios(ui, theme, "writer-titles", &names, on.unwrap_or(0))
+                        {
+                            choices.titles = titles[index];
+                        }
+                        ui.add_space(theme.space(Space::S4));
                         widgets::heading(ui, &tr!("between-documents"), theme);
-                        ui.radio_value(
-                            &mut choices.separator,
-                            Separator::SceneBreak,
-                            tr!("a-scene-break"),
-                        );
-                        ui.radio_value(&mut choices.separator, Separator::Page, tr!("a-new-page"));
-                        ui.radio_value(&mut choices.separator, Separator::None, tr!("nothing"));
-                        ui.add_space(6.0);
-                        ui.checkbox(&mut choices.title_page, tr!("a-title-page-first"));
-                        ui.checkbox(&mut choices.chapter_pages, tr!("each-chapter-new-page"));
+                        let separators = [Separator::SceneBreak, Separator::Page, Separator::None];
+                        let names = [tr!("a-scene-break"), tr!("a-new-page"), tr!("nothing")];
+                        let on = separators.iter().position(|one| *one == choices.separator);
+                        if let Some(index) =
+                            radios(ui, theme, "writer-between", &names, on.unwrap_or(0))
+                        {
+                            choices.separator = separators[index];
+                        }
+                        ui.add_space(theme.space(Space::S4));
+                        if ui::checkbox(
+                            "writer-title-page",
+                            &tr!("a-title-page-first"),
+                            choices.title_page,
+                        )
+                        .show(ui, theme)
+                        .clicked()
+                        {
+                            choices.title_page = !choices.title_page;
+                        }
+                        if ui::checkbox(
+                            "writer-chapter-pages",
+                            &tr!("each-chapter-new-page"),
+                            choices.chapter_pages,
+                        )
+                        .show(ui, theme)
+                        .clicked()
+                        {
+                            choices.chapter_pages = !choices.chapter_pages;
+                        }
                         Self::tidy_ui(ui, choices, theme);
-                        ui.add_space(10.0);
+                        ui.add_space(theme.space(Space::S5));
                         ui.horizontal(|ui| {
-                            if ui.button(tr!("export-ellipsis")).clicked() {
+                            if ui::button("writer-export-go", &tr!("export-ellipsis"))
+                                .primary()
+                                .show(ui, theme)
+                                .clicked()
+                            {
                                 let picked = choices.clone();
                                 after = Some(Box::new(move |me: &mut Self, cx| {
                                     me.ask_compile(cx, picked)
                                 }));
                                 keep = false;
                             }
-                            if ui.button(tr!("cancel")).clicked() {
+                            if ui::button("writer-export-cancel", &tr!("cancel"))
+                                .show(ui, theme)
+                                .clicked()
+                            {
                                 keep = false;
                             }
                         });
@@ -504,30 +551,33 @@ impl SueWriter {
         if crate::compile::tidying(key, &choices.text).is_none() {
             return;
         }
-        ui.add_space(theme.space(Space::S3));
+        ui.add_space(theme.space(Space::S4));
         widgets::heading(ui, &tr!("line-endings"), theme);
         // One row each, so the dialog stays short enough for a laptop.
+        let mut endings = Vec::with_capacity(2);
+        let mut clicked = None;
         ui.horizontal(|ui| {
-            let lf = ui::radio(
-                "writer-endings-lf",
-                &tr!("lf-linux-macos"),
-                choices.text.endings == Endings::Lf,
-            )
-            .show(ui, theme);
-            ui.add_space(theme.space(Space::S5));
-            let crlf = ui::radio(
-                "writer-endings-crlf",
-                &tr!("crlf-windows"),
-                choices.text.endings == Endings::CrLf,
-            )
-            .show(ui, theme);
-            if lf.clicked() {
-                choices.text.endings = Endings::Lf;
-            }
-            if crlf.clicked() {
-                choices.text.endings = Endings::CrLf;
+            let names = [tr!("lf-linux-macos"), tr!("crlf-windows")];
+            let on = usize::from(choices.text.endings == Endings::CrLf);
+            for (index, name) in names.iter().enumerate() {
+                if index > 0 {
+                    ui.add_space(theme.space(Space::S5));
+                }
+                let response =
+                    ui::radio(("writer-endings", index), name, index == on).show(ui, theme);
+                if response.clicked() {
+                    clicked = Some(index);
+                }
+                endings.push(response);
             }
         });
+        if let Some(index) = ui::rove(ui, &endings, Roving::Horizontal).or(clicked) {
+            choices.text.endings = if index == 0 {
+                Endings::Lf
+            } else {
+                Endings::CrLf
+            };
+        }
         if key != "txt" {
             return;
         }
@@ -639,4 +689,23 @@ impl SueWriter {
             );
         }
     }
+}
+
+/// One question's radio buttons, one row each, the arrow keys walking
+/// them. `on`: the answer chosen now. Returns the answer clicked or
+/// walked to in this frame.
+fn radios(ui: &mut Ui, theme: &Theme, salt: &str, names: &[String], on: usize) -> Option<usize> {
+    let mut clicked = None;
+    let members: Vec<egui::Response> = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let response = ui::radio((salt, index), name, index == on).show(ui, theme);
+            if response.clicked() {
+                clicked = Some(index);
+            }
+            response
+        })
+        .collect();
+    ui::rove(ui, &members, Roving::Vertical).or(clicked)
 }
