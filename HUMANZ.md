@@ -3013,23 +3013,28 @@ that do not fit as a list; a tablet, or a phone on its side, sizes the
 sidebar to 30% of the sheet (180 to 300 points). Rows and controls are at least 44 points tall on a
 phone and 36 on a tablet.
 
-The pages are data the engine registers in its `Catalog`, like applets, so
-packages can add their own:
+The pages are data registered in the `Catalog`: Sue's own come from the
+engine, and each studio or tool hands its own through
+`SueApplet::settings_page` (with its keyboard shortcuts as a `KeyMap`
+grouped by its menus) and the drop-downs of its rows through
+`setting_choices`, so the engine names no studio. A group may be
+`advanced` (closed until opened) or shown only `when` a setting holds a
+value. A page may carry `aliases` (old deep links: `studios` opens Sue
+Paint's page) and `search` words (Clip Studio's option names).
 
 | Page | Holds |
 | --- | --- |
-| General | Where Sue opens (`launchpad.pinned`, labeled Open At Launch: the Hub, or the studio or tool pinned there), how many recent files the Hub lists (`launchpad.recent_count`), how often unsaved work is kept (`general.autosave_seconds`, labeled Autosave Every) and quit confirmation |
-| Appearance & Rice | Theme presets (Void, Graphite, Paper, Gray), every color, geometry (padding, hairlines, radii, pill buttons, the top bar and the status bar, shadows), typography, the rice file with Reload, Export and Open Folder |
-| Display & Graphics | The performance preference (`profile.hardware`, labeled Performance Preference) and the active profile; the GPU preference (picked by adapter type: integrated, discrete, or the display's GPU), the GPU drawing, every GPU found and Restart Sue (the GPU is chosen at startup); the frame-rate cap, the settle grace, UI scale, list wheel speed, motion (instant snap, animation speed, spring constants, caret blink, smooth caret and its glide time, message time) |
-| Audio & DSP | Output device, sample rate, buffer size, real-time priority, volume, and the live stream and real-time status |
-| Files & Codecs | JPEG XL effort, bit-exact JPEG recompression, the conversion folder and JPEG quality, the open-file size limit, byte-map width, the built-in codecs |
-| Studios | Each studio's own settings and theme: for Sue Paint the new picture size and resolution, `sue_paint.theme` (Gray by default, the Sue theme, a preset, or Custom) and the Custom colors (`sue_paint_colors`) |
-| Packages & Updates | The signature policy, the installed applets, installed packages, the active generation and rollback state |
-| Keymaps | Every shortcut as an action with all its chords: Sue's own, then Sue Paint's (Clip Studio Paint's defaults, tools and brush keys too) and Sue Writer's |
-| MCP | "Not yet available." (a `SettingsItem::Note`) |
-
-Any rice section no page claims is listed on a final "Other" page, so every
-parameter stays reachable (tested).
+| General | Where Sue opens (`launchpad.pinned`), how many recent files the Hub lists, how often unsaved work is kept, quit confirmation, and updates (version, check automatically, Check for Updates, generation and rollback) |
+| Language | Sue's language and each studio's and tool's |
+| Appearance | Theme presets; interface font, text size and interface scale; rounded corners; motion; Icons (packs, a sheet of each, install, remove, single icons replaced, Sue's set as a template); closed: every color, sizes and spacing, more text sizes, animation details |
+| Display and Performance | The interface (device layout); the performance preference and the active profile, the frame-rate limit; the graphics card, the GPU drawing, every GPU found and Restart Sue; the mouse wheel step |
+| Sound | Output device, volume, sample rate, buffer size, real-time priority, and the live stream and real-time status |
+| Files | The largest file to open; the export folder, JPEG quality, JPEG XL effort, bit-exact JPEG recompression; the built-in formats; closed: the byte map width |
+| Sue Paint (`sue-paint`) | Layout, New Canvas, Saving, Pen and Tools (modifier keys, Pen Pressure and Command Bar buttons), Phones and Tablets (Studio Mode keys as command drop-downs), Layers, Colors, Custom Colors (only while the theme is Custom), closed: the pressure curve as text |
+| Sue Writer (`sue-writer`) | Writing, Page, Colors |
+| Keyboard Shortcuts (`keymaps`) | Sue's own keys, then a group per studio: one closed group per menu (and Tools), every command that can take a key, search by name or key, a mark on both rows of a key held twice with an offer to take it from the other |
+| Extensions (`packages`) | The signature policy, the studios and tools installed, packages |
+| Advanced | The settings file with Reload, Export and Open Folder; any setting no page claims, one closed group per section (tested: every setting has exactly one row) |
 
 | Parameter | Control |
 | --- | --- |
