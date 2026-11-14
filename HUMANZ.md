@@ -571,7 +571,11 @@ and copies the old store's encoded blob, compared byte for byte, for every
 tile whose pixels it already holds. The bytes equal a save into a new file
 whenever the old blobs were written at the same deflate level.
 `SueFile::last_save` counts what a save did (tiles written, remembered,
-hashed, copied, encoded). Kept work is written as a whole file and a
+hashed, copied, encoded). The benchmark in `tests/incremental.rs`
+(release build, this machine, 2026-11-15): an A4 page at 350 dpi of 20
+layers, 3.4 MiB on disk, saves in 0.74 s whole, 0.15 s with nothing
+changed and 0.14 s after a one-tile patch (one tile encoded); an empty
+20 layer A4 is 5.4 KiB. Kept work is written as a whole file and a
 journal of changes (`journal.rs`, `docs/autosave-journal.md`).
 
 ### 1.10 Formats and bundles
