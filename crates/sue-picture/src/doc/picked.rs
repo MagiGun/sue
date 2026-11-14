@@ -95,8 +95,8 @@ pub fn delete_layers(arena: &Arena, picture: EntityId, ids: &[EntityId]) -> Resu
     });
     // The top first, so undo puts them back from the bottom.
     for id in gone.iter().rev() {
-        if let Some(mask) = mask_of(arena, *id) {
-            edit = edit.then(DespawnEntity::new(mask));
+        for attached in attached(arena, *id) {
+            edit = edit.then(DespawnEntity::new(attached));
         }
         edit = edit.then(DespawnEntity::new(*id));
     }
@@ -128,8 +128,8 @@ pub fn duplicate_layers(
         let mut map: HashMap<EntityId, EntityId> = HashMap::new();
         for id in &block {
             map.insert(*id, EntityId::new());
-            if let Some(mask) = mask_of(arena, *id) {
-                map.insert(mask, EntityId::new());
+            for attached in attached(arena, *id) {
+                map.insert(attached, EntityId::new());
             }
         }
         for (id, order) in block.iter().zip(keys) {
@@ -143,11 +143,13 @@ pub fn duplicate_layers(
                 SpawnEntity::new(copy)
                     .with_relation(Relation::new(picture, CHILD, new).ordered(order)),
             );
-            if let Some(mask) = mask_of(arena, *id) {
-                let source = arena.get_by_id(mask).map_err(|error| error.to_string())?;
+            for (kind, attached) in attachments(arena, *id) {
+                let source = arena
+                    .get_by_id(attached)
+                    .map_err(|error| error.to_string())?;
                 edit = edit.then(
-                    SpawnEntity::new(source.clone().with_id(map[&mask]))
-                        .with_relation(Relation::new(new, MASK, map[&mask])),
+                    SpawnEntity::new(source.clone().with_id(map[&attached]))
+                        .with_relation(Relation::new(new, kind, map[&attached])),
                 );
             }
         }
@@ -165,7 +167,10 @@ pub fn duplicate_layers(
                 )));
             }
             for relation in arena.relations().involving(*id) {
-                if relation.from != *id || [CHILD, MEMBER, MASK].contains(&relation.kind.as_str()) {
+                if relation.from != *id
+                    || [CHILD, MEMBER, MASK, super::MATERIAL_IMAGE]
+                        .contains(&relation.kind.as_str())
+                {
                     continue;
                 }
                 let mut tie = relation.clone();
@@ -419,8 +424,8 @@ pub fn merge_picked(
         if *id == into {
             continue;
         }
-        if let Some(mask) = mask_of(arena, *id) {
-            edit = edit.then(DespawnEntity::new(mask));
+        for attached in attached(arena, *id) {
+            edit = edit.then(DespawnEntity::new(attached));
         }
         edit = edit.then(DespawnEntity::new(*id));
     }
@@ -560,10 +565,11 @@ pub fn rasterize_any(
         }
     }
     for id in with_members(arena, picture, &[layer]).iter().rev() {
-        if *id != layer
-            && let Some(mask) = mask_of(arena, *id)
-        {
-            edit = edit.then(DespawnEntity::new(mask));
+        // The layer's own mask went over to the new one.
+        for attached in attached(arena, *id) {
+            if *id != layer || Some(attached) != mask_of(arena, layer) {
+                edit = edit.then(DespawnEntity::new(attached));
+            }
         }
         edit = edit.then(DespawnEntity::new(*id));
     }
@@ -640,10 +646,31 @@ pub(super) fn merge_down_baked(
         }
     }
     for id in with_members(arena, picture, &[layer]).iter().rev() {
-        if let Some(mask) = mask_of(arena, *id) {
-            edit = edit.then(DespawnEntity::new(mask));
+        for attached in attached(arena, *id) {
+            edit = edit.then(DespawnEntity::new(attached));
         }
         edit = edit.then(DespawnEntity::new(*id));
     }
     Ok(edit)
+}
+
+/// The entities that belong to `layer` alone and go where it goes (its
+/// mask, an image material's image), with the relation that ties each.
+fn attachments(arena: &Arena, layer: EntityId) -> Vec<(&'static str, EntityId)> {
+    let mut out: Vec<(&'static str, EntityId)> = mask_of(arena, layer)
+        .map(|mask| (MASK, mask))
+        .into_iter()
+        .collect();
+    for image in arena.relations().targets(layer, super::MATERIAL_IMAGE) {
+        out.push((super::MATERIAL_IMAGE, image));
+    }
+    out
+}
+
+/// The entities of [`attachments`].
+fn attached(arena: &Arena, layer: EntityId) -> Vec<EntityId> {
+    attachments(arena, layer)
+        .into_iter()
+        .map(|(_, id)| id)
+        .collect()
 }

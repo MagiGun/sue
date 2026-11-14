@@ -10,6 +10,7 @@
 
 mod convert;
 mod folders;
+mod kinds;
 mod layers;
 mod masks;
 mod order;
@@ -25,6 +26,13 @@ pub use folders::{
     MEMBER, OPEN, delete_folder, folder_blend, folder_of, folders_around, is_folder, is_open,
     members, new_folder, set_folder,
 };
+pub use kinds::{
+    FILL_COLOR, FILL_LAYER, GRADIENT_END, GRADIENT_FROM_X, GRADIENT_FROM_Y, GRADIENT_LAYER,
+    GRADIENT_RADIAL, GRADIENT_START, GRADIENT_TO_X, GRADIENT_TO_Y, Gradient, MATERIAL_ANGLE,
+    MATERIAL_IMAGE, MATERIAL_IMAGE_CLASS, MATERIAL_LAYER, MATERIAL_SCALE, MATERIAL_TILE,
+    MATERIAL_X, MATERIAL_Y, Placement, material_image, new_fill_layer, new_gradient_layer,
+    new_material_layer,
+};
 pub use layers::{
     CORRECTION, CORRECTION_FILTER, REFERENCE, TEXT, add_layer_pixels, add_layers_pixels, add_paper,
     add_raster_layer, add_raster_layer_at, add_vector_layer, add_vector_lines, delete, duplicate,
@@ -35,10 +43,10 @@ pub use masks::{
     mask_offset, mask_on, new_mask, set_mask_linked, shown_at,
 };
 pub(crate) use order::key_above;
+pub use order::{key_below, keys_above, landing, move_block, reorder};
 pub use palette::{
     PALETTE_COLOR, PALETTE_COLORS, named_palette_color, palette_color, set_palette_color,
 };
-pub use order::{key_below, keys_above, landing, move_block, reorder};
 pub use picked::{
     delete_layers, duplicate_layers, folder_insert, merge_picked, move_layers, outermost,
     rasterize_any, rasterizes, set_layers, with_members,

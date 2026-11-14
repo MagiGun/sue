@@ -224,6 +224,8 @@ impl Layer<'_> {
                     })
             }
             Source::Group(members) => self.mask.is_none() && members.iter().all(Layer::plain),
+            // Drawn from their settings pixel by pixel.
+            Source::Solid(_) | Source::Gradient(_) | Source::Material { .. } => false,
         };
         source
             && self.outer.is_empty()
@@ -260,6 +262,12 @@ impl Layer<'_> {
             Source::Group(members) => {
                 RowSource::Group(members.iter().map(|member| member.row(y)).collect())
             }
+            // Never plain (see `plain`): no row of their own to read.
+            Source::Solid(_) | Source::Gradient(_) | Source::Material { .. } => RowSource::Pixels {
+                bytes: &[],
+                left: 0,
+                mask: None,
+            },
         }
     }
 }

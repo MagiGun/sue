@@ -57,6 +57,15 @@ pub(super) enum Source<'a> {
     /// A folder that is not Through: its members composited on their own,
     /// bottom first, then laid on as one layer.
     Group(Vec<Layer<'a>>),
+    /// A fill layer: one color (straight RGBA) everywhere.
+    Solid([f32; 4]),
+    /// A gradient layer.
+    Gradient(crate::doc::Gradient),
+    /// An image material layer: its image, placed.
+    Material {
+        image: &'a RasterTile2D,
+        place: crate::doc::Placement,
+    },
 }
 
 pub(super) struct Layer<'a> {
@@ -326,6 +335,9 @@ impl Layer<'_> {
             // A correction has no pixels of its own, and a folder's are
             // its members' (see `rows::fold`).
             Source::Correction(_) | Source::Group(_) => [0.0; 4],
+            Source::Solid(rgba) => *rgba,
+            Source::Gradient(gradient) => gradient.at(x, y),
+            Source::Material { image, place } => material_texel(image, place, x, y),
             Source::Raster { raster, offset } => {
                 let lx = x - offset[0];
                 let ly = y - offset[1];
@@ -473,6 +485,23 @@ fn gather_layer<'a>(
             let color = picture::paper_color(entity).to_space(sue_core::ColorSpace::Srgb);
             Source::Paper(color.rgb)
         }
+        LayerKind::Other if entity.class() == crate::doc::FILL_LAYER => {
+            let color = match entity.property(crate::doc::FILL_COLOR) {
+                Some(sue_core::Value::Color(color)) => {
+                    let srgb = color.to_space(sue_core::ColorSpace::Srgb);
+                    [srgb.rgb[0], srgb.rgb[1], srgb.rgb[2], srgb.alpha]
+                }
+                _ => [1.0; 4],
+            };
+            Source::Solid(color)
+        }
+        LayerKind::Other if entity.class() == crate::doc::GRADIENT_LAYER => {
+            Source::Gradient(crate::doc::Gradient::of(entity))
+        }
+        LayerKind::Other if entity.class() == crate::doc::MATERIAL_LAYER => Source::Material {
+            image: crate::doc::material_image(arena, entity.id())?,
+            place: crate::doc::Placement::of(entity),
+        },
         LayerKind::Other if entity.class() == crate::doc::CORRECTION => {
             let filter = entity
                 .property(crate::doc::CORRECTION_FILTER)
@@ -689,4 +718,56 @@ fn every_layer<'s, 'a>(layers: &'s mut [Layer<'a>], out: &mut Vec<&'s mut Layer<
             every_layer(members, out);
         }
     }
+}
+
+/// An image material's straight RGBA at picture pixel `(x, y)`: bilinear
+/// between the image pixels it looks at, clear off the image unless it
+/// tiles.
+fn material_texel(image: &RasterTile2D, place: &crate::doc::Placement, x: i64, y: i64) -> [f32; 4] {
+    let size = [image.width(), image.height()];
+    if size[0] == 0 || size[1] == 0 || image.format() != PixelFormat::Rgba8 {
+        return [0.0; 4];
+    }
+    let Some(bytes) = image.bytes() else {
+        return [0.0; 4];
+    };
+    let [u, v] = place.look(size, x as f32 + 0.5, y as f32 + 0.5);
+    let (u, v) = (u - 0.5, v - 0.5);
+    let (x0, y0) = (u.floor(), v.floor());
+    let (tx, ty) = (u - x0, v - y0);
+    let texel = |ix: i64, iy: i64| -> [f32; 4] {
+        let (w, h) = (i64::from(size[0]), i64::from(size[1]));
+        let (ix, iy) = if place.tile {
+            (ix.rem_euclid(w), iy.rem_euclid(h))
+        } else if ix < 0 || iy < 0 || ix >= w || iy >= h {
+            return [0.0; 4];
+        } else {
+            (ix, iy)
+        };
+        let at = (iy as usize * size[0] as usize + ix as usize) * 4;
+        let p = &bytes[at..at + 4];
+        [0, 1, 2, 3].map(|channel| f32::from(p[channel]) / 255.0)
+    };
+    let mut sum = [0.0_f32; 4];
+    for (dx, dy, weight) in [
+        (0, 0, (1.0 - tx) * (1.0 - ty)),
+        (1, 0, tx * (1.0 - ty)),
+        (0, 1, (1.0 - tx) * ty),
+        (1, 1, tx * ty),
+    ] {
+        let p = texel(x0 as i64 + dx, y0 as i64 + dy);
+        for channel in 0..3 {
+            sum[channel] += p[channel] * p[3] * weight;
+        }
+        sum[3] += p[3] * weight;
+    }
+    if sum[3] <= 0.0 {
+        return [0.0; 4];
+    }
+    [
+        sum[0] / sum[3],
+        sum[1] / sum[3],
+        sum[2] / sum[3],
+        sum[3].min(1.0),
+    ]
 }
