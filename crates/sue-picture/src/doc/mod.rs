@@ -3,9 +3,10 @@
 //! Every picture is the shared layered-picture shape of
 //! [`sue_model::picture`]: an entity of class `sue.image`, its layers as
 //! ordered children. Each function here builds a transaction from the
-//! backbone's generic edits ([`SpawnEntity`], [`DespawnEntity`],
-//! [`SetProperty`], [`Relate`], [`RasterEdit`]) by entity id; the studio
-//! applies it through the global undo history.
+//! backbone's generic edits ([`SpawnEntity`],
+//! [`DespawnEntity`](sue_core::txn::DespawnEntity), [`SetProperty`],
+//! [`Relate`], [`RasterEdit`]) by entity id; the studio applies it
+//! through the global undo history.
 
 mod convert;
 mod folders;

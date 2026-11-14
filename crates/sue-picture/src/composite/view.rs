@@ -43,7 +43,8 @@ pub struct Skin {
     pub force: bool,
 }
 
-/// As [`render`], for one animation frame's `view` of the layers.
+/// As [`render`](super::render), for one animation frame's `view` of the
+/// layers.
 #[must_use]
 pub fn render_view(
     arena: &Arena,
@@ -67,7 +68,8 @@ pub fn render_view(
     out
 }
 
-/// As [`flatten`], for one animation frame's `view` of the layers.
+/// As [`flatten`](super::flatten), for one animation frame's `view` of
+/// the layers.
 #[must_use]
 pub fn flatten_view(
     arena: &Arena,
