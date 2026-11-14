@@ -278,6 +278,7 @@ pub fn menus() -> Vec<Menu> {
                         item("filter.posterize"),
                         item("filter.binarize"),
                         item("filter.gradient_map"),
+                        item("filter.grayscale"),
                     ],
                 ),
                 sub(

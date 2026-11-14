@@ -13,6 +13,7 @@ use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
 use super::when;
 use crate::dialogs::Dialog;
+use crate::doc;
 use crate::filters::Filter;
 use crate::studio::SuePaint;
 
@@ -54,6 +55,70 @@ fn quick(paint: &mut SuePaint, cx: &mut AppletContext<'_>, effect: bool, all: bo
     );
     if all && let Some(Dialog::Filter(dialog)) = paint.dialog.as_mut() {
         dialog.merged = true;
+    }
+}
+
+/// Edit, Tonal Correction, Grayscale: the current layer, and every
+/// other unlocked raster layer picked with it, in grays of the same
+/// brightness, alpha kept, as one step. With a selection only the
+/// selected area turns gray.
+fn grayscale(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    // Brightness picks a color from black to white: the gray of the
+    // same brightness.
+    const GRAY: Filter = Filter::GradientMap {
+        from: [0, 0, 0],
+        to: [255, 255, 255],
+    };
+    let label = tr!("grayscale");
+    let current = match paint.paintable(&cx.world.arena) {
+        Ok(info) => info,
+        Err(error) => {
+            cx.fail(error);
+            return;
+        }
+    };
+    let arena = &cx.world.arena;
+    let selection = paint.doc().and_then(|doc| doc.selection.clone());
+    let picked = paint
+        .doc()
+        .map(|doc| doc.picked.clone())
+        .unwrap_or_default();
+    let others: Vec<doc::LayerInfo> = paint
+        .picture()
+        .map(|picture| doc::layers(arena, picture))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|info| {
+            info.id != current.id
+                && picked.contains(&info.id)
+                && info.kind == sue_model::picture::LayerKind::Raster
+                && !info.locked
+                && !doc::is_folder(arena, info.id)
+        })
+        .collect();
+    let mut edit = doc::Edit::new(label.clone());
+    let mut changed = false;
+    for info in std::iter::once(current).chain(others) {
+        let offset = info.style.offset;
+        let made = doc::rewrite(arena, info.id, &label, |pixels, width, height| {
+            GRAY.apply(pixels, width, height, selection.as_ref(), offset);
+        });
+        match made {
+            Ok(Some(step)) => {
+                edit = edit.then(step);
+                changed = true;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                cx.fail(error);
+                return;
+            }
+        }
+    }
+    if changed {
+        SuePaint::apply(cx, edit);
+    } else {
+        cx.notify(tr!("nothing-changed", label = label));
     }
 }
 
@@ -173,6 +238,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
             p.filter_dialog(cx, Filter::GradientMap { from, to });
         },
     ),
+    c("filter.grayscale", "grayscale", "filter", grayscale),
     // Convert to Lines and Tones (Layer and Filter).
     c(
         "filter.lines_tones",
@@ -607,7 +673,7 @@ mod tests {
     #[test]
     fn the_group_keeps_its_names_and_keys() {
         let names: Vec<&str> = COMMANDS.iter().map(|command| command.name).collect();
-        assert_eq!(names.len(), 49);
+        assert_eq!(names.len(), 50);
         let keyed: Vec<(&str, &str)> = COMMANDS
             .iter()
             .filter(|command| !command.chords.is_empty())
