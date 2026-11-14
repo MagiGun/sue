@@ -3803,11 +3803,24 @@ dependencies = [
  "sue-io",
  "sue-lang",
  "sue-model",
+ "sue-picture",
  "sue-platform",
  "sue-rice",
  "sue-type",
  "sue-wm",
  "sue-writer",
+]
+
+[[package]]
+name = "sue-picture"
+version = "0.0.75"
+dependencies = [
+ "sue-core",
+ "sue-io",
+ "sue-lang",
+ "sue-model",
+ "sue-platform",
+ "sue-type",
 ]
 
 [[package]]
@@ -3913,7 +3926,7 @@ dependencies = [
  "sue-io",
  "sue-lang",
  "sue-model",
- "sue-paint",
+ "sue-picture",
  "sue-platform",
  "sue-rice",
  "sue-type",

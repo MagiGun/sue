@@ -13,7 +13,7 @@ use crate::studio::SuePaint;
 use sue_type::raster::Justify;
 
 /// The class of a text layer.
-pub const TEXT: &str = "sue.paint.text";
+pub use crate::doc::TEXT;
 const CONTENT: &str = "text.content";
 const FONT: &str = "text.font";
 const SIZE: &str = "text.size";

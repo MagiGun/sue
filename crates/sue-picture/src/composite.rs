@@ -2283,7 +2283,7 @@ mod tests {
 }
 
 /// Timings of compositing big areas, for tuning (`cargo test --release -p
-/// sue-paint composite_speed -- --ignored --nocapture`).
+/// sue-picture composite_speed -- --ignored --nocapture`).
 #[cfg(test)]
 mod speed {
     use super::*;
@@ -2395,7 +2395,7 @@ mod speed {
 
     /// Frames of a stroke with each brush setting and effect: the brush,
     /// then the screen, and how many pixels the screen had to redo
-    /// (`cargo test --release -p sue-paint stroke_frames -- --ignored
+    /// (`cargo test --release -p sue-picture stroke_frames -- --ignored
     /// --nocapture`; `SUE_BRUSH_SIZE` sets the size, 400 by default).
     #[test]
     #[ignore = "a benchmark"]

@@ -224,6 +224,38 @@ pub fn resize_rgba(pixels: &[u8], from: [u32; 2], to: [u32; 2]) -> Vec<u8> {
     out
 }
 
+/// `tile` (straight RGBA8) made to fit inside `size` keeping its shape,
+/// never larger than it is, in the middle of a clear picture of `size`.
+#[must_use]
+pub fn fitted(tile: &RasterTile2D, size: [u32; 2]) -> Option<RasterTile2D> {
+    let from = [tile.width(), tile.height()];
+    let scale = (f64::from(size[0]) / f64::from(from[0]))
+        .min(f64::from(size[1]) / f64::from(from[1]))
+        .min(1.0);
+    let to = [
+        ((f64::from(from[0]) * scale).round() as u32).max(1),
+        ((f64::from(from[1]) * scale).round() as u32).max(1),
+    ];
+    let rgba = match tile.format() {
+        PixelFormat::Rgba8 => tile.bytes()?.to_vec(),
+        _ => return None,
+    };
+    let fitted = if to == from {
+        rgba
+    } else {
+        resize_rgba(&rgba, from, to)
+    };
+    let mut out = vec![0_u8; (size[0] * size[1] * 4) as usize];
+    let (left, top) = ((size[0] - to[0]) / 2, (size[1] - to[1]) / 2);
+    for y in 0..to[1] {
+        let row = (y * to[0] * 4) as usize;
+        let at = (((top + y) * size[0] + left) * 4) as usize;
+        out[at..at + (to[0] * 4) as usize]
+            .copy_from_slice(&fitted[row..row + (to[0] * 4) as usize]);
+    }
+    RasterTile2D::from_bytes(size[0], size[1], PixelFormat::Rgba8, out).ok()
+}
+
 /// Text shapes (frame panels, balloons) with every number pair moved by
 /// `shift` and then scaled by `scale`.
 fn move_shapes(text: &str, shift: [f32; 2], scale: [f32; 2]) -> String {
@@ -412,6 +444,11 @@ pub fn resample(
     }
     Ok(edit)
 }
+
+// ----- Text layers -------------------------------------------------------------------
+
+/// The class of a text layer.
+pub const TEXT: &str = "sue.paint.text";
 
 // ----- Correction layers -------------------------------------------------------------
 

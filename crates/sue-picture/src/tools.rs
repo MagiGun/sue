@@ -19,6 +19,23 @@ pub const POLYLINE: u8 = 8;
 /// The Figure tool's Curve sub tool's mode.
 pub const CURVE: u8 = 9;
 
+/// The Balloon tool's sub tools, by mode (0 is the ellipse balloon, 1 the
+/// tail).
+pub const ROUNDED_BALLOON: u8 = 2;
+pub const CLOUD_BALLOON: u8 = 3;
+pub const FLASH_BALLOON: u8 = 4;
+pub const BALLOON_PEN: u8 = 5;
+pub const THOUGHT_TAIL: u8 = 6;
+pub const ELLIPSE_BALLOON: u8 = 0;
+pub const CURVE_BALLOON: u8 = 7;
+pub const POLYLINE_BALLOON: u8 = 8;
+/// The Frame Border tool's polyline frame (0 is the rectangle, 1 the
+/// division).
+pub const POLYLINE_FRAME: u8 = 2;
+/// The Figure tool's effect lines, by mode.
+pub const SATURATED_LINES: u8 = 5;
+pub const SPEED_LINES: u8 = 6;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Tool {
     /// Zooms the view in or out.
@@ -693,8 +710,8 @@ impl Tool {
                     SubTool::new(self, "Filled Ellipse", 4, line),
                     // Clip Studio Paint's Saturated line and Speed line,
                     // each on a layer of its own.
-                    SubTool::new(self, "Saturated Line", crate::comic::SATURATED_LINES, line),
-                    SubTool::new(self, "Speed Line", crate::comic::SPEED_LINES, line),
+                    SubTool::new(self, "Saturated Line", SATURATED_LINES, line),
+                    SubTool::new(self, "Speed Line", SPEED_LINES, line),
                     // Draw round an area and it fills.
                     SubTool::new(self, "Lasso fill", LASSO_FILL, line),
                     // A click at each corner; a double-click (or Enter)
@@ -706,7 +723,7 @@ impl Tool {
             // Clip Studio Paint's order: rectangle, polyline, then cut.
             Self::Frame => vec![
                 plain(&tr!("rectangle-frame"), 0),
-                plain(&tr!("polyline-frame"), crate::comic::POLYLINE_FRAME),
+                plain(&tr!("polyline-frame"), POLYLINE_FRAME),
                 plain(&tr!("frame-border-division"), 1),
             ],
             Self::Balloon => {
@@ -714,10 +731,6 @@ impl Tool {
                     t.size_by.pressure = false;
                 });
                 // Clip Studio Paint's Balloon sub tools.
-                use crate::comic::{
-                    BALLOON_PEN, CLOUD_BALLOON, CURVE_BALLOON, FLASH_BALLOON, POLYLINE_BALLOON,
-                    ROUNDED_BALLOON, THOUGHT_TAIL,
-                };
                 vec![
                     SubTool::new(self, "Ellipse Balloon", 0, outline),
                     SubTool::new(self, "Rounded Rectangle Balloon", ROUNDED_BALLOON, outline),

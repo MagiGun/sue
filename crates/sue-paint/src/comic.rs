@@ -17,19 +17,13 @@ use crate::tools::SubTool;
 
 type Edit = sue_core::txn::Batch<sue_core::Arena>;
 
-/// The Balloon tool's sub tools, by mode (0 is the ellipse balloon, 1 the
-/// tail).
-pub(crate) const ROUNDED_BALLOON: u8 = 2;
-pub(crate) const CLOUD_BALLOON: u8 = 3;
-pub(crate) const FLASH_BALLOON: u8 = 4;
-pub(crate) const BALLOON_PEN: u8 = 5;
-pub(crate) const THOUGHT_TAIL: u8 = 6;
-pub(crate) const ELLIPSE_BALLOON: u8 = 0;
-pub(crate) const CURVE_BALLOON: u8 = 7;
-pub(crate) const POLYLINE_BALLOON: u8 = 8;
-/// The Frame Border tool's polyline frame (0 is the rectangle, 1 the
-/// division).
-pub(crate) const POLYLINE_FRAME: u8 = 2;
+/// The Balloon tool's sub tools by mode, the Frame Border tool's polyline
+/// frame and the Figure tool's effect lines (the constants live with the
+/// tools in the picture engine).
+pub(crate) use crate::tools::{
+    BALLOON_PEN, CLOUD_BALLOON, CURVE_BALLOON, ELLIPSE_BALLOON, FLASH_BALLOON, POLYLINE_BALLOON,
+    POLYLINE_FRAME, ROUNDED_BALLOON, SATURATED_LINES, SPEED_LINES, THOUGHT_TAIL,
+};
 
 /// Whether `tool` in `mode` lays corners one click at a time (closed by
 /// clicking the first or last corner again, or Enter).
@@ -134,9 +128,6 @@ pub(crate) fn effect_outline(lines: &manga::EffectLines) -> Vec<[f32; 2]> {
         })
         .collect()
 }
-/// The Figure tool's effect lines, by mode.
-pub(crate) const SATURATED_LINES: u8 = 5;
-pub(crate) const SPEED_LINES: u8 = 6;
 
 /// A frame border layer's settings when it is made.
 #[derive(Clone, Copy, Debug, PartialEq)]

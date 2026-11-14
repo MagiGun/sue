@@ -4661,7 +4661,7 @@ mod sheet {
     }
 }
 
-/// Timings of big strokes, for tuning (`cargo test --release -p sue-paint
+/// Timings of big strokes, for tuning (`cargo test --release -p sue-picture
 /// brush_speed -- --ignored --nocapture`).
 #[cfg(test)]
 mod speed {

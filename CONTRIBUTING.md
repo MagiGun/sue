@@ -211,7 +211,7 @@ four checks, and make sure it did not touch the backbone without tests.
 ## Adding common things
 
 - **A filter or adjustment in Sue Paint**: a `Filter` variant in
-  `crates/sue-paint/src/filters.rs` (its label, its `apply`), its sliders in
+  `crates/sue-picture/src/filters.rs` (its label, its `apply`), its sliders in
   `dialogs.rs`, and the menu command in `studio.rs` and `menus.rs`. Add a
   test in `filters.rs`.
 - **A file format**: a handler in `crates/sue-io` registered in the

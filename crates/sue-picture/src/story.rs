@@ -497,13 +497,12 @@ pub fn separate(
                 }
                 // The right half is plain pixels: vector lines and text
                 // stay with the left page.
-                let class = if layer.class() == crate::vector::CLASS
-                    || layer.class() == crate::lettering::TEXT
-                {
-                    sue_model::class::LAYER
-                } else {
-                    layer.class()
-                };
+                let class =
+                    if layer.class() == crate::vector::CLASS || layer.class() == crate::doc::TEXT {
+                        sue_model::class::LAYER
+                    } else {
+                        layer.class()
+                    };
                 Entity::new(layer.name(), right_part).with_class(class)
             }
             _ => Entity::empty(layer.name(), layer.class()),

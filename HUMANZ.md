@@ -34,8 +34,9 @@ style).
 
 ```text
 bins/sue      ──► every crate below                   + egui
-sue-writer    ──► sue-type, sue-paint, sue-wm, sue-lang, sue-io, sue-model, sue-rice, sue-core   + egui
-sue-paint     ──► sue-wm, sue-lang, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
+sue-writer    ──► sue-type, sue-picture, sue-wm, sue-lang, sue-io, sue-model, sue-rice, sue-core   + egui
+sue-paint     ──► sue-picture, sue-wm, sue-lang, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
+sue-picture   ──► sue-type, sue-lang, sue-io, sue-model, sue-platform, sue-core   (the picture engine: layered pictures, compositing, brushes, selections, fills, filters; no interface code of its own, no studio)
 sue-type      ──► sue-wm, sue-lang, sue-io, sue-model, sue-core   + egui, ttf-parser
 sue-wm        ──► sue-lang, sue-rice, sue-platform, sue-core   + egui, ttf-parser
 sue-lang      ──► fluent-bundle, fluent-syntax, intl-memoizer, unic-langid   (no engine crates)
