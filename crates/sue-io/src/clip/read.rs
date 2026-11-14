@@ -14,7 +14,7 @@ use super::model::{
     ClipRow, ClipShape, ClipTable, Columns, column,
 };
 use super::offscreen::{parse_attribute, parse_payload};
-use super::schema::{SUE_LAYER_SQL, rowid_column};
+use super::schema::rowid_column;
 use crate::psd::{Psd, PsdKind, PsdLayer};
 use crate::sqlite::{Database, Table, Value};
 
@@ -414,9 +414,10 @@ pub fn read(bytes: &[u8]) -> Result<ClipDocument, String> {
     }
     let mut shapes: Vec<ClipShape> = Vec::new();
     for (table, sql) in &tables {
-        let modeled = MODELED.iter().any(|name| *name == table.name)
-            && (table.name != "SueLayer" || sql == SUE_LAYER_SQL);
-        if modeled {
+        // Every table the model reads keeps its shape, whatever columns
+        // it has: kept whole under the same name, the writer could not
+        // write it back beside its own.
+        if MODELED.iter().any(|name| *name == table.name) {
             shapes.push(ClipShape {
                 table: table.name.clone(),
                 sql: sql.clone(),
@@ -498,16 +499,24 @@ pub fn read(bytes: &[u8]) -> Result<ClipDocument, String> {
     let mut sue_layer = rows("SueLayer");
     if let Some(table) = sue_layer.table {
         // A mark is taken when it is laid out as the writer lays one out
-        // and names a layer; any other row stays as it was.
+        // (a column the table lacks reads as not set) and names a layer;
+        // a row that holds more, such as columns a newer Sue added, stays
+        // as it was, and so does any other row.
         let flag = |row: usize, column: &str| match sue_layer.value(row, column) {
             Some(Value::Integer(value @ (0 | 1))) => Some(*value == 1),
+            None if table.column(column).is_none() => Some(false),
             _ => None,
         };
         let mut marks = HashMap::new();
         for row in 0..table.rows.len() {
             let id = sue_layer.int(row, "LayerId");
+            let more = sue_layer
+                .rest(row, &["LayerId", "Draft", "Reference"])
+                .iter()
+                .any(|(_, value)| *value != Value::Null);
             if let (Some(draft), Some(reference)) = (flag(row, "Draft"), flag(row, "Reference"))
                 && (draft || reference)
+                && !more
                 && matches!(sue_layer.value(row, "LayerId"), Some(Value::Integer(_)))
             {
                 marks.entry(id).or_insert((row, draft, reference));

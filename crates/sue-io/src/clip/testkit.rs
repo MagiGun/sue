@@ -844,6 +844,51 @@ mod tests {
     }
 
     #[test]
+    fn a_sue_layer_table_with_more_columns_reads_and_writes_again() {
+        // A newer Sue may give its own layer table a column: the marks
+        // still read, the rows that use the column come back as they
+        // were, and the file can be written again.
+        let mut doc = raster_subset(20, 20, 6);
+        doc.foreign.shapes.push(ClipShape {
+            table: "SueLayer".to_owned(),
+            sql: "CREATE TABLE SueLayer(LayerId INTEGER, Draft INTEGER, Reference INTEGER, \
+                  ZzLater TEXT)"
+                .to_owned(),
+            columns: ["LayerId", "Draft", "Reference", "ZzLater"]
+                .map(str::to_owned)
+                .to_vec(),
+        });
+        let later: Columns = vec![
+            ("LayerId".to_owned(), Value::Integer(4)),
+            ("Draft".to_owned(), Value::Integer(1)),
+            ("Reference".to_owned(), Value::Integer(0)),
+            ("ZzLater".to_owned(), Value::Text("newer".to_owned())),
+        ];
+        doc.foreign.rows.push(ClipRow {
+            table: "SueLayer".to_owned(),
+            columns: later.clone(),
+        });
+        let first = write(&doc).unwrap();
+        let back = read(&first).unwrap();
+        let marked: Vec<(&str, bool, bool)> = back
+            .all_layers()
+            .into_iter()
+            .filter(|layer| layer.draft || layer.reference)
+            .map(|layer| (layer.name.as_str(), layer.draft, layer.reference))
+            .collect();
+        let want: Vec<(&str, bool, bool)> = doc
+            .all_layers()
+            .into_iter()
+            .filter(|layer| layer.draft || layer.reference)
+            .map(|layer| (layer.name.as_str(), layer.draft, layer.reference))
+            .collect();
+        assert_eq!(marked, want);
+        assert_eq!(back.foreign.rows.len(), 1);
+        assert!(holds(&back.foreign.rows[0].columns, &later));
+        assert_eq!(write(&back).unwrap(), first);
+    }
+
+    #[test]
     fn a_bitmap_chunk_whose_length_does_not_match_keeps_its_pixels() {
         let doc = raster_subset(40, 30, 7);
         let mut bytes = write(&doc).unwrap();
