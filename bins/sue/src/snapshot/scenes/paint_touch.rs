@@ -2,7 +2,7 @@
 
 use sue_rice::RiceValue;
 
-use super::super::{Tour, online};
+use super::super::Tour;
 use super::open_paint;
 
 /// Sue Paint on a touch screen: its start page, Simple Mode and Studio
@@ -25,13 +25,6 @@ pub(super) fn touch(tour: &mut Tour<'_>, prefix: &str) -> Result<(), String> {
     ] {
         tour.paint_go(targets);
         tour.shoot(&format!("{prefix}-{name}"))?;
-    }
-    // Browse Assets, read from the site.
-    if online() {
-        tour.paint_go(&["start/close", "start/browse"]);
-        tour.wait_for_the_network();
-        tour.shoot(&format!("{prefix}-paint-browse"))?;
-        tour.paint_go(&["start/projects"]);
     }
     tour.paint_go(&["start/hide"]);
     // Simple Mode: the canvas, then its "..." menu.

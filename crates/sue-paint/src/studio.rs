@@ -573,10 +573,6 @@ pub struct SuePaint {
     pub(crate) material_pick: Option<String>,
     /// Material thumbnails, by a hash of the material.
     pub(crate) material_thumbs: HashMap<u64, Vec<u8>>,
-    /// CLIP STUDIO ASSETS on the start page's Home, fetched and cached.
-    pub(crate) assets: crate::assets::Assets,
-    /// Links being downloaded into Sue Paint.
-    pub(crate) downloads: crate::downloads::Downloads,
     /// Photos being read by the Pose and Hand Scanners.
     pub(crate) scans: crate::scan::Scans,
     /// The kinds of material, registered at start.
@@ -778,8 +774,6 @@ impl Default for SuePaint {
             material_kind: 0,
             material_pick: None,
             material_thumbs: HashMap::new(),
-            assets: crate::assets::Assets::default(),
-            downloads: crate::downloads::Downloads::default(),
             scans: crate::scan::Scans::default(),
             material_kinds: crate::materials::MaterialKinds::builtin(),
             start: crate::start::StartPage::default(),
@@ -6736,7 +6730,6 @@ impl SuePaint {
             self.shown = true;
         }
         self.sync_docs(&cx.world.arena);
-        self.poll_downloads(cx);
         self.poll_scans(cx);
         self.animate(cx, &ui.ctx().clone());
         self.record_timelapse(cx, &ui.ctx().clone());

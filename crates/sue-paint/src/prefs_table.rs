@@ -513,15 +513,4 @@ pub(super) const PAGES: &[Page] = &[
             },
         ],
     },
-    Page {
-        title: "pref-tabmate-2",
-        groups: &[
-            Group {
-                title: "pref-scan-settings",
-                items: &[
-                    Item::Check { label: "pref-start-scanning-when-app-launches-or-is-active", on: true, wire: Wire::None },
-                ],
-            },
-        ],
-    },
 ];

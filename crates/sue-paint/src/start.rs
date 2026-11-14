@@ -1,9 +1,8 @@
 //! Sue Paint's start page, shown on the desktop while no canvas is open
-//! (and from File, Start Page): a rail with Draw, Projects, Manage
-//! Materials and Browse Assets on the left, Data Transfers, Help and
-//! Settings at the top right, and the projects, the materials or CLIP
-//! STUDIO ASSETS in the main area. Only Browse Assets goes online (see
-//! [`crate::assets`]); everything else is on this device.
+//! (and from File, Start Page): a rail with Draw, Projects and Manage
+//! Materials on the left, Data Transfers, Help and Settings at the top
+//! right, and the projects or the materials in the main area. Everything
+//! on it is on this device; nothing here goes online.
 //!
 //! The projects are the work Sue remembers, shared with the Hub and every
 //! studio: the pictures and Sue Paint projects opened and saved lately and
@@ -48,8 +47,6 @@ pub(crate) enum Tab {
     Projects,
     /// The materials.
     Materials,
-    /// Browse Assets: CLIP STUDIO ASSETS, read from its site.
-    Browse,
 }
 
 /// A popup over the start page.
@@ -490,8 +487,6 @@ pub(crate) struct StartPage {
     pub(crate) new_canvas: Option<usize>,
     /// The device's screen in pixels, for the Screen size template.
     pub(crate) screen: [u32; 2],
-    /// Home's browser of CLIP STUDIO ASSETS: where it is and was.
-    pub(crate) browser: crate::assets::Browser,
 }
 
 /// What the start page asks the studio for, after drawing.
@@ -529,10 +524,6 @@ impl StartPage {
     /// so on), for scripts and snapshots.
     pub(crate) fn navigate(&mut self, target: &str) -> bool {
         match target {
-            "start/browse" => {
-                self.tab = Tab::Browse;
-                self.browser.go(None);
-            }
             "start/projects" => self.tab = Tab::Projects,
             "start/materials" => self.tab = Tab::Materials,
             "start/transfers" => self.popup = Some(Popup::Transfers),
@@ -548,13 +539,6 @@ impl StartPage {
                 self.tab = Tab::Projects;
             }
             "start/new" => self.new_canvas = Some(0),
-            other if other.starts_with("start/browse/") => {
-                // A material's page, by id.
-                self.tab = Tab::Browse;
-                self.browser.go(Some(crate::assets::Place::Material(
-                    other["start/browse/".len()..].to_owned(),
-                )));
-            }
             other => match other
                 .strip_prefix("start/new/")
                 .and_then(|n| n.parse().ok())
@@ -638,28 +622,15 @@ impl SuePaint {
                 label: tr!("start-manage-materials"),
                 round: false,
             },
-            RailItem {
-                glyph: Glyph::Home,
-                label: tr!("start-browse-assets"),
-                round: false,
-            },
         ];
         let selected = Some(match start.tab {
             Tab::Projects => 1,
             Tab::Materials => 2,
-            Tab::Browse => 3,
         });
         match page::rail(&mut child, rail_rect, &items, selected, theme) {
             Some(0) => acts.push(Act::Draw),
             Some(1) => start.tab = Tab::Projects,
             Some(2) => start.tab = Tab::Materials,
-            Some(3) => {
-                // Browse Assets again goes back to its top.
-                if start.tab == Tab::Browse {
-                    start.browser.go(None);
-                }
-                start.tab = Tab::Browse;
-            }
             _ => {}
         }
 
@@ -674,7 +645,6 @@ impl SuePaint {
             pos2(top.left() + 20.0, top.center().y),
             egui::Align2::LEFT_CENTER,
             match start.tab {
-                Tab::Browse => tr!("start-browse-assets"),
                 Tab::Projects => tr!("start-projects"),
                 Tab::Materials => tr!("start-manage-materials"),
             },
@@ -711,7 +681,6 @@ impl SuePaint {
 
         let body = Rect::from_min_max(pos2(main.left(), top.bottom()), main.max);
         match start.tab {
-            Tab::Browse => self.browse_ui(&mut child, body, &mut start, cx, theme),
             Tab::Projects => self.projects_ui(&mut child, body, &mut start, &mut acts, cx, theme),
             Tab::Materials => self.materials_ui(&mut child, body, &mut start, &mut acts, cx, theme),
         }
@@ -725,105 +694,6 @@ impl SuePaint {
         self.start = start;
         for act in acts {
             self.start_act(act, cx);
-        }
-    }
-
-    /// Browse Assets: CLIP STUDIO ASSETS' rows of today's top materials,
-    /// laid out as Clip Studio's start page has them; See more and a
-    /// material open in the same place, with back, forward and reload
-    /// above them.
-    pub(crate) fn browse_ui(
-        &mut self,
-        ui: &mut Ui,
-        body: Rect,
-        start: &mut StartPage,
-        cx: &mut AppletContext<'_>,
-        theme: &Theme,
-    ) {
-        use crate::assets::{self, Go, Place};
-        self.assets.use_folder(
-            cx.catalog
-                .folders
-                .get("cache")
-                .map(|folder| folder.join("sue-paint-assets")),
-        );
-        let mut top = body.top();
-        // The browser's bar, away from Home's top.
-        if start.browser.place.is_some() || !start.browser.forward.is_empty() {
-            let bar = Rect::from_min_size(body.min, vec2(body.width(), 34.0));
-            ui.painter().rect_filled(bar, 0.0, theme.panel);
-            let buttons = [
-                (
-                    Glyph::Back,
-                    tr!("start-back"),
-                    !start.browser.back.is_empty(),
-                ),
-                (
-                    Glyph::Chevron,
-                    tr!("start-forward"),
-                    !start.browser.forward.is_empty(),
-                ),
-                (Glyph::Reload, tr!("start-reload"), true),
-            ];
-            for (index, (glyph, hint, enabled)) in buttons.into_iter().enumerate() {
-                let rect = Rect::from_min_size(
-                    pos2(bar.left() + 10.0 + index as f32 * 34.0, bar.top() + 3.0),
-                    Vec2::splat(28.0),
-                );
-                if page::icon_button_enabled(ui, rect, glyph, &hint, false, enabled, theme)
-                    .clicked()
-                {
-                    match index {
-                        0 => start.browser.back(),
-                        1 => start.browser.forward(),
-                        _ => {
-                            let url = match &start.browser.place {
-                                None => assets::HOME.to_owned(),
-                                Some(Place::List(url)) => url.clone(),
-                                Some(Place::Material(id)) => assets::detail_url(id),
-                            };
-                            self.assets.reload(&url);
-                        }
-                    }
-                }
-            }
-            top = bar.bottom();
-        }
-        let area = Rect::from_min_max(pos2(body.left(), top), body.max).shrink2(vec2(20.0, 8.0));
-        let mut inner = ui.new_child(
-            UiBuilder::new()
-                .max_rect(area)
-                .id_salt("sue-paint-start-home")
-                .layout(egui::Layout::top_down(egui::Align::Min)),
-        );
-        inner.set_clip_rect(area);
-        let mut go = None;
-        egui::ScrollArea::vertical()
-            .id_salt((
-                "sue-paint-start-home-scroll",
-                format!("{:?}", start.browser.place),
-            ))
-            .auto_shrink([false, false])
-            .show(&mut inner, |ui| match start.browser.place.clone() {
-                None => {
-                    go = assets::home_rows(ui, &mut self.assets, cx, theme);
-                }
-                Some(Place::List(url)) => {
-                    go = assets::list_page(ui, &url, &mut self.assets, cx, theme);
-                }
-                Some(Place::Material(id)) => {
-                    go = assets::material_page(ui, &id, &mut self.assets, cx, theme);
-                }
-            });
-        match go {
-            Some(Go::Place(place)) => start.browser.go(Some(place)),
-            Some(Go::Site(link)) => assets::open_site(&link, cx),
-            Some(Go::Download(link)) => self.start_download(cx, &link),
-            None => {}
-        }
-        if self.assets.poll() {
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(100));
         }
     }
 
@@ -1777,16 +1647,8 @@ impl SuePaint {
             return;
         };
         let full = start.full;
-        let mut download = None;
         let outcome = match &popup {
-            Popup::Transfers => transfers_popup(
-                full,
-                ctx,
-                cx,
-                &mut self.downloads.link,
-                &mut download,
-                theme,
-            ),
+            Popup::Transfers => transfers_popup(full, ctx, cx, theme),
             Popup::Help => show(
                 full,
                 ctx,
@@ -2053,9 +1915,6 @@ impl SuePaint {
             }
             Popup::Material(id) => self.material_popup(ctx, start, acts, *id, cx, theme),
         };
-        if let Some(link) = download {
-            self.start_download(cx, &link);
-        }
         if outcome == PopupOutcome::Closed && start.popup.as_ref() == Some(&popup) {
             start.popup = None;
             start.armed = false;
@@ -2526,8 +2385,6 @@ fn transfers_popup(
     full: bool,
     ctx: &egui::Context,
     cx: &mut AppletContext<'_>,
-    link: &mut String,
-    download: &mut Option<String>,
     theme: &Theme,
 ) -> PopupOutcome {
     let now = unix_now();
@@ -2559,33 +2416,6 @@ fn transfers_popup(
                     cx.transfers.clear_completed();
                 }
             });
-            ui.add_space(8.0);
-            // Download from a link: brushes, pictures and zips of them
-            // arrive in Sue Paint by themselves.
-            ui.horizontal(|ui| {
-                let field = ui.add(
-                    egui::TextEdit::singleline(link)
-                        .hint_text(tr!("download-link-hint"))
-                        .desired_width(ui.available_width() - 130.0),
-                );
-                let ready = link.trim().starts_with("http");
-                let enter =
-                    field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                if (page::action(
-                    ui,
-                    Glyph::Transfers,
-                    &tr!("download-link"),
-                    ready,
-                    true,
-                    theme,
-                )
-                .clicked()
-                    || enter)
-                    && ready
-                {
-                    *download = Some(std::mem::take(link));
-                }
-            });
             ui.add_space(12.0);
             if cx.transfers.list().is_empty() {
                 ui.add_space(30.0);
@@ -2614,7 +2444,6 @@ fn transfers_popup(
                     TransferKind::Import => Glyph::Folder,
                     TransferKind::Export => Glyph::External,
                     TransferKind::Copy => Glyph::Transfers,
-                    TransferKind::Download => Glyph::Transfers,
                 };
                 page::glyph(
                     painter,
@@ -2820,5 +2649,10 @@ mod tests {
         assert!(start.navigate("start/close"));
         assert_eq!(start.popup, None);
         assert!(!start.navigate("start/nowhere"));
+        // The page that read another site is gone and must not come
+        // back unnoticed.
+        assert!(!start.navigate("start/browse"));
+        assert!(!start.navigate("start/browse/1"));
+        assert_eq!(start.tab, Tab::Materials);
     }
 }

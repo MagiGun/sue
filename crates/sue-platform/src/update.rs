@@ -609,23 +609,6 @@ pub fn replace_appimage(new: &Path, path: &Path) -> io::Result<()> {
     }
 }
 
-/// Fetches `url` (at most 16 MiB), on a thread: a page or a picture.
-/// `user_agent` names the asker. The browser fetches nothing (other sites
-/// do not let a page read them), and answers so at once.
-#[must_use]
-pub fn fetch(url: &str, user_agent: &str) -> Job<Result<Vec<u8>, String>> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let (url, user_agent) = (url.to_owned(), user_agent.to_owned());
-        Job::spawn(move || net::get_bytes(&user_agent, &url))
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = (url, user_agent);
-        Job::done(Err("the browser cannot read other sites".to_owned()))
-    }
-}
-
 /// The SHA-256 of the file at `path`, in lowercase hex.
 ///
 /// # Errors
@@ -744,22 +727,6 @@ mod net {
             .body_mut()
             .read_to_string()
             .map_err(|error| error.to_string())
-    }
-
-    /// Any file of at most 16 MiB.
-    pub(super) fn get_bytes(user_agent: &str, url: &str) -> Result<Vec<u8>, String> {
-        let mut response = agent(user_agent)
-            .get(url)
-            .call()
-            .map_err(|error| error.to_string())?;
-        let mut bytes = Vec::new();
-        response
-            .body_mut()
-            .as_reader()
-            .take(16 * 1024 * 1024)
-            .read_to_end(&mut bytes)
-            .map_err(|error| error.to_string())?;
-        Ok(bytes)
     }
 
     /// The largest file a link may bring: 1 GiB.

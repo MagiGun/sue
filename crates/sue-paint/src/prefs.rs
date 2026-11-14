@@ -479,7 +479,7 @@ mod tests {
             );
         }
         // Every page and its texts are in the language database.
-        assert_eq!(table::PAGES.len(), 17);
+        assert_eq!(table::PAGES.len(), 16);
         for page in table::PAGES {
             assert_ne!(text(page.title), page.title, "{} has its words", page.title);
         }
