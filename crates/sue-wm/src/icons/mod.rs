@@ -994,7 +994,7 @@ icons! {
     // Group I: animation and the timeline (`animation.rs`).
     /// A triangle that points to the right. Play.
     Play = "play" => animation::PLAY,
-    /// A square. Stop playing.
+    /// A small square, well inside the square of maximize. Stop playing.
     Stop = "stop" => animation::STOP,
     /// Two solid triangles that point to the left, the one at the front
     /// touching the back of the other, at an upright bar they run into.
@@ -1032,7 +1032,7 @@ icons! {
     /// track under it, and a plus in the lower right corner. A new
     /// timeline.
     TimelineNew = "timeline-new" => animation::TIMELINE_NEW,
-    /// A folder with a small solid triangle that points to the right in
+    /// A folder with a solid triangle that points to the right in
     /// it. An animation folder, the folder that holds the cels of one
     /// track.
     AnimationFolder = "animation-folder" => animation::ANIMATION_FOLDER,

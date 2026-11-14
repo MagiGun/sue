@@ -19,8 +19,7 @@ pub(super) const PLAY: Art = Art {
 pub(super) const STOP: Art = Art {
     keyline: Keyline::Square,
     line: &[Part::Stroke(
-        "M7.75 5.75 H16.25 A2 2 0 0 1 18.25 7.75 V16.25 A2 2 0 0 1 16.25 18.25 H7.75 A2 2 0 0 1 \
-         5.75 16.25 V7.75 A2 2 0 0 1 7.75 5.75 Z",
+        "M9.25 7.75 H14.75 A1.5 1.5 0 0 1 16.25 9.25 V14.75 A1.5 1.5 0 0 1 14.75 16.25 H9.25 A1.5          1.5 0 0 1 7.75 14.75 V9.25 A1.5 1.5 0 0 1 9.25 7.75 Z",
     )],
     solid: &[],
 };
@@ -167,7 +166,7 @@ pub(super) const TIMELINE_NEW: Art = Art {
 };
 
 /// The play triangle inside the animation folder.
-const INNER_PLAY: &str = "M10.75 11 L14.75 13.5 L10.75 16 Z";
+const INNER_PLAY: &str = "M9.75 9.75 L17 13.5 L9.75 17.25 Z";
 
 pub(super) const ANIMATION_FOLDER: Art = Art {
     keyline: Keyline::Wide,
