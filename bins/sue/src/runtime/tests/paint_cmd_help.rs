@@ -1,5 +1,6 @@
 //! The Help group of Sue Paint's commands, each run through the runtime
-//! on a canvas as its menu item runs it.
+//! on a canvas as its menu item runs it. A test run is not interactive,
+//! so a link the shell would open in the browser is shown as a notice.
 
 use super::*;
 
@@ -31,7 +32,17 @@ fn every_help_command_runs_on_a_canvas() {
         .collect();
     assert_eq!(
         group,
-        ["help.guide", "help.shortcuts", "help.updates", "help.about"]
+        [
+            "help.guide",
+            "help.shortcuts",
+            "help.updates",
+            "help.about",
+            "help.tips",
+            "help.online_guide",
+            "help.faq",
+            "help.contact",
+            "help.feedback",
+        ]
     );
 
     // The guide opens over the canvas.
@@ -62,4 +73,30 @@ fn every_help_command_runs_on_a_canvas() {
         "{message}"
     );
     assert!(!error);
+
+    // The links go to the browser, each to its page.
+    for (command, link) in [
+        ("help.tips", "https://magigun.github.io/sue/"),
+        (
+            "help.online_guide",
+            "https://github.com/MagiGun/sue/blob/main/HUMANS.md#sue-paint-painting-and-illustration",
+        ),
+        (
+            "help.faq",
+            "https://github.com/MagiGun/sue/issues?q=label%3Aquestion",
+        ),
+        (
+            "help.contact",
+            "https://github.com/MagiGun/sue/issues/new/choose",
+        ),
+        (
+            "help.feedback",
+            "https://github.com/MagiGun/sue/issues/new?template=feature.yml",
+        ),
+    ] {
+        run(&mut paint, command);
+        let (message, error) = paint.runtime.shell.message().expect("a notice");
+        assert!(message.contains(link), "{command}: {message}");
+        assert!(!error, "{command}");
+    }
 }

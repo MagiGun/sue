@@ -59,6 +59,11 @@ follow [Semantic Versioning](https://semver.org/).
   small button at the wheel's bottom right switches between a square of
   saturation and value (HSV) and a triangle between the hue, white and
   black (HLS), and the numbers under the wheel follow it.
+- Sue Paint's command palette offers the help pages on the web that the
+  start page's Help button linked to: Basic Tips, Using Sue Paint
+  (Online), Frequently Asked Questions, Contact, and Feedback and
+  Requests. Each opens in your browser, and each can be given a key in
+  Settings.
 
 ### Changed
 

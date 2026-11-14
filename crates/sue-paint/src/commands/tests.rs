@@ -333,7 +333,12 @@ fn the_palette_offers_what_it_offered() {
             "file.new",
             "file.open",
             "file.export.png",
-            "help.shortcuts"
+            "help.shortcuts",
+            "help.tips",
+            "help.online_guide",
+            "help.faq",
+            "help.contact",
+            "help.feedback",
         ]
     );
     let new = &palette[1];
