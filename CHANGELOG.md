@@ -60,6 +60,10 @@ follow [Semantic Versioning](https://semver.org/).
   way Clip Studio Paint does. A line's far end follows the pen, a shape turns
   and grows around its middle, and what the drag leaves is what lifting the
   pen keeps, still one stroke to undo.
+- A `.sue` file that a later version of Sue saved opens even when a layer
+  holds pixels in a format this version does not know: that layer is not
+  drawn, the rest is, and saving the file again keeps the layer and
+  everything else the later version wrote that this one cannot read.
 
 ## [0.0.75] - 2026-11-09
 
