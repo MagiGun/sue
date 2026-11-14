@@ -1042,7 +1042,7 @@ fn viewport(root: &Node, problems: &mut Vec<Problem>) -> Matrix {
 #[must_use]
 pub fn read(text: &str) -> (Drawing, Vec<Problem>) {
     let document = tree(text);
-    fn find<'n>(node: &'n Node) -> Option<&'n Node> {
+    fn find(node: &Node) -> Option<&Node> {
         if node.name == "svg" {
             return Some(node);
         }

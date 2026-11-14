@@ -658,7 +658,11 @@ impl Pack {
         let (files, skipped) = folder_files(folder)?;
         let mut pack = Self::from_files(&id, &files);
         pack.notes.extend(skipped);
-        if pack.drawings.is_empty() && !files.iter().any(|(name, _)| name == MANIFEST) {
+        if pack.drawings.is_empty()
+            && !files
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case(MANIFEST))
+        {
             return Err(PackError::NotAPack);
         }
         Ok(pack)
@@ -683,6 +687,9 @@ impl Pack {
     }
 }
 
+/// Files by name, with their bytes.
+type Files = Vec<(String, Vec<u8>)>;
+
 /// Files a pack may carry beside its icons, copied along: its licence
 /// and a note from its maker.
 fn kept_beside(name: &str) -> bool {
@@ -696,7 +703,7 @@ fn kept_beside(name: &str) -> bool {
 
 /// The files at the top of `folder` (no links, no folders), with notes
 /// for what was left out.
-fn folder_files(folder: &Path) -> Result<(Vec<(String, Vec<u8>)>, Vec<Note>), PackError> {
+fn folder_files(folder: &Path) -> Result<(Files, Vec<Note>), PackError> {
     let mut files = Vec::new();
     let mut notes = Vec::new();
     let mut total = 0_u64;
@@ -778,7 +785,7 @@ fn declared_sizes(bytes: &[u8]) -> Option<Vec<u64>> {
 
 /// The files of a pack archive: those at its top, or in its one top
 /// folder when everything is in one.
-fn archive_files(bytes: &[u8]) -> Result<(Vec<(String, Vec<u8>)>, Vec<Note>), PackError> {
+fn archive_files(bytes: &[u8]) -> Result<(Files, Vec<Note>), PackError> {
     if bytes.len() as u64 > LARGEST_PACK {
         return Err(PackError::TooLarge);
     }
