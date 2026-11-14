@@ -1,13 +1,20 @@
 //! The visual theme: every color, size and font comes from the rice
 //! and is bound straight into `egui::Style` and `egui::Visuals`. The shipped
 //! palette is pure monochrome, from `#000000` to `#ffffff`.
+//!
+//! The theme holds what the rice says; the design tokens of
+//! [`crate::ui::tokens`] (radii, the spacing scale, the type scale, color
+//! roles, elevation) are methods on it, and egui's own widgets are styled
+//! from those same tokens here.
 
 use std::time::Duration;
 
 use egui::epaint::Shadow;
 use egui::style::{Selection, TextCursorStyle, WidgetVisuals, Widgets};
 use egui::{Color32, CornerRadius, FontFamily, FontId, Stroke, TextStyle, Visuals};
-use sue_rice::{Rgba, RiceSchema, ThemePreset};
+use sue_rice::{HardwareProfile, Rgba, RiceSchema, ThemePreset};
+
+use crate::ui::{Motion, Pace, Radius, Space, TextRole};
 
 /// Colors, geometry and type for the whole shell.
 #[derive(Clone, Debug, PartialEq)]
@@ -44,6 +51,8 @@ pub struct Theme {
     pub border_width: f32,
     /// Rounding of buttons and fields.
     pub control_radius: f32,
+    /// Rounding of cards, list rows and palettes that float.
+    pub card_radius: f32,
     /// Rounding of windows, menus and pill buttons.
     pub pill_radius: f32,
     /// Height of pill buttons.
@@ -58,10 +67,14 @@ pub struct Theme {
     pub ui_size: f32,
     /// Captions and the status bar.
     pub small_size: f32,
+    /// Titles of cards, dialogs and sections.
+    pub title_size: f32,
     /// Headings.
     pub heading_size: f32,
     /// Monospace text.
     pub mono_size: f32,
+    /// How transitions move: the motion settings.
+    pub motion: Motion,
 }
 
 fn color(rgba: Rgba) -> Color32 {
@@ -174,18 +187,19 @@ impl Theme {
             pill: paint("colors.pill", 0x18),
             hover: paint("colors.hover", 0x26),
             active: paint("colors.active", 0x33),
-            border: paint("colors.border", 0x26),
+            border: paint("colors.border", 0x2e),
             border_active: paint("colors.border_active", 0xff),
             text: paint("colors.text", 0xff),
-            muted: paint("colors.muted", 0x80),
+            muted: paint("colors.muted", 0x9a),
             selection: paint("colors.selection", 0x40),
             selection_text: paint("colors.selection_text", 0xff),
             grid: paint("colors.grid", 0x26),
             shadow: paint("colors.shadow", 0x00),
             padding: number("layout.padding", 8.0),
             border_width: number("layout.border_width", 1.0),
-            control_radius: number("layout.control_radius", 4.0),
-            pill_radius: number("layout.pill_radius", 12.0),
+            control_radius: number("layout.control_radius", 6.0),
+            card_radius: number("layout.card_radius", 10.0),
+            pill_radius: number("layout.pill_radius", 14.0),
             pill_height: number("layout.pill_height", 34.0),
             settings_sidebar_width: number("layout.settings_sidebar_width", 190.0),
             shadow_blur: number("layout.shadow_blur", 18.0),
@@ -195,9 +209,20 @@ impl Theme {
                 .to_owned(),
             ui_size: number("typography.ui_size", 13.0),
             small_size: number("typography.small_size", 11.0),
+            title_size: number("typography.title_size", 15.0),
             heading_size: number("typography.heading_size", 18.0),
             mono_size: number("typography.mono_size", 12.0),
+            motion: Motion::from_rice(rice),
         }
+    }
+
+    /// This theme on hardware of `profile`: a profile that forbids spring
+    /// physics makes every transition instant, as
+    /// `motion.instant_transitions` does.
+    #[must_use]
+    pub fn with_profile(mut self, profile: HardwareProfile) -> Self {
+        self.motion = self.motion.for_profile(profile);
+        self
     }
 
     /// `true` when the page is light (dark text on it), as in Paper.
@@ -243,14 +268,12 @@ impl Theme {
         }
     }
 
-    fn radius(value: f32) -> CornerRadius {
-        CornerRadius::same(value.clamp(0.0, 255.0) as u8)
-    }
-
-    /// egui visuals for this theme.
+    /// egui visuals for this theme, built from the design tokens: egui's
+    /// own buttons, fields and windows get the radii, strokes and color
+    /// roles Sue's components use.
     #[must_use]
     pub fn visuals(&self, caret_blink: Option<Duration>) -> Visuals {
-        let control = Self::radius(self.control_radius);
+        let control = self.corner(Radius::Md);
         let widget = |fill: Color32, stroke: Stroke, text: Color32| WidgetVisuals {
             bg_fill: fill,
             weak_bg_fill: fill,
@@ -267,21 +290,25 @@ impl Theme {
             Visuals::dark()
         };
         visuals.override_text_color = None;
-        visuals.weak_text_color = Some(self.muted);
+        visuals.weak_text_color = Some(self.text_muted());
         visuals.widgets = Widgets {
-            noninteractive: widget(self.panel, self.hairline(), self.text),
-            inactive: widget(self.pill, self.hairline(), self.text),
+            noninteractive: widget(self.surface(1), self.hairline(), self.text),
+            inactive: widget(self.surface(2), self.hairline(), self.text),
             hovered: widget(
-                self.hover,
+                self.fill_hover(),
                 Stroke::new(self.border_width, self.active),
                 self.text,
             ),
-            active: widget(self.active, self.hairline_active(), self.text),
-            open: widget(self.active, self.hairline(), self.text),
+            // egui draws a widget that holds keyboard focus as it draws a
+            // pressed one: this is where its focus stroke comes from.
+            active: widget(self.fill_pressed(), self.focus_stroke(), self.text),
+            open: widget(self.fill_selected(), self.hairline(), self.text),
         };
         visuals.selection = Selection {
             bg_fill: self.selection,
-            stroke: Stroke::new(1.0, self.selection_text),
+            // The outline of a text field that holds focus, and the color
+            // of chosen text.
+            stroke: Stroke::new(Self::STRONG_STROKE, self.selection_text),
         };
         visuals.text_cursor = TextCursorStyle {
             stroke: Stroke::new(2.0, self.text),
@@ -290,20 +317,20 @@ impl Theme {
             on_duration: caret_blink.map_or(0.5, |half| half.as_secs_f32()),
             off_duration: caret_blink.map_or(0.5, |half| half.as_secs_f32()),
         };
-        visuals.hyperlink_color = self.text;
-        visuals.faint_bg_color = self.panel;
-        visuals.extreme_bg_color = self.void;
-        visuals.text_edit_bg_color = Some(self.void);
-        visuals.code_bg_color = self.pill;
-        visuals.warn_fg_color = self.text;
-        visuals.error_fg_color = self.text;
-        visuals.window_corner_radius = Self::radius(self.pill_radius);
+        visuals.hyperlink_color = self.link();
+        visuals.faint_bg_color = self.surface(1);
+        visuals.extreme_bg_color = self.surface(0);
+        visuals.text_edit_bg_color = Some(self.surface(0));
+        visuals.code_bg_color = self.surface(2);
+        visuals.warn_fg_color = self.warning();
+        visuals.error_fg_color = self.danger();
+        visuals.window_corner_radius = self.corner(Radius::Xl);
         visuals.window_shadow = self.shadow();
-        visuals.window_fill = self.panel;
+        visuals.window_fill = self.surface(1);
         visuals.window_stroke = self.hairline();
         visuals.window_highlight_topmost = false;
-        visuals.menu_corner_radius = Self::radius(self.pill_radius);
-        visuals.panel_fill = self.panel;
+        visuals.menu_corner_radius = self.corner(Radius::Xl);
+        visuals.panel_fill = self.surface(1);
         visuals.popup_shadow = self.shadow();
         visuals.button_frame = true;
         visuals.striped = false;
@@ -317,8 +344,12 @@ impl Theme {
         visuals
     }
 
-    /// Applies the theme to `ctx`: visuals, spacing and text styles. Fonts
-    /// change only when the interface font does.
+    /// Applies the theme to `ctx`: visuals, spacing, text styles and the
+    /// motion settings (egui's own animations take the base pace, or no
+    /// time at all when transitions are instant; [`crate::ui::motion`]
+    /// reads the rest from `ctx`), and makes `ctx` watch whether focus last
+    /// moved by keyboard, for the focus ring. Fonts change only when the
+    /// interface font does.
     pub fn apply(
         &self,
         ctx: &egui::Context,
@@ -327,22 +358,27 @@ impl Theme {
     ) {
         let visuals = self.visuals(caret_blink);
         let theme = self.clone();
+        self.motion.store(ctx);
+        crate::ui::watch_focus(ctx);
         ctx.all_styles_mut(move |style| {
             style.visuals = visuals.clone();
+            style.animation_time = theme.motion.seconds(Pace::Base);
             style.text_styles = [
-                (TextStyle::Small, theme.font(theme.small_size)),
-                (TextStyle::Body, theme.font(theme.ui_size)),
-                (TextStyle::Button, theme.font(theme.ui_size)),
-                (TextStyle::Heading, theme.font(theme.heading_size)),
-                (TextStyle::Monospace, theme.mono(theme.mono_size)),
+                (TextStyle::Small, theme.text_font(TextRole::Caption)),
+                (TextStyle::Body, theme.text_font(TextRole::Body)),
+                (TextStyle::Button, theme.text_font(TextRole::Body)),
+                (TextStyle::Heading, theme.text_font(TextRole::Heading)),
+                (TextStyle::Monospace, theme.text_font(TextRole::Mono)),
             ]
             .into();
+            // Whole points, rounded down as before the tokens.
+            let margin =
+                |space: Space| egui::Margin::same(theme.space(space).clamp(0.0, 127.0) as i8);
             let spacing = &mut style.spacing;
-            spacing.item_spacing = egui::vec2(theme.padding * 0.75, theme.padding * 0.5);
-            spacing.button_padding = egui::vec2(theme.padding, theme.padding * 0.5);
-            spacing.window_margin = egui::Margin::same(theme.padding.clamp(0.0, 127.0) as i8);
-            spacing.menu_margin =
-                egui::Margin::same((theme.padding * 0.75).clamp(0.0, 127.0) as i8);
+            spacing.item_spacing = egui::vec2(theme.space(Space::S3), theme.space(Space::S2));
+            spacing.button_padding = egui::vec2(theme.space(Space::S4), theme.space(Space::S2));
+            spacing.window_margin = margin(Space::S4);
+            spacing.menu_margin = margin(Space::S3);
             spacing.interact_size.y = (theme.ui_size * 1.9).max(20.0);
             spacing.slider_rail_height = 4.0;
             spacing.slider_width = 160.0;
@@ -562,6 +598,110 @@ mod tests {
             );
         }
         assert!(!visuals.text_cursor.blink);
+    }
+
+    #[test]
+    fn stock_widgets_wear_the_tokens() {
+        let mut rice = RiceSchema::new();
+        crate::register_rice(&mut rice).unwrap();
+        let theme = Theme::from_rice(&rice);
+        assert_eq!(
+            (theme.control_radius, theme.card_radius, theme.pill_radius),
+            (6.0, 10.0, 14.0)
+        );
+        assert_eq!(theme.title_size, 15.0);
+        let visuals = theme.visuals(None);
+        let widgets = &visuals.widgets;
+        for widget in [
+            &widgets.noninteractive,
+            &widgets.inactive,
+            &widgets.hovered,
+            &widgets.active,
+            &widgets.open,
+        ] {
+            assert_eq!(widget.corner_radius, CornerRadius::same(6));
+        }
+        assert_eq!(visuals.window_corner_radius, CornerRadius::same(14));
+        assert_eq!(visuals.menu_corner_radius, CornerRadius::same(14));
+        // A focus stroke: on the widget that holds focus, and around the
+        // text field that does.
+        assert_eq!(widgets.active.bg_stroke, theme.focus_stroke());
+        assert_eq!(widgets.active.bg_stroke.width, 2.0);
+        assert!(widgets.active.bg_stroke.width > widgets.inactive.bg_stroke.width);
+        assert_eq!(visuals.selection.stroke.width, 2.0);
+        // The rice still moves them all.
+        rice.set("layout.control_radius", sue_rice::RiceValue::Float(0.0))
+            .unwrap();
+        rice.set("layout.pill_radius", sue_rice::RiceValue::Float(3.0))
+            .unwrap();
+        let sharp = Theme::from_rice(&rice).visuals(None);
+        assert_eq!(sharp.widgets.inactive.corner_radius, CornerRadius::ZERO);
+        assert_eq!(sharp.window_corner_radius, CornerRadius::same(3));
+    }
+
+    #[test]
+    fn applying_the_theme_binds_the_motion_settings() {
+        let ctx = egui::Context::default();
+        let mut rice = RiceSchema::new();
+        crate::register_rice(&mut rice).unwrap();
+        let theme = Theme::from_rice(&rice);
+        theme.apply(&ctx, None, None);
+        // egui's own animations (the toggle switches use them) take the
+        // base pace, not egui's own time.
+        assert_eq!(ctx.global_style().animation_time, 0.16);
+        assert_eq!(Motion::of(&ctx), theme.motion);
+        // The spacing and the text styles are what they were before the
+        // tokens.
+        let style = ctx.global_style();
+        assert_eq!(style.spacing.item_spacing, egui::vec2(6.0, 4.0));
+        assert_eq!(style.spacing.button_padding, egui::vec2(8.0, 4.0));
+        assert_eq!(style.spacing.window_margin, egui::Margin::same(8));
+        assert_eq!(style.spacing.menu_margin, egui::Margin::same(6));
+        assert_eq!(style.text_styles[&TextStyle::Small].size, 11.0);
+        assert_eq!(style.text_styles[&TextStyle::Body].size, 13.0);
+        assert_eq!(style.text_styles[&TextStyle::Heading].size, 18.0);
+        // A padding whose share is not whole: the margin rounds down, as
+        // it did.
+        let odd = Theme {
+            padding: 10.0,
+            ..theme.clone()
+        };
+        odd.apply(&ctx, None, Some(&theme));
+        assert_eq!(
+            ctx.global_style().spacing.menu_margin,
+            egui::Margin::same(7)
+        );
+        theme.apply(&ctx, None, Some(&odd));
+        // Faster animations are shorter, and instant ones take no time:
+        // a toggle switch then lands in the frame it was clicked.
+        rice.set("motion.animation_speed", sue_rice::RiceValue::Float(2.0))
+            .unwrap();
+        let fast = Theme::from_rice(&rice);
+        assert_ne!(fast, theme, "a motion setting changes the theme");
+        fast.apply(&ctx, None, Some(&theme));
+        assert_eq!(ctx.global_style().animation_time, 0.08);
+        rice.set(
+            "motion.instant_transitions",
+            sue_rice::RiceValue::Bool(true),
+        )
+        .unwrap();
+        let instant = Theme::from_rice(&rice);
+        instant.apply(&ctx, None, Some(&fast));
+        assert_eq!(ctx.global_style().animation_time, 0.0);
+        assert!(Motion::of(&ctx).instant);
+        let id = egui::Id::unique("toggle");
+        let mut seen = Vec::new();
+        for on in [false, true, true, false] {
+            let mut done = ctx.run_ui(egui::RawInput::default(), |ui| {
+                seen.push(ui.ctx().animate_bool_responsive(id, on));
+            });
+            done.textures_delta.clear();
+        }
+        assert_eq!(seen, [0.0, 1.0, 1.0, 0.0]);
+        // So does a hardware profile without spring physics.
+        let legacy = theme.clone().with_profile(HardwareProfile::LegacyLowSpec);
+        assert!(legacy.motion.instant);
+        assert!(!theme.with_profile(HardwareProfile::Balanced).motion.instant);
     }
 
     #[test]

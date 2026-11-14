@@ -50,6 +50,7 @@ mod text;
 mod theme;
 mod transfers;
 mod transport;
+pub mod ui;
 pub mod widgets;
 mod work;
 mod world;

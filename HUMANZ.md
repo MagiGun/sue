@@ -1393,6 +1393,46 @@ style, not the context's, so without it a studio in Gray inside a Paper Sue
 got Paper's white fields. A light theme (`Theme::is_light`, a light page)
 starts from egui's light visuals, so what egui picks by itself reads on it.
 
+**Design tokens** (`sue_wm::ui`). Everything drawn takes its numbers from
+the theme by name, not as literals. `ui::tokens` holds the names, all
+methods on `Theme` that derive from the rice: six radii (`Radius`: 2, 4,
+`layout.control_radius` 6, `layout.card_radius` 10, `layout.pill_radius`
+14, and full), a spacing scale on a 4 pt grid (`Space`, shares of
+`layout.padding`), control sizes for three densities (`Density`: Compact
+for palettes, Regular for dialogs, Settings and the Hub, Touch; a
+`Density::scope` reaches everything drawn inside it), a type scale of
+seven roles with a floor of 10 px (`TextRole`, with the new
+`typography.title_size`), one stroke rule (hairline, icon, focus and
+selected), four shadows (`Elevation`), the layer order mapped to egui's
+in one place (`Layer`), and color roles: `surface(0..=3)`, the hover,
+pressed and selected fills, `text_muted`, `text_disabled` (the one
+disabled rule: the text color at 38 percent over its surface, never
+under 3 to 1), `border_strong` (a border that reaches 3 to 1), `focus`,
+`scrim`, and `danger`, `warning`, `success`, `info` and `link`, which
+are the text color in the shipped themes, so those stay monochrome and
+such things are always told apart by a glyph too. A test computes the
+contrast of every preset: 4.5 to 1 for text and secondary text on every
+surface and on a hovered control, 3 to 1 for strong borders, the focus
+ring and disabled text. `Theme::visuals` and `Theme::apply` build egui's
+own style from the same tokens.
+
+`ui::motion` is the one way things move: `fade`, `slide`, `hover_t` and
+`timed` at three paces (90, 160 and 240 ms, divided by
+`motion.animation_speed`, eased out on the way in and in on the way
+out) and `spring` on the riced spring. Each answers with its target at
+once when `motion.instant_transitions` is on or the hardware profile
+forbids spring physics, and asks for another frame only while its value
+moves. `Theme::apply` hands the settings to the egui context and sets
+egui's own animation time from them, so the toggle switches obey the
+settings too.
+
+`ui::focus` draws the focus ring (`focus_ring`, 2 px in the focus
+color just outside the control, shown for focus that came by keyboard
+and not for a click) and gives groups of controls their keyboard
+behaviour (`FocusScope`: a first focus when the group appears, Tab held
+inside for dialogs, arrow keys with Home and End for menus, lists and
+tab strips).
+
 **Docking** (`sue_wm::dock`). A studio's palettes, as Clip Studio
 Paint's: the studio lists them as a `DockPanel` (a stable key, an optional
 fixed width, a least height, a floating size, whether it stays when its
