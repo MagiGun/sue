@@ -522,7 +522,8 @@ impl Writer<'_> {
 }
 
 /// The highest `MainId` in the document's layers, bitmaps and kept rows
-/// of those tables.
+/// of those tables, and the highest layer a kept row of Sue's own layer
+/// tables names.
 fn highest(doc: &ClipDocument) -> i64 {
     fn walk(layer: &ClipLayer, top: &mut i64) {
         *top = (*top).max(layer.id);
@@ -539,6 +540,13 @@ fn highest(doc: &ClipDocument) -> i64 {
     for row in &doc.foreign.rows {
         if ["Layer", "Mipmap", "MipmapInfo", "Offscreen"].contains(&row.table.as_str())
             && let Some(id) = column(&row.columns, "MainId").and_then(Value::int)
+        {
+            top = top.max(id);
+        }
+        // A kept row of Sue's own tables names its layer: a new layer
+        // must never take that id, or the row would ride on it.
+        if ["SueLayer", "SueLayerPart"].contains(&row.table.as_str())
+            && let Some(id) = column(&row.columns, "LayerId").and_then(Value::int)
         {
             top = top.max(id);
         }

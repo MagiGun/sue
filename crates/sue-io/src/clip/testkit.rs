@@ -1590,6 +1590,54 @@ mod tests {
     }
 
     #[test]
+    fn a_kept_part_never_lands_on_a_layer_made_after_its_own_went() {
+        let doc = every_kind(30, 20, 2);
+        let mut edited = read(&write(&doc).unwrap()).unwrap();
+        // The top layer is deleted and new ones are made in its place.
+        let gone_layer = edited.root.children.pop().unwrap();
+        for index in 0..4 {
+            let pixels = ClipBitmap::color(2, 2, &[9; 16]);
+            edited
+                .root
+                .children
+                .push(ClipLayer::raster(&format!("New {index}"), 0, 0, pixels));
+        }
+        // The id the first new layer gets when nothing else names it.
+        let plain = read(&write(&edited).unwrap()).unwrap();
+        let gone = plain
+            .layers()
+            .iter()
+            .find(|l| l.name == "New 0")
+            .unwrap()
+            .id;
+        assert_ne!(gone, gone_layer.id);
+        // A part of a kind from the future that rode on a deleted layer
+        // with that id is kept: no new layer may take its id.
+        edited.foreign.rows.push(part(
+            "SueLayerPart",
+            vec![
+                ("LayerId", Value::Integer(gone)),
+                ("Kind", Value::Text("zz-hologram".to_owned())),
+                ("Version", Value::Integer(1)),
+                ("Data", Value::Blob(vec![7])),
+            ],
+        ));
+        let back = read(&write(&edited).unwrap()).unwrap();
+        assert!(
+            back.foreign
+                .rows
+                .iter()
+                .any(|row| row.table == "SueLayerPart"
+                    && crate::clip::column(&row.columns, "LayerId") == Some(&Value::Integer(gone))),
+            "the part is kept"
+        );
+        assert!(
+            back.all_layers().iter().all(|layer| layer.id != gone),
+            "no new layer takes the id the kept part names"
+        );
+    }
+
+    #[test]
     fn cut_or_flipped_parts_never_panic() {
         use super::super::parts as p;
         let doc = every_kind(20, 10, 3);
