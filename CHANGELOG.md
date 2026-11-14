@@ -31,6 +31,10 @@ follow [Semantic Versioning](https://semver.org/).
   `CREATE` text, row count and rows), and `sue-cli clip diff <before>
   <after>` prints what differs between two such files. For people
   working on the converter; neither changes a file.
+- Every color wheel can show a triangle instead of the square: the
+  small button at the wheel's bottom right switches between a square of
+  saturation and value (HSV) and a triangle between the hue, white and
+  black (HLS), and the numbers under the wheel follow it.
 
 ### Changed
 
@@ -66,6 +70,10 @@ follow [Semantic Versioning](https://semver.org/).
   that holds keyboard focus shows it with a thicker outline. Two new
   settings, Card radius (Layout) and Title size (Typography), join the
   ones you can tune. A radius or color you set yourself stays as it is.
+- Window title bars, the color wheel's popup, the command palette and
+  the font list follow the theme's spacing, corners and type sizes. The
+  title bar's buttons light up smoothly under the pointer and tell a
+  screen reader their names.
 
 ### Fixed
 
@@ -101,6 +109,10 @@ follow [Semantic Versioning](https://semver.org/).
 - Undo, Redo, Open, Save and Quit show in a studio's menus the keys they
   really have: change one in Settings (Keymaps) and the menu follows, as
   it already did for the studio's own commands.
+- The response curve graph (pen pressure and the like) moves the point
+  you pressed on even when the hand moves quickly, instead of adding a
+  second point beside it.
+- The opacity bar's handle shows on light themes too.
 
 ### Removed
 
