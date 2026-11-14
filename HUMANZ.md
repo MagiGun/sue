@@ -1669,6 +1669,18 @@ the types, `applet.rs`, `frame.rs`, `files.rs`, `clipboard.rs`,
 `layers.rs`, `edit.rs`, `rulers.rs`, `three.rs`, `media.rs`,
 `materials.rs`).
 
+**Sue Paint's canvas.** `crates/sue-paint/src/canvas/` holds the
+canvas: `mod.rs` lays out the column (tabs, the view, Window, Canvas,
+Tile and the empty canvas); `input.rs` reads the pointer, pen and touch
+events in order and turns them into gestures; `press.rs`, `drag.rs` and
+`release.rs` hold what every tool does as the pen goes down, moves and
+lifts; `pick.rs` finds the color, layer or figure part under the pen;
+`fill.rs` has the bucket, lasso fill, auto select and gradients;
+`shape.rs` figures and straight lines; `view.rs` draws the picture with
+its tone overlay, page frames, edge rulers and scrollbars; `overlays.rs`
+draws selections, previews, the brush outline, rulers, the selection
+launcher and puppet warp over it; `status.rs` is the strip below.
+
 **Sue's icon.** `assets/icons` holds the app icon and the bare silhouette,
 each as SVG (the source), PNG and JPEG XL at 1024 pixels, and a Windows
 `.ico` with six sizes, plus inverted and black versions. `sue_wm::brand`
