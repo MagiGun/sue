@@ -123,7 +123,7 @@ transfer-copy = Copiar
 transfer-export = Exportar
 transfer-import = Importar
 
-## files/: the files browser (moved from paint.ftl with the code)
+## files/: the files browser (copied from paint.ftl, which keeps its own until Sue Paint's start page goes)
 
 start-add-label = Añadir una etiqueta
 start-all = Todo
@@ -163,6 +163,7 @@ start-transfer-failed = Fallido: { $why }
 start-transfer-running = En ejecución
 start-type = Tipo
 start-type-picture = Imagen
+start-type-file = Archivo
 start-type-project = Proyecto
 start-type-unsaved = Trabajo no guardado
 start-view-large = Tarjetas grandes

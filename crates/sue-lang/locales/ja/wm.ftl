@@ -111,7 +111,7 @@ transfer-copy = コピー
 transfer-export = エクスポート
 transfer-import = インポート
 
-## files/: the files browser (moved from paint.ftl with the code)
+## files/: the files browser (copied from paint.ftl, which keeps its own until Sue Paint's start page goes)
 
 start-add-label = ラベルを追加
 start-all = すべて
@@ -151,6 +151,7 @@ start-transfer-failed = 失敗: { $why }
 start-transfer-running = 実行中
 start-type = 種類
 start-type-picture = 作品
+start-type-file = ファイル
 start-type-project = プロジェクト
 start-type-unsaved = 未保存の作業
 start-view-large = 大アイコン

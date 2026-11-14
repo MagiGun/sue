@@ -121,7 +121,7 @@ none = لا يوجد
 there-no-studio-tool-called = لا يوجد استوديو أو أداة باسم { $id }
 is-not-available = { $command } غير متاح
 
-## files/: the files browser (moved from paint.ftl with the code)
+## files/: the files browser (copied from paint.ftl, which keeps its own until Sue Paint's start page goes)
 
 start-add-label = إضافة تصنيف
 start-all = الكل
@@ -161,6 +161,7 @@ start-transfer-failed = فشل: { $why }
 start-transfer-running = قيد التشغيل
 start-type = النوع
 start-type-picture = صورة
+start-type-file = ملف
 start-type-project = مشروع
 start-type-unsaved = عمل غير محفوظ
 start-view-large = بطاقات كبيرة

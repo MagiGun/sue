@@ -44,6 +44,17 @@ fn kind_label(item: &Item, studios: &[Studio<'_>]) -> String {
     item.kind.label()
 }
 
+/// What a type chip reads. With more than one studio's work shown, a file
+/// that is not a project is not always a picture (a Sue Writer text is
+/// one too), so that chip reads "File" there.
+fn type_label(kind: Type, studios: &[Studio<'_>]) -> String {
+    if kind == Type::Picture && studios.len() > 1 {
+        tr!("start-type-file")
+    } else {
+        kind.label()
+    }
+}
+
 /// The projects of `studios` in `body`: labels on the left; search, type
 /// chips, the toolbar and the cards on the right.
 #[allow(clippy::too_many_lines)]
@@ -267,7 +278,7 @@ pub fn projects_ui(
         ui.add_space(6.0);
         for kind in Type::ALL {
             let on = state.types.contains(&(kind as u8));
-            if page::chip(ui, &kind.label(), on, theme).clicked() {
+            if page::chip(ui, &type_label(kind, studios), on, theme).clicked() {
                 if on {
                     state.types.remove(&(kind as u8));
                 } else {

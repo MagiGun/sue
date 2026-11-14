@@ -117,7 +117,7 @@ in-folder = { $lead } in { $folder }
 saved = { $name } gespeichert{ $note }{ $folder }{ $click }
 saved-in-folder = {" "}in { $folder }
 
-## files/: the files browser (moved from paint.ftl with the code)
+## files/: the files browser (copied from paint.ftl, which keeps its own until Sue Paint's start page goes)
 
 start-add-label = Etikett hinzufügen
 start-all = Alle
@@ -157,6 +157,7 @@ start-transfer-failed = Fehlgeschlagen: { $why }
 start-transfer-running = Wird ausgeführt
 start-type = Typ
 start-type-picture = Bild
+start-type-file = Datei
 start-type-project = Projekt
 start-type-unsaved = Ungespeicherte Arbeit
 start-view-large = Große Karten

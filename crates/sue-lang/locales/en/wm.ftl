@@ -140,7 +140,7 @@ save = Save
 cancel = Cancel
 shortcuts-custom = Keys of commands that have no default key
 
-## files/: the files browser (moved from paint.ftl with the code)
+## files/: the files browser (copied from paint.ftl, which keeps its own until Sue Paint's start page goes)
 
 start-add-label = Add a label
 start-all = All
@@ -180,6 +180,7 @@ start-transfer-failed = Failed: { $why }
 start-transfer-running = Running
 start-type = Type
 start-type-picture = Picture
+start-type-file = File
 start-type-project = Project
 start-type-unsaved = Unsaved work
 start-view-large = Large cards

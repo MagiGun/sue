@@ -93,7 +93,7 @@ none = 无
 there-no-studio-tool-called = 未找到名为 { $id } 的工作室或工具
 is-not-available = { $command } 不可用
 
-## files/: the files browser (moved from paint.ftl with the code)
+## files/: the files browser (copied from paint.ftl, which keeps its own until Sue Paint's start page goes)
 
 start-add-label = 添加标签
 start-all = 全部
@@ -133,6 +133,7 @@ start-transfer-failed = 失败: { $why }
 start-transfer-running = 传输中
 start-type = 类型
 start-type-picture = 图像
+start-type-file = 文件
 start-type-project = 项目
 start-type-unsaved = 未保存的工作
 start-view-large = 大卡片

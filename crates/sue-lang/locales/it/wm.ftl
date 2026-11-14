@@ -105,7 +105,7 @@ none = Nessuno
 there-no-studio-tool-called = Nessuno studio o strumento denominato { $id }
 is-not-available = { $command } non è disponibile
 
-## files/: the files browser (moved from paint.ftl with the code)
+## files/: the files browser (copied from paint.ftl, which keeps its own until Sue Paint's start page goes)
 
 start-add-label = Aggiungi un'etichetta
 start-all = Tutti
@@ -145,6 +145,7 @@ start-transfer-failed = Non riuscito: { $why }
 start-transfer-running = In corso
 start-type = Tipo
 start-type-picture = Immagine
+start-type-file = File
 start-type-project = Progetto
 start-type-unsaved = Lavoro non salvato
 start-view-large = Schede grandi
