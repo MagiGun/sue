@@ -428,8 +428,9 @@ icons! {
     /// An open hand seen from its back: four fingers up, the thumb out to
     /// the left, a round palm. The hand tool, which moves the view.
     ToolHand = "tool-hand" => tools::TOOL_HAND,
-    /// A sheet tilted to one side, with two curved arrows turning round
-    /// it. The tool that rotates the view of the canvas.
+    /// A sheet tilted to one side, inside one curved arrow that turns
+    /// nearly all the way round it, its solid head at the lower left.
+    /// The tool that rotates the view of the canvas.
     ToolRotateView = "tool-rotate-view" => tools::TOOL_ROTATE_VIEW,
     /// A box with an arrow pointer, solid, resting on its lower right
     /// corner. The tool that picks an object and works on it.
@@ -480,12 +481,14 @@ icons! {
     /// liquid. The liquify tool.
     ToolLiquify = "tool-liquify" => tools::TOOL_LIQUIFY,
     /// A bucket of paint tipped on its corner, with its handle, the
-    /// level of the paint in it, and a solid drop falling from its lip.
+    /// paint in it solid up to a level line, and a solid drop falling
+    /// from its lip.
     /// The fill tool.
     ToolFill = "tool-fill" => tools::TOOL_FILL,
-    /// A frame with a solid band down its left side and three columns
-    /// of solid dots after it, each column of smaller dots than the
-    /// last: a tone that fades from full to empty, as print shows it.
+    /// A solid upright band, and after it three columns of solid dots,
+    /// each column of smaller dots than the last, the middle one set
+    /// between the rows of the other two: a tone that fades from full to empty, as
+    /// print shows it.
     /// The gradient tool.
     ToolGradient = "tool-gradient" => tools::TOOL_GRADIENT,
     /// A circle in front of a square, the square showing behind it at

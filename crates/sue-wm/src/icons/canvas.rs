@@ -29,13 +29,13 @@ const STRUCK: &str = "M3.75 6.75 V5.75 A2 2 0 0 1 5.75 3.75 H6.75 M9.75 3.75 H14
 /// The solid half of the inverted selection.
 const HALF: &str = "M20.25 9.75 V18.25 A2 2 0 0 1 18.25 20.25 H9.75 Z";
 
-/// The horseshoe of the magnet, upright: its round end at the top and
-/// its two legs pointing down.
-const MAGNET: &str = "M6.75 14.25 V9 A5.25 5.25 0 0 1 17.25 9 V14.25 H14.25 V9 A2.25 2.25 0 0 0 \
-                      9.75 9 V14.25 Z";
+/// The horseshoe of the magnet, upright: a broad band bent round at
+/// the top, its two legs pointing down.
+const MAGNET: &str = "M5.75 14.25 V10 A6.25 6.25 0 0 1 18.25 10 V14.25 H14.25 V10 A2.25 2.25 0 \
+                      0 0 9.75 10 V14.25 Z";
 
-/// The two poles of the magnet: the ends of its legs.
-const POLES: &str = "M6.75 11.75 H9.75 V14.25 H6.75 Z M14.25 11.75 H17.25 V14.25 H14.25 Z";
+/// The two poles of the magnet: the ends of its legs, solid.
+const POLES: &str = "M5.75 12.25 H9.75 V14.25 H5.75 Z M14.25 12.25 H18.25 V14.25 H14.25 Z";
 
 /// The chip of the drawing color.
 const CHIP: &str = "M5.25 3.75 H9.25 A1.5 1.5 0 0 1 10.75 5.25 V9.25 A1.5 1.5 0 0 1 9.25 10.75 \
