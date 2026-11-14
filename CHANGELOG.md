@@ -13,16 +13,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Sue Paint's tool palette is data: tools hold sub tool groups (the
-  Pen's Pen and Marker, the Figure tool's Direct draw and its two
-  effect line groups, and others as in Clip Studio Paint Ver. 4), and
-  the whole arrangement reads from and writes to a tool layout file a
-  person can write, share and load (`docs/tool-layout-format.md`).
 - Sue Paint's Liquify has seven modes: Push, Expand, Pinch, Twirl
-  clockwise and counterclockwise, Push left and Push right, picked in
-  Tool Property.
+  clockwise and counterclockwise, Push left and Push right, picked from
+  a Mode list in Tool Property.
 - Auto Select has a third sub tool, Refer Reference Layers.
-
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
@@ -76,9 +70,12 @@ follow [Semantic Versioning](https://semver.org/).
   Blend, and J again Liquify. The Fill tool's sub tools follow Clip
   Studio Paint Ver. 4's order, with Lasso fill among them instead of
   under Figure.
+- Sue Paint's sub tools come in Clip Studio Paint Ver. 4's groups and
+  order: the Pen tool's pens before its markers, the Brush tool's
+  watercolor, thick paint and India ink brushes, the Sketch tool's
+  pencils before its pastels.
 - Two built-in pens have names of Sue's own: Real G-Pen is now Grainy
   G-pen and Milli pen is now Fineliner.
-
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an
   empty or single color tile costs a byte, a tile found twice (a duplicated
@@ -136,7 +133,6 @@ follow [Semantic Versioning](https://semver.org/).
   as it says; without Close gap it reached one pixel further.
 - Choosing which layers Fill and Auto Select refer to no longer turns
   Close and fill or Paint unpainted area into a plain fill.
-
 - Instant transitions and Animation speed (Settings, Motion) now reach
   the switches in Settings and on the start pages and everything else
   the interface toolkit animates by itself: they used to keep their own
