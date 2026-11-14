@@ -61,6 +61,21 @@ follow [Semantic Versioning](https://semver.org/).
   and grows around its middle, and what the drag leaves is what lifting the
   pen keeps, still one stroke to undo.
 
+### Removed
+
+- **Browse Assets** is gone from Sue Paint's start page, on computers,
+  phones and tablets, with everything that read another company's
+  material site. Sue Paint no longer goes online for materials at all,
+  and the pages and pictures it had kept from that site are deleted from
+  Sue's cache the next time Sue Paint starts.
+- The **Downloads** button at the top of Sue Paint's tool palette, which
+  only opened Browse Assets. The tools move up by one place.
+- Downloading from a link in **Data Transfers**. Brushes and pictures
+  that are already on your device still come in as before: **Add from
+  downloads** in the Tool Group palette and `+` in Manage Materials.
+- A page of Sue Paint's Preferences for a hand controller that Sue
+  never worked with; its one setting did nothing.
+
 ## [0.0.75] - 2026-11-09
 
 ### Added

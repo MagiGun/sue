@@ -16,7 +16,7 @@ a section once it is done.
 | `TODO`, `FIXME` or `HACK` markers | 0 |
 | Crates in `Cargo.lock` | 557, 33 of them in two versions |
 | `#[allow]` and `#[expect]` (besides the audited `unsafe`) | 81 |
-| Sue Paint parity with Clip Studio Paint | 84% (267 done, 61 partial, 28 missing) |
+| Sue Paint parity with Clip Studio Paint | 84% (266 done, 60 partial, 28 missing) |
 
 Lines per crate: `sue-paint` 71,600; `bins/sue` 19,500; `sue-io` 17,800;
 `sue-wm` 17,100; `sue-platform` 13,500; `sue-core` 10,100; `sue-type`
