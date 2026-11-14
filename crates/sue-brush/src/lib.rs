@@ -9,3 +9,8 @@
 //!
 //! The engine is built module by module; each package of the 0.0.8 plan
 //! adds its own file and its line to the list below.
+//!
+//! - [`input`]: pen samples in, stroke points out (ingest, pressure,
+//!   resampling, stabilizer, curve, dynamics, tapers).
+
+pub mod input;
