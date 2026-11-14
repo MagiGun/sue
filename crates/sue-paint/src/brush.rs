@@ -1446,7 +1446,10 @@ impl Stroke {
         // A smooth curve through the samples, so even a fast mouse that
         // reported only a few points ends as a curve, not a polygon.
         let step = (self.tip.size * 0.05).clamp(0.75, 8.0);
-        let mut path = spline(&trim_hooks(&self.samples, self.tip.size), step);
+        let trimmed = trim_hooks(&self.samples, self.tip.size);
+        // How much of the line as drawn the trimming took off its ends.
+        let cut = (length(&self.samples) - length(&trimmed)).max(0.0);
+        let mut path = spline(&trimmed, step);
         if finish.correction > 0 {
             path = correct(&path, finish.correction, self.tip.size);
         }
@@ -1469,7 +1472,7 @@ impl Stroke {
         // Only the tapered ends change when the pen lifts: the tiles near
         // them are drawn again and the rest of the stroke stays, so a long
         // stroke finishes as quickly as a short one.
-        let only = self.ends_only(&path, finish);
+        let only = self.ends_only(&path, finish, cut);
         // What the screen shows now, to tell it afterwards only what the
         // finished stroke changed (its ends, mostly), not the whole stroke.
         let shown = self.shown_in(raster, only.as_ref());
@@ -1496,11 +1499,13 @@ impl Stroke {
     /// change, when only they need drawing again; `None` when all of it
     /// does (post correction moves every point, a mixing brush picks up
     /// what is under it, a ribbon spans the whole stroke, or the ends
-    /// reach most of the way along).
+    /// reach most of the way along). `cut` is how much of the line as
+    /// drawn was trimmed off its ends as hooks.
     fn ends_only(
         &self,
         path: &[Sample],
         finish: Finish,
+        cut: f32,
     ) -> Option<std::collections::BTreeSet<(u32, u32)>> {
         let tip = &self.tip;
         if finish.correction > 0 || tip.mix > 0.0 || tip.ribbon || self.picture.is_some() {
@@ -1529,32 +1534,44 @@ impl Stroke {
         let mut keys = std::collections::BTreeSet::new();
         // The finished path's ends, and the ends of the line as it was
         // drawn: a hook trimmed off the path was painted too, and may
-        // reach a tile the finished path comes nowhere near.
-        for (points, total) in [(path, total), (&self.samples[..], length(&self.samples))] {
+        // reach a tile the finished path comes nowhere near. All of what
+        // was trimmed counts as an end, and every step is walked, since a
+        // fast pointer's hook can be one step that crosses whole tiles.
+        let drawn = (&self.samples[..], length(&self.samples), cut);
+        for (points, total, cut) in [(path, total, 0.0), drawn] {
+            let (head, tail) = (head + cut, tail + cut);
             let mut s = 0.0;
             let mut last: Option<[f32; 2]> = None;
             for point in points {
-                if let Some(last) = last {
-                    s += distance(last, point.at);
-                }
+                let from = last.unwrap_or(point.at);
+                let far = distance(from, point.at);
                 last = Some(point.at);
-                if s > head && s < total - tail {
-                    continue;
-                }
-                let [x, y] = point.at;
-                let (x0, y0) = (
-                    ((x - reach).max(0.0) as u32) / TILE,
-                    ((y - reach).max(0.0) as u32) / TILE,
-                );
-                let (x1, y1) = (
-                    ((x + reach).max(0.0) as u32) / TILE,
-                    ((y + reach).max(0.0) as u32) / TILE,
-                );
-                for ty in y0..=y1 {
-                    for tx in x0..=x1 {
-                        keys.insert((ty, tx));
+                let steps = (far / (reach * 0.5)).ceil().max(1.0) as usize;
+                for step in 1..=steps {
+                    let t = step as f32 / steps as f32;
+                    let along = s + far * t;
+                    if along > head && along < total - tail {
+                        continue;
+                    }
+                    let (x, y) = (
+                        from[0] + (point.at[0] - from[0]) * t,
+                        from[1] + (point.at[1] - from[1]) * t,
+                    );
+                    let (x0, y0) = (
+                        ((x - reach).max(0.0) as u32) / TILE,
+                        ((y - reach).max(0.0) as u32) / TILE,
+                    );
+                    let (x1, y1) = (
+                        ((x + reach).max(0.0) as u32) / TILE,
+                        ((y + reach).max(0.0) as u32) / TILE,
+                    );
+                    for ty in y0..=y1 {
+                        for tx in x0..=x1 {
+                            keys.insert((ty, tx));
+                        }
                     }
                 }
+                s += far;
             }
         }
         Some(keys)
