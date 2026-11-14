@@ -102,6 +102,8 @@
 
 mod cache;
 pub mod fit;
+mod layers;
+mod palettes;
 pub mod path;
 pub mod raster;
 mod reference;
@@ -419,6 +421,133 @@ icons! {
     /// A padlock: a body with a keyhole and a shackle over it. Locked;
     /// solid for the state that is on.
     Lock = "lock" => reference::LOCK,
+
+    // Group G: layers and the light table (`layers.rs`).
+    /// Three sheets lying one over the other: the layers of a picture, and the palette that lists
+    /// them.
+    Layers = "layers" => layers::LAYERS,
+    /// Two sheets lying one over the other, with a plus at the lower right: a new raster layer.
+    LayerNew = "layer-new" => layers::LAYER_NEW,
+    /// A curve between two solid square anchor points, with a plus at the lower right: a new vector
+    /// layer.
+    LayerNewVector = "layer-new-vector" => layers::LAYER_NEW_VECTOR,
+    /// A folder with a plus at its lower right corner: a new folder that layers are put into.
+    LayerNewFolder = "layer-new-folder" => layers::LAYER_NEW_FOLDER,
+    /// Two equal sheets, one lying behind and above the other: a copy of the layer.
+    LayerDuplicate = "layer-duplicate" => layers::LAYER_DUPLICATE,
+    /// An arrow pressing down into a sheet: the layer is merged into the one below it.
+    LayerMergeDown = "layer-merge-down" => layers::LAYER_MERGE_DOWN,
+    /// Two sheets one over the other, and beside them an arrow pointing down: what is drawn moves
+    /// to the layer below.
+    LayerTransferDown = "layer-transfer-down" => layers::LAYER_TRANSFER_DOWN,
+    /// An arrow that bends down onto a sheet: the layer is clipped to the layer below it.
+    LayerClip = "layer-clip" => layers::LAYER_CLIP,
+    /// A marker pin standing on a sheet: the layer that other tools look at.
+    LayerReference = "layer-reference" => layers::LAYER_REFERENCE,
+    /// A sheet drawn with a broken line: a draft layer, which is neither printed nor exported.
+    LayerDraft = "layer-draft" => layers::LAYER_DRAFT,
+    /// A checkered square, the sign of see-through pixels, with a padlock at its lower right: the
+    /// transparent pixels are locked.
+    LayerLockAlpha = "layer-lock-alpha" => layers::LAYER_LOCK_ALPHA,
+    /// A frame with a solid round shape in it: a layer mask, which hides what lies outside the
+    /// shape.
+    LayerMask = "layer-mask" => layers::LAYER_MASK,
+    /// A layer mask with a plus at its lower right corner: a new layer mask.
+    LayerMaskNew = "layer-mask-new" => layers::LAYER_MASK_NEW,
+    /// A layer mask with a check at its lower right corner: the mask is applied to the layer for
+    /// good.
+    LayerMaskApply = "layer-mask-apply" => layers::LAYER_MASK_APPLY,
+    /// Two sheets one over the other, with a solid drop of paint at the lower right: the layer is
+    /// shown in its layer color.
+    LayerColor = "layer-color" => layers::LAYER_COLOR,
+    /// A ring whose left half is solid: the layers on the light table are each shown in one color.
+    LayerColorMode = "layer-color-mode" => layers::LAYER_COLOR_MODE,
+    /// Two sheets one over the other, with a solid four pointed spark at the lower right: the
+    /// effects a layer can have.
+    LayerProperty = "layer-property" => layers::LAYER_PROPERTY,
+    /// A sheet over the edge of a second one drawn with a broken line: whether the opacity changes
+    /// all the layers or each on its own.
+    LayerOpacityTarget = "layer-opacity-target" => layers::LAYER_OPACITY_TARGET,
+    /// A sheet lying over a solid one: the paper, a layer of one color under the whole picture.
+    LayerPaper = "layer-paper" => layers::LAYER_PAPER,
+    /// A solid ball and a solid block, with one line running round both at a distance: a border
+    /// drawn round what is on the layer.
+    BorderEffect = "border-effect" => layers::BORDER_EFFECT,
+    /// A drop with a second line inside its lower left rim, where the paint gathers: the watercolor
+    /// edge.
+    WatercolorEdge = "watercolor-edge" => layers::WATERCOLOR_EDGE,
+    /// A solid hill with its own outline lifted off above it: the lines are taken out of a picture.
+    ExtractLine = "extract-line" => layers::EXTRACT_LINE,
+    /// Rows of dots that grow from small at the upper left to large at the lower right: the layer
+    /// is shown as a halftone.
+    Tone = "tone" => layers::TONE,
+    /// A lit panel with rays of light rising from it: the light table, which shows other drawings
+    /// through the layer.
+    LightTable = "light-table" => layers::LIGHT_TABLE,
+    /// A light table with a plus at its upper right: the chosen layer is put on the light table.
+    LightTableAdd = "light-table-add" => layers::LIGHT_TABLE_ADD,
+    /// A light table with a minus at its upper right: the chosen layer is taken off the light
+    /// table.
+    LightTableRemove = "light-table-remove" => layers::LIGHT_TABLE_REMOVE,
+    /// A light table with a page at its upper right: a picture file is put on the light table.
+    LightTableFile = "light-table-file" => layers::LIGHT_TABLE_FILE,
+    /// A light table with a solid pointer at its upper right: the tool that moves what lies on the
+    /// light table.
+    LightTableTool = "light-table-tool" => layers::LIGHT_TABLE_TOOL,
+    /// A cel with its peg holes, and a padlock at its lower right: the cel drawn on stays the same,
+    /// whichever cel is shown.
+    CelLock = "cel-lock" => layers::CEL_LOCK,
+
+    // Group H: palettes, color and the brush (`palettes.rs`).
+    /// A long bar with three solid keys in it: the command bar.
+    PaletteCommandBar = "palette-command-bar" => palettes::PALETTE_COMMAND_BAR,
+    /// A cup with three pens standing in it: the palette of tools.
+    PaletteTools = "palette-tools" => palettes::PALETTE_TOOLS,
+    /// A solid square with a branch running down from it to two boxes: the sub tools of the tool.
+    PaletteSubTools = "palette-sub-tools" => palettes::PALETTE_SUB_TOOLS,
+    /// Three upright sliders with round knobs at different heights: the settings of the tool.
+    PaletteToolProperty = "palette-tool-property" => palettes::PALETTE_TOOL_PROPERTY,
+    /// Three solid dots in a row, growing from small to large: the brush sizes.
+    PaletteBrushSize = "palette-brush-size" => palettes::PALETTE_BRUSH_SIZE,
+    /// Four rings of four sizes laid out in a square: the brush sizes as a grid.
+    PaletteBrushGrid = "palette-brush-grid" => palettes::PALETTE_BRUSH_GRID,
+    /// A ring with a square in it and a solid knob on the ring: the wheel of hues, and the square
+    /// that sets how light and how strong the color is.
+    PaletteColorWheel = "palette-color-wheel" => palettes::PALETTE_COLOR_WHEEL,
+    /// Three level bars, each with a solid knob at its own place: the color sliders.
+    PaletteColorSliders = "palette-color-sliders" => palettes::PALETTE_COLOR_SLIDERS,
+    /// Three color cards fanned out from one rivet: a set of colors to pick from.
+    PaletteColorSet = "palette-color-set" => palettes::PALETTE_COLOR_SET,
+    /// Two rings that overlap, the shared part solid: a color made between two colors.
+    PaletteIntermediate = "palette-intermediate" => palettes::PALETTE_INTERMEDIATE,
+    /// A square cut into three by three cells, the middle one solid: colors close to the current
+    /// one.
+    PaletteApproximate = "palette-approximate" => palettes::PALETTE_APPROXIMATE,
+    /// An arrow turning back round a solid color chip: the colors used before.
+    PaletteColorHistory = "palette-color-history" => palettes::PALETTE_COLOR_HISTORY,
+    /// A frame with a smaller frame inside it, up and to the right: the part of the picture the
+    /// view shows.
+    PaletteNavigator = "palette-navigator" => palettes::PALETTE_NAVIGATOR,
+    /// A picture with a push pin through its top: a picture kept beside the canvas to look at.
+    PaletteSubView = "palette-sub-view" => palettes::PALETTE_SUB_VIEW,
+    /// A ball, a block and a cone standing on a shelf: the materials kept for use in pictures.
+    PaletteMaterials = "palette-materials" => palettes::PALETTE_MATERIALS,
+    /// Three steps in a column, each a ring with its line of text, the last one solid: what was
+    /// done, in order.
+    PaletteHistory = "palette-history" => palettes::PALETTE_HISTORY,
+    /// A solid play mark beside three lines: a list of steps that run by themselves.
+    PaletteAutoAction = "palette-auto-action" => palettes::PALETTE_AUTO_ACTION,
+    /// A box with its lid on and a handle slot on its front: items put away to use again.
+    PaletteItemBank = "palette-item-bank" => palettes::PALETTE_ITEM_BANK,
+    /// A cross hair beside two lines of numbers: where the pointer is and what is under it.
+    PaletteInfo = "palette-info" => palettes::PALETTE_INFO,
+    /// Two tracks of different lengths crossed by a playhead with a solid head: the timeline.
+    PaletteTimeline = "palette-timeline" => palettes::PALETTE_TIMELINE,
+    /// Two cels lying one behind the other, peg holes along the top: the cels of an animation.
+    PaletteCels = "palette-cels" => palettes::PALETTE_CELS,
+    /// A curve rising in a corner between two axes, with a solid point at its end: how the pressure
+    /// of the pen sets the width of the stroke.
+    PressureCurve = "pressure-curve" => palettes::PRESSURE_CURVE,
 }
 
 /// Frames drawn without a window or a GPU, for the tests of this module.
