@@ -1328,7 +1328,15 @@ pub fn card(ui: &mut Ui, size: Vec2, card: &Card, theme: &Theme) -> (Option<Card
                 click = Some(CardClick::Favorite);
             }
         }
-        painter.with_clip_rect(name_rect).text(
+        // The detail stops short of the heart and the `>`, never under them.
+        let detail_rect = Rect::from_min_max(
+            name_rect.min,
+            pos2(
+                right - if card.favorite.is_some() { 24.0 } else { 0.0 },
+                name_rect.bottom(),
+            ),
+        );
+        painter.with_clip_rect(detail_rect).text(
             pos2(name_rect.left(), row_y),
             Align2::LEFT_CENTER,
             &card.detail,
