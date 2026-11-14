@@ -535,12 +535,26 @@ fn a_mask_stays_on_its_layer_when_a_moved_layer_changes_resolution() {
     assert_eq!(&wide[..3], &[0, 0, 0], "{wide:?}");
     assert!(wide[5] == wide[6] && wide[5] > 100, "{wide:?}");
     assert_eq!(&wide[9..], &[0; 7], "{wide:?}");
+    // The mask lies over the layer's pixels, their size, as painting a
+    // mask expects.
+    let aligned = |arena: &Arena| {
+        let mask = mask_of(arena, first).unwrap();
+        let (layer, cover) = (raster(arena, first).unwrap(), raster(arena, mask).unwrap());
+        let at = picture::LayerStyle::of(arena.get_by_id(first).unwrap()).offset;
+        assert_eq!(mask_offset(arena, first), Some(at));
+        assert_eq!(
+            [layer.width(), layer.height()],
+            [cover.width(), cover.height()]
+        );
+    };
+    aligned(&arena);
     // Back to the first canvas, cut two pixels on the left: the mask
     // keeps to the drawing there too.
     history.undo(&mut arena).unwrap();
     let edit = resize_canvas(&arena, picture, [6, 2], [-2, 0]).unwrap();
     undo_pair(&mut arena, &mut history, edit);
     assert_eq!(alpha(&arena, 6), [255, 255, 0, 0, 0, 0]);
+    aligned(&arena);
 }
 
 #[test]

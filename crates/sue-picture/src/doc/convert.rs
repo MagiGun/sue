@@ -161,7 +161,7 @@ pub fn resize_canvas(
             } else {
                 info.style.offset
             };
-        edit = mask_resized(arena, info.id, edit, placed, |mask, at| {
+        edit = mask_resized(arena, info.id, edit, [0, 0], placed, |mask, at| {
             let pixels = placed_cover(mask, [at[0] + shift[0], at[1] + shift[1]], size);
             Some((pixels, size))
         })?;
@@ -264,24 +264,37 @@ pub fn resample(
         .then(SetProperty::new(picture, picture::DPI, dpi));
     for info in layers(arena, picture) {
         edit = live_moved(arena, info.id, edit, [0.0, 0.0], scale);
-        // Where the layer sits after: its place scaled with the pixels.
-        let placed =
-            if raster(arena, info.id).is_some_and(|tile| tile.format() == PixelFormat::Rgba8) {
-                [
+        // A raster layer's mask is remade over the layer's pixels, scaled
+        // with them, so it sits where the layer does and has its size, as
+        // painting a mask expects; any other layer's over the canvas.
+        let (from, into, placed) = match raster(arena, info.id) {
+            Some(tile) if tile.format() == PixelFormat::Rgba8 => {
+                let placed = [
                     (info.style.offset[0] as f32 * scale[0]).round() as i64,
                     (info.style.offset[1] as f32 * scale[1]).round() as i64,
-                ]
-            } else {
-                info.style.offset
-            };
-        edit = mask_resized(arena, info.id, edit, placed, |mask, at| {
-            let full = placed_cover(mask, at, [old_w, old_h]);
+                ];
+                (
+                    (info.style.offset, [tile.width(), tile.height()]),
+                    (
+                        placed,
+                        [
+                            ((tile.width() as f32 * scale[0]).round() as u32).max(1),
+                            ((tile.height() as f32 * scale[1]).round() as u32).max(1),
+                        ],
+                    ),
+                    placed,
+                )
+            }
+            _ => (([0, 0], [old_w, old_h]), ([0, 0], size), info.style.offset),
+        };
+        edit = mask_resized(arena, info.id, edit, into.0, placed, |mask, at| {
+            let full = placed_cover(mask, [at[0] - from.0[0], at[1] - from.0[1]], from.1);
             let rgba: Vec<u8> = full
                 .iter()
                 .flat_map(|cover| [255, 255, 255, *cover])
                 .collect();
-            let small = resize_rgba(&rgba, [old_w, old_h], size);
-            Some((small.iter().skip(3).step_by(4).copied().collect(), size))
+            let small = resize_rgba(&rgba, from.1, into.1);
+            Some((small.iter().skip(3).step_by(4).copied().collect(), into.1))
         })?;
         let Some(raster) = raster(arena, info.id) else {
             continue;
@@ -515,13 +528,14 @@ fn placed_cover(mask: &RasterTile2D, at: [i64; 2], size: [u32; 2]) -> Vec<u8> {
 
 /// `edit` followed by giving `layer`'s mask, if it has one, the cover
 /// `remake` makes of it (from its raster and where it sits) as a raster
-/// over the whole new canvas, at its corner, in the mask's own format.
-/// `placed` is where the layer sits once the edit is done: a linked
-/// mask's place is relative to it.
+/// whose top left sits at picture pixel `corner`, in the mask's own
+/// format. `placed` is where the layer sits once the edit is done: a
+/// linked mask's place is relative to it.
 fn mask_resized(
     arena: &Arena,
     layer: EntityId,
     mut edit: Edit,
+    corner: [i64; 2],
     placed: [i64; 2],
     remake: impl Fn(&RasterTile2D, [i64; 2]) -> Option<(Vec<u8>, [u32; 2])>,
 ) -> Result<Edit, String> {
@@ -554,12 +568,11 @@ fn mask_resized(
         fresh,
         tr!("change-canvas-size"),
     ));
-    // At the canvas's corner: a linked mask's place is relative to its
-    // layer's, so it is the layer's place taken back.
+    // At `corner`: a linked mask's place is relative to its layer's.
     let own = if super::mask_linked(arena, layer) {
-        [-placed[0], -placed[1]]
+        [corner[0] - placed[0], corner[1] - placed[1]]
     } else {
-        [0, 0]
+        corner
     };
     for (key, value) in [(picture::X, own[0]), (picture::Y, own[1])] {
         if value != 0
