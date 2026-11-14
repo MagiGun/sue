@@ -270,7 +270,7 @@ The order of work is the plan at the end.
 | Merge with Layer Below, Merge Selected, Merge Visible, Merge Visible to New, Flatten | Layer | done | |
 | Rasterize | Layer > Rasterize | done | |
 | Convert Layer (kind, expression color) | Layer > Convert Layer | partial | Command exists; verify the dialog |
-| Blend modes and opacity | Layer palette | done | |
+| Blend modes and opacity | Layer palette | done | Clip Studio's 28 in its order, Glow Dodge and Add (Glow) included, Brightness as it names it; a folder composites by its own mode or Through, which the palette offers folders from 0.0.8's Layer palette work |
 
 ## Selection
 
