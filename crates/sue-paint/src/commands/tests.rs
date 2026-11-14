@@ -26,6 +26,7 @@ fn menu_commands() -> Vec<String> {
         &mut menus,
         crate::menus::recent_items(&["picture.sue".into()]),
     );
+    crate::menus::set_canvases(&mut menus, &["Illustration".to_owned()]);
     let mut out = Vec::new();
     for menu in &menus {
         walk(&menu.items, &mut out);
@@ -60,7 +61,7 @@ fn every_menu_command_is_registered() {
 /// Animation Cels and light table palettes, and the 3D drawing figure's
 /// tool property. Named one by one, so a command no one can reach cannot
 /// hide behind a prefix.
-const IN_PALETTES: [&str; 18] = [
+const IN_PALETTES: [&str; 16] = [
     "anim.camera.key",
     "anim.camera.unkey",
     "anim.light_table.reverse",
@@ -74,8 +75,6 @@ const IN_PALETTES: [&str; 18] = [
     "anim.light_table.register_general",
     "anim.light_table.deregister",
     "anim.cel.lock",
-    "anim.cel.prev",
-    "anim.cel.next",
     "figure.register_pose",
     "figure.pose_scanner",
     "figure.hand_scanner",
@@ -163,7 +162,6 @@ fn every_command_can_be_reached() {
         [
             "edit.transform.cancel",
             "edit.material.paste",
-            "window.canvas.",
             "figure.flip",
             "figure.reset",
             "figure.preset.",

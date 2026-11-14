@@ -177,6 +177,25 @@ impl SuePaint {
     }
 }
 
+impl SuePaint {
+    /// Keeps Window, Canvas listing the open canvases by the names their
+    /// tabs show; the list's keys are written again when it changed.
+    pub(crate) fn follow_canvases(&mut self, arena: &Arena) {
+        let names: Vec<String> = self
+            .docs
+            .iter()
+            .map(|doc| {
+                arena
+                    .get_by_id(doc.picture)
+                    .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned())
+            })
+            .collect();
+        if crate::menus::set_canvases(&mut self.menus, &names) {
+            self.bound.invalidate();
+        }
+    }
+}
+
 /// What most commands' state looks at, worked out once per item.
 pub(super) struct Basis {
     /// A canvas is open.

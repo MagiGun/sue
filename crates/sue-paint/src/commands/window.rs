@@ -757,16 +757,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     ),
     // The numbered list of open canvases under Window, Canvas, as Clip
     // Studio Paint has it (gap CC-6): `window.canvas.0` is the first.
-    // Hidden until the menu lists the canvases (P3-2 builds that list and
-    // then drops the flag); Auto Actions and scripts can run it already.
     family(
         "window.canvas.",
         "go-to-canvas",
         "picture",
         canvas,
         canvas_state,
-    )
-    .with(Flags::HIDDEN),
+    ),
 ];
 
 #[cfg(test)]
@@ -937,7 +934,7 @@ mod tests {
             .filter(|command| command.flags.has(Flags::HIDDEN))
             .map(|command| command.name)
             .collect();
-        assert_eq!(hidden, ["window.canvas."]);
+        assert!(hidden.is_empty(), "{hidden:?}");
     }
 
     #[test]

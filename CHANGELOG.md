@@ -106,6 +106,18 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint's menus follow Clip Studio Paint's order and read in Title
+  Case. File puts the exports before Import, then the settings, Manage
+  Fonts and Pen Pressure Settings; Import has Pose Scanner. Animation
+  starts with New Animation Layer, lists Play/Stop and each frame move
+  once, and Edit Track has Rename in Timeline Order, Rename in Layer
+  Order and Select Previous and Next Cel. Window names each palette as
+  the palette's own title does (Sub Tool, Tool Property, Layer Property,
+  Auto Action, Information), in groups, and Window, Canvas lists the
+  open canvases with a check on the current one. Help adds the online
+  guide, Tips, the FAQ, Contact and Feedback. Layer Settings has Switch
+  Using Layer Color, Story the Webtoon Reading Direction, and View's
+  first submenu is Rotate/Flip.
 - Sue Paint: Edit, Paste to Shown Position answers to Ctrl+Shift+V, as
   in Clip Studio Paint (it had no key).
 - A Sue project (`.sue`) with pictures is far smaller and the same on
