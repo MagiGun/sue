@@ -5,9 +5,11 @@
 //! A system context on Sue's window is opened through the `wintab` crate,
 //! which loads the driver's `wintab32.dll` from System32 and keeps its own
 //! calls in it (this crate stays free of `unsafe`). Its packet queue is
-//! drained every frame and the latest pressure goes to [`crate::stylus`];
-//! the pen still moves the system pointer, so positions come with the
-//! window's pointer events as before.
+//! drained every frame and every packet's pressure goes to
+//! [`crate::stylus`] in its order, so the latest counts and a tip that
+//! lifted since the last frame leaves the pressure it had for the stroke's
+//! last points; the pen still moves the system pointer, so positions come
+//! with the window's pointer events as before.
 
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
@@ -52,22 +54,24 @@ impl Tablet {
         })
     }
 
-    /// Takes the packets since the last frame: the latest tells how hard
-    /// the pen presses, or that it does not touch.
+    /// Takes the packets since the last frame, each in its turn: the
+    /// latest tells how hard the pen presses, or that it does not touch,
+    /// and the last one that touched what a pen lifted since had (a
+    /// frame's last packet alone would lose that, and a whole tap that
+    /// began and ended between two frames).
     pub(crate) fn poll(&mut self) {
         self.packets.clear();
         if self.context.drain(&mut self.packets) == 0 {
             return;
         }
-        let Some(last) = self.packets.last().copied() else {
-            return;
-        };
-        let raw = { last.normal_pressure };
-        let buttons = { last.buttons };
-        stylus::set(
-            PenSource::WinTab,
-            touching(raw, buttons.is_pressed(0), self.pressure),
-        );
+        for packet in &self.packets {
+            let raw = { packet.normal_pressure };
+            let buttons = { packet.buttons };
+            stylus::set(
+                PenSource::WinTab,
+                touching(raw, buttons.is_pressed(0), self.pressure),
+            );
+        }
     }
 }
 
