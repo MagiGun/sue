@@ -726,7 +726,7 @@ fn rename_cels(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>)
     };
     let arena = &cx.world.arena;
     let Some(folder) = paint.cel_target(arena, sequence, here.track) else {
-        cx.notify(tr!("pick-animation-folder-to-rename-cels"));
+        cx.notify(tr!("no-animation-folder-to-rename-cels"));
         return;
     };
     let (cels, label) = if call.name == "anim.cel.rename_layer" {
