@@ -29,7 +29,7 @@ use egui::{
 use super::focus::focus_ring;
 use super::motion::{self, Motion, Pace};
 use super::toast::{Tone, close_button};
-use super::tokens::{Density, Elevation, Layer, Radius, Space, TextRole};
+use super::tokens::{Density, Elevation, Layer, Radius, Space, TextRole, contrast};
 use crate::{SpringDamper, Theme};
 
 /// How wide a dialog is when it does not say, in points.
@@ -104,6 +104,9 @@ impl<R> DialogResponse<R> {
 enum Kind {
     /// The button that accepts: filled with the text color.
     Primary,
+    /// The button that accepts in a dialog that destroys: filled with
+    /// the danger color (the text color in the shipped themes).
+    Danger,
     /// Every other button: a quiet fill and an outline.
     Secondary,
 }
@@ -707,6 +710,7 @@ impl<'a> Dialog<'a> {
         let mut drawn = Vec::with_capacity(labels.len());
         for ((answer, label, _), place) in labels.iter().zip(places) {
             let (kind, enabled) = match answer {
+                Answer::Accept if self.danger => (Kind::Danger, self.accept_enabled),
                 Answer::Accept => (Kind::Primary, self.accept_enabled),
                 _ => (Kind::Secondary, true),
             };
@@ -880,16 +884,24 @@ fn action_button(
             Stroke::NONE,
             theme.text_disabled(theme.surface(2)),
         ),
-        Kind::Primary => {
-            // The text color as the fill, the page color as the text:
-            // the strongest thing in a monochrome dialog. Hover and
-            // press take it a step toward the panel.
+        Kind::Primary | Kind::Danger => {
+            // The text color (or the danger color) as the fill, and as
+            // the text whichever of the page and text colors reads best
+            // on it: the strongest thing in a monochrome dialog. Hover
+            // and press take it a step toward the panel.
+            let base = if kind == Kind::Danger {
+                theme.danger()
+            } else {
+                theme.text
+            };
             let step = if down { 0.28 } else { 0.14 * lit };
-            (
-                theme.text.lerp_to_gamma(surface, step),
-                Stroke::NONE,
-                theme.void,
-            )
+            let fill = base.lerp_to_gamma(surface, step);
+            let text = if contrast(theme.void, base) >= contrast(theme.text, base) {
+                theme.void
+            } else {
+                theme.text
+            };
+            (fill, Stroke::NONE, text)
         }
         Kind::Secondary => {
             let fill = if down {
