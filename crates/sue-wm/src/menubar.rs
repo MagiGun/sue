@@ -6,14 +6,23 @@
 //! command. Every frame [`MenuBar::ui`] asks the studio for the state of
 //! each command ([`ItemState`]): items whose command the studio cannot run
 //! yet are drawn grayed out and do nothing, so a menu can show the whole
-//! plan of a studio while only part of it works. Menus open on click, follow
-//! the pointer across the bar while one is open, open submenus on hover,
-//! and close on a pick, on Escape or on a click elsewhere. Scripted runs
-//! open a menu with [`MenuBar::open`].
+//! plan of a studio while only part of it works. An item may carry a note
+//! that says why it is grayed ("Needs a selection"), shown when the pointer
+//! or the keyboard rests on it.
+//!
+//! The menus themselves are drawn by [`crate::ui::menu`], the one menu
+//! implementation: they open on click, follow the pointer across the bar
+//! while one is open, open submenus on hover, answer the arrow keys,
+//! Enter, Escape and typed letters, scroll when taller than the window,
+//! and close on a pick, on Escape or on a click elsewhere. Left and Right
+//! on a top level menu go to the menu beside it. Scripted runs open a menu
+//! with [`MenuBar::open`].
 
-use egui::{Align2, Id, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Id, Rect, Sense, Ui, pos2, vec2};
 
 use crate::Theme;
+use crate::ui::menu::{MenuEvent, MenuRequest, MenuState};
+use crate::ui::{Density, Radius, TextRole};
 
 /// One entry of a menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,6 +35,10 @@ pub enum MenuItem {
         command: String,
         /// The shortcut shown at the right, e.g. `Ctrl+N`.
         shortcut: String,
+        /// One line shown when the pointer or the keyboard rests on the
+        /// item, mostly to say why it is grayed out ("Needs a
+        /// selection"); empty for none.
+        note: String,
     },
     /// A nested menu.
     Sub {
@@ -45,6 +58,7 @@ impl MenuItem {
             label: label.into(),
             command: command.into(),
             shortcut: String::new(),
+            note: String::new(),
         }
     }
 
@@ -52,10 +66,36 @@ impl MenuItem {
     #[must_use]
     pub fn key(self, shortcut: impl Into<String>) -> Self {
         match self {
-            Self::Action { label, command, .. } => Self::Action {
+            Self::Action {
+                label,
+                command,
+                note,
+                ..
+            } => Self::Action {
                 label,
                 command,
                 shortcut: shortcut.into(),
+                note,
+            },
+            other => other,
+        }
+    }
+
+    /// The same item with a note, shown when the pointer or the keyboard
+    /// rests on it: why it is grayed out, or what it will do.
+    #[must_use]
+    pub fn note(self, note: impl Into<String>) -> Self {
+        match self {
+            Self::Action {
+                label,
+                command,
+                shortcut,
+                ..
+            } => Self::Action {
+                label,
+                command,
+                shortcut,
+                note: note.into(),
             },
             other => other,
         }
@@ -69,7 +109,9 @@ impl MenuItem {
         }
     }
 
-    fn label(&self) -> &str {
+    /// What people read (empty for a separator).
+    #[must_use]
+    pub fn label(&self) -> &str {
         match self {
             Self::Action { label, .. } | Self::Sub { label, .. } => label,
             Self::Separator => "",
@@ -143,16 +185,22 @@ impl ItemState {
     }
 }
 
-/// Height of a menu row.
-const ROW: f32 = 24.0;
-/// Height of a separator.
-const GAP: f32 = 9.0;
+/// How tall the rows of a menu are: compact on a desktop, finger sized on
+/// a touch screen.
+fn menu_density(ctx: &egui::Context) -> Density {
+    if crate::widgets::is_touch(ctx) {
+        Density::Touch
+    } else {
+        Density::Compact
+    }
+}
 
-/// A menu bar's state between frames: which menu and submenus are open.
+/// A menu bar's state between frames: which menu is open, and the state of
+/// that menu (its open submenus, the row the keyboard is on).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MenuBar {
     open: Option<usize>,
-    path: Vec<usize>,
+    menu: MenuState,
 }
 
 impl MenuBar {
@@ -162,35 +210,43 @@ impl MenuBar {
         Self::default()
     }
 
-    /// Opens the menu titled `title` (scripted runs). Returns `false` if
-    /// there is none.
+    /// Opens the menu titled `title` (scripted runs), at once and without
+    /// a fade. Returns `false` if there is none.
     pub fn open(&mut self, menus: &[Menu], title: &str) -> bool {
         let found = menus
             .iter()
             .position(|menu| menu.title.eq_ignore_ascii_case(title));
         if found.is_some() {
             self.open = found;
-            self.path.clear();
+            self.menu.open_at_once();
         }
         found.is_some()
     }
 
-    /// Opens a [`Self::dropdown`] menu (scripted runs, a shortcut).
+    /// Opens a [`Self::dropdown`] menu (scripted runs, a shortcut), at once
+    /// and without a fade.
     pub fn open_dropdown(&mut self) {
         self.open = Some(0);
-        self.path.clear();
+        self.menu.open_at_once();
     }
 
     /// Closes every menu.
     pub fn close(&mut self) {
         self.open = None;
-        self.path.clear();
+        self.menu.close();
     }
 
     /// `true` while a menu is open.
     #[must_use]
     pub fn is_open(&self) -> bool {
         self.open.is_some()
+    }
+
+    /// The open menu's state: its open submenus and the row the pointer or
+    /// the keyboard is on (tests, scripted runs).
+    #[must_use]
+    pub fn state(&self) -> &MenuState {
+        &self.menu
     }
 
     /// Draws the bar into `rect` and any open menu over everything. Returns
@@ -204,10 +260,17 @@ impl MenuBar {
         theme: &Theme,
     ) -> Option<String> {
         let base = ui.scope_id().with("sue-menubar");
+        if self.open.is_some_and(|open| open >= menus.len()) {
+            self.close();
+        }
         let painter = ui.painter().with_clip_rect(rect);
-        let font = theme.font(theme.ui_size);
+        let font = theme.text_font(TextRole::Body);
+        let radius = theme.radius(Radius::Md);
         let mut x = rect.left() + 4.0;
         let mut titles = Vec::with_capacity(menus.len());
+        // Only a pointer that moves takes the bar from menu to menu: one
+        // resting on a title leaves the keyboard free to go elsewhere.
+        let moved = ui.input(|input| input.pointer.delta() != egui::Vec2::ZERO);
         for (index, menu) in menus.iter().enumerate() {
             let galley = painter.layout_no_wrap(menu.title.clone(), font.clone(), theme.text);
             let title = Rect::from_min_size(
@@ -216,38 +279,88 @@ impl MenuBar {
             );
             x = title.right();
             let response = ui.interact(title, base.with(("title", index)), Sense::click());
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::Role::MenuItem, true, menu.title.as_str())
+            });
             if response.clicked() {
-                self.open = if self.open == Some(index) {
-                    None
+                if self.open == Some(index) {
+                    self.close();
                 } else {
-                    Some(index)
-                };
-                self.path.clear();
-            } else if response.hovered() && self.open.is_some() && self.open != Some(index) {
+                    self.open = Some(index);
+                    self.menu.open();
+                }
+            } else if moved && response.hovered() && self.open.is_some() && self.open != Some(index)
+            {
+                // While a menu is open, the pointer moving along the bar
+                // shows the menu under it.
                 self.open = Some(index);
-                self.path.clear();
+                self.menu.switch(&menu.items, false);
             }
             let shown = self.open == Some(index);
             if shown || response.hovered() {
                 painter.rect_filled(
                     title,
-                    theme.control_radius,
-                    if shown { theme.active } else { theme.hover },
+                    radius,
+                    if shown {
+                        theme.fill_selected()
+                    } else {
+                        theme.fill_hover()
+                    },
                 );
             }
             painter.galley(title.center() - galley.size() / 2.0, galley, theme.text);
             titles.push(title);
         }
+        let Some(open) = self.open else {
+            self.menu.idle(ui.ctx());
+            return None;
+        };
+        let event = self.menu.show(
+            ui.ctx(),
+            &MenuRequest {
+                id: base.with(("menu", open)),
+                anchor: titles[open].left_bottom() + vec2(0.0, 1.0),
+                owner: rect,
+                items: &menus[open].items,
+                state,
+                density: menu_density(ui.ctx()),
+            },
+            theme,
+        );
+        self.answer(event, menus)
+    }
+
+    /// What the bar does about what its open menu did.
+    fn answer(&mut self, event: MenuEvent, menus: &[Menu]) -> Option<String> {
         let open = self.open?;
-        let menu = menus.get(open)?;
-        let anchor = titles[open].left_bottom() + vec2(0.0, 1.0);
-        self.popups(ui, base, rect, anchor, &menu.items, state, theme)
+        let count = menus.len();
+        match event {
+            MenuEvent::Open => None,
+            MenuEvent::Picked(command) => {
+                self.close();
+                Some(command)
+            }
+            MenuEvent::Closed => {
+                self.close();
+                None
+            }
+            MenuEvent::Previous | MenuEvent::Next => {
+                let next = if event == MenuEvent::Next {
+                    (open + 1) % count
+                } else {
+                    (open + count - 1) % count
+                };
+                self.open = Some(next);
+                self.menu.switch(&menus[next].items, true);
+                // The new menu is drawn from the next frame on.
+                None
+            }
+        }
     }
 
     /// A single menu under a button the caller drew (the Sue button):
     /// `toggle` is the button's click, which opens or closes it. Returns
     /// the command of the item picked this frame.
-    #[allow(clippy::too_many_arguments, reason = "a menu under a button")]
     pub fn dropdown(
         &mut self,
         ui: &mut Ui,
@@ -258,261 +371,52 @@ impl MenuBar {
         theme: &Theme,
     ) -> Option<String> {
         if toggle {
-            self.open = if self.open.is_some() { None } else { Some(0) };
-            self.path.clear();
-        }
-        self.open?;
-        let base = ui.scope_id().with("sue-dropdown");
-        let anchor = button.left_bottom() + vec2(0.0, 1.0);
-        self.popups(ui, base, button, anchor, items, state, theme)
-    }
-
-    /// The open menu at `anchor` and its open submenus; closes on a pick,
-    /// on Escape or on a click outside them and `owner` (the bar or the
-    /// button).
-    #[allow(clippy::too_many_arguments, reason = "the popups of a nested menu")]
-    fn popups(
-        &mut self,
-        ui: &Ui,
-        base: Id,
-        owner: Rect,
-        mut anchor: Pos2,
-        items: &[MenuItem],
-        state: &dyn Fn(&str) -> ItemState,
-        theme: &Theme,
-    ) -> Option<String> {
-        let ctx = ui.ctx().clone();
-        let mut areas = vec![owner];
-        let mut picked = None;
-        let mut level_items = items;
-        for level in 0..=self.path.len() {
-            let (area, sub, chosen) =
-                self.popup(&ctx, base, level, anchor, level_items, state, theme);
-            areas.push(area);
-            if chosen.is_some() {
-                picked = chosen;
-            }
-            match sub {
-                Some((_, row)) => {
-                    if self.path.len() <= level {
-                        break;
-                    }
-                    let Some(MenuItem::Sub { items, .. }) = level_items.get(self.path[level])
-                    else {
-                        self.path.truncate(level);
-                        break;
-                    };
-                    anchor = pos2(area.right() - 2.0, row.top() - 4.0);
-                    level_items = items;
-                }
-                None => {
-                    self.path.truncate(level);
-                    break;
-                }
+            if self.open.is_some() {
+                self.close();
+            } else {
+                self.open = Some(0);
+                self.menu.open();
             }
         }
-        let (clicked, escape, pointer) = ctx.input(|input| {
-            (
-                input.pointer.any_click(),
-                input.key_pressed(egui::Key::Escape),
-                input.pointer.interact_pos(),
-            )
-        });
-        let inside = pointer.is_some_and(|at| areas.iter().any(|area| area.contains(at)));
-        if picked.is_some() || escape || (clicked && !inside) {
-            self.close();
+        if self.open.is_none() {
+            self.menu.idle(ui.ctx());
+            return None;
         }
-        ctx.request_repaint();
-        picked
-    }
-
-    /// One open menu at `level`: returns its rect, the open submenu row (if
-    /// any) and the command picked.
-    #[allow(clippy::too_many_arguments, reason = "one popup of a nested menu")]
-    fn popup(
-        &mut self,
-        ctx: &egui::Context,
-        base: Id,
-        level: usize,
-        anchor: Pos2,
-        items: &[MenuItem],
-        state: &dyn Fn(&str) -> ItemState,
-        theme: &Theme,
-    ) -> (Rect, Option<(usize, Rect)>, Option<String>) {
-        let font = theme.font(theme.ui_size);
-        // For a finger: taller rows, and no keyboard shortcuts to read.
-        let touch = crate::widgets::is_touch(ctx);
-        let row_height = if touch { 44.0 } else { ROW };
-        let width = ctx.fonts_mut(|fonts| {
-            items
-                .iter()
-                .map(|item| {
-                    let label = fonts
-                        .layout_no_wrap(item.label().to_owned(), font.clone(), theme.text)
-                        .size()
-                        .x;
-                    let right = match item {
-                        MenuItem::Action { shortcut, .. } if !shortcut.is_empty() && !touch => {
-                            fonts
-                                .layout_no_wrap(shortcut.clone(), font.clone(), theme.text)
-                                .size()
-                                .x
-                                + 32.0
-                        }
-                        MenuItem::Sub { .. } => 28.0,
-                        _ => 0.0,
-                    };
-                    label + right + 44.0
-                })
-                .fold(180.0_f32, f32::max)
-        });
-        let height: f32 = items
-            .iter()
-            .map(|item| {
-                if matches!(item, MenuItem::Separator) {
-                    GAP
-                } else {
-                    row_height
-                }
-            })
-            .sum::<f32>()
-            + 8.0;
-        let screen = ctx.content_rect();
-        let mut origin = anchor;
-        origin.x = origin
-            .x
-            .min(screen.right() - width - 2.0)
-            .max(screen.left());
-        origin.y = origin
-            .y
-            .min(screen.bottom() - height - 2.0)
-            .max(screen.top());
-        let area = Rect::from_min_size(origin, vec2(width, height));
-        let mut sub = None;
-        let mut picked = None;
-        egui::Area::new(base.with(("popup", level)))
-            .fade_in(false)
-            .order(Order::Tooltip)
-            .fixed_pos(origin)
-            .show(ctx, |ui| {
-                let painter = ui.painter().clone();
-                painter.rect_filled(
-                    area.translate(vec2(0.0, 3.0)).expand(2.0),
-                    theme.control_radius + 2.0,
-                    theme.shadow.gamma_multiply(0.35),
-                );
-                painter.rect_filled(area, theme.control_radius, theme.pill);
-                painter.rect_stroke(
-                    area,
-                    theme.control_radius,
-                    theme.hairline(),
-                    StrokeKind::Inside,
-                );
-                ui.allocate_rect(area, Sense::hover());
-                let mut y = area.top() + 4.0;
-                for (index, item) in items.iter().enumerate() {
-                    if matches!(item, MenuItem::Separator) {
-                        let line = y + GAP / 2.0;
-                        painter.hline(
-                            (area.left() + 8.0)..=(area.right() - 8.0),
-                            line,
-                            theme.hairline(),
-                        );
-                        y += GAP;
-                        continue;
-                    }
-                    let row = Rect::from_min_size(
-                        pos2(area.left() + 4.0, y),
-                        vec2(width - 8.0, row_height),
-                    );
-                    y += row_height;
-                    let item_state = match item {
-                        MenuItem::Action { command, .. } => state(command),
-                        MenuItem::Sub { .. } => {
-                            if item.commands().iter().any(|command| state(command).enabled) {
-                                ItemState::on()
-                            } else {
-                                ItemState::off()
-                            }
-                        }
-                        MenuItem::Separator => ItemState::off(),
-                    };
-                    let response =
-                        ui.interact(row, base.with(("item", level, index)), Sense::click());
-                    let open_sub = matches!(item, MenuItem::Sub { .. })
-                        && self.path.get(level) == Some(&index);
-                    if response.hovered() {
-                        if matches!(item, MenuItem::Sub { .. }) {
-                            self.path.truncate(level);
-                            self.path.push(index);
-                        } else if self.path.len() > level {
-                            self.path.truncate(level);
-                        }
-                    }
-                    if (response.hovered() || open_sub) && item_state.enabled {
-                        painter.rect_filled(row, theme.control_radius, theme.hover);
-                    }
-                    let color = if item_state.enabled {
-                        theme.text
-                    } else {
-                        theme.muted.gamma_multiply(0.75)
-                    };
-                    if item_state.checked == Some(true) {
-                        let mark = row.left_center() + vec2(13.0, 0.0);
-                        painter.line(
-                            vec![
-                                mark + vec2(-4.0, 0.0),
-                                mark + vec2(-1.0, 3.5),
-                                mark + vec2(5.0, -4.0),
-                            ],
-                            Stroke::new(1.5, color),
-                        );
-                    }
-                    painter.text(
-                        row.left_center() + vec2(26.0, 0.0),
-                        Align2::LEFT_CENTER,
-                        item.label(),
-                        font.clone(),
-                        color,
-                    );
-                    match item {
-                        MenuItem::Action {
-                            command, shortcut, ..
-                        } => {
-                            if !shortcut.is_empty() && !touch {
-                                painter.text(
-                                    row.right_center() - vec2(10.0, 0.0),
-                                    Align2::RIGHT_CENTER,
-                                    shortcut,
-                                    font.clone(),
-                                    theme.muted,
-                                );
-                            }
-                            if response.clicked() && item_state.enabled {
-                                picked = Some(command.clone());
-                            }
-                        }
-                        MenuItem::Sub { .. } => {
-                            let tip = row.right_center() - vec2(12.0, 0.0);
-                            painter.line(
-                                vec![tip + vec2(-3.0, -4.0), tip, tip + vec2(-3.0, 4.0)],
-                                Stroke::new(1.2, color),
-                            );
-                            if self.path.get(level) == Some(&index) {
-                                sub = Some((index, row));
-                            }
-                        }
-                        MenuItem::Separator => {}
-                    }
-                }
-            });
-        (area, sub, picked)
+        let base: Id = ui.scope_id().with("sue-dropdown");
+        let event = self.menu.show(
+            ui.ctx(),
+            &MenuRequest {
+                id: base,
+                anchor: button.left_bottom() + vec2(0.0, 1.0),
+                owner: button,
+                items,
+                state,
+                density: menu_density(ui.ctx()),
+            },
+            theme,
+        );
+        match event {
+            MenuEvent::Picked(command) => {
+                self.close();
+                Some(command)
+            }
+            MenuEvent::Closed => {
+                self.close();
+                None
+            }
+            // One menu has no menu beside it.
+            MenuEvent::Open | MenuEvent::Previous | MenuEvent::Next => None,
+        }
     }
 }
 
 /// Shows `items` as a right-click menu in `ui` (inside egui's context menu),
 /// nested menus opening to the side, each item grayed or checked as
-/// `state` says. Returns the command picked; the menu closes then.
+/// `state` says, its note shown on hover. Returns the command picked; the
+/// menu closes then.
+///
+/// New code opens its right-click menus with [`crate::ui::context_menu`],
+/// which draws them like every other menu and answers the keyboard.
 pub fn context_items(
     ui: &mut Ui,
     items: &[MenuItem],
@@ -525,6 +429,7 @@ pub fn context_items(
                 label,
                 command,
                 shortcut,
+                note,
             } => {
                 let now = state(command);
                 let mut button =
@@ -532,7 +437,13 @@ pub fn context_items(
                 if !shortcut.is_empty() {
                     button = button.shortcut_text(shortcut.as_str());
                 }
-                if ui.add_enabled(now.enabled, button).clicked() {
+                let mut response = ui.add_enabled(now.enabled, button);
+                if !note.is_empty() {
+                    response = response
+                        .on_hover_text(note.as_str())
+                        .on_disabled_hover_text(note.as_str());
+                }
+                if response.clicked() {
                     picked = Some(command.clone());
                     ui.close();
                 }
@@ -555,6 +466,7 @@ pub fn context_items(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::{Event, Key, Modifiers, Pos2, RawInput};
 
     fn menus() -> Vec<Menu> {
         vec![
@@ -577,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn items_list_their_commands_and_keys() {
+    fn items_list_their_commands_keys_and_notes() {
         let menus = menus();
         let commands: Vec<&str> = menus[0].items.iter().flat_map(MenuItem::commands).collect();
         assert_eq!(commands, ["file.new", "file.export.png", "file.export.psd"]);
@@ -587,10 +499,27 @@ mod tests {
                 label: "New...".to_owned(),
                 command: "file.new".to_owned(),
                 shortcut: "Ctrl+N".to_owned(),
+                note: String::new(),
             }
         );
-        // Separators and submenus take no shortcut.
+        // A note and a key do not undo each other.
+        let item = MenuItem::action("Crop", "edit.crop")
+            .note("Needs a selection")
+            .key("Ctrl+K");
+        assert_eq!(
+            item,
+            MenuItem::Action {
+                label: "Crop".to_owned(),
+                command: "edit.crop".to_owned(),
+                shortcut: "Ctrl+K".to_owned(),
+                note: "Needs a selection".to_owned(),
+            }
+        );
+        assert_eq!(item.label(), "Crop");
+        // Separators and submenus take no shortcut and no note.
         assert_eq!(MenuItem::Separator.key("Ctrl+X"), MenuItem::Separator);
+        assert_eq!(MenuItem::Separator.note("Why"), MenuItem::Separator);
+        assert_eq!(MenuItem::Separator.label(), "");
     }
 
     #[test]
@@ -606,27 +535,121 @@ mod tests {
         assert!(!bar.is_open());
     }
 
-    #[test]
-    fn a_frame_draws_an_open_menu_and_grays_unknown_commands() {
-        let menus = menus();
+    /// One frame of a bar 800 points wide with `events`.
+    fn frame(
+        ctx: &egui::Context,
+        bar: &mut MenuBar,
+        menus: &[Menu],
+        events: Vec<Event>,
+    ) -> Option<String> {
         let theme = Theme::from_rice(&sue_rice::RiceSchema::new());
-        let mut bar = MenuBar::new();
-        bar.open(&menus, "File");
-        let ctx = egui::Context::default();
-        let mut picked = Some("unset".to_owned());
         let state = |command: &str| {
-            if command == "file.new" {
+            if command == "layer.delete" || command.starts_with("file.") {
                 ItemState::on()
             } else {
                 ItemState::off()
             }
         };
-        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut picked = None;
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+            events,
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| {
             let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 24.0));
-            picked = bar.ui(ui, rect, &menus, &state, &theme);
+            picked = bar.ui(ui, rect, menus, &state, &theme);
         });
         output.textures_delta.clear();
-        assert_eq!(picked, None, "nothing is picked without a click");
+        picked
+    }
+
+    fn key(key: Key) -> Event {
+        Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn a_frame_draws_an_open_menu_and_picks_nothing_without_input() {
+        let menus = menus();
+        let ctx = egui::Context::default();
+        let mut bar = MenuBar::new();
+        bar.open(&menus, "File");
+        assert_eq!(frame(&ctx, &mut bar, &menus, Vec::new()), None);
         assert!(bar.is_open());
+    }
+
+    #[test]
+    fn the_keyboard_walks_the_bar_and_picks() {
+        let menus = menus();
+        let ctx = egui::Context::default();
+        let mut bar = MenuBar::new();
+        bar.open(&menus, "File");
+        frame(&ctx, &mut bar, &menus, Vec::new());
+        // Down lands on the first row, Down again skips the line.
+        frame(&ctx, &mut bar, &menus, vec![key(Key::ArrowDown)]);
+        assert_eq!(bar.state().cursor(), Some((0, 0)));
+        frame(&ctx, &mut bar, &menus, vec![key(Key::ArrowDown)]);
+        assert_eq!(bar.state().cursor(), Some((0, 2)));
+        // Right opens Export on its first row; Left comes back.
+        frame(&ctx, &mut bar, &menus, vec![key(Key::ArrowRight)]);
+        assert_eq!(bar.state().path(), [2]);
+        assert_eq!(bar.state().cursor(), Some((1, 0)));
+        frame(&ctx, &mut bar, &menus, vec![key(Key::ArrowLeft)]);
+        assert_eq!(bar.state().path(), [] as [usize; 0]);
+        assert_eq!(bar.state().cursor(), Some((0, 2)));
+        // Left on the top level goes to the menu before, wrapping to Layer.
+        frame(&ctx, &mut bar, &menus, vec![key(Key::ArrowLeft)]);
+        assert_eq!(bar.open, Some(1));
+        assert_eq!(bar.state().cursor(), Some((0, 0)));
+        // Enter picks Delete and closes the bar.
+        let picked = frame(&ctx, &mut bar, &menus, vec![key(Key::Enter)]);
+        assert_eq!(picked.as_deref(), Some("layer.delete"));
+        assert!(!bar.is_open());
+    }
+
+    #[test]
+    fn a_pointer_resting_on_a_title_leaves_the_keyboard_free() {
+        let menus = menus();
+        let ctx = egui::Context::default();
+        let mut bar = MenuBar::new();
+        bar.open(&menus, "File");
+        // The pointer comes to rest on File's title.
+        frame(
+            &ctx,
+            &mut bar,
+            &menus,
+            vec![Event::PointerMoved(pos2(10.0, 12.0))],
+        );
+        frame(&ctx, &mut bar, &menus, Vec::new());
+        assert_eq!(bar.open, Some(0));
+        frame(&ctx, &mut bar, &menus, vec![key(Key::ArrowRight)]);
+        frame(&ctx, &mut bar, &menus, Vec::new());
+        frame(&ctx, &mut bar, &menus, Vec::new());
+        assert_eq!(bar.open, Some(1), "Right went to Layer, and it stays");
+        // A pointer that moves over File's title shows File again.
+        frame(
+            &ctx,
+            &mut bar,
+            &menus,
+            vec![Event::PointerMoved(pos2(12.0, 12.0))],
+        );
+        assert_eq!(bar.open, Some(0));
+    }
+
+    #[test]
+    fn escape_closes_the_bar() {
+        let menus = menus();
+        let ctx = egui::Context::default();
+        let mut bar = MenuBar::new();
+        bar.open(&menus, "Layer");
+        frame(&ctx, &mut bar, &menus, Vec::new());
+        assert_eq!(frame(&ctx, &mut bar, &menus, vec![key(Key::Escape)]), None);
+        assert!(!bar.is_open());
     }
 }

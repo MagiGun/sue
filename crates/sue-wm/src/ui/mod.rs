@@ -19,9 +19,14 @@ pub mod focus;
 pub mod motion;
 pub mod tokens;
 
+pub mod menu;
+pub mod tooltip;
+
 pub use focus::{FocusScope, Roving, focus_ring, focus_visible, paint_focus_ring, watch_focus};
+pub use menu::{MenuEvent, MenuRequest, MenuState, context_menu, popover};
 pub use motion::{Motion, Pace};
 pub use tokens::{
     Density, EDGE_CONTRAST, Elevation, Layer, MIN_TEXT_SIZE, Radius, Space, TEXT_CONTRAST,
     TextRole, contrast, nested_radius,
 };
+pub use tooltip::{Side, Tip, tip_beside, tooltip};
