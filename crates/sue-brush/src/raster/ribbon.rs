@@ -71,6 +71,13 @@ impl<'a> Ribbon<'a> {
         }
     }
 
+    /// How far past its radius a ribbon of `radius` can still lay paint:
+    /// half a texel of the picture across the line (where bilinear
+    /// reading fades the picture's edge out), and at least a pixel.
+    fn fringe(&self, radius: f32) -> f32 {
+        (radius / self.image.height() as f32).max(1.0)
+    }
+
     /// The widest radius along the painted segments.
     fn widest(&self) -> f32 {
         self.painted()
@@ -92,7 +99,7 @@ struct Nearest {
 
 impl Shape for Ribbon<'_> {
     fn bounds(&self) -> PixelRect {
-        let reach = self.widest() + 2.0;
+        let reach = self.widest() + self.fringe(self.widest()) + 1.0;
         let mut min = [f32::INFINITY; 2];
         let mut max = [f32::NEG_INFINITY; 2];
         let painted = self.painted();
@@ -115,7 +122,7 @@ impl Shape for Ribbon<'_> {
     }
 
     fn span(&self, y: f32) -> Option<(f32, f32)> {
-        let reach = self.widest() + 2.0;
+        let reach = self.widest() + self.fringe(self.widest()) + 1.0;
         self.painted()
             .windows(2)
             .filter_map(|w| segment_span(w[0].disc.at, w[1].disc.at, reach, y))
@@ -177,7 +184,7 @@ impl Shape for Ribbon<'_> {
         } else {
             near.distance
         };
-        if radius <= 0.0 || distance > radius + 1.0 {
+        if radius <= 0.0 || distance > radius + self.fringe(radius) {
             return 0.0;
         }
         let strength = from.disc.strength + (to.disc.strength - from.disc.strength) * t;
@@ -251,6 +258,40 @@ mod tests {
                 .count();
             assert!(partial <= 2, "{shift}: {partial} pixels on the ramps");
         }
+    }
+
+    #[test]
+    fn a_ribbon_wider_than_its_picture_fades_out_without_a_step() {
+        // Four texels across a ribbon 20 pixels wide: each texel is five
+        // pixels, and the bilinear fade past the edge is two and a half.
+        let image = TipImage::from_coverage(4, 4, &[255; 16]).expect("a full picture");
+        let points = [
+            RibbonPoint {
+                disc: Disc::new([0.0, 50.0], 10.0, 1.0),
+                arc: 0.0,
+            },
+            RibbonPoint {
+                disc: Disc::new([100.0, 50.0], 10.0, 1.0),
+                arc: 100.0,
+            },
+        ];
+        let ribbon = Ribbon::new(&points, &image, 10.0);
+        let mut last = 1.0;
+        for k in 0..400 {
+            let c = ribbon.coverage([50.0, 50.0 + k as f32 * 0.05]);
+            assert!(c <= last + 1.0e-6, "it never rises outward");
+            assert!(
+                last - c < 0.03,
+                "a step of {} at {}",
+                last - c,
+                k as f32 * 0.05
+            );
+            last = c;
+        }
+        assert_eq!(last, 0.0);
+        // Everything it lays lies inside its bounds.
+        let bounds = ribbon.bounds();
+        assert!(bounds.y1 as f32 >= 50.0 + 10.0 + 2.5 && bounds.y0 as f32 <= 50.0 - 12.5);
     }
 
     #[test]
