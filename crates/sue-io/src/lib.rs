@@ -24,6 +24,7 @@ pub mod clip;
 mod formats;
 mod ingest;
 mod jxl;
+mod layered;
 pub mod pdf;
 pub mod picture_ops;
 mod pictures;
@@ -54,6 +55,7 @@ pub use jxl::{
     DC_PREVIEW_SCALE, DecodedJxl, FourCc, JXL_CODESTREAM_SIGNATURE, JXL_CONTAINER_SIGNATURE,
     JxlError, JxlImageInfo, JxlPipeline, JxlProbe, NativeJxlPipeline, ProgressiveTarget, probe_jxl,
 };
+pub use layered::{IMPORT_FINGERPRINT, LayeredFormat};
 pub use pictures::{
     PICTURE_SAVE_TYPES, PictureFormat, decode_picture, encode_apng, encode_as,
     encode_gif_animation, encode_picture, encode_webp_animation,
