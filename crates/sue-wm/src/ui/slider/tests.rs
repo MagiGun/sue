@@ -70,13 +70,51 @@ fn a_logarithmic_scale_gives_the_small_end_room() {
 #[test]
 fn a_key_steps_by_the_step_or_a_hundredth_of_the_track() {
     let scale = Scale::new(&(0.0..=200.0), false);
-    assert_eq!(stepped(50.0, 3, scale, Some(5.0)), 65.0);
-    assert_eq!(stepped(50.0, -1, scale, None), 48.0);
-    assert_eq!(stepped(199.0, 10, scale, Some(1.0)), 200.0);
-    assert_eq!(stepped(1.0, -10, scale, None), 0.0);
+    assert_eq!(stepped(50.0, 3, scale, Some(5.0), 0), 65.0);
+    assert_eq!(stepped(50.0, -1, scale, None, 0), 48.0);
+    assert_eq!(stepped(199.0, 10, scale, Some(1.0), 0), 200.0);
+    assert_eq!(stepped(1.0, -10, scale, None, 0), 0.0);
     assert_eq!(rounded(-0.0004, 2), 0.0);
     assert!(rounded(-0.0004, 2).is_sign_positive());
     assert_eq!(rounded(2.345_67, 2), 2.35);
+}
+
+#[test]
+fn a_key_moves_a_value_that_rounding_would_hold_still() {
+    // A hundredth of a short track is less than the last digit kept.
+    let short = Scale::new(&(0.0..=10.0), false);
+    assert_eq!(stepped(4.0, 1, short, None, 0), 5.0);
+    assert_eq!(stepped(4.0, -1, short, None, 0), 3.0);
+    // The small end of a logarithmic size track moves a whole pixel.
+    let sizes = Scale::new(&(1.0..=1000.0), true);
+    assert_eq!(stepped(1.0, 1, sizes, None, 0), 2.0);
+    // At an end it stays there.
+    assert_eq!(stepped(10.0, 1, short, None, 0), 10.0);
+    assert_eq!(stepped(0.0, -1, short, None, 0), 0.0);
+}
+
+#[test]
+fn a_rounded_value_stays_inside_the_range() {
+    let scale = Scale::new(&(0.3..=10.0), false);
+    assert_eq!(value_at(scale, 0.0, 0), 0.3, "0 would lie below the range");
+    assert_eq!(value_at(scale, 1.0, 0), 10.0);
+    assert_eq!(value_at(scale, 0.25, 0), 3.0);
+}
+
+#[test]
+fn the_keys_move_a_short_slider_that_keeps_no_decimals() {
+    let mut harness = Harness::new();
+    let mut value = 4.0;
+    let draw = |ui: &mut Ui, theme: &Theme, value: &mut f64| {
+        slider("short", value, 0.0..=10.0)
+            .field(false)
+            .show_at(ui, place(), theme)
+    };
+    harness.frame(vec![], |ui, theme| draw(ui, theme, &mut value));
+    harness.key(Key::Tab, |ui, theme| draw(ui, theme, &mut value));
+    harness.frame(vec![], |ui, theme| draw(ui, theme, &mut value));
+    harness.key(Key::ArrowRight, |ui, theme| draw(ui, theme, &mut value));
+    assert_eq!(value, 5.0);
 }
 
 // ----- The slider ----------------------------------------------------------------

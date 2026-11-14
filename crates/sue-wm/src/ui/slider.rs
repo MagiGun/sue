@@ -169,13 +169,29 @@ fn keyed(ui: &Ui, id: Id, focused: bool) -> (i64, Option<bool>) {
 }
 
 /// `value` moved by `steps` keys: `step` each where one is given, else a
-/// hundredth of the track.
-fn stepped(value: f64, steps: i64, scale: Scale, step: Option<f64>) -> f64 {
+/// hundredth of the track, rounded to `decimals` digits and kept inside
+/// the range. Where rounding would undo the move (a hundredth of a short
+/// track, or the small end of a logarithmic one), each key moves one unit
+/// of the last digit kept instead, so a key always moves a value that can
+/// move.
+fn stepped(value: f64, steps: i64, scale: Scale, step: Option<f64>, decimals: usize) -> f64 {
     let moved = match step {
         Some(step) if step > 0.0 => value + steps as f64 * step,
         _ => scale.from_unit(scale.to_unit(value) + steps as f64 * KEY_SHARE),
     };
-    scale.clamp(moved)
+    let current = rounded(value, decimals);
+    let mut next = rounded(moved, decimals);
+    if steps != 0 && next == current {
+        let unit = 10_f64.powi(-(decimals.min(9) as i32));
+        next = rounded(current + steps as f64 * unit, decimals);
+    }
+    scale.clamp(next)
+}
+
+/// The value at `t` along the track of `scale`, rounded to `decimals`
+/// digits and kept inside the range (rounding can leave it).
+fn value_at(scale: Scale, t: f64, decimals: usize) -> f64 {
+    scale.clamp(rounded(scale.from_unit(t), decimals))
 }
 
 /// Where along `track` the pointer holds the control behind `response`,
@@ -500,11 +516,11 @@ impl<'a> Slider<'a> {
         let old = *self.value;
         let now = scale.to_unit(old);
         if enabled && let Some(t) = held_share(ui, &response, track, false, now) {
-            *self.value = rounded(scale.from_unit(t), self.decimals);
+            *self.value = value_at(scale, t, self.decimals);
         }
         let (steps, end) = keyed(ui, id, enabled && response.has_focus());
         if steps != 0 {
-            *self.value = rounded(stepped(*self.value, steps, scale, self.step), self.decimals);
+            *self.value = stepped(*self.value, steps, scale, self.step, self.decimals);
         }
         if let Some(end) = end {
             *self.value = if end { scale.high } else { scale.low };
@@ -664,11 +680,11 @@ impl<'a> TallSlider<'a> {
         if enabled
             && let Some(t) = held_share(ui, &response, geometry.track, true, scale.to_unit(old))
         {
-            *self.value = rounded(scale.from_unit(t), self.decimals);
+            *self.value = value_at(scale, t, self.decimals);
         }
         let (steps, end) = keyed(ui, id, enabled && response.has_focus());
         if steps != 0 {
-            *self.value = rounded(stepped(*self.value, steps, scale, self.step), self.decimals);
+            *self.value = stepped(*self.value, steps, scale, self.step, self.decimals);
         }
         if let Some(end) = end {
             *self.value = if end { scale.high } else { scale.low };
@@ -995,7 +1011,7 @@ impl<'a> RangeSlider<'a> {
             let current = if high { *self.high } else { *self.low };
             let mut value = current;
             if steps != 0 {
-                value = rounded(stepped(value, steps, scale, self.step), self.decimals);
+                value = stepped(value, steps, scale, self.step, self.decimals);
             }
             if let Some(end) = end {
                 value = if end { scale.high } else { scale.low };
@@ -1183,11 +1199,11 @@ impl<'a> Wedge<'a> {
             .with_new_rect(rect);
         let old = *self.value;
         if enabled && let Some(t) = held_share(ui, &response, shape, false, scale.to_unit(old)) {
-            *self.value = rounded(scale.from_unit(t), self.decimals);
+            *self.value = value_at(scale, t, self.decimals);
         }
         let (steps, end) = keyed(ui, id, enabled && response.has_focus());
         if steps != 0 {
-            *self.value = rounded(stepped(*self.value, steps, scale, self.step), self.decimals);
+            *self.value = stepped(*self.value, steps, scale, self.step, self.decimals);
         }
         if let Some(end) = end {
             *self.value = if end { scale.high } else { scale.low };
