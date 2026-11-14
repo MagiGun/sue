@@ -4248,6 +4248,117 @@ mod tests {
             "it goes by the corner: {rest:?}"
         );
     }
+
+    /// A light pen line, drawn as the canvas draws one: 30 points 8 pixels
+    /// apart through the stabilizer at pressure 0.3, then, as the pen
+    /// lifts 3 pixels on, the stabilizer's catch-up points at pressure
+    /// `lift`. Answers the body's median width and the widest column of
+    /// the last two brush sizes (both as [`widths`] has them).
+    fn body_and_end(lift: f32) -> (u32, u32) {
+        let size = 16.0_f32;
+        let mut raster = layer(480, 96);
+        let tip = Tip {
+            size,
+            ..Tip::default()
+        };
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.0; 3], false);
+        let mut stabilizer = Stabilizer::new(40, false);
+        let mut raw = [0.0, 0.0];
+        for step in 0..30 {
+            raw = [40.0 + step as f32 * 8.0, 48.0];
+            let at = stabilizer.sample(raw, 1.0, 0.016);
+            stroke.to(&mut raster, at, 0.3, None);
+        }
+        raw[0] += 3.0;
+        let rest = stabilizer.catch_up(raw);
+        assert!(rest.len() > 4, "the brush trails the pen: {rest:?}");
+        for at in rest {
+            stroke.to(&mut raster, at, lift, None);
+        }
+        stroke.end(&mut raster, Finish::default(), None);
+        let mut body = widths(&raster, 80..200);
+        body.sort_unstable();
+        let median = body[body.len() / 2];
+        assert!(median > 0, "the body was painted");
+        let last = (raw[0] + size * 0.5) as u32 + 2;
+        let end = widths(&raster, last - 2 * size as u32..last)
+            .into_iter()
+            .max()
+            .unwrap_or(0);
+        (median, end)
+    }
+
+    /// The rasterizer paints an end as wide as the pressure it is handed
+    /// and no wider: a stroke's end is bigger than its body only when the
+    /// input side hands the catch-up points more pressure than the pen had.
+    #[test]
+    fn a_strokes_end_is_never_wider_than_its_body_at_the_pens_own_pressure() {
+        let (body, end) = body_and_end(0.3);
+        assert!(
+            end <= body + 255,
+            "caught up at the pen's pressure: the end {end} over the body {body}"
+        );
+        // The full-pressure fallback, as a lifted pen without pressure got
+        // it: the same engine paints the blob, so the blame is the input's.
+        let (body, blob) = body_and_end(1.0);
+        assert!(
+            blob > body * 3 / 2,
+            "caught up at full pressure: the end {blob} over the body {body}"
+        );
+    }
+
+    /// A 40 pixel brush whose line ends in a 28 pixel hook, leaving the
+    /// line at a little more than a right angle and reaching into the next
+    /// row of tiles. The hook is trimmed when the pen lifts, so every pixel
+    /// of it has to go, also those in a tile the finished line comes
+    /// nowhere near.
+    fn hooked(whole: bool) -> RasterTile2D {
+        let mut raster = layer(512, 320);
+        let tip = Tip {
+            taper_start: 20.0,
+            taper_end: 20.0,
+            taper_by_speed: true,
+            ..flat_pen(40.0)
+        };
+        let mut stroke = Stroke::new(EntityId::new(), tip, [0.1, 0.2, 0.3], false);
+        stroke.whole = whole;
+        stroke.set_speed(0.1);
+        // The line, level at y 146, 2 pixels a point.
+        for step in 0..=180 {
+            stroke.to(&mut raster, [40.0 + step as f32 * 2.0, 146.0], 1.0, None);
+        }
+        // The hook: 28 pixels down and a little back, to y 172.8. The
+        // brush's edge there is past y 192, where the next tiles begin.
+        let (dx, dy) = (-0.287_f32, 0.958_f32);
+        for step in 1..=14 {
+            let far = step as f32 * 2.0;
+            stroke.to(&mut raster, [400.0 + dx * far, 146.0 + dy * far], 1.0, None);
+        }
+        stroke.end(&mut raster, Finish::default(), None);
+        raster
+    }
+
+    #[test]
+    fn a_hooked_end_across_a_tile_border_redraws_as_the_whole_stroke_does() {
+        let (quick, full) = (hooked(false), hooked(true));
+        // The hook was trimmed: nothing of it is left under the line.
+        let below = |raster: &RasterTile2D| {
+            (170..320)
+                .flat_map(|y| (0..512).map(move |x| (x, y)))
+                .filter(|(x, y)| alpha(raster, *x, *y) > 0)
+                .count()
+        };
+        assert_eq!(below(&full), 0, "a whole redraw leaves no hook");
+        assert_eq!(below(&quick), 0, "redrawing the ends leaves no hook");
+        let differing = quick
+            .bytes()
+            .unwrap()
+            .iter()
+            .zip(full.bytes().unwrap())
+            .filter(|(a, b)| a != b)
+            .count();
+        assert_eq!(differing, 0, "bytes that differ from a whole redraw");
+    }
 }
 
 #[cfg(test)]

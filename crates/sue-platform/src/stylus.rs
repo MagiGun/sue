@@ -46,13 +46,41 @@ static ERASER: AtomicBool = AtomicBool::new(false);
 /// touches.
 #[must_use]
 pub fn pressure() -> Option<f32> {
+    if let Some((_, pressure)) = TEST_PEN.get() {
+        return pressure;
+    }
     let bits = PRESSURE.load(Ordering::Relaxed);
     (bits != u32::MAX).then(|| f32::from_bits(bits))
+}
+
+thread_local! {
+    /// A test's own pen on its own thread (see [`set_for_test`]): where it
+    /// comes from and its pressure, read instead of the real pen's.
+    static TEST_PEN: std::cell::Cell<Option<(PenSource, Option<f32>)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// For tests that drive a studio as a pen of `source` would, without the
+/// tablet: from now on this thread reads `pressure` (and `source`) instead
+/// of the real pen's, until [`forget_for_test`]. Other threads, and so
+/// other tests, see nothing of it.
+#[doc(hidden)]
+pub fn set_for_test(source: PenSource, pressure: Option<f32>) {
+    TEST_PEN.set(Some((source, pressure.map(|value| value.clamp(0.0, 1.0)))));
+}
+
+/// Ends [`set_for_test`]: this thread reads the real pen again.
+#[doc(hidden)]
+pub fn forget_for_test() {
+    TEST_PEN.set(None);
 }
 
 /// Where pen pressure last came from, once a pen has been seen.
 #[must_use]
 pub fn source() -> Option<PenSource> {
+    if let Some((source, _)) = TEST_PEN.get() {
+        return Some(source);
+    }
     match SOURCE.load(Ordering::Relaxed) {
         1 => Some(PenSource::WinTab),
         2 => Some(PenSource::Browser),
