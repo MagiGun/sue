@@ -66,11 +66,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- In Sue Paint a new layer made with a folder picked goes in that folder,
-  on top of what it holds, and one made with a layer in a folder picked
-  stays in that folder; Duplicate Layer on a folder copies everything in
-  it (an animation folder with its track), and a copied layer keeps a
-  copy of its mask.
+- In Sue Paint a new layer made (or pasted) with a folder picked goes in
+  that folder, on top of what it holds, and one made with a layer in a
+  folder picked stays in that folder; Duplicate Layer on a folder copies
+  everything in it (an animation folder with its track), and a copied
+  layer keeps a copy of its mask.
 - Merge Down and Merge Selected Layers bake masks and layer effects into
   the merged pixels, and a folder picked among the layers merges with
   all it holds.

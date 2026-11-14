@@ -529,6 +529,8 @@ fn sue_paint_folders_are_units_for_new_layer_and_duplicate() {
         |runtime: &Runtime, layer| sue_paint::doc::folder_of(&runtime.engine.world.arena, layer);
     let first = stack(&runtime)[1];
     command(&mut runtime, "edit.fill");
+    // What it holds on the clipboard, for Paste below.
+    command(&mut runtime, "edit.copy");
     // Ctrl+G: the layer in a folder, the folder picked.
     step(&mut runtime, vec![key(egui::Key::G, cmd)]);
     let folder = stack(&runtime)[2];
@@ -557,6 +559,15 @@ fn sue_paint_folders_are_units_for_new_layer_and_duplicate() {
         sue_paint::doc::members(&runtime.engine.world.arena, picture, copy).len(),
         2
     );
+    // Paste with the copied folder picked: the pasted layer goes in it,
+    // on top of what it holds.
+    command(&mut runtime, "edit.paste");
+    step(&mut runtime, Vec::new());
+    let pasted_stack = stack(&runtime);
+    assert_eq!(pasted_stack.len(), 8);
+    let pasted = pasted_stack[pasted_stack.len() - 2];
+    assert!(!now_stack.contains(&pasted));
+    assert_eq!(folder_of(&runtime, pasted), Some(copy));
     // Every step undoes, back to the folder as it was.
     while runtime.engine.history.depth() > depth {
         step(&mut runtime, vec![key(egui::Key::Z, cmd)]);

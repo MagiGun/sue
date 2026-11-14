@@ -1,8 +1,6 @@
 //! Copy and paste, and pasting a material.
 
-use sue_core::txn::SpawnEntity;
-use sue_core::{CHILD, Entity, PixelFormat, RasterTile2D, Relation};
-use sue_model::class;
+use sue_core::{PixelFormat, RasterTile2D};
 use sue_model::picture;
 use sue_wm::AppletContext;
 
@@ -133,22 +131,13 @@ impl SuePaint {
         let Ok(raster) = RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels) else {
             return;
         };
-        let layer = Entity::new(name, raster).with_class(class::LAYER);
-        let id = layer.id();
-        let order = {
-            let below = self.layer();
-            let stack = doc::layers(arena, picture);
-            let index = below.and_then(|below| stack.iter().position(|info| info.id == below));
-            match index {
-                Some(index) => sue_core::OrderKey::between(
-                    Some(&stack[index].order),
-                    stack.get(index + 1).map(|info| &info.order),
-                ),
-                None => arena.relations().next_order(picture, CHILD),
-            }
+        // In the picked folder, or right above the picked layer in its
+        // folder, as every new layer goes.
+        let Ok((spawn, id)) =
+            doc::add_layer_pixels(arena, picture, self.layer(), name.to_owned(), raster)
+        else {
+            return;
         };
-        let spawn =
-            SpawnEntity::new(layer).with_relation(Relation::new(picture, CHILD, id).ordered(order));
         if Self::apply(cx, spawn)
             && let Some(doc) = self.doc_mut()
         {
