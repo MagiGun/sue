@@ -271,6 +271,43 @@ fn the_live_stroke_shows_what_the_merge_lays() {
     shoot("live-and-merged", &raster, &live_picture(&stroke, 440, 200));
 }
 
+/// A pencil whose opacity follows a pressure that falls evenly lays an
+/// even gradient along its middle: no step where one capsule of the
+/// stroke meets the next.
+#[test]
+fn an_opacity_that_follows_pressure_fades_without_steps() {
+    let mut preset = pencil(40.0);
+    preset.taper = Taper::default();
+    let count = 200;
+    let mut samples: Vec<Sample> = (0..=count)
+        .map(|i| {
+            let s = i as f32 / count as f32;
+            let kind = if i == 0 { Kind::Down } else { Kind::Move };
+            Sample::new(kind, [40.0 + 600.0 * s, 60.0], 1.0 + f64::from(i) / RATE)
+                .pressing(1.0 - 0.8 * s)
+        })
+        .collect();
+    let last = *samples.last().unwrap();
+    samples.push(Sample::new(Kind::Up, last.pos, last.time + 1.0 / RATE));
+    let stroke = draw(Arc::new(JobPool::new(2)), &black(preset), &samples, 4);
+    let mut raster = white(700, 120);
+    stroke
+        .commit(&mut raster, [0, 0], EntityId::new(), "Stroke")
+        .unwrap();
+    let bytes = raster.bytes().unwrap();
+    let row: Vec<i32> = (100..600)
+        .map(|x| i32::from(bytes[(60 * 700 + x) * 4]))
+        .collect();
+    for pair in row.windows(2) {
+        assert!(
+            (pair[1] - pair[0]).abs() <= 1,
+            "a step along the middle: {:?}",
+            row
+        );
+    }
+    assert!(row[row.len() - 1] - row[0] > 40, "it fades: {row:?}");
+}
+
 // ---------------------------------------------------------------------
 // Time
 // ---------------------------------------------------------------------

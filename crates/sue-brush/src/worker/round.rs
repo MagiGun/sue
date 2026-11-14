@@ -5,10 +5,10 @@
 //! make a big brush lay the same pixels hundreds of times: a 1,000 px
 //! brush moved 100 px would work out fifty million pixels. So points
 //! that lie on one capsule within a fifth of a pixel (place and radius)
-//! and a step of the layer's bytes (strength) are laid as that one
-//! capsule. Whether a point joins a run depends only on the points, never
-//! on how they were cut into updates: the run still open is drawn with
-//! the tail, and only a closed run is committed.
+//! and keep their strength within half a step of the layer's bytes are
+//! laid as that one capsule. Whether a point joins a run depends only on
+//! the points, never on how they were cut into updates: the run still
+//! open is drawn with the tail, and only a closed run is committed.
 
 use sue_model::BrushPreset;
 use sue_model::brush::{AntiAlias, BrushRegistry, param};
@@ -30,7 +30,8 @@ pub const fn edge(antialias: AntiAlias) -> f32 {
 
 /// How far a point may lie off the capsule that stands for it, in pixels.
 const PLACE: f32 = 0.2;
-/// How far its strength may differ: under half a step of an 8-bit layer.
+/// How far the strength may change along a run: under half a step of an
+/// 8-bit layer.
 const STRENGTH: f32 = 0.5 / 255.0;
 /// How far its hardness may differ.
 const HARDNESS: f32 = 1.0 / 256.0;
@@ -47,6 +48,14 @@ struct Spot {
 /// `true` when every spot of `inner` lies on the capsule from `a` to `b`
 /// within the tolerances.
 fn fits(a: Spot, b: Spot, inner: &[Spot]) -> bool {
+    // The strength stays as it is along a run. A capsule lays its
+    // strength at each pixel's nearest point, where the discs of a run of
+    // points would lay the most of the discs over it; with an even
+    // strength the two are the same, and a changing one (a pencil whose
+    // opacity follows pressure) would show steps at every joint.
+    if (b.disc.strength - a.disc.strength).abs() > STRENGTH {
+        return false;
+    }
     let (dx, dy) = (b.disc.at[0] - a.disc.at[0], b.disc.at[1] - a.disc.at[1]);
     let length2 = dx * dx + dy * dy;
     inner.iter().all(|q| {
@@ -58,10 +67,9 @@ fn fits(a: Spot, b: Spot, inner: &[Spot]) -> bool {
         };
         let (ex, ey) = (px - t * dx, py - t * dy);
         let radius = a.disc.radius + (b.disc.radius - a.disc.radius) * t;
-        let strength = a.disc.strength + (b.disc.strength - a.disc.strength) * t;
         ex * ex + ey * ey <= PLACE * PLACE
             && (q.disc.radius - radius).abs() <= PLACE
-            && (q.disc.strength - strength).abs() <= STRENGTH
+            && (q.disc.strength - a.disc.strength).abs() <= STRENGTH
             && (q.hardness - b.hardness).abs() <= HARDNESS
             && (q.hardness - a.hardness).abs() <= HARDNESS
     })
