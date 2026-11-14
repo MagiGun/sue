@@ -441,6 +441,40 @@ whose extension types are unknown to this build still round-trips byte for
 byte. Big buffers are stored raw today; compressed chunks (JPEG XL for rasters)
 are planned as a new `ARNA` version.
 
+#### What a later Sue wrote is kept
+
+Besides unknown chunks and unknown extension types, three more things
+survive a load and a save by a build that cannot read them
+(`sue-core/tests/container.rs` builds such files and checks each):
+
+- The header. A file of a later container version keeps its version number
+  and its header extension (`SueFile::container_version`,
+  `header_extension`).
+- An entity's tail. Bytes after the last field of an entity this build
+  knows are kept on the entity (`Entity::unread_tail`) and written back
+  after it.
+- A raster in a pixel format this build does not know (the codes are
+  `PixelFormat::code`: 0 `Gray8`, 1 `Rgba8`, 2 `RgbaF32`). It no longer
+  fails the whole file. Its payload is kept as bytes
+  (`Entity::unread_component`), it is no projection of the entity, so no
+  compositor shows it and no tool edits it, and it is written back in its
+  place. When this build gives the entity pixels of its own, they take the
+  unread ones' place.
+
+`Entity::holds_unread` tells a saver that an entity carries such bytes,
+which may refer to data elsewhere in the file that must then be kept too.
+
+#### Reading and writing in pieces
+
+`SueFile::scan` takes any `Read + Seek`, reads the header and the 16 byte
+frame of each chunk, seeks over the payloads and returns a `Directory`:
+tag, version, offset, length and stored checksum of every chunk.
+`Directory::read` then fetches one chunk and checks its checksum, so a
+thumbnail or the document properties are read without loading the pixels.
+`SueFile::write_to` writes a file into any `Write`, the same bytes as
+`to_bytes`, without building them in memory first. A file that ends before
+its end mark is an error for both readers.
+
 ### 1.10 Formats and bundles
 
 Every importer and exporter is a `FormatHandler` in one `FormatRegistry`:

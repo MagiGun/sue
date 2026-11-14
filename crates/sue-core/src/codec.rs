@@ -342,6 +342,15 @@ impl<'a> Reader<'a> {
     pub fn nested(&mut self) -> Result<Reader<'a>, CodecError> {
         Ok(Reader::new(self.bytes()?))
     }
+
+    /// Everything that is left, as it is. A reader of a nested encoding
+    /// keeps with this what a newer Sue wrote after the fields this build
+    /// knows, so it can write those bytes back.
+    pub fn rest(&mut self) -> &'a [u8] {
+        let slice = &self.bytes[self.at..];
+        self.at = self.bytes.len();
+        slice
+    }
 }
 
 const CRC_TABLE: [u32; 256] = {
