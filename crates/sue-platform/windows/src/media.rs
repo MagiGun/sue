@@ -31,26 +31,26 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
 use windows::Win32::Media::MediaFoundation::{
-    CODECAPI_AVEncCommonQuality, CODECAPI_AVEncCommonRateControlMode, CODECAPI_AVEncMPVGOPSize,
-    IMFActivate, IMFAttributes, IMFMediaType, IMFSinkWriter, IMFSourceReader,
-    MF_ACCESSMODE_READWRITE, MF_E_TOPO_CODEC_NOT_FOUND, MF_FILEFLAGS_NONE,
-    MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, MF_MT_AAC_PAYLOAD_TYPE,
-    MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_AVG_BYTES_PER_SECOND, MF_MT_AUDIO_BITS_PER_SAMPLE,
-    MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND,
-    MF_MT_AVG_BITRATE, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
-    MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_MINIMUM_DISPLAY_APERTURE, MF_MT_MPEG2_PROFILE,
-    MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_MT_TRANSFER_FUNCTION, MF_MT_VIDEO_NOMINAL_RANGE,
-    MF_MT_VIDEO_PRIMARIES, MF_MT_YUV_MATRIX, MF_OPENMODE_DELETE_IF_EXIST,
-    MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SINK_WRITER_DISABLE_THROTTLING,
-    MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-    MF_SOURCE_READERF_ENDOFSTREAM, MF_TRANSCODE_CONTAINERTYPE, MF_VERSION, MFAudioFormat_AAC,
-    MFAudioFormat_PCM, MFCreateAttributes, MFCreateFile, MFCreateMediaType, MFCreateMemoryBuffer,
-    MFCreateSample, MFCreateSinkWriterFromURL, MFCreateSourceReaderFromURL, MFMediaType_Audio,
-    MFMediaType_Video, MFNominalRange_16_235, MFSTARTUP_LITE, MFShutdown, MFStartup,
-    MFT_CATEGORY_AUDIO_ENCODER, MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_LOCALMFT,
-    MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_REGISTER_TYPE_INFO, MFTEnumEx,
-    MFTranscodeContainerType_MPEG4, MFVideoFormat_H264, MFVideoFormat_NV12,
-    MFVideoInterlace_Progressive, MFVideoPrimaries_BT709, MFVideoTransFunc_709,
+    CODECAPI_AVEncCommonQuality, CODECAPI_AVEncCommonRateControlMode,
+    CODECAPI_AVEncMPVDefaultBPictureCount, CODECAPI_AVEncMPVGOPSize, IMFActivate, IMFAttributes,
+    IMFMediaType, IMFSinkWriter, IMFSourceReader, MF_ACCESSMODE_READWRITE,
+    MF_E_TOPO_CODEC_NOT_FOUND, MF_FILEFLAGS_NONE, MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION,
+    MF_MT_AAC_PAYLOAD_TYPE, MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
+    MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS,
+    MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE,
+    MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_MINIMUM_DISPLAY_APERTURE,
+    MF_MT_MPEG2_PROFILE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_MT_TRANSFER_FUNCTION,
+    MF_MT_VIDEO_NOMINAL_RANGE, MF_MT_VIDEO_PRIMARIES, MF_MT_YUV_MATRIX,
+    MF_OPENMODE_DELETE_IF_EXIST, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
+    MF_SINK_WRITER_DISABLE_THROTTLING, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+    MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READERF_ENDOFSTREAM, MF_TRANSCODE_CONTAINERTYPE,
+    MF_VERSION, MFAudioFormat_AAC, MFAudioFormat_PCM, MFCreateAttributes, MFCreateFile,
+    MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample, MFCreateSinkWriterFromURL,
+    MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video, MFNominalRange_16_235,
+    MFSTARTUP_LITE, MFShutdown, MFStartup, MFT_CATEGORY_AUDIO_ENCODER, MFT_CATEGORY_VIDEO_ENCODER,
+    MFT_ENUM_FLAG_LOCALMFT, MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT,
+    MFT_REGISTER_TYPE_INFO, MFTEnumEx, MFTranscodeContainerType_MPEG4, MFVideoFormat_H264,
+    MFVideoFormat_NV12, MFVideoInterlace_Progressive, MFVideoPrimaries_BT709, MFVideoTransFunc_709,
     MFVideoTransferMatrix_BT709, eAVEncCommonRateControlMode_Quality, eAVEncH264VProfile_High,
 };
 use windows::Win32::System::Com::{
@@ -511,8 +511,11 @@ impl Mp4Writer {
                 ),
             ]
         };
-        // A ceiling the quality mode stays under, about a tenth of a bit
-        // per pixel per frame at 24 a second, at least 1 Mbit/s.
+        // The average bit rate the output type declares (the encoder
+        // wants one): a quarter bit per pixel of each frame, at least
+        // 1 Mbit/s.
+        // Quality based rate control does not hold to it: grainy pictures
+        // at "high" came out several times larger (docs/movie-export.md).
         let pixels_a_second =
             u64::from(spec.width) * u64::from(spec.height) * u64::from(spec.rate.0)
                 / u64::from(spec.rate.1);
@@ -541,6 +544,12 @@ impl Mp4Writer {
             ),
             (CODECAPI_AVEncCommonQuality, spec.quality),
             (CODECAPI_AVEncMPVGOPSize, spec.key_interval.max(1)),
+            // No B frames. With them the encoder shows the first picture
+            // one frame after it is decoded, and Windows' own player (the
+            // Source Reader) ignores the edit list that would correct it,
+            // so pictures ran one frame behind the sound (tried on build
+            // 26300). Without B frames every player starts at zero.
+            (CODECAPI_AVEncMPVDefaultBPictureCount, 0),
         ])?;
         let target = media_type(&out)?;
         // SAFETY: `writer` and `target` are live COM objects.
@@ -959,6 +968,11 @@ mod tests {
         assert_eq!(read.profile, 100, "High profile");
         assert_eq!(read.sound, None);
         assert!(read.times.windows(2).all(|pair| pair[0] < pair[1]));
+        // Each picture is shown when it was written: no B frame delay.
+        for (index, shown) in read.times.iter().enumerate() {
+            let exact = index as i64 * 10_000_000 / 24;
+            assert!((shown - exact).abs() <= 8, "{:?}", read.times);
+        }
         for (index, picture) in read.pictures.iter().enumerate() {
             let want = if index < 6 { 40 } else { 200 };
             let mean = picture[..64 * 48]

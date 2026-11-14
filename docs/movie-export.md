@@ -27,6 +27,13 @@ there.
   range with the matching colour tags, a constant frame rate (any
   rational rate, such as 24/1 or 30000/1001), a key frame every two
   seconds, quality based rate control, the software encoder.
+- No B frames. With them Windows' encoder shows the first picture one
+  frame after it is decoded, and Windows' own player ignores the edit
+  list that corrects that, so the pictures ran one frame behind the
+  sound (tried on Windows 11 build 26300). Every picture is now shown
+  at the time it was pushed, in every player. Should a file still carry
+  such an offset, `sue_io::mp4_index_first` adds the edit list
+  (`edts`), which ffmpeg and browsers follow.
 - The index (`moov`) comes before the picture data, so the file starts
   playing while it loads and upload sites take it as it is. Media
   Foundation's own setting for that (`MF_MPEG4SINK_MOOV_BEFORE_MDAT`)
@@ -66,16 +73,20 @@ grain that changes every frame, about the hardest a painting gets.
 
 | Clip | Quality | KiB | Mean luma PSNR (dB) | Worst frame (dB) |
 | --- | --- | --- | --- | --- |
-| flat | small | 164 | 50.4 | 42.0 |
-| flat | normal | 179 | 53.5 | 43.2 |
-| flat | high | 202 | 56.7 | 42.5 |
-| painted | small | 630 | 34.2 | 33.9 |
-| painted | normal | 2986 | 37.2 | 36.9 |
-| painted | high | 9279 | 41.7 | 41.3 |
+| flat | small | 117 | 51.1 | 45.9 |
+| flat | normal | 157 | 53.2 | 37.4 |
+| flat | high | 166 | 54.5 | 37.2 |
+| painted | small | 698 | 34.1 | 33.9 |
+| painted | normal | 4965 | 37.2 | 37.1 |
+| painted | high | 9296 | 41.2 | 41.0 |
 
-On flat colour the quality stays steady from frame to frame; at "small"
-faint blocks trail a moving shape over plain paper, at "normal" they are
-barely there and at "high" they are gone.
+On flat colour every frame but one stays within a few dB of the mean;
+the worst is the second frame, the first one predicted from the key
+frame (37 dB at "normal" and "high", still clean to the eye). Looked at
+two times enlarged, faint streaks trail the moving lines over flat
+colour at "small" and "normal" and are hardly there at "high"; at
+normal size they do not show. On grain that changes every frame the
+encoder spends what it takes, so files grow fast with the quality.
 
 ## For code: the sink
 

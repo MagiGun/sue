@@ -353,6 +353,13 @@ mod tests {
             assert!(at(b"moov").unwrap() < at(b"mdat").unwrap(), "index first");
             let read = read_mp4(&bytes, 12).unwrap();
             assert_eq!(read.frames, 12, "every frame is there");
+            // Windows' decoder shows each picture when it was pushed: the
+            // first at zero, with the sound, not one frame late (the edit
+            // list over the encoder's B frames).
+            let pushed: Vec<i64> = (0..12).map(|at| settings.frame_time(at) as i64).collect();
+            for (shown, pushed) in read.times.iter().zip(&pushed) {
+                assert!((shown - pushed).abs() <= 1, "{:?}", read.times);
+            }
             assert_eq!((read.width, read.height), (66, 50), "padded to even");
             assert_eq!(read.profile, 100, "High profile");
             assert_eq!(read.sound, Some((48_000, 2)));
@@ -385,6 +392,7 @@ mod tests {
             }
             let read = read_mp4(&sink.finish().unwrap(), 0).unwrap();
             assert_eq!((read.frames, read.sound), (3, None));
+            assert_eq!(read.times.first(), Some(&0), "starts at zero");
             let empty = open(MovieFormat::Mp4H264, MovieSettings::new(64, 64, 24)).unwrap();
             assert_eq!(empty.finish(), Err(MovieError::NoFrames));
         }
