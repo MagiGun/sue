@@ -2340,9 +2340,11 @@ unpacks color or one channel, `color` and `gray` pack), draft and
 reference marks in Sue's own `SueLayer` table until the survey finds
 Clip Studio's columns for them, and `ClipForeign`: chunks, tables, rows
 and columns the model does not name, the shapes of the tables it does,
-and the bytes around the chunks. Writing what was read gives the same
-bytes again; ids that are missing or repeated are made from a
-fingerprint of the document, so two pictures never share them.
+and the bytes around the chunks. A file Sue wrote, read and written
+again, gives the same bytes; a file from Clip Studio keeps its data but
+not its byte layout (rows and chunks are laid out as Sue writes them).
+Ids that are missing or repeated are made from a fingerprint of the
+document, so two pictures never share them.
 `decode_clip` and `encode_clip` stay for Sue Paint as the `Psd` records
 it opens and saves today, through the same model (`write::document_of`).
 `clip::testkit` builds the documents the tests run over, with foreign
