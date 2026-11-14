@@ -177,6 +177,30 @@ Sue menu, the palette, Settings, the Image Viewer, the Converter, Sue Paint
 and its menus and dialogs, Sue Writer's views, and the Hub and Sue Paint on a
 phone and a tablet.
 
+A snapshot run takes options, and two runs can be compared:
+
+```bash
+cargo run -p sue -- --snapshot target/snapshots-paper --scale 1.5 --preset paper
+```
+
+```bash
+cargo run -p sue -- --snapshot-compare target/before target/after --changed "04-*"
+```
+
+`--scale <n>` draws at `<n>` pixels per point (0.5 to 4), as a display set to
+150 % or 200 % does: every scene keeps its size in points, so the pictures get
+larger. `--preset <id>` applies a theme preset (`void`, `graphite`, `paper`,
+`gray`) before the first scene. `--profile <dir>` puts the temporary profile in
+a folder you name instead of `<dir>/profile`; a few scenes draw a path inside
+the profile, so two runs that are to be compared need the same one (a folder
+that does not exist yet; it is removed again at the end).
+`--snapshot-compare <before> <after>` prints, for every scene, how many pixels
+differ between two snapshot folders and the box they lie in. It exits with 1
+when a scene differs that no `--changed <scene>` names (a scene's name, or the
+start of one followed by `*`), so a change to how Sue looks can be checked to
+have touched the scenes it was meant to and no other. The scenes live in
+`bins/sue/src/snapshot/scenes/`, one file per area of Sue.
+
 ## Community
 
 - Website: <https://magigun.github.io/sue/>
