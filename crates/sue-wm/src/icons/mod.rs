@@ -639,9 +639,9 @@ icons! {
     /// Two level arrows, the upper to the right and the lower to the
     /// left. The two change places.
     Swap = "swap" => edit::SWAP,
-    /// An empty square at the top left, a solid one at the bottom right
-    /// and a bent arrow from the first to the second. Put another in
-    /// its place.
+    /// An empty square and a solid one side by side at the bottom, and
+    /// an arrow that arcs over from the first into the place of the
+    /// second. Put another in its place.
     Replace = "replace" => edit::REPLACE,
     /// An upright arrow with a head at both ends beside three lines of
     /// one length. Turn the order round.
@@ -666,8 +666,8 @@ icons! {
     Moon = "moon" => edit::MOON,
     /// A sun: a ring with eight short rays. The light look.
     Sun = "sun" => edit::SUN,
-    /// A globe: a ring, the line round its middle and one line from
-    /// pole to pole. The language.
+    /// A globe: a ring, the line round its middle and a narrow oval
+    /// from pole to pole. The language.
     Language = "language" => edit::LANGUAGE,
     /// A ring with an arrow in it that points up. A newer version.
     Update = "update" => edit::UPDATE,

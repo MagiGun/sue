@@ -47,13 +47,16 @@ const FOLDER_BACK: &str = "M2.75 17.25 V6.75 A2 2 0 0 1 4.75 4.75 H9 L12 7.75 H1
 const FOLDER_FRONT: &str = "M2.75 17.25 L5.5 11.75 A2 2 0 0 1 7.25 10.75 H21.25 L18.5 18.25 A2 2 \
                             0 0 1 16.75 19.25 H4.75 A2 2 0 0 1 2.75 17.25 Z";
 
+/// The folded corner of the sheet that stands in [`FILE_OPEN`].
+const OPEN_FOLD: &str = "M13.25 4.75 V6.75 A1 1 0 0 0 14.25 7.75 H16.25 Z";
+
 pub(super) const FILE_OPEN: Art = line(
     Keyline::Wide,
     &[
-        Part::Stroke("M2.75 17.25 V6.75 A2 2 0 0 1 4.75 4.75 H8 L10 6.75 H11.25"),
-        Part::Stroke(
-            "M14.25 10.75 V5.75 A1 1 0 0 1 15.25 4.75 H19.25 A1 1 0 0 1 20.25 5.75 V10.75",
-        ),
+        Part::Stroke("M2.75 17.25 V6.75 A2 2 0 0 1 4.75 4.75"),
+        Part::Stroke("M7.75 10.75 V5.75 A1 1 0 0 1 8.75 4.75 H13.25 L16.25 7.75 V10.75"),
+        Part::Fill(OPEN_FOLD),
+        Part::Stroke(OPEN_FOLD),
         Part::Stroke(FOLDER_FRONT),
     ],
 );

@@ -86,26 +86,26 @@ pub(super) const ZOOM_ACTUAL: Art = line(
 );
 
 /// The solid half of [`FLIP_HORIZONTAL`].
-const FLIPPED_RIGHT: &str = "M15.25 5.75 V18.25 L20.25 12 Z";
+const FLIPPED_RIGHT: &str = "M15.25 6.75 V17.25 L21.25 12 Z";
 
 pub(super) const FLIP_HORIZONTAL: Art = line(
-    Keyline::Square,
+    Keyline::Wide,
     &[
-        Part::Stroke("M12 3.75 V20.25"),
-        Part::Stroke("M8.75 5.75 V18.25 L3.75 12 Z"),
+        Part::Stroke("M12 4.75 V19.25"),
+        Part::Stroke("M8.75 6.75 V17.25 L2.75 12 Z"),
         Part::Fill(FLIPPED_RIGHT),
         Part::Stroke(FLIPPED_RIGHT),
     ],
 );
 
 /// The solid half of [`FLIP_VERTICAL`].
-const FLIPPED_DOWN: &str = "M5.75 15.25 H18.25 L12 20.25 Z";
+const FLIPPED_DOWN: &str = "M6.75 15.25 H17.25 L12 21.25 Z";
 
 pub(super) const FLIP_VERTICAL: Art = line(
-    Keyline::Square,
+    Keyline::Tall,
     &[
-        Part::Stroke("M3.75 12 H20.25"),
-        Part::Stroke("M5.75 8.75 H18.25 L12 3.75 Z"),
+        Part::Stroke("M4.75 12 H19.25"),
+        Part::Stroke("M6.75 8.75 H17.25 L12 2.75 Z"),
         Part::Fill(FLIPPED_DOWN),
         Part::Stroke(FLIPPED_DOWN),
     ],
@@ -156,17 +156,21 @@ pub(super) const SWAP: Art = line(
 const SQUARE_NEW: &str = "M15.25 14.25 H19.25 A1 1 0 0 1 20.25 15.25 V19.25 A1 1 0 0 1 19.25 20.25 \
                           H15.25 A1 1 0 0 1 14.25 19.25 V15.25 A1 1 0 0 1 15.25 14.25 Z";
 
+/// The head of the arrow of [`REPLACE`].
+const OVER: &str = "M15.75 9.75 H18.75 L17.25 11.25 Z";
+
 pub(super) const REPLACE: Art = line(
     Keyline::Square,
     &[
         Part::Stroke(
-            "M4.75 3.75 H8.75 A1 1 0 0 1 9.75 4.75 V8.75 A1 1 0 0 1 8.75 9.75 H4.75 A1 1 0 0 1 \
-             3.75 8.75 V4.75 A1 1 0 0 1 4.75 3.75 Z",
+            "M4.75 14.25 H8.75 A1 1 0 0 1 9.75 15.25 V19.25 A1 1 0 0 1 8.75 20.25 H4.75 A1 1 0 0 \
+             1 3.75 19.25 V15.25 A1 1 0 0 1 4.75 14.25 Z",
         ),
         Part::Fill(SQUARE_NEW),
         Part::Stroke(SQUARE_NEW),
-        Part::Stroke("M12.75 6.75 H13.75 A3.5 3.5 0 0 1 17.25 10.25 V11.25"),
-        Part::Stroke("M15 9 L17.25 11.25 L19.5 9"),
+        Part::Stroke("M6.75 11.25 V9.75 A5.25 5.25 0 0 1 17.25 9.75"),
+        Part::Fill(OVER),
+        Part::Stroke(OVER),
     ],
 );
 
