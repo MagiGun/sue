@@ -19,33 +19,61 @@
 //!   links.
 //! - [`choice`]: checkboxes, radio buttons, switches, segmented strips
 //!   and chips.
+//! - [`tabs`]: the tab strip (icons and names, folding to icons, dragged
+//!   to reorder and torn off) and the column of side tabs.
+//! - [`mod@card`]: cards, groups and sections, tiles and thumbnail cards.
+//! - [`list`]: list rows, tree rows, the empty state, dividers and
+//!   headings.
+//! - [`progress`]: the progress bar, the spinner and the skeleton.
+//! - [`scroll`]: the scroll view, with thin bars over its content and
+//!   edges that fade where there is more.
+//! - [`mod@splitter`]: the line between two panes.
 
 pub mod button;
+pub mod card;
 pub mod choice;
 pub mod focus;
+pub mod input;
+pub mod list;
 pub mod motion;
+pub mod progress;
+pub mod scroll;
+pub mod slider;
+pub mod splitter;
+pub mod tabs;
 pub mod tokens;
 
 pub use button::{
     Button, ButtonKind, IconButton, Link, Sheet, SplitButton, SplitResponse, button, icon_button,
     link, split_button, toggle_button,
 };
+pub use card::{
+    Card, Thumbnail, ThumbnailCard, ThumbnailOutput, Tile, card, group, section, thumbnail_card,
+    tile,
+};
 pub use choice::{
     Check, Chip, ChipResponse, Marked, Segmented, SegmentedResponse, checkbox, chip, radio, rove,
     segmented, switch,
 };
-pub mod input;
-pub mod slider;
-
 pub use focus::{FocusScope, Roving, focus_ring, focus_visible, paint_focus_ring, watch_focus};
 pub use input::{
     Combo, Dropdown, NumberField, TextField, combo, dropdown, number_field, search_field,
     text_field,
 };
+pub use list::{
+    EmptyState, Leading, ListRow, RowAction, RowOutput, TreeOutput, TreeRow, divider, empty_state,
+    heading, list_row, tree_row,
+};
 pub use motion::{Motion, Pace};
+pub use progress::{
+    ProgressBar, Skeleton, Spinner, paint_skeleton, progress_bar, skeleton, spinner,
+};
+pub use scroll::ScrollView;
 pub use slider::{
     RangeSlider, Scale, Slider, TallSlider, Wedge, range, slider, tall_slider, wedge,
 };
+pub use splitter::{SplitAxis, Splitter, splitter};
+pub use tabs::{SideOutput, SidebarTabs, Tab, TabStrip, TabsOutput, sidebar_tabs, tab_strip};
 pub use tokens::{
     Density, EDGE_CONTRAST, Elevation, Layer, MIN_TEXT_SIZE, Radius, Space, TEXT_CONTRAST,
     TextRole, contrast, nested_radius,
