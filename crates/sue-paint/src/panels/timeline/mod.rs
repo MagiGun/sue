@@ -179,6 +179,9 @@ pub(crate) struct AnimUi {
     pub unit: TimeUnit,
     /// A press on the cells being dragged.
     pub press: Option<Press>,
+    /// The layer picked before the last click on a cell (the click picks
+    /// the cel shown there), so a double click shows that layer there.
+    pub picked_before: Option<EntityId>,
     /// A playback marker being dragged: the start (`true`) or the end.
     pub marker: Option<bool>,
     /// Each sound's waveform: its revision, and its peaks.

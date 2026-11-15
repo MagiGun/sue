@@ -1157,7 +1157,11 @@ impl SuePaint {
                     actions.push(Action::Select(Selection::dragged(tracks, frame, at)));
                 } else {
                     // A click picks that frame alone, so a drag from it
-                    // moves it.
+                    // moves it; the layer picked until now is kept for a
+                    // double click.
+                    if !response.double_clicked() {
+                        self.anim_ui.picked_before = self.layer();
+                    }
                     self.anim_ui.selection = Some(Selection::dragged(vec![row.track], at, at));
                     actions.push(Action::Go {
                         track: row.track,
@@ -1169,10 +1173,12 @@ impl SuePaint {
                 && row.kind == Kind::Cels
                 && let Some(pos) = response.interact_pointer_pos()
             {
-                // A double click shows the layer picked from there.
-                let layer = self
-                    .layer()
-                    .filter(|layer| anim::may_show(&cx.world.arena, &sequence, row.track, *layer));
+                // A double click shows there the layer picked before its
+                // first click (which picked the cel shown there).
+                let layer =
+                    self.anim_ui.picked_before.take().filter(|layer| {
+                        anim::may_show(&cx.world.arena, &sequence, row.track, *layer)
+                    });
                 if let Some(layer) = layer {
                     actions.push(Action::Assign {
                         track: row.track,
