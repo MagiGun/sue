@@ -47,8 +47,10 @@ pub use self::live::LiveView;
 use self::round::Round;
 
 /// About how many pixels of work one slice lays on a pool without
-/// threads, so a frame keeps its time (a few milliseconds).
-pub const SLICE_PIXELS: u64 = 1 << 20;
+/// threads, so a frame keeps its time: a quarter of a megapixel is about
+/// 4 ms on this machine's dev build (a megapixel took 16 ms, a whole
+/// frame at 60 Hz).
+pub const SLICE_PIXELS: u64 = 1 << 18;
 
 /// The pool painting shares with compositing: made on first use, one
 /// core left for the interface (at most eight threads), and kept for the
@@ -197,11 +199,16 @@ impl Stroke {
                 break;
             }
         }
-        work.tail = Some(if self.closed {
-            Vec::new()
+        work.tail = if self.closed {
+            Some(Vec::new())
+        } else if queue.is_empty() {
+            Some(self.round.tail(&self.pipeline.tail()))
         } else {
-            self.round.tail(&self.pipeline.tail())
-        });
+            // A slice that leaves samples for the next one: the tail is
+            // drawn once they are laid, not again for every slice of a
+            // stall (it is the same size as a slice for a big brush).
+            None
+        };
         self.bands.lay(&Arc::new(work), pool)?;
         if self.closed {
             self.bands.settle();
@@ -326,6 +333,16 @@ impl StrokeWorker {
     #[must_use]
     pub fn has_failed(&self) -> bool {
         matches!(self.state, State::Failed)
+    }
+
+    /// The work laid so far, while no job holds the stroke (on a pool
+    /// without threads, always).
+    #[must_use]
+    pub fn counters(&self) -> Option<Counters> {
+        match &self.state {
+            State::Idle(stroke) => Some(stroke.counters()),
+            State::Busy(_) | State::Failed => None,
+        }
     }
 
     /// Samples queued and not laid yet.

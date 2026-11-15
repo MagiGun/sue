@@ -392,7 +392,10 @@ fn a_1000_px_soft_brush_keeps_up_with_the_frames() {
 }
 
 /// On a pool without threads (the browser) each poll lays one slice:
-/// about [`SLICE_PIXELS`] of work, then the frame goes on.
+/// about [`SLICE_PIXELS`] of work, then the frame goes on. The budget is
+/// held as work (the pixels a slice works out), which does not depend on
+/// how busy the machine is; the time is printed, and held only loosely
+/// on the typical slice.
 #[test]
 fn one_slice_on_the_interface_thread_stays_in_its_budget() {
     let pool = Arc::new(JobPool::inline());
@@ -401,22 +404,36 @@ fn one_slice_on_the_interface_thread_stays_in_its_budget() {
     let mut worker = StrokeWorker::start(pool, &brush, Settings::new(Device::Pen));
     // A whole stroke's samples arrive at once, as after a stall.
     worker.push_all(&samples);
-    let mut slices = 0;
-    let mut slowest = Duration::ZERO;
+    let mut times = Vec::new();
+    let mut most = 0;
+    let mut laid = 0;
     while worker.waiting() > 0 {
         let start = Instant::now();
         let _ = worker.poll();
-        slowest = slowest.max(start.elapsed());
-        slices += 1;
-        assert!(slices < 1_000, "the slices make progress");
+        times.push(start.elapsed());
+        let now = worker.counters().expect("an inline pool keeps the stroke").pixels;
+        most = most.max(now - laid);
+        laid = now;
+        assert!(times.len() < 1_000, "the slices make progress");
     }
+    let slices = times.len();
     assert!(
         slices > 1,
         "the work was cut into slices of about {SLICE_PIXELS} pixels"
     );
-    // One slice is about a megapixel of work: a few milliseconds
-    // optimized, held loosely here.
-    assert!(slowest < Duration::from_millis(60), "{slowest:?}");
+    // A slice stops once its shapes reach the budget: it may finish the
+    // sample under way, never much more (the provisional tail is drawn
+    // only by the slice that empties the queue).
+    assert!(
+        most <= SLICE_PIXELS + SLICE_PIXELS / 2,
+        "a slice worked out {most} pixels, the budget is {SLICE_PIXELS}"
+    );
+    let slowest = times.iter().max().copied().unwrap_or_default();
+    let typical = median(times);
+    println!("{slices} slices, at most {most} pixels; typical {typical:?}, slowest {slowest:?}");
+    // A quarter of a megapixel is a few milliseconds optimized: held
+    // loosely, as other builds share the machine while tests run.
+    assert!(typical < Duration::from_millis(30), "{typical:?}");
     let stroke = worker.finish().unwrap();
     assert!(stroke.is_done());
 }
