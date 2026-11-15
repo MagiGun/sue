@@ -21,6 +21,7 @@ mod paint_timeline;
 mod paint_tools;
 mod paint_touch;
 mod paint_view;
+mod rich_text;
 mod settings;
 mod shell;
 mod ui_buttons;
@@ -83,6 +84,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     writer_document::format_menu(tour)?;
     writer_start::desktop(tour)?;
     writer_document::comments(tour)?;
+    // 19a1. What the rich text editor marks on the page.
+    rich_text::marks(tour)?;
 
     // 19b to 19k. The Hub with work in it (and 31a to 31f: Home and
     // Files in the other presets), languages and the Layout menu.

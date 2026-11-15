@@ -177,6 +177,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The rich text editor (Sue Writer and every studio that writes) marks
+  its pages in the theme's colors: the selection and its handles, the
+  wave under a misspelled word, tracked insertions and deletions, the
+  words a comment or a note is on, and the shadow under a page. Each is
+  made to read on the paper shown, light or dark. In Sue's monochrome
+  themes a tracked insertion is underlined in the text color and a
+  deletion struck through in the softer one. The spelling menu is Sue's
+  own menu, and the Cut, Copy, Paste and Select All bar over a finger's
+  selection has touch-sized buttons whose tips name their keys.
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait
