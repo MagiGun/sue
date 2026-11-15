@@ -163,7 +163,10 @@ fn figure(paint: &mut PaintDriver, name: &str) {
     paint.command("tool.eraser");
     paint.command("tool.figure");
     paint.settle(4);
-    paint.click_text(FIGURE[0]);
+    // The first sub tool by its command: the Sub Tool list follows the
+    // sub tool chosen, so its first row can be scrolled out of sight.
+    paint.command(&format!("subtool.figure.{}", FIGURE[0].replace(' ', "_")));
+    paint.settle(2);
     let steps = FIGURE.iter().position(|sub| *sub == name).unwrap();
     for _ in 0..steps {
         paint.command("tool.next_sub");

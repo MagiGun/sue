@@ -114,11 +114,15 @@ pub(crate) fn guide(painter: &Painter, points: Vec<Pos2>, closed: bool, theme: &
     }
 }
 
-/// The light rim of a selection path: white, nearly opaque.
-pub(crate) const PATH_LIGHT: egui::Color32 =
-    egui::Color32::from_rgba_premultiplied(242, 242, 242, 242);
-/// The dark core of a selection path: near black, opaque.
-pub(crate) const PATH_DARK: egui::Color32 = egui::Color32::from_rgb(16, 16, 16);
+/// The two tones of a selection path: its light rim (white, nearly
+/// opaque) and its dark core (near black). They lie on the picture, so
+/// they are fixed, not the theme's.
+pub(crate) fn path_tones() -> [egui::Color32; 2] {
+    [
+        egui::Color32::from_rgba_premultiplied(242, 242, 242, 242),
+        egui::Color32::from_rgb(16, 16, 16),
+    ]
+}
 
 /// The path of a selection being drawn (lasso, lasso fill, Shrink
 /// selection, a polyline selection) through `points` (screen), closed
@@ -129,7 +133,8 @@ pub(crate) const PATH_DARK: egui::Color32 = egui::Color32::from_rgb(16, 16, 16);
 pub(crate) fn selection_path(painter: &Painter, points: Vec<Pos2>, closed: bool, theme: &Theme) {
     let core = firm(theme);
     let rim = core + 2.0 * thin(theme);
-    let strokes = [Stroke::new(rim, PATH_LIGHT), Stroke::new(core, PATH_DARK)];
+    let [light, dark] = path_tones();
+    let strokes = [Stroke::new(rim, light), Stroke::new(core, dark)];
     for stroke in strokes {
         painter.add(if closed {
             Shape::closed_line(points.clone(), stroke)
@@ -265,8 +270,7 @@ mod selection_path_tests {
 
     #[test]
     fn a_selection_path_reads_on_any_color_of_picture() {
-        let dark = [PATH_DARK.r(), PATH_DARK.g(), PATH_DARK.b()];
-        let light = [PATH_LIGHT.r(), PATH_LIGHT.g(), PATH_LIGHT.b()];
+        let [light, dark] = path_tones().map(|tone| [tone.r(), tone.g(), tone.b()]);
         // Every gray, and the pure and mixed colors of a palette: one of
         // the two tones stands out from each by at least 3 to 1 (what
         // WCAG asks of a mark that is not text).

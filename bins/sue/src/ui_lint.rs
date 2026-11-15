@@ -225,6 +225,9 @@ const PICTURE: &[(&str, &str, Exempt)] = &[
         "ruler_overlay",
         Exempt::Colors,
     ),
+    // A selection path's black and white: it lies on the picture, which
+    // can be any color, so it is not the theme's.
+    ("crates/sue-paint/src/canvas", "path_tones", Exempt::Colors),
     // Color fields, and small copies of the picture.
     ("crates/sue-paint/src/panels", "color_wheel", Exempt::All),
     (
