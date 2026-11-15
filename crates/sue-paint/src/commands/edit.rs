@@ -229,7 +229,13 @@ fn clear_outside(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) 
 }
 
 fn smart_smoothing(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.filter_dialog(cx, Filter::SmartSmooth { strength: 0.5 });
+    paint.filter_dialog(
+        cx,
+        Filter::SmartSmooth {
+            strength: crate::filters::SMART_LEVELS[1],
+            remove_noise: false,
+        },
+    );
 }
 
 /// Fill: the selection (or the whole layer) in the drawing color.
@@ -349,6 +355,11 @@ fn mesh(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 
 fn puppet(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.start_warp(cx);
+}
+
+/// Edit, Colorize: the line art filled from a hint layer's colors.
+fn colorize(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.open_colorize(cx);
 }
 
 /// Edit, Pick Screen Color and Hide Windows and Pick Screen Color: the
@@ -760,6 +771,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         screen_color,
     )
     .state(can_read_screen),
+    c("edit.colorize", "colorize-ellipsis", "tool-fill", colorize).state(on_raster),
 ];
 
 #[cfg(test)]

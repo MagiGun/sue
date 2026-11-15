@@ -186,6 +186,16 @@ fn item(command: &str) -> MenuItem {
     MenuItem::action(label, command)
 }
 
+/// Why Pick Screen Color is grayed where the system lets no program
+/// read the screen; nothing where it works.
+fn screen_note() -> String {
+    if sue_platform::screen::available() {
+        String::new()
+    } else {
+        tr!("pick-screen-color-unavailable")
+    }
+}
+
 /// An item for `command` with a label of its own: a recent file, a
 /// workspace, or a submenu entry whose title says the rest.
 fn named(label: &str, command: &str) -> MenuItem {
@@ -465,6 +475,7 @@ pub fn menus() -> Vec<Menu> {
                 item("edit.smart_smoothing"),
                 item("edit.fill"),
                 item("edit.advanced_fill"),
+                item("edit.colorize"),
                 item("edit.recolor"),
                 item("edit.outline_selection"),
                 item("edit.luma_to_alpha"),
@@ -540,8 +551,8 @@ pub fn menus() -> Vec<Menu> {
                     vec![item("edit.material.image"), item("edit.material.tip")],
                 ),
                 SEP,
-                item("edit.screen_color"),
-                item("edit.screen_color_hidden"),
+                item("edit.screen_color").note(screen_note()),
+                item("edit.screen_color_hidden").note(screen_note()),
             ],
         ),
         Menu::new(
@@ -910,6 +921,7 @@ pub fn menus() -> Vec<Menu> {
                 sub(
                     &tr!("distort"),
                     vec![
+                        item("filter.curved_surface"),
                         item("filter.wave"),
                         item("filter.pinch"),
                         item("filter.polar"),
@@ -922,6 +934,7 @@ pub fn menus() -> Vec<Menu> {
                 sub(
                     &tr!("effect"),
                     vec![
+                        item("filter.artistic"),
                         item("filter.mosaic"),
                         item("filter.crystallize"),
                         item("filter.noise"),

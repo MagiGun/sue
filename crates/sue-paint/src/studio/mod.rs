@@ -743,6 +743,8 @@ pub struct SuePaint {
     /// A screen pick asked for by its command, started on the next frame
     /// (`true` hides Sue's windows while it waits).
     pub(crate) screen_pick_asked: Option<bool>,
+    /// The gradient sets, read the first time a gradient map opens.
+    pub(crate) gradients: crate::dialogs::GradientLibrary,
 }
 
 impl Default for SuePaint {
@@ -921,6 +923,7 @@ impl Default for SuePaint {
             pen_stream: Vec::new(),
             screen_pick: None,
             screen_pick_asked: None,
+            gradients: crate::dialogs::GradientLibrary::default(),
         }
     }
 }

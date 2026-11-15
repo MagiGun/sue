@@ -864,7 +864,7 @@ fn sue_paint_flips_and_rotate_180_take_masks_and_vector_lines_along() {
 fn sue_paint_pick_screen_color_sets_the_drawing_color() {
     // CT-29, FG-30: Edit, Pick Screen Color, run as the menu runs it,
     // waits for a click anywhere on the screen; the color there becomes
-    // the drawing color, and the next stroke paints in it.
+    // the drawing color, and Fill paints in it.
     let mut driver = PaintDriver::new("paint-screen-color");
     let state = |name: &str| {
         sue_paint::registry()
@@ -915,25 +915,16 @@ fn sue_paint_pick_screen_color_sets_the_drawing_color() {
         driver.step(Vec::new());
         std::thread::sleep(Duration::from_millis(5));
     }
-    let middle = paint_middle(&driver.runtime);
-    driver.drag(
-        middle - vec2(40.0, 0.0),
-        middle + vec2(40.0, 0.0),
-        egui::PointerButton::Primary,
-    );
+    // Fill puts the drawing color on the layer as it is, to the last
+    // level.
+    driver.command("edit.fill");
+    driver.settle(4);
     let raster = sue_paint::doc::raster(&driver.runtime.engine.world.arena, layer).unwrap();
     let bytes = raster.bytes().unwrap();
-    let solid: Vec<[u8; 3]> = bytes
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .filter(|pixel| pixel[3] == 255)
-        .map(|pixel| [pixel[0], pixel[1], pixel[2]])
-        .collect();
-    assert!(!solid.is_empty(), "the stroke painted");
-    assert!(
-        solid.iter().all(|color| *color == want),
-        "the stroke is in the picked color {want:?}: {:?}",
-        &solid[..solid.len().min(4)]
+    let middle = ((raster.height() / 2 * raster.width() + raster.width() / 2) * 4) as usize;
+    assert_eq!(
+        &bytes[middle..middle + 3],
+        &want,
+        "the layer is filled with the picked color"
     );
 }

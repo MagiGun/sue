@@ -5,6 +5,7 @@
 
 mod anim;
 mod canvas;
+mod colorize;
 mod comps;
 mod fill;
 mod filter;
@@ -27,8 +28,9 @@ use canvas::{
     canvas_properties_ui, canvas_ui, convert_ui, material_ui, perspective_ui, print_ui, proof_ui,
     resolution_ui, shape_3d_ui,
 };
+use colorize::colorize_ui;
 use fill::{gamut_ui, select_by_ui};
-use filter::{correction_ui, filter_ui};
+use filter::{correction_size, dialog_size};
 use frame::frame_ui;
 use pressure::pressure_ui;
 use settings::{modifiers_ui, shortcuts_ui, workspace_ui};
@@ -36,9 +38,10 @@ use story::{page_settings_ui, story_editor_ui, story_info_ui, webtoon_ui};
 use text::text_ui;
 
 pub(crate) use canvas::{CanvasDialog, CanvasProperties, ResolutionDialog};
+pub(crate) use colorize::ColorizeDialog;
 pub(crate) use comps::CompsDialog;
 pub(crate) use fill::AdvancedFill;
-pub(crate) use filter::FilterDialog;
+pub(crate) use filter::{FilterDialog, GradientLibrary};
 #[cfg(test)]
 pub(crate) use new::SIZES;
 pub(crate) use new::{CanvasPreset, NEW_PRESET_TARGET, NewDialog, Project, new_presets};
@@ -121,6 +124,8 @@ pub(crate) enum Dialog {
     Convert(sue_core::EntityId, u8, String),
     /// File, Manage Fonts: Sue's shared font list.
     Fonts(sue_wm::fonts::FontManager),
+    /// Edit, Colorize: the line art, the hint layer and the blur.
+    Colorize(ColorizeDialog),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,17 +153,7 @@ impl Dialog {
                 },
                 vec2(500.0, 400.0),
             ),
-            Dialog::Filter(filter) => (
-                filter.filter.label(),
-                vec2(
-                    400.0,
-                    match filter.filter {
-                        Filter::ToneCurve { .. } => 360.0,
-                        Filter::Levels { .. } => 330.0,
-                        _ => 250.0,
-                    },
-                ),
-            ),
+            Dialog::Filter(filter) => (filter.filter.label(), dialog_size(&filter.filter)),
             Dialog::Shortcuts => (tr!("keyboard-shortcuts"), vec2(470.0, 560.0)),
             Dialog::Pages(_) => (tr!("page-manager"), vec2(820.0, 620.0)),
             Dialog::Comps(_) => (tr!("layer-comps"), vec2(420.0, 300.0)),
@@ -199,17 +194,8 @@ impl Dialog {
             Dialog::StoryEditor(_) => (tr!("story-editor"), vec2(520.0, 520.0)),
             Dialog::Convert(..) => (tr!("convert-layer"), vec2(360.0, 190.0)),
             Dialog::Fonts(_) => (tr!("manage-fonts"), sue_wm::fonts::MANAGE_SIZE),
-            Dialog::Correction(_, filter, ..) => (
-                filter.label(),
-                vec2(
-                    400.0,
-                    match filter {
-                        Filter::ToneCurve { .. } => 340.0,
-                        Filter::Levels { .. } => 310.0,
-                        _ => 230.0,
-                    },
-                ),
-            ),
+            Dialog::Colorize(_) => (tr!("colorize"), vec2(400.0, 260.0)),
+            Dialog::Correction(_, filter, ..) => (filter.label(), correction_size(filter)),
             Dialog::Pressure(pressure) => (
                 tr!("adjust-pen-pressure"),
                 vec2(560.0, if pressure.show_graph { 520.0 } else { 330.0 }),
@@ -380,7 +366,7 @@ impl SuePaint {
         match dialog {
             Dialog::New(new) => self.new_dialog_ui(ui, new, cx, theme),
             Dialog::AdvancedFill => self.advanced_fill_dialog_ui(ui, theme),
-            Dialog::Filter(filter) => filter_ui(ui, filter, theme),
+            Dialog::Filter(filter) => self.filter_dialog_ui(ui, filter, cx, theme),
             Dialog::Pressure(pressure) => pressure_ui(ui, pressure, theme),
             Dialog::Pages(pages) => self.pages_ui(ui, pages, cx, theme),
             Dialog::Comps(comps) => self.comps_ui(ui, comps, cx, theme),
@@ -408,7 +394,8 @@ impl SuePaint {
             Dialog::Material(name) => material_ui(ui, name, theme),
             Dialog::Timelapse(export) => timelapse_ui(ui, export, theme),
             Dialog::Perspective(count) => perspective_ui(ui, count, theme),
-            Dialog::Correction(_, filter, ..) => correction_ui(ui, filter, theme),
+            Dialog::Correction(_, filter, ..) => self.correction_dialog_ui(ui, filter, cx, theme),
+            Dialog::Colorize(colorize) => colorize_ui(ui, colorize, theme),
             Dialog::Canvas(canvas) => canvas_ui(ui, canvas, theme),
             Dialog::Resolution(resolution) => resolution_ui(ui, resolution, theme),
             Dialog::Shortcuts => shortcuts_ui(ui, cx, size, change_keys, theme),
@@ -472,6 +459,7 @@ impl SuePaint {
             }
             Dialog::Canvas(canvas) => self.canvas_ok(cx, &canvas),
             Dialog::Resolution(resolution) => self.resolution_ok(cx, &resolution),
+            Dialog::Colorize(colorize) => self.colorize_ok(cx, &colorize),
             Dialog::Message(..)
             | Dialog::Shortcuts
             | Dialog::Pages(_)
@@ -520,7 +508,8 @@ impl SuePaint {
             | Dialog::StoryEditor(_)
             | Dialog::Convert(..)
             | Dialog::Shortcuts
-            | Dialog::Fonts(_) => {}
+            | Dialog::Fonts(_)
+            | Dialog::Colorize(_) => {}
         }
     }
 }

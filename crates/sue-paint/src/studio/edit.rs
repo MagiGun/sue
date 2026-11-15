@@ -2,14 +2,14 @@
 //! selections by color, Quick Mask and puppet warp.
 
 use sue_core::txn::SetProperty;
-use sue_core::{Arena, RasterTile2D};
+use sue_core::{Arena, EntityId, RasterTile2D};
 use sue_model::picture;
 use sue_wm::{AppletContext, ArenaEdit};
 
 use super::{SuePaint, WarpSession};
 use crate::color;
 use crate::composite::{self, RenderOptions};
-use crate::dialogs::{Dialog, FilterDialog};
+use crate::dialogs::{ColorizeDialog, Dialog, FilterDialog};
 use crate::doc;
 use crate::filters::Filter;
 use crate::select::Selection;
@@ -308,13 +308,16 @@ impl SuePaint {
         let Some(raster) = doc::raster(&cx.world.arena, info.id) else {
             return;
         };
-        self.dialog = Some(Dialog::Filter(FilterDialog::new(
-            filter,
-            info.id,
-            raster,
-            self.doc().and_then(|doc| doc.selection.clone()),
-            info.style.offset,
-        )));
+        self.dialog = Some(Dialog::Filter(
+            FilterDialog::new(
+                filter,
+                info.id,
+                raster,
+                self.doc().and_then(|doc| doc.selection.clone()),
+                info.style.offset,
+            )
+            .with_colors(self.main, self.sub),
+        ));
     }
 
     /// The selection, or everything when nothing is selected.
@@ -457,6 +460,109 @@ impl SuePaint {
                 self.screen_pick = None;
                 cx.notify(tr!("pick-screen-color-failed"));
             }
+        }
+    }
+
+    /// Edit, Colorize: opens its dialog with the current layer as the hint
+    /// layer and, as the line art, the layer right above it (else the
+    /// topmost other one).
+    pub(crate) fn open_colorize(&mut self, cx: &mut AppletContext<'_>) {
+        let info = match self.paintable(&cx.world.arena) {
+            Ok(info) => info,
+            Err(error) => {
+                cx.fail(error);
+                return;
+            }
+        };
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let layers = doc::layers(&cx.world.arena, picture);
+        let choices: Vec<(EntityId, String)> = layers
+            .iter()
+            .filter(|layer| layer.id != info.id && doc::raster(&cx.world.arena, layer.id).is_some())
+            .rev()
+            .map(|layer| (layer.id, layer.name.clone()))
+            .collect();
+        if choices.is_empty() {
+            cx.notify(tr!("colorize-needs-line-art"));
+            return;
+        }
+        let above = layers
+            .iter()
+            .position(|layer| layer.id == info.id)
+            .and_then(|at| layers.get(at + 1))
+            .and_then(|layer| choices.iter().position(|(id, _)| *id == layer.id))
+            .unwrap_or(0);
+        self.dialog = Some(Dialog::Colorize(ColorizeDialog {
+            hints: info.id,
+            choices,
+            lines: above,
+            blur: 1.0,
+        }));
+    }
+
+    /// OK on Colorize: a new layer of flat colors right under the line
+    /// art, as one undo step.
+    pub(crate) fn colorize_ok(&mut self, cx: &mut AppletContext<'_>, dialog: &ColorizeDialog) {
+        let (Some(picture), Some(lines)) = (self.picture(), dialog.line_layer()) else {
+            return;
+        };
+        let arena = &cx.world.arena;
+        let Some([width, height]) = arena.get_by_id(picture).ok().and_then(picture::size) else {
+            return;
+        };
+        let on_canvas = |layer: EntityId| -> Option<Vec<u8>> {
+            let raster = doc::raster(arena, layer)?;
+            let offset = doc::layers(arena, picture)
+                .into_iter()
+                .find(|info| info.id == layer)
+                .map_or([0, 0], |info| info.style.offset);
+            let bytes = raster.bytes()?;
+            let mut out = vec![0_u8; (width * height * 4) as usize];
+            for y in 0..raster.height() {
+                for x in 0..raster.width() {
+                    let (px, py) = (i64::from(x) + offset[0], i64::from(y) + offset[1]);
+                    if px < 0 || py < 0 || px >= i64::from(width) || py >= i64::from(height) {
+                        continue;
+                    }
+                    let from = ((y * raster.width() + x) * 4) as usize;
+                    let to = ((py as u32 * width + px as u32) * 4) as usize;
+                    out[to..to + 4].copy_from_slice(&bytes[from..from + 4]);
+                }
+            }
+            Some(out)
+        };
+        let (Some(line_art), Some(hints)) = (on_canvas(lines), on_canvas(dialog.hints)) else {
+            return;
+        };
+        let Some(colors) = crate::colorize::colorize(&line_art, &hints, width, height, dialog.blur)
+        else {
+            cx.notify(tr!("colorize-needs-hints"));
+            return;
+        };
+        let Ok(raster) =
+            RasterTile2D::from_bytes(width, height, sue_core::PixelFormat::Rgba8, colors)
+        else {
+            return;
+        };
+        // Right under the line art: above the layer below it.
+        let layers = doc::layers(arena, picture);
+        let below = layers
+            .iter()
+            .position(|layer| layer.id == lines)
+            .and_then(|at| at.checked_sub(1))
+            .and_then(|at| layers.get(at))
+            .map(|layer| layer.id);
+        match doc::add_layer_pixels(arena, picture, below, tr!("colorize"), raster) {
+            Ok((spawn, id)) => {
+                if Self::apply(cx, doc::Edit::new(tr!("colorize")).then(spawn))
+                    && let Some(doc) = self.doc_mut()
+                {
+                    doc.layer = Some(id);
+                }
+            }
+            Err(error) => cx.fail(error),
         }
     }
 }
