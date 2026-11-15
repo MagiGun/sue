@@ -24,7 +24,8 @@ pub enum Placement {
     Cover,
     /// It sits in the middle, shrunk to fit (pictures).
     Fit,
-    /// It poses a 3D drawing figure, hand or head (pose materials).
+    /// It goes onto a 3D drawing figure, hand or head: it poses it (pose
+    /// materials) or shapes it (body shape materials).
     Pose,
 }
 
@@ -58,7 +59,7 @@ impl MaterialKinds {
     #[must_use]
     pub fn builtin() -> Self {
         let mut kinds = Self::default();
-        let own: [(&str, &str, Glyph, Placement, Scan); 5] = [
+        let own: [(&str, &str, Glyph, Placement, Scan); 6] = [
             (TONE, "Tones", Glyph::Tone, Placement::Cover, scan_tones),
             (
                 PATTERN,
@@ -70,6 +71,13 @@ impl MaterialKinds {
             (IMAGE, "Images", Glyph::Picture, Placement::Fit, scan_images),
             (TIP, "Brush tips", Glyph::Brush, Placement::Fit, scan_tips),
             (POSE, "Poses", Glyph::Cube, Placement::Pose, scan_poses),
+            (
+                BODY,
+                "Body shapes",
+                Glyph::Cube,
+                Placement::Pose,
+                scan_bodies,
+            ),
         ];
         for (id, name, glyph, placement, scan) in own {
             kinds
@@ -129,6 +137,8 @@ pub const IMAGE: &str = "sue_paint.image";
 pub const TIP: &str = "sue_paint.tip";
 /// Poses of 3D drawing figures, hands and heads, kept to use again.
 pub const POSE: &str = "sue_paint.pose";
+/// Body shapes of 3D drawing figures, kept to use again.
+pub const BODY: &str = "sue_paint.body";
 
 /// One material in the library.
 #[derive(Clone, Debug, PartialEq)]
@@ -289,8 +299,18 @@ fn scan_tips(folder: Option<&Path>) -> Vec<Material> {
 }
 
 fn scan_poses(folder: Option<&Path>) -> Vec<Material> {
+    scan_files(folder, "poses", "pose", POSE)
+}
+
+fn scan_bodies(folder: Option<&Path>) -> Vec<Material> {
+    scan_files(folder, "bodies", "body", BODY)
+}
+
+/// The files ending in `.<extension>` in `dir` of `folder` as materials of
+/// `kind` that go onto a 3D layer, by name.
+fn scan_files(folder: Option<&Path>, dir: &str, extension: &str, kind: &str) -> Vec<Material> {
     let Some(entries) = folder
-        .map(|folder| folder.join("poses"))
+        .map(|folder| folder.join(dir))
         .and_then(|dir| sue_platform::list_dir(&dir, true).ok())
     else {
         return Vec::new();
@@ -300,17 +320,18 @@ fn scan_poses(folder: Option<&Path>) -> Vec<Material> {
         .map(|entry| entry.path)
         .filter(|path| {
             path.extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("pose"))
+                .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
         })
         .collect();
     files.sort();
     files
         .into_iter()
         .map(|path| Material {
-            name: path
-                .file_stem()
-                .map_or_else(|| tr!("pose"), |stem| stem.to_string_lossy().into_owned()),
-            kind: POSE.to_owned(),
+            name: path.file_stem().map_or_else(
+                || tr!("material"),
+                |stem| stem.to_string_lossy().into_owned(),
+            ),
+            kind: kind.to_owned(),
             placement: Placement::Pose,
             source: Source::File(path),
         })
@@ -356,6 +377,35 @@ pub fn register_pose(
     let path = dir.join(format!("{}.pose", safe_name(name)));
     let text = format!("{}\n{}\n", kind.key(), pose.to_text());
     sue_platform::write_atomic(&path, text.as_bytes()).map_err(|error| error.to_string())?;
+    Ok(path)
+}
+
+/// A body shape material's body shape, read from its file
+/// ([`crate::figure::Body::shape_text`]).
+#[must_use]
+pub fn body_of(material: &Material) -> Option<crate::figure::Body> {
+    let Source::File(path) = &material.source else {
+        return None;
+    };
+    let text = String::from_utf8(sue_platform::fs::read(path).ok()?).ok()?;
+    crate::figure::Body::default().with_shape_text(&text)
+}
+
+/// Keeps `body`'s shape as a body shape material named `name` in Sue
+/// Paint's `folder`; returns its file.
+///
+/// # Errors
+/// If it will not write.
+pub fn register_body(
+    folder: &Path,
+    name: &str,
+    body: &crate::figure::Body,
+) -> Result<PathBuf, String> {
+    let dir = folder.join("bodies");
+    sue_platform::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join(format!("{}.body", safe_name(name)));
+    sue_platform::write_atomic(&path, body.shape_text().as_bytes())
+        .map_err(|error| error.to_string())?;
     Ok(path)
 }
 
@@ -428,11 +478,16 @@ pub fn picture(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<Ra
             .get(*index)
             .map(|(_, _, ink)| draw(size, color, *ink)),
         Source::File(_) if material.placement == Placement::Pose => {
-            // The posed figure, drawn.
-            let (kind, pose) = pose_of(material)?;
-            let body = crate::figure::Body {
-                kind,
-                ..crate::figure::Body::default()
+            // The posed figure, or the body shape standing, drawn.
+            let (pose, body) = if material.kind == BODY {
+                (crate::figure::Pose::default(), body_of(material)?)
+            } else {
+                let (kind, pose) = pose_of(material)?;
+                let body = crate::figure::Body {
+                    kind,
+                    ..crate::figure::Body::default()
+                };
+                (pose, body)
             };
             let view = crate::three::View3D {
                 yaw: 18.0,
@@ -864,8 +919,9 @@ mod tests {
                 scan: |_| Vec::new(),
             })
             .unwrap();
-        // Tones, patterns, images, brush tips, poses, and the new one.
-        assert_eq!(kinds.iter().count(), 6);
+        // Tones, patterns, images, brush tips, poses, body shapes, and the
+        // new one.
+        assert_eq!(kinds.iter().count(), 7);
 
         let folder = std::env::temp_dir().join(format!("sue-library-{}", std::process::id()));
         let _ = sue_platform::fs::remove_dir_all(&folder);
