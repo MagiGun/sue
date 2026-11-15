@@ -338,7 +338,8 @@ impl SueWriter {
             });
             ui.vertical(|ui| {
                 ui.set_width(half);
-                ui::heading(ui, &status_name, theme);
+                // In a row as the label's name is, so both lists line up.
+                ui.horizontal(|ui| ui::heading(ui, &status_name, theme));
                 let picked = ui::dropdown(("writer-status", id), &mut status_at, &statuses)
                     .label(&status_name)
                     .width(half)
