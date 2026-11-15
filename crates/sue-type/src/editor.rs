@@ -3341,7 +3341,21 @@ impl Editor {
             if (from.min.y - to.min.y).abs() > 0.5 {
                 continue;
             }
-            let y = galley_at.y + from.max.y - 1.0;
+            // In the letters' descent below the baseline, as the
+            // underlines are (`layout::lay_out`), not at the bottom of a
+            // line box that wide line spacing stretches toward the next
+            // line.
+            let place = block.galley.layout_from_cursor(cursor(start));
+            let y = block
+                .galley
+                .rows
+                .get(place.row)
+                .and_then(|placed| {
+                    let glyph = placed.row.glyphs.get(place.column.0)?;
+                    let descent = (glyph.font_height - glyph.font_ascent).max(2.0);
+                    Some(placed.pos.y + glyph.pos.y + descent * 0.8)
+                })
+                .map_or(galley_at.y + from.max.y - 1.0, |y| galley_at.y + y);
             let mut points = Vec::new();
             let mut x = galley_at.x + from.min.x;
             let right = galley_at.x + to.min.x;
