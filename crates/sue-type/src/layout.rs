@@ -149,9 +149,9 @@ impl Ink {
 /// alone; a theme that gives its roles a hue colors them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PageMarks {
-    /// Behind selected text while the editor has the keyboard. Like
-    /// every wash here it is opaque, the role mixed into the paper, so it
-    /// shows as worked out whatever space the screen blends in.
+    /// Behind selected text while the editor has the keyboard. It is
+    /// opaque, the role mixed into the paper, so it shows as worked out
+    /// whatever space the screen blends in.
     pub selection: Color32,
     /// Behind selected text while something else has the keyboard.
     pub selection_idle: Color32,
@@ -163,9 +163,11 @@ pub struct PageMarks {
     pub inserted: Color32,
     /// Text a tracked change deleted (also struck through).
     pub deleted: Color32,
-    /// Behind words a comment is on.
+    /// Behind words a comment is on: see-through, so a selection under
+    /// it still shows.
     pub comment: Color32,
-    /// Behind the words of a footnote or an endnote.
+    /// Behind the words of a footnote or an endnote, see-through as a
+    /// comment's.
     pub note: Color32,
     /// The shadow under a page in page view.
     pub page_shadow: Shadow,
@@ -260,9 +262,21 @@ impl PageMarks {
         while wash > LEAST_WASH && contrast(text, mix(paper, base, wash)) < TEXT_CONTRAST {
             wash -= 0.02;
         }
-        let tint = |role: Option<Color32>, share: f32, hued: f32| match role {
-            Some(role) => mix(paper, role, hued),
-            None => mix(paper, text, wash * share),
+        // A comment's and a note's washes lie over the selection (it is
+        // painted behind the text, they come with it), so they are the
+        // role at the strength it mixes into the paper, never opaque: a
+        // selected commented word still shows as selected.
+        let tint = |role: Option<Color32>, share: f32, hued: f32| {
+            let (color, strength) = match role {
+                Some(role) => (role, hued),
+                None => (text, wash * share),
+            };
+            Color32::from_rgba_unmultiplied(
+                color.r(),
+                color.g(),
+                color.b(),
+                (strength.clamp(0.0, 1.0) * 255.0).round() as u8,
+            )
         };
         Self {
             selection: mix(paper, base, wash),
@@ -410,35 +424,43 @@ fn color(rgb: [u8; 3]) -> Color32 {
 
 /// Where an underline sits below the baseline, as a share of the font's
 /// descent.
-const UNDERLINE_DROP: f32 = 0.45;
+pub(crate) const UNDERLINE_DROP: f32 = 0.45;
 /// Where a strike sits above the baseline, as a share of the font's
 /// ascent: through the middle of the small letters.
 const STRIKE_RISE: f32 = 0.28;
 
-/// Lays `job` out with its underlines and strikes on the text itself.
+/// What a section of a job draws on its letters: its underline, its
+/// strike and its wash.
+type OnText = (Stroke, Stroke, Color32);
+
+/// Lays `job` out with its underlines, strikes and washes on the text
+/// itself.
 ///
-/// egui draws them from the line box: an underline at its bottom and a
-/// strike through its middle. With line spacing above single, the box
-/// reaches well below the letters, so an underline floats toward the next
-/// line and a strike runs along the baseline, where it reads as an
-/// underline. Here the lines are left out of the layout and put in after,
-/// from each glyph's baseline and font. Where the glyphs cannot be matched
-/// to the text (which egui's layout does not do today), egui's own lines
-/// are kept.
+/// egui draws them from the line box: an underline at its bottom, a
+/// strike through its middle and a wash over all of it. With line spacing
+/// above single, the box reaches well below the letters, so an underline
+/// floats toward the next line, a strike runs along the baseline (where it
+/// reads as an underline) and a comment's wash hangs far under its words.
+/// Here they are left out of the layout and put in after, from each
+/// glyph's baseline and font. Where the glyphs cannot be matched to the
+/// text (which egui's layout does not do today), egui's own are kept.
 pub(crate) fn lay_out(ctx: &egui::Context, job: LayoutJob) -> Arc<Galley> {
-    let lines: Vec<(Stroke, Stroke)> = job
+    let on_text: Vec<OnText> = job
         .sections
         .iter()
-        .map(|section| (section.format.underline, section.format.strikethrough))
+        .map(|section| {
+            let format = &section.format;
+            (format.underline, format.strikethrough, format.background)
+        })
         .collect();
     let spaced = job
         .sections
         .iter()
         .any(|section| section.format.line_height.is_some());
     if !spaced
-        || lines
+        || on_text
             .iter()
-            .all(|(under, strike)| under.is_empty() && strike.is_empty())
+            .all(|(under, strike, wash)| under.is_empty() && strike.is_empty() && wash.a() == 0)
     {
         return ctx.fonts_mut(|fonts| fonts.layout_job(job));
     }
@@ -446,22 +468,25 @@ pub(crate) fn lay_out(ctx: &egui::Context, job: LayoutJob) -> Arc<Galley> {
     for section in &mut bare.sections {
         section.format.underline = Stroke::NONE;
         section.format.strikethrough = Stroke::NONE;
+        section.format.background = Color32::TRANSPARENT;
     }
     let galley = ctx.fonts_mut(|fonts| fonts.layout_job(bare));
-    match place_lines(&galley, &job, &lines) {
+    match place_lines(&galley, &job, &on_text) {
         Some(placed) => Arc::new(placed),
         None => ctx.fonts_mut(|fonts| fonts.layout_job(job)),
     }
 }
 
-/// A line being drawn along a row: its stroke, its height and where it
-/// runs across.
-type Run = (Stroke, f32, f32, f32);
+/// A line or a wash being drawn along a row: its color, its top and
+/// bottom, and where it runs across.
+type Run = (Color32, f32, f32, f32, f32);
 
-/// `galley` (laid out from `job` without lines) with `lines`, the
-/// underline and strike of each section of `job`, drawn on its text.
-/// `None` when a glyph does not match the text.
-fn place_lines(galley: &Galley, job: &LayoutJob, lines: &[(Stroke, Stroke)]) -> Option<Galley> {
+/// `galley` (laid out from `job` without lines and washes) with
+/// `on_text`, the underline, strike and wash of each section of `job`,
+/// drawn on its letters: the washes under the glyphs, the lines over
+/// them. `None` when a glyph does not match the text.
+fn place_lines(galley: &Galley, job: &LayoutJob, on_text: &[OnText]) -> Option<Galley> {
+    use egui::emath::GuiRounding as _;
     let section_of = |byte: usize| {
         job.sections.iter().position(|section| {
             section.byte_range.start.0 <= byte && byte < section.byte_range.end.0
@@ -469,71 +494,125 @@ fn place_lines(galley: &Galley, job: &LayoutJob, lines: &[(Stroke, Stroke)]) -> 
     };
     let pixels = galley.pixels_per_point.max(0.1);
     let snap = |y: f32| (y * pixels).round() / pixels;
+    // Where a line of `stroke` centered on `y` runs: its top and bottom.
+    let line = |stroke: Stroke, y: f32| {
+        let width = stroke.width.max(1.0 / pixels);
+        let top = snap(y - width / 2.0);
+        (top, top + width)
+    };
     let mut out = galley.clone();
     let mut chars = job.text.char_indices();
     let (mut vertices, mut indices) = (0, 0);
     for placed in &mut out.rows {
-        let mut rects: Vec<(Rect, Color32)> = Vec::new();
-        let mut finish = |run: &mut Option<Run>| {
-            if let Some((stroke, y, left, right)) = run.take() {
-                let width = stroke.width.max(1.0 / pixels);
-                let top = snap(y - width / 2.0);
-                rects.push((
-                    Rect::from_min_max(pos2(left, top), pos2(right, top + width)),
-                    stroke.color,
-                ));
+        let mut washes: Vec<(Rect, Color32)> = Vec::new();
+        let mut lines: Vec<(Rect, Color32)> = Vec::new();
+        // The run of each kind along the row: wash, underline, strike.
+        let mut runs: [Option<Run>; 3] = [None, None, None];
+        let finish = |kind: usize,
+                      run: &mut Option<Run>,
+                      washes: &mut Vec<(Rect, Color32)>,
+                      lines: &mut Vec<(Rect, Color32)>| {
+            if let Some((color, top, bottom, left, right)) = run.take() {
+                let rect = Rect::from_min_max(pos2(left, top), pos2(right, bottom));
+                if kind == 0 {
+                    washes.push((rect.round_to_pixels(pixels), color));
+                } else {
+                    lines.push((rect, color));
+                }
             }
         };
-        let (mut under_run, mut strike_run): (Option<Run>, Option<Run>) = (None, None);
         for glyph in &placed.row.glyphs {
             let (byte, ch) = chars.next()?;
             if ch != glyph.chr {
                 return None;
             }
-            let (under, strike) = lines[section_of(byte)?];
+            let section = section_of(byte)?;
+            let (under, strike, wash) = on_text[section];
             let base = glyph.pos.y;
             let descent = (glyph.font_height - glyph.font_ascent).max(0.0);
-            for (stroke, y, run) in [
-                (under, base + descent * UNDERLINE_DROP, &mut under_run),
-                (
-                    strike,
-                    base - glyph.font_ascent * STRIKE_RISE,
-                    &mut strike_run,
-                ),
-            ] {
-                match run {
-                    Some((same, at, _, right))
-                        if !stroke.is_empty() && *same == stroke && (*at - y).abs() < 0.01 =>
+            // A wash covers the letters, ascent to descent, a little wider
+            // as egui's does.
+            let grow = job.sections[section].format.expand_bg;
+            let wanted = [
+                (wash.a() > 0)
+                    .then(|| (wash, base - glyph.font_ascent - grow, base + descent + grow)),
+                (!under.is_empty()).then(|| {
+                    let (top, bottom) = line(under, base + descent * UNDERLINE_DROP);
+                    (under.color, top, bottom)
+                }),
+                (!strike.is_empty()).then(|| {
+                    let (top, bottom) = line(strike, base - glyph.font_ascent * STRIKE_RISE);
+                    (strike.color, top, bottom)
+                }),
+            ];
+            for (kind, want) in wanted.into_iter().enumerate() {
+                let run = &mut runs[kind];
+                let (left, right) = if kind == 0 {
+                    (glyph.pos.x - grow, glyph.max_x() + grow)
+                } else {
+                    (glyph.pos.x, glyph.max_x())
+                };
+                match (want, run.as_mut()) {
+                    (Some((color, top, bottom)), Some((same, at, under, _, end)))
+                        if *same == color
+                            && (*at - top).abs() < 0.01
+                            && (*under - bottom).abs() < 0.01 =>
                     {
-                        *right = glyph.max_x();
+                        *end = right;
                     }
-                    _ => {
-                        finish(run);
-                        if !stroke.is_empty() {
-                            *run = Some((stroke, y, glyph.pos.x, glyph.max_x()));
+                    (want, _) => {
+                        finish(kind, run, &mut washes, &mut lines);
+                        if let Some((color, top, bottom)) = want {
+                            *run = Some((color, top, bottom, left, right));
                         }
                     }
                 }
             }
         }
-        finish(&mut under_run);
-        finish(&mut strike_run);
+        for (kind, run) in runs.iter_mut().enumerate() {
+            finish(kind, run, &mut washes, &mut lines);
+        }
         if placed.ends_with_newline && chars.next()?.1 != '\n' {
             return None;
         }
-        if rects.is_empty() {
+        if washes.is_empty() && lines.is_empty() {
             continue;
         }
         let row = Arc::make_mut(&mut placed.row);
-        let mesh = &mut row.visuals.mesh;
-        let (before_vertices, before_indices) = (mesh.vertices.len(), mesh.indices.len());
-        for (rect, color) in rects {
-            mesh.add_colored_rect(rect, color);
-            row.visuals.mesh_bounds = row.visuals.mesh_bounds.union(rect);
-            out.mesh_bounds = out.mesh_bounds.union(rect.translate(placed.pos.to_vec2()));
+        let before = (
+            row.visuals.mesh.vertices.len(),
+            row.visuals.mesh.indices.len(),
+        );
+        let mut bounds = Rect::NOTHING;
+        // Washes go under the glyphs: in front of them in the mesh, with
+        // the glyphs' places in it moved along.
+        if !washes.is_empty() {
+            let mut mesh = egui::Mesh::default();
+            for (rect, color) in washes {
+                mesh.add_colored_rect(rect, color);
+                bounds = bounds.union(rect);
+            }
+            let (shift, shift_indices) = (mesh.vertices.len(), mesh.indices.len());
+            mesh.append(std::mem::take(&mut row.visuals.mesh));
+            row.visuals.mesh = mesh;
+            row.visuals.glyph_index_start += shift_indices;
+            let glyphs = row.visuals.glyph_vertex_range.clone();
+            row.visuals.glyph_vertex_range = glyphs.start + shift..glyphs.end + shift;
+            let shift = u32::try_from(shift).ok()?;
+            for glyph in &mut row.glyphs {
+                glyph.first_vertex += shift;
+            }
         }
-        vertices += mesh.vertices.len() - before_vertices;
-        indices += mesh.indices.len() - before_indices;
+        for (rect, color) in lines {
+            row.visuals.mesh.add_colored_rect(rect, color);
+            bounds = bounds.union(rect);
+        }
+        row.visuals.mesh_bounds = row.visuals.mesh_bounds.union(bounds);
+        out.mesh_bounds = out
+            .mesh_bounds
+            .union(bounds.translate(placed.pos.to_vec2()));
+        vertices += row.visuals.mesh.vertices.len() - before.0;
+        indices += row.visuals.mesh.indices.len() - before.1;
     }
     out.num_vertices += vertices;
     out.num_indices += indices;
@@ -1064,6 +1143,7 @@ mod tests {
         let ctx = egui::Context::default();
         let under = Color32::from_rgb(1, 200, 3);
         let strike = Color32::from_rgb(200, 5, 6);
+        let wash = Color32::from_rgba_unmultiplied(9, 90, 9, 60);
         let font = FontId::proportional(20.0);
         let mut job = LayoutJob::default();
         job.wrap.max_width = 120.0;
@@ -1072,6 +1152,11 @@ mod tests {
             ("added words ", Stroke::new(1.0, under), Stroke::NONE),
             ("gone words", Stroke::NONE, Stroke::new(1.0, strike)),
         ] {
+            let background = if text.starts_with("added") {
+                wash
+            } else {
+                Color32::TRANSPARENT
+            };
             let start = job.text.len();
             job.text.push_str(text);
             job.sections.push(LayoutSection {
@@ -1082,6 +1167,7 @@ mod tests {
                     line_height: Some(60.0),
                     underline,
                     strikethrough,
+                    background,
                     ..TextFormat::default()
                 },
             });
@@ -1093,14 +1179,24 @@ mod tests {
         full.textures_delta.clear();
         let galley = galley.unwrap();
         assert!(galley.rows.len() > 2, "the text wraps");
-        let mut seen = [false, false];
+        let mut seen = [false, false, false];
         for placed in &galley.rows {
             let Some(glyph) = placed.row.glyphs.first() else {
                 continue;
             };
             let (base, ascent) = (glyph.pos.y, glyph.font_ascent);
             let descent = glyph.font_height - ascent;
-            for vertex in &placed.row.visuals.mesh.vertices {
+            let visuals = &placed.row.visuals;
+            for (index, vertex) in visuals.mesh.vertices.iter().enumerate() {
+                if vertex.color == wash {
+                    seen[2] = true;
+                    // On the letters, ascent to descent (and egui's pixel
+                    // around them): not down into the line spacing. Under
+                    // the glyphs, which come after it in the mesh.
+                    assert!(vertex.pos.y >= base - ascent - 2.0, "{}", vertex.pos.y);
+                    assert!(vertex.pos.y <= base + descent + 2.0, "{}", vertex.pos.y);
+                    assert!(index < visuals.glyph_vertex_range.start);
+                }
                 if vertex.color == under {
                     seen[0] = true;
                     // Below the baseline, within the letters' descent:
@@ -1116,7 +1212,23 @@ mod tests {
                 }
             }
         }
-        assert_eq!(seen, [true, true], "both lines are drawn");
+        assert_eq!(
+            seen,
+            [true, true, true],
+            "both lines and the wash are drawn"
+        );
+        // The glyphs are still where the galley says they are.
+        for placed in &galley.rows {
+            let visuals = &placed.row.visuals;
+            for glyph in &placed.row.glyphs {
+                if glyph.uv_rect.is_nothing() {
+                    continue;
+                }
+                let at = glyph.first_vertex as usize;
+                assert!(visuals.glyph_vertex_range.contains(&at));
+                assert_eq!(visuals.mesh.vertices[at].color, Color32::GRAY);
+            }
+        }
         // The lines are counted, so the painter makes room for them.
         let counted: usize = galley
             .rows
@@ -1151,6 +1263,7 @@ mod tests {
             ..PageMarks::plain(&ink)
         };
         let mut sections = Vec::new();
+        let mut washed = false;
         let mut full = ctx.run_ui(egui::RawInput::default(), |ui| {
             let sheet = StyleSheet::standard(&Fonts::default());
             let setting = Setting {
@@ -1168,6 +1281,17 @@ mod tests {
                 contents: &|_| None,
             };
             let blocks = lay_document(ui.ctx(), 0, &source, &setting);
+            // The comment's wash is in the text: as egui's section
+            // background, or (with wide line spacing) laid on the letters.
+            washed = blocks[0].galley.rows.iter().any(|placed| {
+                placed
+                    .row
+                    .visuals
+                    .mesh
+                    .vertices
+                    .iter()
+                    .any(|vertex| vertex.color == page_marks.comment)
+            });
             let job = &blocks[0].galley.job;
             sections = job
                 .sections
@@ -1192,7 +1316,11 @@ mod tests {
         assert_eq!(find("kept").0, ink.text);
         assert_eq!(find("added").0, page_marks.inserted);
         assert_eq!(find("gone").0, page_marks.deleted);
-        assert_eq!(find("talked").1, page_marks.comment);
+        let background = find("talked").1;
+        assert!(
+            washed && (background == page_marks.comment || background == Color32::TRANSPARENT),
+            "the commented word lies on the comment's wash"
+        );
     }
 
     fn laid(text: &str, marks: &TextMarks, mode: ViewMode, page: &PageSetup) -> Laid {
