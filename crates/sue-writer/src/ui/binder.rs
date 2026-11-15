@@ -139,13 +139,14 @@ impl SueWriter {
             });
             ui.add_space(theme.space(Space::S2));
             let mut moves: Vec<(EntityId, EntityId, usize)> = Vec::new();
+            let mut rows: Vec<(EntityId, egui::Id)> = Vec::new();
             ui::ScrollView::vertical("writer-binder")
                 .on(theme.panel)
                 .show(ui, theme, |ui| {
                     ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
                     let top: Vec<EntityId> = manuscript::children(cx.arena(), root);
                     for id in top {
-                        self.binder_row(ui, id, 0, cx, theme, &mut run, &mut moves);
+                        self.binder_row(ui, id, 0, cx, theme, &mut run, &mut moves, &mut rows);
                     }
                 });
             for (id, parent, index) in moves {
@@ -154,9 +155,66 @@ impl SueWriter {
                     self.expanded.insert(parent);
                 }
             }
+            self.binder_keys(ui, &rows, cx);
         });
         if let Some(command) = run {
             self.binder_command(&command, cx);
+        }
+    }
+
+    /// The keys of the binder as a whole, `rows` being its rows from top
+    /// to bottom as drawn: the up and down arrows walk from the row that
+    /// has the keyboard to the next one and show it (Enter then opens it
+    /// as a click does), and F2 renames the chosen item also while its
+    /// text has the keyboard (a click on a document hands the keys to
+    /// the text at once).
+    fn binder_keys(&mut self, ui: &mut Ui, rows: &[(EntityId, egui::Id)], cx: &AppletContext<'_>) {
+        if self.renaming.is_some() {
+            return;
+        }
+        let focused = ui.memory(egui::Memory::focused);
+        let at = rows.iter().position(|(_, widget)| Some(*widget) == focused);
+        let is_document =
+            |id: EntityId| cx.arena().get_by_id(id).is_ok_and(manuscript::is_document);
+        let Some(at) = at else {
+            // The text has the keys: F2 still renames what the binder
+            // chose, as its menu says.
+            if self.editor.has_focus(ui.ctx())
+                && let Some(id) = self.selected
+                && self.open == Some(id)
+                && is_document(id)
+                && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::F2))
+                && let Ok(entity) = cx.arena().get_by_id(id)
+            {
+                self.renaming = Some((id, entity.name().to_owned()));
+            }
+            return;
+        };
+        let (down, up) = ui.input_mut(|input| {
+            (
+                input.consume_key(Modifiers::NONE, Key::ArrowDown),
+                input.consume_key(Modifiers::NONE, Key::ArrowUp),
+            )
+        });
+        let next = if down {
+            Some(at + 1)
+        } else if up {
+            at.checked_sub(1)
+        } else {
+            None
+        };
+        if let Some(&(id, widget)) = next.and_then(|next| rows.get(next)) {
+            // egui walks the keyboard by the arrows too, to whatever lies
+            // that way: the binder's own walk replaces it.
+            ui.memory_mut(|memory| {
+                memory.move_focus(egui::FocusDirection::None);
+                memory.request_focus(widget);
+            });
+            self.selected = Some(id);
+            self.open = Some(id);
+            if is_document(id) && self.view == View::Corkboard {
+                self.view = View::Document;
+            }
         }
     }
 
@@ -294,6 +352,7 @@ impl SueWriter {
         theme: &Theme,
         run: &mut Option<String>,
         moves: &mut Vec<(EntityId, EntityId, usize)>,
+        rows: &mut Vec<(EntityId, egui::Id)>,
     ) {
         let Some(item) = Self::binder_item(cx, id) else {
             return;
@@ -339,6 +398,7 @@ impl SueWriter {
         let shown = tree.show(ui, theme);
         let response = shown.response;
         let rect = response.rect;
+        rows.push((id, response.id));
         if shown.toggled {
             if open {
                 self.expanded.remove(&id);
@@ -506,7 +566,7 @@ impl SueWriter {
         }
         if open {
             for child in children {
-                self.binder_row(ui, child, depth + 1, cx, theme, run, moves);
+                self.binder_row(ui, child, depth + 1, cx, theme, run, moves, rows);
             }
         }
     }

@@ -7,6 +7,8 @@ use sue_model::manuscript::{self, role};
 
 /// Where the binder ends and the middle of the page begins.
 const BINDER: f32 = 235.0;
+/// Where the inspector begins, at the right of the page.
+const INSPECTOR: f32 = 1150.0;
 
 /// Sue Writer at 1440 by 900 with a new novel open, a frame at a time.
 struct Panes {
@@ -247,6 +249,12 @@ impl Panes {
         (chapter, scene)
     }
 
+    /// Whether the inspector, the right column of the page, is about
+    /// `id`: it is headed by the chosen item's name.
+    fn inspects(&self, id: sue_core::EntityId) -> bool {
+        self.rect_in(&self.name(id), INSPECTOR, 1440.0).is_some()
+    }
+
     fn finish(self) {
         let _ = std::fs::remove_dir_all(&self.root);
     }
@@ -278,6 +286,39 @@ fn sue_writers_binder_renames_in_place_by_double_click_and_f2_with_undo() {
     panes.typed("Never");
     panes.key(egui::Key::Escape, egui::Modifiers::NONE);
     assert_eq!(panes.name(chapter), chapter_name, "Escape keeps the name");
+    panes.finish();
+}
+
+#[test]
+fn sue_writers_binder_walks_by_the_arrows_and_f2_renames_a_document_from_its_text() {
+    let mut panes = Panes::new("writer-binder-arrows");
+    let draft = panes.draft();
+    let (chapter, scene) = panes.chapter_and_scene();
+    // A click on the Draft leaves the keys with the binder; the down
+    // arrow walks to the next row (the first chapter) and shows it, the
+    // next to its scene, and the up arrow back.
+    panes.command("view.inspector");
+    let row = panes.binder_row(&panes.name(draft));
+    panes.click(row);
+    assert!(panes.inspects(draft), "{:?}", panes.shown());
+    panes.key(egui::Key::ArrowDown, egui::Modifiers::NONE);
+    assert!(panes.inspects(chapter), "down walks one row");
+    panes.key(egui::Key::ArrowDown, egui::Modifiers::NONE);
+    assert!(panes.inspects(scene), "and on to the scene");
+    panes.key(egui::Key::ArrowUp, egui::Modifiers::NONE);
+    assert!(panes.inspects(chapter), "up walks back");
+
+    // A click on a document gives its text the keys, and F2 still
+    // renames it, as the binder's menu says.
+    let old = panes.name(scene);
+    let row = panes.binder_row(&old);
+    panes.click(row);
+    panes.key(egui::Key::F2, egui::Modifiers::NONE);
+    panes.typed("Landfall");
+    panes.key(egui::Key::Enter, egui::Modifiers::NONE);
+    assert_eq!(panes.name(scene), "Landfall", "F2 renamed the document");
+    panes.undo();
+    assert_eq!(panes.name(scene), old);
     panes.finish();
 }
 
