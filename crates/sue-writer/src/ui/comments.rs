@@ -76,10 +76,11 @@ impl SueWriter {
                     .hint(&reply)
                     .label(&reply)
                     .show(ui, theme);
+                let enter = key_text(Key::Enter);
+                let response = ui::tooltip(response, &Tip::new(&reply).shortcut(&enter), theme);
                 let send = response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
                 ui.add_space(gap);
                 ui.horizontal(|ui| {
-                    let enter = key_text(Key::Enter);
                     let pressed = ui::button(("writer-comment-send", id), &reply)
                         .enabled(!draft.trim().is_empty())
                         .show(ui, theme);

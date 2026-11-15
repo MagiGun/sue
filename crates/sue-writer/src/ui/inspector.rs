@@ -17,6 +17,7 @@ use crate::project::{self, LABELS, STATUSES};
 use crate::studio::{SueWriter, View};
 
 use super::binder::keys_of;
+use super::rgb;
 
 /// The most words a word target can ask for.
 const MOST_WORDS: f64 = 10_000_000.0;
@@ -27,7 +28,9 @@ const WORDS_PER_MINUTE: usize = 230;
 
 impl SueWriter {
     /// A text property edited in place, `rows` lines tall, committed when
-    /// the field lets go.
+    /// the field lets go. `name` is what it is called (its heading), said
+    /// by its tooltip and to assistive technology; `hint` shows while it
+    /// is empty.
     #[allow(
         clippy::too_many_arguments,
         reason = "the property, its field's look and the context"
@@ -38,7 +41,7 @@ impl SueWriter {
         id: EntityId,
         key: &'static str,
         rows: usize,
-        hint: &str,
+        (name, hint): (&str, &str),
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
@@ -57,8 +60,9 @@ impl SueWriter {
         let response = ui::text_field(("writer-property", id, key), draft)
             .lines(rows)
             .hint(hint)
-            .label(hint)
+            .label(name)
             .show(ui, theme);
+        let response = ui::tooltip(response, &Tip::new(name), theme);
         if response.lost_focus() {
             let text = draft.clone();
             self.drafts.remove(&(id, key));
@@ -162,26 +166,28 @@ impl SueWriter {
         );
         ui.add_space(theme.space(Space::S4));
         if in_project {
-            ui::heading(ui, &tr!("synopsis"), theme);
+            let name = tr!("synopsis");
+            ui::heading(ui, &name, theme);
             self.property_field(
                 ui,
                 id,
                 manuscript::SYNOPSIS,
                 4,
-                &tr!("what-happens-here-line-two"),
+                (&name, &tr!("what-happens-here-line-two")),
                 cx,
                 theme,
             );
             ui.add_space(theme.space(Space::S4));
             self.properties_ui(ui, id, cx, theme, run);
             ui.add_space(gap);
-            ui::heading(ui, &tr!("keywords"), theme);
+            let name = tr!("keywords");
+            ui::heading(ui, &name, theme);
             self.property_field(
                 ui,
                 id,
                 manuscript::KEYWORDS,
                 1,
-                &tr!("comma-separated"),
+                (&name, &tr!("comma-separated")),
                 cx,
                 theme,
             );
@@ -219,13 +225,14 @@ impl SueWriter {
         }
         if in_project {
             ui.add_space(gap);
-            ui::heading(ui, &tr!("notes"), theme);
+            let name = tr!("notes");
+            ui::heading(ui, &name, theme);
             self.property_field(
                 ui,
                 id,
                 manuscript::NOTES,
                 6,
-                &tr!("notes-for-yourself"),
+                (&name, &tr!("notes-for-yourself")),
                 cx,
                 theme,
             );
@@ -298,30 +305,53 @@ impl SueWriter {
             .and_then(|status| STATUSES.iter().position(|name| *name == status))
             .unwrap_or(STATUSES.len());
         let half = (ui.available_width() - theme.space(Space::S2)) / 2.0;
-        ui.horizontal(|ui| {
-            let picked = ui::dropdown(("writer-label", id), &mut label_at, &labels)
-                .label(&tr!("label"))
-                .width(half)
-                .show(ui, theme);
-            let picked = ui::tooltip(picked, &Tip::new(&tr!("label")), theme);
-            if picked.changed() {
-                *run = Some(LABELS.get(label_at).map_or_else(
-                    || "label.none".to_owned(),
-                    |(name, _)| format!("label.{name}"),
-                ));
-            }
-            let picked = ui::dropdown(("writer-status", id), &mut status_at, &statuses)
-                .label(&tr!("status"))
-                .width(half)
-                .show(ui, theme);
-            let picked = ui::tooltip(picked, &Tip::new(&tr!("status")), theme);
-            if picked.changed() {
-                *run = Some(
-                    STATUSES
-                        .get(status_at)
-                        .map_or_else(|| "status.none".to_owned(), |name| format!("status.{name}")),
-                );
-            }
+        let label_name = tr!("label");
+        let status_name = tr!("status");
+        let label_color = label.as_deref().and_then(project::label_color);
+        // Each list under its name, so "Scene" reads as a label and
+        // "Revised Draft" as a status; the label's color beside its name,
+        // as the binder and the outliner show it.
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(half);
+                ui.horizontal(|ui| {
+                    ui::heading(ui, &label_name, theme);
+                    if let Some(color) = label_color {
+                        let side = theme.space(Space::S3);
+                        let half = side / 2.0;
+                        let (dot, _) =
+                            ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::hover());
+                        ui.painter().circle_filled(dot.center(), half, rgb(color));
+                    }
+                });
+                let picked = ui::dropdown(("writer-label", id), &mut label_at, &labels)
+                    .label(&label_name)
+                    .width(half)
+                    .show(ui, theme);
+                let picked = ui::tooltip(picked, &Tip::new(&label_name), theme);
+                if picked.changed() {
+                    *run = Some(LABELS.get(label_at).map_or_else(
+                        || "label.none".to_owned(),
+                        |(name, _)| format!("label.{name}"),
+                    ));
+                }
+            });
+            ui.vertical(|ui| {
+                ui.set_width(half);
+                ui::heading(ui, &status_name, theme);
+                let picked = ui::dropdown(("writer-status", id), &mut status_at, &statuses)
+                    .label(&status_name)
+                    .width(half)
+                    .show(ui, theme);
+                let picked = ui::tooltip(picked, &Tip::new(&status_name), theme);
+                if picked.changed() {
+                    *run =
+                        Some(STATUSES.get(status_at).map_or_else(
+                            || "status.none".to_owned(),
+                            |name| format!("status.{name}"),
+                        ));
+                }
+            });
         });
         ui.add_space(theme.space(Space::S3));
         let export = tr!("include-in-export-2");
