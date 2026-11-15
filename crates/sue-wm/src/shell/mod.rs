@@ -237,6 +237,12 @@ pub struct Shell {
     /// The notices of saved files still showing, each with the file its
     /// button shows, the newest last.
     revealed: Vec<(crate::ui::ToastId, PathBuf)>,
+    /// The notices of noticed transfers still running: the transfer and
+    /// its notice ([`crate::Transfers::spawn_noticed`]).
+    working: Vec<(u64, crate::ui::ToastId)>,
+    /// Noticed transfers whose notice the person closed: the work goes
+    /// on in the Transfers list, and no notice comes back for it.
+    hidden: Vec<u64>,
     /// The applets' views in windows of their own (or floating), the
     /// front one last.
     views: Vec<window::View>,
@@ -317,6 +323,8 @@ impl Shell {
             hub: hub::HubState::default(),
             toasts: crate::ui::Toasts::new("sue-notices"),
             revealed: Vec::new(),
+            working: Vec::new(),
+            hidden: Vec::new(),
             views: Vec::new(),
             raise_view: None,
             window_support: sue_platform::WindowSupport::default(),
@@ -870,8 +878,11 @@ impl Shell {
                     || path.display().to_string(),
                     |name| name.to_string_lossy().into_owned(),
                 );
-                io.transfers
-                    .done(crate::TransferKind::Export, &name, Some(path.clone()));
+                // A background export is in the list already.
+                if !io.transfers.claim_written(&path) {
+                    io.transfers
+                        .done(crate::TransferKind::Export, &name, Some(path.clone()));
+                }
                 self.notify_saved(&path, &note);
             }
             ShellRequest::CloseWindow => self.close_window(),

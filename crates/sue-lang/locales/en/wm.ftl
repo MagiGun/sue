@@ -437,3 +437,7 @@ batch-converted-next-to = { $count ->
    *[other] { $count } pictures converted next to their files
 }
 batch-and-failed = { $text }, { $failed } failed
+# The notice of work running in the background, with its progress.
+exporting-file = Exporting { $name }
+importing-file = Bringing in { $name }
+copying-file = Copying { $name }

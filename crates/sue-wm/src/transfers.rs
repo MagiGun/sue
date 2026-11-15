@@ -3,7 +3,13 @@
 //! opened, a project saved) are noted as they finish; long ones run as
 //! background jobs ([`sue_core::JobPool`]) that report their progress, so
 //! the interface never waits for them. Every studio and tool shares the
-//! one list, and a start page shows it in its Data Transfers popup.
+//! one list, and the Hub shows it in its Transfers popup.
+//!
+//! A long export is spawned noticed ([`Transfers::spawn_noticed`]): while
+//! it runs the window shows a notice with its progress and a Cancel
+//! button, wherever the person is, and the notice that the file was
+//! written adds no second line for it to the list
+//! ([`Transfers::claim_written`]).
 
 use std::path::PathBuf;
 
@@ -65,6 +71,11 @@ pub struct Transfer {
     pub state: TransferState,
     /// When it started, in seconds since 1970.
     pub started: u64,
+    /// The window shows its progress in a notice while it runs
+    /// ([`Transfers::spawn_noticed`]).
+    pub noticed: bool,
+    /// It ran in the background and its result was not yet told.
+    unclaimed: bool,
     job: Option<JobHandle<()>>,
 }
 
@@ -114,6 +125,8 @@ impl Transfers {
             path,
             state: TransferState::Done,
             started: unix_now(),
+            noticed: false,
+            unclaimed: false,
             job: None,
         }
     }
@@ -154,8 +167,47 @@ impl Transfers {
         let job = pool.spawn(label.to_owned(), work);
         let mut transfer = self.make(kind, label, path);
         transfer.state = TransferState::Running(0.0);
+        transfer.unclaimed = true;
         transfer.job = Some(job);
         self.push(transfer)
+    }
+
+    /// [`Self::spawn`], and the window shows its progress and a Cancel
+    /// button in a notice while it runs: for work a person started and
+    /// waits for, such as an export.
+    pub fn spawn_noticed<F>(
+        &mut self,
+        kind: TransferKind,
+        label: &str,
+        path: Option<PathBuf>,
+        work: F,
+    ) -> u64
+    where
+        F: FnOnce(&JobContext) -> Result<(), String> + Send + 'static,
+    {
+        let id = self.spawn(kind, label, path, work);
+        if let Some(transfer) = self.list.iter_mut().find(|transfer| transfer.id == id) {
+            transfer.noticed = true;
+        }
+        id
+    }
+
+    /// `true`, once, when a background transfer that wrote `path` finished
+    /// and is listed already: the notice that says the file was written
+    /// then adds no second line for it.
+    pub fn claim_written(&mut self, path: &std::path::Path) -> bool {
+        let found = self.list.iter_mut().find(|transfer| {
+            transfer.unclaimed
+                && transfer.state == TransferState::Done
+                && transfer.path.as_deref() == Some(path)
+        });
+        match found {
+            Some(transfer) => {
+                transfer.unclaimed = false;
+                true
+            }
+            None => false,
+        }
     }
 
     /// Reads the progress of running transfers. Returns `true` while any
@@ -264,6 +316,32 @@ mod tests {
         assert_eq!(transfers.running(), 0);
         transfers.clear_completed();
         assert!(transfers.list().is_empty());
+    }
+
+    #[test]
+    fn a_noticed_export_is_listed_once_when_its_file_is_told() {
+        let mut transfers = Transfers::default();
+        let path = PathBuf::from("Walk.mp4");
+        let id = transfers.spawn_noticed(
+            TransferKind::Export,
+            "Walk.mp4",
+            Some(path.clone()),
+            |job| {
+                job.set_progress(1.0);
+                Ok(())
+            },
+        );
+        assert!(transfers.get(id).unwrap().noticed);
+        assert!(!transfers.claim_written(&path), "not finished yet");
+        while transfers.poll() {
+            std::thread::yield_now();
+        }
+        assert!(transfers.claim_written(&path));
+        assert!(!transfers.claim_written(&path), "only once");
+        // A file written at once was never a background transfer.
+        transfers.done(TransferKind::Export, "Quick.png", Some("Quick.png".into()));
+        assert!(!transfers.claim_written(std::path::Path::new("Quick.png")));
+        assert!(!transfers.list()[0].noticed);
     }
 
     #[test]
