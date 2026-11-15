@@ -179,7 +179,7 @@ The order of work is the plan at the end.
 | Cut, Copy, Paste | Edit | done | |
 | Copy vectors as SVG | Edit > Copy vectors as SVG | done | The vector layer's lines, or those the Operation tool picked, as SVG code on the clipboard |
 | Paste to shown position | Edit > Paste to shown position | done | |
-| Delete | Edit | done | |
+| Delete | Edit | done | While a mask is edited it hides on the mask and leaves the layer as it is |
 | Delete Outside Selection | Edit | done | Shift+Delete |
 | Fill with the main color | Edit > Fill | done | Alt+Delete |
 | Advanced Fill dialog (EX) | Edit > Fill (Advanced) | partial | Every option but Fill up to vector path and Exclude |
@@ -257,7 +257,7 @@ The order of work is the plan at the end.
 | --- | --- | --- | --- |
 | New Raster Layer | Layer > New Layer | done | |
 | New Vector, Text, Balloon, Tone layers | Layer > New Layer | done | |
-| New Gradient, Fill and Paper layers | Layer > New Layer | partial | Commands exist; verify the kinds behave as Clip Studio's |
+| New Gradient, Fill and Paper layers | Layer > New Layer | partial | A gradient layer stays live: the Gradient tool lays its line again or drags an end, Tool Property (Gradient or Object tool) edits its stops, shape and edge; verify fill and paper layers |
 | New 3D Layer | Layer > New Layer | done | Cube, sphere, cylinder, cone, plane |
 | New Frame Border Folder (EX) | Layer > New Layer | done | |
 | New Correction Layer | Layer > New Correction Layer | done | |
@@ -391,14 +391,15 @@ The order of work is the plan at the end.
 | Eraser with Vector modes | Tool | done | Only where it touches, up to where lines cross, or whole lines |
 | Blend: Blur, Finger Tip, Liquify | Tool | done | Liquify has its own slot in Clip Studio's order; it pushes, swells, pinches and twirls |
 | Copy stamp | Blend tool | done | Alt and click sets the source; the first stroke fixes the distance, later strokes keep it |
-| Close and fill | Fill tool | done | Every area the lines inside the lasso close off fills, a pixel under the lines |
+| Close and fill | Fill tool | done | Every area the lines inside the lasso close off fills, a pixel under the lines; Target color fills only what the editing layer has in that color, the other layers' lines closing the areas |
 | Paint unpainted area | Fill tool | done | Inside the lasso, what the layer left unpainted and no line covers fills |
 | Ruby (furigana) | Text tool, Tool Property | done | Over the words, or to their right in vertical text; kept on its words as they change |
 | Lasso fill | Figure tool | done | |
 | Fill bucket: Close gap, Area scaling | Tool | done | Paint stays inside lines with small breaks, no white edge. A drag fills every area it crosses that is like the one it started in, as one step; in an animation it sees only the frame shown; on a mask being edited it shows or hides the layer |
-| Auto Select (magic wand) | Tool | done | Looks at reference layers only when set |
+| Auto Select (magic wand) | Tool | done | Looks at reference layers only when set; Refer multiple with all, selected, folder or reference layers, and an Exclude row of five (draft, text, editing, paper, locked) |
 | Shrink selection | Selection area tool | done | The seventh sub tool: a lasso whose selection shrinks to the drawing inside it, keeping the holes it closes in |
-| Gradient tool | Tool | partial | Gradient layers exist; verify the tool's dials |
+| Selection area: Aspect, Anti-aliasing, Adjust angle after fixed | Tool Property | done | Free, Square or a ratio of its own; after the drag the rectangle or ellipse turns with the pointer until a click (Enter keeps it straight, Esc drops it) |
+| Gradient tool | Tool | done | Twelve sub tools of Sue's own, Contour line fill among them; an editable bar of stops, gradients from set files and kept in My Gradients; Linear, Circle, Ellipse; Do not repeat, Repeat, Reverse, Do not draw; Step of angle, Where to create (a live gradient layer), opacity and blending mode |
 | Figure tool (rectangle, ellipse, polygon, polyline) | Tool | done | Straight line, rectangle, ellipse, filled shapes, polygon (corners and roundness of corner), Polyline and Continuous Curve (a click at each corner; a double-click ends it, the first corner closes it), Curve (drag the ends, move to bend, click), Bezier Curve (click or drag out handles). Shift: 45 degrees, square, circle. Follows the rulers and the perspective ruler's plane; on a vector layer a vector line. Line or fill as one setting is not yet (filled shapes are sub tools of their own) |
 | Smart Shape (5.0) | Drawing with any tool | done | Hold the pen still: a line, arc, ellipse, circle or polygon; on or off per sub tool |
 | Text tool | Tool | done | |

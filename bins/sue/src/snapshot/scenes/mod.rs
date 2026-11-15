@@ -24,6 +24,7 @@ mod paint_extras;
 mod paint_figure;
 mod paint_fill;
 mod paint_filters;
+mod paint_gradient;
 mod paint_handles;
 mod paint_layers;
 mod paint_modifiers;
@@ -86,6 +87,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_figure::tool(tour)?;
     paint_canvas::figure(tour)?;
     paint_fill::shrink_selection(tour)?;
+    paint_gradient::scenes(tour)?;
     paint_layers::rows(tour)?;
     paint_3d::tool_property(tour)?;
     shell::sue_menu_in_paint(tour)?;

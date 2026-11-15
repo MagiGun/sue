@@ -3450,3 +3450,4 @@ aspect-height = Height
 adjust-angle-after-fixed = Adjust angle after fixed
 adjust-angle-after-fixed-hint = After the drag, move the pointer to turn the selection, then click to fix it
 stop-color-from = Color from
+gradient-layer-kind = Gradient layer: the Gradient or Object tool edits it in Tool Property

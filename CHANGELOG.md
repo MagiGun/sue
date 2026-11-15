@@ -13,6 +13,27 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
+  Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
+  fill (click an area and the gradient runs from its outline inward).
+  Tool Property has a bar of stops you edit by clicking and dragging,
+  a row that takes a gradient from a gradient set or keeps yours in My
+  Gradients (the same set files as Gradient Map), Linear, Circle or
+  Ellipse, the edge process (Do not repeat, Repeat, Reverse, Do not
+  draw), Step of angle (Shift keeps 45 degrees), Where to create,
+  opacity and blending mode.
+- Sue Paint: a gradient can be made as a gradient layer that stays
+  editable. With the Gradient tool on it, drag to lay its line again or
+  drag one of its ends; Tool Property (Gradient or Object tool) changes
+  its stops, shape and edge, each change one undo step. Layer, New
+  Layer, Gradient makes such a layer.
+- Sue Paint, Close and fill: Target color fills only what the editing
+  layer has in that color, so painted areas can be filled again.
+- Sue Paint, Fill and Auto Select: Refer multiple's Exclude row is five
+  toggles; the fifth leaves out the editing layer itself.
+- Sue Paint, Selection area: Tool Property shows Aspect (Free, Square,
+  a ratio), Anti-aliasing and Adjust angle after fixed: after the drag
+  the rectangle or ellipse turns with the pointer until you click.
 - Sue Paint: drag the Fill tool across a picture to fill every area the
   drag crosses that is like the one it started in, as one undo step; the
   lines it crosses on the way stay as they are.
@@ -761,6 +782,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint: Edit, Delete while a layer's mask is edited hides on the
+  mask and leaves the layer's pixels as they were.
 - A dialog keeps its place while what it holds grows or shrinks: a
   row added to a list no longer moves the buttons under the pointer.
   Dialogs that drew their own OK and Cancel (Gradient Map, Color
