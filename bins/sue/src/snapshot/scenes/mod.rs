@@ -45,6 +45,7 @@ mod writer_compile;
 mod writer_corkboard;
 mod writer_document;
 mod writer_outliner;
+mod writer_panes;
 mod writer_start;
 mod writer_touch;
 
@@ -112,6 +113,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     writer_bars::text_color(tour)?;
     writer_corkboard::corkboard(tour)?;
     writer_outliner::outliner(tour)?;
+    writer_panes::inspector(tour)?;
     writer_document::composition(tour)?;
     writer_compile::dialog(tour)?;
     writer_compile::export_and_tables(tour)?;

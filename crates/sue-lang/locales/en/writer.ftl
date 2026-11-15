@@ -651,3 +651,27 @@ tabs-as = Tabs as
 spaces = spaces
 tabs-as-spaces = Tabs as spaces
 n-0-keeps-the-tabs = 0 keeps the tabs
+
+## The binder, outliner, corkboard, inspector, comments and research
+## panes (0.0.8, P4-11B).
+binder-left-out = Left out
+outliner-empty = Nothing in this folder yet
+outliner-empty-detail = New documents and folders show up here as rows.
+outliner-row-help = Double-click or press Enter to open it.
+corkboard-empty = No cards here yet
+corkboard-empty-detail = New documents and folders in this folder show up as cards.
+corkboard-card-help = Double-click or press Enter to open it; drag it to move it.
+inspector-empty = Choose something in the binder to see it here
+comments-empty-detail = Select some words and choose Review, New Comment.
+comments-go-to-words = Select these words in the text
+research-empty = Nothing to show
+research-empty-detail = Sue Writer could not read this picture. Open it in Sue Paint to work on it.
+reading-time = { $minutes ->
+    [one] About a minute to read
+   *[other] About { $minutes } minutes to read
+}
+selected-word-count = { $words ->
+    [one] Selected: one word
+   *[other] Selected: { $words } words
+}
+research-kept-detail = Sue Writer shows pictures and documents here. This item is kept in the project as it is.

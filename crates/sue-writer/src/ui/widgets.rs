@@ -168,19 +168,9 @@ pub(super) fn page_icon(painter: &Painter, rect: Rect, color: Color32, empty: bo
     paint(painter, rect, icon, color, false);
 }
 
-/// A folder of the binder.
-pub(super) fn folder_icon(painter: &Painter, rect: Rect, color: Color32) {
-    paint(painter, rect, Icon::Folder, color, false);
-}
-
 /// The Draft folder, and the binder that holds it.
 pub(super) fn book_icon(painter: &Painter, rect: Rect, color: Color32) {
     paint(painter, rect, Icon::Binder, color, false);
-}
-
-/// The Trash folder.
-pub(super) fn trash_icon(painter: &Painter, rect: Rect, color: Color32) {
-    paint(painter, rect, Icon::Delete, color, false);
 }
 
 /// A picture.
