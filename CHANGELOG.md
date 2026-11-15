@@ -13,6 +13,23 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, New: each kind of work has its own settings. An animation
+  has five presets with blank space (1920 x 1080 at 192 dpi gives a
+  2304 x 1296 canvas), its output frame with a preview, title-safe area,
+  overflow frame, timeline name, scene, shot, division line and the
+  playback time in frames or in seconds and frames. A comic has its
+  bleed and border, monochrome with black and white inks and a default
+  tone frequency, and Show all comic settings shows its story
+  information. Create animated illustration gives a picture a timeline.
+  A registered preset brings all of it back.
+- Sue Paint, Convert to Lines and Tones asks first: line and tone
+  settings over a live preview of the result.
+- Sue Paint, View, Grid Settings: the grid's gap, divisions and origin,
+  saved with the picture; Snap to Grid follows its finest lines.
+- Sue Paint, Convert Layer has an expression color, a blending mode and
+  Keep original layer; Create Perspective Ruler puts the ruler on a new
+  layer (on at first); Expand Selected Area can keep square corners;
+  Text takes the main, the sub or its own color.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
@@ -177,6 +194,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint's dialogs are as tall as what they hold, on the shared
+  controls with focus rings and tooltips; Drop Shadow, Focus Lines and
+  Speed Lines no longer hide their OK and Cancel.
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait
