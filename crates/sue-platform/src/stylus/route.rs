@@ -296,6 +296,7 @@ impl Router {
     /// A touch event of the window: a finger, or a pen whose force comes
     /// with it. The first touch to land is the one that draws, as it is
     /// the one that moves the pointer; the others belong to gestures.
+    #[cfg(test)]
     pub(crate) fn touch(
         &mut self,
         stream: &mut Stream,
@@ -307,6 +308,20 @@ impl Router {
     ) {
         let mut sample = PenSample::at(PenSource::Touch, pos, time);
         sample.pressure = force;
+        self.touch_sample(stream, id, phase, sample);
+    }
+
+    /// [`Self::touch`] for a touch whose packet says more than winit's
+    /// event: `sample` (of [`PenSource::Touch`]) with the packet's own
+    /// pressure, lean, twist, end and time (a Windows Ink pen).
+    pub(crate) fn touch_sample(
+        &mut self,
+        stream: &mut Stream,
+        id: u64,
+        phase: egui::TouchPhase,
+        mut sample: PenSample,
+    ) {
+        let pos = sample.pos;
         match phase {
             egui::TouchPhase::Start => {
                 if self.touch.is_some() {

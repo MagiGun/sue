@@ -1178,3 +1178,214 @@ fn stroke_ends_sheet() {
     std::fs::write(&path, png).unwrap();
     println!("stroke ends: {}", path.display());
 }
+
+/// Sue Paint with the new brush engine on (`sue_paint.brush_engine`), and
+/// a bigger G-pen, so a line's width can be read.
+fn new_engine(tag: &str) -> Paint {
+    let mut paint = Paint::new(tag);
+    // The key is hidden (not in the shipped rice): as the owner turns it
+    // on, by writing it into the rice file.
+    let _ = paint
+        .runtime
+        .engine
+        .world
+        .rice
+        .register(&sue_rice::RiceDeclaration::new(
+            "sue_paint.brush_engine",
+            sue_rice::RiceParameter::Text {
+                value: "new".to_owned(),
+            },
+            "",
+        ));
+    for _ in 0..8 {
+        paint.step(vec![key(egui::Key::CloseBracket, egui::Modifiers::NONE)]);
+    }
+    paint
+}
+
+/// A sample of the pen's stream at `pos` and `time`, pressing `pressure`.
+fn packet(kind: stylus::PenKind, pos: Pos2, time: f64, pressure: Option<f32>) -> stylus::PenSample {
+    let mut sample = stylus::PenSample::at(PenSource::WinTab, [pos.x, pos.y], time);
+    sample.kind = kind;
+    sample.pressure = pressure;
+    sample
+}
+
+/// The new engine takes every packet of the pen with its own pressure:
+/// forty packets that press harder and harder, all in one frame, draw a
+/// line that widens along its length, not one of the frame's last
+/// pressure. The lift is a frame later and adds nothing; the stroke is
+/// one undo step.
+#[test]
+fn sue_paint_the_new_engine_draws_every_packets_pressure() {
+    let mut paint = new_engine("paint-engine-packets");
+    let start = paint.middle() - vec2(150.0, 0.0);
+    let mut events = vec![
+        egui::Event::PointerMoved(start),
+        button(start, true, egui::Modifiers::NONE),
+    ];
+    let count = 40;
+    for i in 0..=count {
+        let at = start + vec2(300.0 * i as f32 / count as f32, 0.0);
+        let pressure = 0.1 + 0.9 * i as f32 / count as f32;
+        let kind = if i == 0 {
+            stylus::PenKind::Down
+        } else {
+            stylus::PenKind::Move
+        };
+        stylus::push_for_test(packet(kind, at, 5.0 + f64::from(i) / 200.0, Some(pressure)));
+        if i > 0 && i % 4 == 0 {
+            events.push(egui::Event::PointerMoved(at));
+        }
+    }
+    paint.step(events);
+    let end = start + vec2(300.0, 0.0);
+    stylus::push_for_test(packet(stylus::PenKind::Up, end, 5.25, None));
+    paint.step(vec![button(end, false, egui::Modifiers::NONE)]);
+    paint.settle(3);
+    let profile = paint.profile();
+    assert!(profile.len() > 40, "the line was drawn: {profile:?}");
+    let quarter = profile.len() / 4;
+    let early = profile[quarter].1;
+    let late = profile[profile.len() - quarter].1;
+    assert!(
+        early * 3 <= late * 2,
+        "the line widens with the pen's pressure within one frame: {early} px early, {late} px late"
+    );
+    paint.command("edit.undo");
+    assert!(paint.profile().is_empty(), "the stroke was one undo step");
+    paint.command("edit.redo");
+    assert_eq!(paint.profile(), profile, "redo lays it again");
+}
+
+/// With no sample of the pen's stream (a script of pointer events), the
+/// pointer's events are the new engine's samples; its end is no blob.
+#[test]
+fn sue_paint_the_new_engine_draws_from_pointer_events_too() {
+    let mut paint = new_engine("paint-engine-pointer");
+    let start = paint.middle() - vec2(120.0, 0.0);
+    paint.step(vec![
+        egui::Event::PointerMoved(start),
+        button(start, true, egui::Modifiers::NONE),
+    ]);
+    let mut at = start;
+    for _ in 0..30 {
+        at += vec2(8.0, 0.0);
+        paint.step(vec![egui::Event::PointerMoved(at)]);
+    }
+    let end = at + vec2(3.0, 0.0);
+    paint.step(vec![
+        egui::Event::PointerMoved(end),
+        button(end, false, egui::Modifiers::NONE),
+    ]);
+    paint.settle(2);
+    let profile = paint.profile();
+    let (middle, end) = middle_and_end(&profile);
+    assert!(
+        end <= middle + 1,
+        "the end ({end} px) is no blob over the middle ({middle} px)"
+    );
+    paint.command("edit.undo");
+    assert!(paint.profile().is_empty(), "the stroke was one undo step");
+}
+
+/// The switch is a line the owner writes under `[sue_paint]` in the
+/// rice file, not a declared setting: the file with that line is read
+/// as it stands (no migration drops it), keeps the line when Sue writes
+/// the file back, and still says `new` once the shell's declarations are
+/// registered over it, as at start.
+#[test]
+fn the_new_engine_switch_is_read_from_the_rice_file() {
+    let shipped = sue_rice::DEFAULT_RICE;
+    let section = shipped.find("[sue_paint]").expect("a [sue_paint] table");
+    let line_end = section + shipped[section..].find('\n').unwrap() + 1;
+    let text = format!(
+        "{}brush_engine = \"new\"\n{}",
+        &shipped[..line_end],
+        &shipped[line_end..]
+    );
+    assert_eq!(sue_rice::migrate(&text).unwrap(), None, "read as it is");
+    let mut schema = sue_rice::RiceSchema::parse(&text).unwrap();
+    sue_wm::register_rice(&mut schema).unwrap();
+    assert_eq!(schema.get_str("sue_paint.brush_engine"), Some("new"));
+    assert!(
+        schema.to_suerice().contains("brush_engine = \"new\""),
+        "the line stays when the file is written back"
+    );
+}
+
+/// What the new engine lays on the real canvas from a pen's packets, for
+/// a person to look at: rows of strokes, each frame carrying several
+/// packets, ending four ways (columns: easing off, lifted while pressing,
+/// the driver going quiet before the lift, a quick flick of falling
+/// pressure). `SUE_STROKE_ENDS` names the PNG file.
+#[test]
+#[ignore = "writes a picture of the new engine's strokes for a person to look at"]
+fn new_engine_sheet() {
+    let mut paint = new_engine("paint-engine-sheet");
+    let middle = paint.middle();
+    let mut time = 10.0;
+    for row in 0..4 {
+        for column in 0..4 {
+            let start = middle + vec2(-340.0 + column as f32 * 175.0, -150.0 + row as f32 * 90.0);
+            let count = 60;
+            let mut events = vec![
+                egui::Event::PointerMoved(start),
+                button(start, true, egui::Modifiers::NONE),
+            ];
+            for i in 0..=count {
+                let s = i as f32 / count as f32;
+                let at = start + vec2(150.0 * s, 26.0 * (s * 5.0 + row as f32).sin());
+                let body = 0.2 + 0.25 * row as f32;
+                let rise = (s * 8.0).min(1.0);
+                let pressure = match column {
+                    0 => body * rise * (1.0 - ((s - 0.8).max(0.0) / 0.2) * 0.9),
+                    1 => body * rise,
+                    2 if s > 0.9 => -1.0,
+                    3 => body * rise * (1.0 - s * 0.95),
+                    _ => body * rise,
+                };
+                let kind = if i == 0 {
+                    stylus::PenKind::Down
+                } else {
+                    stylus::PenKind::Move
+                };
+                time += 1.0 / 200.0;
+                let pressure = (pressure >= 0.0).then_some(pressure.max(0.02));
+                stylus::push_for_test(packet(kind, at, time, pressure));
+                if i % 3 == 0 {
+                    events.push(egui::Event::PointerMoved(at));
+                }
+                // About three packets reach a frame.
+                if i % 3 == 2 {
+                    paint.step(std::mem::take(&mut events));
+                }
+            }
+            let end = start + vec2(150.0, 26.0 * (5.0 + row as f32).sin());
+            paint.step(std::mem::take(&mut events));
+            time += 1.0 / 200.0;
+            stylus::push_for_test(packet(stylus::PenKind::Up, end, time, None));
+            paint.step(vec![button(end, false, egui::Modifiers::NONE)]);
+            paint.settle(2);
+        }
+    }
+    let layers = paint.layers();
+    let (_, width, bytes) = layers.last().unwrap();
+    let height = bytes.len() / 4 / width;
+    let mut out = Vec::with_capacity(width * height * 4);
+    for pixel in bytes.chunks(4) {
+        let cover = u32::from(pixel[3]);
+        for &ink in &pixel[..3] {
+            let ink = u32::from(ink);
+            out.push(((ink * cover + 255 * (255 - cover)) / 255) as u8);
+        }
+        out.push(255);
+    }
+    let png = sue_io::encode_png_rgba(*width as u32, height as u32, &out).unwrap();
+    let path = std::env::var("SUE_STROKE_ENDS").map_or_else(
+        |_| std::env::temp_dir().join("sue-new-engine.png"),
+        PathBuf::from,
+    );
+    std::fs::write(&path, png).unwrap();
+    println!("new engine: {}", path.display());
+}

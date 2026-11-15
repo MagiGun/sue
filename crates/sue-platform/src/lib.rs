@@ -30,6 +30,8 @@ mod device;
 pub mod fs;
 mod gpu;
 mod host;
+#[cfg(target_os = "windows")]
+mod ink_pen;
 mod input;
 #[cfg(target_os = "ios")]
 mod ios;

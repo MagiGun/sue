@@ -1,0 +1,30 @@
+[package]
+name = "sue-winpen"
+description = "Sue on Windows: the one audited call that reads a Windows Ink pen's packet history, so every packet of a pen keeps its own pressure, lean, twist and time."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+license-file.workspace = true
+
+# The Win32 bindings winit and sue-platform already use, with the pointer
+# input functions.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { workspace = true, features = ["Win32_UI_Input_Pointer", "Win32_UI_WindowsAndMessaging"] }
+
+# Reading a pen's packet history is a Win32 call through a raw pointer to
+# a buffer, which Rust counts as unsafe: this crate (part of sue-platform,
+# backbone rule 6) relaxes the workspace's `forbid` to `deny` so that the
+# one audited function may allow it, under the owner's standing approval
+# of 2026-11-13 for unsafe code that brings a real benefit (an operating
+# system API with no safe call), each block with a SAFETY comment.
+[lints.rust]
+unsafe_code = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+undocumented_unsafe_blocks = "deny"

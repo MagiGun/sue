@@ -3800,6 +3800,7 @@ version = "0.0.75"
 dependencies = [
  "egui",
  "sue-ai",
+ "sue-brush",
  "sue-core",
  "sue-io",
  "sue-lang",
@@ -3816,6 +3817,7 @@ dependencies = [
 name = "sue-picture"
 version = "0.0.75"
 dependencies = [
+ "sue-brush",
  "sue-core",
  "sue-io",
  "sue-lang",
@@ -3855,6 +3857,7 @@ dependencies = [
  "sha2",
  "sue-ios",
  "sue-wayland",
+ "sue-winpen",
  "sys-locale",
  "ureq",
  "wasm-bindgen",
@@ -3901,6 +3904,13 @@ dependencies = [
  "raw-window-handle",
  "wayland-backend",
  "wayland-client",
+]
+
+[[package]]
+name = "sue-winpen"
+version = "0.0.75"
+dependencies = [
+ "windows 0.62.2",
 ]
 
 [[package]]

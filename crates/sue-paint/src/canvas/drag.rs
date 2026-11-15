@@ -405,6 +405,10 @@ impl SuePaint {
             self.pick(pos, mode, viewport, size, cx);
             return;
         }
+        if matches!(self.gesture, Some(Gesture::Engine(_))) {
+            self.engine_drag(pos, viewport, size);
+            return;
+        }
         if matches!(self.gesture, Some(Gesture::Blend { .. })) {
             self.blend_drag(pos, viewport, size, cx);
             return;
@@ -790,6 +794,7 @@ impl SuePaint {
                 }
             }
             Gesture::Pick { .. }
+            | Gesture::Engine(_)
             | Gesture::Pin { .. }
             | Gesture::Transform { .. }
             | Gesture::Blend { .. }

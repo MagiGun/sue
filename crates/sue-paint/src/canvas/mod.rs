@@ -18,6 +18,7 @@ use crate::tools::Tool;
 use view::{SCROLLBAR, scrollbar};
 
 mod drag;
+pub(crate) mod engine;
 mod fill;
 mod input;
 mod overlays;

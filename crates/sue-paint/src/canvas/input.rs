@@ -93,6 +93,9 @@ impl SuePaint {
                     // first finger began drawing is taken back as if never
                     // drawn (nothing to undo, so no undo can take anything
                     // else).
+                    if matches!(self.gesture, Some(Gesture::Engine(_))) {
+                        self.engine_abandon(cx);
+                    }
                     if let Some(Gesture::Stroke { stroke, offset, .. }) = self.gesture.take()
                         && let Some(doc) = self.docs.get_mut(self.active)
                         && let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer())
@@ -264,6 +267,8 @@ impl SuePaint {
         // where the system's pen comes through Sue (a Wayland tablet), so
         // each point of a stroke has the pressure and lean it had there.
         let mut samples = sue_platform::stylus::take_samples();
+        // Every packet of the pen, for a stroke of the new brush engine.
+        self.engine_take_samples(cx);
         if sue_platform::stylus::pressure().is_some()
             || samples.iter().any(|sample| sample.pressure.is_some())
         {
@@ -386,7 +391,11 @@ impl SuePaint {
                     {
                         lifted = true;
                     }
-                    if matches!(self.gesture, Some(Gesture::Stroke { .. })) {
+                    if matches!(self.gesture, Some(Gesture::Engine(_))) {
+                        // The new engine's stroke ends where the pen last
+                        // was; the release is not a point of it.
+                        self.engine_release(pos, viewport, size, cx);
+                    } else if matches!(self.gesture, Some(Gesture::Stroke { .. })) {
                         // A brush stroke takes no point from its release:
                         // the line is finished to where the button was let
                         // go, at the pressure of its own last point.
@@ -489,6 +498,9 @@ impl SuePaint {
                 );
             }
         }
+        // The new engine's stroke: this frame's samples to its worker, and
+        // what it laid since the last frame.
+        self.engine_frame(viewport, size, cx);
         if self.gesture.is_some() {
             ctx.request_repaint();
         } else if let Some(doc) = self.docs.get_mut(self.active) {

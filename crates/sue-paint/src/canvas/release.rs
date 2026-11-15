@@ -642,6 +642,7 @@ impl SuePaint {
             Gesture::Pan { .. }
             | Gesture::Rotate { .. }
             | Gesture::Pick { .. }
+            | Gesture::Engine(_)
             | Gesture::Pin { .. }
             | Gesture::Transform { .. }
             | Gesture::BrushSize { .. } => {}

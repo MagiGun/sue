@@ -57,6 +57,9 @@ sue-ios = { path = "ios" }
 [target.'cfg(target_os = "windows")'.dependencies]
 wintab.workspace = true
 windows.workspace = true
+# A Windows Ink pen's packet history (each packet's own pressure), read
+# by the one audited call in crates/sue-platform/winpen.
+sue-winpen = { path = "winpen" }
 
 # Pen pressure, tilt and the eraser from X11's XInput2 (a pen tablet
 # under X11, or under Wayland through XWayland), on a connection of its

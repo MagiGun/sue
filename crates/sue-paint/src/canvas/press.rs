@@ -147,6 +147,16 @@ impl SuePaint {
         } else {
             self.toolbox.of(tool).clone()
         };
+        // The round pen and the pencil of the new brush engine, when it is
+        // on and can draw this stroke (canvas/engine.rs).
+        if matches!(tool, Tool::Pen | Tool::Pencil)
+            && self.engine_press(pos, &sub, modifiers, viewport, size, cx)
+        {
+            return;
+        }
+        let Some(doc) = self.docs.get(self.active) else {
+            return;
+        };
         let op = match (modifiers.shift, modifiers.alt) {
             (true, true) => Op::Intersect,
             (true, false) => Op::Add,

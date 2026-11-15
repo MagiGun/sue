@@ -16,7 +16,10 @@
 //!   mip-mapped dab, the ribbon) and the premultiplied row kernels.
 //! - [`buffer`]: the tiled stroke buffer, with committed and tail tiles,
 //!   that a stroke paints into and that merges into the layer on lift.
+//! - [`worker`]: the stroke laid on the shared job pool while the pen is
+//!   down, shown live, and merged into its layer as one edit on lift.
 
 pub mod buffer;
 pub mod input;
 pub mod raster;
+pub mod worker;
