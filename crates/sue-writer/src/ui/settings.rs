@@ -9,8 +9,6 @@ use sue_wm::{AppletContext, Theme};
 use crate::project;
 use crate::studio::{Furniture, Settings, SueWriter};
 
-use super::toolbar::font_picker;
-
 /// How wide a part of a header or a footer is, in the largest steps of
 /// the spacing scale.
 const PART_STEPS: f32 = 3.5;
@@ -93,21 +91,28 @@ impl SueWriter {
             });
             form.section(&tr!("fonts"));
             form.row(&tr!("body-font"), |ui| {
-                font_picker(
+                font_box(
                     ui,
                     "writer-body-font",
+                    &tr!("body-font"),
                     &mut settings.font,
                     &mut settings.font_filter,
+                    theme,
                 );
             });
             form.row(&tr!("heading-font"), |ui| {
-                let mut filter = String::new();
-                font_picker(
+                // Its search is kept between frames like the body font's.
+                let kept = Id::unique("writer-heading-font-filter");
+                let mut filter: String = ui.data(|data| data.get_temp(kept)).unwrap_or_default();
+                font_box(
                     ui,
                     "writer-heading-font",
+                    &tr!("heading-font"),
                     &mut settings.heading_font,
                     &mut filter,
+                    theme,
                 );
+                ui.data_mut(|data| data.insert_temp(kept, filter));
             });
             form.row(&tr!("body-size-pt"), |ui| {
                 let mut size = f64::from(settings.size);
@@ -256,8 +261,11 @@ fn pick(
     theme: &Theme,
 ) {
     let mut chosen = keys.iter().position(|key| *key == value).unwrap_or(0);
+    // As wide as the text fields above it, so the column reads as one.
+    let width = ui.available_width();
     if ui::dropdown(salt, &mut chosen, names)
         .label(label)
+        .width(width)
         .show(ui, theme)
         .changed()
         && let Some(key) = keys.get(chosen)
@@ -284,6 +292,69 @@ fn words_field(
         .label(label)
         .show(ui, theme);
     *value = (words.round() as i64).clamp(0, most);
+}
+
+/// A box like the dropdowns beside it that shows `font` and opens the
+/// installed fonts, each drawn in its own face, under a search field kept
+/// in `filter`.
+fn font_box(
+    ui: &mut Ui,
+    salt: &str,
+    label: &str,
+    font: &mut String,
+    filter: &mut String,
+    theme: &Theme,
+) {
+    let open_id = Id::unique(salt).with("open");
+    let mut open = ui.data(|data| data.get_temp::<bool>(open_id).unwrap_or(false));
+    let width = ui.available_width();
+    let shown = ui::picker_box(ui, salt, font, label, open, width, theme);
+    let opened = shown.clicked() && !open;
+    if shown.clicked() {
+        open = !open;
+    }
+    // Escape closes the fonts, not the dialog under them: it is taken
+    // before the list sees it.
+    let escaped =
+        open && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    if escaped {
+        open = false;
+    }
+    let picked = ui::popover(
+        ui.ctx(),
+        open_id.with("list"),
+        shown.rect,
+        &mut open,
+        theme,
+        |ui| {
+            ui.set_width(width);
+            let hint = tr!("search-fonts");
+            let search = ui::search_field((salt, "search"), filter)
+                .hint(&hint)
+                .label(&hint)
+                .width(width)
+                .show(ui, theme);
+            if opened {
+                search.request_focus();
+            }
+            if !sue_wm::fonts::ready() {
+                caption(ui, &tr!("finding-installed-fonts-ellipsis"), theme);
+            }
+            sue_wm::fonts::list_ui(ui, font, filter)
+        },
+    )
+    .flatten();
+    // Once Escape or a picked font closes the fonts, the keys go back to
+    // the box.
+    let picked_one = picked.is_some();
+    if let Some(family) = picked {
+        *font = family;
+    }
+    if escaped || picked_one {
+        open = false;
+        shown.request_focus();
+    }
+    ui.data_mut(|data| data.insert_temp(open_id, open));
 }
 
 /// A line of secondary text.
