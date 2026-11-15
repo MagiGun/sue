@@ -313,11 +313,17 @@ impl Action {
 /// The sub tool a borrowed `tool` of `mode` is, by name, for the dialog
 /// and the tooltips: the built-in one of that mode.
 pub(crate) fn borrowed_name(tool: Tool, mode: Option<u8>) -> String {
-    mode.and_then(|mode| tool.sub_tools().into_iter().find(|sub| sub.mode == mode))
-        .map_or_else(
-            || tool.label(),
-            |sub| format!("{}: {}", tool.label(), crate::localize(&sub.name)),
-        )
+    let Some(mode) = mode else {
+        // The sub tool picked on the tool, whichever it is then.
+        return tr!("modifiers-as-picked", tool = tool.label());
+    };
+    match tool.sub_tools().into_iter().find(|sub| sub.mode == mode) {
+        // A sub tool named as its tool (the Hand's Hand) needs no second
+        // name.
+        Some(sub) if sub.name == tool.english() => tool.label(),
+        Some(sub) => format!("{}: {}", tool.label(), crate::localize(&sub.name)),
+        None => tool.label(),
+    }
 }
 
 /// The tools a held Alt turns into the Eyedropper unless a tool says

@@ -2556,3 +2556,4 @@ light-table-nothing-to-move = The light table has no layers here to move: add so
 edit-timeline-needs-a-timeline = Edit timeline steps through the frames of a timeline: make one first (Animation, Timeline)
 operation-light-table = Light table
 operation-edit-timeline = Edit timeline
+modifiers-as-picked = { $tool } (the sub tool picked)
