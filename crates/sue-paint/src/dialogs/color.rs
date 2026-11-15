@@ -178,8 +178,12 @@ pub(crate) enum ColorDialog {
     SetName(Option<usize>, String),
     /// The name of a color: the set, the cell and the name typed.
     ColorName(usize, usize, String),
-    /// Edit Color Sets: the set picked in its list and its name as typed.
-    EditSets(usize, String),
+    /// Edit Color Sets: the set picked in its list, its name as typed,
+    /// and whether Delete This Set was pressed (it closes to ask first).
+    EditSets(usize, String, bool),
+    /// Whether to delete the set at an index, and whether Edit Color Sets
+    /// opens again after.
+    DeleteSet(usize, bool),
 }
 
 impl ColorDialog {
@@ -191,6 +195,7 @@ impl ColorDialog {
             Self::SetName(Some(_), _) => (tr!("rename-color-set"), NAME_SIZE),
             Self::ColorName(..) => (tr!("change-color-name"), NAME_SIZE),
             Self::EditSets(..) => (tr!("edit-color-sets"), SETS_SIZE),
+            Self::DeleteSet(..) => (tr!("delete-color-set"), NAME_SIZE),
         }
     }
 }
@@ -323,7 +328,29 @@ impl SuePaint {
             .set()
             .map(|set| set.name.clone())
             .unwrap_or_default();
-        self.dialog = Some(Dialog::Color(ColorDialog::EditSets(picked, name)));
+        self.dialog = Some(Dialog::Color(ColorDialog::EditSets(picked, name, false)));
+    }
+
+    /// Deletes the set at `index`, asking first when it holds a color
+    /// (a set cannot be brought back); `back` opens Edit Color Sets again
+    /// after. The last set stays.
+    pub(crate) fn ask_delete_set(&mut self, cx: &mut AppletContext<'_>, index: usize, back: bool) {
+        let Some(set) = self.color_sets.sets.get(index) else {
+            return;
+        };
+        if self.color_sets.sets.len() <= 1 {
+            return;
+        }
+        if set.filled() > 0 {
+            self.dialog = Some(Dialog::Color(ColorDialog::DeleteSet(index, back)));
+            return;
+        }
+        if self.color_sets.delete(index) {
+            self.save_color_sets(cx);
+        }
+        if back {
+            self.open_edit_sets();
+        }
     }
 
     /// The body of a color dialog.
@@ -337,7 +364,18 @@ impl SuePaint {
             ColorDialog::Settings(settings) => settings_ui(ui, settings, theme),
             ColorDialog::SetName(_, name) => name_ui(ui, "sue-paint-set-name", name, theme),
             ColorDialog::ColorName(_, _, name) => name_ui(ui, "sue-paint-color-name", name, theme),
-            ColorDialog::EditSets(picked, name) => self.edit_sets_ui(ui, picked, name, theme),
+            ColorDialog::EditSets(picked, name, deleting) => {
+                self.edit_sets_ui(ui, picked, name, deleting, theme)
+            }
+            ColorDialog::DeleteSet(index, _) => {
+                let (name, count) = self
+                    .color_sets
+                    .sets
+                    .get(*index)
+                    .map(|set| (set.name.clone(), set.filled()))
+                    .unwrap_or_default();
+                delete_ui(ui, &name, count, theme)
+            }
         }
     }
 
@@ -368,9 +406,20 @@ impl SuePaint {
                     self.save_color_sets(cx);
                 }
             }
-            ColorDialog::EditSets(picked, name) => {
+            ColorDialog::EditSets(picked, name, deleting) => {
                 self.color_sets.rename(picked, &name);
                 self.save_color_sets(cx);
+                if deleting {
+                    self.ask_delete_set(cx, picked, true);
+                }
+            }
+            ColorDialog::DeleteSet(index, back) => {
+                if self.color_sets.delete(index) {
+                    self.save_color_sets(cx);
+                }
+                if back {
+                    self.open_edit_sets();
+                }
             }
         }
     }
@@ -378,8 +427,14 @@ impl SuePaint {
     /// What Cancel does in a color dialog: Edit Color Sets changes the
     /// sets as it goes, so it keeps them whichever way it closes.
     pub(super) fn color_dialog_cancel(&mut self, cx: &mut AppletContext<'_>, dialog: ColorDialog) {
-        if let ColorDialog::EditSets(..) = dialog {
-            self.save_color_sets(cx);
+        match dialog {
+            ColorDialog::EditSets(..) => self.save_color_sets(cx),
+            // Keeping the set goes back to where Delete was pressed.
+            ColorDialog::DeleteSet(index, true) => {
+                self.color_sets.current = index.min(self.color_sets.sets.len().saturating_sub(1));
+                self.open_edit_sets();
+            }
+            _ => {}
         }
     }
 
@@ -420,6 +475,7 @@ impl SuePaint {
         ui: &mut Ui,
         picked: &mut usize,
         name: &mut String,
+        deleting: &mut bool,
         theme: &Theme,
     ) -> Outcome {
         let sets = &mut self.color_sets;
@@ -589,9 +645,9 @@ impl SuePaint {
                     .full_width()
                     .show(ui, theme)
                     .clicked()
-                    && sets.delete(*picked)
                 {
-                    chosen = Some((*picked).min(sets.sets.len() - 1));
+                    // It closes, asks, and opens again (see `color_dialog_ok`).
+                    *deleting = true;
                 }
                 ui.add_space(theme.space(Space::S4));
                 caption(ui, &tr!("edit-color-sets-hint"), theme);
@@ -630,7 +686,11 @@ impl SuePaint {
                 set.name.clone_into(name);
             }
         }
-        let mut outcome = Outcome::Open;
+        let mut outcome = if *deleting {
+            Outcome::Ok
+        } else {
+            Outcome::Open
+        };
         ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
             if ui::button("sue-paint-edit-sets-close", &tr!("close"))
                 .primary()
@@ -655,6 +715,34 @@ fn moved_index(index: usize, from: usize, to: usize) -> usize {
     } else {
         index
     }
+}
+
+/// Asks whether to delete the set `name` of `count` colors: Delete, or
+/// Cancel to keep it.
+fn delete_ui(ui: &mut Ui, name: &str, count: usize, theme: &Theme) -> Outcome {
+    ui.label(
+        egui::RichText::new(tr!("delete-color-set-ask", name = name, count = count))
+            .font(theme.text_font(TextRole::Body))
+            .color(theme.text),
+    );
+    let mut outcome = Outcome::Open;
+    ui.add_space(theme.space(Space::S4));
+    ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
+        if ui::button("sue-paint-delete-set-accept", &tr!("delete"))
+            .danger()
+            .show(ui, theme)
+            .clicked()
+        {
+            outcome = Outcome::Ok;
+        }
+        if ui::button("sue-paint-delete-set-cancel", &tr!("cancel"))
+            .show(ui, theme)
+            .clicked()
+        {
+            outcome = Outcome::Cancel;
+        }
+    });
+    outcome
 }
 
 /// A dialog that asks for a name.

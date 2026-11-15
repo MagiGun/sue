@@ -263,7 +263,8 @@ impl SuePaint {
                 sets.duplicate(current);
             }
             "delete" => {
-                sets.delete(current);
+                self.ask_delete_set(cx, current, false);
+                return;
             }
             "small" => sets.tile = SMALL,
             "medium" => sets.tile = 0.0,

@@ -2570,3 +2570,8 @@ corner-bottom-right = Bottom right corner
 color-set-name = Name
 color-current-help = Click to take this color back
 click-a-color-to-draw-with-it = Click a color to draw with it
+delete-color-set = Delete Color Set
+delete-color-set-ask = Delete the color set "{ $name }"? { $count ->
+    [one] Its color cannot be brought back.
+   *[other] Its { $count } colors cannot be brought back.
+}
