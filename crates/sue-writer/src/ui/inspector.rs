@@ -116,6 +116,9 @@ impl SueWriter {
             ui::ScrollView::vertical("writer-inspector")
                 .on(theme.panel)
                 .show(ui, theme, |ui| {
+                    // A gutter for the scroll bar, so it never lies over
+                    // the fields' edges.
+                    ui.set_max_width(ui.available_width() - theme.space(Space::S4));
                     self.inspector_body(ui, target, cx, theme, &mut run);
                 });
         });
