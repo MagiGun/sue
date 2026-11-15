@@ -177,14 +177,17 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint: Color Settings opens on a double click of the main or sub
   color or of a swatch (and from the command palette): a wheel, the new
   color beside the current one, the hex code, and HSV, RGB, CMYK and Lab
-  numbers. The Color Slider palette switches between HSV, RGB and CMYK.
+  numbers. The main and sub color circles under the Color Wheel and in
+  the tool strip open it too. The Color Slider palette switches between
+  HSV, RGB and CMYK, and each slider's track shows the colors it gives.
 - Sue Paint's color sets: a new set asks for its name and starts as
   empty cells to fill; colors take names (Change Color Name); deleting a
   color leaves its cell empty; Edit Color Sets renames, duplicates,
   deletes and reorders sets (drag a set by its grip, or Alt and Up or
   Down) and adds back any of Sue's standard sets. Clip Studio Paint
   color sets (`.cls`) import, and an exported GIMP palette keeps names
-  and empty cells, so a shared set arrives as it was arranged.
+  and empty cells, so a shared set arrives as it was arranged. Deleting
+  a set that holds colors asks first.
 
 ### Changed
 
