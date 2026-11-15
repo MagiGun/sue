@@ -11,12 +11,15 @@ use super::model::{
     ClipBitmap, ClipDocument, ClipHead, ClipLayer, ClipShape, ClipTable, Columns, FOLDER, column,
 };
 use super::offscreen::{attribute_of, payload_bytes};
+use super::parts::{self, VERSION};
 use super::read::MODELED;
 use super::schema::{
     ANIMATION_CUT_BANK_COLUMNS, CANVAS_COLUMNS, CANVAS_ITEM_BANK_COLUMNS, EXTERNAL_CHUNK_SQL,
     EXTERNAL_NAMES_SQL, LAYER_COLUMNS, LAYER_COMP_MANAGER_COLUMNS, LAYER_THUMBNAIL_COLUMNS,
-    MIPMAP_COLUMNS, MIPMAP_INFO_COLUMNS, OFFSCREEN_COLUMNS, PROJECT_COLUMNS, SUE_LAYER_SQL,
-    SUE_PROJECT_SQL, composite_of, definition, names, quoted, rowid_column, table_sql,
+    MIPMAP_COLUMNS, MIPMAP_INFO_COLUMNS, OFFSCREEN_COLUMNS, PROJECT_COLUMNS,
+    SUE_DOCUMENT_PART_COLUMNS, SUE_DOCUMENT_PART_SQL, SUE_LAYER_PART_COLUMNS, SUE_LAYER_PART_SQL,
+    SUE_LAYER_SQL, SUE_PROJECT_SQL, composite_of, definition, names, quoted, rowid_column,
+    table_sql,
 };
 use crate::psd::{Psd, PsdKind, PsdLayer};
 use crate::sqlite::{self, NewTable, Value};
@@ -67,11 +70,52 @@ impl Fingerprint {
                 self.bytes(block.data.as_deref().unwrap_or_default());
             }
         }
+        for (kind, data) in layer_parts(layer) {
+            self.bytes(kind.as_bytes());
+            self.bytes(&data);
+        }
         for child in &layer.children {
             self.layer(child);
         }
         self.word(u64::MAX);
     }
+}
+
+/// The parts of a layer Sue stores in its own table, by part name, in the
+/// order they are written.
+fn layer_parts(layer: &ClipLayer) -> Vec<(&'static str, Vec<u8>)> {
+    let mut out = Vec::new();
+    if let Some(content) = &layer.content {
+        out.push((content.kind(), parts::encode_content(content)));
+    }
+    if let Some(effects) = &layer.effects {
+        out.push(("effects", parts::encode_effects(effects)));
+    }
+    if let Some(color) = layer.palette_color {
+        out.push(("palette-color", parts::encode_color(color)));
+    }
+    if !layer.rulers.is_empty() {
+        out.push(("rulers", parts::encode_rulers(&layer.rulers)));
+    }
+    if let Some(picture) = &layer.thumbnail {
+        out.push(("thumbnail", parts::encode_picture(picture)));
+    }
+    out
+}
+
+/// The parts of the document Sue stores in its own table.
+fn document_parts(doc: &ClipDocument) -> Vec<(&'static str, Vec<u8>)> {
+    let mut out = Vec::new();
+    if !doc.comps.is_empty() {
+        out.push(("comps", parts::encode_comps(&doc.comps)));
+    }
+    if let Some(timeline) = &doc.timeline {
+        out.push(("timeline", parts::encode_timeline(timeline)));
+    }
+    if let Some(picture) = &doc.preview {
+        out.push(("preview", parts::encode_picture(picture)));
+    }
+    out
 }
 
 /// Fresh ids for one document: each new one differs from the last.
@@ -87,6 +131,10 @@ impl Ids {
         print.word(doc.dpi.to_bits());
         print.layer(&doc.root);
         print.bytes(doc.sue.as_deref().unwrap_or_default());
+        for (kind, data) in document_parts(doc) {
+            print.bytes(kind.as_bytes());
+            print.bytes(&data);
+        }
         Self {
             seed: print.0,
             count: 0,
@@ -284,6 +332,7 @@ struct Writer<'a> {
     offscreens: Out,
     thumbnails: Vec<(i64, Vec<Value>)>,
     marks: Vec<(i64, bool, bool)>,
+    parts: Vec<(i64, &'static str, Vec<u8>)>,
     exta: Vec<(String, Vec<u8>)>,
     /// The last layer row that is not a folder.
     top: i64,
@@ -386,6 +435,11 @@ impl Writer<'_> {
         if layer.draft || layer.reference {
             self.marks.push((id, layer.draft, layer.reference));
         }
+        if !root {
+            for (kind, data) in layer_parts(layer) {
+                self.parts.push((id, kind, data));
+            }
+        }
         let int = Value::Integer;
         let mut typed = vec![
             ("MainId", int(id)),
@@ -468,7 +522,8 @@ impl Writer<'_> {
 }
 
 /// The highest `MainId` in the document's layers, bitmaps and kept rows
-/// of those tables.
+/// of those tables, and the highest layer a kept row of Sue's own layer
+/// tables names.
 fn highest(doc: &ClipDocument) -> i64 {
     fn walk(layer: &ClipLayer, top: &mut i64) {
         *top = (*top).max(layer.id);
@@ -485,6 +540,13 @@ fn highest(doc: &ClipDocument) -> i64 {
     for row in &doc.foreign.rows {
         if ["Layer", "Mipmap", "MipmapInfo", "Offscreen"].contains(&row.table.as_str())
             && let Some(id) = column(&row.columns, "MainId").and_then(Value::int)
+        {
+            top = top.max(id);
+        }
+        // A kept row of Sue's own tables names its layer: a new layer
+        // must never take that id, or the row would ride on it.
+        if ["SueLayer", "SueLayerPart"].contains(&row.table.as_str())
+            && let Some(id) = column(&row.columns, "LayerId").and_then(Value::int)
         {
             top = top.max(id);
         }
@@ -565,6 +627,7 @@ pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
         ),
         thumbnails: Vec::new(),
         marks: Vec::new(),
+        parts: Vec::new(),
         exta: Vec::new(),
         top: 0,
     };
@@ -722,6 +785,7 @@ pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
     tables.push(canvas_out.finish()?);
     let thumbnails = std::mem::take(&mut writer.thumbnails);
     let marks = std::mem::take(&mut writer.marks);
+    let layer_part_rows = std::mem::take(&mut writer.parts);
     for out in [
         writer.layers,
         writer.mipmaps,
@@ -827,6 +891,32 @@ pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
     if !sue_layer.rows.is_empty() {
         tables.push(sue_layer.finish()?);
     }
+    let mut layer_parts_out = Out::new(
+        doc,
+        "SueLayerPart",
+        SUE_LAYER_PART_SQL.to_owned(),
+        SUE_LAYER_PART_COLUMNS,
+    );
+    for (id, kind, data) in layer_part_rows {
+        layer_parts_out.rows.push(part_row(Some(id), kind, data));
+    }
+    push_kept(doc, "SueLayerPart", &mut layer_parts_out);
+    if !layer_parts_out.rows.is_empty() {
+        tables.push(layer_parts_out.finish()?);
+    }
+    let mut document_parts_out = Out::new(
+        doc,
+        "SueDocumentPart",
+        SUE_DOCUMENT_PART_SQL.to_owned(),
+        SUE_DOCUMENT_PART_COLUMNS,
+    );
+    for (kind, data) in document_parts(doc) {
+        document_parts_out.rows.push(part_row(None, kind, data));
+    }
+    push_kept(doc, "SueDocumentPart", &mut document_parts_out);
+    if !document_parts_out.rows.is_empty() {
+        tables.push(document_parts_out.finish()?);
+    }
     for table in &doc.foreign.tables {
         let skeleton = [
             "Project",
@@ -881,6 +971,23 @@ fn chunk(kind: [u8; 4], data: &[u8]) -> Vec<u8> {
     out.extend_from_slice(&(data.len() as u64).to_be_bytes());
     out.extend_from_slice(data);
     out
+}
+
+/// A row of one of Sue's part tables.
+fn part_row(layer: Option<i64>, kind: &str, data: Vec<u8>) -> Row {
+    let mut typed = Vec::with_capacity(4);
+    if let Some(id) = layer {
+        typed.push(("LayerId", Value::Integer(id)));
+    }
+    typed.extend([
+        ("Kind", Value::Text(kind.to_owned())),
+        ("Version", Value::Integer(VERSION)),
+        ("Data", Value::Blob(data)),
+    ]);
+    Row {
+        typed,
+        ..Row::default()
+    }
 }
 
 fn push_kept(doc: &ClipDocument, table: &str, out: &mut Out) {

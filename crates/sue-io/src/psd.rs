@@ -1,10 +1,13 @@
 //! Layered Photoshop documents: `.psd` (version 1) and `.psb` (version 2,
-//! "large document"), 8-bit RGB with transparency, written and read with
-//! their layers, folders, blend modes, opacity and visibility.
+//! "large document"), RGB with transparency, written and read with their
+//! layers, folders, blend modes, opacity, visibility, layer masks and
+//! resolution.
 //!
-//! Channel data is PackBits compressed (RLE), as Photoshop writes it.
-//! Reading takes raw or RLE channels; other compressions, depths and
-//! color modes are refused with a reason.
+//! Channel data is written PackBits compressed (RLE), as Photoshop writes
+//! it, 8 bits a channel. Reading takes 8 and 16 bits a channel (16-bit
+//! channels come in rounded to 8 bits), raw, RLE and zip channels with or
+//! without prediction; other depths and color modes are refused with a
+//! reason.
 
 /// What a layer record is: pixels, or one end of a folder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +48,29 @@ pub struct PsdLayer {
     pub clip: bool,
     /// The blend mode key, such as `norm` or `mul ` (see [`blend_key`]).
     pub blend: [u8; 4],
+    /// Its layer mask.
+    pub mask: Option<PsdMask>,
+}
+
+/// A layer mask: one channel, 255 shows and 0 hides.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PsdMask {
+    /// Where its pixels start in the document.
+    pub left: i32,
+    /// Where its pixels start in the document.
+    pub top: i32,
+    /// Its pixels' width.
+    pub width: u32,
+    /// Its pixels' height.
+    pub height: u32,
+    /// `width * height` bytes.
+    pub pixels: Vec<u8>,
+    /// What the mask is outside its pixels: 0 or 255.
+    pub outside: u8,
+    /// It is on.
+    pub enabled: bool,
+    /// It moves with the layer.
+    pub linked: bool,
 }
 
 impl PsdLayer {
@@ -70,6 +96,7 @@ impl PsdLayer {
             visible: true,
             clip: false,
             blend: *b"norm",
+            mask: None,
         }
     }
 
@@ -101,6 +128,80 @@ pub struct Psd {
     pub layers: Vec<PsdLayer>,
     /// The whole picture merged, straight RGBA8.
     pub merged: Vec<u8>,
+}
+
+/// What a Photoshop document says about itself beyond its layers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PsdInfo {
+    /// Bits a channel: 8 or 16 are read.
+    pub depth: u16,
+    /// Pixels per inch across, when the document says.
+    pub dpi: Option<f64>,
+}
+
+/// The depth and resolution of a Photoshop document, from its header and
+/// image resources alone.
+///
+/// # Errors
+/// If the bytes are not a Photoshop document or end early.
+pub fn psd_info(bytes: &[u8]) -> Result<PsdInfo, String> {
+    let mut r = Reader {
+        bytes,
+        at: 0,
+        big: false,
+    };
+    if r.take(4)? != b"8BPS" {
+        return Err("not a Photoshop document".into());
+    }
+    r.take(2 + 6 + 2 + 4 + 4)?;
+    let depth = r.u16()?;
+    r.u16()?;
+    let skip = r.u32()? as usize;
+    r.take(skip)?;
+    let resources = r.u32()? as usize;
+    let dpi = resolution(r.take(resources)?);
+    Ok(PsdInfo { depth, dpi })
+}
+
+/// The horizontal resolution in pixels per inch from the image resources
+/// (`ResolutionInfo`, id 1005), when they hold it.
+fn resolution(mut data: &[u8]) -> Option<f64> {
+    while data.len() >= 12 && &data[..4] == b"8BIM" {
+        let id = u16::from_be_bytes([data[4], data[5]]);
+        let name = usize::from(data[6]);
+        let name_size = (name + 1).next_multiple_of(2);
+        let at = 6 + name_size;
+        let size = u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?) as usize;
+        let body = data.get(at + 4..at + 4 + size)?;
+        if id == 1005 && size >= 16 {
+            let fixed = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
+            let unit = u16::from_be_bytes([body[4], body[5]]);
+            let value = f64::from(fixed) / 65536.0;
+            // Unit 2 is pixels per centimeter.
+            let dpi = if unit == 2 { value * 2.54 } else { value };
+            return (dpi > 0.0 && dpi.is_finite()).then_some(dpi);
+        }
+        data = data.get(at + 4 + size.next_multiple_of(2)..)?;
+    }
+    None
+}
+
+/// The image resource block that says the resolution is `dpi`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn resolution_block(dpi: f64) -> Vec<u8> {
+    let fixed = (dpi.clamp(1.0, 65_535.0) * 65536.0).round() as u32;
+    let mut out = Vec::with_capacity(28);
+    out.extend_from_slice(b"8BIM");
+    out.extend_from_slice(&1005_u16.to_be_bytes());
+    out.extend_from_slice(&[0, 0]);
+    out.extend_from_slice(&16_u32.to_be_bytes());
+    for _ in 0..2 {
+        out.extend_from_slice(&fixed.to_be_bytes());
+        // Pixels per inch, shown in inches.
+        out.extend_from_slice(&1_u16.to_be_bytes());
+        out.extend_from_slice(&1_u16.to_be_bytes());
+    }
+    out
 }
 
 /// The largest side of a `.psd`; `.psb` goes to 300,000.
@@ -185,6 +286,17 @@ pub fn blend_name(key: [u8; 4]) -> &'static str {
 /// If the document is larger than the version allows, or a layer's pixels
 /// do not fit its size.
 pub fn encode_psd(psd: &Psd, big: bool) -> Result<Vec<u8>, String> {
+    encode_psd_at(psd, big, None)
+}
+
+/// Writes `psd` as a `.psd`, or a `.psb` when `big`, saying its
+/// resolution is `dpi` when given.
+///
+/// # Errors
+/// If the document is larger than the version allows, or a layer's or
+/// mask's pixels do not fit its size.
+#[allow(clippy::too_many_lines)]
+pub fn encode_psd_at(psd: &Psd, big: bool, dpi: Option<f64>) -> Result<Vec<u8>, String> {
     let max = if big { PSB_MAX_SIDE } else { PSD_MAX_SIDE };
     if psd.width == 0 || psd.height == 0 || psd.width.max(psd.height) > max {
         return Err(format!(
@@ -207,9 +319,11 @@ pub fn encode_psd(psd: &Psd, big: bool) -> Result<Vec<u8>, String> {
     out.u32(psd.width);
     out.u16(8);
     out.u16(3);
-    // No color mode data, no image resources.
+    // No color mode data; the resolution when known.
     out.u32(0);
-    out.u32(0);
+    let resources = dpi.map(resolution_block).unwrap_or_default();
+    out.u32(resources.len() as u32);
+    out.bytes.extend_from_slice(&resources);
 
     // Layer and mask information.
     let section = out.reserve_long();
@@ -220,16 +334,24 @@ pub fn encode_psd(psd: &Psd, big: bool) -> Result<Vec<u8>, String> {
     let mut channels = Vec::with_capacity(psd.layers.len());
     for layer in &psd.layers {
         let planes = layer_planes(layer)?;
-        let encoded: Vec<Vec<u8>> = planes
+        let mut encoded: Vec<Vec<u8>> = planes
             .iter()
             .map(|plane| rle_channel(plane, layer.width, layer.height, big))
             .collect();
+        let mut ids = vec![-1_i16, 0, 1, 2];
+        if let Some(mask) = &layer.mask {
+            if mask.pixels.len() != mask.width as usize * mask.height as usize {
+                return Err(format!("the mask of {} does not fit its size", layer.name));
+            }
+            encoded.push(rle_channel(&mask.pixels, mask.width, mask.height, big));
+            ids.push(-2);
+        }
         out.i32(layer.top);
         out.i32(layer.left);
         out.i32(layer.top + layer.height as i32);
         out.i32(layer.left + layer.width as i32);
-        out.u16(4);
-        for (id, data) in [-1_i16, 0, 1, 2].iter().zip(&encoded) {
+        out.u16(ids.len() as u16);
+        for (id, data) in ids.iter().zip(&encoded) {
             out.u16(*id as u16);
             out.long(data.len() as u64);
         }
@@ -241,7 +363,22 @@ pub fn encode_psd(psd: &Psd, big: bool) -> Result<Vec<u8>, String> {
         out.bytes.push(if layer.visible { 0x08 } else { 0x0A });
         out.bytes.push(0);
         let extra = out.reserve_u32();
-        out.u32(0); // No layer mask.
+        match &layer.mask {
+            Some(mask) => {
+                out.u32(20);
+                out.i32(mask.top);
+                out.i32(mask.left);
+                out.i32(mask.top + mask.height as i32);
+                out.i32(mask.left + mask.width as i32);
+                out.bytes.push(mask.outside);
+                // Bit 1 turns the mask off; bit 0 says its place does not
+                // follow the layer (unlinked).
+                out.bytes
+                    .push(u8::from(!mask.linked) | u8::from(!mask.enabled) << 1);
+                out.bytes.extend_from_slice(&[0, 0]);
+            }
+            None => out.u32(0),
+        }
         out.u32(0); // No blending ranges.
         pascal_name(&mut out.bytes, &layer.name);
         unicode_name(&mut out.bytes, &layer.name);
@@ -298,11 +435,11 @@ pub fn encode_psd(psd: &Psd, big: bool) -> Result<Vec<u8>, String> {
     Ok(out.bytes)
 }
 
-/// Reads a `.psd` or `.psb`.
+/// Reads a `.psd` or `.psb`; 16-bit channels come in rounded to 8 bits.
 ///
 /// # Errors
-/// If the bytes are not a Photoshop document Sue can read: 8-bit RGB with
-/// raw or RLE channels.
+/// If the bytes are not a Photoshop document Sue can read: 8 or 16-bit
+/// RGB with raw, RLE or zip channels.
 pub fn decode_psd(bytes: &[u8]) -> Result<Psd, String> {
     let mut r = Reader {
         bytes,
@@ -323,7 +460,7 @@ pub fn decode_psd(bytes: &[u8]) -> Result<Psd, String> {
     let width = r.u32()?;
     let depth = r.u16()?;
     let mode = r.u16()?;
-    if depth != 8 {
+    if depth != 8 && depth != 16 {
         return Err(format!("{depth}-bit Photoshop documents are not read yet"));
     }
     if mode != 3 {
@@ -343,12 +480,15 @@ pub fn decode_psd(bytes: &[u8]) -> Result<Psd, String> {
         let info = r.long()? as usize;
         let info_end = r.at + info;
         if info > 0 {
-            layers = read_layers(&mut r)?;
+            layers = read_layers(&mut r, depth)?;
         }
         r.at = info_end;
+        if layers.is_empty() && depth == 16 {
+            layers = tagged_layers(&mut r, section_end, depth)?;
+        }
     }
     r.at = section_end;
-    let merged = read_merged(&mut r, width, height, channels)?;
+    let merged = read_merged(&mut r, width, height, channels, depth)?;
     Ok(Psd {
         width,
         height,
@@ -357,7 +497,56 @@ pub fn decode_psd(bytes: &[u8]) -> Result<Psd, String> {
     })
 }
 
-fn read_layers(r: &mut Reader<'_>) -> Result<Vec<PsdLayer>, String> {
+/// The layers of a 16-bit document as Photoshop writes them: its layer
+/// info is empty and the layers are in an `Lr16` block among the tagged
+/// blocks after the global mask info, which end at `end`.
+fn tagged_layers(r: &mut Reader<'_>, end: usize, depth: u16) -> Result<Vec<PsdLayer>, String> {
+    // Blocks whose length is 8 bytes in a `.psb`.
+    const LONG: [&[u8; 4]; 13] = [
+        b"LMsk", b"Lr16", b"Lr32", b"Layr", b"Mt16", b"Mt32", b"Mtrn", b"Alph", b"FMsk", b"lnk2",
+        b"FEid", b"FXid", b"PxSD",
+    ];
+    if r.at.saturating_add(4) > end {
+        return Ok(Vec::new());
+    }
+    let global = r.u32()? as usize;
+    r.take(global)?;
+    loop {
+        // Some writers pad a block to a multiple of four.
+        while r.at < end && r.bytes.get(r.at) == Some(&0) {
+            r.at += 1;
+        }
+        if r.at.saturating_add(12) > end {
+            return Ok(Vec::new());
+        }
+        let signature = r.take(4)?;
+        if signature != b"8BIM" && signature != b"8B64" {
+            return Ok(Vec::new());
+        }
+        let key = r.take(4)?;
+        let size = if r.big && LONG.iter().any(|long| long.as_slice() == key) {
+            usize::try_from(r.u64()?).map_err(|_| "the document is damaged")?
+        } else {
+            r.u32()? as usize
+        };
+        let start = r.at;
+        let block_end = start
+            .checked_add(size)
+            .filter(|block_end| *block_end <= end)
+            .ok_or("the document is cut short")?;
+        if key == b"Lr16" {
+            return if size == 0 {
+                Ok(Vec::new())
+            } else {
+                read_layers(r, depth)
+            };
+        }
+        r.at = block_end;
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn read_layers(r: &mut Reader<'_>, depth: u16) -> Result<Vec<PsdLayer>, String> {
     let count = (r.u16()? as i16).unsigned_abs() as usize;
     let mut records = Vec::with_capacity(count);
     for _ in 0..count {
@@ -383,8 +572,32 @@ fn read_layers(r: &mut Reader<'_>) -> Result<Vec<PsdLayer>, String> {
         r.u8()?;
         let extra = r.u32()? as usize;
         let extra_end = r.at + extra;
-        let mask = r.u32()? as usize;
-        r.take(mask)?;
+        let mask_size = r.u32()? as usize;
+        let mask_data = r.take(mask_size)?;
+        let mask = (mask_size >= 18).then(|| {
+            let int = |at: usize| {
+                i32::from_be_bytes([
+                    mask_data[at],
+                    mask_data[at + 1],
+                    mask_data[at + 2],
+                    mask_data[at + 3],
+                ])
+            };
+            let (top, left, bottom, right) = (int(0), int(4), int(8), int(12));
+            let flags = mask_data[17];
+            PsdMask {
+                left,
+                top,
+                width: u32::try_from(i64::from(right) - i64::from(left)).unwrap_or(0),
+                height: u32::try_from(i64::from(bottom) - i64::from(top)).unwrap_or(0),
+                pixels: Vec::new(),
+                outside: if mask_data[16] >= 128 { 255 } else { 0 },
+                enabled: flags & 2 == 0,
+                linked: flags & 1 == 0,
+            }
+        });
+        // A mask larger than any document is damage, not a mask.
+        let mask = mask.filter(|mask| mask.width <= PSB_MAX_SIDE && mask.height <= PSB_MAX_SIDE);
         let ranges = r.u32()? as usize;
         r.take(ranges)?;
         let length = r.u8()? as usize;
@@ -453,6 +666,7 @@ fn read_layers(r: &mut Reader<'_>) -> Result<Vec<PsdLayer>, String> {
                 visible: flags & 0x02 == 0,
                 clip,
                 blend,
+                mask,
             },
             channels,
         ));
@@ -467,10 +681,15 @@ fn read_layers(r: &mut Reader<'_>) -> Result<Vec<PsdLayer>, String> {
                 pixel[3] = 255;
             }
         }
+        let mut mask_plane = None;
         for (id, length) in channels {
             let start = r.at;
             let data = r.take(length)?;
             r.at = start + length;
+            if id == -2 {
+                mask_plane = Some(data);
+                continue;
+            }
             let slot = match id {
                 0..=2 => Some(id as usize),
                 -1 => Some(3),
@@ -482,12 +701,23 @@ fn read_layers(r: &mut Reader<'_>) -> Result<Vec<PsdLayer>, String> {
             if area == 0 || data.len() < 2 {
                 continue;
             }
-            let plane = channel_plane(data, layer.width, layer.height, r.big)?;
+            let plane = channel_plane(data, layer.width, layer.height, r.big, depth)?;
             for (index, value) in plane.into_iter().enumerate().take(area) {
                 pixels[index * 4 + slot] = value;
             }
         }
         layer.pixels = pixels;
+        if let Some(mask) = &mut layer.mask {
+            let area = mask.width as usize * mask.height as usize;
+            mask.pixels = match mask_plane {
+                Some(data) if area > 0 && data.len() >= 2 => {
+                    let mut plane = channel_plane(data, mask.width, mask.height, r.big, depth)?;
+                    plane.resize(area, mask.outside);
+                    plane
+                }
+                _ => vec![mask.outside; area],
+            };
+        }
         layers.push(layer);
     }
     Ok(layers)
@@ -498,15 +728,38 @@ fn read_merged(
     width: u32,
     height: u32,
     channels: u16,
+    depth: u16,
 ) -> Result<Vec<u8>, String> {
     let area = width as usize * height as usize;
     let mut merged = vec![255_u8; area * 4];
     let compression = r.u16()?;
     let used = usize::from(channels.min(4));
+    let bytes = usize::from(depth / 8);
+    let row = width as usize * bytes;
     let planes: Vec<Vec<u8>> = match compression {
         0 => (0..used)
-            .map(|_| r.take(area).map(<[u8]>::to_vec))
+            .map(|_| r.take(area * bytes).map(|raw| eight_bits(raw, depth)))
             .collect::<Result<_, _>>()?,
+        2 | 3 => {
+            let packed = &r.bytes[r.at..];
+            let raw = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+                packed,
+                area * bytes * usize::from(channels),
+            )
+            .map_err(|_| "the merged picture does not inflate")?;
+            (0..used)
+                .map(|channel| {
+                    let mut plane = raw
+                        .get(channel * area * bytes..(channel + 1) * area * bytes)
+                        .ok_or("the merged picture is cut short")?
+                        .to_vec();
+                    if compression == 3 {
+                        unpredict(&mut plane, row, bytes);
+                    }
+                    Ok(eight_bits(&plane, depth))
+                })
+                .collect::<Result<_, String>>()?
+        }
         1 => {
             let rows = height as usize * usize::from(channels);
             let mut counts = Vec::with_capacity(rows);
@@ -520,11 +773,11 @@ fn read_merged(
             let mut planes = Vec::with_capacity(used);
             for channel in 0..used {
                 let mut plane = Vec::with_capacity(area);
-                for row in 0..height as usize {
-                    let packed = r.take(counts[channel * height as usize + row])?;
-                    plane.extend(unpackbits(packed, width as usize)?);
+                for line in 0..height as usize {
+                    let packed = r.take(counts[channel * height as usize + line])?;
+                    plane.extend(unpackbits(packed, row)?);
                 }
-                planes.push(plane);
+                planes.push(eight_bits(&plane, depth));
             }
             planes
         }
@@ -538,13 +791,74 @@ fn read_merged(
     Ok(merged)
 }
 
-/// One channel's data (its compression, then its pixels) as a plane.
-fn channel_plane(data: &[u8], width: u32, height: u32, big: bool) -> Result<Vec<u8>, String> {
+/// Samples of `depth` bits as 8-bit ones (16-bit samples rounded).
+fn eight_bits(raw: &[u8], depth: u16) -> Vec<u8> {
+    if depth == 16 {
+        raw.as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| {
+                let value = u32::from(u16::from_be_bytes(*pair));
+                ((value * 255 + 32_767) / 65_535) as u8
+            })
+            .collect()
+    } else {
+        raw.to_vec()
+    }
+}
+
+/// Undoes zip prediction: each sample of a row of `row` bytes was stored
+/// as its difference from the one before (samples of `bytes` bytes).
+fn unpredict(plane: &mut [u8], row: usize, bytes: usize) {
+    if row == 0 {
+        return;
+    }
+    for line in plane.chunks_mut(row) {
+        if bytes == 2 {
+            let mut last = 0_u16;
+            for pair in line.as_chunks_mut::<2>().0 {
+                last = last.wrapping_add(u16::from_be_bytes(*pair));
+                *pair = last.to_be_bytes();
+            }
+        } else {
+            for i in 1..line.len() {
+                line[i] = line[i].wrapping_add(line[i - 1]);
+            }
+        }
+    }
+}
+
+/// One channel's data (its compression, then its pixels) as an 8-bit
+/// plane.
+fn channel_plane(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    big: bool,
+    depth: u16,
+) -> Result<Vec<u8>, String> {
     let compression = u16::from_be_bytes([data[0], data[1]]);
     let body = &data[2..];
-    let area = width as usize * height as usize;
+    let bytes = usize::from(depth / 8);
+    let row = width as usize * bytes;
+    let area = width as usize * height as usize * bytes;
     match compression {
-        0 => Ok(body.get(..area).ok_or("a channel is cut short")?.to_vec()),
+        0 => Ok(eight_bits(
+            body.get(..area).ok_or("a channel is cut short")?,
+            depth,
+        )),
+        2 | 3 => {
+            let mut plane =
+                miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(body, area.max(1))
+                    .map_err(|_| "a channel does not inflate")?;
+            if plane.len() < area {
+                return Err("a channel is cut short".into());
+            }
+            if compression == 3 {
+                unpredict(&mut plane, row, bytes);
+            }
+            Ok(eight_bits(&plane, depth))
+        }
         1 => {
             let size = if big { 4 } else { 2 };
             let table = height as usize * size;
@@ -558,10 +872,10 @@ fn channel_plane(data: &[u8], width: u32, height: u32, big: bool) -> Result<Vec<
                     u16::from_be_bytes([count[0], count[1]]) as usize
                 };
                 let packed = body.get(at..at + count).ok_or("a channel is cut short")?;
-                plane.extend(unpackbits(packed, width as usize)?);
+                plane.extend(unpackbits(packed, row)?);
                 at += count;
             }
-            Ok(plane)
+            Ok(eight_bits(&plane, depth))
         }
         other => Err(format!("Photoshop compression {other} is not read yet")),
     }
@@ -890,5 +1204,275 @@ mod tests {
             merged: vec![0; (PSD_MAX_SIDE as usize + 1) * 4],
         };
         assert!(encode_psd(&too_big, false).is_err());
+    }
+
+    #[test]
+    fn layer_masks_round_trip_on_off_and_unlinked() {
+        for big in [false, true] {
+            let mut psd = sample();
+            let ramp = |w: u32, h: u32| (0..w * h).map(|i| (i * 37 % 256) as u8).collect();
+            psd.layers[2].mask = Some(PsdMask {
+                left: -2,
+                top: 1,
+                width: 4,
+                height: 3,
+                pixels: ramp(4, 3),
+                outside: 255,
+                enabled: true,
+                linked: true,
+            });
+            psd.layers[3].mask = Some(PsdMask {
+                left: 3,
+                top: 0,
+                width: 2,
+                height: 2,
+                pixels: ramp(2, 2),
+                outside: 0,
+                enabled: false,
+                linked: false,
+            });
+            // A folder carries a mask too.
+            psd.layers[4].mask = Some(PsdMask {
+                left: 0,
+                top: 0,
+                width: 0,
+                height: 0,
+                pixels: Vec::new(),
+                outside: 0,
+                enabled: true,
+                linked: true,
+            });
+            let bytes = encode_psd(&psd, big).unwrap();
+            assert_eq!(decode_psd(&bytes).unwrap(), psd, "big {big}");
+        }
+        let mut wrong = sample();
+        wrong.layers[0].mask = Some(PsdMask {
+            left: 0,
+            top: 0,
+            width: 2,
+            height: 2,
+            pixels: vec![1],
+            outside: 0,
+            enabled: true,
+            linked: true,
+        });
+        assert!(encode_psd(&wrong, false).is_err());
+    }
+
+    #[test]
+    fn the_resolution_is_written_and_read() {
+        let psd = sample();
+        let plain = encode_psd(&psd, false).unwrap();
+        assert_eq!(
+            psd_info(&plain).unwrap(),
+            PsdInfo {
+                depth: 8,
+                dpi: None
+            }
+        );
+        for dpi in [72.0, 350.0, 600.5] {
+            let bytes = encode_psd_at(&psd, false, Some(dpi)).unwrap();
+            let info = psd_info(&bytes).unwrap();
+            assert!((info.dpi.unwrap() - dpi).abs() < 1e-3, "{dpi}");
+            assert_eq!(decode_psd(&bytes).unwrap(), psd);
+        }
+        // Pixels per centimeter read as per inch.
+        let mut block = resolution_block(100.0);
+        block[16..18].copy_from_slice(&2_u16.to_be_bytes());
+        assert!((resolution(&block).unwrap() - 254.0).abs() < 1e-3);
+        // A resource before it, with a name of odd length, is stepped over.
+        let mut both = b"8BIM\x03\xed\x03abc\x00\x00\x00\x03xyz\x00".to_vec();
+        both.extend(resolution_block(300.0));
+        assert!((resolution(&both).unwrap() - 300.0).abs() < 1e-3);
+        assert_eq!(resolution(b"8BIM\x03\xed\x00\x00\xff\xff\xff\xff"), None);
+    }
+
+    /// A 16-bit document of `width` by `height` with one layer whose four
+    /// channels are stored raw, RLE, zip and zip with prediction, and a
+    /// raw merged picture; each sample is `value(x, y, channel)`.
+    fn sixteen_bit(width: u32, height: u32, value: impl Fn(u32, u32, usize) -> u16) -> Vec<u8> {
+        let plane = |channel: usize| -> Vec<u8> {
+            let mut out = Vec::new();
+            for y in 0..height {
+                for x in 0..width {
+                    out.extend_from_slice(&value(x, y, channel).to_be_bytes());
+                }
+            }
+            out
+        };
+        let row = width as usize * 2;
+        let channel_data = |channel: usize, compression: u16| -> Vec<u8> {
+            let raw = plane(channel);
+            let mut out = compression.to_be_bytes().to_vec();
+            match compression {
+                0 => out.extend(raw),
+                1 => {
+                    let rows: Vec<Vec<u8>> = raw.chunks(row).map(packbits).collect();
+                    for packed in &rows {
+                        out.extend_from_slice(&(packed.len() as u16).to_be_bytes());
+                    }
+                    for packed in rows {
+                        out.extend(packed);
+                    }
+                }
+                2 => out.extend(miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6)),
+                _ => {
+                    let mut predicted = raw.clone();
+                    for line in predicted.chunks_mut(row) {
+                        let samples: Vec<u16> = line
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|pair| u16::from_be_bytes(*pair))
+                            .collect();
+                        for (i, pair) in line.as_chunks_mut::<2>().0.iter_mut().enumerate() {
+                            let before = if i == 0 { 0 } else { samples[i - 1] };
+                            *pair = samples[i].wrapping_sub(before).to_be_bytes();
+                        }
+                    }
+                    out.extend(miniz_oxide::deflate::compress_to_vec_zlib(&predicted, 6));
+                }
+            }
+            out
+        };
+        let mut w = Writer {
+            bytes: Vec::new(),
+            big: false,
+        };
+        w.bytes.extend_from_slice(b"8BPS");
+        w.u16(1);
+        w.bytes.extend_from_slice(&[0; 6]);
+        w.u16(4);
+        w.u32(height);
+        w.u32(width);
+        w.u16(16);
+        w.u16(3);
+        w.u32(0);
+        w.u32(0);
+        let section = w.reserve_long();
+        let info = w.reserve_long();
+        w.u16((-1_i16) as u16);
+        // Alpha raw, red RLE, green zip, blue zip with prediction.
+        let channels: Vec<(i16, Vec<u8>)> = vec![
+            (-1, channel_data(3, 0)),
+            (0, channel_data(0, 1)),
+            (1, channel_data(1, 2)),
+            (2, channel_data(2, 3)),
+        ];
+        w.i32(0);
+        w.i32(0);
+        w.i32(height as i32);
+        w.i32(width as i32);
+        w.u16(4);
+        for (id, data) in &channels {
+            w.u16(*id as u16);
+            w.u32(data.len() as u32);
+        }
+        w.bytes.extend_from_slice(b"8BIMnorm");
+        w.bytes.extend_from_slice(&[255, 0, 8, 0]);
+        let extra = w.reserve_u32();
+        w.u32(0);
+        w.u32(0);
+        pascal_name(&mut w.bytes, "Deep");
+        w.fill_u32(extra);
+        for (_, data) in channels {
+            w.bytes.extend(data);
+        }
+        if (w.bytes.len() - info - 4) % 2 == 1 {
+            w.bytes.push(0);
+        }
+        w.fill_long(info);
+        w.u32(0);
+        w.fill_long(section);
+        w.u16(0);
+        for channel in [0, 1, 2, 3] {
+            w.bytes.extend(plane(channel));
+        }
+        w.bytes
+    }
+
+    #[test]
+    fn sixteen_bit_documents_read_rounded_to_eight_bits() {
+        let (width, height) = (37_u32, 5_u32);
+        let value = |x: u32, y: u32, channel: usize| -> u16 {
+            ((x * 1777 + y * 9001 + channel as u32 * 12_345) % 65_536) as u16
+        };
+        let bytes = sixteen_bit(width, height, value);
+        assert_eq!(psd_info(&bytes).unwrap().depth, 16);
+        let psd = decode_psd(&bytes).unwrap();
+        let eight = |v: u16| ((u32::from(v) * 255 + 32_767) / 65_535) as u8;
+        let layer = &psd.layers[0];
+        assert_eq!(
+            (layer.name.as_str(), layer.width, layer.height),
+            ("Deep", width, height)
+        );
+        for y in 0..height {
+            for x in 0..width {
+                let at = ((y * width + x) * 4) as usize;
+                let want: Vec<u8> = (0..4).map(|c| eight(value(x, y, c))).collect();
+                assert_eq!(&layer.pixels[at..at + 4], &want[..], "layer at {x},{y}");
+                assert_eq!(&psd.merged[at..at + 4], &want[..], "merged at {x},{y}");
+            }
+        }
+        // The ends of the range land on the ends.
+        assert_eq!((eight(0), eight(65_535), eight(32_896)), (0, 255, 128));
+        // Cut anywhere, it fails cleanly.
+        for cut in (0..bytes.len()).step_by(13) {
+            let _ = decode_psd(&bytes[..cut]);
+        }
+        let mut deeper = bytes.clone();
+        deeper[22..24].copy_from_slice(&32_u16.to_be_bytes());
+        assert!(decode_psd(&deeper).unwrap_err().contains("32-bit"));
+    }
+
+    /// Photoshop keeps the layers of a 16-bit document in an `Lr16`
+    /// block after the global mask info, with the layer info left empty.
+    #[test]
+    fn sixteen_bit_layers_kept_in_an_lr16_block_are_read() {
+        let (width, height) = (9_u32, 4_u32);
+        let value = |x: u32, y: u32, channel: usize| -> u16 {
+            ((x * 7001 + y * 333 + channel as u32 * 20_000) % 65_536) as u16
+        };
+        let plain = sixteen_bit(width, height, value);
+        let want = decode_psd(&plain).unwrap();
+        // Header, color mode and resources take 34 bytes; then the
+        // section's length, the layer info's length and the layer info.
+        let length = |at: usize| u32::from_be_bytes(plain[at..at + 4].try_into().unwrap());
+        let info = length(38) as usize;
+        let body = &plain[42..42 + info];
+        let rest = &plain[42 + info + 4..];
+        for (signature, padding) in [(b"8BIM", 0), (b"8B64", 3)] {
+            let mut block = Vec::new();
+            // An unknown block first, which is stepped over.
+            block.extend_from_slice(b"8BIMPatt");
+            block.extend_from_slice(&3_u32.to_be_bytes());
+            block.extend_from_slice(&[1, 2, 3]);
+            block.extend(std::iter::repeat_n(0, padding));
+            block.extend_from_slice(signature);
+            block.extend_from_slice(b"Lr16");
+            block.extend_from_slice(&(info as u32).to_be_bytes());
+            block.extend_from_slice(body);
+            let mut bytes = plain[..34].to_vec();
+            bytes.extend_from_slice(&((4 + 4 + block.len()) as u32).to_be_bytes());
+            bytes.extend_from_slice(&0_u32.to_be_bytes());
+            bytes.extend_from_slice(&0_u32.to_be_bytes());
+            bytes.extend(block);
+            bytes.extend_from_slice(rest);
+            assert_eq!(decode_psd(&bytes).unwrap(), want, "padding {padding}");
+            for cut in 34..bytes.len() {
+                let _ = decode_psd(&bytes[..cut]);
+            }
+        }
+    }
+
+    #[test]
+    fn eight_bit_zip_channels_with_prediction_are_read() {
+        let mut row = vec![10_u8, 12, 15, 15, 200, 3];
+        let original = row.clone();
+        for i in (1..row.len()).rev() {
+            row[i] = row[i].wrapping_sub(row[i - 1]);
+        }
+        unpredict(&mut row, 6, 1);
+        assert_eq!(row, original);
     }
 }

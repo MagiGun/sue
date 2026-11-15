@@ -1210,24 +1210,6 @@ impl KeptFormat {
                 class::IMAGE,
             ),
             make(
-                "psd",
-                "Photoshop document",
-                &["psd"],
-                "image/vnd.adobe.photoshop",
-                "Image",
-                NativeFormat::Psd,
-                class::IMAGE,
-            ),
-            make(
-                "clip",
-                "Clip Studio Paint file",
-                &["clip"],
-                "application/x-clip-studio-paint",
-                "Image",
-                NativeFormat::Clip,
-                class::IMAGE,
-            ),
-            make(
                 "avif",
                 "AVIF image",
                 &["avif"],
@@ -1473,6 +1455,9 @@ pub fn formats(registry: ComponentRegistry) -> FormatRegistry {
     for format in PublishFormat::all() {
         formats.register(format);
     }
+    // Layered pictures: real handlers, no longer kept bytes only.
+    formats.register(crate::LayeredFormat::clip());
+    formats.register(crate::LayeredFormat::psd());
     for format in KeptFormat::all() {
         formats.register(format);
     }

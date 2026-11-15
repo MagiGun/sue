@@ -18,6 +18,10 @@
 //! compressed. [`ClipBitmap::decode`] unpacks them when asked, and
 //! [`ClipBitmap::color`] and [`ClipBitmap::gray`] pack new ones.
 
+use super::kinds::{
+    ClipComp, ClipContent, ClipEffects, ClipLayerPath, ClipNative, ClipPicture, ClipRuler,
+    ClipTimeline,
+};
 use super::offscreen::{AttributePart, BlockList};
 use super::schema::{blend_of, composite_of};
 use crate::sqlite::Value;
@@ -65,6 +69,12 @@ pub struct ClipDocument {
     pub head: ClipHead,
     /// Everything read that the model does not name.
     pub foreign: ClipForeign,
+    /// The layer comps, in order.
+    pub comps: Vec<ClipComp>,
+    /// The timeline, when the document has one.
+    pub timeline: Option<ClipTimeline>,
+    /// A small picture of the whole canvas.
+    pub preview: Option<ClipPicture>,
 }
 
 impl ClipDocument {
@@ -85,7 +95,53 @@ impl ClipDocument {
             sue: None,
             head: ClipHead::Sue { id: [0; 16] },
             foreign: ClipForeign::default(),
+            comps: Vec::new(),
+            timeline: None,
+            preview: None,
         }
+    }
+
+    /// The layer at `path`, the root not included.
+    #[must_use]
+    pub fn layer_at(&self, path: &ClipLayerPath) -> Option<&ClipLayer> {
+        let mut layer = &self.root;
+        for index in &path.0 {
+            layer = layer.children.get(usize::try_from(*index).ok()?)?;
+        }
+        (!path.0.is_empty()).then_some(layer)
+    }
+
+    /// The layer at `path`, to change.
+    pub fn layer_at_mut(&mut self, path: &ClipLayerPath) -> Option<&mut ClipLayer> {
+        if path.0.is_empty() {
+            return None;
+        }
+        let mut layer = &mut self.root;
+        for index in &path.0 {
+            layer = layer.children.get_mut(usize::try_from(*index).ok()?)?;
+        }
+        Some(layer)
+    }
+
+    /// Every layer and folder with its path, the root not included, in
+    /// the order the writer lays them out (a folder after what it holds).
+    #[must_use]
+    pub fn paths(&self) -> Vec<(ClipLayerPath, &ClipLayer)> {
+        fn walk<'a>(
+            layers: &'a [ClipLayer],
+            at: &mut Vec<u32>,
+            out: &mut Vec<(ClipLayerPath, &'a ClipLayer)>,
+        ) {
+            for (index, layer) in (0_u32..).zip(layers) {
+                at.push(index);
+                walk(&layer.children, at, out);
+                out.push((ClipLayerPath(at.clone()), layer));
+                at.pop();
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.root.children, &mut Vec::new(), &mut out);
+        out
     }
 
     /// The layers on the top level, bottom first.
@@ -250,6 +306,17 @@ pub struct ClipLayer {
     pub children: Vec<ClipLayer>,
     /// The row's other columns.
     pub columns: Columns,
+    /// What it draws, when more than pixels or a folder (Sue's own part;
+    /// its pixels are what Clip Studio shows).
+    pub content: Option<ClipContent>,
+    /// Its effects beyond the layer color.
+    pub effects: Option<ClipEffects>,
+    /// The color it is marked with in the layer list.
+    pub palette_color: Option<[u8; 3]>,
+    /// The rulers on it.
+    pub rulers: Vec<ClipRuler>,
+    /// A small picture of it for the layer list.
+    pub thumbnail: Option<ClipPicture>,
 }
 
 impl ClipLayer {
@@ -274,7 +341,45 @@ impl ClipLayer {
             mask: None,
             children: Vec::new(),
             columns: Vec::new(),
+            content: None,
+            effects: None,
+            palette_color: None,
+            rulers: Vec::new(),
+            thumbnail: None,
         }
+    }
+
+    /// A layer of `content` whose pixels (what Clip Studio shows) are
+    /// `pixels` with their top left corner at `left`, `top`.
+    #[must_use]
+    pub fn generated(
+        name: &str,
+        content: ClipContent,
+        left: i64,
+        top: i64,
+        pixels: ClipBitmap,
+    ) -> Self {
+        let folder = matches!(
+            content,
+            ClipContent::Frame(_) | ClipContent::AnimationFolder(_) | ClipContent::Camera(_)
+        );
+        let mut layer = if folder {
+            Self {
+                pixels: Some(pixels),
+                ..Self::folder(name)
+            }
+        } else {
+            Self::raster(name, left, top, pixels)
+        };
+        layer.content = Some(content);
+        layer
+    }
+
+    /// What Clip Studio stored for a generated layer it wrote, when Sue
+    /// knows where to find it.
+    #[must_use]
+    pub fn native(&self) -> Option<ClipNative<'_>> {
+        ClipNative::of(&self.columns)
     }
 
     /// A visible, opaque, normal raster layer of `pixels`, whose top left

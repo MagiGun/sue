@@ -171,6 +171,9 @@ follow [Semantic Versioning](https://semver.org/).
   onion skin included. A new cel made after a folder cel copies its
   folders and layers, empty, and a cel made between two others is named
   after the one before it (1a, 1b) and sits right above it.
+- Sue Paint opens Photoshop documents with 16 bits a channel (rounded
+  to 8 bits) and documents whose channels are zip compressed; before,
+  both were refused.
 
 ### Changed
 

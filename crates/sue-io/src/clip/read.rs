@@ -9,17 +9,19 @@ use std::collections::{HashMap, HashSet};
 
 use super::Clip;
 use super::container::{be64, layout};
+use super::kinds::{ClipComp, ClipPicture, ClipTimeline};
 use super::model::{
     ClipBitmap, ClipChunk, ClipDocument, ClipDrawColor, ClipForeign, ClipHead, ClipLayer, ClipMask,
     ClipRow, ClipShape, ClipTable, Columns, column,
 };
 use super::offscreen::{parse_attribute, parse_payload};
+use super::parts::{self, CONTENT_KINDS, VERSION};
 use super::schema::rowid_column;
 use crate::psd::{Psd, PsdKind, PsdLayer};
 use crate::sqlite::{Database, Table, Value};
 
 /// The tables the model reads; any other is kept whole.
-pub(super) const MODELED: [&str; 8] = [
+pub(super) const MODELED: [&str; 10] = [
     "Canvas",
     "Layer",
     "Mipmap",
@@ -28,6 +30,8 @@ pub(super) const MODELED: [&str; 8] = [
     "ExternalChunk",
     "SueProject",
     "SueLayer",
+    "SueLayerPart",
+    "SueDocumentPart",
 ];
 
 /// The columns of `Layer` the model names, always.
@@ -268,6 +272,11 @@ impl Reader<'_> {
             mask: None,
             children: Vec::new(),
             columns: Vec::new(),
+            content: None,
+            effects: None,
+            palette_color: None,
+            rulers: Vec::new(),
+            thumbnail: None,
         };
         let (render, masked, first) = (
             int("LayerRenderMipmap"),
@@ -331,6 +340,84 @@ fn mark(
         }
         mark(layer, marks, found);
     }
+}
+
+/// One layer part read from `SueLayerPart`, decoded.
+enum LayerPart {
+    Content(super::kinds::ClipContent),
+    Effects(super::kinds::ClipEffects),
+    PaletteColor([u8; 3]),
+    Rulers(Vec<super::kinds::ClipRuler>),
+    Thumbnail(ClipPicture),
+}
+
+impl LayerPart {
+    /// The part named `kind`, when this build knows it and its bytes are
+    /// laid out as this build writes them.
+    fn decode(kind: &str, data: &[u8]) -> Option<Self> {
+        match kind {
+            "effects" => parts::decode_effects(data).ok().map(Self::Effects),
+            "palette-color" => parts::decode_color(data).ok().map(Self::PaletteColor),
+            "rulers" => parts::decode_rulers(data).ok().map(Self::Rulers),
+            "thumbnail" => parts::decode_picture(data).ok().map(Self::Thumbnail),
+            kind if CONTENT_KINDS.contains(&kind) => {
+                parts::decode_content(kind, data).ok().map(Self::Content)
+            }
+            _ => None,
+        }
+    }
+
+    /// Puts the part on `layer` when its place there is free.
+    fn give(self, layer: &mut ClipLayer) -> bool {
+        match self {
+            Self::Content(content) if layer.content.is_none() => layer.content = Some(content),
+            Self::Effects(effects) if layer.effects.is_none() => layer.effects = Some(effects),
+            Self::PaletteColor(color) if layer.palette_color.is_none() => {
+                layer.palette_color = Some(color);
+            }
+            Self::Rulers(rulers) if layer.rulers.is_empty() && !rulers.is_empty() => {
+                layer.rulers = rulers;
+            }
+            Self::Thumbnail(picture) if layer.thumbnail.is_none() => {
+                layer.thumbnail = Some(picture);
+            }
+            _ => return false,
+        }
+        true
+    }
+}
+
+/// Gives the parts in `waiting` (by layer id, in row order) to the
+/// layers they name, the root left out; answers the rows given.
+fn give_parts(
+    folder: &mut ClipLayer,
+    waiting: &mut HashMap<i64, Vec<(usize, LayerPart)>>,
+    given: &mut Vec<usize>,
+) {
+    for layer in &mut folder.children {
+        if let Some(list) = waiting.remove(&layer.id) {
+            for (row, part) in list {
+                if part.give(layer) {
+                    given.push(row);
+                }
+            }
+        }
+        give_parts(layer, waiting, given);
+    }
+}
+
+/// Whether a part row is laid out as the writer lays one out: its
+/// version is this build's, its data a blob, and no other column holds
+/// anything.
+fn plain_part<'a>(rows: &Rows<'a>, row: usize, columns: &[&str]) -> Option<(String, &'a [u8])> {
+    let more = rows
+        .rest(row, columns)
+        .iter()
+        .any(|(_, value)| *value != Value::Null);
+    let version = rows.value(row, "Version").and_then(Value::int);
+    let kind = rows.value(row, "Kind").and_then(Value::text)?;
+    let data = rows.value(row, "Data")?.bytes()?;
+    (!more && version == Some(VERSION)).then(|| (kind.to_owned(), data))
 }
 
 /// Reads a Clip Studio file into a [`ClipDocument`].
@@ -529,6 +616,58 @@ pub fn read(bytes: &[u8]) -> Result<ClipDocument, String> {
         }
     }
 
+    // Sue's own parts of layers.
+    let mut layer_parts = rows("SueLayerPart");
+    if let Some(table) = layer_parts.table {
+        let mut waiting: HashMap<i64, Vec<(usize, LayerPart)>> = HashMap::new();
+        for row in 0..table.rows.len() {
+            let Some(Value::Integer(id)) = layer_parts.value(row, "LayerId") else {
+                continue;
+            };
+            if let Some((kind, data)) =
+                plain_part(&layer_parts, row, &["LayerId", "Kind", "Version", "Data"])
+                && let Some(part) = LayerPart::decode(&kind, data)
+            {
+                waiting.entry(*id).or_default().push((row, part));
+            }
+        }
+        let mut given = Vec::new();
+        give_parts(&mut root, &mut waiting, &mut given);
+        layer_parts.taken.extend(given);
+    }
+
+    // Sue's own parts of the document.
+    let mut document_parts = rows("SueDocumentPart");
+    let (mut comps, mut timeline, mut preview): (
+        Option<Vec<ClipComp>>,
+        Option<ClipTimeline>,
+        Option<ClipPicture>,
+    ) = (None, None, None);
+    if let Some(table) = document_parts.table {
+        for row in 0..table.rows.len() {
+            let Some((kind, data)) = plain_part(&document_parts, row, &["Kind", "Version", "Data"])
+            else {
+                continue;
+            };
+            let taken = match kind.as_str() {
+                "comps" if comps.is_none() => parts::decode_comps(data)
+                    .ok()
+                    .filter(|list| !list.is_empty())
+                    .map(|list| comps = Some(list)),
+                "timeline" if timeline.is_none() => parts::decode_timeline(data)
+                    .ok()
+                    .map(|value| timeline = Some(value)),
+                "preview" if preview.is_none() => parts::decode_picture(data)
+                    .ok()
+                    .map(|value| preview = Some(value)),
+                _ => None,
+            };
+            if taken.is_some() {
+                document_parts.taken.insert(row);
+            }
+        }
+    }
+
     // The bitmap chunks' extra columns.
     let external = rows("ExternalChunk");
     if let Some(table) = external.table {
@@ -555,6 +694,8 @@ pub fn read(bytes: &[u8]) -> Result<ClipDocument, String> {
         ("Offscreen", &reader.offscreens),
         ("SueProject", &sue_project),
         ("SueLayer", &sue_layer),
+        ("SueLayerPart", &layer_parts),
+        ("SueDocumentPart", &document_parts),
     ] {
         foreign.rows.extend(rows.left(name));
     }
@@ -584,6 +725,9 @@ pub fn read(bytes: &[u8]) -> Result<ClipDocument, String> {
         sue,
         head,
         foreign,
+        comps: comps.unwrap_or_default(),
+        timeline,
+        preview,
     })
 }
 
