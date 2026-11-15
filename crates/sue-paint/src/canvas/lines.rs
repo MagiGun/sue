@@ -786,10 +786,11 @@ impl SuePaint {
                 (base, quad)
             }
         };
-        let selected = theme.selected_stroke();
+        // A hairline along each picked line's middle, so its ink still
+        // shows round it.
         for line in picked.iter().filter_map(|index| lines.get(*index)) {
             let points: Vec<Pos2> = line.samples.iter().map(|sample| at(sample.at)).collect();
-            painter.add(Shape::line(points, selected));
+            painter.add(Shape::line(points, light));
         }
         let Some(quad) = quad else {
             return;
