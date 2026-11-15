@@ -165,8 +165,14 @@ fn sue_paint_animation_cels_entries_have_an_eye_opacity_and_mode_and_take_a_drop
     paint.command("edit.undo");
     paint.settle(2);
 
-    // A click on the entry opens its opacity, with the number, and its
-    // color mode.
+    // The entry a drop made is picked: its opacity, with the number, and
+    // its color mode at the palette's foot. A click on it puts them away,
+    // a second brings them back.
+    let colors_shown =
+        |texts: &[(String, egui::Rect)]| texts.iter().any(|(text, _)| text == "Colors");
+    assert!(colors_shown(&paint.settle(2)), "picked by the drop");
+    let texts = super::paint_anim::click_at(&mut paint, entry.center());
+    assert!(!colors_shown(&texts), "a click puts them away: {texts:?}");
     let texts = super::paint_anim::click_at(&mut paint, entry.center());
     assert!(
         texts.iter().any(|(text, _)| text == "Colors"),
