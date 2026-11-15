@@ -94,4 +94,5 @@ A camera folder is a layer folder with `folder.camera` set to true. Its
 view), `camera.scale`, `camera.angle` (radians), `camera.pivot.x` and
 `camera.pivot.y` (the centre of rotation; the view's middle when
 missing) and `camera.opacity`. A value not keyed is read from the
-folder's property of the same name.
+folder's property of the same name, except the opacity, which only keys
+set (without them the folder keeps its own).
