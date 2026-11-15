@@ -22,8 +22,8 @@ use sue_wm::{AppletContext, ArenaEdit};
 use crate::caret::{self, CaretGlide, CaretMotion};
 use crate::edit;
 use crate::layout::{
-    Block, Ink, Laid, PX_PER_PT, PageSetup, Setting, Source, ViewMode, byte_of_char, char_of_byte,
-    lay_document, paginate,
+    Block, Ink, Laid, PX_PER_PT, PageMarks, PageSetup, Setting, Source, ViewMode, byte_of_char,
+    char_of_byte, lay_document, paginate,
 };
 use crate::style::{CharFormat, ParagraphLook, StyleSheet, char_format, paragraph_look};
 pub use crate::tables::TableEdit;
@@ -41,8 +41,6 @@ fn take_focus(ctx: &egui::Context, id: Id) {
 
 /// The radius of a finger selection's handle knob.
 const HANDLE: f32 = 9.0;
-/// The color of the handles, the selection's own blue.
-const HANDLE_COLOR: Color32 = Color32::from_rgb(0x3a, 0x7b, 0xd5);
 
 /// What the bar over a finger's selection does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,6 +134,8 @@ struct DocKey {
     scale: u32,
     fonts: usize,
     ink: [u8; 4],
+    /// The colors of the marks set into the text.
+    marks: [[u8; 4]; 4],
     /// The revisions of the tables it shows.
     embeds: u64,
 }
@@ -231,6 +231,9 @@ pub struct Editor {
     delete_forward: bool,
     /// A cell the caret left this frame, its typing still to record.
     left_cell: Option<CellCaret>,
+    /// The colors of the marks on the page, from the theme for the ink
+    /// shown.
+    page_marks: PageMarks,
 }
 
 impl std::fmt::Debug for Editor {
@@ -288,6 +291,7 @@ impl Editor {
             delete_forward: false,
             spell_menu: None,
             ignored: std::collections::HashSet::new(),
+            page_marks: PageMarks::plain(&Ink::paper()),
         }
     }
 
@@ -1091,6 +1095,8 @@ impl Editor {
         let fonts = ctx.fonts(|fonts| fonts.definitions().font_data.len());
         let sheet = view.sheet.fingerprint();
         let ink = view.ink.text.to_array();
+        self.page_marks = PageMarks::resolve(cx.theme, &view.ink);
+        let page_marks = self.page_marks;
         let mut blocks = Vec::new();
         let mut starts = Vec::with_capacity(docs.len());
         let figure_size = |id: EntityId| (view.figures)(id).map(|(_, size)| size);
@@ -1123,6 +1129,7 @@ impl Editor {
                 scale: scale.to_bits(),
                 fonts,
                 ink,
+                marks: page_marks.text_key(),
                 embeds,
             };
             let fresh = self.cache.get(id).is_some_and(|cached| cached.key == key);
@@ -1132,6 +1139,7 @@ impl Editor {
                     scale,
                     width,
                     ink: view.ink,
+                    marks: page_marks,
                 };
                 let source = Source {
                     text: &self.texts[index],
@@ -1173,6 +1181,7 @@ impl Editor {
                 scale,
                 width,
                 ink: view.ink,
+                marks: page_marks,
             };
             for pass in 0..2 {
                 let pages = (pass > 0).then(|| {
@@ -2153,11 +2162,12 @@ impl Editor {
         let painter = ui.painter();
         for (line, knob) in places {
             let base = pos2(line.left(), line.bottom());
-            painter.line_segment([line.left_top(), base], Stroke::new(2.0, HANDLE_COLOR));
+            let color = self.page_marks.handle;
+            painter.line_segment([line.left_top(), base], Stroke::new(2.0, color));
             // A round knob with a square corner pointing at the line: a
             // teardrop.
-            painter.rect_filled(Rect::from_two_pos(base, knob), 0.0, HANDLE_COLOR);
-            painter.circle_filled(knob, HANDLE, HANDLE_COLOR);
+            painter.rect_filled(Rect::from_two_pos(base, knob), 0.0, color);
+            painter.circle_filled(knob, HANDLE, color);
         }
     }
 
@@ -3030,10 +3040,10 @@ impl Editor {
                 if !rect.expand(12.0).intersects(self.viewport) {
                     continue;
                 }
-                painter.rect_filled(
-                    rect.translate(vec2(0.0, 2.0)).expand(1.5),
-                    2.0,
-                    Color32::from_black_alpha(60),
+                painter.add(
+                    self.page_marks
+                        .page_shadow
+                        .as_shape(rect, egui::CornerRadius::ZERO),
                 );
                 painter.rect_filled(rect, 0.0, view.ink.paper);
                 let small =
@@ -3077,9 +3087,9 @@ impl Editor {
         let selection = self.selection();
         let selecting = !selection.is_empty();
         let select_color = if focused {
-            Color32::from_rgba_unmultiplied(0x3a, 0x7b, 0xd5, 0x55)
+            self.page_marks.selection
         } else {
-            Color32::from_rgba_unmultiplied(0x80, 0x80, 0x80, 0x45)
+            self.page_marks.selection_idle
         };
         let mut last_doc = None;
         for index in 0..self.laid.pieces.len() {
@@ -3237,7 +3247,7 @@ impl Editor {
         }
     }
 
-    /// Red waves under the misspelled words of `block`, but not under the
+    /// Waves under the misspelled words of `block`, but not under the
     /// word being typed.
     fn paint_spelling(
         &self,
@@ -3252,7 +3262,7 @@ impl Editor {
         };
         let body = &text[block.range.clone()];
         let typing = (focused && self.caret.doc == block.doc).then_some(self.caret.offset);
-        let wave = Stroke::new(1.0, Color32::from_rgb(0xd0, 0x30, 0x30));
+        let wave = Stroke::new(1.0, self.page_marks.misspelt);
         for range in crate::spell::words(body) {
             let word = &body[range.clone()];
             let at = block.range.start + range.start..block.range.start + range.end;

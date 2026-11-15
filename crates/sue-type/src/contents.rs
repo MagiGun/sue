@@ -276,6 +276,7 @@ mod tests {
                 scale: 1.0,
                 width: 400.0,
                 ink: Ink::paper(),
+                marks: crate::layout::PageMarks::plain(&Ink::paper()),
             };
             let contents = Contents {
                 title: "Contents".to_owned(),

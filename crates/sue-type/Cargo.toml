@@ -20,5 +20,8 @@ sue-platform.workspace = true
 sue-wm.workspace = true
 ttf-parser.workspace = true
 
+[dev-dependencies]
+sue-rice.workspace = true
+
 [lints]
 workspace = true

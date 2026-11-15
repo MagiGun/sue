@@ -3900,6 +3900,7 @@ dependencies = [
  "sue-lang",
  "sue-model",
  "sue-platform",
+ "sue-rice",
  "sue-wm",
  "ttf-parser",
 ]
