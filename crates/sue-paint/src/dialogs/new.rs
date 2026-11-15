@@ -12,7 +12,7 @@ use sue_wm::{AppletContext, Theme};
 
 use super::canvas::anchor_ui;
 use super::fill::{Reads, check, number};
-use super::{Outcome, bare, note, tip};
+use super::{Outcome, bare, label, note, tip};
 use crate::anim::setup::{OutputFrame, Overflow, Settings};
 use crate::doc::{self, Edit, NewPicture};
 use crate::studio::SuePaint;
@@ -757,6 +757,9 @@ fn project_row(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) {
                 new.choose(project);
             }
         }
+        // The kind of work chosen, in words: the icons alone do not say.
+        ui.add_space(theme.space(Space::S2));
+        label(ui, &new.project.label(), theme);
     });
 }
 
@@ -1031,19 +1034,27 @@ fn size_rows(form: &mut sue_wm::ui::FormGrid<'_, '_>, new: &mut NewDialog, theme
             suffix: &dpi,
         };
         number(ui, "sue-paint-new-dpi", &mut new.dpi, &reads, &name, theme);
-        let common = ["72", "150", "300", "350", "600", "1200"];
+        // The common resolutions, with the one set now in its place among
+        // them when it is not one of them (a preset's 192), so the list
+        // always shows what the canvas gets.
+        let mut common: Vec<f64> = vec![72.0, 150.0, 300.0, 350.0, 600.0, 1200.0];
+        if !common.contains(&new.dpi) {
+            common.push(new.dpi);
+            common.sort_by(f64::total_cmp);
+        }
+        let names: Vec<String> = common.iter().map(|dpi| format!("{dpi}")).collect();
         let mut chosen = common
             .iter()
-            .position(|value| value.parse::<f64>().ok() == Some(new.dpi))
-            .unwrap_or(usize::MAX);
+            .position(|value| *value == new.dpi)
+            .unwrap_or_default();
         let label = tr!("common-resolutions");
-        let response = dropdown("sue-paint-dpi", &mut chosen, &common)
+        let response = dropdown("sue-paint-dpi", &mut chosen, &names)
             .label(&label)
             .show(ui, theme);
         if tip(response, &label, "", theme).changed()
-            && let Some(value) = common.get(chosen).and_then(|v| v.parse().ok())
+            && let Some(value) = common.get(chosen)
         {
-            new.dpi = value;
+            new.dpi = *value;
         }
     });
 }
