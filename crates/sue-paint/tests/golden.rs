@@ -1552,16 +1552,27 @@ fn the_data_folder_of_0_0_75_loads_into_the_studio() {
     // 0.0.75 itself reads them back as one hidden button that is none
     // (`command_bar.txt` shows it). Reading the file as 0.0.75 does is
     // right; so is a reader that finds the four entries again.
-    let mut hidden: Vec<&str> = paint.bar_hidden.iter().map(String::as_str).collect();
-    hidden.sort_unstable();
-    let as_written = hidden == ["edit.redohide file.saveadd view.flip_hadd layer.new"]
-        && paint.bar_extra.is_empty();
-    let recovered =
-        hidden == ["edit.redo", "file.save"] && paint.bar_extra == ["view.flip_h", "layer.new"];
+    // Sue Paint reads the four entries again: the buttons but the two
+    // hidden ones, then the two added after a line.
+    let names: Vec<String> = paint
+        .bar
+        .items
+        .iter()
+        .map(|slot| match &slot.item {
+            crate::bar_items::Item::Command(command) => command.clone(),
+            other => format!("{other:?}"),
+        })
+        .collect();
     assert!(
-        as_written || recovered,
-        "the command bar reads as {hidden:?} and {:?}",
-        paint.bar_extra
+        !names
+            .iter()
+            .any(|name| name == "edit.redo" || name == "file.save")
+            && names.ends_with(&[
+                "Separator".to_owned(),
+                "view.flip_h".to_owned(),
+                "layer.new".to_owned()
+            ]),
+        "the command bar reads as {names:?}"
     );
 
     // The workspaces, and the default one.
@@ -2938,10 +2949,10 @@ fn generate_the_paint_folder() {
         },
     ];
     // The command bar: two buttons hidden, two added.
-    paint.bar_hidden.insert("file.save".to_owned());
-    paint.bar_hidden.insert("edit.redo".to_owned());
-    paint.bar_extra.push("view.flip_h".to_owned());
-    paint.bar_extra.push("layer.new".to_owned());
+    paint.bar = crate::bar_items::bar_of_old(
+        &["file.save", "edit.redo"].map(String::from).into(),
+        &["view.flip_h".to_owned(), "layer.new".to_owned()],
+    );
 
     // Window, Workspace, Register: the palettes as they start, then with
     // the navigator floating and the color set folded away.

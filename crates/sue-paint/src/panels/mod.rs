@@ -17,6 +17,7 @@ mod layer;
 mod layer_property;
 mod material;
 mod navigator;
+mod quick_access;
 mod sub_tool;
 mod timeline;
 mod tool;
@@ -30,8 +31,9 @@ use sue_wm::{AppletContext, Theme};
 use crate::icons::{self, Icon};
 use crate::studio::SuePaint;
 
-pub(crate) use command_bar::BAR_GROUPS;
+pub(crate) use command_bar::icon_picker;
 pub(crate) use material::material_thumb;
+pub(crate) use quick_access::MENU_COMMANDS as QUICK_ACCESS_COMMANDS;
 pub(crate) use tool::{slot_icon, tool_icon};
 
 /// A child `Ui` confined to `rect`.

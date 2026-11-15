@@ -671,7 +671,42 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         canvas,
         canvas_state,
     ),
+    // Quick Access (gaps WS-2, FG-38): its palette, then its sets and its
+    // settings, from its palette menu and its own button.
+    c(
+        "window.quick_access",
+        "quick-access",
+        "star",
+        palette,
+        palette_state,
+    ),
+    c(
+        "window.quick_access.new_set",
+        "new-set",
+        "plus",
+        crate::bar_items::new_quick_set,
+        doc_any,
+    ),
+    c(
+        "window.quick_access.delete_set",
+        "delete-set",
+        "delete",
+        crate::bar_items::delete_quick_set,
+        crate::bar_items::delete_quick_set_state,
+    ),
+    c(
+        "window.quick_access.settings",
+        "quick-access-settings-ellipsis",
+        "settings",
+        crate::bar_items::quick_access_settings,
+        doc_any,
+    ),
 ];
+
+/// A command that works with or without a canvas.
+fn doc_any(_: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    ItemState::on()
+}
 
 #[cfg(test)]
 mod tests {
@@ -923,8 +958,9 @@ mod tests {
     }
 
     /// Every palette command of the Window menu.
-    const PALETTE_COMMANDS: [&str; 23] = [
+    const PALETTE_COMMANDS: [&str; 24] = [
         "window.command_bar",
+        "window.quick_access",
         "window.tool",
         "window.sub_tool",
         "window.tool_property",

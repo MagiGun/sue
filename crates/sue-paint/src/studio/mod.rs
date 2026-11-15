@@ -460,10 +460,12 @@ pub struct SuePaint {
     pub(crate) tiled: bool,
     /// How pictures go on paper (File, Print Settings).
     pub(crate) print: crate::print::PrintSettings,
-    /// Command bar buttons people hid (Command Bar Settings).
-    pub(crate) bar_hidden: HashSet<String>,
-    /// Commands people added to the command bar.
-    pub(crate) bar_extra: Vec<String>,
+    /// The command bar's buttons (Command Bar Settings).
+    pub(crate) bar: crate::bar_items::Bar,
+    /// Quick Access's sets of buttons.
+    pub(crate) quick_access: crate::bar_items::QuickAccess,
+    /// The bars' popovers and the button being dragged.
+    pub(crate) bar_ui: crate::bar_items::BarUi,
     /// Rulers along the canvas's top and left (View, Ruler Bar).
     pub(crate) ruler_bar: bool,
     /// The canvas's scrollbars show (View, Scroll Bar).
@@ -763,8 +765,9 @@ impl Default for SuePaint {
             default_workspace: None,
             tiled: false,
             print: crate::print::PrintSettings::default(),
-            bar_hidden: HashSet::new(),
-            bar_extra: Vec::new(),
+            bar: crate::bar_items::Bar::default(),
+            quick_access: crate::bar_items::QuickAccess::default(),
+            bar_ui: crate::bar_items::BarUi::default(),
             ruler_bar: false,
             scroll_bars: true,
             advanced_fill: crate::dialogs::AdvancedFill::default(),

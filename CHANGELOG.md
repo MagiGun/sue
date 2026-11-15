@@ -13,6 +13,20 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint's command bar holds more than menu commands: tools, sub
+  tools, drawing colors, palettes that pop up under their button, Auto
+  Actions, lines between groups, and groups of buttons with a list. Right-click
+  a button for Icon Settings, Delete, Add Drawing Color, Insert Drawing
+  Color into Group, Add Separator, Change Order (Drag or Ctrl + Drag) and
+  Command Bar Settings; drag a button to move it. Command Bar Settings is
+  new: categories, a search, the bar's buttons as a list to move, group,
+  give icons or delete, Restore Default Layout, and Export and Import of
+  the bar as a file to share. The timelapse button is on the bar.
+- Quick Access (Window, Quick Access, or its icon in the strip): sets of
+  buttons with their names, Set 1 as Clip Studio Paint ships it, with New
+  Set, Delete Set and Quick Access Settings, the same right-click menu
+  and drags as the command bar, and buttons dragged between the two.
+  Workspaces keep Quick Access with the command bar.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own

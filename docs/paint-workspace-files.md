@@ -39,7 +39,8 @@ switching styles and back loses nothing.
 | `layout.txt` | The palettes as they were last left (when Settings, Remember the palette layout is on) |
 | `workspaces.txt` | The registered workspaces (Window, Workspace, Register Workspace) |
 | `default_workspace.txt` | The workspace Reset to Default goes back to (Use Current Workspace as Default) |
-| `command_bar.txt` | The command bar's own items (File, Command Bar Settings) |
+| `command_bar.txt` | The command bar's buttons (File, Command Bar Settings): [`paint-command-bar-files.md`](paint-command-bar-files.md) |
+| `quick_access.txt` | Quick Access's sets of buttons, in the same lines |
 
 `workspaces.txt` and `default_workspace.txt` hold sections: a line
 `[name]`, then that workspace's lines. `layout.txt` holds the lines of
@@ -72,22 +73,28 @@ Sliders), `color` (Color Wheel), `color_slider`, `color_set`,
 | `menus <0 or 1>` | Whether the menu bar shows |
 | `style <id>` | The layout style the workspace was made in |
 | `strip tab` | Icons of the strip open their palettes as tabs (left out: as pop-ups) |
-| `bar` | The workspace holds the command bar's items: the `bar` lines after it replace them |
-| `bar hide <command>`, `bar add <command>` | A built-in command bar button hidden, a command added |
+| `bar` | The workspace holds the command bar's buttons: the `bar` lines after it replace them |
+| `bar <line>` | A line of `command_bar.txt` after its first ([`paint-command-bar-files.md`](paint-command-bar-files.md)), such as `bar command view.fit`. Sue Paint 0.0.75 wrote `bar hide <command>` and `bar add <command>`, still read: Sue Paint's buttons but those hidden, then those added |
+| `quick` | The workspace holds Quick Access's sets: the `quick` lines after it replace them |
+| `quick <line>` | A line of `quick_access.txt` after its first, such as `quick [Set 1]` |
 
 A palette the lines lack goes where the layout style has it. A layout
 kept by Sue Paint 0.0.75 or older, where Tool Property, Brush Size,
 Color Slider, Intermediate Color, Approximate Color and Color History
 were tabs inside other palettes, gets them back as tabs of those
 palettes. A workspace kept before it held the command bar (no `bar`
-line) leaves the command bar as it is.
+line, no `quick` line) leaves the command bar and Quick Access as they
+are.
 
 ## The command bar file
 
-`command_bar.txt` holds one line per item: `hide <command>` for each
-built-in button hidden, then `add <command>` for each command added, in
-order. Command names are those of Sue Paint's commands (the command
-palette and Settings, Keymaps list them).
+`command_bar.txt` and `quick_access.txt` are described in
+[`paint-command-bar-files.md`](paint-command-bar-files.md). Sue Paint
+0.0.75 wrote `command_bar.txt` as one line per item, `hide <command>` for
+each built-in button hidden and `add <command>` for each command added
+(in the language in use, and run together); such a file is read once as
+Sue Paint's buttons but those hidden, then those added after a line,
+and written again in the form of now.
 
 ## Example
 
@@ -104,5 +111,8 @@ panels 1111011111
 menus 1
 style classic
 bar
-bar add view.fit
+bar reorder ctrl-drag
+bar command file.new
+bar separator
+bar command view.fit
 ```

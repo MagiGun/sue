@@ -1,6 +1,5 @@
 //! The settings dialogs: Modifier Key Settings, Keyboard Shortcuts (with
-//! what the pen and the mouse do), Preferences, Command Bar Settings and
-//! the workspaces.
+//! what the pen and the mouse do), Preferences and the workspaces.
 
 use egui::{Align, Layout, RichText, Ui};
 use sue_rice::{RiceValue, SetRiceValue};
@@ -178,71 +177,6 @@ impl SuePaint {
             self.workspaces.remove(index);
         }
         ui.add_space(8.0);
-        if ui.button(tr!("close")).clicked() {
-            outcome = Outcome::Ok;
-        }
-        outcome
-    }
-
-    /// Command Bar Settings: which buttons show, and menu commands added to it.
-    pub(super) fn command_bar_ui(
-        &mut self,
-        ui: &mut Ui,
-        adding: &mut String,
-        size: egui::Vec2,
-        theme: &Theme,
-    ) -> Outcome {
-        let mut outcome = Outcome::Open;
-        egui::ScrollArea::vertical()
-            .max_height(size.y - 150.0)
-            .show(ui, |ui| {
-                for group in crate::panels::BAR_GROUPS {
-                    for (_, command, tip) in group.iter() {
-                        let mut shown = !self.bar_hidden.contains(*command);
-                        if ui.checkbox(&mut shown, crate::localize(tip)).changed() {
-                            if shown {
-                                self.bar_hidden.remove(*command);
-                            } else {
-                                self.bar_hidden.insert((*command).to_owned());
-                            }
-                        }
-                    }
-                    ui.separator();
-                }
-                let mut gone = None;
-                for (index, command) in self.bar_extra.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.label(crate::menus::label_of(&self.menus, command).unwrap_or(command));
-                        if ui.small_button(tr!("remove")).clicked() {
-                            gone = Some(index);
-                        }
-                    });
-                }
-                if let Some(index) = gone {
-                    self.bar_extra.remove(index);
-                }
-            });
-        ui.horizontal(|ui| {
-            label(ui, &tr!("add"), theme);
-            let picked = crate::menus::label_of(&self.menus, adding)
-                .unwrap_or(&tr!("a-menu-command"))
-                .to_owned();
-            egui::ComboBox::from_id_salt("sue-paint-bar-add")
-                .selected_text(picked)
-                .height(320.0)
-                .show_ui(ui, |ui| {
-                    for (label, command) in crate::menus::commands(&self.menus) {
-                        ui.selectable_value(adding, command, label);
-                    }
-                });
-            if ui.button(tr!("add-2")).clicked()
-                && !adding.is_empty()
-                && !self.bar_extra.contains(adding)
-            {
-                self.bar_extra.push(adding.clone());
-            }
-        });
-        ui.add_space(6.0);
         if ui.button(tr!("close")).clicked() {
             outcome = Outcome::Ok;
         }

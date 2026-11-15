@@ -1031,8 +1031,10 @@ mod tests {
         let mut paint = SuePaint::default();
         paint.panels.navigator = false;
         paint.menus_hidden = true;
-        paint.bar_hidden.insert("edit.undo".to_owned());
-        paint.bar_extra = vec!["view.fit".to_owned(), "layer.new".to_owned()];
+        paint
+            .bar
+            .items
+            .push(crate::bar_items::Slot::command("layer.new"));
         let english = {
             let _english = sue_lang::scope(sue_lang::ENGLISH);
             paint.workspace_now("Inking").lines
@@ -1046,14 +1048,13 @@ mod tests {
             back.apply_layout(&lines);
             assert_eq!(back.panels, paint.panels, "{language}");
             assert!(back.menus_hidden, "{language}");
-            assert_eq!(back.bar_hidden, paint.bar_hidden, "{language}");
-            assert_eq!(back.bar_extra, paint.bar_extra, "{language}");
+            assert_eq!(back.bar, paint.bar, "{language}");
             assert_eq!(back.workspace_now("Inking").lines, lines, "{language}");
         }
         assert!(english.contains(&"panels 1111111011".to_owned()));
         assert!(english.contains(&"menus 0".to_owned()));
         assert!(english.contains(&"style classic".to_owned()));
-        assert!(english.contains(&"bar hide edit.undo".to_owned()));
+        assert!(english.contains(&"bar command layer.new".to_owned()));
     }
 
     #[test]

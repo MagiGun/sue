@@ -12,6 +12,7 @@ mod icons;
 mod menus;
 mod paint_canvas;
 mod paint_color;
+mod paint_command_bar;
 mod paint_dialogs;
 mod paint_dock;
 mod paint_layers;
@@ -69,6 +70,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_layers::property(tour)?;
     paint_color::scenes(tour);
     paint_dock::scenes(tour)?;
+    paint_command_bar::scenes(tour)?;
 
     // 12 and 13. Back to the Hub, then into Sue Paint again.
     shell::entering(tour)?;

@@ -76,6 +76,7 @@ pub use sue_picture::{
 // Private in Sue Paint before the move, so private here still.
 use sue_picture::{comps, smart};
 
+pub use bar_items::bar_button_rect;
 pub use commands::registry;
 pub use menus::menus;
 pub use studio::{ID, SuePaint, mirror};
@@ -261,9 +262,6 @@ mod language_tests {
         for (what, how) in crate::dialogs::GESTURES {
             names.push(what.to_owned());
             names.push(how.to_owned());
-        }
-        for group in crate::panels::BAR_GROUPS {
-            names.extend(group.iter().map(|(_, _, tip)| (*tip).to_owned()));
         }
         let missing: Vec<String> = names
             .into_iter()

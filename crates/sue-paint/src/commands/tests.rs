@@ -59,9 +59,9 @@ fn every_menu_command_is_registered() {
 
 /// Commands that palettes run, not a menu: the timeline's camera keys, the
 /// Animation Cels and light table palettes, and the 3D drawing figure's
-/// tool property. Named one by one, so a command no one can reach cannot
+/// tool property, and Quick Access's palette menu. Named one by one, so a command no one can reach cannot
 /// hide behind a prefix.
-const IN_PALETTES: [&str; 16] = [
+const IN_PALETTES: [&str; 19] = [
     "anim.camera.key",
     "anim.camera.unkey",
     "anim.light_table.reverse",
@@ -78,6 +78,9 @@ const IN_PALETTES: [&str; 16] = [
     "figure.register_pose",
     "figure.pose_scanner",
     "figure.hand_scanner",
+    "window.quick_access.new_set",
+    "window.quick_access.delete_set",
+    "window.quick_access.settings",
 ];
 
 /// The palettes' code, which runs those commands by name: every source

@@ -222,6 +222,7 @@ const SEP: MenuItem = MenuItem::Separator;
 const WINDOW_PALETTES: [&[(&str, Palette)]; 5] = [
     &[
         ("window.command_bar", Palette::CommandBar),
+        ("window.quick_access", Palette::QuickAccess),
         ("window.tool", Palette::Tools),
         ("window.sub_tool", Palette::SubTool),
         ("window.tool_property", Palette::ToolProperty),

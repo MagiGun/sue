@@ -36,6 +36,8 @@ pub(crate) type Laid = sue_wm::dock::Laid<Palette>;
 pub(crate) enum Palette {
     /// The command bar.
     CommandBar,
+    /// Quick Access: sets of buttons with their names.
+    QuickAccess,
     /// The tool strip.
     Tools,
     /// Sub Tool and Tool Property.
@@ -85,8 +87,12 @@ pub(crate) enum Palette {
 /// The palettes the "Clip Studio" style keeps folded in the strip at the
 /// right from the start: Clip Studio Paint's Material, then the ones it
 /// does not show at first (Animation Cels, and Sue's own Tool Sliders).
-pub(crate) const STRIP_PALETTES: [Palette; 3] =
-    [Palette::Material, Palette::Cels, Palette::BrushSize];
+pub(crate) const STRIP_PALETTES: [Palette; 4] = [
+    Palette::QuickAccess,
+    Palette::Material,
+    Palette::Cels,
+    Palette::BrushSize,
+];
 
 /// The six color palettes, tabs of one group in the "Clip Studio" style.
 pub(crate) const COLOR_PALETTES: [Palette; 6] = [
@@ -160,8 +166,9 @@ pub(crate) fn classic_layout() -> Dock {
 }
 
 /// Every palette.
-const PALETTES: [Palette; 23] = [
+const PALETTES: [Palette; 24] = [
     Palette::CommandBar,
+    Palette::QuickAccess,
     Palette::Tools,
     Palette::SubTool,
     Palette::BrushSize,
@@ -191,6 +198,7 @@ impl Palette {
     pub fn title(self) -> String {
         match self {
             Self::CommandBar => tr!("command-bar"),
+            Self::QuickAccess => tr!("quick-access"),
             Self::Tools => tr!("tool"),
             Self::SubTool => tr!("sub-tool"),
             Self::BrushSize => tr!("tool-sliders"),
@@ -220,6 +228,7 @@ impl Palette {
     pub fn icon(self) -> Icon {
         match self {
             Self::CommandBar => Icon::Menu,
+            Self::QuickAccess => Icon::List,
             Self::Tools => Icon::Pen,
             Self::SubTool => Icon::Brush,
             Self::BrushSize => Icon::BrushSize,
@@ -258,7 +267,8 @@ impl Palette {
             Self::Navigator => panels.navigator,
             Self::Layer => panels.layer,
             Self::Timeline => panels.timeline,
-            Self::Material
+            Self::QuickAccess
+            | Self::Material
             | Self::LayerProperty
             | Self::History
             | Self::Cels
@@ -279,6 +289,7 @@ impl Palette {
     pub fn of_window_command(command: &str) -> Option<Self> {
         Some(match command {
             "window.command_bar" => Self::CommandBar,
+            "window.quick_access" => Self::QuickAccess,
             "window.tool" => Self::Tools,
             "window.sub_tool" => Self::SubTool,
             "window.tool_property" => Self::ToolProperty,
@@ -319,6 +330,8 @@ impl Palette {
                 "layer.rename",
                 "layer.properties",
             ],
+            Self::CommandBar => &["file.command_bar"],
+            Self::QuickAccess => &crate::panels::QUICK_ACCESS_COMMANDS,
             Self::Timeline => &[
                 "anim.timeline.edit",
                 "anim.onion",
@@ -357,6 +370,7 @@ impl DockPanel for Palette {
     fn key(self) -> &'static str {
         match self {
             Self::CommandBar => "command_bar",
+            Self::QuickAccess => "quick_access",
             Self::Tools => "tool",
             Self::SubTool => "sub_tool",
             Self::BrushSize => "brush_size",
@@ -583,6 +597,7 @@ impl SuePaint {
         ui.ctx().data_mut(|data| data.insert_temp(inset, 26.0_f32));
         match palette {
             Palette::CommandBar => self.command_bar(ui, rect, cx, theme),
+            Palette::QuickAccess => self.quick_access_panel(ui, rect, cx, theme),
             Palette::Tools => self.tool_strip(ui, rect, cx, theme),
             Palette::SubTool => self.tool_panel(ui, rect, cx, theme),
             Palette::BrushSize => self.size_column(ui, rect, theme),
