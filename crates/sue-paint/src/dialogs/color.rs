@@ -205,7 +205,7 @@ impl ColorDialog {
 fn accept_cancel(ui: &mut Ui, accept: &str, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
     ui.add_space(theme.space(Space::S4));
-    ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
+    crate::dialogs::button_row(ui, |ui| {
         if ui::button("sue-paint-color-accept", accept)
             .primary()
             .show(ui, theme)
@@ -691,7 +691,7 @@ impl SuePaint {
         } else {
             Outcome::Open
         };
-        ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
+        crate::dialogs::button_row(ui, |ui| {
             if ui::button("sue-paint-edit-sets-close", &tr!("close"))
                 .primary()
                 .show(ui, theme)
@@ -727,7 +727,7 @@ fn delete_ui(ui: &mut Ui, name: &str, count: usize, theme: &Theme) -> Outcome {
     );
     let mut outcome = Outcome::Open;
     ui.add_space(theme.space(Space::S4));
-    ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
+    crate::dialogs::button_row(ui, |ui| {
         if ui::button("sue-paint-delete-set-accept", &tr!("delete"))
             .danger()
             .show(ui, theme)

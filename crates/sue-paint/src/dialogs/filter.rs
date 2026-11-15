@@ -665,7 +665,7 @@ fn heading(ui: &mut Ui, text: &str, theme: &Theme) {
 /// OK and Cancel, OK the primary one, at the right.
 fn ok_cancel(ui: &mut Ui, outcome: &mut Outcome, theme: &Theme) {
     ui.add_space(theme.space(Space::S4));
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
+    crate::dialogs::button_row(ui, |ui| {
         let cancel = tr!("cancel");
         let response = ui::button("sue-paint-filter-cancel", &cancel).show(ui, theme);
         if response.clicked() {

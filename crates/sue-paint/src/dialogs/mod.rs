@@ -744,6 +744,20 @@ impl SuePaint {
 /// edited.
 fn ok_cancel(_ui: &mut Ui, _outcome: &mut Outcome) {}
 
+/// A row of buttons standing at the right, as tall as a control. A
+/// layout that aligns to the bottom would take every point the dialog
+/// host offers, and the host makes a dialog as tall as what it holds:
+/// such a dialog would grow to the screen's height.
+pub(crate) fn button_row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let height = Density::of(ui).control_height();
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), height),
+        egui::Layout::right_to_left(egui::Align::Center),
+        add,
+    )
+    .inner
+}
+
 /// A label as a form row, a tooltip or a field's name shows it: without
 /// the colon some of the older labels end with.
 fn bare(text: String) -> String {

@@ -1,7 +1,7 @@
 //! The settings dialogs: Keyboard Shortcuts (with
 //! what the pen and the mouse do), Preferences and the workspaces.
 
-use egui::{Align, Layout, RichText, Ui};
+use egui::{RichText, Ui};
 use sue_wm::{AppletContext, Theme};
 
 use super::{Outcome, label, ok_cancel};
@@ -97,7 +97,7 @@ pub(super) fn shortcuts_ui(
                 .collect();
             sue_wm::shortcuts::grid_ui(ui, "sue-paint-gestures", &gestures, theme);
         });
-    ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
+    crate::dialogs::button_row(ui, |ui| {
         if ui.button(tr!("close")).clicked() {
             outcome = Outcome::Cancel;
         }

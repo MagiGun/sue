@@ -805,7 +805,7 @@ fn stop_timelapse_ui(ui: &mut Ui, delete: &mut bool, frames: usize, theme: &Them
     );
     help(ui, &tr!("a-kept-timelapse-can-be-exported"), theme);
     ui.add_space(theme.space(wm_ui::Space::S5));
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
+    crate::dialogs::button_row(ui, |ui| {
         if wm_ui::button("anim-timelapse-keep", &tr!("keep-the-recording"))
             .primary()
             .show(ui, theme)

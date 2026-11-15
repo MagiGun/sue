@@ -63,7 +63,7 @@ pub(super) fn colorize_ui(ui: &mut Ui, dialog: &mut ColorizeDialog, theme: &Them
             .font(theme.text_font(TextRole::Caption))
             .color(theme.text_muted()),
     );
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
+    crate::dialogs::button_row(ui, |ui| {
         let cancel = tr!("cancel");
         let response = ui::button("sue-paint-colorize-cancel", &cancel).show(ui, theme);
         if response.clicked() {

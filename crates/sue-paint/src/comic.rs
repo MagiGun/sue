@@ -247,7 +247,7 @@ pub(crate) fn divide_frame_ui(
     });
     ui.add_space(theme.space(sue_wm::ui::Space::S4));
     let mut outcome = crate::dialogs::Outcome::Open;
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
+    crate::dialogs::button_row(ui, |ui| {
         if sue_wm::ui::button("sue-paint-divide-ok", &tr!("ok"))
             .primary()
             .show(ui, theme)
