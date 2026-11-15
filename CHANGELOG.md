@@ -346,8 +346,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- A layer with keyframes on no longer takes brush strokes it would lose:
-  Sue Paint says why and paints nothing.
+- A layer with keyframes on no longer takes brush or Blend strokes it
+  would lose: Sue Paint says why and paints nothing.
 - Exporting a PSD reads a layer mask wherever it sits, also a gray one.
 
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
