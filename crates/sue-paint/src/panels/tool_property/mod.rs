@@ -72,10 +72,11 @@ impl SuePaint {
         let sub = self.toolbox.current_mut();
         match tool {
             tool if tool.paints() => {
-                paint::paint_properties(ui, tool, sub, theme);
                 if tool == Tool::Figure {
                     self.magnet_row(ui, theme);
                 }
+                let sub = self.toolbox.current_mut();
+                paint::paint_properties(ui, tool, sub, theme);
             }
             Tool::Fill | Tool::AutoSelect => {
                 fill::fill_properties(ui, tool, sub, &mut self.select_op, theme);
