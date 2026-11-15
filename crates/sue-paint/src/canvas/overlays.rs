@@ -289,8 +289,33 @@ impl SuePaint {
                 }
             }
         }
+        // The Figure tool's shapes and lines under way (canvas/shape.rs).
+        let guides = super::shape::Guides::of(&cx.world.arena, doc);
+        let figure = super::shape::Preview {
+            painter: &painter,
+            screen: &screen,
+            stroke: Stroke::new(1.0, theme.border_active),
+            pointer: self.pointer.map(|at| {
+                let at = view.to_picture(viewport, size, at);
+                [at.x, at.y]
+            }),
+            shift: self.modifiers.shift,
+            guides: &guides,
+        };
+        if let Some(bend) = &self.figure_draft.bend
+            && self.toolbox.tool() == Tool::Figure
+        {
+            figure.bend(bend);
+        }
         // What a drag is drawing.
         match &self.gesture {
+            Some(Gesture::Shape {
+                tool: Tool::Figure,
+                sub,
+                from,
+                to,
+                ..
+            }) => figure.drag(sub, *from, *to),
             Some(Gesture::Shape {
                 tool,
                 sub,
@@ -369,7 +394,11 @@ impl SuePaint {
         }
         // Corners being clicked out, and the line on to the pointer; a
         // curve balloon shows its curve.
-        if !self.polyline.is_empty() {
+        if let Some((Tool::Figure, mode)) = self.polyline_for
+            && !self.polyline.is_empty()
+        {
+            figure.corners(mode, &self.polyline, &self.figure_draft.handles);
+        } else if !self.polyline.is_empty() {
             let mut points = self.polyline.clone();
             if let Some(hover) = response.hover_pos() {
                 let at = view.to_picture(viewport, size, hover);
