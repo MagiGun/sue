@@ -235,6 +235,25 @@ impl SuePaint {
         true
     }
 
+    /// Fill up to vector path, for the Fill tool: a fill that looks at
+    /// vector layers stops at their lines' middles, under the lines.
+    pub(super) fn vector_path_row(&mut self, ui: &mut Ui, theme: &Theme) {
+        let response = checkbox(
+            "sue-paint-fill-vector-path",
+            &tr!("fill-up-to-vector-path"),
+            self.fill_vector_path,
+        )
+        .show(ui, theme);
+        if response.clicked() {
+            self.fill_vector_path = !self.fill_vector_path;
+        }
+        tooltip(
+            response,
+            &Tip::new(&tr!("fill-up-to-vector-path")).help(&tr!("fill-up-to-vector-path-hint")),
+            theme,
+        );
+    }
+
     /// Vector magnet, for the Figure tool: a figure laid on a vector
     /// layer joins its ends to the ends of lines near them.
     pub(super) fn magnet_row(&mut self, ui: &mut Ui, theme: &Theme) {

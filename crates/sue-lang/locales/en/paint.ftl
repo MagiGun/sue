@@ -2544,3 +2544,5 @@ updated-lines = Updated { $updated } lines to the new brush engine. Undo takes i
 updated-lines-kept-some = Updated { $updated } lines to the new brush engine. { $kept } lines with a flick or post correction stay as they are, since the new engine cannot draw those yet.
 no-lines-updated-kept = Nothing was updated: the { $kept } lines left have a flick or post correction, which the new brush engine cannot draw yet.
 no-legacy-lines-to-update = Every line of this layer already uses the new brush engine.
+fill-up-to-vector-path = Fill up to vector path
+fill-up-to-vector-path-hint = Where the fill looks at vector layers, it stops at the middle of their lines, so no gap shows under them

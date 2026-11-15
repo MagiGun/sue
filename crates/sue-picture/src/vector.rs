@@ -2249,6 +2249,104 @@ pub fn snap_end(line: &mut Line, last: bool, others: &[Line], reach: f32, close:
     true
 }
 
+/// What a fill looks at with Fill up to vector path (FGV-33): the
+/// layers `refer` names drawn as [`crate::fill::reference`] draws them,
+/// but each vector layer among them as its lines' paths, two pixels wide
+/// and opaque, instead of its pixels. An area filled up to a line then
+/// reaches in under the line to its middle, so no gap shows between the
+/// fill and the line's soft edge. `None` when there is nothing to look
+/// at.
+#[must_use]
+pub fn path_reference(
+    arena: &Arena,
+    picture: EntityId,
+    size: [u32; 2],
+    editing: Option<EntityId>,
+    picked: &[EntityId],
+    refer: crate::fill::Refer,
+    exclude: crate::fill::Exclude,
+) -> Option<Vec<u8>> {
+    let layers = crate::fill::ReferLayer::of_picture(arena, picture);
+    let keep = crate::fill::referred(&layers, editing, picked, refer, exclude);
+    if keep.is_empty() {
+        return None;
+    }
+    let vectors: Vec<EntityId> = keep
+        .iter()
+        .copied()
+        .filter(|layer| is_vector(arena, *layer))
+        .collect();
+    let view = crate::composite::FrameView {
+        hidden: layers
+            .iter()
+            .filter(|layer| {
+                !layer.folder && (!keep.contains(&layer.id) || vectors.contains(&layer.id))
+            })
+            .map(|layer| layer.id)
+            .collect(),
+        ..crate::composite::FrameView::default()
+    };
+    let mut pixels = crate::composite::render_view(
+        arena,
+        picture,
+        [0, 0, size[0], size[1]],
+        crate::composite::RenderOptions {
+            paper: !exclude.paper,
+            drafts: !exclude.drafts,
+        },
+        Some(&view),
+    );
+    for layer in vectors {
+        let offset = arena
+            .get_by_id(layer)
+            .map(|entity| sue_model::picture::LayerStyle::of(entity).offset)
+            .unwrap_or([0, 0])
+            .map(|value| value as f32);
+        for line in lines(&geometry(arena, layer)) {
+            if line.tip.eraser {
+                continue;
+            }
+            draw_path(&mut pixels, size, &line.samples, offset);
+        }
+    }
+    Some(pixels)
+}
+
+/// The path of `samples` (moved by `offset`) drawn two pixels wide in
+/// opaque black into the straight RGBA8 `pixels` of `size`: wide enough
+/// that no fill slips through it between two pixels.
+fn draw_path(pixels: &mut [u8], size: [u32; 2], samples: &[Sample], offset: [f32; 2]) {
+    let mut plot = |x: f32, y: f32| {
+        let (left, top) = ((x - 0.5).floor(), (y - 0.5).floor());
+        for (dx, dy) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+            let (px, py) = (left + dx, top + dy);
+            if px < 0.0 || py < 0.0 || px >= size[0] as f32 || py >= size[1] as f32 {
+                continue;
+            }
+            let at = ((py as usize) * size[0] as usize + px as usize) * 4;
+            if let Some(pixel) = pixels.get_mut(at..at + 4) {
+                pixel.copy_from_slice(&[0, 0, 0, 255]);
+            }
+        }
+    };
+    for (index, sample) in samples.iter().enumerate() {
+        let to = [sample.at[0] + offset[0], sample.at[1] + offset[1]];
+        let from = samples.get(index.wrapping_sub(1)).map_or(to, |before| {
+            [before.at[0] + offset[0], before.at[1] + offset[1]]
+        });
+        let steps = ((to[0] - from[0]).hypot(to[1] - from[1]) / 0.5)
+            .ceil()
+            .max(1.0) as usize;
+        for step in 0..=steps {
+            let t = step as f32 / steps as f32;
+            plot(
+                from[0] + (to[0] - from[0]) * t,
+                from[1] + (to[1] - from[1]) * t,
+            );
+        }
+    }
+}
+
 /// The lines of each vector layer the eraser, `radius` wide, touched
 /// `at` (each in its own layer pixels): for every layer it touched, the
 /// lines left. The Vector eraser over several picked layers.
@@ -2955,6 +3053,41 @@ mod tests {
         assert!(snap_ends(&mut new, std::slice::from_ref(&other), 6.0));
         assert_eq!(new.samples.last().unwrap().at, [50.0, 0.0]);
         assert_eq!(new.samples[0].at, [0.0, 2.0], "the far end stays");
+    }
+
+    #[test]
+    fn a_path_drawn_for_fill_is_closed_to_a_four_way_flood() {
+        // A diagonal path: two pixels wide, so no pixel beside it reaches
+        // across to the other side by an edge.
+        let size = [20, 20];
+        let mut pixels = vec![0; 20 * 20 * 4];
+        let path = line([0.0, 0.0], [19.0, 19.0]).samples;
+        draw_path(&mut pixels, size, &path, [0.0, 0.0]);
+        let ink = |x: u32, y: u32| pixels[((y * 20 + x) * 4 + 3) as usize] == 255;
+        // A four way flood from the top right corner over clear pixels.
+        let mut reached = vec![false; 400];
+        let mut todo = vec![(19_u32, 0_u32)];
+        while let Some((x, y)) = todo.pop() {
+            if reached[(y * 20 + x) as usize] || ink(x, y) {
+                continue;
+            }
+            reached[(y * 20 + x) as usize] = true;
+            if x > 0 {
+                todo.push((x - 1, y));
+            }
+            if x < 19 {
+                todo.push((x + 1, y));
+            }
+            if y > 0 {
+                todo.push((x, y - 1));
+            }
+            if y < 19 {
+                todo.push((x, y + 1));
+            }
+        }
+        assert!(reached[19], "the flood starts");
+        assert!(!reached[19 * 20], "it never crosses the path");
+        assert!(ink(10, 10) && !ink(15, 3));
     }
 
     #[test]

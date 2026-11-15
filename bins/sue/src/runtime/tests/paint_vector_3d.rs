@@ -1086,3 +1086,65 @@ fn sue_paint_an_open_end_dragged_onto_the_other_closes_the_line() {
     let after = (closed, inked(&d, layer));
     undo_pair(&mut d, layer, &before, &after);
 }
+
+/// FG-25 and FGV-33 (full guide 00:34:56 and 00:35:22): Fill, Refer
+/// Other Layers, with Fill up to vector path. Inside a vector ellipse,
+/// a fill on the raster layer below stops at the line's soft edge; with
+/// the option on it reaches in under the line to its middle, so it
+/// covers more, and stays inside.
+#[test]
+fn sue_paint_fill_up_to_vector_path_reaches_under_the_line() {
+    let mut d = PaintDriver::new("paint-vector-fill");
+    let picture = picture_of(&d);
+    let paint_layer = top_layer(&d);
+    d.command("layer.new.vector");
+    d.settle(2);
+    let lines_layer = top_layer(&d);
+    let middle = d.runtime.shell.page_rect().center();
+    // A thick ellipse on the vector layer.
+    d.command("tool.pick.figure");
+    d.command("tool.next_sub");
+    d.command("tool.next_sub");
+    d.settle(2);
+    d.drag(
+        middle + vec2(-90.0, -60.0),
+        middle + vec2(90.0, 60.0),
+        egui::PointerButton::Primary,
+    );
+    assert_eq!(lines_on(&d, lines_layer).len(), 1);
+    // Back to the raster layer below, and Fill: Refer Other Layers.
+    d.command("layer.select_below");
+    d.settle(2);
+    let arena = &d.runtime.engine.world.arena;
+    assert_eq!(
+        sue_paint::doc::layers(arena, picture)
+            .iter()
+            .position(|info| info.id == paint_layer),
+        Some(sue_paint::doc::layers(arena, picture).len() - 2)
+    );
+    d.command("tool.pick.fill");
+    d.settle(2);
+    let fill = |d: &mut PaintDriver| {
+        d.drag(middle, middle, egui::PointerButton::Primary);
+        inked(d, paint_layer)
+    };
+    let plain = fill(&mut d);
+    assert!(plain > 1000, "the inside fills: {plain}");
+    d.command("edit.undo");
+    d.settle(2);
+    assert_eq!(inked(&d, paint_layer), 0);
+    d.click_text("Tool Property");
+    d.click_text("Fill up to vector path");
+    let under = fill(&mut d);
+    assert!(
+        under > plain,
+        "it reaches in under the line: {under} against {plain}"
+    );
+    // Only to the line's middle: far less than the whole canvas.
+    let raster = sue_paint::doc::raster(&d.runtime.engine.world.arena, paint_layer).unwrap();
+    let all = (raster.width() * raster.height()) as usize;
+    assert!(under < all / 2, "it stays inside the ellipse");
+    d.command("edit.undo");
+    d.settle(2);
+    assert_eq!(inked(&d, paint_layer), 0, "one step");
+}

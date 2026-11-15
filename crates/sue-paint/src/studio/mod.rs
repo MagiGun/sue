@@ -757,6 +757,9 @@ pub struct SuePaint {
     pub(crate) line_lines_shown: Option<Vec<crate::vector::Line>>,
     /// The hex codes typed for the picked lines' main and sub color.
     pub(crate) line_hex: [String; 2],
+    /// Fill, when it looks at vector layers, stops at their lines'
+    /// middles instead of their edges (Fill up to vector path).
+    pub(crate) fill_vector_path: bool,
 }
 
 impl Default for SuePaint {
@@ -940,6 +943,7 @@ impl Default for SuePaint {
             line_preview: None,
             line_lines_shown: None,
             line_hex: [String::new(), String::new()],
+            fill_vector_path: false,
         }
     }
 }
