@@ -6,12 +6,29 @@ use egui::{
 use sue_core::EntityId;
 use sue_model::class;
 use sue_model::manuscript;
-use sue_wm::{AppletContext, Theme, widgets};
+use sue_wm::icons::Icon;
+use sue_wm::ui::{self, Density, Radius, Space, TextRole, Tip};
+use sue_wm::{AppletContext, Theme};
 
 use crate::studio::SueWriter;
 use crate::templates::{Group, Template};
 
+/// The widest a start page's column gets, in the largest steps of the
+/// spacing scale.
+const COLUMN_STEPS: f32 = 22.5;
+/// Below this width (in the largest steps of the spacing scale) the page
+/// is a phone's: a thumb's gutter, smaller cards.
+const NARROW_STEPS: f32 = 15.0;
+/// The least width of a template's card, in rows of the density, on a
+/// narrow page and on a wide one.
+const CARD_ROWS: (f32, f32) = (3.5, 4.5);
+/// A page is this many times as tall as it is wide.
+const PAGE_RATIO: f32 = 1.25;
+
 impl SueWriter {
+    /// The start page: what to begin from, as pictures of first pages
+    /// (the templates, then the presets for long work), the projects that
+    /// are already in this Sue project, and importing a document.
     pub(super) fn start_ui(
         &mut self,
         ui: &mut Ui,
@@ -19,11 +36,13 @@ impl SueWriter {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        ui.painter().rect_filled(rect, 0.0, theme.void);
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::ZERO, theme.void);
         // A phone's start page keeps a thumb's gutter; a desk's centers a
         // column, as a word processor's start screen does.
-        let gutter = if rect.width() < 600.0 { 16.0 } else { 36.0 };
-        let width = (rect.width() - 2.0 * gutter).min(900.0);
+        let narrow = rect.width() < theme.space(Space::S9) * NARROW_STEPS;
+        let gutter = theme.space(if narrow { Space::S6 } else { Space::S8 });
+        let width = (rect.width() - 2.0 * gutter).min(theme.space(Space::S9) * COLUMN_STEPS);
         let area = Rect::from_min_max(
             pos2(rect.center().x - width / 2.0, rect.top() + gutter),
             pos2(rect.center().x + width / 2.0, rect.bottom()),
@@ -39,72 +58,37 @@ impl SueWriter {
             .auto_shrink([false, false])
             .show(&mut child, |ui| {
                 ui.set_width(width);
+                // The cards keep clear of the scroll bar at the right.
+                let width = width - theme.space(Space::S5);
                 ui.label(
-                    RichText::new("Sue Writer")
-                        .size(theme.heading_size * 1.4)
+                    RichText::new(tr!("start-title"))
+                        .font(theme.text_font(TextRole::Display))
                         .color(theme.text),
                 );
                 ui.label(
                     RichText::new(tr!("start-something-new-open-project-sue"))
-                        .size(theme.small_size + 1.0)
-                        .color(theme.muted),
+                        .font(theme.text_font(TextRole::Body))
+                        .color(theme.text_muted()),
                 );
-                ui.add_space(14.0);
-                // New, with the presets for long work in a list at its side.
-                ui.horizontal(|ui| {
-                    widgets::heading(ui, &tr!("new-2"), theme);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        egui::ComboBox::from_id_salt("writer-presets")
-                            .selected_text(tr!("presets"))
-                            .width(170.0)
-                            .show_ui(ui, |ui| {
-                                ui.set_min_width(240.0);
-                                for template in self.templates.group(Group::Preset) {
-                                    if ui
-                                        .selectable_label(false, template.name())
-                                        .on_hover_text(template.about())
-                                        .clicked()
-                                    {
-                                        chosen = Some(template.key.clone());
-                                    }
-                                }
-                            })
-                            .response
-                            .on_hover_text(tr!("presets-about"));
-                    });
-                });
-                ui.add_space(6.0);
-                // Each template as a picture of its first page.
-                let gap = 12.0;
-                let least = if width < 420.0 { 100.0 } else { 132.0 };
-                let columns = ((width + gap) / (least + gap)).floor().max(2.0) as usize;
-                let card_width = (width - gap * (columns as f32 - 1.0)) / columns as f32;
-                let paper = vec2(card_width, card_width * 1.25);
+                ui.add_space(theme.space(Space::S6));
+                let least = Density::of(ui).row() * if narrow { CARD_ROWS.0 } else { CARD_ROWS.1 };
+                ui::heading(ui, &tr!("new-2"), theme);
+                ui.add_space(theme.space(Space::S2));
                 let templates: Vec<&Template> = self.templates.group(Group::Template).collect();
-                for row in templates.chunks(columns) {
-                    ui.horizontal_top(|ui| {
-                        ui.spacing_mut().item_spacing.x = gap;
-                        for template in row {
-                            let (card, response) = ui.allocate_exact_size(
-                                vec2(card_width, paper.y + 44.0),
-                                Sense::click(),
-                            );
-                            let page = Rect::from_min_size(card.min, paper);
-                            template_thumb(ui.painter(), page, template, response.hovered(), theme);
-                            ui.painter().text(
-                                pos2(page.left() + 2.0, page.bottom() + 8.0),
-                                Align2::LEFT_TOP,
-                                template.name(),
-                                theme.font(theme.ui_size),
-                                theme.text,
-                            );
-                            let response = response.on_hover_text(template.about());
-                            if response.clicked() {
-                                chosen = Some(template.key.clone());
-                            }
-                        }
-                    });
-                    ui.add_space(gap * 0.5);
+                if let Some(key) = gallery(ui, "writer-template", &templates, width, least, theme) {
+                    chosen = Some(key);
+                }
+                ui.add_space(theme.space(Space::S5));
+                ui::heading(ui, &tr!("presets"), theme);
+                ui.label(
+                    RichText::new(tr!("presets-about"))
+                        .font(theme.text_font(TextRole::Caption))
+                        .color(theme.text_muted()),
+                );
+                ui.add_space(theme.space(Space::S2));
+                let presets: Vec<&Template> = self.templates.group(Group::Preset).collect();
+                if let Some(key) = gallery(ui, "writer-preset", &presets, width, least, theme) {
+                    chosen = Some(key);
                 }
                 let projects: Vec<(EntityId, String, usize)> = cx
                     .arena()
@@ -119,29 +103,36 @@ impl SueWriter {
                     })
                     .collect();
                 if !projects.is_empty() {
-                    ui.add_space(14.0);
-                    widgets::heading(ui, &tr!("in-this-project"), theme);
+                    ui.add_space(theme.space(Space::S5));
+                    ui::heading(ui, &tr!("in-this-project"), theme);
                     for (id, name, words) in projects {
-                        if ui
-                            .button(tr!("words", name = name, words = words))
-                            .clicked()
-                        {
+                        let count = tr!("word-count", count = words);
+                        let row = ui::list_row(("writer-start-project", id), &name)
+                            .icon(Icon::Book)
+                            .note(&count)
+                            .show(ui, theme);
+                        if row.response.clicked() {
                             self.open_project(cx, id, None);
                         }
                     }
                 }
-                ui.add_space(14.0);
+                ui.add_space(theme.space(Space::S6));
                 ui.horizontal_wrapped(|ui| {
-                    if widgets::pill_button(ui, &tr!("import-a-document-ellipsis"), false, theme)
-                        .on_hover_text(tr!("word-markdown-html-plain-text"))
-                        .clicked()
-                    {
+                    let import = tr!("import-a-document-ellipsis");
+                    let help = tr!("word-markdown-html-plain-text");
+                    let button = ui::button("writer-start-import", &import)
+                        .icon(Icon::Import)
+                        .show(ui, theme);
+                    if ui::tooltip(button, &Tip::new(&import).help(&help), theme).clicked() {
                         self.run("file.import", cx);
                     }
-                    if widgets::pill_button(ui, &tr!("templates-folder"), false, theme)
-                        .on_hover_text(tr!("templates-folder-about"))
-                        .clicked()
-                    {
+                    let folder = tr!("templates-folder");
+                    let help = tr!("templates-folder-about");
+                    let button = ui::button("writer-start-templates", &folder)
+                        .ghost()
+                        .icon(Icon::FolderReveal)
+                        .show(ui, theme);
+                    if ui::tooltip(button, &Tip::new(&folder).help(&help), theme).clicked() {
                         self.run("file.templates_folder", cx);
                     }
                 });
@@ -155,31 +146,72 @@ impl SueWriter {
             self.new_project(cx, &key, &label);
         }
     }
-
-    // ----- Corkboard and outliner -----------------------------------------------------
 }
 
-/// The color around pages: the theme's darkest, a little lighter.
+/// `templates` as cards of their first pages in rows as wide as `width`,
+/// each card at least `least` wide. Returns the key of the one clicked
+/// (or chosen with Enter or Space while it holds focus).
+fn gallery(
+    ui: &mut Ui,
+    salt: &str,
+    templates: &[&Template],
+    width: f32,
+    least: f32,
+    theme: &Theme,
+) -> Option<String> {
+    let gap = theme.space(Space::S5);
+    let columns = ((width + gap) / (least + gap)).floor().max(2.0) as usize;
+    let card_width = (width - gap * (columns as f32 - 1.0)) / columns as f32;
+    let page_height = card_width * PAGE_RATIO;
+    let name_font = theme.text_font(TextRole::Body);
+    let name_height = theme.text_size(TextRole::Body) + theme.space(Space::S5);
+    let radius = theme.radius(Radius::Sm);
+    let mut chosen = None;
+    for (row, members) in templates.chunks(columns).enumerate() {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            for (column, template) in members.iter().enumerate() {
+                let (card, _) = ui.allocate_exact_size(
+                    vec2(card_width, page_height + name_height),
+                    Sense::hover(),
+                );
+                let id = ui.scope_id().with((salt, row * columns + column));
+                let response = ui.interact(card, id, Sense::click());
+                let name = template.name();
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+                let page = Rect::from_min_size(card.min, vec2(card_width, page_height));
+                template_thumb(ui.painter(), page, template);
+                let outline = if response.hovered() || response.has_focus() {
+                    theme.selected_stroke()
+                } else {
+                    theme.hairline()
+                };
+                ui.painter()
+                    .rect_stroke(page, radius, outline, StrokeKind::Outside);
+                ui::focus_ring(ui, &response, radius, theme);
+                ui.painter().text(
+                    pos2(page.left(), page.bottom() + theme.space(Space::S3)),
+                    Align2::LEFT_TOP,
+                    &name,
+                    name_font.clone(),
+                    theme.text,
+                );
+                let about = template.about();
+                if ui::tooltip(response, &Tip::new(&name).help(&about), theme).clicked() {
+                    chosen = Some(template.key.clone());
+                }
+            }
+        });
+        ui.add_space(theme.space(Space::S3));
+    }
+    chosen
+}
+
 /// A template's first page in small: its paragraphs as bars, sized and
 /// placed by their styles, as a word processor's template gallery shows.
-fn template_thumb(
-    painter: &Painter,
-    page: Rect,
-    template: &Template,
-    hovered: bool,
-    theme: &Theme,
-) {
-    painter.rect_filled(page, 3.0, Color32::from_gray(0xfa));
-    painter.rect_stroke(
-        page,
-        3.0,
-        if hovered {
-            Stroke::new(2.0, theme.text)
-        } else {
-            theme.hairline()
-        },
-        StrokeKind::Outside,
-    );
+/// It is a picture of paper, so it stays light in every theme.
+fn template_thumb(painter: &Painter, page: Rect, template: &Template) {
+    painter.rect_filled(page, page.width() * 0.02, Color32::from_gray(0xfa));
     let margin = page.width() * 0.12;
     let inner = page.shrink(margin);
     let unit = page.width() / 100.0;
