@@ -861,8 +861,10 @@ impl SuePaint {
                 _ => corners = quad.map(|[x, y]| [x + delta[0], y + delta[1]]),
             }
             session.corners = corners;
-            if session.pivot == Pivot::Free {
-                // A dragged centre stays where it was put.
+            // A dragged rotation centre goes along when the box moves
+            // whole (after Ctrl on a corner freed it), as it does before.
+            if session.pivot == Pivot::Free && handle == Handle::Move {
+                session.pivot_at = [grab[0] + delta[0], grab[1] + delta[1]];
             }
             return;
         }
@@ -1593,6 +1595,29 @@ mod tests {
             "{}",
             angle.to_degrees()
         );
+    }
+
+    #[test]
+    fn a_dragged_centre_moves_with_a_distorted_box() {
+        let mut paint = SuePaint {
+            transform: Some(session(Mode::ScaleRotate)),
+            ..SuePaint::default()
+        };
+        grab(&mut paint, Handle::Pivot, [20.0, 15.0]);
+        paint.transform_drag([12.0, 12.0], Modifiers::NONE);
+        grab(&mut paint, Handle::Corner(2), [30.0, 20.0]);
+        paint.transform_drag([36.0, 28.0], Modifiers::COMMAND);
+        assert!(paint.transform.as_ref().unwrap().free);
+        // Moved whole by (5, 3): the centre goes along.
+        grab(&mut paint, Handle::Move, [20.0, 15.0]);
+        paint.transform_drag([25.0, 18.0], Modifiers::NONE);
+        let moved = paint.transform.as_ref().unwrap();
+        assert!(
+            close(moved.pivot_point(), [17.0, 15.0]),
+            "{:?}",
+            moved.pivot_point()
+        );
+        assert!(close(moved.quad()[0], [15.0, 13.0]), "{:?}", moved.quad());
     }
 
     #[test]
