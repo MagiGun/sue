@@ -309,7 +309,10 @@ fn a_field_of_several_lines_takes_enter_as_a_new_line_and_grows() {
     let mut harness = Harness::new();
     let mut text = String::new();
     let draw = |ui: &mut Ui, theme: &Theme, text: &mut String| {
-        text_field("notes", text).lines(3).width(300.0).show(ui, theme)
+        text_field("notes", text)
+            .lines(3)
+            .width(300.0)
+            .show(ui, theme)
     };
     let first = harness.frame(vec![], |ui, theme| draw(ui, theme, &mut text));
     let single = harness.frame(vec![], |ui, theme| {
@@ -330,8 +333,11 @@ fn a_field_of_several_lines_takes_enter_as_a_new_line_and_grows() {
         typed("two"),
     ];
     let response = harness.frame(events, |ui, theme| draw(ui, theme, &mut text));
-    assert_eq!(text, "one
-two");
+    assert_eq!(
+        text,
+        "one
+two"
+    );
     assert!(response.has_focus(), "Enter did not end the typing");
     // Many more lines than it shows: it grows to hold them.
     let events = (0..6)
