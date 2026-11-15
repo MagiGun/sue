@@ -61,8 +61,10 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_layers::first_tab(tour);
     paint_canvas::launchers(tour)?;
     paint_dialogs::galleries(tour)?;
-    paint_canvas::figure(tour)?;
+    // Before 08o, whose own steps then replace this scene's undone ones
+    // in History, so the scenes after see what they saw before it.
     paint_figure::tool(tour)?;
+    paint_canvas::figure(tour)?;
     shell::sue_menu_in_paint(tour)?;
     paint_dialogs::menu_and_dialogs(tour)?;
     paint_dialogs::pages(tour)?;

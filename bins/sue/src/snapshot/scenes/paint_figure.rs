@@ -48,6 +48,8 @@ fn drag(tour: &mut Tour<'_>, from: Pos2, to: Pos2) {
 /// 08q. A polygon and a Bezier curve on a new layer, and a Curve whose
 /// ends are laid, bending toward the pointer.
 pub(super) fn tool(tour: &mut Tour<'_>) -> Result<(), String> {
+    // Where the pointer was, so the scenes after find it there again.
+    let pointer = tour.camera.ctx.input(|input| input.pointer.latest_pos());
     tour.paint_command("layer.new");
     let middle = tour.runtime.shell.page_rect().center();
     figure(tour, POLYGON);
@@ -78,22 +80,22 @@ pub(super) fn tool(tour: &mut Tour<'_>) -> Result<(), String> {
         .input
         .push(vec![Event::PointerMoved(middle + vec2(40.0, 30.0))]);
     tour.shoot("08q-sue-paint-figure-tool")?;
-    // Esc drops the curve; the drawing and the layer go back.
-    tour.camera.input.push(vec![Event::Key {
-        key: egui::Key::Escape,
-        physical_key: None,
-        pressed: true,
-        repeat: false,
-        modifiers: Modifiers::NONE,
-    }]);
+    // Another sub tool drops the curve (a key such as Esc would turn on
+    // keyboard focus for the scenes after); the drawing and the layer go
+    // back.
+    tour.paint_command("tool.previous_sub");
     tour.settle();
     for _ in 0..3 {
         tour.paint_command("edit.undo");
     }
     // Straight Line again, where the Figure tool was.
-    for _ in 0..CURVE {
+    for _ in 0..CURVE - 1 {
         tour.paint_command("tool.previous_sub");
     }
     tour.paint_command("tool.pen");
+    if let Some(at) = pointer {
+        tour.camera.input.push(vec![Event::PointerMoved(at)]);
+        tour.settle();
+    }
     Ok(())
 }
