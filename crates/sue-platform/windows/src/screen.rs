@@ -22,9 +22,9 @@ use std::time::Duration;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CLR_INVALID, CreateFontW, CreateSolidBrush,
-    DEFAULT_CHARSET, DEFAULT_GUI_FONT, FW_NORMAL, OUT_DEFAULT_PRECIS, DT_LEFT, DT_NOPREFIX,
-    DeleteObject, DrawTextW, EndPaint, FillRect, GetDC, GetPixel, GetStockObject, InvalidateRect,
-    MONITOR_DEFAULTTONULL, MonitorFromPoint, PAINTSTRUCT, ReleaseDC, SelectObject, SetBkMode,
+    DEFAULT_CHARSET, DEFAULT_GUI_FONT, DT_LEFT, DT_NOPREFIX, DeleteObject, DrawTextW, EndPaint,
+    FW_NORMAL, FillRect, GetDC, GetPixel, GetStockObject, InvalidateRect, MONITOR_DEFAULTTONULL,
+    MonitorFromPoint, OUT_DEFAULT_PRECIS, PAINTSTRUCT, ReleaseDC, SelectObject, SetBkMode,
     SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
