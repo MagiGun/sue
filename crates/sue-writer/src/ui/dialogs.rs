@@ -26,9 +26,6 @@ use super::settings::furniture_ui;
 const CHART_DAYS: usize = 14;
 /// How tall the chart is, in the largest steps of the spacing scale.
 const CHART_STEPS: f32 = 3.0;
-/// How wide the Export dialog is, in the largest steps of the spacing
-/// scale: two columns of formats with their extensions.
-const EXPORT_STEPS: f32 = 13.0;
 /// How wide Header and Footer is, in the largest steps of the spacing
 /// scale: a label and three parts of a line.
 const FURNITURE_STEPS: f32 = 15.0;
@@ -54,10 +51,8 @@ impl SueWriter {
             matches!(dialog, Dialog::Shortcuts).then(|| crate::commands::shortcut_rows(cx.rice()));
         let title = title(&dialog);
         let mut host = footer(ui::Dialog::new(salt(&dialog), &title, theme), &dialog);
-        match dialog {
-            Dialog::Compile(_) => host = host.width(theme.space(Space::S9) * EXPORT_STEPS),
-            Dialog::Furniture(_) => host = host.width(theme.space(Space::S9) * FURNITURE_STEPS),
-            _ => {}
+        if matches!(dialog, Dialog::Furniture(_)) {
+            host = host.width(theme.space(Space::S9) * FURNITURE_STEPS);
         }
         let shown = host.show(ctx, |ui| {
             self.dialog_body(ui, cx, theme, &mut dialog, keys.as_deref())

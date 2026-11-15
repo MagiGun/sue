@@ -177,6 +177,23 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Writer's dialogs (New Project, Export, Project Settings, Link,
+  footnotes and endnotes, Insert Table, Header and Footer, Table of
+  Contents, comments, Writing Statistics, Keyboard Shortcuts, About)
+  are drawn like every dialog of Sue: the buttons always stand in the
+  same order with the one that accepts first, Enter accepts, Escape
+  cancels, and every field, list and check box is Sue's own, with a
+  focus ring when it is reached with Tab. Project Settings sorts its
+  rows under Page, Fonts and Targets, and picks the orientation from a
+  pair of segments.
+- Sue Writer's start page shows the presets for long work (Novel,
+  Screenplay and the others) as pages like the templates, in place of
+  a list folded into a button; every page names itself and says what
+  it is for when the pointer rests on it, and can be reached with Tab
+  and opened with Enter.
+- Sue Writer on a phone or a tablet: the buttons of the top bar draw
+  Sue's icons, so an icon pack changes them too, and pressing and
+  holding one shows its name and its keys.
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait
@@ -331,6 +348,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Writer: Undo after Insert Table takes the whole table away at
+  once (it took three steps, and the first left the table behind).
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
   the update. It now takes the theme as it ships; colors you picked
