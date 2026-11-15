@@ -660,8 +660,8 @@ impl SuePaint {
         true
     }
 
-    /// The Vector eraser pressed at `p` (picture pixels) while several
-    /// layers are picked and the current one is among them: it erases
+    /// The Vector eraser pressed at `p` (picture pixels) while other
+    /// layers are picked beside the current one: it erases
     /// the lines of every picked vector layer it passes over, as one
     /// step. `false` when fewer than two picked layers are vector layers
     /// (the eraser works on the current layer as before).
@@ -679,13 +679,14 @@ impl SuePaint {
         let Some(current) = doc.layer else {
             return false;
         };
-        if !doc.picked.contains(&current) {
+        // The current layer is picked with the others `doc.picked` names.
+        if doc.picked.is_empty() {
             return false;
         }
         let layers: Vec<ErasedLayer> = doc::layers(arena, doc.picture)
             .into_iter()
             .filter(|info| {
-                doc.picked.contains(&info.id)
+                (info.id == current || doc.picked.contains(&info.id))
                     && vector::is_vector(arena, info.id)
                     && !info.locked
                     && info.style.visible
@@ -812,6 +813,26 @@ impl SuePaint {
             );
         }
     }
+}
+
+/// Correct Line's control point `index` of `lines[line]` let go: when it
+/// is an end of its line and lies within `reach` of the line's other end
+/// or of another line's end, it goes onto it, so dragging an open end
+/// onto the other closes the shape. `true` when it moved.
+pub(crate) fn join_dragged_end(lines: &mut [Line], line: usize, index: usize, reach: f32) -> bool {
+    let Some(count) = lines.get(line).map(|line| line.samples.len()) else {
+        return false;
+    };
+    if index != 0 && index + 1 != count {
+        return false;
+    }
+    let others: Vec<Line> = lines
+        .iter()
+        .enumerate()
+        .filter(|(at, _)| *at != line)
+        .map(|(_, other)| other.clone())
+        .collect();
+    vector::snap_end(&mut lines[line], index != 0, &others, reach, true)
 }
 
 /// The least distance, in layer pixels, the Vector magnet reaches.

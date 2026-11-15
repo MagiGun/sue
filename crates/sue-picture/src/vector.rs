@@ -2190,56 +2190,63 @@ pub fn figure_line(points: &[[f32; 2]], tip: Tip, colors: [[f32; 3]; 2], corners
 }
 
 /// The ends of `line` within `reach` of an end of one of `others`, or
-/// of its own other end, put there (Vector magnet; an open end drawn or
-/// dragged onto the other closes the shape). The line follows the end it
-/// moves over `reach` of its length, so it bends there instead of
-/// jumping. `true` when an end moved.
+/// of its own other end, put there (Vector magnet; an open end drawn
+/// onto the other closes the shape). The line follows the end it moves
+/// over `reach` of its length, so it bends there instead of jumping.
+/// `true` when an end moved.
 pub fn snap_ends(line: &mut Line, others: &[Line], reach: f32) -> bool {
+    // Its own start only for its last end: the first stays where it
+    // began.
+    let first = snap_end(line, false, others, reach, false);
+    snap_end(line, true, others, reach, true) || first
+}
+
+/// One end of `line` (its last with `last`, else its first) within
+/// `reach` of an end of one of `others`, or with `close` of its own
+/// other end, put there as [`snap_ends`] does: an open end dragged onto
+/// the other closes the shape. `true` when it moved.
+pub fn snap_end(line: &mut Line, last: bool, others: &[Line], reach: f32, close: bool) -> bool {
     let count = line.samples.len();
     if count < 2 || reach <= 0.0 {
         return false;
     }
     let arcs = arcs(&line.samples);
     let total = arcs.last().copied().unwrap_or(0.0);
-    let mut moved = false;
-    for (end, far) in [(0, count - 1), (count - 1, 0)] {
-        let at = line.samples[end].at;
-        let mut target: Option<([f32; 2], f32)> = None;
-        let mut consider = |to: [f32; 2]| {
-            let away = distance(at, to);
-            if away > 0.0 && away <= reach && target.is_none_or(|(_, best)| away < best) {
-                target = Some((to, away));
-            }
-        };
-        // Its own other end, when the line is long enough to close, and
-        // only from its last end (the first stays where it began).
-        if end == count - 1 && total > reach * 3.0 {
-            consider(line.samples[far].at);
+    let (end, far) = if last { (count - 1, 0) } else { (0, count - 1) };
+    let at = line.samples[end].at;
+    let mut target: Option<([f32; 2], f32)> = None;
+    let mut consider = |to: [f32; 2]| {
+        let away = distance(at, to);
+        if away > 0.0 && away <= reach && target.is_none_or(|(_, best)| away < best) {
+            target = Some((to, away));
         }
-        for other in others {
-            if let (Some(a), Some(b)) = (other.samples.first(), other.samples.last()) {
-                consider(a.at);
-                consider(b.at);
-            }
-        }
-        let Some((to, _)) = target else {
-            continue;
-        };
-        let by = [to[0] - at[0], to[1] - at[1]];
-        // Over at most a third of the line, so a short line is not
-        // dragged whole.
-        let span = reach.min(total / 3.0).max(f32::EPSILON);
-        for index in 0..count {
-            let t = 1.0 - ((arcs[index] - arcs[end]).abs() / span).min(1.0);
-            if t > 0.0 {
-                let sample = &mut line.samples[index];
-                sample.at[0] += by[0] * t;
-                sample.at[1] += by[1] * t;
-            }
-        }
-        moved = true;
+    };
+    // Its own other end, when the line is long enough to close.
+    if close && total > reach * 3.0 {
+        consider(line.samples[far].at);
     }
-    moved
+    for other in others {
+        if let (Some(a), Some(b)) = (other.samples.first(), other.samples.last()) {
+            consider(a.at);
+            consider(b.at);
+        }
+    }
+    let Some((to, _)) = target else {
+        return false;
+    };
+    let by = [to[0] - at[0], to[1] - at[1]];
+    // Over at most a third of the line, so a short line is not dragged
+    // whole.
+    let span = reach.min(total / 3.0).max(f32::EPSILON);
+    for index in 0..count {
+        let t = 1.0 - ((arcs[index] - arcs[end]).abs() / span).min(1.0);
+        if t > 0.0 {
+            let sample = &mut line.samples[index];
+            sample.at[0] += by[0] * t;
+            sample.at[1] += by[1] * t;
+        }
+    }
+    true
 }
 
 /// The lines of each vector layer the eraser, `radius` wide, touched
@@ -2948,6 +2955,30 @@ mod tests {
         assert!(snap_ends(&mut new, std::slice::from_ref(&other), 6.0));
         assert_eq!(new.samples.last().unwrap().at, [50.0, 0.0]);
         assert_eq!(new.samples[0].at, [0.0, 2.0], "the far end stays");
+    }
+
+    #[test]
+    fn the_first_end_dragged_onto_the_last_closes_too() {
+        let mut open = figure_line(
+            &[
+                [0.0, 3.0],
+                [0.0, 40.0],
+                [40.0, 40.0],
+                [40.0, 0.0],
+                [0.0, 0.0],
+            ],
+            Tip::default(),
+            [[0.0; 3], [1.0; 3]],
+            false,
+        );
+        let end = open.samples.last().unwrap().at;
+        assert!(
+            !snap_end(&mut open, false, &[], 6.0, false),
+            "not asked to close"
+        );
+        assert!(snap_end(&mut open, false, &[], 6.0, true));
+        assert_eq!(open.samples[0].at, end, "closed");
+        assert_eq!(open.samples.last().unwrap().at, end, "the last end stays");
     }
 
     #[test]

@@ -576,3 +576,513 @@ f 2 3 4
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+// ----- Vector lines (P4-14) -------------------------------------------------------
+
+/// The picture Sue Paint has open in `driver`.
+fn picture_of(driver: &PaintDriver) -> sue_core::EntityId {
+    driver
+        .runtime
+        .applets
+        .get(&AppletId::new(sue_paint::ID).unwrap())
+        .and_then(|applet| applet.focus())
+        .expect("a picture is open")
+}
+
+/// The current top layer of the open picture: the one a new layer
+/// command just made.
+fn top_layer(driver: &PaintDriver) -> sue_core::EntityId {
+    sue_paint::doc::layers(&driver.runtime.engine.world.arena, picture_of(driver))
+        .last()
+        .expect("a layer")
+        .id
+}
+
+/// The vector lines of `layer`.
+fn lines_on(driver: &PaintDriver, layer: sue_core::EntityId) -> Vec<sue_paint::vector::Line> {
+    let arena = &driver.runtime.engine.world.arena;
+    sue_paint::vector::lines(&sue_paint::vector::geometry(arena, layer))
+}
+
+/// How many pixels of `layer` have ink.
+fn inked(driver: &PaintDriver, layer: sue_core::EntityId) -> usize {
+    let raster = sue_paint::doc::raster(&driver.runtime.engine.world.arena, layer).unwrap();
+    raster
+        .bytes()
+        .unwrap()
+        .chunks(4)
+        .filter(|pixel| pixel[3] > 0)
+        .count()
+}
+
+/// Presses at the first of `points`, moves through the rest and lets go
+/// at the last, with `modifiers` held.
+fn trace(driver: &mut PaintDriver, points: &[Pos2], modifiers: egui::Modifiers) {
+    let press = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers,
+    };
+    driver.step(vec![
+        egui::Event::PointerMoved(points[0]),
+        press(points[0], true),
+    ]);
+    for pair in points.windows(2) {
+        for part in 1..=6 {
+            let at = pair[0] + (pair[1] - pair[0]) * (part as f32 / 6.0);
+            driver.step(vec![egui::Event::PointerMoved(at)]);
+        }
+    }
+    let last = *points.last().unwrap();
+    driver.step(vec![press(last, false)]);
+    driver.settle(6);
+}
+
+/// Where picture pixel `at` is on screen, from a line drawn from screen
+/// point `from` whose first sample is `first`, at `scale` screen points
+/// a picture pixel.
+fn on_screen(at: [f32; 2], from: Pos2, first: [f32; 2], scale: f32) -> Pos2 {
+    from + vec2(at[0] - first[0], at[1] - first[1]) * scale
+}
+
+/// The undo pair of rule 7 for the last step: the lines and pixels of
+/// `layer` as `before` after undo, as `after` after redo.
+fn undo_pair(
+    driver: &mut PaintDriver,
+    layer: sue_core::EntityId,
+    before: &(Vec<sue_paint::vector::Line>, usize),
+    after: &(Vec<sue_paint::vector::Line>, usize),
+) {
+    driver.command("edit.undo");
+    driver.settle(2);
+    assert_eq!(
+        lines_on(driver, layer),
+        before.0,
+        "undo puts the lines back"
+    );
+    assert_eq!(inked(driver, layer), before.1, "and their pixels");
+    driver.command("edit.redo");
+    driver.settle(2);
+    assert_eq!(lines_on(driver, layer), after.0, "redo makes them again");
+    assert_eq!(inked(driver, layer), after.1);
+}
+
+/// CT-6, CTL-1 and CTL-2 (TL 01:11 to 01:34, T50 tip 21): the Object
+/// tool on a vector layer. A loop drawn round two of three lines picks
+/// them; Delete takes just those; the box's bottom handle stretches them
+/// (Scale) and its corner bends them (Free transform); in Tool Property
+/// a typed hex code recolors every picked line, and the brush size
+/// thickens them. Every change is one step with its undo pair.
+#[test]
+fn sue_paint_object_tool_loops_boxes_and_restyles_vector_lines() {
+    let mut d = PaintDriver::new("paint-vector-object");
+    d.command("layer.new.vector");
+    d.settle(2);
+    let layer = top_layer(&d);
+    let middle = d.runtime.shell.page_rect().center();
+    d.step(vec![key(egui::Key::P, egui::Modifiers::NONE)]);
+    // Three level lines, the lowest apart from the other two.
+    let starts = [
+        middle + vec2(-100.0, -60.0),
+        middle + vec2(-100.0, -20.0),
+        middle + vec2(-100.0, 100.0),
+    ];
+    for from in starts {
+        d.drag(from, from + vec2(200.0, 0.0), egui::PointerButton::Primary);
+    }
+    let drawn = lines_on(&d, layer);
+    assert_eq!(drawn.len(), 3);
+    let first = drawn[0].samples[0].at;
+    let scale = (starts[1].y - starts[0].y) / (drawn[1].samples[0].at[1] - first[1]);
+    let screen = |at: [f32; 2]| on_screen(at, starts[0], first, scale);
+
+    // Object (O): a loop round the top two lines picks them.
+    d.step(vec![key(egui::Key::O, egui::Modifiers::NONE)]);
+    let ring = [
+        middle + vec2(-130.0, -90.0),
+        middle + vec2(130.0, -90.0),
+        middle + vec2(130.0, 10.0),
+        middle + vec2(-130.0, 10.0),
+        middle + vec2(-130.0, -88.0),
+    ];
+    trace(&mut d, &ring, egui::Modifiers::NONE);
+    d.click_text("Tool Property");
+    let texts = d.settle(4);
+    assert!(
+        texts.iter().any(|(text, _)| text == "2 lines picked"),
+        "Tool Property names what the loop picked"
+    );
+    assert!(texts.iter().any(|(text, _)| text == "Editing vector"));
+    // Delete takes the two picked lines and leaves the third.
+    let before = (lines_on(&d, layer), inked(&d, layer));
+    d.command("edit.clear");
+    d.settle(2);
+    let left = lines_on(&d, layer);
+    assert_eq!(
+        left,
+        [drawn[2].clone()],
+        "only the line outside the loop stays"
+    );
+    let after = (left, inked(&d, layer));
+    undo_pair(&mut d, layer, &before, &after);
+    d.command("edit.undo");
+    d.settle(2);
+    assert_eq!(lines_on(&d, layer), drawn);
+
+    // Pick them again; the bottom middle handle pulled down 40 points
+    // stretches them taller, the third line stays.
+    trace(&mut d, &ring, egui::Modifiers::NONE);
+    let [_, top, _, bottom] = sue_paint::vector::bounds(&drawn, &[0, 1]).unwrap();
+    let left_x = drawn[0].samples[0].at[0];
+    let right_x = drawn[0].samples.last().unwrap().at[0];
+    let handle = screen([(left_x + right_x) / 2.0, bottom]);
+    let before = (lines_on(&d, layer), inked(&d, layer));
+    d.drag(
+        handle,
+        handle + vec2(0.0, 40.0),
+        egui::PointerButton::Primary,
+    );
+    let stretched = lines_on(&d, layer);
+    let [_, new_top, _, new_bottom] = sue_paint::vector::bounds(&stretched, &[0, 1]).unwrap();
+    assert!(
+        (new_top - top).abs() < 0.5,
+        "the top edge stays: {new_top} {top}"
+    );
+    assert!(
+        new_bottom - bottom > 40.0 / scale * 0.8,
+        "the box is taller: {bottom} to {new_bottom}"
+    );
+    assert_eq!(stretched[2], drawn[2], "a line not picked stays");
+    let after = (stretched.clone(), inked(&d, layer));
+    undo_pair(&mut d, layer, &before, &after);
+
+    // Mode: Free transform; the bottom right corner dragged right moves
+    // only that corner, so the top line keeps its length.
+    d.click_text("Free Transform");
+    let [_, _, right, bottom] = sue_paint::vector::bounds(&stretched, &[0, 1]).unwrap();
+    let corner = screen([right, bottom]);
+    d.drag(
+        corner,
+        corner + vec2(50.0, 0.0),
+        egui::PointerButton::Primary,
+    );
+    let bent = lines_on(&d, layer);
+    let length =
+        |line: &sue_paint::vector::Line| line.samples.last().unwrap().at[0] - line.samples[0].at[0];
+    assert!(
+        (length(&bent[0]) - length(&stretched[0])).abs() < 1.0,
+        "the top line keeps its length"
+    );
+    assert!(
+        length(&bent[1]) > length(&stretched[1]) + 10.0,
+        "the lower one reaches right"
+    );
+
+    // Tool Property: the main color's hex code typed recolors both
+    // picked lines as soon as it is whole, as one step.
+    let before = (lines_on(&d, layer), inked(&d, layer));
+    let was = sue_paint::color::hex(sue_paint::color::bytes(bent[0].colors[0]));
+    d.click_text(&was);
+    d.step(vec![key(egui::Key::A, egui::Modifiers::COMMAND)]);
+    d.step(vec![egui::Event::Text("#1414".to_owned())]);
+    assert_eq!(
+        lines_on(&d, layer)[0].colors,
+        bent[0].colors,
+        "not yet whole"
+    );
+    d.step(vec![egui::Event::Text("14".to_owned())]);
+    d.settle(3);
+    let recolored = lines_on(&d, layer);
+    let gray = [20.0 / 255.0; 3];
+    for index in [0, 1] {
+        for (have, want) in recolored[index].colors[0].iter().zip(gray) {
+            assert!((have - want).abs() < 1e-3, "line {index} recolored");
+        }
+    }
+    assert_eq!(
+        recolored[2].colors, drawn[2].colors,
+        "the third keeps its color"
+    );
+    let after = (recolored.clone(), inked(&d, layer));
+    d.step(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    undo_pair(&mut d, layer, &before, &after);
+
+    // The brush size typed into its field thickens both lines.
+    let size = sue_wm::ui::input::plain_number(f64::from(recolored[0].tip.size), 1);
+    let wider = recolored[0].tip.size * 3.0;
+    let before = (lines_on(&d, layer), inked(&d, layer));
+    d.click_text(&size);
+    d.step(vec![key(egui::Key::A, egui::Modifiers::COMMAND)]);
+    d.step(vec![egui::Event::Text(format!("{wider}"))]);
+    d.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    d.settle(4);
+    let thick = lines_on(&d, layer);
+    for line in &thick[..2] {
+        assert!((line.tip.size - wider).abs() < 0.05, "{}", line.tip.size);
+    }
+    assert_eq!(thick[2].tip, drawn[2].tip);
+    assert!(
+        inked(&d, layer) > before.1,
+        "thicker lines cover more: {} against {}",
+        inked(&d, layer),
+        before.1
+    );
+    let after = (thick, inked(&d, layer));
+    undo_pair(&mut d, layer, &before, &after);
+}
+
+/// CT-7 and CTL-3 (TL 01:54 to 01:58), FGV-29's Vector magnet: the
+/// Figure tool on a vector layer lays its shapes as vector lines with
+/// the sub tool's brush (the ellipse takes the brush shape), and with
+/// Vector magnet on a straight line ending near another line's end
+/// joins it. Each figure is one step with its undo pair.
+#[test]
+fn sue_paint_figures_on_a_vector_layer_become_lines_with_the_brush() {
+    let mut d = PaintDriver::new("paint-vector-figure");
+    d.command("layer.new.vector");
+    d.settle(2);
+    let layer = top_layer(&d);
+    let middle = d.runtime.shell.page_rect().center();
+    d.command("tool.pick.figure");
+    // Straight Line, Rectangle, Ellipse.
+    d.command("tool.next_sub");
+    d.command("tool.next_sub");
+    let texts = d.settle(3);
+    assert!(
+        texts.iter().any(|(text, _)| text == "Ellipse"),
+        "the Ellipse sub tool"
+    );
+    let before = (lines_on(&d, layer), inked(&d, layer));
+    d.drag(
+        middle + vec2(-80.0, -50.0),
+        middle + vec2(80.0, 50.0),
+        egui::PointerButton::Primary,
+    );
+    let ellipse = lines_on(&d, layer);
+    assert_eq!(ellipse.len(), 1, "the ellipse is a vector line");
+    let line = &ellipse[0];
+    assert!(line.samples.len() > 90, "round: {}", line.samples.len());
+    assert!(
+        line.marks.is_empty(),
+        "its control points come from its path"
+    );
+    let first = line.samples[0].at;
+    let last = line.samples.last().unwrap().at;
+    assert!(
+        (first[0] - last[0]).hypot(first[1] - last[1]) < 0.5,
+        "closed"
+    );
+    assert!(line.tip.size > 0.0 && line.tip.taper_start == 0.0);
+    assert!(inked(&d, layer) > 200, "painted");
+    let after = (ellipse.clone(), inked(&d, layer));
+    undo_pair(&mut d, layer, &before, &after);
+
+    // The Straight Line sub tool with Vector magnet on: a line ending a
+    // few points from the ellipse's start goes onto it.
+    d.command("tool.previous_sub");
+    d.command("tool.previous_sub");
+    d.settle(3);
+    d.click_text("Tool Property");
+    d.click_text("Vector magnet");
+    let start = ellipse[0].samples[0].at;
+    let scale = 160.0
+        / (ellipse[0]
+            .samples
+            .iter()
+            .map(|s| s.at[0])
+            .fold(f32::MIN, f32::max)
+            - ellipse[0]
+                .samples
+                .iter()
+                .map(|s| s.at[0])
+                .fold(f32::MAX, f32::min));
+    let near = middle + vec2(80.0, 0.0) + vec2(0.0, 2.0);
+    d.drag(near + vec2(0.0, 120.0), near, egui::PointerButton::Primary);
+    let joined = lines_on(&d, layer);
+    assert_eq!(joined.len(), 2);
+    let end = joined[1].samples.last().unwrap().at;
+    assert!(
+        (end[0] - start[0]).hypot(end[1] - start[1]) < 0.01,
+        "the magnet joined the ends: {end:?} {start:?} at {scale}"
+    );
+    // A filled shape is not a line: on a vector layer it is refused
+    // with a notice, and nothing changes.
+    d.command("tool.next_sub");
+    d.command("tool.next_sub");
+    d.command("tool.next_sub");
+    d.settle(2);
+    let kept = lines_on(&d, layer);
+    d.drag(
+        middle,
+        middle + vec2(30.0, 30.0),
+        egui::PointerButton::Primary,
+    );
+    assert_eq!(lines_on(&d, layer), kept);
+}
+
+/// Owned row "the vector eraser on several layers": with two vector
+/// layers picked, the Vector eraser takes the lines it
+/// touches on both, as one step that undo takes back whole.
+#[test]
+fn sue_paint_vector_eraser_goes_over_every_picked_vector_layer() {
+    let mut d = PaintDriver::new("paint-vector-layers");
+    let middle = d.runtime.shell.page_rect().center();
+    let mut layers = Vec::new();
+    for offset in [-30.0, 30.0] {
+        d.command("layer.new.vector");
+        d.settle(2);
+        layers.push(top_layer(&d));
+        d.step(vec![key(egui::Key::P, egui::Modifiers::NONE)]);
+        let from = middle + vec2(-100.0, offset);
+        d.drag(from, from + vec2(200.0, 0.0), egui::PointerButton::Primary);
+    }
+    for layer in &layers {
+        assert_eq!(lines_on(&d, *layer).len(), 1);
+    }
+    let before: Vec<_> = layers
+        .iter()
+        .map(|layer| (lines_on(&d, *layer), inked(&d, *layer)))
+        .collect();
+    d.command("layer.select_all");
+    d.settle(2);
+    // The Vector eraser (up to intersection: these lines cross nothing,
+    // so each goes whole).
+    d.step(vec![key(egui::Key::E, egui::Modifiers::NONE)]);
+    for _ in 0..3 {
+        d.step(vec![key(egui::Key::Period, egui::Modifiers::NONE)]);
+    }
+    d.settle(2);
+    d.drag(
+        middle + vec2(0.0, -60.0),
+        middle + vec2(0.0, 60.0),
+        egui::PointerButton::Primary,
+    );
+    for layer in &layers {
+        assert!(
+            lines_on(&d, *layer).is_empty(),
+            "the line on every picked layer goes"
+        );
+        assert_eq!(inked(&d, *layer), 0);
+    }
+    d.command("edit.undo");
+    d.settle(2);
+    for (layer, (lines, ink)) in layers.iter().zip(&before) {
+        assert_eq!(&lines_on(&d, *layer), lines, "one undo brings both back");
+        assert_eq!(inked(&d, *layer), *ink);
+    }
+    d.command("edit.redo");
+    d.settle(2);
+    for layer in &layers {
+        assert!(lines_on(&d, *layer).is_empty());
+    }
+}
+
+/// Layer, Update Lines to New Brush Engine (the action P3-8 left as a
+/// model function): lines drawn with the legacy engine become lines of
+/// the brush engine as one step, the notice says so, and a second run
+/// says there is nothing left. A line with a flick or post correction
+/// stays legacy (`vector::update_lines_kept`, tested in sue-picture).
+#[test]
+fn sue_paint_update_lines_to_the_new_brush_engine_is_one_step() {
+    let mut d = PaintDriver::new("paint-vector-update");
+    d.command("layer.new.vector");
+    d.settle(2);
+    let layer = top_layer(&d);
+    let middle = d.runtime.shell.page_rect().center();
+    d.step(vec![key(egui::Key::P, egui::Modifiers::NONE)]);
+    for y in [-30.0, 30.0] {
+        let from = middle + vec2(-80.0, y);
+        d.drag(from, from + vec2(160.0, 0.0), egui::PointerButton::Primary);
+    }
+    let drawn = lines_on(&d, layer);
+    assert!(
+        drawn.iter().all(|line| line.engine.is_none()),
+        "drawn with the legacy engine"
+    );
+    let waiting = sue_paint::vector::legacy_lines(&d.runtime.engine.world.arena, layer);
+    let before = (drawn.clone(), inked(&d, layer));
+    d.command("layer.update_lines");
+    let texts = d.settle(3);
+    let updated = lines_on(&d, layer);
+    for (was, now) in drawn.iter().zip(&updated) {
+        assert_eq!(
+            now.engine.is_some(),
+            sue_paint::vector::updates_unchanged(was),
+            "updated unless it would lose its flick or post correction"
+        );
+    }
+    let notice = if waiting.kept > 0 {
+        format!(
+            "Updated {} lines to the new brush engine. {} lines with a flick or post correction stay as they are, since the new engine cannot draw those yet.",
+            waiting.updated, waiting.kept
+        )
+    } else {
+        format!(
+            "Updated {} lines to the new brush engine. Undo takes it back.",
+            waiting.updated
+        )
+    };
+    assert!(
+        texts.iter().any(|(text, _)| text.contains(&notice[..30])),
+        "the notice says what changed: {texts:?}"
+    );
+    let after = (updated, inked(&d, layer));
+    undo_pair(&mut d, layer, &before, &after);
+    d.command("layer.update_lines");
+    let texts = d.settle(3);
+    assert!(
+        texts.iter().any(
+            |(text, _)| text.contains("already uses the new brush engine")
+                || text.contains("Nothing was updated")
+        ),
+        "a second run says there is nothing left"
+    );
+    assert_eq!(lines_on(&d, layer), after.0, "and changes nothing");
+}
+
+/// TL 01:46 (crash tips, vector lines): with Correct Line's control
+/// points, the open end of a line dragged onto its other end closes the
+/// shape: the ends meet exactly, not only near each other. One step with
+/// its undo pair.
+#[test]
+fn sue_paint_an_open_end_dragged_onto_the_other_closes_the_line() {
+    let mut d = PaintDriver::new("paint-vector-close");
+    d.command("layer.new.vector");
+    d.settle(2);
+    let layer = top_layer(&d);
+    let middle = d.runtime.shell.page_rect().center();
+    d.step(vec![key(egui::Key::P, egui::Modifiers::NONE)]);
+    // A short line to measure the view by, then an open square.
+    let mark = middle + vec2(-200.0, -150.0);
+    d.drag(mark, mark + vec2(30.0, 0.0), egui::PointerButton::Primary);
+    let corner = middle + vec2(-60.0, -60.0);
+    let square = [
+        corner,
+        corner + vec2(120.0, 0.0),
+        corner + vec2(120.0, 120.0),
+        corner + vec2(0.0, 120.0),
+        corner + vec2(0.0, 30.0),
+    ];
+    trace(&mut d, &square, egui::Modifiers::NONE);
+    let drawn = lines_on(&d, layer);
+    assert_eq!(drawn.len(), 2);
+    let (a, b) = (drawn[0].samples[0].at, drawn[1].samples[0].at);
+    let scale = (corner.y - mark.y) / (b[1] - a[1]);
+    let screen = |at: [f32; 2]| on_screen(at, corner, b, scale);
+    let start = drawn[1].samples[0].at;
+    let end = drawn[1].samples.last().unwrap().at;
+    assert!((end[0] - start[0]).hypot(end[1] - start[1]) > 10.0, "open");
+    // Correct Line (Y), its first sub tool: move control points.
+    d.step(vec![key(egui::Key::Y, egui::Modifiers::NONE)]);
+    d.settle(2);
+    let before = (lines_on(&d, layer), inked(&d, layer));
+    let to = screen(start) + vec2(3.0, 4.0);
+    d.drag(screen(end), to, egui::PointerButton::Primary);
+    let closed = lines_on(&d, layer);
+    let last = closed[1].samples.last().unwrap().at;
+    assert_eq!(last, closed[1].samples[0].at, "the ends meet exactly");
+    assert_eq!(closed[0], drawn[0], "the other line stays");
+    let after = (closed, inked(&d, layer));
+    undo_pair(&mut d, layer, &before, &after);
+}
