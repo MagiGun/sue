@@ -63,12 +63,8 @@ pub enum Icon {
     Paper,
     Swap,
     Play,
-    Stop,
-    First,
-    Last,
     Prev,
     Next,
-    Loop,
     Up,
     /// Three lines: a palette's menu.
     Menu,
@@ -705,17 +701,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             filled(&[(0.64, 0.76), (0.88, 0.76), (0.76, 0.88)]);
         }
         Icon::Play => filled(&[(0.3, 0.18), (0.82, 0.5), (0.3, 0.82)]),
-        Icon::Stop => {
-            painter.rect_filled(Rect::from_min_max(p(0.26, 0.26), p(0.74, 0.74)), 0.0, color);
-        }
-        Icon::First => {
-            line(&[(0.24, 0.2), (0.24, 0.8)]);
-            filled(&[(0.8, 0.2), (0.8, 0.8), (0.3, 0.5)]);
-        }
-        Icon::Last => {
-            line(&[(0.76, 0.2), (0.76, 0.8)]);
-            filled(&[(0.2, 0.2), (0.7, 0.5), (0.2, 0.8)]);
-        }
         Icon::Prev => {
             filled(&[(0.5, 0.22), (0.5, 0.78), (0.14, 0.5)]);
             filled(&[(0.86, 0.22), (0.86, 0.78), (0.5, 0.5)]);
@@ -723,12 +708,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Next => {
             filled(&[(0.14, 0.22), (0.5, 0.5), (0.14, 0.78)]);
             filled(&[(0.5, 0.22), (0.86, 0.5), (0.5, 0.78)]);
-        }
-        Icon::Loop => {
-            curve(0.5, 0.5, 0.3, 20.0, 160.0);
-            curve(0.5, 0.5, 0.3, 200.0, 340.0);
-            filled(&[(0.2, 0.36), (0.12, 0.56), (0.32, 0.54)]);
-            filled(&[(0.8, 0.64), (0.88, 0.44), (0.68, 0.46)]);
         }
         Icon::Up => line(&[(0.22, 0.64), (0.5, 0.34), (0.78, 0.64)]),
         Icon::Menu => {
