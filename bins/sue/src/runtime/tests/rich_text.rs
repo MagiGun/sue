@@ -358,13 +358,20 @@ fn rich_text_marks_come_from_the_theme_and_the_spelling_menu_picks_with_undo() {
         drawn_line(&text, "T", Line::Strike, marks.deleted),
         "deleted text is struck through"
     );
-    let commented = text
-        .galley
-        .job
-        .sections
-        .iter()
-        .any(|section| section.format.background == marks.comment);
+    // The wash lies on the letters (in the row's mesh, under the glyphs),
+    // see-through, so a selection, painted behind the text, still shows
+    // through it.
+    let commented = text.galley.rows.iter().any(|placed| {
+        let visuals = &placed.row.visuals;
+        visuals
+            .mesh
+            .vertices
+            .iter()
+            .take(visuals.glyph_vertex_range.start)
+            .any(|vertex| vertex.color == marks.comment)
+    }) || section_of(&text, "morning").background == marks.comment;
     assert!(commented, "the commented word lies on the comment's wash");
+    assert!(marks.comment.a() < 255, "a comment's wash is see-through");
     // In Sue's monochrome themes the marks are told apart by shape, and
     // none of the old fixed colors is drawn anywhere.
     for color in colors(&drawn) {
@@ -378,7 +385,7 @@ fn rich_text_marks_come_from_the_theme_and_the_spelling_menu_picks_with_undo() {
 }
 
 #[test]
-fn rich_text_touch_bar_buttons_name_their_keys() {
+fn rich_text_touch_bar_buttons_name_their_keys_and_keep_the_keyboard() {
     let (mut runtime, root) = runtime("rich-text-touch-bar");
     let _ = runtime.engine.world.rice.set(
         "display.interface",
@@ -449,6 +456,7 @@ fn rich_text_touch_bar_buttons_name_their_keys() {
         ],
     );
     let mut copy = None;
+    let mut cut = None;
     let mut handles = false;
     for _ in 0..10 {
         let drawn = step(&mut runtime, &ctx, size, start, Vec::new());
@@ -464,6 +472,15 @@ fn rich_text_touch_bar_buttons_name_their_keys() {
                 _ => None,
             })
             .or(copy);
+        cut = drawn
+            .iter()
+            .find_map(|shape| match shape {
+                egui::Shape::Text(text) if text.galley.text() == "Cut" => {
+                    Some(text.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .or(cut);
     }
     assert!(handles, "the handles are drawn in {:?}", marks.handle);
     let copy = copy.expect("the bar shows Copy");
@@ -486,6 +503,58 @@ fn rich_text_touch_bar_buttons_name_their_keys() {
         }
     }
     assert!(tip, "Copy's tip names Ctrl+C");
+    // A tap on Cut takes the word out, and the keyboard stays with the
+    // text: what is typed next goes in where the word was.
+    let cut = cut.expect("the bar shows Cut");
+    let tap = |phase, pressed| {
+        vec![
+            touch(phase, cut),
+            egui::Event::PointerMoved(cut),
+            egui::Event::PointerButton {
+                pos: cut,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    };
+    step(
+        &mut runtime,
+        &ctx,
+        size,
+        start,
+        tap(egui::TouchPhase::Start, true),
+    );
+    let mut lift = tap(egui::TouchPhase::End, false);
+    lift.push(egui::Event::PointerGone);
+    step(&mut runtime, &ctx, size, start, lift);
+    for _ in 0..5 {
+        step(&mut runtime, &ctx, size, start, Vec::new());
+    }
+    runtime.typing.flush(&mut runtime.engine.history);
+    assert_eq!(
+        document(&runtime).0,
+        "The  sat down
+",
+        "Cut took the word"
+    );
+    step(
+        &mut runtime,
+        &ctx,
+        size,
+        start,
+        vec![egui::Event::Text("dog".to_owned())],
+    );
+    for _ in 0..3 {
+        step(&mut runtime, &ctx, size, start, Vec::new());
+    }
+    runtime.typing.flush(&mut runtime.engine.history);
+    assert_eq!(
+        document(&runtime).0,
+        "The dog sat down
+",
+        "the keyboard stayed with the text"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
