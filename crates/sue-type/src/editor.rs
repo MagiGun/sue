@@ -667,7 +667,20 @@ impl Editor {
     /// Puts an embedded entity (a picture) in a paragraph of its own at the
     /// caret.
     pub fn insert_embed(&mut self, cx: &mut AppletContext<'_>, entity: EntityId) {
-        self.embed(cx, entity, &tr!("insert-picture"));
+        self.embed(cx, None, entity, &tr!("insert-picture"));
+    }
+
+    /// Puts `entity`, a picture not yet in the arena, in a paragraph of
+    /// its own at the caret: the picture and its place in the text are
+    /// one undo step. Returns its id, or `None` when nothing was put in.
+    pub fn insert_new_embed(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        entity: sue_core::Entity,
+    ) -> Option<EntityId> {
+        let id = entity.id();
+        self.embed(cx, Some(entity), id, &tr!("insert-picture"))
+            .then_some(id)
     }
 
     /// Puts a new table of `rows` by `columns` in a paragraph of its own at
@@ -799,10 +812,8 @@ impl Editor {
         self.current()?;
         let entity = contents.entity();
         let id = entity.id();
-        cx.apply(ArenaEdit(sue_core::txn::SpawnEntity::new(entity)))
-            .ok()?;
-        self.embed(cx, id, &tr!("insert-table-of-contents"));
-        Some(id)
+        self.embed(cx, Some(entity), id, &tr!("insert-table-of-contents"))
+            .then_some(id)
     }
 
     /// Spawns table `entity` and sets it over `range` of the current
@@ -816,8 +827,6 @@ impl Editor {
         self.commit(cx);
         self.current()?;
         let id = entity.id();
-        cx.apply(ArenaEdit(sue_core::txn::SpawnEntity::new(entity)))
-            .ok()?;
         self.anchor = Caret {
             doc: self.caret.doc,
             offset: range.start,
@@ -826,7 +835,9 @@ impl Editor {
             doc: self.caret.doc,
             offset: range.end,
         };
-        self.embed(cx, id, &tr!("insert-table"));
+        if !self.embed(cx, Some(entity), id, &tr!("insert-table")) {
+            return None;
+        }
         self.enter_cell(id, 0, 0);
         Some(id)
     }
@@ -1023,15 +1034,35 @@ impl Editor {
     }
 
     /// Puts `entity` in a paragraph of its own over the selection, as one
-    /// edit labeled `label`.
-    fn embed(&mut self, cx: &mut AppletContext<'_>, entity: EntityId, label: &str) {
+    /// undo step labeled `label`: the text, the mark that embeds it and,
+    /// when `spawn` holds it, the entity itself, which is not yet in the
+    /// arena. Returns `false` when nothing was put in.
+    fn embed(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        spawn: Option<sue_core::Entity>,
+        entity: EntityId,
+        label: &str,
+    ) -> bool {
+        use sue_core::txn::{Batch, DeleteText, InsertText, SetExtension, SpawnEntity};
+        self.commit(cx);
         let Some(doc) = self.current() else {
-            return;
+            return false;
         };
-        let at = self.selection().start;
-        let text = self.text().to_owned();
+        let Some(handle) = cx.arena().handle_of(doc) else {
+            return false;
+        };
+        let Some(text) = edit::text_of(cx.arena(), doc).map(str::to_owned) else {
+            return false;
+        };
+        let selection = self.selection();
+        let range = selection.start.min(text.len())..selection.end.min(text.len());
+        if !text.is_char_boundary(range.start) || !text.is_char_boundary(range.end) {
+            return false;
+        }
+        let at = range.start;
         let starts_line = at == 0 || text.as_bytes().get(at - 1) == Some(&b'\n');
-        let ends_line = text.as_bytes().get(self.selection().end) == Some(&b'\n');
+        let ends_line = text.as_bytes().get(range.end) == Some(&b'\n');
         let mut insert = String::new();
         if !starts_line {
             insert.push('\n');
@@ -1041,13 +1072,31 @@ impl Editor {
         if !ends_line {
             insert.push('\n');
         }
-        let Some(end) = edit::replace(cx, doc, self.selection(), &insert, None, &[]) else {
-            return;
-        };
+        let mut marks = edit::marks_of(cx.arena(), doc);
+        let mut kept = text;
+        if !range.is_empty() {
+            marks.delete_text(&kept, range.clone());
+            kept.replace_range(range.clone(), "");
+        }
+        marks.insert_text(&kept, at, &insert, None);
         let object = object_at..object_at + sue_model::OBJECT.len_utf8();
-        edit::reformat(cx, doc, label, |_, marks| {
-            marks.set(object, kind::EMBED, Some(Value::Entity(entity)));
-        });
+        marks.set(object, kind::EMBED, Some(Value::Entity(entity)));
+        let end = at + insert.len();
+        let mut batch = Batch::new(label);
+        if let Some(spawn) = spawn {
+            batch = batch.then(SpawnEntity::new(spawn));
+        }
+        if !range.is_empty() {
+            batch = batch.then(DeleteText::new(handle, range));
+        }
+        let batch = batch
+            .then(InsertText::new(handle, at, insert))
+            .then(SetExtension::set(doc, marks));
+        if let Err(error) = cx.apply(ArenaEdit(batch)) {
+            cx.fail(error.to_string());
+            return false;
+        }
+        self.sync_text(cx);
         self.set_caret(
             Caret {
                 doc: self.caret.doc,
@@ -1055,6 +1104,7 @@ impl Editor {
             },
             false,
         );
+        true
     }
 
     // ----- The frame ---------------------------------------------------------

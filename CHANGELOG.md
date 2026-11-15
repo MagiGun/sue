@@ -340,6 +340,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Inserting a table, a table of contents or a picture into rich text,
+  and Text to Table, is one step to undo. Undo used to take the table's
+  place in the text away first and leave an empty table behind for a
+  second undo.
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
   the update. It now takes the theme as it ships; colors you picked
