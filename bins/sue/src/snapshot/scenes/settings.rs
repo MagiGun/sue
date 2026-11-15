@@ -142,11 +142,14 @@ pub(super) fn desktop(tour: &mut Tour<'_>) -> Result<(), String> {
         return Err("Install from Folder asked for no folder".to_owned());
     }
     tour.settle();
-    let sues_own = sue_lang::text("settings", "icons-sues-own");
-    scroll_to(tour, &sues_own)?;
+    // The pack's card, with its own icons as its preview, chosen.
+    scroll_to(tour, "Snapshot Shapes")?;
     click(tour, "Snapshot Shapes")?;
     tour.settle();
     tour.shoot("04h-settings-icon-pack")?;
+    let sues_own = sue_lang::text("settings", "icons-sues-own");
+    scroll(tour, -4000.0);
+    scroll_to(tour, &sues_own)?;
     click(tour, &sues_own)?;
     tour.settle();
     // File, Preferences in Sue Paint opens this page.

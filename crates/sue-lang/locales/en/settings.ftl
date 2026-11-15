@@ -152,6 +152,37 @@ icons-replaced = { $name } is replaced; { $count } things could not be read.
 icons-failed = That did not work: { $error }
 icons-not-read = { $count } things in the icons in use could not be read; Sue's own stand in for them.
 
+## settings/icons.rs: Appearance, Icons, as cards (P4-18)
+
+icons-sue-about = Drawn for Sue. Every icon has a line drawing; a few have a filled twin for the state that is on.
+icons-pack-about = By { $author }, { $licence }, version { $version }. Draws { $count ->
+    [one] one icon
+   *[other] { $count } icons
+}.
+icons-files-not-read = { $count ->
+    [one] 1 file could not be read; Sue's own icon stands in for it.
+   *[other] { $count } files could not be read; Sue's own icons stand in for them.
+}
+icons-twins-left-out = Draws no filled twin for { $names }, so Sue's own filled twin shows when they are on. Twins are optional.
+icons-show-details = Show What Could Not Be Read
+icons-hide-details = Hide the Details
+icons-pack-installed = Installed { $name }.
+icons-icon-replaced = { $name } is replaced.
+icons-in-use-not-read = { $count ->
+    [one] 1 file of the icons in use could not be read; Sue's own icon stands in for it.
+   *[other] { $count } files of the icons in use could not be read; Sue's own icons stand in for them.
+}
+icons-use-hint = Draw Sue with this set of icons. Anything it leaves out stays Sue's own.
+icons-show-sheet-hint = Every icon of Sue as this set draws it; click one to replace it on its own.
+icons-remove-hint = Takes the pack out of Sue. Asks once more first.
+icons-install-folder-hint = Install an icon pack from a folder of SVG files with an icon-pack.txt.
+icons-install-archive-hint = Install an icon pack from a .zip archive of one.
+icons-export-hint = Writes every icon of Sue as an SVG file in a .zip, with a manifest to fill in: a start for a pack of your own.
+icons-replace-heading = Single Icons
+icons-replace-which = Icon to replace
+icons-style = Which drawing: the line, or the filled twin
+icons-choose-svg-hint = Choose an SVG file to draw this icon with, in place of the set's.
+
 ## settings.rs: the window on Sue's shared controls (P4-18)
 
 preset-hint = Sets every setting this look holds at once. Each change can be undone.
