@@ -301,6 +301,22 @@ impl Selection {
         out
     }
 
+    /// The selection grown by `by` pixels with square corners (Expand
+    /// Selected Area with the square expansion type): each pixel takes
+    /// the most coverage of the square `by` pixels round it.
+    #[must_use]
+    pub fn expanded_square(&self, by: f32) -> Self {
+        let reach = by.max(0.0).round() as usize;
+        if reach == 0 || self.width == 0 || self.height == 0 {
+            return self.clone();
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let across = widest(&self.mask, height, width, [width, 1], reach);
+        let mut out = self.clone();
+        out.mask = widest(&across, width, height, [1, width], reach);
+        out
+    }
+
     /// The selection drawn in by `by` pixels all round (Shrink Selected
     /// Area).
     #[must_use]
@@ -559,6 +575,40 @@ impl Selection {
     }
 }
 
+/// The most of `values` within `reach` along each of `lanes` lanes of
+/// `length` values: lane `n` starts at `n * step[0]` and walks by
+/// `step[1]`. A window that slides with a queue of the falling maxima, so
+/// the cost does not grow with `reach`.
+fn widest(values: &[u8], lanes: usize, length: usize, step: [usize; 2], reach: usize) -> Vec<u8> {
+    let mut out = values.to_vec();
+    let mut queue = std::collections::VecDeque::with_capacity(length);
+    for lane in 0..lanes {
+        let at = |index: usize| lane * step[0] + index * step[1];
+        queue.clear();
+        let mut next = 0;
+        for index in 0..length {
+            let last = (index + reach).min(length - 1);
+            while next <= last {
+                while queue
+                    .back()
+                    .is_some_and(|back: &usize| values[at(*back)] <= values[at(next)])
+                {
+                    queue.pop_back();
+                }
+                queue.push_back(next);
+                next += 1;
+            }
+            while queue.front().is_some_and(|front| *front + reach < index) {
+                queue.pop_front();
+            }
+            if let Some(front) = queue.front() {
+                out[at(index)] = values[at(*front)];
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,6 +643,27 @@ mod tests {
         let red = Selection::of_color(&pixels, 4, 4, [255, 0, 0], 0.1);
         assert_eq!(red.at(0, 0), 1.0);
         assert_eq!(red.at(1, 0), 0.0);
+    }
+
+    #[test]
+    fn a_square_expansion_keeps_square_corners() {
+        let mut square = Selection::new(40, 40);
+        square.rect([10, 10, 30, 30], Op::Replace);
+        let grown = square.expanded_square(4.0);
+        assert_eq!(grown.at(6, 20), 1.0, "four pixels out");
+        assert_eq!(grown.at(5, 20), 0.0, "past the growth");
+        assert_eq!(grown.at(6, 6), 1.0, "square at the corners");
+        assert_eq!(grown.at(5, 6), 0.0);
+        assert!(
+            square.expanded(4.0).at(6, 6) < 1.0,
+            "the round one is round"
+        );
+        assert_eq!(square.expanded_square(0.0).mask(), square.mask());
+        // Partial coverage keeps its own value.
+        let mut soft = Selection::new(5, 1);
+        soft.mask[2] = 128;
+        let grown = soft.expanded_square(1.0);
+        assert_eq!(grown.mask(), [0, 128, 128, 128, 0]);
     }
 
     #[test]
