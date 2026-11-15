@@ -604,7 +604,13 @@ impl SuePaint {
             (Popover::Icon, _) => {
                 let mut query = std::mem::take(&mut self.bar_ui.icon_query);
                 let picked = sue_wm::ui::popover(&ctx, id, rect, &mut open, theme, |ui| {
-                    icon_picker(ui, &mut query, slot.icon.as_deref(), theme)
+                    icon_picker(
+                        ui,
+                        &mut query,
+                        slot.icon.as_deref(),
+                        theme.surface(3),
+                        theme,
+                    )
                 })
                 .flatten();
                 self.bar_ui.icon_query = query;
@@ -671,10 +677,12 @@ fn drop_mark(rects: &[Rect], at: usize, area: Rect, theme: &Theme) -> [Pos2; 2] 
 /// Icon Settings: a search and a grid of every icon of Sue's set (an
 /// icon pack's own drawings showing where it has them). Hands back the
 /// icon picked: `Some(Some(name))`, or `Some(None)` for the button's own.
+/// `surface` is the fill it lies on, which its grid's edges fade into.
 pub(crate) fn icon_picker(
     ui: &mut Ui,
     query: &mut String,
     current: Option<&str>,
+    surface: egui::Color32,
     theme: &Theme,
 ) -> Option<Option<String>> {
     let mut picked = None;
@@ -693,10 +701,11 @@ pub(crate) fn icon_picker(
         .copied()
         .filter(|icon| words.is_empty() || icon.name().contains(&words))
         .collect();
-    egui::ScrollArea::vertical()
-        .id_salt("sue-paint-icon-grid")
+    sue_wm::ui::ScrollView::vertical("sue-paint-icon-grid")
+        .on(surface)
+        .auto_shrink(true, true)
         .max_height(side * columns as f32 * 0.75)
-        .show(ui, |ui| {
+        .show(ui, theme, |ui| {
             let rows = icons.len().div_ceil(columns);
             let (grid, _) = ui.allocate_exact_size(vec2(width, side * rows as f32), Sense::hover());
             for (index, icon) in icons.iter().enumerate() {

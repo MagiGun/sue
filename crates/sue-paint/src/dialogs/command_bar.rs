@@ -151,6 +151,16 @@ impl SuePaint {
                 for menu in &self.menus {
                     walk(&menu.items, &menu.title, &mut out);
                 }
+                // A submenu in the middle of a menu would split it under
+                // two headings of the same name: each heading gathers all
+                // its entries, in the order the menus first show it.
+                let mut order: Vec<String> = Vec::new();
+                for (heading, _) in &out {
+                    if !order.contains(heading) {
+                        order.push(heading.clone());
+                    }
+                }
+                out.sort_by_key(|(heading, _)| order.iter().position(|known| known == heading));
             }
             Category::PopupPalettes => {
                 out.extend(
@@ -432,10 +442,9 @@ impl SuePaint {
             })
             .collect();
         let mut add = None;
-        egui::ScrollArea::vertical()
-            .id_salt("sue-paint-bar-entries")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
+        sue_wm::ui::ScrollView::vertical("sue-paint-bar-entries")
+            .on(theme.panel)
+            .show(ui, theme, |ui| {
                 let mut heading = None;
                 for (index, (under, slot)) in entries.iter().enumerate() {
                     if heading != Some(under) && !under.is_empty() {
@@ -502,9 +511,13 @@ impl SuePaint {
             .get(index)
             .and_then(|slot| slot.icon.clone());
         sue_wm::ui::heading(ui, &tr!("icon-settings"), theme);
-        if let Some(icon) =
-            crate::panels::icon_picker(ui, &mut dialog.icon_query, current.as_deref(), theme)
-        {
+        if let Some(icon) = crate::panels::icon_picker(
+            ui,
+            &mut dialog.icon_query,
+            current.as_deref(),
+            theme.panel,
+            theme,
+        ) {
             if let Some(slot) = self
                 .holder_items_mut(holder)
                 .and_then(|items| items.get_mut(index))
@@ -679,10 +692,9 @@ impl SuePaint {
         };
         sue_wm::ui::heading(ui, &title, theme);
         let items = self.holder_items(holder).to_vec();
-        egui::ScrollArea::vertical()
-            .id_salt("sue-paint-bar-items")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
+        sue_wm::ui::ScrollView::vertical("sue-paint-bar-items")
+            .on(theme.panel)
+            .show(ui, theme, |ui| {
                 for (index, slot) in items.iter().enumerate() {
                     let label = slot.item.label();
                     let mut row = ListRow::new(("bar-item", index), &label)
