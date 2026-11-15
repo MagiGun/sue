@@ -437,6 +437,8 @@ pub(crate) struct InsertForm {
     /// The cel showing at the frame shows again after the new frames,
     /// which stay blank, instead of being held through them.
     pub split: bool,
+    /// The Timeline palette shows the result while the dialog is open.
+    pub preview: bool,
 }
 
 #[cfg(test)]

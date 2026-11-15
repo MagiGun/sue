@@ -6,8 +6,8 @@
 //! Timeline palette's buttons call [`SuePaint::anim_command`]), so the
 //! entries are found by name here as well as through the registry.
 
-use sue_core::txn::{Relate, SetProperty, Unrelate};
-use sue_core::{Arena, EntityId, OrderKey, Relation};
+use sue_core::txn::{Relate, SetProperty};
+use sue_core::{Arena, EntityId, Relation};
 use sue_model::Sequence;
 use sue_wm::{AppletContext, Call, Command, Facts, FilePick, Flags, ItemState, ShellRequest};
 
@@ -422,30 +422,17 @@ fn light_register(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
         ));
         if SuePaint::apply(cx, edit) {
             paint.light_table = true;
+            // Its entry is picked in the Animation Cels palette, its
+            // opacity and colors at hand.
+            paint.anim_ui.cels.picked = Some((
+                crate::panels::cels::Table {
+                    from: cel,
+                    general: false,
+                },
+                layer,
+            ));
         }
     }
-}
-
-/// The edit that puts `cel`'s light table in the reverse order. Each
-/// layer gets an order key of its own: the table is sorted by its keys,
-/// and layers that share one (as each registered with the default key
-/// does) sort by their ids, which no relinking turns round.
-fn reversed_light_table(arena: &Arena, cel: EntityId) -> Edit {
-    let layers = anim::light_table(arena, cel);
-    let off = layers.iter().fold(
-        Edit::new(tr!("reverse-layers-vertically-light-table")),
-        |edit, layer| edit.then(Unrelate::new(cel, anim::LIGHT_TABLE, *layer)),
-    );
-    let keys = OrderKey::sequence(None, layers.len());
-    layers
-        .iter()
-        .rev()
-        .zip(keys)
-        .fold(off, |edit, (layer, order)| {
-            edit.then(Relate::new(
-                Relation::new(cel, anim::LIGHT_TABLE, *layer).ordered(order),
-            ))
-        })
 }
 
 /// The light table's layers in the reverse order.
@@ -456,7 +443,7 @@ fn light_reverse(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) 
     if let Some(cel) = paint.editing_cel(&cx.world.arena)
         && anim::light_table(&cx.world.arena, cel).len() > 1
     {
-        SuePaint::apply(cx, reversed_light_table(&cx.world.arena, cel));
+        SuePaint::apply(cx, anim::reversed(&cx.world.arena, cel));
     }
 }
 
@@ -1386,7 +1373,59 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     )
     .state(has_sound)
     .with(Flags::PALETTE),
+    c("anim.audio.scrub", "audio-scrubbing", "audio", audio_scrub).state(scrub_on),
+    c(
+        "anim.timeline.prev",
+        "go-to-previous-timeline",
+        "chevron-left",
+        timeline_step,
+    )
+    .state(timeline_step_state),
+    c(
+        "anim.timeline.next",
+        "go-to-next-timeline",
+        "chevron-right",
+        timeline_step,
+    )
+    .state(timeline_step_state),
 ];
+
+/// Audio Scrubbing: moving through the frames by hand plays the sound of
+/// each frame reached.
+fn audio_scrub(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.anim_ui.scrub = !paint.anim_ui.scrub;
+}
+
+/// Checked while Audio Scrubbing is on.
+fn scrub_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    flag(paint.anim_ui.scrub)
+}
+
+/// The timeline beside the one shown, before it (`anim.timeline.prev`)
+/// or after it, in the picker's order: none past either end.
+fn timeline_beside(paint: &SuePaint, arena: &sue_core::Arena, name: &str) -> Option<EntityId> {
+    let picture = paint.picture()?;
+    let timelines = anim::setup::timelines(arena, picture);
+    let shown = timelines.iter().position(|entry| entry.aside.is_none())?;
+    let to = if name == "anim.timeline.prev" {
+        shown.checked_sub(1)?
+    } else {
+        shown + 1
+    };
+    timelines.get(to)?.aside
+}
+
+/// Go to Previous Timeline, Go to Next Timeline.
+fn timeline_step(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    if let Some(aside) = timeline_beside(paint, &cx.world.arena, call.name) {
+        paint.timeline_action(cx, crate::panels::timeline::Action::Switch(aside));
+    }
+}
+
+/// Grayed where there is no timeline that way.
+fn timeline_step_state(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    super::when(timeline_beside(paint, facts.arena, call.name).is_some())
+}
 
 #[cfg(test)]
 mod tests {

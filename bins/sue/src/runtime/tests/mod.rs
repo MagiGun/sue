@@ -16,6 +16,7 @@ mod paint_brush;
 mod paint_brush_engine;
 mod paint_canvas_chrome;
 mod paint_canvas_keys;
+mod paint_cels;
 mod paint_cmd_anim;
 mod paint_cmd_canvas;
 mod paint_cmd_edit;

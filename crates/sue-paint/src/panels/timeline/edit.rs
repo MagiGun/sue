@@ -47,6 +47,9 @@ pub(crate) enum Action {
     AudioSettings(usize),
     /// Make the timeline kept aside in `Some(entity)` the one shown.
     Switch(EntityId),
+    /// Open (`true`) or fold a folder's rows, as the Layer palette's fold
+    /// arrow does (one undo step).
+    Fold(EntityId, bool),
 }
 
 impl SuePaint {
@@ -206,6 +209,9 @@ impl SuePaint {
                 self.anim_ui.audio_track = Some(track);
                 self.ask_audio_clip(cx, track);
             }
+            Action::Fold(folder, open) => {
+                Self::apply(cx, crate::doc::set(folder, crate::doc::OPEN, open));
+            }
             Action::Switch(aside) => {
                 if let Some(edit) = anim::setup::switch_timeline(&cx.world.arena, picture, aside) {
                     Self::apply(cx, edit);
@@ -356,6 +362,7 @@ impl SuePaint {
             count: 1,
             selected_only: false,
             split: false,
+            preview: true,
         }))));
     }
 
@@ -364,9 +371,27 @@ impl SuePaint {
     /// Clip the new frames are blank and the cel showing at the frame
     /// shows again after them.
     pub(crate) fn insert_frames(&mut self, cx: &mut AppletContext<'_>, form: &InsertForm) {
-        let Some((picture, sequence, length)) = self.timeline_here(&cx.world.arena) else {
+        let Some((picture, out, new_length)) = self.inserted(&cx.world.arena, form) else {
             return;
         };
+        let edit = Edit::new(tr!("insert-frame"))
+            .then(sue_core::txn::SetExtension::set(picture, out))
+            .then(SetProperty::new(
+                picture,
+                anim::LENGTH,
+                i64::from(new_length),
+            ));
+        Self::apply(cx, edit);
+    }
+
+    /// The timeline as Insert Frame with `form` leaves it: its picture,
+    /// the new timeline and its length (what the dialog's Preview shows).
+    pub(crate) fn inserted(
+        &self,
+        arena: &sue_core::Arena,
+        form: &InsertForm,
+    ) -> Option<(EntityId, Sequence, u32)> {
+        let (picture, sequence, length) = self.timeline_here(arena)?;
         let count = form.count.max(1);
         let new_length = length + count;
         let picked = form
@@ -402,14 +427,37 @@ impl SuePaint {
                 }
             }
         }
-        let edit = Edit::new(tr!("insert-frame"))
-            .then(sue_core::txn::SetExtension::set(picture, out))
-            .then(SetProperty::new(
-                picture,
-                anim::LENGTH,
-                i64::from(new_length),
-            ));
-        Self::apply(cx, edit);
+        Some((picture, out, new_length))
+    }
+
+    /// The timeline the palette shows: the one there, or while the Insert
+    /// Frame dialog previews, the one it would leave.
+    pub(crate) fn timeline_shown(
+        &self,
+        arena: &sue_core::Arena,
+    ) -> Option<(EntityId, Sequence, u32, bool)> {
+        if let Some(crate::dialogs::Dialog::Anim(dialog)) = &self.dialog
+            && let crate::dialogs::AnimDialog::Insert(form) = dialog.as_ref()
+            && form.preview
+            && let Some((picture, sequence, length)) = self.inserted(arena, form)
+        {
+            return Some((picture, sequence, length, true));
+        }
+        self.timeline_here(arena)
+            .map(|(picture, sequence, length)| (picture, sequence, length, false))
+    }
+
+    /// The frames Insert Frame's Preview adds: the first, and how many.
+    pub(crate) fn insert_preview(&self) -> Option<(u32, u32)> {
+        match &self.dialog {
+            Some(crate::dialogs::Dialog::Anim(dialog)) => match dialog.as_ref() {
+                crate::dialogs::AnimDialog::Insert(form) if form.preview => {
+                    Some((form.frame + 1, form.count.max(1)))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// Keeps a timeline label's name; an empty one takes it away.

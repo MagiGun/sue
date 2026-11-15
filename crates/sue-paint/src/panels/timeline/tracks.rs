@@ -40,6 +40,22 @@ struct Row {
     kind: Kind,
     top: f32,
     height: f32,
+    /// How many folders with rows of their own it is inside.
+    depth: usize,
+    /// The band of keys over its cels (a folder with keyframes on), 0
+    /// when it has none.
+    band: f32,
+}
+
+/// Where a track sits among the rows: its place in the Layer palette
+/// (the top layer highest), how many folders with rows it is inside, and
+/// whether a folder around it is folded (so it has no row).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Place {
+    stack: Option<usize>,
+    depth: usize,
+    folded: bool,
+    keys: bool,
 }
 
 /// The kind of `track`.
@@ -57,40 +73,53 @@ fn kind_of(track: &Track) -> Kind {
 
 /// The rows of `sequence` laid out with rows `row` tall and cel pictures
 /// `thumbs` rows tall: the camera first, then the layers and folders in
-/// the Layer palette's order (`stack` gives a track's place there, the
-/// top layer highest; tracks with none keep their order after them), the
-/// sounds last.
+/// the Layer palette's order and nesting (`place` says where a track
+/// sits; tracks with no place keep their order after them, and a track
+/// in a folded folder has no row), the sounds last. An animation folder
+/// with keyframes on has a band of keys over its cels.
 fn rows(
     sequence: &Sequence,
     row: f32,
     thumbs: Thumbs,
-    stack: impl Fn(&Track) -> Option<usize>,
+    place: impl Fn(&Track) -> Place,
 ) -> Vec<Row> {
     let mut out = Vec::new();
     let mut top = 0.0;
     let mut pictured: Vec<usize> = (0..sequence.tracks.len())
         .filter(|index| kind_of(&sequence.tracks[*index]) != Kind::Audio)
+        .filter(|index| !place(&sequence.tracks[*index]).folded)
         .collect();
     pictured.sort_by_key(|index| {
         let track = &sequence.tracks[*index];
         (
             kind_of(track) != Kind::Camera,
-            stack(track).map_or(usize::MAX, |place| usize::MAX - 1 - place),
+            place(track)
+                .stack
+                .map_or(usize::MAX, |place| usize::MAX - 1 - place),
         )
     });
     let order = pictured.into_iter().chain(anim::audio_tracks(sequence));
     for track in order {
         let kind = kind_of(&sequence.tracks[track]);
-        let height = match kind {
-            Kind::Cels => row * (1.0 + thumbs.rows()),
-            Kind::Audio => row * 1.5,
-            Kind::Camera | Kind::Layer => row,
+        let at = place(&sequence.tracks[track]);
+        let band = if kind == Kind::Cels && at.keys {
+            row
+        } else {
+            0.0
         };
+        let height = band
+            + match kind {
+                Kind::Cels => row * (1.0 + thumbs.rows()),
+                Kind::Audio => row * 1.5,
+                Kind::Camera | Kind::Layer => row,
+            };
         out.push(Row {
             track,
             kind,
             top,
             height,
+            depth: if kind == Kind::Audio { 0 } else { at.depth },
+            band,
         });
         top += height;
     }
@@ -137,6 +166,75 @@ fn key_mark(painter: &egui::Painter, at: Pos2, size: f32, ease: Ease, ink: egui:
 }
 
 impl SuePaint {
+    /// The keyboard on a row's frames: Tab reaches them (the row becomes
+    /// the current track), Left and Right step the frame, Home and End go
+    /// to the first and the last, Enter or Space picks the frame shown.
+    /// While they hold keyboard focus, the frame shown on the row has the
+    /// focus ring (`cell`, drawn with `painter`).
+    fn cells_keyboard(
+        &mut self,
+        ui: &Ui,
+        response: &egui::Response,
+        (track, frame, length): (usize, u32, u32),
+        actions: &mut Vec<Action>,
+        (cell, painter): (Rect, &egui::Painter),
+        theme: &Theme,
+    ) {
+        if response.gained_focus()
+            && let Some(doc) = self.doc_mut()
+        {
+            doc.track = track;
+        }
+        if !response.has_focus() {
+            return;
+        }
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                egui::EventFilter {
+                    horizontal_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
+        let last = length.saturating_sub(1);
+        let (left, right, home, end, pick) = ui.input(|input| {
+            (
+                input.key_pressed(egui::Key::ArrowLeft),
+                input.key_pressed(egui::Key::ArrowRight),
+                input.key_pressed(egui::Key::Home),
+                input.key_pressed(egui::Key::End),
+                input.key_pressed(egui::Key::Enter) || input.key_pressed(egui::Key::Space),
+            )
+        });
+        let to = if home {
+            Some(0)
+        } else if end {
+            Some(last)
+        } else if left {
+            frame.checked_sub(1)
+        } else if right {
+            (frame < last).then_some(frame + 1)
+        } else {
+            None
+        };
+        if let Some(to) = to {
+            actions.push(Action::Go { track, frame: to });
+        }
+        if pick {
+            self.anim_ui.selection = Some(Selection::dragged(vec![track], frame, frame));
+        }
+        if wm_ui::focus_visible(ui.ctx()) && cell.is_positive() {
+            wm_ui::paint_focus_ring(
+                painter,
+                cell.shrink(theme.space(Space::S1)),
+                theme.radius(wm_ui::Radius::Xs),
+                1.0,
+                theme,
+            );
+        }
+    }
+
     /// The picture of `id` in `rect` (kept to its aspect, over the
     /// checkerboard of clear), from the same thumbnails the layer palette
     /// keeps.
@@ -358,7 +456,8 @@ impl SuePaint {
         let names = Rect::from_min_max(area.min, pos2(area.left() + names_width, area.bottom()));
         ui.painter()
             .vline(names.right(), area.y_range(), theme.hairline());
-        let Some((picture, sequence, length)) = self.timeline_here(&cx.world.arena) else {
+        let Some((picture, sequence, length, previewing)) = self.timeline_shown(&cx.world.arena)
+        else {
             // No timeline yet: say how to make one, with the button.
             let inner = names.shrink(pad);
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner));
@@ -384,9 +483,45 @@ impl SuePaint {
         let (play_start, play_end) = settings.range(length);
         let thumbs = self.anim_ui.thumbs;
         let stack = sue_model::picture::layers(arena, picture);
+        // The folders that have rows: a layer inside one is indented under
+        // it, and has no row while it is folded (as in the Layer palette).
+        let with_rows: Vec<EntityId> = sequence.tracks.iter().filter_map(keyed).collect();
+        let place_of = |layer: EntityId| {
+            let around: Vec<EntityId> = crate::doc::folders_around(arena, layer)
+                .into_iter()
+                .filter(|folder| with_rows.contains(folder))
+                .collect();
+            (
+                around.len(),
+                around
+                    .iter()
+                    .any(|folder| !crate::doc::is_open(arena, *folder)),
+            )
+        };
         let layout = rows(&sequence, row_size, thumbs, |track| {
-            keyed(track).and_then(|layer| stack.iter().position(|id| *id == layer))
+            let Some(layer) = keyed(track) else {
+                return Place::default();
+            };
+            let (depth, folded) = place_of(layer);
+            Place {
+                stack: stack.iter().position(|id| *id == layer),
+                depth,
+                folded,
+                keys: track.kind == anim::CELS
+                    && arena.get_by_id(layer).is_ok_and(anim::motion::keyframes_on),
+            }
         });
+        // The folders whose rows have rows inside them: they fold.
+        let parents: Vec<EntityId> = with_rows
+            .iter()
+            .copied()
+            .filter(|folder| {
+                crate::doc::is_folder(arena, *folder)
+                    && with_rows
+                        .iter()
+                        .any(|layer| crate::doc::folders_around(arena, *layer).contains(folder))
+            })
+            .collect();
         let ruler = row_size * 1.5;
         let ruler_half = ruler / 2.0;
         // The shape of the cels' pictures: the canvas's, kept in reason.
@@ -783,8 +918,34 @@ impl SuePaint {
                 Kind::Layer => "layers",
                 Kind::Audio => "audio",
             };
+            // Inside a folder the rest is indented; a folder holding other
+            // rows has its fold arrow, which folds it in the Layer palette
+            // too.
+            let indent = row.depth as f32 * icon_side;
+            // The fold arrows' room, while any row has one.
+            let fold_room = if parents.is_empty() { 0.0 } else { icon_side };
+            let fold_rect = Rect::from_center_size(
+                pos2(eye_rect.right() + indent + fold_room / 2.0, line),
+                egui::Vec2::splat(icon_side),
+            );
+            if let Some(folder) = target.filter(|folder| parents.contains(folder)) {
+                let open = crate::doc::is_open(&cx.world.arena, folder);
+                let fold = wm_ui::icon_button(
+                    ("timeline-fold", row.track),
+                    icon(if open { "caret-down" } else { "caret-right" }),
+                    &tr!("fold-or-unfold-folder"),
+                )
+                .quiet()
+                .show_at(ui, fold_rect.intersect(rows_area), theme);
+                if fold.clicked() {
+                    actions.push(Action::Fold(folder, !open));
+                }
+            }
             let kind_rect = Rect::from_center_size(
-                pos2(eye_rect.right() + icon_side / 2.0, line),
+                pos2(
+                    eye_rect.right() + indent + fold_room + icon_side / 2.0,
+                    line,
+                ),
                 egui::Vec2::splat(icon_side),
             );
             sue_wm::icons::paint(
@@ -842,7 +1003,7 @@ impl SuePaint {
                 // The cel's picture keeps the canvas's shape.
                 let height = thumb_height - pad;
                 let rect = Rect::from_min_size(
-                    pos2(kind_rect.left(), top + row_size),
+                    pos2(kind_rect.left(), top + row_size + row.band),
                     vec2(height * aspect, height),
                 )
                 .intersect(rows_area);
@@ -884,7 +1045,7 @@ impl SuePaint {
                             },
                         );
                         cells_painter.text(
-                            pos2(x + pad / 2.0, line),
+                            pos2(x + pad / 2.0, line + row.band),
                             Align2::LEFT_CENTER,
                             name,
                             font.clone(),
@@ -894,7 +1055,7 @@ impl SuePaint {
                             // A line for as long as it shows.
                             cells_painter.hline(
                                 (x + pad / 2.0)..=column(end) - pad / 2.0,
-                                top + row_size - pad / 2.0,
+                                top + row_size - pad / 2.0 + row.band,
                                 tint.map_or_else(
                                     || Stroke::new(theme.hairline().width, theme.text_muted()),
                                     |tint| Stroke::new(thick, tint),
@@ -904,7 +1065,7 @@ impl SuePaint {
                                 let width = ((end - at) as f32 * step - pad / 2.0)
                                     .clamp(pad, thumb_height * aspect);
                                 let rect = Rect::from_min_size(
-                                    pos2(x + pad / 4.0, top + row_size),
+                                    pos2(x + pad / 4.0, top + row_size + row.band),
                                     vec2(width, thumb_height - pad),
                                 );
                                 self.cel_thumb(&cells_painter, rect, *cel, cx, theme);
@@ -962,7 +1123,9 @@ impl SuePaint {
                 Kind::Camera | Kind::Audio => {}
             }
             // Keys of the camera, a layer or a folder: a mark each, shaped
-            // by how it moves on.
+            // by how it moves on; an animation folder's in the band over
+            // its cels. Each names its frame and how it moves on, on hover.
+            let mut key_tip: Option<String> = None;
             if row.kind != Kind::Audio
                 && let Some(layer) = target
                 && (row.kind == Kind::Camera
@@ -977,18 +1140,30 @@ impl SuePaint {
                     let at = time.frame(sequence.rate).max(0) as u32;
                     let ease =
                         anim::motion::ease_at(&cx.world.arena, layer, time).unwrap_or(Ease::Linear);
-                    let y = if row.kind == Kind::Cels {
+                    let y = if row.kind == Kind::Cels && row.band > 0.0 {
+                        top + row.band / 2.0
+                    } else if row.kind == Kind::Cels {
                         top + row.height - row_size / 2.0
                     } else {
                         line
                     };
-                    key_mark(
-                        &cells_painter,
-                        pos2(column(at) + step / 2.0, y),
-                        size,
-                        ease,
-                        theme.text,
-                    );
+                    let center = pos2(column(at) + step / 2.0, y);
+                    key_mark(&cells_painter, center, size, ease, theme.text);
+                    if hover.is_some_and(|pos| {
+                        below.contains(pos)
+                            && Rect::from_center_size(center, egui::Vec2::splat(size.max(pad)))
+                                .contains(pos)
+                    }) {
+                        key_tip = Some(tr!(
+                            "keyframe-at-frame",
+                            frame = self.anim_ui.unit.show(at, fps),
+                            ease = match ease {
+                                Ease::Smooth => tr!("keyframe-smooth"),
+                                Ease::Linear => tr!("keyframe-linear"),
+                                Ease::Hold => tr!("keyframe-hold"),
+                            }
+                        ));
+                    }
                 }
             }
             if row.kind == Kind::Audio {
@@ -1115,6 +1290,25 @@ impl SuePaint {
                 ui.scope_id().with(("timeline-cells", row.track)),
                 Sense::click_and_drag(),
             );
+            let response = match key_tip {
+                Some(tip) => response.on_hover_text_at_pointer(tip),
+                None => response,
+            };
+            self.cells_keyboard(
+                ui,
+                &response,
+                (row.track, frame, length),
+                &mut actions,
+                (
+                    Rect::from_min_max(
+                        pos2(column(frame), top),
+                        pos2(column(frame + 1), top + row.height),
+                    )
+                    .intersect(below),
+                    &cells_painter,
+                ),
+                theme,
+            );
             if panning {
                 continue;
             }
@@ -1156,6 +1350,9 @@ impl SuePaint {
             if response.clicked()
                 && let Some(pos) = response.interact_pointer_pos()
             {
+                // The frames keep the keyboard after a click: the arrows
+                // step on from the frame picked.
+                response.request_focus();
                 let at = at_pointer(pos).min(length - 1);
                 if shift_held {
                     // Shift and a click picks a run of frames from the
@@ -1302,6 +1499,21 @@ impl SuePaint {
                     }
                 }
             }
+        }
+
+        // ----- Insert Frame's Preview: the frames it adds, outlined.
+        if previewing && let Some((from, count)) = self.insert_preview() {
+            let added = Rect::from_min_max(
+                pos2(column(from), below.top()),
+                pos2(column(from + count), below.bottom()),
+            );
+            painter.rect_filled(added, CornerRadius::ZERO, theme.fill_selected());
+            painter.rect_stroke(
+                added,
+                CornerRadius::ZERO,
+                Stroke::new(thick, theme.focus()),
+                egui::StrokeKind::Inside,
+            );
         }
 
         // ----- The frame shown: a bar down the frames in the accent, its

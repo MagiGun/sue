@@ -367,7 +367,7 @@ The order of work is the plan at the end.
 | Play, Stop, Loop, Move Frame | Animation > Playback | done | |
 | Timeline palette as Clip Studio's | Palette | done | Cels as pictures in six sizes or none, every other second lighter, the current frame a bar with its number, the ruler's seconds and division lines, a track for every layer in the Layer palette's order |
 | Timeline navigation: the wheel zooms around the pointer, Shift and the wheel pan, Alt and the wheel scroll the tracks, Space or the middle button and a drag pan, scrollbars | Timeline palette | done | The eye beside each animation folder shows and hides the same folder as the Layer palette's |
-| Animation Cels palette | Palette | done | |
+| Animation Cels palette | Palette | done | The cel being drawn, then one row per traced layer with its eye, opacity and colors; drag a layer from the Layer palette to register it |
 | Sound on the timeline | Animation, File > Import > Audio | done | Plays along, drag to move, right-click to mute or delete |
 | Exposure sheet (EX) | Animation | done | Animation > Timeline > Exposure Sheet: cels, blanks and holds, set by clicking |
 | Camera track depth (easing curves between keys) | Timeline palette | partial | Keys glide; easing to verify |
@@ -376,7 +376,10 @@ The order of work is the plan at the end.
 | Clips: Split, Merge, first and last displayed frame | Timeline palette right click | done | |
 | Playback range, timeline labels, track labels | Timeline palette | done | Drag the range's ends on the ruler |
 | Layer keyframes from the timeline: Smooth, Linear, Hold | Timeline palette | done | The three marks read apart without color |
-| Insert Frame dialog, Audio Clip Settings | Animation > Edit Track, Timeline palette | done | Number of frames, Selected layers only, Split clip; a sound's volume, cuts and fades |
+| Insert Frame dialog, Audio Clip Settings | Animation > Edit Track, Timeline palette | done | Number of frames, Selected layers only, Split clip, Preview; a sound's volume, cuts and fades |
+| Timeline palette menu | Timeline palette | done | Clip Studio's list and order in submenus; Show split view, Graph Editor, Manage timeline, Show 2D camera frames, Show camera path, Show all field guides and Thumbnail display settings are left out |
+| Audio scrubbing | Animation > Playback Settings | done | Each frame reached by hand plays its own sound |
+| Folder rows on the timeline | Timeline palette | done | A folder holding animation folders is a parent row with a fold arrow; a folder's keys show in a band over its cels |
 
 ## Tools and drawing
 

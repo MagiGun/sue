@@ -69,7 +69,13 @@ impl SuePaint {
     ) {
         let here = self.timeline_here(&cx.world.arena);
         let playing = self.doc().is_some_and(|doc| doc.playing.is_some());
-        let buttons: [Button; 21] = [
+        let keyed = self.layer().is_some_and(|layer| {
+            cx.world
+                .arena
+                .get_by_id(layer)
+                .is_ok_and(anim::motion::keyframes_on)
+        });
+        let buttons: [Button; 24] = [
             Some(("timeline-new", "anim.timeline.new", false)),
             Some(("settings", "anim.timeline.settings", false)),
             Some(("animation-folder", "anim.layer.folder", false)),
@@ -91,6 +97,11 @@ impl SuePaint {
             Some(("minus", "anim.key.delete", false)),
             Some(("plus", "anim.frame.insert", false)),
             Some(("delete", "anim.frame.delete", false)),
+            None,
+            // The layer's own keys, as Clip Studio Paint's bar: Add
+            // Keyframe, and Enable Keyframes on This Layer at its right.
+            Some(("keyframe-add", "anim.key.layer", false)),
+            Some(("keyframes", "anim.keyframes", keyed)),
             None,
             Some(("onion-skin", "anim.onion", self.onion)),
         ];
@@ -138,9 +149,12 @@ impl SuePaint {
         let top = bar.center().y - side / 2.0;
         let mut x = bar.left() + group;
         let mut run = None;
-        let mut overflow: Vec<&'static str> = Vec::new();
+        let mut overflow: Vec<Option<&'static str>> = Vec::new();
         for button in buttons {
             let Some((icon_name, command, lit)) = button else {
+                if !overflow.is_empty() {
+                    overflow.push(None);
+                }
                 if overflow.is_empty() {
                     ui.painter().vline(
                         x + group / 2.0 - gap,
@@ -152,7 +166,7 @@ impl SuePaint {
                 continue;
             };
             if x + side > limit || !overflow.is_empty() {
-                overflow.push(command);
+                overflow.push(Some(command));
                 continue;
             }
             let rect = Rect::from_min_size(pos2(x, top), egui::Vec2::splat(side));
@@ -179,31 +193,13 @@ impl SuePaint {
             x += side + gap;
         }
         if !overflow.is_empty() {
-            // What did not fit, under More, as Clip Studio Paint keeps
-            // nothing out of reach on a narrow palette.
+            // What did not fit, under More, in the bar's order, so nothing
+            // is out of reach on a narrow palette: Specify Cels as a
+            // submenu of the folder's cels.
             let rect = Rect::from_min_size(pos2(x, top), egui::Vec2::splat(side));
-            let response =
-                wm_ui::icon_button("timeline-bar-more", icon("more"), &tr!("more-buttons"))
-                    .show_at(ui, rect, theme);
-            let names: Vec<(String, &str, bool)> = overflow
-                .iter()
-                .filter(|command| **command != "anim.cel.list")
-                .map(|command| {
-                    (
-                        self.button_name(cx, command),
-                        *command,
-                        self.command_enabled(cx, command),
-                    )
-                })
-                .collect();
-            egui::Popup::menu(&response).show(|ui| {
-                for (name, command, enabled) in &names {
-                    if ui.add_enabled(*enabled, egui::Button::new(name)).clicked() {
-                        run = Some((*command).to_owned());
-                        ui.close();
-                    }
-                }
-            });
+            if let Some(command) = self.bar_more(ui, rect, &overflow, cx, theme) {
+                run = Some(command);
+            }
         }
         if let Some(text) = readout {
             ui.painter().text(
@@ -219,6 +215,124 @@ impl SuePaint {
         {
             self.anim_command(&command, cx);
         }
+    }
+
+    /// The More button at `rect` and its menu (the shared menu): the
+    /// bar's buttons that did not fit (`overflow`, with a line where a
+    /// group starts), each with its name and keys. Returns the command
+    /// picked.
+    fn bar_more(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        overflow: &[Option<&'static str>],
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) -> Option<String> {
+        let id = egui::Id::unique("sue-paint-timeline-more");
+        let mut state: wm_ui::MenuState = ui.data(|data| data.get_temp(id)).unwrap_or_default();
+        let response = wm_ui::icon_button("timeline-bar-more", icon("more"), &tr!("more-buttons"))
+            .selected(state.is_open())
+            .show_at(ui, rect, theme);
+        if response.clicked() {
+            if state.is_open() {
+                state.close();
+            } else {
+                state.open();
+            }
+        }
+        let items = self.bar_more_items(overflow, cx);
+        let facts = sue_wm::Facts::of(cx);
+        let registry = crate::commands::registry();
+        let event = state.show(
+            ui.ctx(),
+            &wm_ui::MenuRequest {
+                id,
+                anchor: rect.left_bottom() + egui::Vec2::Y * theme.space(Space::S1),
+                owner: rect,
+                items: &items,
+                state: &|command: &str| registry.state(self, &facts, command),
+                density: Density::Compact,
+            },
+            theme,
+        );
+        ui.data_mut(|data| data.insert_temp(id, state));
+        match event {
+            wm_ui::MenuEvent::Picked(command) => Some(command),
+            _ => None,
+        }
+    }
+
+    /// What the More menu holds: each button left over, as its command
+    /// labeled with its name and keys; Specify Cels as the list of the
+    /// current folder's cels and a blank.
+    pub(crate) fn bar_more_items(
+        &self,
+        overflow: &[Option<&'static str>],
+        cx: &AppletContext<'_>,
+    ) -> Vec<sue_wm::MenuItem> {
+        use sue_wm::MenuItem;
+        let registry = crate::commands::registry();
+        let mut items: Vec<MenuItem> = Vec::new();
+        for entry in overflow {
+            let Some(command) = entry else {
+                if items
+                    .last()
+                    .is_some_and(|item| !matches!(item, MenuItem::Separator))
+                {
+                    items.push(MenuItem::Separator);
+                }
+                continue;
+            };
+            if *command == "anim.cel.list" {
+                items.push(MenuItem::sub(tr!("specify-cels-list"), self.cel_items(cx)));
+                continue;
+            }
+            let label = registry
+                .label(command)
+                .unwrap_or_else(|| (*command).to_owned())
+                .trim_end_matches("...")
+                .to_owned();
+            items.push(
+                MenuItem::action(label, *command).key(super::command_keys(&cx.world.rice, command)),
+            );
+        }
+        if matches!(items.last(), Some(MenuItem::Separator)) {
+            items.pop();
+        }
+        items
+    }
+
+    /// The cels of the current animation folder as menu items that show
+    /// one from the frame shown (newest first, as Specify Cels lists
+    /// them), then a blank.
+    fn cel_items(&self, cx: &AppletContext<'_>) -> Vec<sue_wm::MenuItem> {
+        use sue_wm::MenuItem;
+        let mut items = Vec::new();
+        if let Some((picture, sequence, _)) = self.timeline_here(&cx.world.arena) {
+            let track = self.doc().map_or(0, |doc| doc.track);
+            if let Some(folder) = sequence.tracks.get(track).and_then(anim::track_folder) {
+                for cel in anim::cels(&cx.world.arena, picture, folder)
+                    .into_iter()
+                    .rev()
+                {
+                    if let Ok(entity) = cx.world.arena.get_by_id(cel) {
+                        items.push(MenuItem::action(
+                            entity.name().to_owned(),
+                            format!("anim.cel.show.{cel}"),
+                        ));
+                    }
+                }
+            }
+        }
+        if !items.is_empty() {
+            items.push(MenuItem::Separator);
+        }
+        items.push(MenuItem::action(
+            tr!("blank-from-here"),
+            "anim.cel.show.blank",
+        ));
+        items
     }
 
     /// The list Specify Cels opens: the cels of the current animation

@@ -1027,6 +1027,12 @@ icons! {
     /// Two upright bars with round ends, side by side. Hold the playing
     /// where it is, to go on from there.
     Pause = "pause" => animation::PAUSE,
+    /// A diamond outline, the mark of a key on the timeline, with a plus
+    /// at its lower right. Add a keyframe.
+    KeyframeAdd = "keyframe-add" => animation::KEYFRAME_ADD,
+    /// A solid diamond on a level track that runs out of both its sides.
+    /// Keyframes are on for this layer.
+    Keyframes = "keyframes" => animation::KEYFRAMES,
     /// Two solid triangles that point to the left, the one at the front
     /// touching the back of the other, at an upright bar they run into.
     /// Go to the first frame.

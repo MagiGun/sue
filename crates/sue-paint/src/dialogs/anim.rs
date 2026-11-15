@@ -206,7 +206,7 @@ impl AnimDialog {
             Self::Cels(_) => 5.0,
             Self::AudioClip(_) => 10.0,
             Self::Label(_) | Self::StopTimelapse(..) => 4.0,
-            Self::Insert(_) => 4.5,
+            Self::Insert(_) => 5.5,
         };
         let row = wm_ui::Density::Regular.row();
         egui::Vec2::new(row * 15.0, row * (rows + 2.0) * 1.2)
@@ -810,6 +810,15 @@ fn insert_ui(ui: &mut Ui, form: &mut InsertForm, theme: &Theme) -> Outcome {
                 "anim-insert-split",
                 &tr!("split-clip-option"),
                 &mut form.split,
+                theme,
+            );
+        });
+        grid.row("", |ui| {
+            tick(
+                ui,
+                "anim-insert-preview",
+                &tr!("preview-on-the-timeline"),
+                &mut form.preview,
                 theme,
             );
         });

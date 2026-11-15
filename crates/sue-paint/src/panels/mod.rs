@@ -9,7 +9,7 @@
 
 pub(crate) mod auto_action;
 mod brush_size;
-mod cels;
+pub(crate) mod cels;
 mod color;
 mod color_set;
 mod command_bar;

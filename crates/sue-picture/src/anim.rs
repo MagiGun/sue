@@ -444,22 +444,185 @@ pub struct Traced {
     pub place: Option<[f32; 6]>,
     /// It shows only on light tables.
     pub only: bool,
+    /// Its entry's own opacity, times the table's.
+    pub opacity: f32,
+    /// Its entry's color mode.
+    pub mode: EntryMode,
 }
 
-/// `layers` as a light table on a `size` canvas shows them.
+/// `layers` as a light table on a `size` canvas shows them, each with
+/// the settings of a new entry (shown whole, in the table's color mode).
 #[must_use]
 pub fn traced(arena: &Arena, layers: &[EntityId], size: [u32; 2]) -> Vec<Traced> {
     layers
         .iter()
+        .filter_map(|layer| traced_one(arena, *layer, LightEntry::default(), size))
+        .collect()
+}
+
+/// The layers on one light table (`from`'s links of `kind`: a cel's
+/// [`LIGHT_TABLE`] or a picture's [`GENERAL_LIGHT_TABLE`]) as it shows
+/// them on a `size` canvas: an entry whose eye is off is left out, and
+/// each keeps its own opacity and color mode ([`LightEntry`]).
+#[must_use]
+pub fn traced_on(arena: &Arena, from: EntityId, kind: &str, size: [u32; 2]) -> Vec<Traced> {
+    arena
+        .relations()
+        .targets(from, kind)
+        .into_iter()
         .filter_map(|layer| {
-            let entity = arena.get_by_id(*layer).ok()?;
-            Some(Traced {
-                layer: *layer,
-                place: Place::of(entity).map(size),
-                only: entity.property(ONLY).and_then(Value::as_bool) == Some(true),
-            })
+            let entry = entry(arena, from, kind, layer);
+            entry
+                .shown
+                .then(|| traced_one(arena, layer, entry, size))
+                .flatten()
         })
         .collect()
+}
+
+fn traced_one(arena: &Arena, layer: EntityId, entry: LightEntry, size: [u32; 2]) -> Option<Traced> {
+    let entity = arena.get_by_id(layer).ok()?;
+    Some(Traced {
+        layer,
+        place: Place::of(entity).map(size),
+        only: entity.property(ONLY).and_then(Value::as_bool) == Some(true),
+        opacity: entry.opacity,
+        mode: entry.mode,
+    })
+}
+
+/// The color a light table tints its layers in Color mode.
+pub const LIGHT_TABLE_TINT: [f32; 3] = [0.25, 0.45, 1.0];
+
+/// Whether an entry of a light table shows (`Bool`, on its link).
+pub const ENTRY_SHOWN: &str = "light_table.shown";
+/// How strongly an entry shows, 0 to 1, times the table's own opacity
+/// (`Float`, on its link).
+pub const ENTRY_OPACITY: &str = "light_table.opacity";
+/// An entry's color mode by its stable name ([`EntryMode::name`],
+/// `Text`, on its link).
+pub const ENTRY_MODE: &str = "light_table.mode";
+
+/// How an entry of a light table is colored.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EntryMode {
+    /// As the whole table: tinted while its Color button is on.
+    #[default]
+    Table,
+    /// Always in the layer's own colors.
+    Own,
+    /// Always tinted in the light table's color.
+    Tinted,
+}
+
+impl EntryMode {
+    /// Every mode, in the order a menu lists them.
+    pub const ALL: [Self; 3] = [Self::Table, Self::Own, Self::Tinted];
+
+    /// The stable name kept in the file.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Table => "table",
+            Self::Own => "own",
+            Self::Tinted => "tinted",
+        }
+    }
+
+    /// The mode of a stable name; an unknown one is [`Self::Table`].
+    #[must_use]
+    pub fn from_name(name: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|mode| mode.name() == name)
+            .unwrap_or_default()
+    }
+
+    /// The tint this mode gives, when the table's own is `table`.
+    #[must_use]
+    pub fn tint(self, table: Option<[f32; 3]>) -> Option<[f32; 3]> {
+        match self {
+            Self::Table => table,
+            Self::Own => None,
+            Self::Tinted => Some(table.unwrap_or(LIGHT_TABLE_TINT)),
+        }
+    }
+}
+
+/// A layer's own settings on one light table, kept on its link so the
+/// same layer can show differently on two tables: Clip Studio Paint's
+/// eye, opacity and mode of an entry in the Animation Cels palette.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LightEntry {
+    /// It shows (its eye).
+    pub shown: bool,
+    /// How strongly, 0 to 1.
+    pub opacity: f32,
+    /// How it is colored.
+    pub mode: EntryMode,
+}
+
+impl Default for LightEntry {
+    fn default() -> Self {
+        Self {
+            shown: true,
+            opacity: 1.0,
+            mode: EntryMode::Table,
+        }
+    }
+}
+
+/// The settings of `layer` on `from`'s light table of `kind`; a new
+/// entry's when it has none (or is not on it).
+#[must_use]
+pub fn entry(arena: &Arena, from: EntityId, kind: &str, layer: EntityId) -> LightEntry {
+    let Some(link) = arena.relations().get(from, kind, layer) else {
+        return LightEntry::default();
+    };
+    let properties = &link.properties;
+    LightEntry {
+        shown: properties
+            .get(ENTRY_SHOWN)
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        opacity: properties
+            .get(ENTRY_OPACITY)
+            .and_then(Value::as_f64)
+            .map_or(1.0, |opacity| opacity.clamp(0.0, 1.0) as f32),
+        mode: properties
+            .get(ENTRY_MODE)
+            .and_then(Value::as_str)
+            .map(EntryMode::from_name)
+            .unwrap_or_default(),
+    }
+}
+
+/// The edit that gives `layer` the settings `entry` on `from`'s light
+/// table of `kind`, in its place there; `None` when it is not on that
+/// table or already has them.
+#[must_use]
+pub fn set_entry(
+    arena: &Arena,
+    from: EntityId,
+    kind: &str,
+    layer: EntityId,
+    entry: LightEntry,
+) -> Option<Edit> {
+    let mut link = arena.relations().get(from, kind, layer)?;
+    let before = self::entry(arena, from, kind, layer);
+    if before == entry {
+        return None;
+    }
+    link.properties.set(ENTRY_SHOWN, entry.shown);
+    link.properties
+        .set(ENTRY_OPACITY, f64::from(entry.opacity.clamp(0.0, 1.0)));
+    link.properties.set(ENTRY_MODE, entry.mode.name());
+    let name = if before.shown == entry.shown {
+        tr!("light-table-entry-settings")
+    } else {
+        tr!("show-or-hide-on-light-table")
+    };
+    Some(Edit::new(name).then(Relate::new(link)))
 }
 
 /// The layers on `cel`'s light table, in the order they were registered.
@@ -477,21 +640,28 @@ pub fn register(cel: EntityId, layer: EntityId) -> Edit {
 }
 
 /// The edit that turns `cel`'s light table upside down: its layers in
-/// the reverse order.
+/// the reverse order. Each link gets an order key of its own (the table
+/// is sorted by its keys, and links that share one, as each registered
+/// with the default key does, sort by their ids, which no relinking
+/// turns round) and keeps its entry's eye, opacity and color mode
+/// ([`LightEntry`]): only its place on the table changes.
 #[must_use]
 pub fn reversed(arena: &Arena, cel: EntityId) -> Edit {
+    let relations = arena.relations();
     let layers = light_table(arena, cel);
-    let off = layers.iter().fold(
+    let keys = sue_core::OrderKey::sequence(None, layers.len());
+    layers.iter().rev().zip(keys).fold(
         Edit::new(tr!("reverse-layers-vertically-light-table")),
-        |edit, layer| edit.then(sue_core::txn::Unrelate::new(cel, LIGHT_TABLE, *layer)),
-    );
-    layers.iter().rev().fold(off, |edit, layer| {
-        edit.then(sue_core::txn::Relate::new(sue_core::Relation::new(
-            cel,
-            LIGHT_TABLE,
-            *layer,
-        )))
-    })
+        |edit, (layer, order)| {
+            let link = relations
+                .get(cel, LIGHT_TABLE, *layer)
+                .unwrap_or_else(|| sue_core::Relation::new(cel, LIGHT_TABLE, *layer));
+            edit.then(sue_core::txn::Relate::new(sue_core::Relation {
+                order,
+                ..link
+            }))
+        },
+    )
 }
 
 /// The edit that takes `layers` off `cel`'s light table.
@@ -521,11 +691,12 @@ impl FrameView {
                 self.hidden.insert(traced.layer);
             }
             if !self.onion.iter().any(|skin| skin.cel == traced.layer) {
+                let color = traced.mode.tint(color);
                 self.onion.push(Skin {
                     cel: traced.layer,
                     color: color.unwrap_or([0.0; 3]),
                     tint: if color.is_some() { 1.0 } else { 0.0 },
-                    opacity,
+                    opacity: opacity * traced.opacity,
                     place: traced.place,
                     force: traced.only,
                 });
@@ -1906,6 +2077,8 @@ mod tests {
                 layer: reference,
                 place: None,
                 only: false,
+                opacity: 1.0,
+                mode: EntryMode::Table,
             }],
             0.5,
             None,
