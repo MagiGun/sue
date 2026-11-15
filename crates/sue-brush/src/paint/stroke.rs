@@ -323,10 +323,14 @@ impl PaintStroke {
 
     /// Stamps planned dabs into the committed part or the tail.
     fn stamp(&mut self, tail: bool, dabs: &[Planned], backdrop: Option<&dyn Backdrop>) {
+        // A wet stroke has no whole stroke to lay the paper on (it lays
+        // its dabs on the picture one by one), so its paper breaks up
+        // each dab.
+        let wet = matches!(self.target, Target::Wet(_));
         let texture = self
             .texture
             .as_ref()
-            .filter(|(_, settings)| settings.per_dab)
+            .filter(|(_, settings)| settings.per_dab || wet)
             .map(|(paper, settings)| Texture::new(paper, *settings));
         let texture = texture.as_ref();
         let tips = Tips {

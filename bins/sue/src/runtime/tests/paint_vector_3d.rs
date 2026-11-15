@@ -1057,16 +1057,38 @@ fn sue_paint_update_lines_to_the_new_brush_engine_is_one_step() {
     d.command("layer.new.vector");
     d.settle(2);
     let layer = top_layer(&d);
-    let middle = d.runtime.shell.page_rect().center();
-    d.step(vec![key(egui::Key::P, egui::Modifiers::NONE)]);
-    for y in [-30.0, 30.0] {
-        let from = middle + vec2(-80.0, y);
-        d.drag(from, from + vec2(160.0, 0.0), egui::PointerButton::Primary);
+    // Two lines as Sue 0.0.75 kept them (new strokes are lines of the
+    // brush engine already), painted onto the layer as it saved them.
+    let pen = sue_paint::brush::Tip {
+        size: 6.0,
+        ..sue_paint::brush::Tip::default()
+    };
+    let legacy: Vec<sue_paint::vector::Line> = [100.0, 160.0]
+        .into_iter()
+        .map(|y| {
+            let points: Vec<[f32; 2]> = (0..=16).map(|i| [80.0 + 10.0 * i as f32, y]).collect();
+            sue_paint::vector::figure_line(&points, pen, [[0.0; 3], [1.0; 3]], false)
+        })
+        .collect();
+    {
+        let arena = &mut d.runtime.engine.world.arena;
+        let old = sue_paint::vector::geometry(arena, layer);
+        let raster = sue_paint::doc::raster(arena, layer).unwrap();
+        let painted = sue_paint::vector::render(&legacy, raster.width(), raster.height()).unwrap();
+        let _ = sue_paint::vector::keep(arena, layer, old, &legacy, None, "old lines");
+        if let (Some(into), Some(from)) = (
+            sue_paint::doc::raster_mut(arena, layer).and_then(sue_core::RasterTile2D::bytes_mut),
+            painted.bytes(),
+        ) {
+            into.copy_from_slice(from);
+        }
     }
+    d.settle(2);
     let drawn = lines_on(&d, layer);
+    assert_eq!(drawn.len(), 2);
     assert!(
         drawn.iter().all(|line| line.engine.is_none()),
-        "drawn with the legacy engine"
+        "lines of the legacy engine"
     );
     let waiting = sue_paint::vector::legacy_lines(&d.runtime.engine.world.arena, layer);
     let before = (drawn.clone(), inked(&d, layer));

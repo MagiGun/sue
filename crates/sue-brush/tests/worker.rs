@@ -745,3 +745,86 @@ fn a_tile_of_the_live_view_reads_as_its_pixels() {
     let far = sue_brush::buffer::TileKey::of_pixel(4000, 4000);
     assert!(!live.tile_coverage(far, &mut tile), "nothing there");
 }
+
+/// A brush with paint behaviours (an airbrush that builds up, here with
+/// a soft round tip and its size and flow following pressure) goes
+/// through the worker too: what the live view shows is, pixel for
+/// pixel, what the merge lays on the layer, its copies lay once, and the
+/// stroke painted again from what a recorder kept gives the same bytes.
+#[test]
+fn a_brush_with_paint_behaviours_shows_what_it_lays_and_replays() {
+    use sue_brush::replay::{self, ENGINE, Recorder};
+    use sue_brush::worker::Canvas;
+    let preset = sue_brush::presets::find("sue.airbrush.soft").expect("the soft airbrush");
+    let brush = Brush::new(preset.clone(), [0.2, 0.3, 0.8]);
+    assert!(!brush.is_plain(), "an airbrush builds up");
+    let layer = patterned(256, 160);
+    let settings = Settings::new(Device::Pen);
+    let mut recorder = Recorder::new(
+        ENGINE,
+        [7; 32],
+        &settings,
+        sue_brush::paint::Colors {
+            main: brush.color,
+            sub: brush.sub_color,
+        },
+        Vec::new(),
+    );
+    let canvas = Canvas {
+        snapshot: Some(layer.clone()),
+        ..Canvas::default()
+    };
+    let pool = Arc::new(JobPool::new(2));
+    let mut worker = StrokeWorker::start_on(pool, &brush, recorder.settings(), canvas);
+    let samples = wave([30.0, 80.0], [220.0, 70.0], 0.4, 12.0);
+    for frame in samples.chunks(3) {
+        for sample in frame {
+            if let Some(kept) = recorder.take(*sample) {
+                worker.push(kept);
+            }
+        }
+        let _ = worker.poll();
+    }
+    let live = worker.live();
+    let mut stroke = worker.finish().expect("finished");
+    assert!(stroke.paints_behaviours());
+    stroke.let_go_of_layer();
+    let mut merged = layer.clone();
+    let edit = stroke
+        .commit(&mut merged, [0, 0], EntityId::NIL, "Airbrush")
+        .expect("laid");
+    assert!(!edit.is_empty(), "it painted");
+    let (width, height) = (merged.width() as i64, merged.height() as i64);
+    let bytes = merged.bytes().unwrap();
+    let under = layer.bytes().unwrap();
+    for y in 0..height {
+        for x in 0..width {
+            let i = ((y * width + x) * 4) as usize;
+            let before =
+                [under[i], under[i + 1], under[i + 2], under[i + 3]].map(|v| f32::from(v) / 255.0);
+            let shown = live.over(x, y, before).map(|v| (v * 255.0).round() as u8);
+            assert_eq!(
+                &shown[..],
+                &bytes[i..i + 4],
+                "pixel {x}, {y}: shown is laid"
+            );
+        }
+    }
+    // Painted again from what was kept.
+    let kept = recorder.finish();
+    let mut again = layer.clone();
+    replay::paint(
+        &kept,
+        &preset,
+        sue_brush::paint::Resources::default(),
+        &mut again,
+        [0, 0],
+        false,
+    )
+    .expect("replayed");
+    assert_eq!(
+        again.bytes(),
+        merged.bytes(),
+        "the replay lays the same bytes"
+    );
+}
