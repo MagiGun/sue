@@ -4,7 +4,6 @@
 //! by name), each kept in Sue Paint's data folder, with the palette layout
 //! as it was last left.
 
-use std::collections::HashSet;
 use std::path::Path;
 
 use egui::{Align2, Rect, Sense, Ui, pos2};
@@ -198,9 +197,6 @@ const WORKSPACES_FILE: &str = "workspaces.txt";
 /// Default), one section as `workspaces.txt` has.
 const DEFAULT_FILE: &str = "default_workspace.txt";
 
-/// The file the command bar's own items are kept in.
-const COMMAND_BAR_FILE: &str = "command_bar.txt";
-
 /// The rice key: Sue Paint opens with its palettes where they were left.
 pub(crate) const REMEMBER_LAYOUT: &str = "sue_paint.remember_layout";
 
@@ -277,16 +273,11 @@ const MENUS_WORD: &str = "menus";
 const STYLE_WORD: &str = "style";
 /// The word before how the strip opens its palettes (`tab` or `popup`).
 const STRIP_WORD: &str = "strip";
-/// The line that says the workspace holds the command bar's items, and
-/// the word before each of them (`bar hide <command>`, `bar add
-/// <command>`).
-const BAR_WORD: &str = "bar";
-
 /// How the lines `panels`, `menus`, `hide` and `add` read in each
 /// language Sue Paint 0.0.75 wrote them in: (language, panels, menus,
 /// hide, add). A word is written before the value, or, with a leading
 /// space, after it.
-const OLD_WORDS: [(&str, &str, &str, &str, &str); 9] = [
+pub(crate) const OLD_WORDS: [(&str, &str, &str, &str, &str); 9] = [
     ("en", "panels ", "menus ", "hide ", "add "),
     ("ar", "لوحات ", "قوائم ", "إخفاء ", "إضافة "),
     ("de", "Panels ", "Menüs ", " ausblenden", " hinzufügen"),
@@ -379,111 +370,11 @@ pub(crate) fn canonical_line(line: &str) -> String {
     line.to_owned()
 }
 
-/// The command bar's items as kept in `command_bar.txt`: one `hide
-/// <command>` line per built-in button people hid (sorted), then one
-/// `add <command>` line per command they added, in order.
-#[must_use]
-pub(crate) fn command_bar_text(hidden: &HashSet<String>, added: &[String]) -> String {
-    let mut hidden: Vec<&String> = hidden.iter().collect();
-    hidden.sort();
-    let mut text = String::new();
-    for command in hidden {
-        text.push_str(&format!("hide {command}\n"));
-    }
-    for command in added {
-        text.push_str(&format!("add {command}\n"));
-    }
-    text
-}
-
-/// The command bar's items from `command_bar.txt`, and whether the file
-/// was in the old form (another language's words, or every line run
-/// together, as 0.0.75 wrote it) and is to be written again.
-#[must_use]
-pub(crate) fn command_bar_from(text: &str) -> (HashSet<String>, Vec<String>, bool) {
-    let registry = crate::commands::registry();
-    let mut hidden = HashSet::new();
-    let mut added = Vec::new();
-    let mut tidy = true;
-    for line in text.lines().filter(|line| !line.trim().is_empty()) {
-        if let Some(command) = line.strip_prefix("hide ")
-            && registry.has(command)
-        {
-            hidden.insert(command.to_owned());
-        } else if let Some(command) = line.strip_prefix("add ")
-            && registry.has(command)
-        {
-            added.push(command.to_owned());
-        } else {
-            tidy = false;
-        }
-    }
-    if tidy {
-        return (hidden, added, false);
-    }
-    // The old form: look for every command in every language's words.
-    hidden.clear();
-    added.clear();
-    let mut found: Vec<(usize, bool, String)> = Vec::new();
-    let boundary_after = |rest: &str| {
-        rest.is_empty()
-            || rest.starts_with('\n')
-            || OLD_WORDS.iter().any(|words| {
-                [words.3, words.4]
-                    .iter()
-                    .any(|word| !word.starts_with(' ') && rest.starts_with(word))
-            })
-    };
-    let boundary_before = |head: &str| {
-        head.is_empty()
-            || head.ends_with('\n')
-            || OLD_WORDS.iter().any(|words| {
-                [words.3, words.4]
-                    .iter()
-                    .any(|word| word.starts_with(' ') && head.ends_with(word))
-            })
-    };
-    for command in registry
-        .iter()
-        .filter(|command| !command.is_family())
-        .map(|command| command.name)
-    {
-        for words in &OLD_WORDS {
-            for (word, hide) in [(words.3, true), (words.4, false)] {
-                let needle = if word.starts_with(' ') {
-                    format!("{command}{word}")
-                } else {
-                    format!("{word}{command}")
-                };
-                for (at, _) in text.match_indices(&needle) {
-                    let fits = if word.starts_with(' ') {
-                        boundary_before(&text[..at])
-                    } else {
-                        boundary_after(&text[at + needle.len()..])
-                    };
-                    if fits && !found.iter().any(|(_, _, known)| known == command) {
-                        found.push((at, hide, command.to_owned()));
-                    }
-                }
-            }
-        }
-    }
-    found.sort_by_key(|(at, _, _)| *at);
-    for (_, hide, command) in found {
-        if hide {
-            hidden.insert(command);
-        } else {
-            added.push(command);
-        }
-    }
-    (hidden, added, true)
-}
-
-fn read(folder: Option<&Path>, file: &str) -> Option<String> {
+pub(crate) fn read(folder: Option<&Path>, file: &str) -> Option<String> {
     sue_platform::fs::read_to_string(folder?.join(file)).ok()
 }
 
-fn write(folder: Option<&Path>, file: &str, text: &str) -> Result<(), String> {
+pub(crate) fn write(folder: Option<&Path>, file: &str, text: &str) -> Result<(), String> {
     let folder = folder.ok_or(tr!("sue-paint-has-no-data-folder"))?;
     sue_platform::fs::create_dir_all(folder)
         .and_then(|()| sue_platform::fs::write(folder.join(file), text))
@@ -567,19 +458,7 @@ impl SuePaint {
                 }
             }
         }
-        if let Some(text) = read(folder.as_deref(), COMMAND_BAR_FILE) {
-            let (hidden, added, old) = command_bar_from(&text);
-            self.bar_hidden = hidden;
-            self.bar_extra = added;
-            if old {
-                // Read once in the old form, kept in the new one.
-                let _ = write(
-                    folder.as_deref(),
-                    COMMAND_BAR_FILE,
-                    &command_bar_text(&self.bar_hidden, &self.bar_extra),
-                );
-            }
-        }
+        self.load_command_bar(folder.as_deref());
         self.layout_style = crate::layout_style::current(cx.rice()).id;
         self.load_style_files(folder.as_deref(), remember_layout(cx));
     }
@@ -720,14 +599,13 @@ impl SuePaint {
             .map(|item| item.to_line() + "\n")
             .collect();
         let spaces = workspaces_text(&self.workspaces);
-        let bar = command_bar_text(&self.bar_hidden, &self.bar_extra);
         let spaces_file = crate::layout_style::file_for(self.layout_style, WORKSPACES_FILE);
         let written = write(
             folder.as_deref(),
             "auto_actions.txt",
             &AutoActions::write(&self.auto.sets),
         )
-        .and_then(|()| write(folder.as_deref(), COMMAND_BAR_FILE, &bar))
+        .and_then(|()| self.save_command_bar(folder.as_deref()))
         .and_then(|()| write(folder.as_deref(), "item_bank.txt", &bank))
         .and_then(|()| {
             let presets: String = self
@@ -775,9 +653,7 @@ impl SuePaint {
         if self.strip_as_tab {
             lines.push(format!("{STRIP_WORD} tab"));
         }
-        lines.push(BAR_WORD.to_owned());
-        let bar = command_bar_text(&self.bar_hidden, &self.bar_extra);
-        lines.extend(bar.lines().map(|line| format!("{BAR_WORD} {line}")));
+        lines.extend(self.bar_workspace_lines());
         Workspace {
             name: name.to_owned(),
             lines,
@@ -843,7 +719,7 @@ impl SuePaint {
         if let Some(dock) = Self::read_layout(lines, &self.style_layout()) {
             self.dock = dock;
         }
-        let mut bar: Option<(HashSet<String>, Vec<String>)> = None;
+        let mut bar = crate::bar_items::WorkspaceBar::default();
         self.strip_as_tab = false;
         for line in lines {
             if let Some(panels) = panels_from(line) {
@@ -852,28 +728,11 @@ impl SuePaint {
                 self.menus_hidden = !shown;
             } else if let Some(how) = line.strip_prefix(&format!("{STRIP_WORD} ")) {
                 self.strip_as_tab = how == "tab";
-            } else if line == BAR_WORD {
-                bar = Some((HashSet::new(), Vec::new()));
-            } else if let Some(item) = line.strip_prefix(&format!("{BAR_WORD} "))
-                && let Some((hidden, added)) = bar.as_mut()
-            {
-                let registry = crate::commands::registry();
-                if let Some(command) = item.strip_prefix("hide ")
-                    && registry.has(command)
-                {
-                    hidden.insert(command.to_owned());
-                } else if let Some(command) = item.strip_prefix("add ")
-                    && registry.has(command)
-                {
-                    added.push(command.to_owned());
-                }
+            } else {
+                bar.read(line);
             }
         }
-        // A workspace kept before it held the command bar leaves it as is.
-        if let Some((hidden, added)) = bar {
-            self.bar_hidden = hidden;
-            self.bar_extra = added;
-        }
+        bar.apply(self);
     }
 
     /// Plays auto action `index`: each of its commands in turn.
@@ -1236,35 +1095,6 @@ mod tests {
     }
 
     #[test]
-    fn the_command_bar_file_keeps_one_line_per_item() {
-        let hidden: HashSet<String> = ["view.fit", "edit.undo"].map(String::from).into();
-        let added = vec!["layer.new".to_owned(), "select.all".to_owned()];
-        let text = command_bar_text(&hidden, &added);
-        assert_eq!(
-            text,
-            "hide edit.undo\nhide view.fit\nadd layer.new\nadd select.all\n"
-        );
-        assert_eq!(
-            command_bar_from(&text),
-            (hidden.clone(), added.clone(), false)
-        );
-        // As 0.0.75 wrote it: every line run together, in English or in
-        // German (whose words come after the command).
-        for old in [
-            "hide edit.undohide view.fitadd layer.newadd select.all",
-            "edit.undo ausblendenview.fit ausblendenlayer.new hinzufügenselect.all hinzufügen",
-            "ocultar edit.undoocultar view.fitañadir layer.newañadir select.all",
-        ] {
-            assert_eq!(
-                command_bar_from(old),
-                (hidden.clone(), added.clone(), true),
-                "{old}"
-            );
-        }
-        assert_eq!(command_bar_from(""), (HashSet::new(), Vec::new(), false));
-    }
-
-    #[test]
     fn the_old_words_are_what_each_language_wrote() {
         let languages: Vec<String> = sue_lang::languages()
             .into_iter()
@@ -1314,22 +1144,5 @@ mod tests {
             assert!(!back.palette_showing(palette), "{palette:?} came back");
         }
         assert_eq!(back.workspace_now("Empty").lines, lines);
-    }
-
-    #[test]
-    fn a_workspace_kept_before_the_command_bar_was_in_it_leaves_the_bar() {
-        let mut paint = SuePaint {
-            bar_extra: vec!["view.fit".to_owned()],
-            ..SuePaint::default()
-        };
-        let old: Vec<String> = ["panels 1111111111", "menus 1"].map(String::from).to_vec();
-        paint.apply_layout(&old);
-        assert_eq!(paint.bar_extra, ["view.fit"]);
-        // One kept now holds the bar, an empty one too.
-        paint.bar_extra.clear();
-        let now = paint.workspace_now("").lines;
-        paint.bar_extra = vec!["view.fit".to_owned()];
-        paint.apply_layout(&now);
-        assert!(paint.bar_extra.is_empty());
     }
 }
