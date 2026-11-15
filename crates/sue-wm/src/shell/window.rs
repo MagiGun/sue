@@ -409,8 +409,16 @@ impl Shell {
         }
         let raise = self.raise_view.take();
         let caret_blink = self.config.caret_blink;
-        let phone = self.form_factor() == FormFactor::Mobile;
-        let strip = crate::widgets::TITLE_BAR;
+        let form = self.form_factor();
+        let phone = form == FormFactor::Mobile;
+        // The systems with one window are the touch ones: there the title
+        // strip and its close button are finger sized.
+        let density = if form == FormFactor::Desktop && !crate::widgets::is_touch(ctx) {
+            Density::Compact
+        } else {
+            Density::Touch
+        };
+        let strip = density.tab_strip();
         let step = theme.space(Space::S6);
         let mut closed = Vec::new();
         for index in 0..self.views.len() {
@@ -447,7 +455,9 @@ impl Shell {
             let shown = area.show(ctx, |ui| {
                 let painter = ui.painter().clone();
                 let radius = theme.radius(Radius::Md);
-                painter.add(theme.elevation(Elevation::Raised).as_shape(frame, radius));
+                // Lifted off the page as a popover is, so its edge reads
+                // where the view and the page share a color.
+                painter.add(theme.elevation(Elevation::Floating).as_shape(frame, radius));
                 painter.rect_filled(frame, radius, page_theme.void);
                 // The title strip: dragging it moves the frame.
                 let header = Rect::from_min_size(frame.min, vec2(size.x, strip));
@@ -466,7 +476,7 @@ impl Shell {
                     Id::unique(("sue-view-grip", key.as_str())),
                     Sense::click_and_drag(),
                 );
-                let button = Density::of(ui).icon_button().min(strip);
+                let button = density.icon_button().min(strip);
                 let close = Rect::from_min_size(
                     pos2(
                         header.right() - button - theme.space(Space::S1),
@@ -478,7 +488,11 @@ impl Shell {
                 let room = (close.left() - header.left() - 2.0 * inset).max(0.0);
                 let galley = painter.layout(
                     open.title.clone(),
-                    theme.text_font(TextRole::Caption),
+                    theme.text_font(if density == Density::Touch {
+                        TextRole::Body
+                    } else {
+                        TextRole::Caption
+                    }),
                     theme.text_muted(),
                     room,
                 );

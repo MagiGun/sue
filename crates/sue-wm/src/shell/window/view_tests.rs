@@ -423,3 +423,28 @@ fn on_a_phone_a_floating_view_fills_the_page() {
     assert!((frame.width() - page.width()).abs() < 0.5);
     assert!((frame.height() - page.height()).abs() < 0.5);
 }
+
+#[test]
+fn on_a_touch_screen_the_floating_frame_is_finger_sized() {
+    for form in [FormFactor::Tablet, FormFactor::Mobile] {
+        let mut rig = Rig::new(WindowSupport::One, form);
+        let ctx = egui::Context::default();
+        let mut host = HeadlessWindows::new(&ctx, [1180.0, 820.0], 1.0);
+        rig.ask(open("canvas", "Canvas"));
+        rig.frames(&mut host, 3);
+        let (frame, close) = rig
+            .shell
+            .view_rects(&view_key(&viewer(), "canvas"))
+            .unwrap();
+        let least = Density::Touch.icon_button();
+        assert!(close.width() >= least - 0.5, "{form:?}: {close:?}");
+        assert!(close.height() >= least - 0.5, "{form:?}: {close:?}");
+        // The view starts below the strip the button sits in.
+        let (_, room) = rig.heard.lock().unwrap().drawn.last().cloned().unwrap();
+        assert!(room.top() >= close.bottom() - 0.5, "{form:?}: {room:?}");
+        assert!(frame.contains_rect(close));
+        // And its close button still closes it.
+        click(&mut host, &mut rig, MAIN_SURFACE, close.center());
+        assert!(rig.shell.views().is_empty(), "{form:?}");
+    }
+}

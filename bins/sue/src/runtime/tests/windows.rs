@@ -164,6 +164,34 @@ fn pictures_of_a_view_floating_and_in_its_own_window() {
         .paint_offscreen(&ctx, [1440, 900], clear, output.shapes, textures, 1.0)
         .unwrap();
     write("p3-20-floating.png", [1440, 900], pixels);
+    // The same on a tablet's layout: a finger-sized strip and close.
+    runtime
+        .engine
+        .world
+        .rice
+        .set(
+            sue_wm::INTERFACE_KEY,
+            sue_rice::RiceValue::Text("tablet".to_owned()),
+        )
+        .unwrap();
+    for _ in 0..60 {
+        let (_, textures) = main(&mut runtime, &mut painter, &mut step);
+        painter.apply_textures(textures);
+    }
+    let (output, textures) = main(&mut runtime, &mut painter, &mut step);
+    let pixels = painter
+        .paint_offscreen(&ctx, [1440, 900], clear, output.shapes, textures, 1.0)
+        .unwrap();
+    write("p3-20-floating-tablet.png", [1440, 900], pixels);
+    runtime
+        .engine
+        .world
+        .rice
+        .set(
+            sue_wm::INTERFACE_KEY,
+            sue_rice::RiceValue::Text("desktop".to_owned()),
+        )
+        .unwrap();
     // In a window of its own, with Sue's frame.
     runtime.shell.set_window_support(WindowSupport::Many);
     let key = runtime.windows()[0].key.clone();
