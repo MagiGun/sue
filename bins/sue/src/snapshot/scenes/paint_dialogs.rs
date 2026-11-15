@@ -83,7 +83,7 @@ fn click(tour: &mut Tour<'_>, text: &str) -> Result<(), String> {
         .into_iter()
         .filter(|(found, _)| found == text)
         .map(|(_, rect)| rect.center())
-        .last()
+        .next_back()
         .ok_or_else(|| format!("no {text:?} is drawn"))?;
     tour.camera.click(at);
     tour.settle();
