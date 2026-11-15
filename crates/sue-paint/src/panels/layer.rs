@@ -369,7 +369,7 @@ impl SuePaint {
         let mut chosen = modes.iter().position(|mode| *mode == blend).unwrap_or(0);
         let can_blend = current.is_some_and(|info| info.kind != LayerKind::Paper);
         let gap = theme.space(Space::S2);
-        let field = theme.space(Space::S9) + theme.space(Space::S4);
+        let field = theme.space(Space::S9) + theme.space(Space::S6);
         let split = area.left() + (area.width() * 0.45).max(field);
         let blend_rect = Rect::from_min_max(area.min, pos2(split - gap, area.bottom()));
         let wedge_rect = Rect::from_min_max(
