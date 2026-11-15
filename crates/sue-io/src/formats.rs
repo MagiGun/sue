@@ -710,6 +710,57 @@ impl DelimitedFormat {
             delimiter: '\t',
         }
     }
+
+    /// The format of a file named `name`: CSV for `.csv`, TSV for `.tsv`
+    /// and `.tab` (any case), else none.
+    #[must_use]
+    pub fn for_name(name: &str) -> Option<Self> {
+        let ext = std::path::Path::new(name)
+            .extension()?
+            .to_string_lossy()
+            .to_ascii_lowercase();
+        [Self::csv(), Self::tsv()]
+            .into_iter()
+            .find(|format| format.info.extensions.contains(&ext.as_str()))
+    }
+
+    /// The rows of a file in this format, each cell's text exactly as the
+    /// file holds it (no numbers read, so `007` stays `007`), for a
+    /// table of text such as a document's. A byte order mark is skipped.
+    ///
+    /// # Errors
+    /// If the file is not UTF-8 text.
+    pub fn read_rows(&self, bytes: &[u8]) -> Result<Vec<Vec<String>>, FormatError> {
+        let text = std::str::from_utf8(bytes)
+            .map_err(|_| FormatError::new("the file is not UTF-8 text"))?;
+        let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+        Ok(parse_delimited(text, self.delimiter))
+    }
+
+    /// `rows` of cell text in this format: a cell that holds the
+    /// delimiter, a quote or a line end is quoted (RFC 4180), and every
+    /// row ends with CRLF. [`Self::read_rows`] reads it back the same.
+    #[must_use]
+    pub fn write_rows<S: AsRef<str>>(&self, rows: &[Vec<S>]) -> Vec<u8> {
+        let mut out = String::new();
+        for row in rows {
+            for (column, cell) in row.iter().enumerate() {
+                if column > 0 {
+                    out.push(self.delimiter);
+                }
+                let text = cell.as_ref();
+                if text.contains([self.delimiter, '"', '\n', '\r']) {
+                    out.push('"');
+                    out.push_str(&text.replace('"', "\"\""));
+                    out.push('"');
+                } else {
+                    out.push_str(text);
+                }
+            }
+            out.push_str("\r\n");
+        }
+        out.into_bytes()
+    }
 }
 
 /// Splits delimited text into rows of fields (RFC 4180 quoting).
@@ -824,27 +875,19 @@ impl FormatHandler for DelimitedFormat {
             .ext::<Table>()
             .ok_or_else(|| FormatError::new("only tables export to this format"))?;
         let (rows, columns) = table.size();
-        let mut out = String::new();
-        for row in 0..rows {
-            for column in 0..columns {
-                if column > 0 {
-                    out.push(self.delimiter);
-                }
-                let text = table
-                    .value(row, column)
-                    .map(ToString::to_string)
-                    .unwrap_or_default();
-                if text.contains([self.delimiter, '"', '\n', '\r']) {
-                    out.push('"');
-                    out.push_str(&text.replace('"', "\"\""));
-                    out.push('"');
-                } else {
-                    out.push_str(&text);
-                }
-            }
-            out.push_str("\r\n");
-        }
-        Ok(out.into_bytes())
+        let cells: Vec<Vec<String>> = (0..rows)
+            .map(|row| {
+                (0..columns)
+                    .map(|column| {
+                        table
+                            .value(row, column)
+                            .map(ToString::to_string)
+                            .unwrap_or_default()
+                    })
+                    .collect()
+            })
+            .collect();
+        Ok(self.write_rows(&cells))
     }
 }
 
@@ -1866,5 +1909,53 @@ mod tests {
         let text = String::from_utf8(tsv).unwrap();
         assert!(text.starts_with("plain\tLee, Ada\t\"say \"\"hi\"\"\"\t"));
         assert!(text.contains("\t\"a\tb\"\t"));
+    }
+
+    /// A document's table keeps each cell's text as the file wrote it, and
+    /// goes back out byte for byte.
+    #[test]
+    fn delimited_rows_keep_their_text_and_write_back_the_same() {
+        assert_eq!(DelimitedFormat::for_name("a.CSV").unwrap().info().id, "csv");
+        assert_eq!(DelimitedFormat::for_name("a.tab").unwrap().info().id, "tsv");
+        assert_eq!(DelimitedFormat::for_name("a.tsv").unwrap().info().id, "tsv");
+        assert!(DelimitedFormat::for_name("a.txt").is_none());
+        assert!(DelimitedFormat::for_name("csv").is_none());
+        let csv = DelimitedFormat::csv();
+        let file = "Part,Code,Note\r\nBolt,007,\"M8, zinc\"\r\nNut, 1.50 ,\"say \"\"hi\"\"\"\r\n";
+        let rows = csv.read_rows(format!("\u{FEFF}{file}").as_bytes()).unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                vec!["Part", "Code", "Note"],
+                vec!["Bolt", "007", "M8, zinc"],
+                vec!["Nut", " 1.50 ", "say \"hi\""],
+            ]
+        );
+        assert_eq!(csv.write_rows(&rows), file.as_bytes());
+        // The registered export writes what write_rows writes.
+        let mut table = Table::new();
+        for (row, cells) in rows.iter().enumerate() {
+            for (column, cell) in cells.iter().enumerate() {
+                table.set(
+                    row as u32,
+                    column as u32,
+                    Some(sue_model::Cell::value(cell.as_str())),
+                );
+            }
+        }
+        let mut arena = Arena::new();
+        let handle = arena.insert(Entity::empty("t", class::SHEET).with_ext(table));
+        let id = arena.get(handle).unwrap().id();
+        assert_eq!(
+            csv.export(&arena, &[id], &Properties::new()).unwrap(),
+            file.as_bytes()
+        );
+        let tsv = DelimitedFormat::tsv();
+        assert_eq!(
+            tsv.read_rows(&tsv.write_rows(&rows)).unwrap(),
+            rows,
+            "TSV round trip"
+        );
+        assert!(csv.read_rows(&[0xff, 0xfe, 0x00]).is_err());
     }
 }

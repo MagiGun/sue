@@ -178,7 +178,7 @@ impl SueWriter {
                     });
                     let mut include = included;
                     if ui
-                        .checkbox(&mut include, tr!("include-in-compile-2"))
+                        .checkbox(&mut include, tr!("include-in-export-2"))
                         .changed()
                     {
                         run = Some("project.include".to_owned());

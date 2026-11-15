@@ -148,6 +148,7 @@ of work is by how much people miss each one (the plan at the end).
 | Borders and shading, table styles and autoformat | WL | partial | Every table ruled, its heading row shaded; no styles yet |
 | Cell alignment, margins and text direction | WL | missing | |
 | Convert text to table and table to text | WL | done | Tabs, else commas |
+| Table from a CSV or TSV file, table out as one | WL | done | Table, Convert, Table from File and Export Table As; a `.csv`, `.tsv` or `.tab` opens as a document holding the table; the first row a heading row if asked; cells kept as written |
 | Sort | WL | missing | |
 | Formulas and number formats | WL | missing | |
 | Nested tables | WL | missing | |
@@ -315,7 +316,7 @@ of work is by how much people miss each one (the plan at the end).
 | EPUB export | L | done | |
 | HTML export and import | WL | done | |
 | Markdown export and import | WL | done | |
-| Plain text export and import | WL | done | |
+| Plain text export and import | WL | done | Line endings (LF or CRLF), spaces at line ends dropped, tabs as spaces; Markdown takes the line endings |
 | DOC (Word 97) | WL | missing | |
 | FODT (flat OpenDocument) | L | missing | |
 | DocBook, XHTML | L | missing | |
@@ -330,7 +331,7 @@ of work is by how much people miss each one (the plan at the end).
 | Print preview | WL | partial | Page view |
 | Print markup, comments | W | missing | |
 | Brochure and multiple pages per sheet | L | missing | |
-| Compile (one book from many documents) | - | done | Sue's own |
+| Export (one book from many documents, once called Compile) | - | done | Sue's own; File, Export |
 
 ## Accessibility and review
 

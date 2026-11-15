@@ -253,9 +253,9 @@ impl SueWriter {
                 item(
                     ui,
                     &if included {
-                        tr!("leave-out-of-compile")
+                        tr!("leave-out-of-export")
                     } else {
-                        tr!("include-in-compile")
+                        tr!("include-in-export")
                     },
                     "project.include",
                     run,

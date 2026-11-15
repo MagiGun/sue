@@ -6,8 +6,10 @@
 
 use std::collections::HashMap;
 
-use sue_core::{Arena, ComponentKind, EntityId, Value};
+use sue_core::{Arena, ComponentKind, Entity, EntityId, FormatHandler, Properties, Value};
+use sue_io::DelimitedFormat;
 use sue_io::publish::{Book, Figure, PublishStyle, PublishTable, Section};
+use sue_io::text_ops::{Endings, TextOptions, tidy};
 use sue_model::contents::Contents;
 use sue_model::manuscript;
 use sue_model::{TextMarks, mark_kind as kind, picture};
@@ -82,6 +84,47 @@ pub struct Options {
     pub title_page: bool,
     /// Each top folder starts a new page.
     pub chapter_pages: bool,
+    /// How plain text is tidied on its way out: its line endings, spaces
+    /// at line ends and tabs. Markdown takes the line endings only (two
+    /// spaces at a line end are a line break there, and tabs carry lists
+    /// and code); the other formats none of it.
+    pub text: TextOptions,
+}
+
+/// The tidying a format takes of `text`: all of it for plain text, the
+/// line endings for Markdown, none for the rest.
+#[must_use]
+pub fn tidying(format: &str, text: &TextOptions) -> Option<TextOptions> {
+    match format {
+        "txt" => Some(*text),
+        "md" => Some(TextOptions {
+            endings: text.endings,
+            trim_trailing: false,
+            tab_spaces: 0,
+        }),
+        _ => None,
+    }
+}
+
+/// The line endings of this system: CRLF on Windows, LF elsewhere.
+#[must_use]
+pub fn system_endings() -> Endings {
+    if sue_platform::crlf_line_ends() {
+        Endings::CrLf
+    } else {
+        Endings::Lf
+    }
+}
+
+/// Plain text tidied as the system writes it: its own line endings, the
+/// spaces and tabs kept.
+#[must_use]
+pub fn system_text() -> TextOptions {
+    TextOptions {
+        endings: system_endings(),
+        trim_trailing: false,
+        tab_spaces: 0,
+    }
 }
 
 /// The project's look: its style sheet and page.
@@ -360,7 +403,7 @@ fn comments(arena: &Arena, sections: &[Section]) -> HashMap<EntityId, sue_model:
 pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>, String> {
     let mut sections = sections(arena, options, look);
     if sections.is_empty() {
-        return Err(tr!("there-nothing-compile-every-document-left"));
+        return Err(tr!("there-is-nothing-to-export-every-document-left"));
     }
     // Word and web pages show tracked changes; the rest print the text as
     // it is with every change accepted.
@@ -436,8 +479,18 @@ pub fn compile(arena: &Arena, options: &Options, look: &Look) -> Result<Vec<u8>,
         "epub" => p::to_epub(&book),
         "html" => p::to_html(&book).into_bytes(),
         "rtf" => p::to_rtf(&book).into_bytes(),
-        "md" => p::to_markdown(&book).into_bytes(),
-        "txt" => p::to_text(&book).into_bytes(),
+        "md" | "txt" => {
+            let text = if options.format == "md" {
+                p::to_markdown(&book)
+            } else {
+                p::to_text(&book)
+            };
+            match tidying(&options.format, &options.text) {
+                Some(tidied) => tidy(&text, &tidied),
+                None => text,
+            }
+            .into_bytes()
+        }
         other => return Err(tr!("sue-writer-cannot-write-files", other = other)),
     })
 }
@@ -475,8 +528,87 @@ pub fn import(name: &str, bytes: &[u8]) -> Result<sue_io::publish::Imported, Str
             sue_model::ensure_final_newline(&mut text);
             Ok(plain((text, TextMarks::new())))
         }
+        "csv" | "tsv" | "tab" => import_table(name, bytes, true),
         other => Err(tr!("sue-writer-cannot-read-files-yet", other = other)),
     }
+}
+
+/// `true` for a file Sue Writer reads as a table: `.csv`, `.tsv` or
+/// `.tab`, any case.
+#[must_use]
+pub fn is_table_file(name: &str) -> bool {
+    DelimitedFormat::for_name(name).is_some()
+}
+
+/// `true` for a tab-separated file name (`.tsv` or `.tab`).
+#[must_use]
+pub fn is_tsv(name: &str) -> bool {
+    DelimitedFormat::for_name(name).is_some_and(|format| format.info().id == "tsv")
+}
+
+/// A table file read into a table entity, through the registered
+/// [`DelimitedFormat`]: each cell holds its text as the file wrote it,
+/// and the first row is a heading row when `heading` says so.
+///
+/// # Errors
+/// If `name` is not a table file, the file is not UTF-8 text, or it holds
+/// no rows.
+pub fn read_table(name: &str, bytes: &[u8], heading: bool) -> Result<Entity, String> {
+    let Some(format) = DelimitedFormat::for_name(name) else {
+        let ext = std::path::Path::new(name)
+            .extension()
+            .map(|ext| ext.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        return Err(tr!("sue-writer-cannot-read-files-yet", other = ext));
+    };
+    let rows = format
+        .read_rows(bytes)
+        .map_err(|_| tr!("the-table-file-is-not-text"))?;
+    if rows.iter().all(|row| row.iter().all(String::is_empty)) {
+        return Err(tr!("the-table-file-is-empty"));
+    }
+    Ok(sue_model::text_table(&rows, u32::from(heading), &[]))
+}
+
+/// A table file read as a document that holds the one table, as Word and
+/// OpenDocument files bring theirs (the table entity in
+/// [`Imported::entities`](sue_io::publish::Imported), set in the text).
+///
+/// # Errors
+/// As [`read_table`].
+pub fn import_table(
+    name: &str,
+    bytes: &[u8],
+    heading: bool,
+) -> Result<sue_io::publish::Imported, String> {
+    let table = read_table(name, bytes, heading)?;
+    let mut text = String::new();
+    text.push(sue_model::OBJECT);
+    text.push('\n');
+    let mut marks = TextMarks::new();
+    marks.set(
+        0..sue_model::OBJECT.len_utf8(),
+        kind::EMBED,
+        Some(Value::Entity(table.id())),
+    );
+    Ok(sue_io::publish::Imported {
+        text,
+        marks,
+        entities: vec![table],
+    })
+}
+
+/// Table `table` written as the table file `name`: TSV for `.tsv` and
+/// `.tab`, else CSV, through the registered [`DelimitedFormat`]. Every
+/// row, the heading rows too, is a line of the file.
+///
+/// # Errors
+/// If `table` is not a table in `arena`.
+pub fn export_table(arena: &Arena, table: EntityId, name: &str) -> Result<Vec<u8>, String> {
+    let format = DelimitedFormat::for_name(name).unwrap_or_else(DelimitedFormat::csv);
+    format
+        .export(arena, &[table], &Properties::new())
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -521,6 +653,7 @@ mod tests {
             separator: Separator::SceneBreak,
             title_page: true,
             chapter_pages: true,
+            text: system_text(),
         };
         let sections = sections(&arena, &options, &look);
         let titles: Vec<&str> = sections
@@ -568,5 +701,110 @@ mod tests {
             import("a.md", b"# Hi\n\nthere").unwrap();
         assert_eq!(text, "Hi\nthere\n");
         assert!(marks.paragraph_value(&text, 0, kind::STYLE).is_some());
+    }
+
+    /// One loose document holding `text`, and the options to export it.
+    fn loose(text: &str) -> (Arena, Options, Look) {
+        let mut arena = Arena::new();
+        let doc = crate::project::document_entity("Notes", text.to_owned(), TextMarks::new());
+        let from = doc.id();
+        arena.insert(doc);
+        let options = Options {
+            format: "txt".to_owned(),
+            from,
+            titles: Titles::None,
+            separator: Separator::None,
+            title_page: false,
+            chapter_pages: false,
+            text: TextOptions {
+                endings: Endings::CrLf,
+                trim_trailing: true,
+                tab_spaces: 4,
+            },
+        };
+        let fonts = sue_type::Fonts::default();
+        let look = Look {
+            sheet: StyleSheet::manuscript(&fonts),
+            page: PageSetup::default(),
+            title: "Notes".to_owned(),
+            author: String::new(),
+        };
+        (arena, options, look)
+    }
+
+    #[test]
+    fn plain_text_is_tidied_and_markdown_keeps_its_spaces_and_tabs() {
+        let (arena, mut options, look) = loose("one  \n\ttwo\n");
+        let text = String::from_utf8(compile(&arena, &options, &look).unwrap()).unwrap();
+        assert!(text.contains("one\r\n    two\r\n"), "{text:?}");
+        assert!(!text.contains('\t') && !text.contains(" \r\n"), "{text:?}");
+        assert!(
+            !text.replace("\r\n", "").contains('\n'),
+            "every line ends with CRLF: {text:?}"
+        );
+        // Markdown: the line endings only.
+        options.format = "md".to_owned();
+        let markdown = String::from_utf8(compile(&arena, &options, &look).unwrap()).unwrap();
+        assert!(markdown.contains("\r\n"), "{markdown:?}");
+        assert!(!markdown.replace("\r\n", "").contains('\n'), "{markdown:?}");
+        assert_eq!(
+            tidying("md", &options.text),
+            Some(TextOptions {
+                endings: Endings::CrLf,
+                trim_trailing: false,
+                tab_spaces: 0,
+            })
+        );
+        // LF wanted, LF written.
+        options.format = "txt".to_owned();
+        options.text.endings = Endings::Lf;
+        let text = String::from_utf8(compile(&arena, &options, &look).unwrap()).unwrap();
+        assert!(!text.contains('\r'), "{text:?}");
+        // The other formats are not touched.
+        assert_eq!(tidying("docx", &options.text), None);
+        assert_eq!(tidying("html", &options.text), None);
+        assert_eq!(system_text().tab_spaces, 0);
+        assert!(!system_text().trim_trailing);
+    }
+
+    #[test]
+    fn a_table_file_becomes_a_document_with_its_table_and_goes_back_out() {
+        let file = "Part,Code\r\nBolt,007\r\n\"M8, zinc\",2\r\n";
+        let read = import_table("parts.csv", file.as_bytes(), true).unwrap();
+        assert_eq!(read.text, format!("{}\n", sue_model::OBJECT));
+        assert_eq!(read.entities.len(), 1);
+        let table = &read.entities[0];
+        assert_eq!(table.class(), sue_model::TEXT_TABLE);
+        assert_eq!(
+            read.marks.value_at(0, kind::EMBED),
+            Some(&Value::Entity(table.id()))
+        );
+        assert_eq!(table.property(sue_model::HEADER_ROWS), Some(&Value::Int(1)));
+        let cells = table.ext::<sue_model::Table>().unwrap();
+        assert_eq!(cells.size(), (3, 2));
+        assert_eq!(cells.text(1, 1), "007");
+        assert_eq!(cells.text(2, 0), "M8, zinc");
+        // Without the heading row, no heading.
+        let plain = read_table("parts.CSV", file.as_bytes(), false).unwrap();
+        assert_eq!(plain.property(sue_model::HEADER_ROWS), None);
+        // Back out as CSV, byte for byte; as TSV by the name.
+        let mut arena = Arena::new();
+        let id = table.id();
+        arena.insert(table.clone());
+        assert_eq!(
+            export_table(&arena, id, "out.csv").unwrap(),
+            file.as_bytes()
+        );
+        assert_eq!(
+            String::from_utf8(export_table(&arena, id, "out.tsv").unwrap()).unwrap(),
+            "Part\tCode\r\nBolt\t007\r\nM8, zinc\t2\r\n"
+        );
+        // The general import reads one too, its first row a heading.
+        let tsv = import("t.tab", b"a\tb\n").unwrap();
+        assert_eq!(tsv.entities.len(), 1);
+        assert!(is_table_file("x.TSV") && !is_table_file("x.txt"));
+        assert!(read_table("empty.csv", b"", true).is_err());
+        assert!(read_table("bad.csv", &[0xff, 0xfe], true).is_err());
+        assert!(read_table("x.txt", b"a", true).is_err());
     }
 }

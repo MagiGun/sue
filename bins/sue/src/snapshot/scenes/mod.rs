@@ -79,6 +79,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     writer_outliner::outliner(tour)?;
     writer_document::composition(tour)?;
     writer_compile::dialog(tour)?;
+    writer_compile::export_and_tables(tour)?;
     writer_document::format_menu(tour)?;
     writer_start::desktop(tour)?;
     writer_document::comments(tour)?;

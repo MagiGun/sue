@@ -23,9 +23,15 @@ mod table;
 mod view;
 
 /// Commands the shell's own keys run (`keys.undo`, `keys.redo`,
-/// `keys.open_file`): they get no row in the studio's shortcuts, so the
-/// menus show the shell's keys beside them.
-const SHELL_OWNED: [&str; 3] = ["edit.undo", "edit.redo", "file.open"];
+/// `keys.open_file`, `keys.save`, `keys.quit`): they get no row in the
+/// studio's shortcuts, so the menus show the shell's keys beside them.
+const SHELL_OWNED: [&str; 5] = [
+    "edit.undo",
+    "edit.redo",
+    "file.open",
+    "file.save",
+    "app.quit",
+];
 
 /// Every command of Sue Writer.
 pub(crate) fn registry() -> &'static CommandRegistry<SueWriter> {
@@ -48,7 +54,7 @@ pub(crate) fn registry() -> &'static CommandRegistry<SueWriter> {
 /// Settings that keep the English name 0.0.75 gave them, which differs
 /// from the command's label (the shipped settings file and `rice.ftl`
 /// name them so).
-const SETTING_NAMES: [(&str, &str); 1] = [("compile.pdf", "PDF")];
+const SETTING_NAMES: [(&str, &str); 2] = [("compile.pdf", "PDF"), ("compile.open", "Compile")];
 
 /// Sue Writer's shortcuts: a row for every command that can be given a
 /// key, with its default chords, but for the commands the shell's keys

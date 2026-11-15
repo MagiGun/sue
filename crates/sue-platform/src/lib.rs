@@ -158,6 +158,13 @@ pub fn own_frames() -> bool {
     ))
 }
 
+/// `true` where text files end their lines with CRLF by custom (Windows),
+/// so an export's line endings can follow the system by default.
+#[must_use]
+pub const fn crlf_line_ends() -> bool {
+    cfg!(target_os = "windows")
+}
+
 /// This run's process id; in the browser, which has none, a number
 /// drawn once per page so two tabs still tell their work apart.
 #[must_use]

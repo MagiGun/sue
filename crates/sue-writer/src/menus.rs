@@ -39,6 +39,9 @@ pub fn menus() -> Vec<Menu> {
         .map(|(key, _, _)| named(compile::format_name(key), format!("compile.{key}")))
         .collect();
     vec![
+        // One skeleton for every studio (plan D11): File (new, open,
+        // save, export, settings, back, quit), Edit, View, the studio's
+        // own menus, Help.
         Menu::new(
             tr!("file"),
             vec![
@@ -49,14 +52,20 @@ pub fn menus() -> Vec<Menu> {
                 // The shell's Open key runs `file.open`, so the item shows it.
                 item("file.open"),
                 MenuItem::Separator,
-                item("file.save_template"),
-                item("file.templates_folder"),
+                item("file.save"),
+                item("file.save_as"),
+                MenuItem::sub(
+                    tr!("templates"),
+                    vec![item("file.save_template"), item("file.templates_folder")],
+                ),
                 MenuItem::Separator,
                 item("compile.open"),
                 MenuItem::sub(tr!("export-as"), export),
                 MenuItem::Separator,
-                item("project.settings"),
-                item("studio.leave"),
+                item("file.settings"),
+                MenuItem::Separator,
+                item("file.leave"),
+                item("app.quit"),
             ],
         ),
         Menu::new(
@@ -64,6 +73,11 @@ pub fn menus() -> Vec<Menu> {
             vec![
                 item("edit.undo"),
                 item("edit.redo"),
+                MenuItem::Separator,
+                item("edit.cut"),
+                item("edit.copy"),
+                item("edit.paste"),
+                item("edit.select_all"),
                 MenuItem::Separator,
                 item("edit.find"),
                 item("edit.replace"),
@@ -229,7 +243,13 @@ pub fn menus() -> Vec<Menu> {
                 MenuItem::Separator,
                 MenuItem::sub(
                     tr!("convert"),
-                    vec![item("table.from_text"), item("table.to_text")],
+                    vec![
+                        item("table.from_text"),
+                        item("table.to_text"),
+                        MenuItem::Separator,
+                        item("table.from_file"),
+                        item("table.export"),
+                    ],
                 ),
             ],
         ),
@@ -299,9 +319,18 @@ pub fn menus() -> Vec<Menu> {
                 ),
                 MenuItem::Separator,
                 item("project.statistics"),
+                item("project.settings"),
             ],
         ),
-        Menu::new(tr!("help"), vec![item("help.shortcuts")]),
+        Menu::new(
+            tr!("help"),
+            vec![
+                item("help.shortcuts"),
+                MenuItem::Separator,
+                item("help.updates"),
+                item("help.about"),
+            ],
+        ),
     ]
 }
 
@@ -329,6 +358,93 @@ mod tests {
             .iter()
             .filter(|item| !matches!(item, MenuItem::Separator))
             .count()
+    }
+
+    /// Every command a menu sends, submenus included.
+    fn sent(items: &[MenuItem], out: &mut Vec<String>) {
+        for item in items {
+            match item {
+                MenuItem::Action { command, .. } => out.push(command.clone()),
+                MenuItem::Sub { items, .. } => sent(items, out),
+                MenuItem::Separator => {}
+            }
+        }
+    }
+
+    #[test]
+    fn the_menus_follow_the_skeleton_every_studio_shares() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let menus = menus();
+        let titles: Vec<&str> = menus.iter().map(|menu| menu.title.as_str()).collect();
+        assert_eq!(titles.first(), Some(&"File"));
+        assert_eq!(titles.get(1), Some(&"Edit"));
+        assert_eq!(titles.get(2), Some(&"View"));
+        assert_eq!(titles.last(), Some(&"Help"));
+        let of = |title: &str| {
+            let mut out = Vec::new();
+            sent(
+                &menus.iter().find(|menu| menu.title == title).unwrap().items,
+                &mut out,
+            );
+            out
+        };
+        let has = |title: &str, commands: &[&str]| {
+            let found = of(title);
+            for command in commands {
+                assert!(found.iter().any(|one| one == command), "{title}: {command}");
+            }
+        };
+        has(
+            "File",
+            &[
+                "file.new",
+                "file.open",
+                "file.save",
+                "file.save_as",
+                "compile.open",
+                "compile.txt",
+                "file.settings",
+                "file.leave",
+                "app.quit",
+            ],
+        );
+        has(
+            "Edit",
+            &[
+                "edit.undo",
+                "edit.redo",
+                "edit.cut",
+                "edit.copy",
+                "edit.paste",
+                "edit.select_all",
+                "edit.find",
+            ],
+        );
+        has("Table", &["table.from_file", "table.export"]);
+        has("Project", &["project.settings"]);
+        has("Help", &["help.shortcuts", "help.updates", "help.about"]);
+        // The old name of Back to the Hub is in no menu, and every command
+        // a menu sends is one the registry runs.
+        for menu in &menus {
+            let mut all = Vec::new();
+            sent(&menu.items, &mut all);
+            assert!(!all.iter().any(|one| one == "studio.leave"));
+            for command in all {
+                assert!(registry().find(&command).is_some(), "{command}");
+            }
+        }
+        // "Compile" reads "Export".
+        let file = &menus[0];
+        let labels: Vec<&str> = file
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Action { label, .. } => Some(label.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.contains(&"Export..."), "{labels:?}");
+        assert!(!labels.iter().any(|label| label.contains("Compile")));
     }
 
     #[test]

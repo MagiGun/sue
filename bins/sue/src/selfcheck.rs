@@ -1227,6 +1227,7 @@ fn check_writer_studio(subject: &mut Subject) -> Result<String, String> {
             separator: sue_writer::Separator::SceneBreak,
             title_page: true,
             chapter_pages: true,
+            text: sue_writer::system_text(),
         };
         let bytes = sue_writer::compile(
             arena,

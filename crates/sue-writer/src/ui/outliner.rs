@@ -36,7 +36,7 @@ impl SueWriter {
             (tr!("label"), 0.1),
             (tr!("status"), 0.1),
             (tr!("words-3"), 0.06),
-            (tr!("compile"), 0.06),
+            (tr!("export"), 0.06),
         ];
         let width = ui.available_width();
         ui.horizontal(|ui| {
