@@ -103,7 +103,7 @@ fn filter(tour: &mut Tour<'_>, text: &str) -> Result<(), String> {
 /// 04 and 05. Settings, on two categories; 04b. the color wheel behind
 /// the page background's swatch; 04c to 04g. Sue Paint's page, the
 /// keyboard shortcuts with a key held twice, the icons, and Sue Writer's
-/// page.
+/// page; 04h. the icons with a test pack installed and chosen.
 pub(super) fn desktop(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.request(ShellRequest::OpenSettings(Some("appearance".to_owned())));
     tour.shoot("04-settings-appearance")?;
@@ -126,6 +126,29 @@ pub(super) fn desktop(tour: &mut Tour<'_>) -> Result<(), String> {
     scroll_to(tour, &sheet)?;
     click(tour, &sheet)?;
     tour.shoot("04c-settings-icons")?;
+    // 04h. A pack installed from a folder and chosen: its icons, drawn
+    // as filled shapes, take the place of Sue's own on the sheet and in
+    // the frame around it; then Sue's own again.
+    let folder = tour.home.join("snapshot-icon-pack");
+    write_test_pack(&folder)?;
+    let install = sue_lang::text("settings", "icons-install-folder");
+    scroll_to(tour, &install)?;
+    click(tour, &install)?;
+    let now = tour.camera.now;
+    if !tour
+        .runtime
+        .answer_pick(&folder, &mut tour.camera.painter, now)
+    {
+        return Err("Install from Folder asked for no folder".to_owned());
+    }
+    tour.settle();
+    let sues_own = sue_lang::text("settings", "icons-sues-own");
+    scroll_to(tour, &sues_own)?;
+    click(tour, "Snapshot Shapes")?;
+    tour.settle();
+    tour.shoot("04h-settings-icon-pack")?;
+    click(tour, &sues_own)?;
+    tour.settle();
     // File, Preferences in Sue Paint opens this page.
     tour.request(ShellRequest::OpenSettings(Some(sue_paint::ID.to_owned())));
     tour.shoot("04d-settings-sue-paint")?;
@@ -183,5 +206,51 @@ pub(super) fn screens(tour: &mut Tour<'_>) -> Result<(), String> {
     }
     tour.runtime.shell.close_window();
     tour.set(sue_wm::INTERFACE_KEY, RiceValue::Text("auto".to_owned()));
+    Ok(())
+}
+
+/// A small icon pack of filled shapes, unlike Sue's lines, so a sheet
+/// shows at a glance which icons it draws.
+fn write_test_pack(folder: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+    let manifest = "format = 1
+name = Snapshot Shapes
+author = Sue's snapshot tour
+                    licence = CC0-1.0
+version = 1
+";
+    let disc = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="black"/></svg>"#;
+    let square = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3" fill="black"/></svg>"#;
+    let diamond = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 3 L21 12 L12 21 L3 12 Z" fill="black"/></svg>"#;
+    let mut files = vec![("icon-pack.txt".to_owned(), manifest.to_owned())];
+    for (index, name) in [
+        "settings",
+        "search",
+        "folder",
+        "delete",
+        "info",
+        "tool-brush",
+        "picture",
+        "document",
+        "star",
+        "heart",
+        "eye",
+        "lock",
+        "close",
+        "check",
+        "plus",
+        "minus",
+        "menu",
+        "filter",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let svg = [disc, square, diamond][index % 3];
+        files.push((format!("{name}.svg"), svg.to_owned()));
+    }
+    for (name, text) in files {
+        std::fs::write(folder.join(name), text).map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
