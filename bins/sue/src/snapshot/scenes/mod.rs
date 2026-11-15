@@ -18,6 +18,7 @@ mod paint_comic;
 mod paint_command_bar;
 mod paint_dialogs;
 mod paint_dock;
+mod paint_engine;
 mod paint_export;
 mod paint_extras;
 mod paint_figure;
@@ -176,6 +177,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 36a and 36b. Picked vector lines and Vector magnet, last, since
     // their steps stay in Sue Paint's history.
     paint_vector::scenes(tour)?;
+    // 08s. A pen line painted by the brush engine, after everything.
+    paint_engine::pen_stroke(tour)?;
     Ok(())
 }
 
