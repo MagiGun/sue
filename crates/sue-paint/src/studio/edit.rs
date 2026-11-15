@@ -96,31 +96,19 @@ impl SuePaint {
         self.warp = Some(WarpSession {
             layer: info.id,
             size,
-            bounds: crate::warp::bounds(&before, size[0], size[1]),
             before,
             pins: Vec::new(),
             shown: Vec::new(),
             offset: info.style.offset,
+            shown_settings: None,
+            mesh: Vec::new(),
         });
         cx.notify(tr!("puppet-warp-click-put-pins-drag"));
     }
 
     /// Shows the layer bent by the pins as they are now.
     pub(crate) fn warp_preview(&mut self, cx: &mut AppletContext<'_>) {
-        let Some(warp) = self.warp.as_mut() else {
-            return;
-        };
-        if warp.pins == warp.shown {
-            return;
-        }
-        let pixels = crate::warp::warp(&warp.before, warp.size[0], warp.size[1], &warp.pins, 8);
-        if let Some(bytes) = doc::raster_mut(&mut cx.world.arena, warp.layer)
-            .and_then(RasterTile2D::bytes_mut)
-            .filter(|bytes| bytes.len() == pixels.len())
-        {
-            bytes.copy_from_slice(&pixels);
-        }
-        warp.shown = warp.pins.clone();
+        self.puppet_preview(cx);
     }
 
     /// Ends puppet warp: keeps the bend as one undo step, or puts the
@@ -131,7 +119,7 @@ impl SuePaint {
         };
         self.gesture = None;
         let after = if keep {
-            crate::warp::warp(&warp.before, warp.size[0], warp.size[1], &warp.pins, 2)
+            warp.bend(&self.transform_prefs.puppet)
         } else {
             warp.before.clone()
         };
