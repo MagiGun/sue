@@ -552,5 +552,82 @@ fn sue_writers_comments_pane_replies_resolves_and_deletes_with_undo() {
             .unwrap()
             .resolved
     );
+    // Delete is the icon button after Resolve: the pointer walks right
+    // from Resolve until a tooltip names it, and clicks there.
+    let resolve = panes.rect_of("Resolve").expect("Resolve is shown");
+    let mut x = resolve.right() + 4.0;
+    let delete = loop {
+        assert!(x < resolve.right() + 80.0, "no Delete button after Resolve");
+        let at = egui::pos2(x, resolve.center().y);
+        panes.hover(at);
+        if panes.rect_of("Delete").is_some() {
+            break at;
+        }
+        x += 6.0;
+    };
+    // The thread goes with its reply, and Undo brings both back.
+    let thread = comments(&panes);
+    assert_eq!(thread.len(), 2, "the comment and its reply");
+    panes.click(delete);
+    assert!(comments(&panes).is_empty(), "the comment was deleted");
+    panes.undo();
+    assert_eq!(comments(&panes), thread, "undo brings the thread back");
+    panes.finish();
+}
+
+#[test]
+fn sue_writers_research_shows_a_picture_and_says_why_another_item_is_blank() {
+    let mut panes = Panes::new("writer-research");
+    let research = manuscript::folder(panes.arena(), panes.novel, role::RESEARCH).unwrap();
+    let tile = sue_core::RasterTile2D::from_bytes(
+        8,
+        8,
+        sue_core::PixelFormat::Rgba8,
+        [40, 90, 160, 255].repeat(64),
+    )
+    .unwrap();
+    let picture = sue_core::Entity::new("Harbor map", tile).with_class(sue_model::class::IMAGE);
+    let other = sue_core::Entity::empty("Interview card", "sue.test.card");
+    let arena = &mut panes.runtime.engine.world.arena;
+    for entity in [picture, other] {
+        let id = entity.id();
+        arena.insert(entity);
+        let order = arena.relations().next_order(research, sue_core::CHILD);
+        arena
+            .relate(sue_core::Relation::new(research, sue_core::CHILD, id).ordered(order))
+            .unwrap();
+    }
+    panes.settle(4);
+    // Research opens by its chevron's key, the right arrow.
+    let row = panes.binder_row("Research");
+    panes.click(row);
+    if panes.rect_in("Harbor map", 0.0, BINDER).is_none() {
+        panes.key(egui::Key::ArrowRight, egui::Modifiers::NONE);
+    }
+    // A picture shows under its name, with no word of being blank.
+    let row = panes.binder_row("Harbor map");
+    panes.click(row);
+    assert!(
+        panes.rect_in("Harbor map", BINDER, 1440.0).is_some(),
+        "its name heads the page: {:?}",
+        panes.shown()
+    );
+    assert!(panes.rect_of("Nothing to show").is_none());
+    // Anything else says why nothing is shown and where to work on it.
+    let row = panes.binder_row("Interview card");
+    panes.click(row);
+    assert!(
+        panes.rect_of("Nothing to show").is_some(),
+        "{:?}",
+        panes.shown()
+    );
+    assert!(
+        panes
+            .shown()
+            .iter()
+            .any(|text| text.starts_with("Only pictures show here")),
+        "{:?}",
+        panes.shown()
+    );
     panes.finish();
 }
