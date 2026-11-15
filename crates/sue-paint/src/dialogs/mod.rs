@@ -13,6 +13,7 @@
 mod anim;
 mod canvas;
 mod color;
+mod colorize;
 mod command_bar;
 mod comps;
 mod fill;
@@ -40,8 +41,8 @@ use canvas::{
     canvas_properties_ui, canvas_ui, convert_ui, grid_ui, material_ui, perspective_ui, print_ui,
     proof_ui, resolution_ui, shape_3d_ui,
 };
+use colorize::colorize_ui;
 use fill::{gamut_ui, select_by_ui};
-use filter::{correction_ui, filter_ui};
 use frame::frame_ui;
 use lines_tones::lines_tones_ui;
 use modifiers::modifiers_ui;
@@ -53,11 +54,12 @@ use text::text_ui;
 pub(crate) use canvas::{
     CanvasDialog, CanvasProperties, ConvertDialog, PerspectiveDialog, ResolutionDialog,
 };
+pub(crate) use colorize::ColorizeDialog;
 pub(crate) use color::{ColorDialog, ColorTarget, cmyk_of, rgb_of_cmyk};
 pub(crate) use command_bar::{BarDialog, BarTarget};
 pub(crate) use comps::CompsDialog;
 pub(crate) use fill::AdvancedFill;
-pub(crate) use filter::FilterDialog;
+pub(crate) use filter::{FilterDialog, GradientLibrary};
 pub(crate) use lines_tones::LinesTonesDialog;
 pub(crate) use modifiers::ModifiersDialog;
 #[cfg(test)]
@@ -160,6 +162,8 @@ pub(crate) enum Dialog {
     /// A dialog of the timeline (New Timeline, the animation exports,
     /// Audio Clip Settings and the rest).
     Anim(Box<AnimDialog>),
+    /// Edit, Colorize: the line art, the hint layer and the blur.
+    Colorize(ColorizeDialog),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -325,7 +329,11 @@ impl Dialog {
                 Wide,
                 Footer::none(),
             ),
-            Dialog::Filter(filter) => Look::new(filter.filter.label(), Form, Footer::none()),
+            Dialog::Filter(filter) => Look::new(
+                filter.filter.label(),
+                Width::Points(filter::dialog_size(&filter.filter).x),
+                Footer::none(),
+            ),
             Dialog::Shortcuts => Look::new(tr!("keyboard-shortcuts"), Wide, Footer::none())
                 .room(14.0)
                 .enter_is_the_bodys(),
@@ -428,7 +436,13 @@ impl Dialog {
             )
             .fixed(sue_wm::fonts::MANAGE_SIZE.y)
             .enter_is_the_bodys(),
-            Dialog::Correction(_, filter, ..) => Look::new(filter.label(), Form, ok()),
+            Dialog::Colorize(_) => Look::new(tr!("colorize"), Form, ok()),
+            // Its body draws its own OK and Cancel, by its preview.
+            Dialog::Correction(_, filter, ..) => Look::new(
+                filter.label(),
+                Width::Points(filter::correction_size(filter).x),
+                Footer::none(),
+            ),
             Dialog::Pressure(_) => Look::new(
                 tr!("adjust-pen-pressure"),
                 Wide,
@@ -544,7 +558,7 @@ impl SuePaint {
         match dialog {
             Dialog::New(new) => self.new_dialog_ui(ui, new, cx, theme),
             Dialog::AdvancedFill => self.advanced_fill_dialog_ui(ui, theme),
-            Dialog::Filter(filter) => filter_ui(ui, filter, theme),
+            Dialog::Filter(filter) => self.filter_dialog_ui(ui, filter, cx, theme),
             Dialog::Pressure(pressure) => pressure_ui(ui, pressure, theme),
             Dialog::Pages(preview) => self.binding_ui(ui, preview, cx, theme),
             Dialog::Comps(comps) => self.comps_ui(ui, comps, cx, theme),
@@ -575,7 +589,8 @@ impl SuePaint {
             Dialog::Material(name) => material_ui(ui, name, theme),
             Dialog::Timelapse(export) => timelapse_ui(ui, export, theme),
             Dialog::Perspective(perspective) => perspective_ui(ui, perspective, theme),
-            Dialog::Correction(_, filter, ..) => correction_ui(ui, filter, theme),
+            Dialog::Correction(_, filter, ..) => self.correction_dialog_ui(ui, filter, cx, theme),
+            Dialog::Colorize(colorize) => colorize_ui(ui, colorize, theme),
             Dialog::Canvas(canvas) => canvas_ui(ui, canvas, theme),
             Dialog::Resolution(resolution) => resolution_ui(ui, resolution, theme),
             Dialog::Shortcuts => shortcuts_ui(ui, cx, room, change_keys, theme),
@@ -660,6 +675,7 @@ impl SuePaint {
             Dialog::SimpleTone(tone) => self.simple_tone_ok(cx, &tone),
             Dialog::Anim(dialog) => self.anim_dialog_ok(cx, *dialog),
             Dialog::Color(color) => self.color_dialog_ok(cx, color),
+            Dialog::Colorize(colorize) => self.colorize_ok(cx, &colorize),
             Dialog::Message(..)
             | Dialog::Shortcuts
             | Dialog::Pages(_)
@@ -714,7 +730,8 @@ impl SuePaint {
             | Dialog::DivideFrame(_)
             | Dialog::DeleteFolders(_)
             | Dialog::SimpleTone(_)
-            | Dialog::Anim(_) => {}
+            | Dialog::Anim(_)
+            | Dialog::Colorize(_) => {}
             Dialog::Color(color) => self.color_dialog_cancel(cx, color),
         }
     }

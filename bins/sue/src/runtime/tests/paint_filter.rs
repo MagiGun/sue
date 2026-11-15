@@ -153,7 +153,7 @@ fn every_filter_command_runs_undoes_and_redoes() {
         .filter(|command| command.group == "filter")
         .map(|command| command.name)
         .collect();
-    assert_eq!(group.len(), 50, "{group:?}");
+    assert_eq!(group.len(), 52, "{group:?}");
     let base = driver.runtime.engine.history.depth();
     let before = entities(&driver.runtime);
     let mut cut_off = Vec::new();
@@ -216,7 +216,7 @@ fn filters_are_grayed_without_a_raster_layer() {
         .filter(|command| command.group == "filter")
         .map(|command| command.name)
         .collect();
-    assert_eq!(group.len(), 50);
+    assert_eq!(group.len(), 52);
     for name in group {
         driver.command(name);
         driver.settle(4);
@@ -315,4 +315,498 @@ fn grayscale_keeps_to_the_selection_and_names_its_step() {
         top.iter().any(|pixel| pixel[3] > 0 && !gray(pixel)),
         "the unselected edge turned gray too"
     );
+}
+
+/// The layer's pixels now.
+fn pixels_of(driver: &PaintDriver, layer: EntityId) -> Vec<u8> {
+    sue_paint::doc::raster(&driver.runtime.engine.world.arena, layer)
+        .and_then(|raster| raster.bytes().map(<[u8]>::to_vec))
+        .expect("8-bit pixels")
+}
+
+/// Every text `names` is on screen.
+fn shows_all(driver: &PaintDriver, names: &[&str]) {
+    for name in names {
+        assert!(
+            driver.rect_of(name).is_some(),
+            "{name:?} is in the dialog: {:?}",
+            driver
+                .texts
+                .iter()
+                .map(|(text, _)| text)
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// Where a test stands before it opens a dialog: the history's depth
+/// and every entity.
+fn standing(driver: &PaintDriver) -> (usize, Vec<Entity>) {
+    (
+        driver.runtime.engine.history.depth(),
+        entities(&driver.runtime),
+    )
+}
+
+/// OK (Enter) on the open dialog, then undo and redo walked and checked
+/// exact against where the test stood before it opened the dialog
+/// (`from`); answers the layer's pixels after OK.
+fn ok_and_undo_pair(
+    driver: &mut PaintDriver,
+    layer: EntityId,
+    from: &(usize, Vec<Entity>),
+) -> Vec<u8> {
+    let (base, before) = (from.0, &from.1);
+    driver.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    let done = driver.runtime.engine.history.depth();
+    assert_eq!(done, base + 1, "one undo step");
+    let after = entities(&driver.runtime);
+    let result = pixels_of(driver, layer);
+    walk_to(driver, base);
+    assert!(entities(&driver.runtime) == *before, "undo is exact");
+    walk_to(driver, done);
+    assert!(entities(&driver.runtime) == after, "redo is exact");
+    result
+}
+
+/// On an open Level Correction: Red, then a click near the start of
+/// the output Highlight's track, which pulls red's white far down.
+fn pull_red_highlight_down(driver: &mut PaintDriver) {
+    driver.click_text("Red");
+    // The output's Highlight is the lower of the two: a click near the
+    // start of its track pulls red's white far down.
+    let lowest = driver
+        .texts
+        .iter()
+        .filter(|(text, _)| text == "Highlight")
+        .map(|(_, rect)| *rect)
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the output highlight");
+    // Its track lies between its name and its number field ("1.00",
+    // on the same row): a click a third of the way along it.
+    let field = driver
+        .texts
+        .iter()
+        .filter(|(text, rect)| text == "1.00" && (rect.center().y - lowest.center().y).abs() < 4.0)
+        .map(|(_, rect)| *rect)
+        .next()
+        .expect("the output highlight's field");
+    let span = field.left() - lowest.left();
+    let at = lowest.left_center() + vec2(span * 0.7, 0.0);
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    driver.step(vec![egui::Event::PointerMoved(at)]);
+    driver.step(vec![press(true)]);
+    driver.step(vec![press(false)]);
+    driver.settle(4);
+}
+
+#[test]
+fn level_correction_changes_one_channel_alone() {
+    // H-1: Level Correction has RGB, Red, Green and Blue.
+    let (mut driver, layer) = canvas("paint-filter-levels");
+    let before = pixels_of(&driver, layer);
+    let from = standing(&driver);
+    driver.command("filter.levels");
+    driver.settle(4);
+    shows_all(&driver, &["RGB", "Red", "Green", "Blue", "Gamma"]);
+    pull_red_highlight_down(&mut driver);
+    let after = ok_and_undo_pair(&mut driver, layer, &from);
+    let (mut darker, mut same) = (0, true);
+    for (old, new) in before
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(after.as_chunks::<4>().0)
+    {
+        if old[3] == 0 {
+            continue;
+        }
+        if new[0] < old[0] {
+            darker += 1;
+        }
+        same &= new[1] == old[1] && new[2] == old[2];
+    }
+    assert!(darker > 1000, "red pulled down: {darker}");
+    assert!(same, "green and blue untouched");
+}
+
+#[test]
+fn a_level_correction_layer_changes_one_channel_alone() {
+    // H-1: the channels work on a correction layer too, and its stored
+    // text keeps them.
+    let (mut driver, _) = canvas("paint-filter-levels-layer");
+    let shown = |driver: &PaintDriver| -> Vec<u8> {
+        let picture = picture(driver);
+        sue_paint::composite::render(
+            &driver.runtime.engine.world.arena,
+            picture,
+            [0, 0, 1600, 1200],
+            sue_paint::composite::RenderOptions::default(),
+        )
+    };
+    let before = shown(&driver);
+    driver.command("layer.correction.levels");
+    driver.settle(4);
+    shows_all(&driver, &["RGB", "Red", "Green", "Blue"]);
+    pull_red_highlight_down(&mut driver);
+    let base = driver.runtime.engine.history.depth();
+    driver.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    assert_eq!(driver.runtime.engine.history.depth(), base + 1, "one step");
+    let arena = &driver.runtime.engine.world.arena;
+    let stored: Vec<String> = sue_paint::doc::layers(arena, picture(&driver))
+        .iter()
+        .filter_map(|info| {
+            arena
+                .get_by_id(info.id)
+                .ok()?
+                .property(sue_paint::doc::CORRECTION_FILTER)?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect();
+    assert!(
+        stored
+            .iter()
+            .any(|text| text.starts_with("levels:") && text.contains('|')),
+        "the channels are kept: {stored:?}"
+    );
+    let after = shown(&driver);
+    let (mut darker, mut same) = (0, true);
+    for (old, new) in before
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(after.as_chunks::<4>().0)
+    {
+        if new[0] < old[0] {
+            darker += 1;
+        }
+        same &= new[1] == old[1] && new[2] == old[2];
+    }
+    assert!(darker > 1000, "red pulled down: {darker}");
+    assert!(same, "green and blue untouched");
+}
+
+#[test]
+fn gradient_map_offers_its_set_and_maps_with_stops() {
+    // H-2, X-2, CTV-12: a gradient set list and gradients of several
+    // stops; picking one maps the layer through it.
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let (mut driver, layer) = canvas("paint-filter-gradient");
+    let before = pixels_of(&driver, layer);
+    let from = standing(&driver);
+    driver.command("filter.gradient_map");
+    driver.settle(4);
+    shows_all(
+        &driver,
+        &[
+            "Gradient Set",
+            "Dusk",
+            "Forest",
+            "Mixing Rate",
+            "Position (%)",
+        ],
+    );
+    driver.click_text("Dusk");
+    let after = ok_and_undo_pair(&mut driver, layer, &from);
+    let dusk = sue_paint::gradient_map::GradientSet::builtin()
+        .gradients
+        .into_iter()
+        .find(|gradient| gradient.name == "Dusk")
+        .expect("Sue ships Dusk")
+        .map;
+    assert!(dusk.stops().len() > 2, "more than two stops");
+    let mut want = before.clone();
+    let [width, height] = {
+        let raster = sue_paint::doc::raster(&driver.runtime.engine.world.arena, layer).unwrap();
+        [raster.width(), raster.height()]
+    };
+    sue_paint::filters::Filter::Gradient { map: dusk }.apply(
+        &mut want,
+        width,
+        height,
+        None,
+        [0, 0],
+    );
+    assert!(after == want, "the layer mapped through Dusk's stops");
+}
+
+#[test]
+fn a_click_on_the_gradient_bar_adds_a_stop_and_delete_takes_it_away() {
+    // CTV-12: stops are added on the bar; the bar's tooltip names Delete,
+    // and Delete takes the stop being edited away again.
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let (mut driver, _) = canvas("paint-filter-gradient-stops");
+    driver.command("filter.gradient_map");
+    driver.settle(4);
+    let position = driver.rect_of("Position (%)").expect("the stop's place");
+    // The stop being edited is the first, at 0.
+    let field = |driver: &PaintDriver| -> Vec<String> {
+        driver
+            .texts
+            .iter()
+            .filter(|(_, rect)| (rect.center().y - position.center().y).abs() < 6.0)
+            .map(|(text, _)| text.clone())
+            .collect()
+    };
+    assert!(
+        field(&driver).contains(&"0".to_owned()),
+        "{:?}",
+        field(&driver)
+    );
+    // The bar lies over the stop's settings, in the same column.
+    let at = egui::pos2(position.left() + 90.0, position.top() - 52.0);
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    driver.step(vec![egui::Event::PointerMoved(at)]);
+    driver.step(vec![press(true)]);
+    driver.step(vec![press(false)]);
+    driver.settle(4);
+    let added = field(&driver);
+    assert!(
+        !added.contains(&"0".to_owned()),
+        "a new stop, between the ends, is edited: {added:?}"
+    );
+    driver.step(vec![key(egui::Key::Delete, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    assert!(
+        field(&driver).contains(&"0".to_owned()),
+        "Delete took it away: {:?}",
+        field(&driver)
+    );
+    // Two stops are the least: Delete does nothing more.
+    driver.step(vec![key(egui::Key::Delete, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    assert!(driver.rect_of("Position (%)").is_some(), "still open");
+}
+
+#[test]
+fn radial_blur_turns_round_the_centre_put_on_its_pad() {
+    // FGV-52: the centre is put by a click on the picture.
+    let (mut driver, layer) = canvas("paint-filter-radial");
+    let from = standing(&driver);
+    driver.command("filter.radial_blur");
+    driver.settle(4);
+    let middle = ok_and_undo_pair(&mut driver, layer, &from);
+    walk_to(&mut driver, from.0);
+    driver.command("filter.radial_blur");
+    driver.settle(4);
+    let heading = driver.rect_of("Center").expect("the center pad's heading");
+    // The pad lies under its heading; its top left corner.
+    let at = heading.left_bottom() + vec2(heading.height(), heading.height() * 1.5);
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    driver.step(vec![egui::Event::PointerMoved(at)]);
+    driver.step(vec![press(true)]);
+    driver.step(vec![press(false)]);
+    driver.settle(4);
+    let corner = ok_and_undo_pair(&mut driver, layer, &from);
+    assert!(
+        corner != middle,
+        "a centre at the corner turns it otherwise"
+    );
+}
+
+#[test]
+fn perlin_noise_and_curved_surface_have_their_settings() {
+    // FGV-53, CTV-11: Perlin Noise's six settings; Distort starts with
+    // Curved Surface.
+    let (mut driver, layer) = canvas("paint-filter-perlin");
+    let from = standing(&driver);
+    driver.command("filter.perlin");
+    driver.settle(4);
+    shows_all(
+        &driver,
+        &[
+            "Scale",
+            "Amplitude",
+            "Attenuation",
+            "Repetition",
+            "Offset X",
+            "Offset Y",
+        ],
+    );
+    let noise = ok_and_undo_pair(&mut driver, layer, &from);
+    assert!(
+        noise
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[0] == pixel[1] && pixel[1] == pixel[2] && pixel[3] == 255),
+        "gray noise over all of it"
+    );
+    walk_to(&mut driver, from.0);
+    let menus = sue_paint::menus();
+    let filter = menus
+        .iter()
+        .find(|menu| menu.title == "Filter")
+        .expect("the Filter menu");
+    let distort = filter
+        .items
+        .iter()
+        .find_map(|item| match item {
+            sue_wm::MenuItem::Sub { label, items } if label == "Distort" => Some(items),
+            _ => None,
+        })
+        .expect("Filter, Distort");
+    assert!(
+        matches!(distort.first(), Some(sue_wm::MenuItem::Action { command, .. }) if command == "filter.curved_surface"),
+        "Curved Surface first"
+    );
+    driver.command("filter.curved_surface");
+    driver.settle(4);
+    shows_all(&driver, &["Amount", "Both Ways", "Across", "Up and Down"]);
+    driver.click_text("Across");
+    ok_and_undo_pair(&mut driver, layer, &from);
+}
+
+#[test]
+fn artistic_shows_its_line_and_color_settings() {
+    // FG-29, FGV-54.
+    let (mut driver, layer) = canvas("paint-filter-artistic");
+    let before = pixels_of(&driver, layer);
+    let from = standing(&driver);
+    driver.command("filter.artistic");
+    driver.settle(4);
+    shows_all(
+        &driver,
+        &[
+            "Colors and Lines",
+            "Lines",
+            "Colors",
+            "Line Thickness",
+            "Line Simplicity",
+            "Line Density",
+            "Line Opacity",
+            "Line Anti-aliasing",
+            "Color Blending",
+            "Color Blur",
+            "Number of Colors",
+        ],
+    );
+    let after = ok_and_undo_pair(&mut driver, layer, &from);
+    assert!(after != before);
+}
+
+#[test]
+fn smart_smoothing_has_weak_medium_strong_and_remove_noise() {
+    // Full guide 00:42:11: Intensity, Remove noise and Preview.
+    let (mut driver, layer) = canvas("paint-filter-smart");
+    let before = pixels_of(&driver, layer);
+    let from = standing(&driver);
+    driver.command("edit.smart_smoothing");
+    driver.settle(4);
+    shows_all(
+        &driver,
+        &[
+            "Intensity",
+            "Weak",
+            "Medium",
+            "Strong",
+            "Remove Noise",
+            "Preview",
+        ],
+    );
+    driver.click_text("Strong");
+    driver.click_text("Remove Noise");
+    let after = ok_and_undo_pair(&mut driver, layer, &from);
+    assert!(after != before);
+}
+
+#[test]
+fn smoothing_is_named_as_clip_studio_paint_names_it() {
+    // A25-27: Filter, Blur, Smoothing, and its undo step says so.
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let (mut driver, _) = canvas("paint-filter-smoothing");
+    assert_eq!(
+        sue_paint::registry().label("filter.smooth").as_deref(),
+        Some("Smoothing")
+    );
+    driver.command("filter.smooth");
+    driver.settle(4);
+    let history = &driver.runtime.engine.history;
+    assert_eq!(history.label(history.cursor()), Some("Smoothing"));
+}
+
+#[test]
+fn colorize_fills_the_line_art_from_the_hint_layer() {
+    // FG-1: Edit, Colorize with a hint layer, on the device.
+    let mut driver = PaintDriver::new("paint-colorize");
+    let first = *rasters(&driver).last().expect("a raster layer");
+    // The line art above: a black line down the middle.
+    driver.command("layer.new");
+    driver.settle(4);
+    let lines = *rasters(&driver).last().expect("the line art layer");
+    assert_ne!(lines, first);
+    {
+        let raster =
+            sue_paint::doc::raster_mut(&mut driver.runtime.engine.world.arena, lines).unwrap();
+        let width = raster.width();
+        let height = raster.height();
+        let bytes = raster.bytes_mut().unwrap();
+        for y in 0..height {
+            for x in width / 2 - 2..width / 2 + 2 {
+                let at = ((y * width + x) * 4) as usize;
+                bytes[at..at + 4].copy_from_slice(&[0, 0, 0, 255]);
+            }
+        }
+    }
+    // The hint layer under it: a red stroke left, a blue one right.
+    {
+        let raster =
+            sue_paint::doc::raster_mut(&mut driver.runtime.engine.world.arena, first).unwrap();
+        let width = raster.width();
+        let bytes = raster.bytes_mut().unwrap();
+        for y in 500..520 {
+            for (x, rgb) in [(300, [220, 30, 30]), (1300, [30, 40, 220])] {
+                let at = ((y * width + x) * 4) as usize;
+                bytes[at..at + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+            }
+        }
+    }
+    driver.command("layer.select_below");
+    driver.settle(4);
+    driver.command("edit.colorize");
+    driver.settle(4);
+    shows_all(&driver, &["Line Art", "Blur Strength", "OK", "Cancel"]);
+    let base = driver.runtime.engine.history.depth();
+    let before = entities(&driver.runtime);
+    driver.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    assert_eq!(driver.runtime.engine.history.depth(), base + 1, "one step");
+    let after = entities(&driver.runtime);
+    // A new layer, right under the line art, left red and right blue.
+    let infos = sue_paint::doc::layers(&driver.runtime.engine.world.arena, picture(&driver));
+    let at = infos.iter().position(|info| info.id == lines).unwrap();
+    let colors = infos[at - 1].id;
+    assert!(colors != first && colors != lines, "a layer of its own");
+    let pixels = pixels_of(&driver, colors);
+    let width = sue_paint::doc::raster(&driver.runtime.engine.world.arena, colors)
+        .unwrap()
+        .width();
+    let pixel = |x: u32, y: u32| {
+        let at = ((y * width + x) * 4) as usize;
+        [pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]]
+    };
+    assert_eq!(pixel(40, 40), [220, 30, 30, 255]);
+    assert_eq!(pixel(1560, 1100), [30, 40, 220, 255]);
+    walk_to(&mut driver, base);
+    assert!(entities(&driver.runtime) == before, "undo is exact");
+    walk_to(&mut driver, base + 1);
+    assert!(entities(&driver.runtime) == after, "redo is exact");
 }

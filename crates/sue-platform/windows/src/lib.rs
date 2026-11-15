@@ -16,11 +16,12 @@
 //!
 //! - [`media`]: MP4 movies through the Media Foundation Sink Writer, with
 //!   Windows' own H.264 and AAC encoders, and reading one back.
-//! - `screen` (to come, P4-17 of the v0.0.8 plan): the colour of a pixel
-//!   on the screen, for Obtain Screen Color. It is a new file and one
-//!   line in the list below.
+//! - [`screen`]: the colour of a pixel on the screen, and a pick that
+//!   waits for a click anywhere, for Edit, Obtain Screen Color.
 //!
 //! On every other system this library is empty.
 
 #[cfg(target_os = "windows")]
 pub mod media;
+#[cfg(target_os = "windows")]
+pub mod screen;

@@ -228,7 +228,13 @@ fn clear_outside(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) 
 }
 
 fn smart_smoothing(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.filter_dialog(cx, Filter::SmartSmooth { strength: 0.5 });
+    paint.filter_dialog(
+        cx,
+        Filter::SmartSmooth {
+            strength: crate::filters::SMART_LEVELS[1],
+            remove_noise: false,
+        },
+    );
 }
 
 /// Fill: the selection (or the whole layer) in the drawing color, on
@@ -372,6 +378,26 @@ fn copy_paste(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 
 fn puppet(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.start_warp(cx);
+}
+
+/// Edit, Colorize: the line art filled from a hint layer's colors.
+fn colorize(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.open_colorize(cx);
+}
+
+/// Edit, Pick Screen Color and Hide Windows and Pick Screen Color: the
+/// pick starts on the next frame (it needs the window's context).
+fn screen_color(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    if !sue_platform::screen::available() {
+        cx.notify(tr!("pick-screen-color-unavailable"));
+        return;
+    }
+    paint.screen_pick_asked = Some(call.name == "edit.screen_color_hidden");
+}
+
+/// Works where the system lets Sue read the screen; no canvas needed.
+fn can_read_screen(_: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(sue_platform::screen::available())
 }
 
 /// Edit, Align/Distribute: the six alignments, told apart by their
@@ -756,6 +782,21 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     .with(Flags::HIDDEN),
     c("edit.cut_paste", "cut-and-paste", "cut", cut_paste).state(on_raster),
     c("edit.copy_paste", "copy-and-paste", "copy", copy_paste).state(on_raster),
+    c(
+        "edit.screen_color",
+        "pick-screen-color-ellipsis",
+        "tool-eyedropper",
+        screen_color,
+    )
+    .state(can_read_screen),
+    c(
+        "edit.screen_color_hidden",
+        "hide-windows-and-pick-screen-color-ellipsis",
+        "tool-eyedropper",
+        screen_color,
+    )
+    .state(can_read_screen),
+    c("edit.colorize", "colorize-ellipsis", "tool-fill", colorize).state(on_raster),
 ];
 
 #[cfg(test)]

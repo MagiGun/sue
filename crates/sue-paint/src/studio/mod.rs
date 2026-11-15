@@ -875,6 +875,13 @@ pub struct SuePaint {
     /// File's export settings dialog, Batch Convert Pictures, and the
     /// file each canvas was last written to (see `studio/files.rs`).
     pub(crate) files: files::Files,
+    /// Edit, Pick Screen Color while it waits for the click.
+    pub(crate) screen_pick: Option<sue_platform::screen::ScreenPick>,
+    /// A screen pick asked for by its command, started on the next frame
+    /// (`true` hides Sue's windows while it waits).
+    pub(crate) screen_pick_asked: Option<bool>,
+    /// The gradient sets, read the first time a gradient map opens.
+    pub(crate) gradients: crate::dialogs::GradientLibrary,
 }
 
 impl Default for SuePaint {
@@ -1080,6 +1087,9 @@ impl Default for SuePaint {
             tool_palettes: crate::panels::ToolPalettes::default(),
             layer_palette: crate::panels::LayerPalette::default(),
             files: files::Files::default(),
+            screen_pick: None,
+            screen_pick_asked: None,
+            gradients: crate::dialogs::GradientLibrary::default(),
         }
     }
 }
@@ -1117,6 +1127,9 @@ pub(crate) struct WarpSession {
     pub shown_settings: Option<crate::warp::PuppetSettings>,
     /// The mesh's triangles as the pins bend them, for Show mesh.
     pub mesh: Vec<crate::warp::Triangle>,
+    /// The undo step's name: the menu item that started it (Puppet Warp
+    /// or Mesh Transformation).
+    pub label: String,
 }
 
 impl SuePaint {

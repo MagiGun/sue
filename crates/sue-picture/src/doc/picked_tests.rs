@@ -622,6 +622,126 @@ fn a_quarter_turn_turns_moved_layers_with_their_masks() {
 }
 
 #[test]
+fn flips_and_a_half_turn_take_masks_and_vector_lines_along() {
+    // A 5 by 3 picture: a layer moved one right with a mask over a corner
+    // of it, a second layer with an unlinked mask, and a vector layer with
+    // one line. Each flip shows the picture mirrored, and the line is
+    // mirrored with it.
+    let (mut arena, picture, mut history, first) = picture_of(5, 3);
+    for (index, pixel) in raster_mut(&mut arena, first)
+        .unwrap()
+        .bytes_mut()
+        .unwrap()
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .enumerate()
+    {
+        *pixel = [(index * 17) as u8, 40, 200, 255];
+    }
+    history
+        .apply(&mut arena, set(first, picture::X, 1_i64))
+        .unwrap();
+    let (edit, _) = new_mask(&arena, first, |x, y| if x < 3 && y < 2 { 1.0 } else { 0.3 }).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let (spawn, second) = add_raster_layer(
+        &arena,
+        picture,
+        Some(first),
+        "Top".to_owned(),
+        Some([250, 200, 0, 255]),
+    )
+    .unwrap();
+    history
+        .apply(&mut arena, Edit::new("Add").then(spawn))
+        .unwrap();
+    let (edit, _) = new_mask(&arena, second, |x, _| if x == 4 { 1.0 } else { 0.0 }).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let unlink = set_mask_linked(&arena, second, false).unwrap();
+    history.apply(&mut arena, unlink).unwrap();
+    let (spawn, ink) = add_vector_layer(&arena, picture, Some(second), "Ink".to_owned()).unwrap();
+    history
+        .apply(&mut arena, Edit::new("Add").then(spawn))
+        .unwrap();
+    let sample = |at: [f32; 2]| crate::brush::Sample {
+        at,
+        pressure: 1.0,
+        speed: 0.0,
+        tilt: 0.0,
+        lean: [0.0, 0.0],
+        width: 1.0,
+        alpha: 1.0,
+    };
+    let line = crate::vector::Line {
+        samples: vec![sample([0.5, 0.5]), sample([2.0, 1.0])],
+        tip: crate::brush::Tip::default(),
+        colors: [[0.0; 3]; 2],
+        finish: crate::brush::Finish::default(),
+        copies: Vec::new(),
+        marks: Vec::new(),
+        engine: None,
+    };
+    history
+        .apply(
+            &mut arena,
+            Edit::new("Line").then(sue_core::txn::SetExtension::set(
+                ink,
+                crate::vector::to_geometry(&[line]),
+            )),
+        )
+        .unwrap();
+    let shown = |arena: &Arena| -> Vec<[u8; 4]> {
+        render(arena, picture, [0, 0, 5, 3], RenderOptions::default())
+            .as_chunks::<4>()
+            .0
+            .to_vec()
+    };
+    let first_line = |arena: &Arena| -> Vec<[f32; 2]> {
+        crate::vector::lines(&crate::vector::geometry(arena, ink))[0]
+            .samples
+            .iter()
+            .map(|sample| sample.at)
+            .collect()
+    };
+    let before = shown(&arena);
+    let line_before = first_line(&arena);
+    for (flip_h, flip_v) in [(true, false), (false, true), (true, true)] {
+        let edit = flip_canvas(&arena, picture, flip_h, flip_v, "Flip").unwrap();
+        undo_pair(&mut arena, &mut history, edit);
+        let after = shown(&arena);
+        for y in 0..3_usize {
+            for x in 0..5_usize {
+                let ox = if flip_h { 4 - x } else { x };
+                let oy = if flip_v { 2 - y } else { y };
+                assert_eq!(
+                    after[y * 5 + x],
+                    before[oy * 5 + ox],
+                    "{flip_h} {flip_v} {x},{y}"
+                );
+            }
+        }
+        let [lw, lh] = {
+            let pixels = raster(&arena, ink).unwrap();
+            [pixels.width() as f32, pixels.height() as f32]
+        };
+        let want: Vec<[f32; 2]> = line_before
+            .iter()
+            .map(|[x, y]| {
+                [
+                    if flip_h { lw - x } else { *x },
+                    if flip_v { lh - y } else { *y },
+                ]
+            })
+            .collect();
+        assert_eq!(first_line(&arena), want, "{flip_h} {flip_v}");
+        history.undo(&mut arena).unwrap();
+    }
+    // Neither way is no change at all.
+    let edit = flip_canvas(&arena, picture, false, false, "None").unwrap();
+    assert!(edit.is_empty());
+}
+
+#[test]
 fn a_moved_layers_mask_keeps_to_it_through_merge_down_and_rasterize() {
     // The mask lies over the layer's pixels, their size, as painting a
     // mask expects, and the picture shows the same.

@@ -1,15 +1,15 @@
 //! Edit's work on pixels: fills, filters, canvas transforms, clearing,
 //! selections by color, Quick Mask and puppet warp.
 
-use sue_core::txn::{Batch, SetProperty};
-use sue_core::{Arena, RasterTile2D};
-use sue_model::picture::{self, LayerKind};
+use sue_core::txn::SetProperty;
+use sue_core::{Arena, EntityId, RasterTile2D};
+use sue_model::picture;
 use sue_wm::{AppletContext, ArenaEdit};
 
-use super::{SuePaint, WarpSession, mirror};
+use super::{SuePaint, WarpSession};
 use crate::color;
 use crate::composite::{self, RenderOptions};
-use crate::dialogs::{Dialog, FilterDialog};
+use crate::dialogs::{ColorizeDialog, Dialog, FilterDialog};
 use crate::doc;
 use crate::filters::Filter;
 use crate::select::Selection;
@@ -102,6 +102,7 @@ impl SuePaint {
             offset: info.style.offset,
             shown_settings: None,
             mesh: Vec::new(),
+            label: tr!("puppet-warp-2"),
         });
         cx.notify(tr!("puppet-warp-click-put-pins-drag"));
     }
@@ -134,7 +135,7 @@ impl SuePaint {
         {
             cx.record(ArenaEdit(sue_core::txn::RasterEdit::new(
                 warp.layer,
-                tr!("puppet-warp-2"),
+                warp.label.clone(),
                 vec![patch],
             )));
         }
@@ -295,13 +296,16 @@ impl SuePaint {
         let Some(raster) = doc::raster(&cx.world.arena, info.id) else {
             return;
         };
-        self.dialog = Some(Dialog::Filter(FilterDialog::new(
-            filter,
-            info.id,
-            raster,
-            self.doc().and_then(|doc| doc.selection.clone()),
-            info.style.offset,
-        )));
+        self.dialog = Some(Dialog::Filter(
+            FilterDialog::new(
+                filter,
+                info.id,
+                raster,
+                self.doc().and_then(|doc| doc.selection.clone()),
+                info.style.offset,
+            )
+            .with_colors(self.main, self.sub),
+        ));
     }
 
     /// The selection, or everything when nothing is selected.
@@ -313,7 +317,8 @@ impl SuePaint {
         })
     }
 
-    /// Mirrors (and for 180 degrees, turns) every raster layer.
+    /// Mirrors the canvas (and for 180 degrees, turns it): every layer's
+    /// pixels, masks and vector lines go with it, as one undo step.
     pub(crate) fn transform_canvas(
         &mut self,
         cx: &mut AppletContext<'_>,
@@ -324,42 +329,12 @@ impl SuePaint {
         let Some(picture) = self.picture() else {
             return;
         };
-        let arena = &cx.world.arena;
-        let Some([width, height]) = arena.get_by_id(picture).ok().and_then(picture::size) else {
-            return;
-        };
-        let mut edit = Batch::new(label);
-        for info in doc::layers(arena, picture) {
-            if info.kind != LayerKind::Raster {
-                continue;
+        match doc::flip_canvas(&cx.world.arena, picture, flip_h, flip_v, label) {
+            Ok(edit) if !edit.is_empty() => {
+                Self::apply(cx, edit);
             }
-            let Some(raster) = doc::raster(arena, info.id) else {
-                continue;
-            };
-            let (w, h) = (raster.width(), raster.height());
-            if let Ok(Some(pixels)) = doc::rewrite(arena, info.id, label, |pixels, w, h| {
-                mirror(pixels, w, h, flip_h, flip_v);
-            }) {
-                edit = edit.then(pixels);
-            }
-            let [x, y] = info.style.offset;
-            if flip_h && (x != 0 || w != width) {
-                edit = edit.then(SetProperty::new(
-                    info.id,
-                    picture::X,
-                    i64::from(width) - x - i64::from(w),
-                ));
-            }
-            if flip_v && (y != 0 || h != height) {
-                edit = edit.then(SetProperty::new(
-                    info.id,
-                    picture::Y,
-                    i64::from(height) - y - i64::from(h),
-                ));
-            }
-        }
-        if !edit.is_empty() {
-            Self::apply(cx, edit);
+            Ok(_) => {}
+            Err(error) => cx.fail(error),
         }
     }
 
@@ -418,5 +393,164 @@ impl SuePaint {
                 }
             }
         });
+    }
+
+    /// Edit, Pick Screen Color (and, with `hide`, Hide Windows and Pick
+    /// Screen Color): the next click anywhere on any screen, also outside
+    /// Sue, sets the drawing color; a right click or Esc cancels. Where
+    /// the system lets no program read the screen it says so.
+    fn start_screen_pick(&mut self, ctx: &egui::Context, cx: &mut AppletContext<'_>, hide: bool) {
+        if self.screen_pick.is_some() {
+            return;
+        }
+        let title = if hide {
+            tr!("hide-windows-and-pick-screen-color")
+        } else {
+            tr!("pick-screen-color")
+        };
+        let wake = ctx.clone();
+        match sue_platform::screen::ScreenPick::start(
+            hide,
+            title,
+            Box::new(move || wake.request_repaint()),
+        ) {
+            Ok(pick) => {
+                self.screen_pick = Some(pick);
+                cx.notify(tr!("pick-screen-color-hint"));
+            }
+            Err(_) => cx.notify(tr!("pick-screen-color-unavailable")),
+        }
+    }
+
+    /// Follows a screen pick under way, once a frame: the picked color
+    /// becomes the drawing color, as the Eyedropper sets it.
+    pub(crate) fn screen_pick_frame(&mut self, ctx: &egui::Context, cx: &mut AppletContext<'_>) {
+        use sue_platform::screen::PickState;
+        if let Some(hide) = self.screen_pick_asked.take() {
+            self.start_screen_pick(ctx, cx, hide);
+        }
+        let Some(pick) = self.screen_pick.as_ref() else {
+            return;
+        };
+        match pick.state() {
+            PickState::Waiting(_) => {
+                // The picker wakes the frame on each change; this is the
+                // net under it.
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            }
+            PickState::Picked(rgb) => {
+                self.screen_pick = None;
+                self.set_drawing_color(rgb);
+                ctx.request_repaint();
+            }
+            PickState::Cancelled => self.screen_pick = None,
+            PickState::Failed(_) => {
+                self.screen_pick = None;
+                cx.notify(tr!("pick-screen-color-failed"));
+            }
+        }
+    }
+
+    /// Edit, Colorize: opens its dialog with the current layer as the hint
+    /// layer and, as the line art, the layer right above it (else the
+    /// topmost other one).
+    pub(crate) fn open_colorize(&mut self, cx: &mut AppletContext<'_>) {
+        let info = match self.paintable(&cx.world.arena) {
+            Ok(info) => info,
+            Err(error) => {
+                cx.fail(error);
+                return;
+            }
+        };
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let layers = doc::layers(&cx.world.arena, picture);
+        let choices: Vec<(EntityId, String)> = layers
+            .iter()
+            .filter(|layer| layer.id != info.id && doc::raster(&cx.world.arena, layer.id).is_some())
+            .rev()
+            .map(|layer| (layer.id, layer.name.clone()))
+            .collect();
+        if choices.is_empty() {
+            cx.notify(tr!("colorize-needs-line-art"));
+            return;
+        }
+        let above = layers
+            .iter()
+            .position(|layer| layer.id == info.id)
+            .and_then(|at| layers.get(at + 1))
+            .and_then(|layer| choices.iter().position(|(id, _)| *id == layer.id))
+            .unwrap_or(0);
+        self.dialog = Some(Dialog::Colorize(ColorizeDialog {
+            hints: info.id,
+            choices,
+            lines: above,
+            blur: 1.0,
+        }));
+    }
+
+    /// OK on Colorize: a new layer of flat colors right under the line
+    /// art, as one undo step.
+    pub(crate) fn colorize_ok(&mut self, cx: &mut AppletContext<'_>, dialog: &ColorizeDialog) {
+        let (Some(picture), Some(lines)) = (self.picture(), dialog.line_layer()) else {
+            return;
+        };
+        let arena = &cx.world.arena;
+        let Some([width, height]) = arena.get_by_id(picture).ok().and_then(picture::size) else {
+            return;
+        };
+        let on_canvas = |layer: EntityId| -> Option<Vec<u8>> {
+            let raster = doc::raster(arena, layer)?;
+            let offset = doc::layers(arena, picture)
+                .into_iter()
+                .find(|info| info.id == layer)
+                .map_or([0, 0], |info| info.style.offset);
+            let bytes = raster.bytes()?;
+            let mut out = vec![0_u8; (width * height * 4) as usize];
+            for y in 0..raster.height() {
+                for x in 0..raster.width() {
+                    let (px, py) = (i64::from(x) + offset[0], i64::from(y) + offset[1]);
+                    if px < 0 || py < 0 || px >= i64::from(width) || py >= i64::from(height) {
+                        continue;
+                    }
+                    let from = ((y * raster.width() + x) * 4) as usize;
+                    let to = ((py as u32 * width + px as u32) * 4) as usize;
+                    out[to..to + 4].copy_from_slice(&bytes[from..from + 4]);
+                }
+            }
+            Some(out)
+        };
+        let (Some(line_art), Some(hints)) = (on_canvas(lines), on_canvas(dialog.hints)) else {
+            return;
+        };
+        let Some(colors) = crate::colorize::colorize(&line_art, &hints, width, height, dialog.blur)
+        else {
+            cx.notify(tr!("colorize-needs-hints"));
+            return;
+        };
+        let Ok(raster) =
+            RasterTile2D::from_bytes(width, height, sue_core::PixelFormat::Rgba8, colors)
+        else {
+            return;
+        };
+        // Right under the line art: above the layer below it.
+        let layers = doc::layers(arena, picture);
+        let below = layers
+            .iter()
+            .position(|layer| layer.id == lines)
+            .and_then(|at| at.checked_sub(1))
+            .and_then(|at| layers.get(at))
+            .map(|layer| layer.id);
+        match doc::add_layer_pixels(arena, picture, below, tr!("colorize"), raster) {
+            Ok((spawn, id)) => {
+                if Self::apply(cx, doc::Edit::new(tr!("colorize")).then(spawn))
+                    && let Some(doc) = self.doc_mut()
+                {
+                    doc.layer = Some(id);
+                }
+            }
+            Err(error) => cx.fail(error),
+        }
     }
 }

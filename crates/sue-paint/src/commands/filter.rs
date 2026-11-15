@@ -318,7 +318,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "radial-blur-ellipsis",
         "tool-blend",
         |p, cx, _| {
-            p.filter_dialog(cx, Filter::RadialBlur { angle: 10.0 });
+            p.filter_dialog(
+                cx,
+                Filter::RadialBlur {
+                    angle: 10.0,
+                    center: [0.5, 0.5],
+                },
+            );
         },
     ),
     c(
@@ -326,7 +332,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "zoom-blur-ellipsis",
         "tool-blend",
         |p, cx, _| {
-            p.filter_dialog(cx, Filter::ZoomBlur { amount: 0.3 });
+            p.filter_dialog(
+                cx,
+                Filter::ZoomBlur {
+                    amount: 0.3,
+                    center: [0.5, 0.5],
+                },
+            );
         },
     ),
     c(
@@ -337,7 +349,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
             p.filter_dialog(cx, Filter::LensBlur { radius: 8 });
         },
     ),
-    c("filter.smooth", "smooth", "tool-blend", |p, cx, _| {
+    c("filter.smooth", "smoothing", "tool-blend", |p, cx, _| {
         p.filter_now(cx, Filter::Smooth);
     }),
     // Correction.
@@ -588,7 +600,10 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
                 cx,
                 Filter::PerlinNoise {
                     scale: 60.0,
-                    contrast: 1.0,
+                    amplitude: 1.0,
+                    attenuation: 0.5,
+                    repetition: 4,
+                    offset: [0.0, 0.0],
                 },
             );
         },
@@ -620,6 +635,41 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
                     radius: 3.0,
                     amount: 1.0,
                     threshold: 0.0,
+                },
+            );
+        },
+    ),
+    c(
+        "filter.curved_surface",
+        "curved-surface-ellipsis",
+        "filter",
+        |p, cx, _| {
+            p.filter_dialog(
+                cx,
+                Filter::CurvedSurface {
+                    amount: 0.5,
+                    axis: 0,
+                },
+            );
+        },
+    ),
+    c(
+        "filter.artistic",
+        "artistic-ellipsis",
+        "filter",
+        |p, cx, _| {
+            p.filter_dialog(
+                cx,
+                Filter::Artistic {
+                    process: 0,
+                    line_width: 2.0,
+                    simplicity: 0.4,
+                    density: 0.5,
+                    line_opacity: 1.0,
+                    antialias: true,
+                    blending: 0.0,
+                    color_blur: 2.0,
+                    colors: 6,
                 },
             );
         },
@@ -673,7 +723,7 @@ mod tests {
     #[test]
     fn the_group_keeps_its_names_and_keys() {
         let names: Vec<&str> = COMMANDS.iter().map(|command| command.name).collect();
-        assert_eq!(names.len(), 50);
+        assert_eq!(names.len(), 52);
         let keyed: Vec<(&str, &str)> = COMMANDS
             .iter()
             .filter(|command| !command.chords.is_empty())

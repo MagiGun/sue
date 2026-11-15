@@ -48,6 +48,7 @@ mod paths;
     )
 )]
 mod picks;
+pub mod screen;
 pub mod stylus;
 #[cfg_attr(
     not(any(

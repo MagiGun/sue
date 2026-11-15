@@ -21,7 +21,7 @@ mod picked;
 mod picked_tests;
 
 pub use convert::{
-    fitted, rasterize, resample, resize_canvas, resize_rgba, rotate_canvas, vectorize,
+    fitted, flip_canvas, rasterize, resample, resize_canvas, resize_rgba, rotate_canvas, vectorize,
 };
 pub use folders::{
     MEMBER, OPEN, delete_folder, folder_blend, folder_of, folders_around, is_folder, is_open,

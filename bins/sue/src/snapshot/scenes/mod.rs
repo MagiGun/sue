@@ -22,6 +22,7 @@ mod paint_export;
 mod paint_extras;
 mod paint_figure;
 mod paint_fill;
+mod paint_filters;
 mod paint_handles;
 mod paint_layers;
 mod paint_modifiers;
@@ -86,6 +87,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_modifiers::scenes(tour)?;
     paint_comic::pages(tour)?;
     paint_comic::frames(tour)?;
+    paint_filters::dialogs(tour)?;
     paint_timeline::timeline(tour)?;
     paint_view::marks(tour)?;
     paint_canvas_chrome::window(tour)?;

@@ -470,6 +470,170 @@ pub fn rotate_canvas(arena: &Arena, picture: EntityId, clockwise: bool) -> Resul
     Ok(edit)
 }
 
+/// The edit that mirrors `picture` across (`flip_h`), up and down
+/// (`flip_v`), or both, which is a half turn: Edit, Rotate/Flip Canvas,
+/// Flip Horizontal, Flip Vertical and Rotate 180 Degrees. Every layer's
+/// pixels, its mask, its vector lines and a gradient's line or an image
+/// material's place go with the picture, as [`rotate_canvas`] turns
+/// them. An image material keeps its own picture unmirrored (it has no
+/// mirror of its own); a half turn turns it.
+///
+/// # Errors
+/// If `picture` is not a picture.
+pub fn flip_canvas(
+    arena: &Arena,
+    picture: EntityId,
+    flip_h: bool,
+    flip_v: bool,
+    label: &str,
+) -> Result<Edit, String> {
+    let [width, height] = size_of(arena, picture)?;
+    let mut edit = Edit::new(label);
+    if !flip_h && !flip_v {
+        return Ok(edit);
+    }
+    // Mirrors `id`'s pixels (8-bit color, or a `Gray8` mask) sitting at
+    // picture pixel `offset`, and answers where they sit after.
+    let mirror = |id: EntityId, offset: [i64; 2], edit: Edit| -> Result<(Edit, [i64; 2]), String> {
+        let Some(raster) = raster(arena, id) else {
+            return Ok((edit, offset));
+        };
+        let (Some(bytes), PixelFormat::Rgba8 | PixelFormat::Gray8) =
+            (raster.bytes(), raster.format())
+        else {
+            return Ok((edit, offset));
+        };
+        let step = raster.format().bytes_per_pixel();
+        let (w, h) = (raster.width(), raster.height());
+        let mut out = vec![0_u8; bytes.len()];
+        for y in 0..h {
+            let from_y = if flip_v { h - 1 - y } else { y };
+            for x in 0..w {
+                let from_x = if flip_h { w - 1 - x } else { x };
+                let from = (from_y * w + from_x) as usize * step;
+                let to = (y * w + x) as usize * step;
+                out[to..to + step].copy_from_slice(&bytes[from..from + step]);
+            }
+        }
+        let tile = RasterTile2D::from_bytes(w, h, raster.format(), out)
+            .map_err(|error| error.to_string())?;
+        let [x, y] = offset;
+        let moved = [
+            if flip_h {
+                i64::from(width) - x - i64::from(w)
+            } else {
+                x
+            },
+            if flip_v {
+                i64::from(height) - y - i64::from(h)
+            } else {
+                y
+            },
+        ];
+        Ok((
+            edit.then(sue_core::txn::ReplaceComponent::new(id, tile, label)),
+            moved,
+        ))
+    };
+    // Sets `id`'s place to `at` (left out while it is and stays 0, 0).
+    let place = |id: EntityId, at: [i64; 2], edit: Edit| -> Edit {
+        let stored = arena.get_by_id(id).is_ok_and(|entity| {
+            entity.property(picture::X).is_some() || entity.property(picture::Y).is_some()
+        });
+        if at == [0, 0] && !stored {
+            return edit;
+        }
+        edit.then(SetProperty::new(id, picture::X, at[0]))
+            .then(SetProperty::new(id, picture::Y, at[1]))
+    };
+    let point = |[x, y]: [f32; 2]| -> [f32; 2] {
+        [
+            if flip_h { width as f32 - x } else { x },
+            if flip_v { height as f32 - y } else { y },
+        ]
+    };
+    for info in layers(arena, picture) {
+        edit = live_flipped(arena, info.id, edit, &point, flip_h && flip_v);
+        let (mirrored, moved) = mirror(info.id, info.style.offset, edit)?;
+        edit = if moved == info.style.offset {
+            mirrored
+        } else {
+            place(info.id, moved, mirrored)
+        };
+        if let (Some(mask), Some(at)) =
+            (mask_of(arena, info.id), super::mask_offset(arena, info.id))
+        {
+            // Mirrored where it sits on the canvas; a linked mask's place
+            // is then taken relative to its layer's new one.
+            let (mirrored, mask_moved) = mirror(mask, at, edit)?;
+            let own = if super::mask_linked(arena, info.id) {
+                [mask_moved[0] - moved[0], mask_moved[1] - moved[1]]
+            } else {
+                mask_moved
+            };
+            edit = place(mask, own, mirrored);
+        }
+        if crate::vector::is_vector(arena, info.id) {
+            // Lines are kept in the layer's own pixels: mirrored within
+            // the layer, whose place moved above.
+            let [lw, lh] = raster(arena, info.id)
+                .map_or([width, height], |pixels| [pixels.width(), pixels.height()]);
+            let mut lines = crate::vector::lines(&crate::vector::geometry(arena, info.id));
+            for line in &mut lines {
+                for sample in &mut line.samples {
+                    let [x, y] = sample.at;
+                    sample.at = [
+                        if flip_h { lw as f32 - x } else { x },
+                        if flip_v { lh as f32 - y } else { y },
+                    ];
+                }
+            }
+            edit = edit.then(sue_core::txn::SetExtension::set(
+                info.id,
+                crate::vector::to_geometry(&lines),
+            ));
+        }
+    }
+    Ok(edit)
+}
+
+/// `edit` followed by mirroring a gradient's line or an image material's
+/// place through `point`; a half turn (`half`) also turns the material.
+fn live_flipped(
+    arena: &Arena,
+    layer: EntityId,
+    mut edit: Edit,
+    point: &dyn Fn([f32; 2]) -> [f32; 2],
+    half: bool,
+) -> Edit {
+    let Ok(entity) = arena.get_by_id(layer) else {
+        return edit;
+    };
+    let pairs: &[(&str, &str)] = match entity.class() {
+        super::GRADIENT_LAYER => &[
+            (super::GRADIENT_FROM_X, super::GRADIENT_FROM_Y),
+            (super::GRADIENT_TO_X, super::GRADIENT_TO_Y),
+        ],
+        super::MATERIAL_LAYER => &[(super::MATERIAL_X, super::MATERIAL_Y)],
+        _ => return edit,
+    };
+    let number = |key: &str| entity.property(key).and_then(Value::as_f64).unwrap_or(0.0);
+    for (x_key, y_key) in pairs {
+        let [nx, ny] = point([number(x_key) as f32, number(y_key) as f32]);
+        edit = edit
+            .then(SetProperty::new(layer, *x_key, f64::from(nx)))
+            .then(SetProperty::new(layer, *y_key, f64::from(ny)));
+    }
+    if half && entity.class() == super::MATERIAL_LAYER {
+        edit = edit.then(SetProperty::new(
+            layer,
+            super::MATERIAL_ANGLE,
+            number(super::MATERIAL_ANGLE) + 180.0,
+        ));
+    }
+    edit
+}
+
 /// The edit that turns raster `layer` into a vector layer in its place
 /// (Convert Layer): its pixels traced to center lines, its name,
 /// properties and folder kept. Returns the new layer.

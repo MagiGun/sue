@@ -223,6 +223,13 @@ const PICTURE: &[(&str, &str, Exempt)] = &[
         "layer_thumbnail",
         Exempt::All,
     ),
+    // A filter dialog's gradients and its small copies of the layer.
+    (
+        "crates/sue-paint/src/dialogs",
+        "paint_gradient",
+        Exempt::All,
+    ),
+    ("crates/sue-paint/src/dialogs", "pad_picture", Exempt::All),
     // The miniature page of a template on Sue Writer's start page.
     ("crates/sue-writer/src/ui", "template_thumb", Exempt::All),
 ];
