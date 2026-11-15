@@ -145,12 +145,16 @@ impl SuePaint {
             Some(Gesture::RulerPen { .. }) => self.ruler_pen_drag(pos, viewport, size),
             Some(Gesture::Comic(_)) => self.comic_drag(pos, viewport, size),
             Some(Gesture::LightTable { .. }) => self.light_table_drag(pos, viewport, size, cx),
-            Some(Gesture::Lasso { .. } | Gesture::Outline { .. } | Gesture::LassoFill { .. }) => {
+            Some(
+                Gesture::Lasso { .. }
+                | Gesture::Outline { .. }
+                | Gesture::LassoFill { .. }
+                | Gesture::ShrinkLasso { .. },
+            ) => {
                 self.trace_drag(pos, viewport, size);
             }
             Some(Gesture::Move { .. }) => self.move_drag(pos, viewport, size, cx),
             Some(Gesture::Bucket { .. }) => self.bucket_drag(pos, viewport, size),
-            Some(Gesture::ShrinkLasso { .. }) => self.shrink_drag(pos, viewport, size),
         }
     }
 
@@ -176,13 +180,14 @@ impl SuePaint {
     }
 
     /// An outline traced freehand (the lasso, the balloon pen, Text on
-    /// Curve, lasso fill) carried on to `pos`.
+    /// Curve, lasso fill, Shrink selection) carried on to `pos`.
     fn trace_drag(&mut self, pos: Pos2, viewport: Rect, size: [u32; 2]) {
         let (
             Some(
                 Gesture::Lasso { points, .. }
                 | Gesture::Outline { points, .. }
-                | Gesture::LassoFill { points, .. },
+                | Gesture::LassoFill { points, .. }
+                | Gesture::ShrinkLasso { points, .. },
             ),
             Some(doc),
         ) = (self.gesture.as_mut(), self.docs.get_mut(self.active))

@@ -177,22 +177,6 @@ impl SuePaint {
         self.select_shape(&shape, op, aa);
     }
 
-    /// Shrink selection traced on to `pos`.
-    pub(super) fn shrink_drag(&mut self, pos: Pos2, viewport: Rect, size: [u32; 2]) {
-        let (Some(Gesture::ShrinkLasso { points, .. }), Some(doc)) =
-            (self.gesture.as_mut(), self.docs.get_mut(self.active))
-        else {
-            return;
-        };
-        let p = doc.view.to_picture(viewport, size, pos);
-        if points
-            .last()
-            .is_none_or(|last| (last[0] - p.x).hypot(last[1] - p.y) > 1.5 / doc.view.zoom.max(0.01))
-        {
-            points.push([p.x, p.y]);
-        }
-    }
-
     /// Shrink selection let go: of the area traced round, what is drawn
     /// in it (on the layers the sub tool refers to, at the frame shown),
     /// with the clear holes the drawing closes in.
