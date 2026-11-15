@@ -251,7 +251,14 @@ pub(crate) struct Stream {
     /// Its lean and its end in use, for [`tilt`] and [`eraser`].
     tilt: Option<[f32; 2]>,
     eraser: bool,
+    /// The latest touches the system named a pen or a finger, by touch
+    /// id, newest last ([`touch_is_pen`]).
+    touch_kinds: VecDeque<(u64, bool)>,
 }
+
+/// How many touches [`touch_is_pen`] remembers: more fingers than a hand
+/// has, and the pen.
+const TOUCHES_KEPT: usize = 16;
 
 impl Stream {
     pub(crate) const fn new() -> Self {
@@ -270,7 +277,27 @@ impl Stream {
             pen_time: None,
             tilt: None,
             eraser: false,
+            touch_kinds: VecDeque::new(),
         }
+    }
+
+    /// Notes that the system says the touch `id` is a pen (`true`) or a
+    /// finger (`false`).
+    pub(crate) fn mark_touch(&mut self, id: u64, pen: bool) {
+        self.touch_kinds.retain(|(known, _)| *known != id);
+        if self.touch_kinds.len() >= TOUCHES_KEPT {
+            self.touch_kinds.pop_front();
+        }
+        self.touch_kinds.push_back((id, pen));
+    }
+
+    /// What [`touch_is_pen`] answers.
+    pub(crate) fn touch_kind(&self, id: u64) -> Option<bool> {
+        self.touch_kinds
+            .iter()
+            .rev()
+            .find(|(known, _)| *known == id)
+            .map(|(_, pen)| *pen)
     }
 
     /// Whether `source` touches, as its samples so far say.
@@ -538,6 +565,24 @@ pub fn push_for_test(sample: PenSample) -> Option<PenSample> {
 #[doc(hidden)]
 pub fn forget_for_test() {
     TEST_STREAM.set(None);
+}
+
+/// Whether the window's touch `id` (egui's `TouchId`) is a pen (`true`)
+/// or a finger (`false`), as the system said when it went down; `None`
+/// where the system does not tell them apart, or for a touch it never
+/// named. On Windows a pen is a touch with Windows Ink pen packets.
+#[must_use]
+pub fn touch_is_pen(id: u64) -> Option<bool> {
+    read(|stream| stream.touch_kind(id))
+}
+
+/// For tests that drive a studio with fingers and a pen: this thread's
+/// own stream (made on first use) says the touch `id` is a pen or a
+/// finger, as the system would, until [`forget_for_test`].
+#[doc(hidden)]
+pub fn mark_touch_for_test(id: u64, pen: bool) {
+    TEST_STREAM
+        .with_borrow_mut(|stream| stream.get_or_insert_with(Stream::new).mark_touch(id, pen));
 }
 
 /// Where pen pressure last came from, once a pen has been seen: one of
@@ -967,5 +1012,31 @@ mod tests {
         assert_eq!(taken[1].kind, PenKind::Up);
         assert_eq!(taken[1].pos, [7.0, 8.0], "where the stream last saw it");
         assert_eq!(stream.pen(), Some((PenSource::WinTab, 1.2)));
+    }
+
+    #[test]
+    fn a_touch_is_a_pen_or_a_finger_as_the_system_said() {
+        let mut stream = Stream::new();
+        assert_eq!(stream.touch_kind(1), None, "never named");
+        stream.mark_touch(1, true);
+        stream.mark_touch(2, false);
+        assert_eq!(stream.touch_kind(1), Some(true));
+        assert_eq!(stream.touch_kind(2), Some(false));
+        // An id the system uses again is what it said last.
+        stream.mark_touch(1, false);
+        assert_eq!(stream.touch_kind(1), Some(false));
+        // Only the latest touches are kept.
+        for id in 10..10 + TOUCHES_KEPT as u64 {
+            stream.mark_touch(id, true);
+        }
+        assert_eq!(stream.touch_kind(2), None);
+        assert_eq!(stream.touch_kind(10), Some(true));
+        // A test's own stream answers on its thread only.
+        mark_touch_for_test(77, false);
+        assert_eq!(touch_is_pen(77), Some(false));
+        let other = std::thread::spawn(|| touch_is_pen(77)).join().unwrap();
+        assert_eq!(other, None);
+        forget_for_test();
+        assert_eq!(touch_is_pen(77), None);
     }
 }

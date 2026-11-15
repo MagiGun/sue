@@ -3241,3 +3241,9 @@ grid-hint = The grid belongs to the picture: it is saved with it, and Snap to Gr
 # Sue Paint: a floating palette's header (P4-9)
 palette-roll-up = Roll Up
 palette-unroll = Unroll
+## Touch modes (0.0.8, P4-10): Draw with Fingers and the edge key bar
+draw-with-fingers = Draw with Fingers
+edge-key-bar = Edge Key Bar
+edge-key-bar-pin = Pin the key bar beside the canvas
+edge-key-bar-hide = Put the key bar away
+edge-key-bar-choose = Choose what T1 to T7 do

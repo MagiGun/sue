@@ -30,6 +30,7 @@ mod story;
 pub(crate) mod subtool;
 mod tool;
 mod tool_palette;
+mod touch;
 mod view;
 mod window;
 
@@ -69,6 +70,7 @@ pub fn registry() -> &'static CommandRegistry<SuePaint> {
         registry.add(subtool::COMMANDS);
         registry.add(tool_palette::COMMANDS);
         registry.add(color::COMMANDS);
+        registry.add(touch::COMMANDS);
         registry
     })
 }

@@ -411,13 +411,13 @@ picture. Your work and the materials are in the Hub, whose tab bar along
 the bottom has Home, Files and Materials.
 
 **Simple Mode** is how Sue Paint draws on a phone or tablet at first: the
-canvas alone, with the back arrow (to the Hub), Undo, Redo, your
-reference pictures and **...** along the top. Near the bottom are the brush
-size and opacity sliders with their numbers; the bar under them swaps
-brush and eraser, picks a pen, picks a brush and its settings, opens the
+canvas alone, with the back arrow (to the Hub), Draw with Fingers, Undo,
+Redo, your reference pictures and **...** along the top. Near the bottom
+are the brush size and opacity sliders with their numbers; the bar under
+them swaps brush and eraser, picks a pen, picks a brush and its settings, opens the
 color and the layers. **...** has Export image, Export timelapse, Flip
 horizontal view, See reference images, Create animation, Canvas setting,
-Preferences, Switch to Studio Mode and Help.
+Preferences, Draw with Fingers, Switch to Studio Mode and Help.
 
 **Studio Mode** is closer to the desktop. A column at the left holds the
 menu, the brush and eraser swap, your pen (tap it again for every tool),
@@ -425,13 +425,25 @@ the lasso and the object tool, then the brush size and opacity on
 vertical sliders and your color. Along the bottom a row of palettes
 (navigator, layers, layer property, tool settings, color, materials,
 timeline, reference pictures) sits over a command bar: back, save, undo,
-redo, transform, select all, copy, cut and paste. The button at the top
-right goes fullscreen. The tab at the right edge slides out the modifier
-keys: Esc, Ctrl, Shift, Alt and Space stay down until you tap them again,
-and T1 to T7 run commands you choose in Settings (Sue Paint, Key T1 and
-on). The menu button opens Return to Home, Switch to Simple Mode, App
+redo, Draw with Fingers, transform, select all, copy, cut, paste and
+record timelapse. The button at the top right goes fullscreen. The edge
+key bar comes in from either side of the canvas: swipe in from the left
+or right edge (or tap the small tab there) and it comes in see-through,
+over the picture; swipe in again and it is pinned beside the canvas,
+which makes room for it; swipe it back out, or tap its arrow, to put it
+away. On it, Esc, Ctrl, Shift, Alt and Space stay down until you tap them
+again, and T1 to T7 run commands you choose in Settings (Sue Paint, Phones
+and Tablets, Studio Mode key T1 and on); its last button opens that
+page. The menu button opens Return to Home, Switch to Simple Mode, App
 Settings and every menu. Settings, Sue Paint, Touch mode switches between
 the two modes too.
+
+**Draw with Fingers** decides what a finger does on the canvas. On, a
+finger draws with the tool. Off, a finger only moves the view and the pen
+draws, so a stray finger never leaves a mark. Settings, Sue Paint, Phones
+and Tablets also says what a two-finger swipe, pinch and rotation do (move,
+zoom and turn the canvas, or nothing), next to the two- and three-finger
+taps for Undo and Redo.
 
 Once a canvas is open:
 

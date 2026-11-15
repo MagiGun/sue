@@ -28,6 +28,8 @@ pub(super) fn touch(tour: &mut Tour<'_>, prefix: &str) -> Result<(), String> {
     tour.shoot(&format!("{prefix}-paint-simple"))?;
     tour.paint_go(&["sheet/more"]);
     tour.shoot(&format!("{prefix}-paint-simple-more"))?;
+    tour.paint_go(&["sheet/close", "sheet/pens"]);
+    tour.shoot(&format!("{prefix}-paint-simple-pens"))?;
     tour.paint_go(&["sheet/close"]);
     // Studio Mode: the canvas, its modifier key bar and its Menu.
     tour.set(
@@ -35,11 +37,18 @@ pub(super) fn touch(tour: &mut Tour<'_>, prefix: &str) -> Result<(), String> {
         RiceValue::Text("studio".to_owned()),
     );
     tour.shoot(&format!("{prefix}-paint-studio"))?;
-    for (target, name) in [
-        ("keys/open", "paint-studio-keys"),
-        ("sheet/menu", "paint-studio-menu"),
+    // The edge key bar pinned, see-through, then pinned at the left;
+    // the Menu, Tools and Layers sheets.
+    for (targets, name) in [
+        (&["keys/right", "keys/open"][..], "paint-studio-keys"),
+        (&["keys/peek"], "paint-studio-keys-peek"),
+        (&["keys/left", "keys/open"], "paint-studio-keys-left"),
+        (&["keys/right", "sheet/menu"], "paint-studio-menu"),
+        (&["sheet/tools"], "paint-studio-tools"),
+        (&["sheet/layers"], "paint-studio-layers"),
     ] {
-        tour.paint_go(&["sheet/close", target]);
+        tour.paint_go(&["sheet/close"]);
+        tour.paint_go(targets);
         tour.shoot(&format!("{prefix}-{name}"))?;
     }
     tour.paint_go(&["sheet/close"]);

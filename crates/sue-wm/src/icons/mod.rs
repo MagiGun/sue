@@ -694,6 +694,10 @@ icons! {
     /// A keyboard: a wide box with a row of keys and a long key under
     /// them. Keyboard shortcuts.
     Keyboard = "keyboard" => edit::KEYBOARD,
+    /// A hand seen from its back pointing up with its index finger, the
+    /// other fingers curled and the thumb out to the left. Fingers on a
+    /// touch screen: whether they draw. Its solid twin is the hand filled.
+    Finger = "finger" => tools::FINGER,
     /// A crescent moon. The dark look.
     Moon = "moon" => edit::MOON,
     /// A sun: a ring with eight short rays. The light look.

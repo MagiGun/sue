@@ -15,7 +15,6 @@ use sue_wm::ui::{Density, Radius, Space};
 use sue_wm::{AppletContext, Theme};
 
 use crate::color;
-use crate::icons::Icon;
 use crate::panels::Flow;
 use crate::panels::tool_property::is_liquify_mode;
 use crate::studio::SuePaint;
@@ -71,43 +70,6 @@ pub(crate) enum ToolDrag {
 /// all liquify.
 pub(crate) fn slot_is_liquify(slot: &ToolSlot) -> bool {
     slot.kind == Tool::Blend && slot.subs().iter().all(|sub| is_liquify_mode(sub.mode))
-}
-
-/// The icon of tool palette entry `slot`: its tool's, or Liquify's.
-pub(crate) fn slot_icon(slot: &ToolSlot) -> Icon {
-    if slot_is_liquify(slot) {
-        Icon::Replace
-    } else {
-        tool_icon(slot.kind)
-    }
-}
-
-/// The icon of a tool.
-pub(crate) fn tool_icon(tool: Tool) -> Icon {
-    match tool {
-        Tool::Zoom => Icon::Zoom,
-        Tool::Hand => Icon::Hand,
-        Tool::MoveLayer => Icon::MoveLayer,
-        Tool::Select => Icon::Select,
-        Tool::AutoSelect => Icon::AutoSelect,
-        Tool::Eyedropper => Icon::Eyedropper,
-        Tool::Pen => Icon::Pen,
-        Tool::Pencil => Icon::Pencil,
-        Tool::Brush => Icon::Brush,
-        Tool::Airbrush => Icon::Airbrush,
-        Tool::Decoration => Icon::Decoration,
-        Tool::Eraser => Icon::Eraser,
-        Tool::Blend => Icon::Blend,
-        Tool::Fill => Icon::Fill,
-        Tool::Gradient => Icon::Gradient,
-        Tool::Figure => Icon::Figure,
-        Tool::Text => Icon::Text,
-        Tool::Balloon => Icon::Balloon,
-        Tool::Frame => Icon::Frame,
-        Tool::Ruler => Icon::Ruler,
-        Tool::CorrectLine => Icon::CorrectLine,
-        Tool::Operation => Icon::Operation,
-    }
 }
 
 /// The icon of tool palette entry `slot` in Sue's icon set, which icon

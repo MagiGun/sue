@@ -138,7 +138,7 @@ struct Area {
 /// P2-3 had made every folder: the same numbers. Every area is held. For
 /// comparison, `code-ui-polish.md` 2.1 counted these files at 823b060
 /// with a coarser rule (six columns, `vec2` positions included).
-const AREAS: [Area; 6] = [
+const AREAS: [Area; 9] = [
     Area {
         folder: "crates/sue-paint/src/panels",
         baseline: Counts::new([5, 9, 24, 5, 59, 9, 7]),
@@ -162,6 +162,20 @@ const AREAS: [Area; 6] = [
     Area {
         folder: "crates/sue-wm/src/shell",
         baseline: Counts::new([0, 2, 9, 0, 17, 0, 2]),
+    },
+    // Phase 4's touch modes (P4-10), each a file of its own, held at
+    // zero from the start.
+    Area {
+        folder: "crates/sue-paint/src/phone",
+        baseline: Counts::new([0, 0, 0, 0, 0, 0, 0]),
+    },
+    Area {
+        folder: "crates/sue-paint/src/simple",
+        baseline: Counts::new([0, 0, 0, 0, 0, 0, 0]),
+    },
+    Area {
+        folder: "crates/sue-paint/src/studio_mode",
+        baseline: Counts::new([0, 0, 0, 0, 0, 0, 0]),
     },
 ];
 

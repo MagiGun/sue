@@ -479,6 +479,8 @@ fn the_palette_offers_what_it_offered() {
             "color.settings",
             "color.new_set",
             "color.edit_sets",
+            "touch.finger_draws",
+            "touch.key_bar",
         ]
     );
     let new = &palette[1];

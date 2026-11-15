@@ -324,6 +324,7 @@ impl SuePaint {
                         continue;
                     }
                     self.track_touch(id.0, phase, pos, time, viewport, size, cx);
+                    self.touch_seen(id.0, phase, force);
                     match phase {
                         TouchPhase::Start | TouchPhase::Move => {
                             if let Some(force) = force {
@@ -362,6 +363,10 @@ impl SuePaint {
                         continue;
                     }
                     match button {
+                        // Draw with Fingers off: a finger moves the view.
+                        PointerButton::Primary if self.finger_moves_view(cx) => {
+                            self.gesture = Some(Gesture::Pan { last: pos });
+                        }
                         PointerButton::Primary => {
                             self.press(pos, modifiers, space, viewport, size, cx)
                         }
@@ -422,15 +427,19 @@ impl SuePaint {
         let pinch = ctx
             .input(egui::InputState::multi_touch)
             .filter(|touch| !covered(touch.center_pos));
+        // Preferences, Touch gestures: which of them move the view.
+        let gestures = crate::studio_mode::Gestures::of(cx.rice());
         if let Some(touch) = pinch.filter(|_| !blocked)
             && let Some(doc) = self.docs.get_mut(self.active)
         {
-            doc.view.pan += touch.translation_delta;
-            if (touch.zoom_delta - 1.0).abs() > 1e-4 {
+            if gestures.swipe {
+                doc.view.pan += touch.translation_delta;
+            }
+            if gestures.pinch && (touch.zoom_delta - 1.0).abs() > 1e-4 {
                 doc.view
                     .zoom_at(viewport, size, touch.center_pos, touch.zoom_delta);
             }
-            if touch.rotation_delta.abs() > 1e-4 {
+            if gestures.rotate && touch.rotation_delta.abs() > 1e-4 {
                 doc.view
                     .rotate_by(viewport, size, touch.rotation_delta.to_degrees());
             }

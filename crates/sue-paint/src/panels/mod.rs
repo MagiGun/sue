@@ -50,7 +50,7 @@ pub(crate) use navigator::MENU_COMMANDS as NAVIGATOR_COMMANDS;
 pub(crate) use quick_access::MENU_COMMANDS as QUICK_ACCESS_COMMANDS;
 pub(crate) use sub_view::MENU_COMMANDS as SUB_VIEW_COMMANDS;
 pub(crate) use sub_tool_detail::ToolPalettes;
-pub(crate) use tool::{PROPERTY_MENU, SUB_TOOL_MENU, TOOL_MENU, slot_icon, tool_icon};
+pub(crate) use tool::{PROPERTY_MENU, SUB_TOOL_MENU, TOOL_MENU, slot_is_liquify};
 
 /// The rice key: the Tool palette shows the main and sub colors under its
 /// tools (its menu's Show Color Icon).
@@ -66,43 +66,6 @@ pub(crate) fn child(ui: &mut Ui, rect: Rect, salt: &str) -> Ui {
     );
     inner.set_clip_rect(rect.intersect(ui.clip_rect()));
     inner
-}
-
-/// A square icon button. Returns `true` when clicked while enabled.
-pub(crate) fn icon_button(
-    ui: &mut Ui,
-    rect: Rect,
-    icon: Icon,
-    enabled: bool,
-    active: bool,
-    tip: &str,
-    theme: &Theme,
-) -> bool {
-    let response = ui.interact(
-        rect,
-        Id::unique(("sue-paint-icon", tip, rect.min.x as i32, rect.min.y as i32)),
-        Sense::click(),
-    );
-    let painter = ui.painter();
-    if active {
-        painter.rect_filled(rect, theme.control_radius, theme.active);
-    } else if enabled && response.hovered() {
-        painter.rect_filled(rect, theme.control_radius, theme.hover);
-    }
-    let color = if !enabled {
-        theme.muted.gamma_multiply(0.45)
-    } else if active {
-        theme.text
-    } else {
-        theme.text.gamma_multiply(0.85)
-    };
-    icons::paint(painter, rect.shrink(rect.width() * 0.13), icon, color);
-    let response = if enabled {
-        response.on_hover_text(tip)
-    } else {
-        response.on_hover_text(tr!("not-available-now", tip = tip))
-    };
-    enabled && response.clicked()
 }
 
 /// A palette's tab strip, as Clip Studio Paint draws it: each tab an icon

@@ -36,6 +36,16 @@ pub(super) const TOOL_HAND: Art = Art {
     solid: &[],
 };
 
+/// The outline of [`FINGER`]: a hand from its back with the index finger
+/// up and the other three curled under it, the thumb out to the left.
+const FINGER_OUTLINE: &str = "M6.75 11.03 V5.25 A1.5 1.5 0 0 1 9.75 5.25 V10.5 A1.5 1.5 0 0 1      12.75 10.5 A1.625 1.625 0 0 1 16 10.5 A1.625 1.625 0 0 1 19.25 10.5 V14 C19.25 17.75 16.75      20.25 13.5 20.25 C11.5 20.25 10 19.6 8.9 18.2 L5.2 13.4 A1.5 1.5 0 0 1 6.75 11.03 Z";
+
+pub(super) const FINGER: Art = Art {
+    keyline: Keyline::Square,
+    line: &[Part::Stroke(FINGER_OUTLINE)],
+    solid: &[Part::Fill(FINGER_OUTLINE), Part::Stroke(FINGER_OUTLINE)],
+};
+
 pub(super) const TOOL_ROTATE_VIEW: Art = Art {
     keyline: Keyline::Circle,
     line: &[

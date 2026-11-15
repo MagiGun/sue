@@ -316,6 +316,7 @@ own files are. A twin marked "yes" also has a `<name>.solid.svg`.
 | `unlock` |  | The padlock with its shackle open: one end free, lifted off the body. Not locked. |
 | `fullscreen` |  | Two arrows that point apart, to the top right and to the bottom left corner. Fill the whole screen. |
 | `keyboard` |  | A keyboard: a wide box with a row of keys and a long key under them. Keyboard shortcuts. |
+| `finger` | yes | A hand seen from its back pointing up with its index finger, the other fingers curled and the thumb out to the left. Fingers on a touch screen: whether they draw. Its solid twin is the hand filled. |
 | `moon` |  | A crescent moon. The dark look. |
 | `sun` |  | A sun: a ring with eight short rays. The light look. |
 | `language` |  | A globe: a ring, the line round its middle and a narrow oval from pole to pole. The language. |

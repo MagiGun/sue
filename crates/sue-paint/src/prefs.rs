@@ -24,6 +24,26 @@ const CLIP_NAMES: &[(&str, &str, &str)] = &[
     ),
     (
         "pref-touch-gestures",
+        "pref-use-tools-with-finger",
+        crate::studio_mode::FINGER_KEY,
+    ),
+    (
+        "pref-touch-gestures",
+        "pref-two-finger-swipe",
+        crate::studio_mode::SWIPE_KEY,
+    ),
+    (
+        "pref-touch-gestures",
+        "pref-two-finger-pinch",
+        crate::studio_mode::PINCH_KEY,
+    ),
+    (
+        "pref-touch-gestures",
+        "pref-two-finger-rotation",
+        crate::studio_mode::ROTATE_KEY,
+    ),
+    (
+        "pref-touch-gestures",
         "pref-two-finger-tap",
         "sue_paint.two_finger_tap",
     ),
@@ -88,6 +108,10 @@ pub(crate) fn page(title: &str) -> SettingsPage {
         .collect();
     let mut touch = params(&[
         crate::simple::MODE_KEY,
+        crate::studio_mode::FINGER_KEY,
+        crate::studio_mode::SWIPE_KEY,
+        crate::studio_mode::PINCH_KEY,
+        crate::studio_mode::ROTATE_KEY,
         "sue_paint.two_finger_tap",
         "sue_paint.three_finger_tap",
     ]);
