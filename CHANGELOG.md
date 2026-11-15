@@ -185,6 +185,10 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint's History names the steps of Edit, Rotate/Flip Canvas as the
   menu does: Flip Horizontal, Flip Vertical and Rotate 180 Degrees, where
   it used to say "Flip Canvas" for both flips and "Rotate Canvas".
+- Sue Paint: Flip Pose, Reset Pose, the preset poses and the Pose and
+  Hand Scanners, given a key or run by an Auto Action, are off where there
+  is no 3D drawing figure (or hand) to pose, instead of only saying so,
+  and a pose number the figure does not have no longer resets its pose.
 - Instant transitions and Animation speed (Settings, Motion) now reach
   the switches in Settings and on the start pages and everything else
   the interface toolkit animates by itself: they used to keep their own
