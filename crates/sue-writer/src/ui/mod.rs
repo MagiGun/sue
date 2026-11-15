@@ -2,9 +2,10 @@
 //! the corkboard, or the outliner), the inspector, the status bar, the find
 //! bar, composition mode, the start screen and the dialogs.
 
-use egui::{Color32, Rect, Sense, Ui, UiBuilder, pos2, vec2};
+use egui::{Color32, CornerRadius, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
 use sue_model::manuscript::{self, role};
-use sue_wm::{AppletContext, AppletId, Facts, ItemState};
+use sue_wm::ui::Splitter;
+use sue_wm::{AppletContext, AppletId, Facts, ItemState, MenuItem};
 
 use crate::project;
 use crate::studio::{ID, SueWriter, View};
@@ -25,7 +26,6 @@ mod toolbar;
 mod widgets;
 
 use editor::keeps_typing;
-use widgets::splitter;
 
 const TOOLBAR_HEIGHT: f32 = 36.0;
 /// What a tool button senses: clicks, but never the keyboard's focus,
@@ -39,6 +39,13 @@ const THUMB: f32 = 44.0;
 const PHONE_BAR: f32 = THUMB + 8.0;
 /// The room beside a phone's lines, so that they get the screen's width.
 const PHONE_GAP: f32 = 14.0;
+/// The binder's width at first, and after a double click on its edge.
+const BINDER_WIDTH: f32 = 230.0;
+/// The inspector's width at first, and after a double click on its edge.
+const INSPECTOR_WIDTH: f32 = 260.0;
+/// How far past the window's edge a panel slides on its way out, so no
+/// sliver of it stays in view.
+const SLIDE_PAST: f32 = 2.0;
 
 fn rgb(color: [u8; 3]) -> Color32 {
     Color32::from_rgb(color[0], color[1], color[2])
@@ -130,7 +137,7 @@ impl SueWriter {
         let hide = 1.0 - smooth(reveal);
         let cover = smooth(reveal / 0.35);
         ui.painter()
-            .rect_filled(full, 0.0, theme.void.gamma_multiply(cover));
+            .rect_filled(full, CornerRadius::ZERO, theme.void.gamma_multiply(cover));
         if self.composition {
             ui.set_opacity(cover.max(0.02));
             self.composition_ui(ui, full, cx, &theme);
@@ -153,10 +160,10 @@ impl SueWriter {
         let toolbar = if self.phone {
             places
                 .toolbar
-                .translate(vec2(0.0, hide * (full.bottom() - places.toolbar.top())))
+                .translate(Vec2::Y * hide * (full.bottom() - places.toolbar.top()))
         } else {
             let lift = hide * (places.body.top() - full.top());
-            places.toolbar.translate(vec2(0.0, -lift))
+            places.toolbar.translate(-Vec2::Y * lift)
         };
         if self.phone {
             if toolbar.height() > 0.0 {
@@ -179,36 +186,39 @@ impl SueWriter {
         }
         let body = places.body;
         if let Some(rect) = places.binder {
-            let slid = rect.translate(vec2(-hide * (rect.width() + 2.0), 0.0));
+            let slid = rect.translate(-Vec2::X * hide * (rect.width() + SLIDE_PAST));
             self.binder_ui(ui, slid, cx, &theme);
-            if hide < 0.01
-                && let Some(width) = splitter(
-                    ui,
-                    "writer-binder-edge",
-                    rect.right(),
-                    body.y_range(),
-                    &theme,
-                )
-            {
-                self.binder_width = (width - body.left()).clamp(150.0, 480.0);
+            if hide < 0.01 {
+                // The width shown, which the room may hold under the one
+                // asked for, is what a drag starts from.
+                let mut width = rect.width();
+                let edge = Splitter::columns("writer-binder-edge")
+                    .range(150.0..=480.0)
+                    .reset_to(BINDER_WIDTH)
+                    .label(&tr!("binder"))
+                    .show(ui, &theme, rect.right(), body.y_range(), &mut width);
+                if edge.changed() {
+                    self.binder_width = width;
+                }
             }
         }
         if let Some(rect) = places.inspector {
-            let slid = rect.translate(vec2(hide * (rect.width() + 2.0), 0.0));
+            let slid = rect.translate(Vec2::X * hide * (rect.width() + SLIDE_PAST));
             self.inspector_ui(ui, slid, cx, &theme);
-            if hide < 0.01
-                && let Some(x) = splitter(
-                    ui,
-                    "writer-inspector-edge",
-                    rect.left(),
-                    body.y_range(),
-                    &theme,
-                )
-            {
-                self.inspector_width = (body.right() - x).clamp(190.0, 520.0);
+            if hide < 0.01 {
+                let mut width = rect.width();
+                let edge = Splitter::columns("writer-inspector-edge")
+                    .range(190.0..=520.0)
+                    .reset_to(INSPECTOR_WIDTH)
+                    .sizes_after(true)
+                    .label(&tr!("inspector"))
+                    .show(ui, &theme, rect.left(), body.y_range(), &mut width);
+                if edge.changed() {
+                    self.inspector_width = width;
+                }
             }
         }
-        let status = places.status.translate(vec2(0.0, hide * STATUS_HEIGHT));
+        let status = places.status.translate(Vec2::Y * hide * STATUS_HEIGHT);
         self.status_ui(ui, status, cx, &theme);
         self.dialog_ui(&ctx, cx, &theme);
     }
@@ -348,7 +358,39 @@ impl SueWriter {
         crate::commands::registry().state(self, &Facts::of(cx), command)
     }
 
-    // ----- Toolbar -------------------------------------------------------------
+    /// What a bar's button for `command` is called, and the keys that run
+    /// it: as the menus show them now, so a key changed in Settings shows
+    /// in the tooltip too. A command no menu holds gets its name and its
+    /// default keys from the registry.
+    pub(crate) fn tip_of(&self, command: &str) -> (String, String) {
+        fn find<'a>(items: &'a [MenuItem], wanted: &str) -> Option<(&'a str, &'a str)> {
+            items.iter().find_map(|item| match item {
+                MenuItem::Action {
+                    label,
+                    command,
+                    shortcut,
+                    ..
+                } if command == wanted => Some((label.as_str(), shortcut.as_str())),
+                MenuItem::Sub { items, .. } => find(items, wanted),
+                _ => None,
+            })
+        }
+        let shown = self
+            .menus
+            .iter()
+            .find_map(|menu| find(&menu.items, command));
+        let (name, keys) = if let Some((label, keys)) = shown {
+            (label.to_owned(), keys.to_owned())
+        } else {
+            let registry = crate::commands::registry();
+            let keys = registry.find(command).map_or("", |(found, _)| {
+                found.chords.split(" or ").next().unwrap_or_default()
+            });
+            (registry.label(command).unwrap_or_default(), keys.to_owned())
+        };
+        // A menu's "Find..." is a button's "Find".
+        (name.trim_end_matches("...").to_owned(), keys)
+    }
 }
 
 /// Where the studio's parts go.

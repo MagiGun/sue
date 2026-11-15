@@ -157,7 +157,7 @@ const AREAS: [Area; 11] = [
     },
     Area {
         folder: "crates/sue-writer/src/ui",
-        baseline: Counts::new([16, 13, 29, 29, 60, 27, 6]),
+        baseline: Counts::new([9, 10, 14, 26, 34, 6, 2]),
     },
     Area {
         folder: "crates/sue-wm/src/shell",
@@ -271,7 +271,7 @@ const INTERFACE: [&str; 5] = [
 ///
 /// P4-18 took the last of `bins/sue/src` (the cross of a key chip and
 /// the arrows of Settings on a phone) to icons.
-const GLYPH_BASELINE: [u32; 5] = [1, 2, 6, 0, 0];
+const GLYPH_BASELINE: [u32; 5] = [1, 2, 3, 0, 0];
 
 /// Characters that are text where they stand, not icons: a file or a
 /// folder from the repository root, the character (`None` for every

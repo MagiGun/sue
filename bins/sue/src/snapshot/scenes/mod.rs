@@ -40,6 +40,7 @@ mod ui_buttons;
 mod ui_dialogs;
 mod ui_export;
 mod ui_inputs;
+mod writer_bars;
 mod writer_compile;
 mod writer_corkboard;
 mod writer_document;
@@ -106,6 +107,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
 
     // 14 to 19a. Sue Writer on a sample novel.
     writer_document::open(tour)?;
+    writer_bars::find_bar(tour)?;
+    writer_bars::font_list(tour)?;
+    writer_bars::text_color(tour)?;
     writer_corkboard::corkboard(tour)?;
     writer_outliner::outliner(tour)?;
     writer_document::composition(tour)?;

@@ -537,6 +537,19 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint, Edit, Change Image Resolution resamples with the same
   bicubic resampler as every export, so a picture made larger keeps
   crisper edges and one made smaller stays clean at its transparent edges.
+- Sue Writer's toolbar, status bar and find bar use Sue's own icons
+  and controls: Bold, Italic, Underline, the alignments, the lists and
+  the indents are icon buttons that light up while they are on, the
+  paragraph style and the size are dropdowns, the font box opens a
+  search over your fonts, each shown in its own face, and Highlight
+  opens a small list of colors. The text color is a letter A over a
+  bar of the color, and opens a color wheel. Every button names itself
+  and its keys in its tooltip, keys you change in Settings included,
+  and Tab reaches each one with a focus ring; the find bar's boxes name
+  themselves too. After a font or a size is picked, the keys go back to
+  the text. The edges of the binder and the inspector can be moved
+  with the arrow keys too, and a double click puts them back.
+  Composition mode writes on your theme's page.
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait

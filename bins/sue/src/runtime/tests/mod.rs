@@ -55,6 +55,7 @@ mod shell;
 mod shell_polish;
 mod windows;
 mod writer;
+mod writer_bars;
 
 pub(crate) fn runtime(tag: &str) -> (Runtime, PathBuf) {
     let (host, root) = temp_host(tag);
