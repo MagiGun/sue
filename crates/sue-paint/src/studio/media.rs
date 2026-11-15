@@ -8,7 +8,7 @@ use sue_model::picture;
 use sue_platform::write_atomic;
 use sue_wm::{AppletContext, FilePick, ShellRequest};
 
-use super::exports::{Done, Staged, Steps, What, write_whole};
+use super::exports::{Done, Staged, Steps, What, cannot, write_whole};
 use super::{SuePaint, me_id};
 use crate::composite::{self, RenderOptions};
 use crate::doc;
@@ -346,7 +346,8 @@ impl SuePaint {
                 let Some(flat) = flat else {
                     continue;
                 };
-                let bytes = sue_io::encode_as(&flat, &extension, quality, effort)?;
+                let bytes = sue_io::encode_as(&flat, &extension, quality, effort)
+                    .map_err(|error| cannot(&error))?;
                 staged.write(target, &bytes)?;
             }
             let files = staged.finish(&held, steps)?;
@@ -444,8 +445,8 @@ impl SuePaint {
                     drafts: false,
                 },
             )
-            .ok_or_else(|| tr!("no-frames"))?;
-            let bytes = flat.bytes().ok_or_else(|| tr!("no-frames"))?;
+            .ok_or_else(|| cannot(&tr!("no-frames")))?;
+            let bytes = flat.bytes().ok_or_else(|| cannot(&tr!("no-frames")))?;
             let from = [flat.width(), flat.height()];
             let scaled = if to == from {
                 bytes.to_vec()
@@ -467,7 +468,7 @@ impl SuePaint {
                     sue_core::PixelFormat::Rgba8,
                     piece,
                 )
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| cannot(&error.to_string()))?;
                 let bytes = sue_io::encode_as(&tile, &extension, 92, 7).map_err(|error| {
                     tr!("cannot-export-piece", written = index + 1, error = error)
                 })?;
@@ -583,7 +584,12 @@ impl SuePaint {
                 if let Some(into) = target.parent() {
                     staged.folder(into)?;
                 }
-                let bytes = sue_io::encode_as(&tile, &extension, 92, 7)?;
+                let bytes = sue_io::encode_as(&tile, &extension, 92, 7).map_err(|error| {
+                    let name = target
+                        .file_name()
+                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+                    tr!("cannot-export-2", name = name, error = error)
+                })?;
                 staged.write(target, &bytes)?;
             }
             let files = staged.finish(&held, steps)?;

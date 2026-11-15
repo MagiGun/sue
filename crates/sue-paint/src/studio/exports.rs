@@ -60,7 +60,8 @@ impl What {
                 error = sue_lang::translate("io", error)
             ),
             Self::Animation => tr!("cannot-export-the-animation", error = error.to_owned()),
-            Self::Sequence | Self::Cels => tr!("cannot-export", error = error.to_owned()),
+            // Their work says which file or frame it could not make.
+            Self::Sequence | Self::Cels => error.to_owned(),
             Self::Timelapse => tr!(
                 "cannot-export-the-timelapse",
                 error = sue_lang::translate("io", error)
@@ -211,7 +212,7 @@ impl Staged {
             missing.push(folder.to_path_buf());
             at = folder.parent();
         }
-        sue_platform::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+        sue_platform::fs::create_dir_all(dir).map_err(|error| cannot(&error.to_string()))?;
         missing.reverse();
         self.folders.extend(missing);
         Ok(())
@@ -223,7 +224,7 @@ impl Staged {
     /// When it will not write.
     pub(crate) fn write(&mut self, target: &Path, bytes: &[u8]) -> Result<(), String> {
         let temporary = Self::temporary(target);
-        sue_platform::fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
+        sue_platform::fs::write(&temporary, bytes).map_err(|error| cannot(&error.to_string()))?;
         self.files.push((temporary, target.to_path_buf()));
         Ok(())
     }
@@ -249,7 +250,7 @@ impl Staged {
             if let Err(error) = sue_platform::fs::rename(&temporary, &target) {
                 let _ = sue_platform::fs::remove_file(&temporary);
                 self.files = left.collect();
-                return Err(error.to_string());
+                return Err(cannot(&error.to_string()));
             }
         }
         self.folders.clear();
@@ -272,6 +273,11 @@ impl Drop for Staged {
             }
         }
     }
+}
+
+/// "Cannot export: `why`", what a part export says when it fails.
+pub(crate) fn cannot(why: &str) -> String {
+    tr!("cannot-export", error = why.to_owned())
 }
 
 /// How an export ended.

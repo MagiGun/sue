@@ -196,7 +196,8 @@ pub(crate) fn movie_bytes(
 }
 
 /// The animated picture of `frames` (`kind`), each frame scaled to `size`
-/// when one is given, looping `loops` times (0 for ever).
+/// when one is given, looping `loops` times (0 for ever), and how many
+/// frames it holds (a frame that will not render is left out).
 ///
 /// # Errors
 /// When a frame will not encode, or it was cancelled.
@@ -206,7 +207,7 @@ pub(crate) fn animated_bytes(
     size: Option<[u32; 2]>,
     loops: u32,
     steps: Steps<'_>,
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, usize), String> {
     let mut tiles = Vec::with_capacity(frames.len());
     for index in 0..frames.len() {
         steps.go_on()?;
@@ -220,7 +221,7 @@ pub(crate) fn animated_bytes(
     }
     steps.go_on()?;
     let delay = (1000.0 / frames.fps.max(1.0)).round() as u32;
-    match kind {
+    let bytes = match kind {
         Animated::WebP => sue_io::encode_webp_animation(&tiles, delay),
         Animated::Apng => sue_io::encode_apng(&tiles, delay),
         Animated::Gif => sue_io::encode_gif_animation_looping(
@@ -228,7 +229,8 @@ pub(crate) fn animated_bytes(
             delay,
             u16::try_from(loops).ok().filter(|loops| *loops > 0),
         ),
-    }
+    }?;
+    Ok((bytes, tiles.len()))
 }
 impl SuePaint {
     /// The size an export starts from: the output frame's, else the
@@ -486,10 +488,10 @@ impl SuePaint {
         let loops = form.as_ref().map_or(0, |form| form.loops);
         let target = path.to_path_buf();
         self.run_export(cx, What::Animation, path, move |steps| {
-            let bytes = animated_bytes(&frames, kind, size, loops, steps)?;
+            let (bytes, count) = animated_bytes(&frames, kind, size, loops, steps)?;
             write_whole(&target, &bytes, steps)?;
             Ok(Done {
-                frames: frames.len(),
+                frames: count,
                 bytes: bytes.len(),
                 files: 1,
             })
