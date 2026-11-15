@@ -28,10 +28,12 @@ const CHART_DAYS: usize = 14;
 const CHART_STEPS: f32 = 3.0;
 /// How wide Header and Footer is, in the largest steps of the spacing
 /// scale: a label and three parts of a line.
-const FURNITURE_STEPS: f32 = 15.0;
+const FURNITURE_STEPS: f32 = 17.0;
 /// How tall the list of shortcuts gets before it scrolls, in the largest
 /// steps of the spacing scale.
 const SHORTCUT_STEPS: f32 = 11.0;
+/// How many columns New Project's templates stand in.
+const TEMPLATE_COLUMNS: usize = 3;
 /// How many lines a note or a comment field shows.
 const NOTE_ROWS: usize = 4;
 
@@ -324,21 +326,31 @@ impl SueWriter {
         let templates: Vec<&Template> = self.templates.group(Group::Template).collect();
         let mut members = Vec::with_capacity(templates.len());
         let mut clicked = None;
-        for (index, one) in templates.iter().enumerate() {
-            let response = ui::radio(
-                ("writer-new-template", index),
-                &one.name(),
-                *template == one.key,
-            )
-            .show(ui, theme);
-            let about = one.about();
-            let response = ui::tooltip(response, &Tip::new("").help(&about), theme);
-            if response.clicked() {
-                clicked = Some(index);
-            }
-            members.push(response);
-        }
-        if let Some(index) = ui::rove(ui, &members, Roving::Vertical).or(clicked) {
+        // Three columns, so the list stays short; the arrow keys walk them
+        // both ways.
+        egui::Grid::new("writer-new-templates")
+            .num_columns(TEMPLATE_COLUMNS)
+            .spacing([theme.space(Space::S6), theme.space(Space::S1)])
+            .show(ui, |ui| {
+                for (index, one) in templates.iter().enumerate() {
+                    let response = ui::radio(
+                        ("writer-new-template", index),
+                        &one.name(),
+                        *template == one.key,
+                    )
+                    .show(ui, theme);
+                    let about = one.about();
+                    let response = ui::tooltip(response, &Tip::new("").help(&about), theme);
+                    if response.clicked() {
+                        clicked = Some(index);
+                    }
+                    members.push(response);
+                    if index % TEMPLATE_COLUMNS == TEMPLATE_COLUMNS - 1 {
+                        ui.end_row();
+                    }
+                }
+            });
+        if let Some(index) = ui::rove(ui, &members, Roving::Both).or(clicked) {
             templates[index].key.clone_into(template);
         }
         ui.add_space(theme.space(Space::S4));
@@ -354,8 +366,10 @@ impl SueWriter {
                     .position(|one| one.key == *template)
                     .map_or(0, |index| index + 1);
                 let label = tr!("presets");
+                let width = ui.available_width();
                 let response = ui::dropdown("writer-new-preset", &mut chosen, &names)
                     .label(&label)
+                    .width(width)
                     .show(ui, theme);
                 if response.changed() {
                     match chosen.checked_sub(1).and_then(|index| presets.get(index)) {

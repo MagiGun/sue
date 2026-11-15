@@ -9,9 +9,6 @@ use sue_wm::{AppletContext, Theme};
 use crate::project;
 use crate::studio::{Furniture, Settings, SueWriter};
 
-/// How wide a part of a header or a footer is, in the largest steps of
-/// the spacing scale.
-const PART_STEPS: f32 = 3.5;
 /// Points in an inch: the margin is kept in points and shown in inches.
 const POINTS_PER_INCH: f32 = 72.0;
 
@@ -372,9 +369,8 @@ fn caption(ui: &mut Ui, text: &str, theme: &Theme) {
 pub(super) fn furniture_ui(ui: &mut Ui, furniture: &mut Furniture, theme: &Theme) {
     let memory = Id::unique("writer-furniture-focus");
     let mut focused: Option<(usize, usize)> = ui.ctx().data(|data| data.get_temp(memory));
-    let width = theme.space(Space::S9) * PART_STEPS;
     let parts = [tr!("left"), tr!("middle"), tr!("right")];
-    let rows = [tr!("header"), tr!("footer")];
+    let rows = [tr!("header"), tr!("footer"), tr!("insert")];
     // The labels' column, as wide as the wider of them.
     let label_width = rows
         .iter()
@@ -388,6 +384,8 @@ pub(super) fn furniture_ui(ui: &mut Ui, furniture: &mut Furniture, theme: &Theme
         .ceil();
     let gap = theme.space(Space::S4);
     let height = ui::Density::of(ui).control_height();
+    // The three parts share what the labels leave of the dialog's width.
+    let width = ((ui.available_width() - label_width - 3.0 * gap) / 3.0).floor();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = gap;
         ui.allocate_exact_size(vec2(label_width, height), egui::Sense::hover());
@@ -399,17 +397,21 @@ pub(super) fn furniture_ui(ui: &mut Ui, furniture: &mut Furniture, theme: &Theme
         }
     });
     let runnings = [&mut furniture.header, &mut furniture.footer];
+    // A row's label, in the labels' column and centered on its controls.
+    let row_label = |ui: &mut Ui, label: &str| {
+        let (rect, _) = ui.allocate_exact_size(vec2(label_width, height), egui::Sense::hover());
+        ui.painter().text(
+            rect.left_center(),
+            egui::Align2::LEFT_CENTER,
+            label,
+            theme.text_font(TextRole::Body),
+            theme.text_muted(),
+        );
+    };
     for (row, (label, running)) in rows.iter().zip(runnings).enumerate() {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
-            let (rect, _) = ui.allocate_exact_size(vec2(label_width, height), egui::Sense::hover());
-            ui.painter().text(
-                rect.left_center(),
-                egui::Align2::LEFT_CENTER,
-                label,
-                theme.text_font(TextRole::Body),
-                theme.text_muted(),
-            );
+            row_label(ui, label);
             for (column, part) in [&mut running.left, &mut running.center, &mut running.right]
                 .into_iter()
                 .enumerate()
@@ -427,12 +429,12 @@ pub(super) fn furniture_ui(ui: &mut Ui, furniture: &mut Furniture, theme: &Theme
     }
     ui.add_space(theme.space(Space::S4));
     ui.horizontal_wrapped(|ui| {
-        caption(ui, &tr!("insert"), theme);
+        ui.spacing_mut().item_spacing.x = theme.space(Space::S2);
+        row_label(ui, &rows[2]);
+        ui.add_space(gap - theme.space(Space::S2));
         for (index, (field, name)) in sue_model::FIELDS.iter().enumerate() {
             let help = tr!("puts-the-field-where-you-type");
-            let button = ui::button(("writer-furniture-field", index), name)
-                .ghost()
-                .show(ui, theme);
+            let button = ui::button(("writer-furniture-field", index), name).show(ui, theme);
             if ui::tooltip(button, &Tip::new(name).help(&help), theme).clicked() {
                 let (row, column) = focused.unwrap_or((1, 1));
                 let running = if row == 0 {
