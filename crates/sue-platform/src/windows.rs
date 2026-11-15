@@ -70,8 +70,9 @@ pub struct WindowSpec {
     /// The size of its inside when it opens, in points.
     pub size: [f32; 2],
     /// Where its top left corner goes on the desktop when it opens, in
-    /// points; `None` lets the system place it.
-    pub at: Option<[f32; 2]>,
+    /// the desktop's pixels (screens of different scales have no common
+    /// points, only common pixels); `None` lets the system place it.
+    pub at: Option<[i32; 2]>,
 }
 
 impl WindowSpec {
@@ -86,10 +87,10 @@ impl WindowSpec {
         }
     }
 
-    /// Opens it with its top left corner at `at` (points on the desktop,
-    /// so on another screen too).
+    /// Opens it with its top left corner at `at` (the desktop's pixels,
+    /// as [`Screen::at`] gives them, so on another screen too).
     #[must_use]
-    pub fn at(mut self, at: [f32; 2]) -> Self {
+    pub fn at(mut self, at: [i32; 2]) -> Self {
         self.at = Some(at);
         self
     }
@@ -101,17 +102,41 @@ impl WindowSpec {
     }
 }
 
-/// One screen of the desktop, in points.
+/// One screen of the desktop. Its place is in the desktop's pixels, the
+/// one measure every screen shares when their scales differ.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Screen {
     /// The name the system gives it (may be empty).
     pub name: String,
-    /// Its top left corner on the desktop.
-    pub at: [f32; 2],
-    /// Its size.
-    pub size: [f32; 2],
+    /// Its top left corner on the desktop, in the desktop's pixels.
+    pub at: [i32; 2],
+    /// Its size in pixels.
+    pub pixels: [u32; 2],
     /// Its pixels a point.
     pub scale: f32,
+}
+
+impl Screen {
+    /// Its size in points.
+    #[must_use]
+    pub fn size(&self) -> [f32; 2] {
+        let scale = if self.scale > 0.0 { self.scale } else { 1.0 };
+        [
+            self.pixels[0] as f32 / scale,
+            self.pixels[1] as f32 / scale,
+        ]
+    }
+
+    /// Where a window's top left corner goes to sit `inset` points in
+    /// from this screen's top left corner, in the desktop's pixels (for
+    /// [`WindowSpec::at`]).
+    #[must_use]
+    pub fn place(&self, inset: [f32; 2]) -> [i32; 2] {
+        [
+            self.at[0] + (inset[0] * self.scale).round() as i32,
+            self.at[1] + (inset[1] * self.scale).round() as i32,
+        ]
+    }
 }
 
 /// The egui viewport of the window named `key`.
@@ -652,6 +677,36 @@ mod tests {
         // Surface ids are never given twice.
         let c = set.insert(spec("c"), (), [10.0, 10.0], 1.0);
         assert!(c.0 > b.0);
+    }
+
+    #[test]
+    fn a_place_on_another_screen_is_in_that_screens_pixels() {
+        // A 4K screen at 150 percent with a 100 percent screen to its
+        // right: in points the second would start at 2560, inside the
+        // first's 3840 pixels, so places are named in pixels.
+        let first = Screen {
+            name: "first".to_owned(),
+            at: [0, 0],
+            pixels: [3840, 2160],
+            scale: 1.5,
+        };
+        let second = Screen {
+            name: "second".to_owned(),
+            at: [3840, 0],
+            pixels: [1920, 1080],
+            scale: 1.0,
+        };
+        assert_eq!(first.size(), [2560.0, 1440.0]);
+        assert_eq!(second.size(), [1920.0, 1080.0]);
+        assert_eq!(first.place([40.0, 40.0]), [60, 60]);
+        let at = second.place([40.0, 40.0]);
+        assert_eq!(at, [3880, 40]);
+        assert!(at[0] >= second.at[0], "on the second screen, not the first");
+        let spec = spec("a").at(at);
+        assert_eq!(spec.at, Some([3880, 40]));
+        // A screen that reports no scale is read at one pixel a point.
+        let odd = Screen { scale: 0.0, ..second };
+        assert_eq!(odd.size(), [1920.0, 1080.0]);
     }
 
     #[test]

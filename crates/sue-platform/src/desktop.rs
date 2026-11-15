@@ -605,16 +605,13 @@ impl DesktopHost {
     }
 
     /// Where the window named `key` is on the desktop: its top left
-    /// corner, in points, while it is open (to open it there again).
+    /// corner, in the desktop's pixels, while it is open (to open it there
+    /// again with [`WindowSpec::at`]).
     #[must_use]
-    pub fn sue_window_at(&self, key: &str) -> Option<[f32; 2]> {
+    pub fn sue_window_at(&self, key: &str) -> Option<[i32; 2]> {
         #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
         return self.windows.by_key(key).and_then(|tracked| {
-            let window = &tracked.native.window;
-            let at = window
-                .outer_position()
-                .ok()?
-                .to_logical::<f32>(window.scale_factor());
+            let at = tracked.native.window.outer_position().ok()?;
             Some([at.x, at.y])
         });
         #[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
@@ -633,17 +630,18 @@ impl DesktopHost {
             .window
             .available_monitors()
             .map(|monitor| {
-                let scale = monitor.scale_factor();
-                let at = monitor.position().to_logical::<f32>(scale);
-                let size = monitor.size().to_logical::<f32>(scale);
+                // Pixels, not points: screens of different scales share
+                // no points, so a point would name two places.
+                let at = monitor.position();
+                let size = monitor.size();
                 let main = current.as_ref() == Some(&monitor);
                 (
                     main,
                     crate::windows::Screen {
                         name: monitor.name().unwrap_or_default(),
                         at: [at.x, at.y],
-                        size: [size.width, size.height],
-                        scale: scale as f32,
+                        pixels: [size.width, size.height],
+                        scale: monitor.scale_factor() as f32,
                     },
                 )
             })
@@ -1042,7 +1040,7 @@ impl DesktopHost {
             .with_min_inner_size(LogicalSize::new(240.0, 160.0))
             .with_decorations(self.options.decorations);
         if let Some([x, y]) = spec.at {
-            attributes = attributes.with_position(winit::dpi::LogicalPosition::new(x, y));
+            attributes = attributes.with_position(winit::dpi::PhysicalPosition::new(x, y));
         }
         // The main window waits hidden for its first frame; these show at
         // once.

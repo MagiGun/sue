@@ -31,8 +31,8 @@ struct Two {
     /// How often the timer ran.
     ticks: u32,
     /// Where the second window opens, and where it was.
-    place: Option<[f32; 2]>,
-    second_at: Option<[f32; 2]>,
+    place: Option<[i32; 2]>,
+    second_at: Option<[i32; 2]>,
 }
 
 impl DesktopApp for Two {
@@ -46,11 +46,14 @@ impl DesktopApp for Two {
             .iter()
             .skip(1)
             .last()
-            .map(|screen| [screen.at[0] + 40.0, screen.at[1] + 40.0]);
+            .map(|screen| screen.place([40.0, 40.0]));
         for screen in &screens {
             self.report.push(format!(
-                "screen {:?} at {:?}, {:?} points, scale {}",
-                screen.name, screen.at, screen.size, screen.scale
+                "screen {:?} at {:?} pixels, {:?} points, scale {}",
+                screen.name,
+                screen.at,
+                screen.size(),
+                screen.scale
             ));
         }
         Ok(())

@@ -854,7 +854,8 @@ Two hosts implement the trait:
 
 **More than one window.** Besides the main window an application lists
 the windows it wants (`DesktopApp::windows`, each a `WindowSpec`: a key,
-a title, a size and where on the desktop it opens). On a desktop each
+a title, a size and where on the desktop it opens, in the desktop's
+pixels, since screens of different scales share no points). On a desktop each
 becomes a system window of its own with Sue's frame, which can go to
 another screen (`sue-platform/src/windows.rs`). All windows share one egui
 context, so fonts, the theme and textures are shared; each window is an
