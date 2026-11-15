@@ -207,10 +207,10 @@ fn the_same_notice_twice_starts_its_time_again() {
 }
 
 #[test]
-fn more_notices_than_fit_send_the_oldest_away() {
+fn more_notices_than_a_stack_holds_send_the_oldest_away() {
     let mut bench = Bench::new();
     let mut toasts = Toasts::new("many");
-    let ids: Vec<ToastId> = (0..MAX_SHOWN + 2)
+    let ids: Vec<ToastId> = (0..MAX_HELD + 2)
         .map(|n| toasts.push(Toast::info(format!("Notice {n}"))))
         .collect();
     let events = show(&mut bench, &mut toasts, Vec::new());
@@ -219,8 +219,163 @@ fn more_notices_than_fit_send_the_oldest_away() {
         vec![ToastEvent::Expired(ids[0]), ToastEvent::Expired(ids[1])]
     );
     run(&mut bench, &mut toasts, 40);
-    assert_eq!(toasts.len(), MAX_SHOWN);
+    assert_eq!(toasts.len(), MAX_HELD);
     assert!(ids[2..].iter().all(|id| toasts.get(*id).is_some()));
+}
+
+#[test]
+fn older_notices_fold_behind_the_newest_and_unfold_on_a_click() {
+    let mut bench = Bench::new();
+    let mut toasts = Toasts::new("fold");
+    let ids: Vec<ToastId> = (0..5)
+        .map(|n| toasts.push(Toast::info(format!("Notice {n}")).sticky()))
+        .collect();
+    run(&mut bench, &mut toasts, 40);
+    // The newest three show; the two older fold behind them.
+    assert_eq!(toasts.folded(), 2);
+    assert!(ids[..2].iter().all(|id| toasts.rects(*id).is_none()));
+    let shown: Vec<Rect> = ids[2..]
+        .iter()
+        .map(|id| toasts.rects(*id).expect("shown").toast)
+        .collect();
+    let fold = toasts.fold_rect().expect("a button says how many more");
+    assert!(fold.bottom() < shown[0].top(), "it sits over the stack");
+    assert!(fold.height() >= Density::Regular.min_hit() * 0.75);
+    assert_eq!(tr!("toast-more", count = 2), "2 more");
+    // A click unfolds them all, and the same button folds them again.
+    click(&mut bench, &mut toasts, fold.center());
+    run(&mut bench, &mut toasts, 40);
+    assert!(toasts.unfolded());
+    assert_eq!(toasts.folded(), 0);
+    assert!(ids.iter().all(|id| toasts.rects(*id).is_some()));
+    let fold = toasts.fold_rect().expect("Show fewer");
+    click(&mut bench, &mut toasts, fold.center());
+    run(&mut bench, &mut toasts, 40);
+    assert!(!toasts.unfolded());
+    assert_eq!(toasts.folded(), 2);
+    // Closing a shown one brings the next older forward.
+    let close = toasts.rects(ids[4]).expect("shown").close.center();
+    assert_eq!(
+        click(&mut bench, &mut toasts, close),
+        vec![ToastEvent::Dismissed(ids[4])]
+    );
+    run(&mut bench, &mut toasts, 40);
+    assert_eq!(toasts.folded(), 1);
+    assert!(toasts.rects(ids[1]).is_some());
+    // With no more than fit, there is no button.
+    for id in &ids[..2] {
+        toasts.dismiss(*id);
+    }
+    run(&mut bench, &mut toasts, 40);
+    assert_eq!(toasts.folded(), 0);
+    assert_eq!(toasts.fold_rect(), None);
+}
+
+#[test]
+fn a_folded_notice_keeps_its_own_time_and_leaves_unseen() {
+    let mut bench = Bench::new();
+    let mut toasts = Toasts::new("folded-time");
+    let old = toasts.push(Toast::info("Old news").seconds(1.0));
+    for n in 0..MAX_SHOWN {
+        toasts.push(Toast::info(format!("Fresh {n}")).sticky());
+    }
+    run(&mut bench, &mut toasts, 10);
+    assert!(toasts.rects(old).is_none(), "folded");
+    let events = run(&mut bench, &mut toasts, frames_in(1.2));
+    assert_eq!(events, vec![ToastEvent::Expired(old)]);
+    assert_eq!(toasts.get(old), None, "gone at once: it was not in sight");
+    assert_eq!(toasts.folded(), 0);
+}
+
+#[test]
+fn a_narrow_room_shows_only_the_newest_notice() {
+    let mut bench = Bench::with(egui::vec2(393.0, 851.0), &[]);
+    let mut toasts = Toasts::new("narrow");
+    let ids: Vec<ToastId> = (0..4)
+        .map(|n| toasts.push(Toast::info(format!("Notice {n}"))))
+        .collect();
+    run(&mut bench, &mut toasts, 40);
+    assert_eq!(toasts.folded(), 3);
+    let newest = toasts.rects(ids[3]).expect("the newest shows").toast;
+    let within = room(&bench);
+    assert!(within.contains_rect(newest));
+    // What it covers is the card, the edges behind it and the button.
+    let fold = toasts.fold_rect().expect("3 more");
+    let covered = toasts.covered();
+    assert!((covered - (within.bottom() - fold.top())).abs() < 1.0);
+    assert!(covered < within.height() / 4.0, "{covered}");
+}
+
+#[test]
+fn notices_wait_under_a_modal_dialog_with_their_clock_stopped() {
+    use crate::ui::Dialog;
+    let mut bench = Bench::new();
+    let mut toasts = Toasts::new("modal");
+    let id = toasts.push(Toast::info("Saved").seconds(1.0));
+    run(&mut bench, &mut toasts, 10);
+    assert_eq!(
+        toasts.layer().map(|layer| layer.order),
+        Some(Layer::Toast.order())
+    );
+    let within = room(&bench);
+    let with_dialog = |bench: &mut Bench, toasts: &mut Toasts, count: usize| {
+        let mut events = Vec::new();
+        for _ in 0..count {
+            events.extend(
+                bench
+                    .frame(Vec::new(), |ui, theme| {
+                        let events = toasts.show(ui.ctx(), within, theme);
+                        Dialog::new("modal", "Settings", theme)
+                            .ok()
+                            .show(ui.ctx(), |_| ());
+                        events
+                    })
+                    .out,
+            );
+        }
+        events
+    };
+    // Long past its time, it is still there, under the dialog's layer.
+    assert!(with_dialog(&mut bench, &mut toasts, frames_in(3.0)).is_empty());
+    let layer = toasts.layer().expect("drawn");
+    let modal = bench
+        .ctx
+        .memory(|memory| memory.top_modal_layer())
+        .expect("the dialog is modal");
+    assert!(layer.order < modal.order, "the notice is under the dialog");
+    // It takes no click while the dialog is up.
+    let close = toasts.rects(id).expect("drawn").close.center();
+    let button = |pressed| Event::PointerButton {
+        pos: close,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    for events in [
+        vec![Event::PointerMoved(close)],
+        vec![button(true)],
+        vec![button(false)],
+    ] {
+        let out = bench.frame(events, |ui, theme| {
+            let events = toasts.show(ui.ctx(), within, theme);
+            Dialog::new("modal", "Settings", theme)
+                .ok()
+                .show(ui.ctx(), |_| ());
+            events
+        });
+        assert!(out.out.is_empty());
+    }
+    show(&mut bench, &mut toasts, vec![Event::PointerGone]);
+    // The dialog closes: the notice comes back over everything with all
+    // of its time, then leaves.
+    run(&mut bench, &mut toasts, 2);
+    assert_eq!(
+        toasts.layer().map(|layer| layer.order),
+        Some(Layer::Toast.order())
+    );
+    assert!(toasts.get(id).is_some());
+    let events = run(&mut bench, &mut toasts, frames_in(1.2));
+    assert_eq!(events, vec![ToastEvent::Expired(id)]);
 }
 
 #[test]

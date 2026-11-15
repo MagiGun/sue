@@ -4,11 +4,23 @@
 //! A [`Toasts`] is the stack of one window. Whoever owns the window keeps
 //! it, [`push`](Toasts::push)es a [`Toast`] when something is worth
 //! saying, and calls [`show`](Toasts::show) every frame with the room the
-//! notices may take (the window without its status bar). The newest
-//! notice is the lowest; each slides and fades in, stays for its time
-//! (the clock stops while the pointer is over the stack), and fades out
-//! while those above it settle down. A notice can carry one action
-//! ("Show in Folder") and always has a button that closes it.
+//! notices may take (the window without its status bar, and on a phone
+//! without its tab bar). The newest notice is the lowest; each slides and
+//! fades in, stays for its time (the clock stops while the pointer is over
+//! the stack), and fades out while those above it settle down. A notice
+//! can carry one action ("Show in Folder") and always has a button that
+//! closes it.
+//!
+//! The stack stays small: at most [`MAX_SHOWN`] notices show on a wide
+//! screen and [`MAX_SHOWN_NARROW`] on a narrow one. Older ones fold
+//! behind the oldest shown, as the edges of cards under it and a button
+//! that says how many more there are; it unfolds them, and they keep
+//! their own time while folded, so old news leaves on its own. A stack
+//! never holds more than [`MAX_HELD`]: past that the oldest leaves.
+//!
+//! A notice never covers a modal dialog: while one is open the stack
+//! waits under the dialog's scrim with its clock stopped, and comes back
+//! up, with all its time left, when the dialog closes.
 //!
 //! Every notice wears the glyph of its [`Tone`], so the four are told
 //! apart without color: the shipped themes are monochrome.
@@ -19,25 +31,39 @@
 use std::sync::Arc;
 
 use egui::{
-    Area, Color32, Context, Galley, Id, Painter, Rect, Response, Role, Sense, Stroke, StrokeKind,
-    Ui, UiBuilder, WidgetInfo, pos2, vec2,
+    Area, Color32, Context, Galley, Id, LayerId, Painter, Rect, Response, Role, Sense, Stroke,
+    StrokeKind, Ui, UiBuilder, WidgetInfo, pos2, vec2,
 };
 
 use super::focus::focus_ring;
 use super::motion::{self, Motion, Pace};
 use super::tokens::{Density, Elevation, Layer, Radius, Space, TextRole};
 use crate::Theme;
+use crate::icons::{self, Icon};
 
 /// How long a notice stays when it does not say, in seconds.
 pub const DEFAULT_SECONDS: f32 = 5.0;
 
-/// How many notices show at once: a newer one sends the oldest away.
-pub const MAX_SHOWN: usize = 4;
+/// How many notices show at once on a wide screen; older ones fold
+/// behind them.
+pub const MAX_SHOWN: usize = 3;
+
+/// How many notices show at once on a narrow screen (a phone): the
+/// newest, with the others folded behind it.
+pub const MAX_SHOWN_NARROW: usize = 1;
+
+/// Narrower than this many points, a stack shows [`MAX_SHOWN_NARROW`].
+pub const NARROW: f32 = 560.0;
+
+/// The most notices a stack holds, folded ones included: a newer one
+/// sends the oldest away.
+pub const MAX_HELD: usize = 6;
 
 /// The widest a notice gets, in points.
 const MAX_WIDTH: f32 = 420.0;
 
-/// What a notice, or a question, is about. Each has a glyph of its own.
+/// How many card edges show behind a folded stack, at most.
+const EDGES: usize = 2;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Tone {
     /// Something to know: a ring with a letter i.
@@ -242,16 +268,20 @@ pub struct ToastRects {
 struct Entry {
     id: ToastId,
     toast: Toast,
-    /// When it was first drawn.
+    /// When it was first drawn: its clock starts then.
     born: Option<f64>,
-    /// How long it has been showing, the time under the pointer left out.
+    /// When it last came into sight (a folded notice that comes forward
+    /// rises in again).
+    shown: Option<f64>,
+    /// How long it has been showing, the time under the pointer and under
+    /// a modal dialog left out.
     age: f64,
     /// It was sent away by [`Toasts::dismiss`] and leaves in the next
     /// frame.
     dismissed: bool,
     /// When it began to leave.
     leaving: Option<f64>,
-    /// Where it was drawn last.
+    /// Where it was drawn last; `None` while it is folded.
     rects: Option<ToastRects>,
 }
 
@@ -263,10 +293,23 @@ pub struct Toasts {
     next: u64,
     /// When the stack was last shown.
     last: Option<f64>,
+    /// The folded notices were asked to show.
+    unfolded: bool,
+    /// How many notices were folded in the last frame.
+    folded: usize,
+    /// Where the button that folds and unfolds the stack was drawn last.
+    fold: Option<Rect>,
+    /// The band of its room the stack took last: from the top of what it
+    /// drew to the room's bottom, across the room.
+    area: Option<Rect>,
+    /// The layer the stack was drawn on last.
+    layer: Option<LayerId>,
 }
 
 /// A notice measured for a frame.
 struct Laid {
+    /// Which entry it is.
+    index: usize,
     text: Arc<Galley>,
     action: Option<Arc<Galley>>,
     height: f32,
@@ -286,6 +329,11 @@ impl Toasts {
             entries: Vec::new(),
             next: 0,
             last: None,
+            unfolded: false,
+            folded: 0,
+            fold: None,
+            area: None,
+            layer: None,
         }
     }
 
@@ -307,6 +355,7 @@ impl Toasts {
             id,
             toast,
             born: None,
+            shown: None,
             age: 0.0,
             dismissed: false,
             leaving: None,
@@ -326,9 +375,11 @@ impl Toasts {
     /// Takes every notice away at once.
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.rest();
     }
 
-    /// How many notices the stack holds, those leaving included.
+    /// How many notices the stack holds, those folded and those leaving
+    /// included.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -349,7 +400,8 @@ impl Toasts {
             .map(|entry| &entry.toast)
     }
 
-    /// Where the notice `id` and its buttons were drawn last.
+    /// Where the notice `id` and its buttons were drawn last; `None`
+    /// while it is folded behind newer ones.
     #[must_use]
     pub fn rects(&self, id: ToastId) -> Option<ToastRects> {
         self.entries
@@ -358,13 +410,68 @@ impl Toasts {
             .and_then(|entry| entry.rects)
     }
 
+    /// How many notices were folded behind the shown ones in the last
+    /// frame.
+    #[must_use]
+    pub fn folded(&self) -> usize {
+        self.folded
+    }
+
+    /// Where the button that unfolds the stack ("2 more") or folds it
+    /// again was drawn last, while there is one.
+    #[must_use]
+    pub fn fold_rect(&self) -> Option<Rect> {
+        self.fold
+    }
+
+    /// `true` while the folded notices were asked to show.
+    #[must_use]
+    pub fn unfolded(&self) -> bool {
+        self.unfolded
+    }
+
+    /// How far up from the bottom of its room the stack reached in the
+    /// last frame, in points (0 when it showed nothing): what a page may
+    /// leave free at its end so nothing stays under the notices.
+    #[must_use]
+    pub fn covered(&self) -> f32 {
+        self.area.map_or(0.0, |area| area.height())
+    }
+
+    /// The band of its room the stack took in the last frame: from the
+    /// top of what it drew to the bottom of the room, across the room.
+    #[must_use]
+    pub fn area(&self) -> Option<Rect> {
+        self.area
+    }
+
+    /// The layer the stack was drawn on in the last frame.
+    #[must_use]
+    pub fn layer(&self) -> Option<LayerId> {
+        self.layer
+    }
+
+    /// Forgets what the last frame drew.
+    fn rest(&mut self) {
+        self.last = None;
+        self.unfolded = false;
+        self.folded = 0;
+        self.fold = None;
+        self.area = None;
+        self.layer = None;
+    }
+
     /// Draws the stack at the bottom of `within`, the part of the window
-    /// notices may cover (leave the status bar out of it), and says what
-    /// happened to which notice.
+    /// notices may cover (leave the status bar and a tab bar out of it),
+    /// and says what happened to which notice.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one frame of the stack, from the clock to the drawing"
+    )]
     pub fn show(&mut self, ctx: &Context, within: Rect, theme: &Theme) -> Vec<ToastEvent> {
         let mut events = Vec::new();
         if self.entries.is_empty() {
-            self.last = None;
+            self.rest();
             return events;
         }
         let now = ctx.input(|input| input.time);
@@ -383,6 +490,9 @@ impl Toasts {
                 motion::ease(((now - since) as f32 / seconds).clamp(0.0, 1.0))
             }
         };
+        // A modal dialog (as the last frame left it): the stack waits
+        // under its scrim, with its clock stopped.
+        let modal = ctx.memory(|memory| memory.top_modal_layer()).is_some();
 
         // Sizes.
         let margin = theme.space(Space::S6);
@@ -395,15 +505,23 @@ impl Toasts {
             .min(within.width() - margin * 2.0)
             .max(control * 4.0);
         let font = theme.text_font(TextRole::Body);
+        let room_for = if within.width() < NARROW {
+            MAX_SHOWN_NARROW
+        } else {
+            MAX_SHOWN
+        };
 
         // The clock: it stands still while the pointer is over the stack.
         let pointer = ctx.pointer_hover_pos();
-        let paused = pointer.is_some_and(|at| {
-            self.entries
-                .iter()
-                .filter_map(|entry| entry.rects)
-                .any(|rects| rects.toast.expand(gap).contains(at))
-        });
+        let hovered = !modal
+            && pointer.is_some_and(|at| {
+                self.entries
+                    .iter()
+                    .filter_map(|entry| entry.rects.map(|rects| rects.toast))
+                    .chain(self.fold)
+                    .any(|rect| rect.expand(gap).contains(at))
+            });
+        let paused = modal || hovered;
         let mut fresh = false;
         for entry in &mut self.entries {
             if entry.leaving.is_some() {
@@ -428,7 +546,7 @@ impl Toasts {
             }
             entry.born.get_or_insert(now);
         }
-        // More than fit: the oldest make room.
+        // More than a stack holds: the oldest make room.
         let staying = self
             .entries
             .iter()
@@ -438,28 +556,52 @@ impl Toasts {
             .entries
             .iter_mut()
             .filter(|entry| entry.leaving.is_none())
-            .take(staying.saturating_sub(MAX_SHOWN))
+            .take(staying.saturating_sub(MAX_HELD))
         {
             entry.leaving = Some(now);
             events.push(ToastEvent::Expired(entry.id));
         }
-        // What has faded out is gone, and so is what left before it was
-        // ever drawn.
+        // What has faded out is gone, and so is what left while it was
+        // folded or before it was ever drawn.
         self.entries.retain(|entry| {
             entry
                 .leaving
                 .is_none_or(|since| entry.rects.is_some() && along(since) < 1.0)
         });
         if self.entries.is_empty() {
-            self.last = None;
+            self.rest();
             return events;
+        }
+
+        // Which show: the newest of those staying, and those fading out;
+        // the older ones fold behind them.
+        let staying: Vec<usize> = (0..self.entries.len())
+            .filter(|&index| self.entries[index].leaving.is_none())
+            .collect();
+        if staying.len() <= room_for {
+            self.unfolded = false;
+        }
+        let limit = if self.unfolded { MAX_HELD } else { room_for };
+        let folded = &staying[..staying.len().saturating_sub(limit)];
+        for &index in folded {
+            let entry = &mut self.entries[index];
+            entry.rects = None;
+            entry.shown = None;
+        }
+        self.folded = folded.len();
+        let visible: Vec<usize> = (0..self.entries.len())
+            .filter(|index| !folded.contains(index))
+            .collect();
+        for &index in &visible {
+            self.entries[index].shown.get_or_insert(now);
         }
 
         // Measure, then place from the bottom up: the newest is lowest.
         let laid: Vec<Laid> = ctx.fonts_mut(|fonts| {
-            self.entries
+            visible
                 .iter()
-                .map(|entry| {
+                .map(|&index| {
+                    let entry = &self.entries[index];
                     let action =
                         entry.toast.action.as_ref().map(|label| {
                             fonts.layout_no_wrap(label.clone(), font.clone(), theme.text)
@@ -479,9 +621,10 @@ impl Toasts {
                         theme.text,
                         (width - taken).max(control),
                     );
-                    let entered = entry.born.map_or(0.0, along);
+                    let entered = entry.shown.map_or(0.0, along);
                     let left = entry.leaving.map_or(0.0, along);
                     Laid {
+                        index,
                         height: text.size().y.max(control) + pad.y * 2.0,
                         text,
                         action,
@@ -504,29 +647,104 @@ impl Toasts {
             );
             bottom -= (toast.height + gap) * toast.presence;
         }
+        let top_card = places
+            .iter()
+            .zip(&laid)
+            .find(|(_, toast)| self.entries[toast.index].leaving.is_none())
+            .map(|(place, _)| *place);
+
+        // The folded ones: the edges of cards behind the oldest shown,
+        // and over them a button that says how many; once unfolded, the
+        // same button folds them again.
+        let step = theme.space(Space::S3);
+        let edges: Vec<Rect> = top_card.map_or_else(Vec::new, |card| {
+            (1..=self.folded.min(EDGES))
+                .map(|level| {
+                    let level = level as f32;
+                    Rect::from_min_max(
+                        pos2(card.left() + pad.x * level, card.top() - step * level),
+                        pos2(card.right() - pad.x * level, card.bottom() - step * level),
+                    )
+                })
+                .collect()
+        });
+        let fold_label = if self.folded > 0 {
+            Some((tr!("toast-more", count = self.folded), Icon::ChevronUp))
+        } else if self.unfolded {
+            Some((tr!("toast-fewer"), Icon::ChevronDown))
+        } else {
+            None
+        };
+        let fold_size = (density.min_hit() * 0.8).round();
+        let fold = top_card.zip(fold_label).map(|(card, (label, glyph))| {
+            let galley = ctx.fonts_mut(|fonts| {
+                fonts.layout_no_wrap(
+                    label.clone(),
+                    theme.text_font(TextRole::Caption),
+                    Color32::PLACEHOLDER,
+                )
+            });
+            let above = edges.last().map_or(card.top(), |edge| edge.top());
+            let size = vec2(
+                galley.size().x + icon + tight + pad.x * 2.0,
+                fold_size.max(galley.size().y + tight * 2.0),
+            );
+            let rect =
+                Rect::from_min_size(pos2(card.right() - size.x, above - tight - size.y), size);
+            (rect, label, galley, glyph)
+        });
+        self.fold = fold.as_ref().map(|(rect, ..)| *rect);
         let all = places
             .iter()
+            .chain(&edges)
+            .chain(fold.as_ref().map(|(rect, ..)| rect))
             .fold(Rect::NOTHING, |all, place| all.union(*place));
+        self.area = Some(Rect::from_min_max(
+            pos2(within.left(), all.top().min(within.bottom())),
+            within.max,
+        ));
 
+        // Under a modal dialog the stack draws on the layer below the
+        // dialogs' (its scrim dims it and it takes no clicks); else on
+        // the notices' own, over what opened before it.
+        let order = if modal {
+            Layer::FloatingPalette.order()
+        } else {
+            Layer::Toast.order()
+        };
         let area = Area::new(self.id)
-            .order(Layer::Toast.order())
+            .order(order)
             .fixed_pos(all.min)
             .constrain(false)
             .fade_in(false)
             .sense(Sense::hover())
             .role(egui::accesskit::Role::Alert)
             .accessible_name(tr!("notices"));
+        self.layer = Some(area.layer());
         if fresh {
-            // A new notice shows over whatever opened before it.
             ctx.move_to_top(area.layer());
         }
         let dismiss = tr!("toast-dismiss");
         let radius = theme.radius(Radius::Lg);
         let surface = theme.surface(3);
         let stack = self.id;
+        let mut toggle = false;
         area.show(ctx, |ui| {
             ui.allocate_rect(all, Sense::hover());
-            for ((entry, toast), place) in self.entries.iter_mut().zip(&laid).zip(&places) {
+            // Behind the cards, the edges of the folded ones, the farthest
+            // first.
+            let painter = ui.painter();
+            for edge in edges.iter().rev() {
+                painter.rect(
+                    *edge,
+                    radius,
+                    theme.surface(2),
+                    theme.hairline(),
+                    StrokeKind::Inside,
+                );
+            }
+            for (toast, place) in laid.iter().zip(&places) {
+                let entry = &mut self.entries[toast.index];
                 let place = *place;
                 let id = stack.with(entry.id);
                 let mut child = ui.new_child(UiBuilder::new().max_rect(place).id_salt(id));
@@ -583,15 +801,30 @@ impl Toasts {
                     close,
                 });
             }
+            if let Some((rect, label, galley, glyph)) = &fold {
+                toggle = fold_button(
+                    ui,
+                    stack.with("sue-fold"),
+                    *rect,
+                    (label, galley, *glyph),
+                    theme,
+                )
+                .clicked();
+            }
         });
+        if toggle {
+            self.unfolded = !self.unfolded;
+            ctx.request_repaint();
+        }
 
         // Frames: every one while something moves, else only the one in
-        // which the next notice leaves.
-        let moving = self
-            .entries
-            .iter()
-            .zip(&laid)
-            .any(|(entry, toast)| entry.leaving.is_some() || toast.entered < 1.0);
+        // which the next notice leaves (none while the clock stands).
+        let moving = laid.iter().any(|toast| {
+            self.entries
+                .get(toast.index)
+                .is_some_and(|entry| entry.leaving.is_some())
+                || toast.entered < 1.0
+        });
         if moving {
             ctx.request_repaint();
         } else if !paused {
@@ -609,6 +842,48 @@ impl Toasts {
         }
         events
     }
+}
+
+/// The button over a folded stack: how many more notices there are (or
+/// that it folds them again) and an arrow, in a small hairline pill.
+fn fold_button(
+    ui: &Ui,
+    id: Id,
+    rect: Rect,
+    (label, galley, glyph): (&str, &Arc<Galley>, Icon),
+    theme: &Theme,
+) -> Response {
+    let response = ui.interact(rect, id, Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, label));
+    let radius = theme.radius(Radius::Full);
+    let lit = motion::hover_t(ui.ctx(), id.with("sue-hover"), response.hovered());
+    let fill = if response.is_pointer_button_down_on() {
+        theme.fill_pressed()
+    } else {
+        theme.surface(3).lerp_to_gamma(theme.fill_hover(), lit)
+    };
+    let painter = ui.painter();
+    painter.add(theme.elevation(Elevation::Floating).as_shape(rect, radius));
+    painter.rect(rect, radius, fill, theme.hairline(), StrokeKind::Inside);
+    let ink = theme.text_muted().lerp_to_gamma(theme.text, lit);
+    let side = Density::of(ui).icon().min(rect.height());
+    let pad = (rect.width() - galley.size().x - side - theme.space(Space::S2)) / 2.0;
+    painter.galley(
+        pos2(rect.left() + pad, rect.center().y - galley.size().y / 2.0),
+        galley.clone(),
+        ink,
+    );
+    icons::paint(
+        painter,
+        Rect::from_center_size(
+            pos2(rect.right() - pad - side / 2.0, rect.center().y),
+            egui::Vec2::splat(side),
+        ),
+        glyph,
+        ink,
+    );
+    focus_ring(ui, &response, radius, theme);
+    response.on_hover_text(label)
 }
 
 /// The action button of a notice: its label in a hairline box.
@@ -638,7 +913,7 @@ fn text_button(
         theme.text,
     );
     focus_ring(ui, &response, radius, theme);
-    response
+    response.on_hover_text(text)
 }
 
 #[cfg(test)]
