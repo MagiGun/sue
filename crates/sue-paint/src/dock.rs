@@ -1940,7 +1940,8 @@ mod tests {
                 .unwrap()
                 .1
         };
-        assert_eq!(place(Palette::SubTool).top(), 38.0 + COLUMN_BAR);
+        // Its body, under the column bar and its header.
+        assert_eq!(place(Palette::SubTool).top(), 38.0 + COLUMN_BAR + TAB_STRIP);
         assert!(place(Palette::ToolProperty).top() > place(Palette::SubTool).top());
         assert!(place(Palette::BrushGrid).top() > place(Palette::ToolProperty).top());
         assert!((place(Palette::Color).bottom() - 900.0).abs() < 0.5);
