@@ -298,7 +298,7 @@ fn a_dropped_sound_file_goes_on_the_timeline_of_the_canvas_in_front() {
 
 #[test]
 fn a_float_picture_opens_as_an_8_bit_copy_and_save_asks_where() {
-    let (mut runtime, root) = runtime("paint-float");
+    let (mut runtime, root) = fresh_runtime("paint-float");
     std::fs::create_dir_all(&root).unwrap();
     let ctx = egui::Context::default();
     let now = Instant::now();

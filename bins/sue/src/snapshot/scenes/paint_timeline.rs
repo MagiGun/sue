@@ -7,6 +7,9 @@ use super::super::Tour;
 /// is left on that tab for the scene after.
 pub(super) fn timeline(tour: &mut Tour<'_>) -> Result<(), String> {
     for command in [
+        // The Timeline starts folded under the canvas: Window, Timeline
+        // opens it.
+        "window.timeline",
         "anim.cel.new",
         "anim.next",
         "anim.next",

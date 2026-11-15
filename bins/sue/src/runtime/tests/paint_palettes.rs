@@ -191,7 +191,7 @@ fn sue_paint_palettes_drag_by_their_title_bars() {
         "Color Wheel",
         "Color Set",
         "Navigator",
-        "Sub View",
+        "Color Slider",
     ] {
         let Some(from) = texts
             .iter()
@@ -383,4 +383,158 @@ fn sue_paint_tears_a_tab_off_into_a_palette_of_its_own() {
         text_in(&texts, "Color Wheel", left).is_some(),
         "the color wheel stays where it was"
     );
+}
+
+/// The leftmost place `text` is drawn at or below `top`.
+fn below(paint: &PaintDriver, text: &str, top: f32) -> Option<egui::Rect> {
+    paint
+        .texts
+        .iter()
+        .filter(|(found, rect)| found == text && rect.top() >= top)
+        .map(|(_, rect)| *rect)
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+}
+
+#[test]
+fn sue_paint_starts_in_the_clip_studio_style() {
+    let mut paint = PaintDriver::fresh("paint-style-default");
+    let top = paint.page_top() + 40.0;
+    // The pointer over the canvas, so no tooltip shows.
+    paint.step(vec![egui::Event::PointerMoved(egui::pos2(720.0, 400.0))]);
+    paint.settle(30);
+    // Sub Tool, Tool Property and Brush Size stacked at the left, over the
+    // six color palettes as tabs.
+    let sub = below(&paint, "Sub Tool", top).expect("Sub Tool");
+    let property = below(&paint, "Tool Property", top).expect("Tool Property");
+    let size = below(&paint, "Brush Size", top).expect("Brush Size");
+    assert!(sub.top() < property.top() && property.top() < size.top());
+    for name in [
+        "Color Wheel",
+        "Color Slider",
+        "Color Set",
+        "Intermediate Color",
+        "Approximate Color",
+        "Color History",
+    ] {
+        let tab = below(&paint, name, size.bottom()).expect(name);
+        assert!(tab.left() < 400.0, "{name} at the left: {tab:?}");
+    }
+    // Navigator, Layer Property and Layer at the right; the Timeline
+    // folded to an icon under the canvas (no palette shows its name).
+    for name in ["Navigator", "Layer Property", "Layer"] {
+        let at = below(&paint, name, top).expect(name);
+        assert!(at.left() > 1000.0, "{name} at the right: {at:?}");
+    }
+    assert!(
+        below(&paint, "Timeline", top).is_none(),
+        "{:?}",
+        paint.texts
+    );
+    // Picking a sub tool leaves the list where it is: Tool Property shows
+    // beside it, no tab switches.
+    paint.click_text("Real G-Pen");
+    assert!(paint.rect_of("Mapping pen").is_some(), "the list stays");
+    assert!(paint.rect_of("Tool Property").is_some());
+    // Window, Layout Style, directly above Workspace; the style not built
+    // yet does nothing when asked for.
+    paint.click_text("Window");
+    let style = paint.rect_of("Layout Style").expect("Window, Layout Style");
+    let workspace = paint.rect_of("Workspace").expect("Window, Workspace");
+    assert!(style.bottom() <= workspace.top() + 1.0);
+    paint.command("window.layout_style.sue_paint");
+    paint.settle(4);
+    assert_eq!(
+        paint
+            .runtime
+            .engine
+            .world
+            .rice
+            .get_str("sue_paint.layout_style"),
+        Some("classic"),
+        "the grayed style is never chosen"
+    );
+}
+
+#[test]
+fn sue_paint_hides_every_palette_and_shows_them_back_as_they_were() {
+    let mut paint = PaintDriver::fresh("paint-hide-all");
+    let top = paint.page_top() + 40.0;
+    paint.settle(4);
+    let before: Vec<String> = paint
+        .texts
+        .iter()
+        .filter(|(_, rect)| rect.top() >= top)
+        .map(|(text, _)| text.clone())
+        .collect();
+    assert!(before.iter().any(|text| text == "Layer"));
+    paint.command("window.hide_all");
+    paint.settle(6);
+    for name in [
+        "Layer",
+        "Sub Tool",
+        "Tool Property",
+        "Navigator",
+        "Color Wheel",
+    ] {
+        assert!(below(&paint, name, top).is_none(), "{name} hidden");
+    }
+    paint.click_text("Window");
+    assert!(
+        paint.rect_of("Show All Palettes").is_some(),
+        "{:?}",
+        paint.texts
+    );
+    paint.click_text("Show All Palettes");
+    paint.settle(6);
+    let after: Vec<String> = paint
+        .texts
+        .iter()
+        .filter(|(_, rect)| rect.top() >= top)
+        .map(|(text, _)| text.clone())
+        .collect();
+    for name in [
+        "Layer",
+        "Sub Tool",
+        "Tool Property",
+        "Navigator",
+        "Color Wheel",
+    ] {
+        assert!(after.iter().any(|text| text == name), "{name} back");
+    }
+    paint.click_text("Window");
+    assert!(paint.rect_of("Hide All Palettes").is_some());
+}
+
+#[test]
+fn sue_paint_palette_menu_sits_top_left_and_hides_its_palette() {
+    let mut paint = PaintDriver::fresh("paint-palette-menu");
+    let top = paint.page_top() + 40.0;
+    paint.settle(4);
+    let title = below(&paint, "Layer Property", top).expect("Layer Property");
+    // The menu button, left of the title, at the header's left end.
+    let button = egui::pos2(title.left() - 48.0, title.center().y);
+    let press = |pressed| egui::Event::PointerButton {
+        pos: button,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    paint.step(vec![egui::Event::PointerMoved(button)]);
+    paint.step(vec![press(true)]);
+    paint.step(vec![press(false)]);
+    paint.settle(4);
+    let hide = paint
+        .rect_of("Hide Layer Property Palette")
+        .unwrap_or_else(|| panic!("the menu opened: {:?}", paint.texts));
+    assert!(paint.rect_of("Float in a Window").is_some());
+    assert!(hide.left() < title.left(), "it opens from the left");
+    paint.click_text("Hide Layer Property Palette");
+    paint.settle(4);
+    assert!(below(&paint, "Layer Property", top).is_none(), "hidden");
+    // The Window menu shows it again where it was.
+    paint.click_text("Window");
+    paint.click_text("Layer Property");
+    paint.settle(4);
+    let back = below(&paint, "Layer Property", top).expect("shown again");
+    assert!(back.left() > 1000.0, "at the right again: {back:?}");
 }

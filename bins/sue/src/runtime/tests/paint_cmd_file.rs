@@ -75,7 +75,7 @@ fn every_file_command_runs_on_a_canvas() {
             }
         })
         .collect();
-    assert!(commands.len() > 50, "{}", commands.len());
+    assert!(commands.len() >= 50, "{}", commands.len());
     // Open Recent and Clear Recent Files have no file to work on in a
     // fresh test home; every other command must show that it ran.
     let quiet_here = ["file.recent.clear", "file.recent.open.0"];

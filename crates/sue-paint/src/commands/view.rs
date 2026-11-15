@@ -5,8 +5,7 @@
 //! do what it does.
 //!
 //! Flags of the group: every View command may be recorded by Auto
-//! Actions ([`Flags::RECORDABLE`], as `recordable()` of `extras.rs` says
-//! for every name outside File, Window, Help and Auto Actions), and none
+//! Actions ([`Flags::RECORDABLE`]), and none
 //! leaves the canvas ([`Flags::LEAVES_CANVAS`]): Color Profile, Preview
 //! Settings opens a dialog of the studio, which Esc closes.
 
@@ -810,12 +809,11 @@ mod tests {
     #[test]
     fn every_view_command_is_recordable_and_stays_on_the_canvas() {
         // RECORDABLE and LEAVES_CANVAS of the group: all recordable, none
-        // leaving, as `recordable()` and the runtime test had it.
+        // leaving, as the runtime test has it.
         for command in COMMANDS {
             assert_eq!(command.group, "view", "{}", command.name);
             assert!(command.flags.has(Flags::RECORDABLE), "{}", command.name);
             assert!(!command.flags.has(Flags::LEAVES_CANVAS), "{}", command.name);
-            assert!(crate::extras::recordable(command.name), "{}", command.name);
         }
     }
 

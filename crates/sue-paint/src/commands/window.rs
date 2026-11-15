@@ -12,13 +12,13 @@ use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
 use super::{doc_open, flag, when};
 use crate::dialogs::Dialog;
-use crate::dock::{Dock, Palette};
+use crate::dock::Palette;
 use crate::studio::{Doc, Panels, SuePaint};
 
 /// The commands of this group that Auto Actions may record: none. They
 /// change how the studio looks, not the picture, so a recorded action
-/// that replays them would only move palettes about (`extras::recordable`
-/// has always left every `window.` command out).
+/// that replays them would only move palettes about (no `window.`
+/// command was ever recorded).
 pub(super) const RECORDABLE: [&str; 0] = [];
 
 /// The commands of this group that go outside the canvas, so a test that
@@ -100,17 +100,6 @@ const fn family(
         .icon(icon)
         .state(state)
         .with(flags_of(prefix))
-}
-
-/// Shows the tab `wanted` of a palette with tabs, or hides the palette
-/// when that tab is already the one shown.
-fn toggle_tab(shown: &mut bool, tab: &mut u8, wanted: u8) {
-    if *shown && *tab == wanted {
-        *shown = false;
-    } else {
-        *shown = true;
-        *tab = wanted;
-    }
 }
 
 // Canvases.
@@ -219,10 +208,13 @@ fn workspace_reset(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>)
         .default_workspace
         .clone()
         .filter(|space| space.lines != paint.workspace_now("").lines);
+    paint.hidden_all = None;
+    paint.current_workspace = None;
     if let Some(space) = saved {
         paint.apply_layout(&space.lines);
     } else {
-        paint.dock = Dock::default();
+        // The layout style's own arrangement.
+        paint.dock = paint.style_layout();
         paint.panels = Panels::default();
         paint.menus_hidden = false;
     }
@@ -232,6 +224,79 @@ fn workspace_reset(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>)
 fn workspace_use(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
     if let Ok(index) = call.arg.parse::<usize>() {
         paint.use_workspace(index);
+    }
+}
+
+/// A registered workspace is checked while it is the one in use, and
+/// grayed when no workspace has that number.
+fn workspace_use_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
+    match call
+        .arg
+        .parse::<usize>()
+        .ok()
+        .and_then(|index| paint.workspaces.get(index))
+    {
+        Some(space) => flag(paint.current_workspace.as_deref() == Some(space.name.as_str())),
+        None => ItemState::off(),
+    }
+}
+
+/// Reload: the workspace in use, as it was registered.
+fn workspace_reload(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.reload_workspace();
+}
+
+/// Reload works while a registered workspace is in use (not one renamed
+/// or deleted in Manage Workspaces since).
+fn workspace_reload_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(
+        paint
+            .current_workspace
+            .as_ref()
+            .is_some_and(|name| paint.workspaces.iter().any(|space| space.name == *name)),
+    )
+}
+
+/// A workspace Sue Paint ships (Illustration, Animation).
+fn workspace_preset(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
+    paint.use_preset(call.arg);
+}
+
+/// A preset works when Sue Paint ships one of that name.
+fn workspace_preset_state(_: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
+    when(
+        crate::extras::PRESETS
+            .iter()
+            .any(|preset| preset.id == call.arg),
+    )
+}
+
+// Layout styles.
+
+/// A style of Window, Layout Style: the setting `sue_paint.layout_style`,
+/// which Sue's own history takes back like any other setting. A style
+/// that is not built yet is never chosen.
+fn layout_style(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let Some(style) = crate::layout_style::by_id(call.arg).filter(|style| style.available) else {
+        return;
+    };
+    if style.id == paint.layout_style {
+        return;
+    }
+    match cx.edit_rice(sue_rice::SetRiceValue::new(
+        crate::layout_style::KEY,
+        sue_rice::RiceValue::Text(style.id.to_owned()),
+    )) {
+        Ok(_) => paint.follow_layout_style(cx),
+        Err(error) => cx.fail(tr!("cannot-change-the-layout-style", error = error)),
+    }
+}
+
+/// The style in use is checked; one not built yet is grayed out.
+fn layout_style_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
+    match crate::layout_style::by_id(call.arg) {
+        Some(style) if style.available => flag(style.id == paint.layout_style),
+        _ => ItemState::off(),
     }
 }
 
@@ -255,7 +320,7 @@ fn interface(_: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
         "display.interface",
         sue_rice::RiceValue::Text(chosen),
     )) {
-        Ok(_) => cx.notify(tr!("interface-changes-now-window-interface-changes")),
+        Ok(_) => cx.notify(tr!("the-interface-changes-now")),
         Err(error) => cx.fail(tr!("cannot-change-the-interface", error = error)),
     }
 }
@@ -267,28 +332,17 @@ fn interface_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState
 
 // Showing and hiding.
 
-/// Hide All Palettes: every palette but the command bar goes, or comes
-/// back when none is shown.
+/// Hide All Palettes: every palette goes, docked, floating, in a window
+/// or in the strip (the command bar stays, as in Clip Studio Paint);
+/// while they are hidden the item reads Show All Palettes and puts every
+/// palette back exactly as it was.
 fn hide_all(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    let show = !paint.any_panel();
-    let command_bar = paint.panels.command_bar;
-    paint.panels = Panels {
-        command_bar,
-        tool: show,
-        sub_tool: show,
-        tool_property: show,
-        brush_size: show,
-        color: show,
-        color_set: show,
-        navigator: show,
-        layer: show,
-        timeline: show,
-    };
+    paint.toggle_hide_all();
 }
 
-/// Hide All Palettes is checked while no palette is shown.
-fn hide_all_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    flag(!paint.any_panel())
+/// Hide All Palettes always works; its label says which way it goes.
+fn hide_all_state(_: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    ItemState::on()
 }
 
 /// Hide Menu Bar.
@@ -296,203 +350,25 @@ fn hide_menus(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
     paint.menus_hidden = !paint.menus_hidden;
 }
 
-// The palettes. Each palette's item shows it or hides it; a palette that
-// is a tab of another shows that palette at its tab, and hides it when
-// the tab is already the one shown.
+// The palettes. Every palette is one of its own: its item shows it (at
+// the front of its tabs, or open beside the strip) or, while it shows,
+// hides it for good, as its Close does.
 
-/// Command Bar.
-fn command_bar(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.panels.command_bar = !paint.panels.command_bar;
+/// The palette a palette item of the Window menu shows.
+fn palette_of(call: Call<'_>) -> Option<Palette> {
+    Palette::of_window_command(call.name)
 }
 
-/// Command Bar is checked while shown.
-fn command_bar_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    flag(paint.panels.command_bar)
-}
-
-/// Tool.
-fn tool(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.panels.tool = !paint.panels.tool;
-}
-
-/// Tool is checked while shown.
-fn tool_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    flag(paint.panels.tool)
-}
-
-/// Sub Tool.
-fn sub_tool(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.panels.sub_tool = !paint.panels.sub_tool;
-}
-
-/// Sub Tool is checked while shown.
-fn sub_tool_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    flag(paint.panels.sub_tool)
-}
-
-/// Tool Property.
-fn tool_property(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.panels.tool_property = !paint.panels.tool_property;
-}
-
-/// Tool Property is checked while shown.
-fn tool_property_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    flag(paint.panels.tool_property)
-}
-
-/// The brush size sliders.
-fn brush_size(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.panels.brush_size = !paint.panels.brush_size;
-}
-
-/// The brush size sliders are checked while shown.
-fn brush_size_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    flag(paint.panels.brush_size)
-}
-
-/// Brush Size: the grid of sizes, a tab of the Sub Tool palette.
-fn brush_grid(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.panels.sub_tool = true;
-    paint.tool_tab = 2;
-}
-
-/// Brush Size is checked while its tab is shown.
-fn brush_grid_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    flag(paint.panels.sub_tool && paint.tool_tab == 2)
-}
-
-/// The tab of the color palette a command shows: the wheel, the
-/// sliders, the intermediate colors or the approximate colors.
-fn color_tab_of(call: Call<'_>) -> u8 {
-    match call.name {
-        "window.color_slider" => 1,
-        "window.intermediate" => 2,
-        "window.approximate" => 3,
-        _ => 0,
+/// A palette's item: shows the palette, or hides it while it shows.
+fn palette(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
+    if let Some(palette) = palette_of(call) {
+        paint.toggle_palette(palette);
     }
 }
 
-/// Color Wheel, Color Slider, Intermediate Color, Approximate Color.
-fn color(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
-    toggle_tab(
-        &mut paint.panels.color,
-        &mut paint.color_tab,
-        color_tab_of(call),
-    );
-}
-
-/// A color palette's item is checked while its tab is shown.
-fn color_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
-    flag(paint.panels.color && paint.color_tab == color_tab_of(call))
-}
-
-/// The tab of the color set palette a command shows: the set, the
-/// history or the materials.
-fn set_tab_of(call: Call<'_>) -> u8 {
-    match call.name {
-        "window.color_history" => 1,
-        "window.material" => 2,
-        _ => 0,
-    }
-}
-
-/// Color Set, Color History, Material.
-fn color_set(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
-    toggle_tab(
-        &mut paint.panels.color_set,
-        &mut paint.set_tab,
-        set_tab_of(call),
-    );
-}
-
-/// A color set palette's item is checked while its tab is shown.
-fn color_set_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
-    flag(paint.panels.color_set && paint.set_tab == set_tab_of(call))
-}
-
-/// Navigator.
-fn navigator(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.panels.navigator = !paint.panels.navigator;
-}
-
-/// Navigator is checked while shown.
-fn navigator_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    flag(paint.panels.navigator)
-}
-
-/// Sub View: a tab of the Navigator palette.
-fn sub_view(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.panels.navigator = true;
-    paint.nav_tab = 1;
-}
-
-/// Sub View is checked while its tab is shown.
-fn sub_view_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    flag(paint.panels.navigator && paint.nav_tab == 1)
-}
-
-/// Layer.
-fn layer(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    toggle_tab(&mut paint.panels.layer, &mut paint.layer_tab, 0);
-}
-
-/// The tab of the Layer palette a command shows.
-fn layer_tab_of(call: Call<'_>) -> u8 {
-    match call.name {
-        "window.layer_property" => 1,
-        "window.history" => 2,
-        "window.cels" => 3,
-        _ => 0,
-    }
-}
-
-/// Layer Property, History, Animation Cels: tabs of the Layer palette,
-/// shown (a second run leaves them shown).
-fn layer_palette_tab(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
-    paint.panels.layer = true;
-    paint.layer_tab = layer_tab_of(call);
-}
-
-/// A tab of the Layer palette is checked while it is the one shown.
-fn layer_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
-    flag(paint.panels.layer && paint.layer_tab == layer_tab_of(call))
-}
-
-/// Timeline.
-fn timeline(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.panels.timeline = !paint.panels.timeline;
-}
-
-/// Timeline is checked while shown.
-fn timeline_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    flag(paint.panels.timeline)
-}
-
-/// The palette of its own a command opens.
-fn own_palette(call: Call<'_>) -> Palette {
-    match call.name {
-        "window.info" => Palette::Info,
-        "window.auto_actions" => Palette::AutoAction,
-        _ => Palette::ItemBank,
-    }
-}
-
-/// Auto Action, Item Bank, Information: palettes of their own, opened
-/// from the strip of icons.
-fn open_own(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
-    let palette = own_palette(call);
-    if !paint.dock.has(palette) {
-        paint.dock.iconize(palette);
-    }
-    if paint.dock.iconized.contains(&palette) {
-        paint.dock.popped = Some(palette);
-    }
-    paint.dock.choose(palette);
-}
-
-/// A palette of its own is checked while the dock has it.
-fn own_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
-    flag(paint.dock.has(own_palette(call)))
+/// A palette's item is checked while the palette shows.
+fn palette_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
+    flag(palette_of(call).is_some_and(|palette| paint.palette_showing(palette)))
 }
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[
@@ -561,28 +437,32 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "layout-style",
         interface,
         interface_state,
-    ),
+    )
+    .with(Flags::PALETTE),
     c(
         "window.interface.desktop",
         "desktop",
         "layout-style",
         interface,
         interface_state,
-    ),
+    )
+    .with(Flags::PALETTE),
     c(
         "window.interface.tablet",
         "tablet",
         "layout-style",
         interface,
         interface_state,
-    ),
+    )
+    .with(Flags::PALETTE),
     c(
         "window.interface.phone",
         "phone",
         "layout-style",
         interface,
         interface_state,
-    ),
+    )
+    .with(Flags::PALETTE),
     c(
         "window.hide_all",
         "hide-all-palettes",
@@ -603,157 +483,184 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "window.command_bar",
         "command-bar",
         "palette-command-bar",
-        command_bar,
-        command_bar_state,
+        palette,
+        palette_state,
     ),
-    c("window.tool", "tool", "palette-tools", tool, tool_state),
+    c(
+        "window.tool",
+        "tool",
+        "palette-tools",
+        palette,
+        palette_state,
+    ),
     c(
         "window.sub_tool",
         "tool-group",
         "palette-sub-tools",
-        sub_tool,
-        sub_tool_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.tool_property",
         "tool-settings",
         "palette-tool-property",
-        tool_property,
-        tool_property_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.brush_size",
         "tool-sliders",
         "palette-brush-size",
-        brush_size,
-        brush_size_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.brush_grid",
         "brush-size",
         "palette-brush-grid",
-        brush_grid,
-        brush_grid_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.color_wheel",
         "color-wheel",
         "palette-color-wheel",
-        color,
-        color_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.color_slider",
         "color-slider",
         "palette-color-sliders",
-        color,
-        color_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.color_set",
         "color-set",
         "palette-color-set",
-        color_set,
-        color_set_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.color_history",
         "color-history",
         "palette-color-history",
-        color_set,
-        color_set_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.intermediate",
         "intermediate-color",
         "palette-intermediate",
-        color,
-        color_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.approximate",
         "approximate-color",
         "palette-approximate",
-        color,
-        color_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.navigator",
         "navigator",
         "palette-navigator",
-        navigator,
-        navigator_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.sub_view",
         "sub-view",
         "palette-sub-view",
-        sub_view,
-        sub_view_state,
+        palette,
+        palette_state,
     ),
-    c("window.layer", "layer-2", "layers", layer, layer_state),
+    c("window.layer", "layer-2", "layers", palette, palette_state),
     c(
         "window.layer_property",
         "layer-properties",
         "layer-property",
-        layer_palette_tab,
-        layer_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.history",
         "history",
         "palette-history",
-        layer_palette_tab,
-        layer_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.timeline",
         "timeline",
         "palette-timeline",
-        timeline,
-        timeline_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.cels",
         "animation-cels",
         "palette-cels",
-        layer_palette_tab,
-        layer_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.material",
         "material",
         "palette-materials",
-        color_set,
-        color_set_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.auto_actions",
         "auto-action-palette",
         "palette-auto-action",
-        open_own,
-        own_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.item_bank",
         "item-bank",
         "palette-item-bank",
-        open_own,
-        own_state,
+        palette,
+        palette_state,
     ),
     c(
         "window.info",
         "information",
         "palette-info",
-        open_own,
-        own_state,
+        palette,
+        palette_state,
     ),
     family(
         "window.workspace.use.",
         "workspace",
         "layout-style",
         workspace_use,
-        doc_open,
+        workspace_use_state,
+    ),
+    c(
+        "window.workspace.reload",
+        "reload-workspace-plain",
+        "reset",
+        workspace_reload,
+        workspace_reload_state,
+    ),
+    family(
+        "window.workspace.preset.",
+        "workspace-preset",
+        "layout-style",
+        workspace_preset,
+        workspace_preset_state,
+    ),
+    family(
+        crate::layout_style::COMMAND_PREFIX,
+        "layout-style",
+        "layout-style",
+        layout_style,
+        layout_style_state,
     ),
     // The numbered list of open canvases under Window, Canvas, as Clip
     // Studio Paint has it (gap CC-6): `window.canvas.0` is the first.
@@ -920,14 +827,13 @@ mod tests {
                 LEAVES_CANVAS.contains(&name),
                 "{name}"
             );
-            // The flag says what the old check said, until P3-14 takes
-            // the old check away.
+            // Only the interface choices are offered in the command palette:
+            // the Window menu no longer lists them (the Sue menu does).
             assert_eq!(
-                command.flags.has(Flags::RECORDABLE),
-                crate::extras::recordable(&runnable(command)),
+                command.flags.has(Flags::PALETTE),
+                name.starts_with("window.interface."),
                 "{name}"
             );
-            assert!(!command.flags.has(Flags::PALETTE), "{name}");
         }
         let hidden: Vec<&str> = COMMANDS
             .iter()
@@ -1016,91 +922,147 @@ mod tests {
         });
     }
 
+    /// Every palette command of the Window menu.
+    const PALETTE_COMMANDS: [&str; 23] = [
+        "window.command_bar",
+        "window.tool",
+        "window.sub_tool",
+        "window.tool_property",
+        "window.brush_grid",
+        "window.brush_size",
+        "window.color_wheel",
+        "window.color_slider",
+        "window.color_set",
+        "window.intermediate",
+        "window.approximate",
+        "window.color_history",
+        "window.layer",
+        "window.layer_property",
+        "window.cels",
+        "window.timeline",
+        "window.navigator",
+        "window.sub_view",
+        "window.history",
+        "window.auto_actions",
+        "window.info",
+        "window.item_bank",
+        "window.material",
+    ];
+
+    /// How many places `palette` is in: docked, collapsed or floating.
+    fn places(paint: &SuePaint, palette: Palette) -> usize {
+        usize::from(paint.dock.find(palette).is_some())
+            + usize::from(paint.dock.iconized.contains(&palette))
+            + paint
+                .dock
+                .floating
+                .iter()
+                .filter(|(found, _)| *found == palette)
+                .count()
+    }
+
     #[test]
-    fn each_palette_item_shows_its_palette_and_is_checked_while_shown() {
+    fn each_palette_item_shows_its_own_palette_and_hides_it_for_good() {
         let mut paint = paint_with(1);
         with_context(|cx| {
-            // A palette of its own, or a palette with tabs: a first run
-            // shows it checked, a second hides it.
-            for name in [
-                "window.command_bar",
-                "window.tool",
-                "window.sub_tool",
-                "window.tool_property",
-                "window.brush_size",
-                "window.color_wheel",
-                "window.color_slider",
-                "window.intermediate",
-                "window.approximate",
-                "window.color_set",
-                "window.color_history",
-                "window.material",
-                "window.navigator",
-                "window.layer",
-                "window.timeline",
-            ] {
+            for name in PALETTE_COMMANDS {
+                let palette = Palette::of_window_command(name).expect(name);
+                // Open palettes start checked; the strip's icons and the
+                // folded Timeline do not, and their item opens them.
                 let before = checked(&paint, cx, name);
+                assert_eq!(
+                    before,
+                    paint.dock.is_open(palette) && palette != Palette::Timeline
+                );
                 registry().run(&mut paint, cx, name);
                 assert_eq!(checked(&paint, cx, name), !before, "{name}");
-                if before {
+                registry().run(&mut paint, cx, name);
+                assert_eq!(checked(&paint, cx, name), before, "{name}: and back");
+                if !before {
                     registry().run(&mut paint, cx, name);
-                    assert!(checked(&paint, cx, name), "{name}");
                 }
-                registry().run(&mut paint, cx, name);
-                assert!(!checked(&paint, cx, name), "{name}: a second run hides");
-                registry().run(&mut paint, cx, name);
-                assert!(checked(&paint, cx, name), "{name}: and shows again");
+                assert!(checked(&paint, cx, name), "{name}: shown");
+                assert!(paint.palette_showing(palette), "{name}");
+                assert!(paint.dock.has(palette), "{name}: as itself");
             }
-            // One tab of a palette at a time: the sliders leave the wheel.
+            // No palette shows in two places: each one is in the dock
+            // once, and the color palettes are each their own.
+            for name in PALETTE_COMMANDS {
+                let palette = Palette::of_window_command(name).expect(name);
+                assert_eq!(places(&paint, palette), 1, "{name}");
+            }
+            assert!(checked(&paint, cx, "window.color_slider"));
+            assert!(checked(&paint, cx, "window.color_wheel"));
+        });
+    }
+
+    #[test]
+    fn a_palette_closed_for_good_comes_back_where_the_style_has_it() {
+        let mut paint = paint_with(1);
+        with_context(|cx| {
+            // Closed from its own menu or its window's X: gone for good.
+            paint.close_palette(Palette::ColorSlider);
+            assert!(paint.dock.is_closed(Palette::ColorSlider));
+            assert!(!checked(&paint, cx, "window.color_slider"));
+            // The Window menu brings it back as a tab of the colors.
             registry().run(&mut paint, cx, "window.color_slider");
-            assert!(!checked(&paint, cx, "window.color_wheel"));
-            // Tabs that only show: a second run leaves them shown.
-            for name in [
-                "window.brush_grid",
-                "window.sub_view",
-                "window.layer_property",
-                "window.history",
-                "window.cels",
-            ] {
-                registry().run(&mut paint, cx, name);
-                assert!(checked(&paint, cx, name), "{name}");
-                registry().run(&mut paint, cx, name);
-                assert!(checked(&paint, cx, name), "{name} stays");
-            }
-            assert!(!checked(&paint, cx, "window.layer"), "Cels is the tab");
-            // The palettes of their own come into the dock and stay,
-            // whether the dock had them already or not.
-            for name in ["window.info", "window.auto_actions", "window.item_bank"] {
-                for _ in 0..2 {
-                    registry().run(&mut paint, cx, name);
-                    assert!(checked(&paint, cx, name), "{name}");
-                }
-            }
+            let found = paint.dock.find(Palette::ColorSlider);
+            assert!(found.is_some());
+            assert_eq!(paint.dock.find(Palette::Color), found);
+            // A floating palette closed leaves nothing behind.
+            paint.dock.float(Palette::Info, egui::pos2(300.0, 200.0));
+            paint.close_palette(Palette::Info);
+            assert_eq!(places(&paint, Palette::Info), 0);
+            registry().run(&mut paint, cx, "window.info");
+            assert!(paint.dock.find(Palette::Info).is_some(), "back in its tabs");
+            // Material, an icon in the strip, opens beside the strip.
+            registry().run(&mut paint, cx, "window.material");
+            assert_eq!(paint.dock.popped, Some(Palette::Material));
+            assert!(checked(&paint, cx, "window.material"));
+            // The folded Timeline: its item opens the row.
+            assert!(!checked(&paint, cx, "window.timeline"));
+            registry().run(&mut paint, cx, "window.timeline");
+            assert!(!paint.dock.row_folded[1]);
+            assert!(checked(&paint, cx, "window.timeline"));
         });
     }
 
     #[test]
     fn hiding_everything_and_the_default_workspace() {
         let mut paint = paint_with(1);
+        paint.dock.float(Palette::Info, egui::pos2(300.0, 200.0));
+        paint.panels.navigator = false;
+        let before = (paint.panels, paint.dock.clone());
         with_context(|cx| {
-            assert!(!checked(&paint, cx, "window.hide_all"));
             registry().run(&mut paint, cx, "window.hide_all");
             assert!(!paint.any_panel());
-            assert!(checked(&paint, cx, "window.hide_all"));
-            assert_eq!(
-                paint.panels.command_bar,
-                Panels::default().command_bar,
-                "the command bar stays as it was"
-            );
+            assert!(paint.hidden_all.is_some());
+            // Every palette goes, the strip's and the floating ones too;
+            // the command bar stays, as in Clip Studio Paint.
+            for &palette in <Palette as sue_wm::dock::DockPanel>::all() {
+                let showing = paint.palette_showing(palette);
+                assert_eq!(showing, palette == Palette::CommandBar, "{palette:?}");
+            }
+            // Kept as they were, in the layout file too.
+            let lines = before.1.to_lines();
+            assert_eq!(paint.workspace_now("").lines[..lines.len()], lines[..]);
+            // Show All Palettes: exactly as before.
             registry().run(&mut paint, cx, "window.hide_all");
-            assert!(paint.panels.tool && paint.panels.layer && paint.panels.timeline);
+            assert_eq!((paint.panels, paint.dock.clone()), before);
+            assert!(paint.hidden_all.is_none());
+            // Showing one palette while all are hidden brings the rest too.
+            registry().run(&mut paint, cx, "window.hide_all");
+            registry().run(&mut paint, cx, "window.layer");
+            assert!(paint.hidden_all.is_none());
+            assert!(paint.palette_showing(Palette::Info));
             registry().run(&mut paint, cx, "window.hide_menus");
             assert!(paint.menus_hidden);
-            // Reset to Default with none chosen: Sue Paint's own palettes
-            // and the menu bar back.
+            // Reset to Default with none chosen: the layout style's own
+            // palettes and the menu bar back.
             paint.panels.tool = false;
             registry().run(&mut paint, cx, "window.workspace.reset");
             assert_eq!(paint.panels, Panels::default());
+            assert_eq!(paint.dock, crate::dock::classic_layout());
             assert!(!paint.menus_hidden);
             // Use Current Workspace as Default (here with no data folder,
             // so kept for this run only), then Reset goes back to it.
@@ -1116,6 +1078,78 @@ mod tests {
             registry().run(&mut paint, cx, "window.workspace.manage");
             assert!(matches!(paint.dialog, Some(Dialog::Workspaces)));
         });
+    }
+
+    #[test]
+    fn workspaces_reload_check_the_one_in_use_and_presets_lay_out() {
+        let mut paint = paint_with(1);
+        with_context(|cx| {
+            assert!(!enabled(&paint, cx, "window.workspace.reload"));
+            paint.panels.navigator = false;
+            paint.workspaces = vec![paint.workspace_now("Inking")];
+            paint.panels.navigator = true;
+            registry().run(&mut paint, cx, "window.workspace.use.0");
+            assert!(checked(&paint, cx, "window.workspace.use.0"));
+            assert!(!paint.panels.navigator);
+            assert!(!enabled(&paint, cx, "window.workspace.use.1"));
+            // Moved about, then Reload: as registered.
+            paint.panels.navigator = true;
+            registry().run(&mut paint, cx, "window.workspace.reload");
+            assert!(!paint.panels.navigator);
+            // Renamed in Manage Workspaces: nothing left to reload.
+            paint.workspaces[0].name = "Inks".to_owned();
+            assert!(!enabled(&paint, cx, "window.workspace.reload"));
+            paint.workspaces[0].name = "Inking".to_owned();
+            assert!(enabled(&paint, cx, "window.workspace.reload"));
+            // The Animation preset opens the Timeline with the cels by
+            // the layers; Illustration is the style's own arrangement.
+            registry().run(&mut paint, cx, "window.workspace.preset.animation");
+            assert!(!paint.dock.row_folded[1] && paint.panels.timeline);
+            assert_eq!(
+                paint.dock.find(Palette::Cels),
+                paint.dock.find(Palette::Layer)
+            );
+            assert!(!checked(&paint, cx, "window.workspace.use.0"));
+            registry().run(&mut paint, cx, "window.workspace.preset.illustration");
+            assert_eq!(paint.dock, crate::dock::classic_layout());
+            assert!(!enabled(&paint, cx, "window.workspace.preset.none"));
+        });
+    }
+
+    #[test]
+    fn a_layout_style_not_built_is_grayed_and_never_chosen() {
+        let mut paint = paint_with(1);
+        with_context(|cx| {
+            let classic = "window.layout_style.classic";
+            let later = "window.layout_style.sue_paint";
+            assert!(checked(&paint, cx, classic));
+            assert!(!enabled(&paint, cx, later));
+            let dock = paint.dock.clone();
+            registry().run(&mut paint, cx, later);
+            assert_eq!(paint.layout_style, crate::layout_style::CLASSIC);
+            assert_eq!(paint.dock, dock);
+            assert!(cx.requests.is_empty(), "{:?}", cx.requests);
+            assert!(!enabled(&paint, cx, "window.layout_style.nothing"));
+        });
+    }
+
+    #[test]
+    fn switching_layout_styles_and_back_keeps_each_ones_palettes() {
+        // The second style is not built, so the switch is made directly
+        // (as the setting will make it once it is).
+        let mut paint = paint_with(1);
+        paint.panels.navigator = false;
+        paint.dock.float(Palette::Layer, egui::pos2(200.0, 100.0));
+        let classic = paint.workspace_now("").lines;
+        paint.switch_layout_style(crate::layout_style::SUE_PAINT, None, false);
+        assert_eq!(paint.layout_style, crate::layout_style::SUE_PAINT);
+        assert!(paint.panels.navigator, "the other style's own palettes");
+        assert_ne!(paint.workspace_now("").lines, classic);
+        paint.panels.color = false;
+        paint.switch_layout_style(crate::layout_style::CLASSIC, None, false);
+        assert_eq!(paint.workspace_now("").lines, classic);
+        paint.switch_layout_style(crate::layout_style::SUE_PAINT, None, false);
+        assert!(!paint.panels.color, "and the other style's as left");
     }
 
     #[test]

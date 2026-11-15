@@ -504,8 +504,7 @@ fn material_paste(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
 /// A command of this group, with its icon of the shared set: works
 /// while a canvas is open unless its `state` says otherwise.
 ///
-/// Every Edit command may be recorded in an Auto Action (as
-/// `extras::recordable` has it), and none leaves the canvas: the
+/// Every Edit command may be recorded in an Auto Action, and none leaves the canvas: the
 /// group's RECORDABLE list is all of it and its LEAVES_CANVAS list is
 /// empty.
 const fn c(
@@ -758,14 +757,7 @@ mod tests {
         for command in COMMANDS {
             assert_eq!(command.group, "edit");
             assert!(command.name.starts_with("edit."), "{}", command.name);
-            // RECORDABLE stands where `extras::recordable` answers until
-            // that function goes.
-            assert_eq!(
-                command.flags.has(Flags::RECORDABLE),
-                crate::extras::recordable(command.name),
-                "{}",
-                command.name
-            );
+            assert!(command.flags.has(Flags::RECORDABLE), "{}", command.name);
             assert!(
                 !command.flags.has(Flags::LEAVES_CANVAS),
                 "{} stays on the canvas",

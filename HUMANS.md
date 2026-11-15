@@ -485,14 +485,31 @@ Once a canvas is open:
   for the next). Below them are the main and sub colors, their swap, and
   the transparent color. A tap with a pen leaves a dot the size of the
   brush.
-- **Laid out like Clip Studio Paint:** Sue Paint starts with the same
-  frame: tools, Sub Tool, the color wheel and color set at the left, Tool
-  Sliders beside them, the Navigator and layers at the right, and a strip
-  of folded palettes at the far right (Material, Layer Property,
-  Animation Cels, History, Sub View, Auto Actions, Item Bank and Info);
-  click an icon to open one. The arrows at the top of a column fold the
-  whole column into that strip. The canvas has scrollbars (View, Scroll
-  Bar hides them), with the zoom and turn controls beside the bottom one.
+- **Layout Styles:** a layout style is which design Sue Paint's
+  workspace follows: which palettes there are and where they sit until
+  you move them. Choose it in Window, Layout Style (or Settings, Sue
+  Paint). **Clip Studio** is the one built: it lays Sue Paint out as Clip
+  Studio Paint does. **Sue Paint (Coming Later)** is listed grayed out for
+  a design of Sue's own. A layout style is not a workspace (where you put
+  the palettes inside a style, below), nor the interface (desktop, tablet
+  or phone, in the Sue menu), nor the theme (colors). Each style keeps
+  its own palettes and workspaces, so switching styles and back loses
+  nothing.
+- **Laid out like Clip Studio Paint:** in the Clip Studio style Sue Paint
+  starts with the same frame: the command bar across the top; at the
+  left the tools, then Sub Tool, Tool Property and Brush Size stacked as
+  three palettes over the six color palettes (Color Wheel, Color Slider,
+  Color Set, Intermediate Color, Approximate Color, Color History) as
+  tabs; at the right Navigator (with Sub View, Item Bank and Information
+  as tabs), Layer Property, and Layer (with History and Auto Action); the
+  Timeline folded to an icon under the canvas (click it to open the
+  Timeline); and a strip of folded palettes at the far right (Material,
+  Animation Cels and Tool Sliders). Every palette is one of its own: the
+  Window menu opens each as itself, and none shows in two places.
+  Picking a sub tool leaves the Sub Tool list where it is. The arrows at
+  the top of a column fold the whole column into that strip. The canvas
+  has scrollbars (View, Scroll Bar hides them), with the zoom and turn
+  controls beside the bottom one.
 - **Launchers:** small bars of buttons under what you are working on, as
   in Clip Studio Paint. Under a transform's box: reset, flip, turn a
   quarter, cancel and OK. Under a text layer's words: edit, smaller,
@@ -525,19 +542,26 @@ Once a canvas is open:
   canvas beside the timeline, its top puts it in the row at the top beside
   the command bar, the strip folds it into an icon, and anywhere else
   floats it over the canvas. Drag a tab such as Color Slider, Tool
-  Settings or History off its palette to make it a palette of its own;
-  closing that palette puts it back among the tabs. The command bar (by
+  Property or History off its group to make it a palette of its own. The command bar (by
   the grip at its left end) and the tool palette move the same way. Drag
   the edge of a column to make it wider (the tool palette then shows its
   tools in several columns), the line between two palettes to share the
   room differently, and the edge of the row under the canvas or at the
   top to make it taller. Each palette's menu (the three lines at its top
-  right) also docks it on either side, in a new column on the left or
-  right, at the top or at the bottom, floats it over the canvas, pops it
-  out into a window of its own that you can move anywhere (outside Sue's
-  window too, onto another screen) and resize, folds it into an icon in a
-  strip at the far right (click the icon to see it), or closes it; the
-  Window menu shows it again. In a narrow window,
+  left, on floating palettes too) holds the palette's own commands (the
+  Layer palette's new layers, for one), then docks it on either side, in
+  a new column on the left or right, at the top or at the bottom, floats
+  it over the canvas, pops it out into a window of its own that you can
+  move anywhere (outside Sue's window too, onto another screen) and
+  resize, or folds it into an icon in a strip at the far right (click the
+  icon to see it); its last item, Hide (name) Palette, hides it. Hiding a
+  palette, or the X of a floating one, hides it for good: only the Window
+  menu shows it again, where it was. Double-click a floating palette's
+  title to roll it up. Right-click an icon of the strip to choose Display
+  Palette as Tab (it stays open until you click its icon again) or as
+  Pop-up (a click elsewhere closes it). The row under the canvas has
+  arrows at its right end: one folds it into icons, two close it to a
+  thin bar. In a narrow window,
   the widest palettes fold into the strip by themselves and come back when
   there is room. Sue Paint opens with the palettes where you left them
   (Settings, Remember the palette layout, turns that off). Window,
@@ -545,7 +569,16 @@ Once a canvas is open:
   have, its name in the menu brings it back, Manage Workspaces renames and
   deletes them, Use Current Workspace as Default keeps the palettes as they
   are as your default, and Reset to Default puts everything back that way
-  (choose it again to get Sue Paint's own layout, as it was at first). `Tab` hides or shows every palette and `Shift+Tab` the menus.
+  (choose it again to get the layout style's own layout, as it was at
+  first). The workspace in use is checked, and Reload puts it back as you
+  registered it. Illustration and Animation are workspaces Sue Paint
+  ships (Animation opens the Timeline and puts Animation Cels beside the
+  layers). A workspace keeps the command bar's buttons too. The layouts
+  and workspaces are plain text files in Sue Paint's data folder, which
+  you can copy, share and edit (`docs/paint-workspace-files.md`).
+  `Tab` (Window, Hide All Palettes) hides every palette but the command
+  bar, and shows them all again exactly as they were (the item then reads
+  Show All Palettes); `Shift+Tab` hides the menus.
 - **Shortcuts:** Sue Paint uses Clip Studio Paint's default keys: the tool
   letters (`P`, `B`, `E`, `G`, `M`, `W`, `I`, `K`, `H`, `R`, `/` and the
   rest), `,` and `.` for the previous and next sub tool, `[` and `]` for the

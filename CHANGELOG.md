@@ -23,6 +23,24 @@ follow [Semantic Versioning](https://semver.org/).
   them can get a key, not only those that ship with one. Search finds a
   command by its name or its key. A key that two commands hold is marked
   on both rows, with a button to take it from the other one.
+- Sue Paint: Layout Styles. Window, Layout Style (and Settings) chooses
+  which design Sue Paint's workspace follows. "Clip Studio", the default,
+  lays the palettes out as Clip Studio Paint does: Sub Tool, Tool
+  Property and Brush Size as three palettes over the six color palettes,
+  the Timeline folded under the canvas, Material in the strip. "Sue
+  Paint" is listed for later. Each style keeps its own layout and
+  workspaces.
+- Sue Paint: each palette's menu, at the top left of its header and on
+  floating palettes too, holds the palette's own commands and ends with
+  Hide (name) Palette. Floating palettes roll up on a double-click; strip
+  icons can open their palettes as tabs or as pop-ups; the row under the
+  canvas folds into icons or closes with its arrows.
+- Sue Paint: workspaces keep the command bar's buttons too; Window,
+  Workspace checks the one in use, offers Reload, and ships the
+  Illustration and Animation workspaces. The layout and workspace files
+  are described for people who share them
+  (`docs/paint-workspace-files.md`).
+
 - Sue Paint: every tool that shares its letter with others (Pen and
   Pencil on P, Brush, Airbrush and Decoration on B, Fill and Gradient on
   G, Figure, Frame Border and Ruler on U, Text and Balloon on T) has a
@@ -226,6 +244,20 @@ follow [Semantic Versioning](https://semver.org/).
   with its readable secondary text.
 - Recording a shortcut in Settings over Sue Paint no longer also runs the
   key in Sue Paint (recording R picked the Rotate tool).
+- Sue Paint: every palette is a palette of its own. The Window menu
+  opens Tool Property, Brush Size and each color palette as itself, no
+  palette shows in two places, and picking a sub tool no longer switches
+  the Sub Tool palette to Tool Property.
+- Sue Paint: closing a palette hides it for good, also the X of a
+  floating palette (which docked it again) and the palettes of the strip
+  (which only folded back); Hide All Palettes hides every palette and
+  shows them back exactly as they were, reading Show All Palettes
+  meanwhile.
+- Sue Paint: in a language other than English, the palette layout,
+  workspaces and the menu bar's state are restored again, and the
+  command bar keeps every button added (two or more ran into one line).
+  Files written that way are read once and kept in English.
+
 - Sue Paint's History names steps as the menus do: New Animation Folder
   and Convert to Drawing Color, and a duplicated layer or page is called
   "<name> Copy" with a capital, as in Clip Studio Paint. The help on the

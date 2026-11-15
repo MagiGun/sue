@@ -4,6 +4,7 @@
 //! by name), each kept in Sue Paint's data folder, with the palette layout
 //! as it was last left.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use egui::{Align2, Rect, Sense, Ui, pos2};
@@ -67,15 +68,6 @@ pub(crate) struct AutoActions {
     /// The action commands are being recorded into.
     pub recording: Option<usize>,
     pub loaded: bool,
-}
-
-/// `true` for commands an auto action keeps: what changes the picture or
-/// the view, not files, windows or the actions themselves.
-#[must_use]
-pub(crate) fn recordable(command: &str) -> bool {
-    !["auto.", "file.", "window.", "help.", "story.editor"]
-        .iter()
-        .any(|prefix| command.starts_with(prefix))
 }
 
 /// Named sections of lines: `[name]` then its lines.
@@ -195,12 +187,19 @@ impl Item {
 }
 
 /// The file in Sue Paint's data folder that keeps the palette layout
-/// between runs (never inside a document).
+/// between runs (never inside a document), for the default layout style
+/// (another style keeps `layout.<id>.txt`, `layout_style::file_for`).
 const LAYOUT_FILE: &str = "layout.txt";
+
+/// The file the registered workspaces are kept in, a section each.
+const WORKSPACES_FILE: &str = "workspaces.txt";
 
 /// The file the default workspace is kept in (Use Current Workspace as
 /// Default), one section as `workspaces.txt` has.
 const DEFAULT_FILE: &str = "default_workspace.txt";
+
+/// The file the command bar's own items are kept in.
+const COMMAND_BAR_FILE: &str = "command_bar.txt";
 
 /// The rice key: Sue Paint opens with its palettes where they were left.
 pub(crate) const REMEMBER_LAYOUT: &str = "sue_paint.remember_layout";
@@ -220,6 +219,103 @@ pub(crate) struct Workspace {
     pub lines: Vec<String>,
 }
 
+/// A workspace Sue Paint ships, offered in Window, Workspace before the
+/// registered ones: its id (saved in the command
+/// `window.workspace.preset.<id>`), the language key of its name, and
+/// what it changes on the style's own arrangement.
+pub(crate) struct Preset {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub arrange: fn(&mut crate::dock::Dock, &mut Panels),
+}
+
+/// The workspaces Sue Paint ships: Illustration (the style's own
+/// arrangement) and Animation (the Timeline open under the canvas and
+/// Animation Cels beside the layers).
+pub(crate) const PRESETS: [Preset; 2] = [
+    Preset {
+        id: "illustration",
+        label: "workspace-illustration",
+        arrange: |_, _| {},
+    },
+    Preset {
+        id: "animation",
+        label: "workspace-animation",
+        arrange: |dock, panels| {
+            use crate::dock::Palette;
+            panels.timeline = true;
+            dock.row_folded[sue_wm::dock::Row::Bottom.index()] = false;
+            dock.row_hidden[sue_wm::dock::Row::Bottom.index()] = false;
+            dock.bottom_height = dock.bottom_height.max(200.0);
+            if dock.find(Palette::Layer).is_some() {
+                dock.put(
+                    Palette::Cels,
+                    sue_wm::dock::Target::Join {
+                        anchor: Palette::Layer,
+                        before: false,
+                    },
+                );
+                dock.choose(Palette::Layer);
+            }
+        },
+    },
+];
+
+// ----- The lines a layout or workspace is kept as -------------------------
+//
+// These lines are a file format (docs/paint-workspace-files.md), never
+// interface text: they are written in English whatever the language, and
+// read in English. Sue Paint 0.0.75 and older wrote four of them through
+// the language database, so a file written in another language is read
+// once with the words below and written again in English.
+
+/// The word before the ten palette switches.
+const PANELS_WORD: &str = "panels";
+/// The word before whether the menu bar shows (1) or not (0).
+const MENUS_WORD: &str = "menus";
+/// The word before the layout style a workspace was made in.
+const STYLE_WORD: &str = "style";
+/// The word before how the strip opens its palettes (`tab` or `popup`).
+const STRIP_WORD: &str = "strip";
+/// The line that says the workspace holds the command bar's items, and
+/// the word before each of them (`bar hide <command>`, `bar add
+/// <command>`).
+const BAR_WORD: &str = "bar";
+
+/// How the lines `panels`, `menus`, `hide` and `add` read in each
+/// language Sue Paint 0.0.75 wrote them in: (language, panels, menus,
+/// hide, add). A word is written before the value, or, with a leading
+/// space, after it.
+const OLD_WORDS: [(&str, &str, &str, &str, &str); 9] = [
+    ("en", "panels ", "menus ", "hide ", "add "),
+    ("ar", "لوحات ", "قوائم ", "إخفاء ", "إضافة "),
+    ("de", "Panels ", "Menüs ", " ausblenden", " hinzufügen"),
+    ("es", "paneles ", "menús ", "ocultar ", "añadir "),
+    ("fr", "cases ", "menus ", "masquer ", "ajouter "),
+    ("it", "pannelli ", "menu ", "nascondi ", "aggiungi "),
+    ("ja", "パネル ", "メニュー ", "hide ", "add "),
+    ("pt-BR", "painéis ", "menus ", "ocultar ", "adicionar "),
+    ("zh-Hans", "面板 ", "菜单 ", "隐藏 ", "添加 "),
+];
+
+/// The value `word` holds in `line`: after the word, or before it when
+/// the word starts with a space.
+fn after_word<'a>(line: &'a str, word: &str) -> Option<&'a str> {
+    if word.starts_with(' ') {
+        line.strip_suffix(word)
+    } else {
+        line.strip_prefix(word)
+    }
+}
+
+/// The value of a `panels` line (`panels`) or a `menus` line, in any
+/// language 0.0.75 wrote it in.
+fn old_value(line: &str, panels: bool) -> Option<&str> {
+    OLD_WORDS
+        .iter()
+        .find_map(|words| after_word(line, if panels { words.1 } else { words.2 }))
+}
+
 /// Panels as a line of flags.
 #[must_use]
 pub(crate) fn panels_line(panels: &Panels) -> String {
@@ -236,18 +332,18 @@ pub(crate) fn panels_line(panels: &Panels) -> String {
         panels.timeline,
     ];
     let bits: String = flags.iter().map(|on| if *on { '1' } else { '0' }).collect();
-    tr!("panels", bits = bits)
+    format!("{PANELS_WORD} {bits}")
 }
 
-/// Panels from [`panels_line`].
+/// Panels from [`panels_line`] (or from such a line in another language).
 #[must_use]
 pub(crate) fn panels_from(line: &str) -> Option<Panels> {
-    let bits: Vec<bool> = line
-        .strip_prefix("panels ")?
-        .chars()
-        .map(|c| c == '1')
-        .collect();
-    (bits.len() == 10).then(|| Panels {
+    let bits = old_value(line, true)?;
+    if bits.len() != 10 || !bits.chars().all(|c| c == '0' || c == '1') {
+        return None;
+    }
+    let bits: Vec<bool> = bits.chars().map(|c| c == '1').collect();
+    Some(Panels {
         command_bar: bits[0],
         tool: bits[1],
         sub_tool: bits[2],
@@ -261,6 +357,128 @@ pub(crate) fn panels_from(line: &str) -> Option<Panels> {
     })
 }
 
+/// Whether the menu bar shows, from a `menus` line in any language.
+fn menus_from(line: &str) -> Option<bool> {
+    match old_value(line, false)? {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
+/// `line` as Sue Paint writes it now: a `panels` or `menus` line in
+/// another language becomes the English one; any other line is kept.
+#[must_use]
+pub(crate) fn canonical_line(line: &str) -> String {
+    if let Some(panels) = panels_from(line) {
+        return panels_line(&panels);
+    }
+    if let Some(shown) = menus_from(line) {
+        return format!("{MENUS_WORD} {}", u8::from(shown));
+    }
+    line.to_owned()
+}
+
+/// The command bar's items as kept in `command_bar.txt`: one `hide
+/// <command>` line per built-in button people hid (sorted), then one
+/// `add <command>` line per command they added, in order.
+#[must_use]
+pub(crate) fn command_bar_text(hidden: &HashSet<String>, added: &[String]) -> String {
+    let mut hidden: Vec<&String> = hidden.iter().collect();
+    hidden.sort();
+    let mut text = String::new();
+    for command in hidden {
+        text.push_str(&format!("hide {command}\n"));
+    }
+    for command in added {
+        text.push_str(&format!("add {command}\n"));
+    }
+    text
+}
+
+/// The command bar's items from `command_bar.txt`, and whether the file
+/// was in the old form (another language's words, or every line run
+/// together, as 0.0.75 wrote it) and is to be written again.
+#[must_use]
+pub(crate) fn command_bar_from(text: &str) -> (HashSet<String>, Vec<String>, bool) {
+    let registry = crate::commands::registry();
+    let mut hidden = HashSet::new();
+    let mut added = Vec::new();
+    let mut tidy = true;
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        if let Some(command) = line.strip_prefix("hide ")
+            && registry.has(command)
+        {
+            hidden.insert(command.to_owned());
+        } else if let Some(command) = line.strip_prefix("add ")
+            && registry.has(command)
+        {
+            added.push(command.to_owned());
+        } else {
+            tidy = false;
+        }
+    }
+    if tidy {
+        return (hidden, added, false);
+    }
+    // The old form: look for every command in every language's words.
+    hidden.clear();
+    added.clear();
+    let mut found: Vec<(usize, bool, String)> = Vec::new();
+    let boundary_after = |rest: &str| {
+        rest.is_empty()
+            || rest.starts_with('\n')
+            || OLD_WORDS.iter().any(|words| {
+                [words.3, words.4]
+                    .iter()
+                    .any(|word| !word.starts_with(' ') && rest.starts_with(word))
+            })
+    };
+    let boundary_before = |head: &str| {
+        head.is_empty()
+            || head.ends_with('\n')
+            || OLD_WORDS.iter().any(|words| {
+                [words.3, words.4]
+                    .iter()
+                    .any(|word| word.starts_with(' ') && head.ends_with(word))
+            })
+    };
+    for command in registry
+        .iter()
+        .filter(|command| !command.is_family())
+        .map(|command| command.name)
+    {
+        for words in &OLD_WORDS {
+            for (word, hide) in [(words.3, true), (words.4, false)] {
+                let needle = if word.starts_with(' ') {
+                    format!("{command}{word}")
+                } else {
+                    format!("{word}{command}")
+                };
+                for (at, _) in text.match_indices(&needle) {
+                    let fits = if word.starts_with(' ') {
+                        boundary_before(&text[..at])
+                    } else {
+                        boundary_after(&text[at + needle.len()..])
+                    };
+                    if fits && !found.iter().any(|(_, _, known)| known == command) {
+                        found.push((at, hide, command.to_owned()));
+                    }
+                }
+            }
+        }
+    }
+    found.sort_by_key(|(at, _, _)| *at);
+    for (_, hide, command) in found {
+        if hide {
+            hidden.insert(command);
+        } else {
+            added.push(command);
+        }
+    }
+    (hidden, added, true)
+}
+
 fn read(folder: Option<&Path>, file: &str) -> Option<String> {
     sue_platform::fs::read_to_string(folder?.join(file)).ok()
 }
@@ -270,6 +488,36 @@ fn write(folder: Option<&Path>, file: &str, text: &str) -> Result<(), String> {
     sue_platform::fs::create_dir_all(folder)
         .and_then(|()| sue_platform::fs::write(folder.join(file), text))
         .map_err(|error| error.to_string())
+}
+
+/// Workspaces from a `workspaces.txt` text, their lines as Sue Paint
+/// writes them now, and whether any line changed (a file written in
+/// another language, to be written again).
+fn workspaces_from(text: &str) -> (Vec<Workspace>, bool) {
+    let mut changed = false;
+    let spaces = sections(text)
+        .into_iter()
+        .map(|(name, lines)| {
+            let lines: Vec<String> = lines
+                .into_iter()
+                .map(|line| {
+                    let tidy = canonical_line(&line);
+                    changed |= tidy != line;
+                    tidy
+                })
+                .collect();
+            Workspace { name, lines }
+        })
+        .collect();
+    (spaces, changed)
+}
+
+fn workspaces_text(spaces: &[Workspace]) -> String {
+    write_sections(
+        spaces
+            .iter()
+            .map(|space| (space.name.as_str(), space.lines.clone())),
+    )
 }
 
 impl SuePaint {
@@ -319,36 +567,119 @@ impl SuePaint {
                 }
             }
         }
-        if let Some(text) = read(folder.as_deref(), "command_bar.txt") {
-            for line in text.lines() {
-                if let Some(command) = line.strip_prefix("hide ") {
-                    self.bar_hidden.insert(command.to_owned());
-                } else if let Some(command) = line.strip_prefix("add ") {
-                    self.bar_extra.push(command.to_owned());
-                }
+        if let Some(text) = read(folder.as_deref(), COMMAND_BAR_FILE) {
+            let (hidden, added, old) = command_bar_from(&text);
+            self.bar_hidden = hidden;
+            self.bar_extra = added;
+            if old {
+                // Read once in the old form, kept in the new one.
+                let _ = write(
+                    folder.as_deref(),
+                    COMMAND_BAR_FILE,
+                    &command_bar_text(&self.bar_hidden, &self.bar_extra),
+                );
             }
         }
-        self.workspaces = read(folder.as_deref(), "workspaces.txt")
-            .map(|text| {
-                sections(&text)
-                    .into_iter()
-                    .map(|(name, lines)| Workspace { name, lines })
-                    .collect()
-            })
+        self.layout_style = crate::layout_style::current(cx.rice()).id;
+        self.load_style_files(folder.as_deref(), remember_layout(cx));
+    }
+
+    /// Reads the layout style in use's workspaces, its default workspace
+    /// and, when `remember`, its palettes where they were left (else where
+    /// people chose as the default, else the style's own arrangement).
+    /// Files written in another language are written again in English.
+    fn load_style_files(&mut self, folder: Option<&Path>, remember: bool) {
+        let style = self.layout_style;
+        let file = |name: &str| crate::layout_style::file_for(style, name);
+        let (spaces, old) = read(folder, &file(WORKSPACES_FILE))
+            .map(|text| workspaces_from(&text))
             .unwrap_or_default();
-        self.default_workspace = read(folder.as_deref(), DEFAULT_FILE)
-            .and_then(|text| sections(&text).into_iter().next())
-            .map(|(name, lines)| Workspace { name, lines });
+        self.workspaces = spaces;
+        if old {
+            let _ = write(
+                folder,
+                &file(WORKSPACES_FILE),
+                &workspaces_text(&self.workspaces),
+            );
+        }
+        let (default, old) = read(folder, &file(DEFAULT_FILE))
+            .map(|text| workspaces_from(&text))
+            .unwrap_or_default();
+        self.default_workspace = default.into_iter().next();
+        if old && let Some(space) = &self.default_workspace {
+            let _ = write(
+                folder,
+                &file(DEFAULT_FILE),
+                &workspaces_text(std::slice::from_ref(space)),
+            );
+        }
+        self.current_workspace = None;
+        self.hidden_all = None;
         self.refresh_workspace_menu();
-        // The palettes where they were left, or else where people chose as
-        // the default.
-        if remember_layout(cx)
-            && let Some(text) = read(folder.as_deref(), LAYOUT_FILE)
-        {
-            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+        let kept = remember
+            .then(|| read(folder, &file(LAYOUT_FILE)))
+            .flatten()
+            .map(|text| text.lines().map(str::to_owned).collect::<Vec<String>>());
+        if let Some(lines) = kept {
             self.apply_layout(&lines);
         } else if let Some(space) = self.default_workspace.clone() {
             self.apply_layout(&space.lines);
+        } else {
+            self.dock = self.style_layout();
+            self.panels = Panels::default();
+        }
+        // A file in the old form is written again by `keep_layout`, since
+        // its lines differ from these.
+        self.layout_kept = read(folder, &file(LAYOUT_FILE))
+            .map(|text| text.lines().map(str::to_owned).collect())
+            .unwrap_or_else(|| self.workspace_now("").lines);
+    }
+
+    /// Follows the setting `sue_paint.layout_style` (changed in Settings,
+    /// by the Window menu or by undo): the palettes as they are now are
+    /// kept for the style left, and the new style's come back.
+    pub(crate) fn follow_layout_style(&mut self, cx: &mut AppletContext<'_>) {
+        let wanted = crate::layout_style::current(cx.rice()).id;
+        if wanted != self.layout_style && self.auto.loaded {
+            let folder = crate::colorsets::folder(cx);
+            self.switch_layout_style(wanted, folder.as_deref(), remember_layout(cx));
+        }
+    }
+
+    /// Changes to the layout style `id`: writes the palettes as they are
+    /// for the style in use, then lays out `id`'s as they were left (kept
+    /// for this run, else in its files), else its default workspace, else
+    /// its own arrangement; its workspaces fill Window, Workspace.
+    pub(crate) fn switch_layout_style(
+        &mut self,
+        id: &'static str,
+        folder: Option<&Path>,
+        remember: bool,
+    ) {
+        if id == self.layout_style {
+            return;
+        }
+        let lines = self.workspace_now("").lines;
+        let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
+        if remember {
+            let _ = write(
+                folder,
+                &crate::layout_style::file_for(self.layout_style, LAYOUT_FILE),
+                &text,
+            );
+        }
+        self.kept_styles
+            .retain(|(style, _)| *style != self.layout_style);
+        self.kept_styles.push((self.layout_style, lines));
+        self.layout_style = id;
+        let kept = self
+            .kept_styles
+            .iter()
+            .find(|(style, _)| *style == id)
+            .map(|(_, lines)| lines.clone());
+        self.load_style_files(folder, remember);
+        if let Some(lines) = kept {
+            self.apply_layout(&lines);
         }
         self.layout_kept = self.workspace_now("").lines;
     }
@@ -370,17 +701,10 @@ impl SuePaint {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(LAYOUT_SETTLE + 0.1));
             return;
         }
-        let text: String = lines
-            .iter()
-            .map(|line| {
-                format!(
-                    "{line}
-"
-                )
-            })
-            .collect();
+        let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
         let folder = crate::colorsets::folder(cx);
-        if let Err(error) = write(folder.as_deref(), LAYOUT_FILE, &text) {
+        let file = crate::layout_style::file_for(self.layout_style, LAYOUT_FILE);
+        if let Err(error) = write(folder.as_deref(), &file, &text) {
             cx.fail(tr!("cannot-keep-the-palettes-settings", error = error));
         }
         self.layout_kept = lines;
@@ -395,28 +719,15 @@ impl SuePaint {
             .iter()
             .map(|item| item.to_line() + "\n")
             .collect();
-        let spaces = write_sections(
-            self.workspaces
-                .iter()
-                .map(|space| (space.name.as_str(), space.lines.clone())),
-        );
-        let mut bar: Vec<String> = self
-            .bar_hidden
-            .iter()
-            .map(|command| tr!("hide", command = command))
-            .collect();
-        bar.sort();
-        bar.extend(
-            self.bar_extra
-                .iter()
-                .map(|command| tr!("add-3", command = command)),
-        );
+        let spaces = workspaces_text(&self.workspaces);
+        let bar = command_bar_text(&self.bar_hidden, &self.bar_extra);
+        let spaces_file = crate::layout_style::file_for(self.layout_style, WORKSPACES_FILE);
         let written = write(
             folder.as_deref(),
             "auto_actions.txt",
             &AutoActions::write(&self.auto.sets),
         )
-        .and_then(|()| write(folder.as_deref(), "command_bar.txt", &bar.concat()))
+        .and_then(|()| write(folder.as_deref(), COMMAND_BAR_FILE, &bar))
         .and_then(|()| write(folder.as_deref(), "item_bank.txt", &bank))
         .and_then(|()| {
             let presets: String = self
@@ -426,28 +737,47 @@ impl SuePaint {
                 .collect();
             write(folder.as_deref(), "canvas_presets.txt", &presets)
         })
-        .and_then(|()| write(folder.as_deref(), "workspaces.txt", &spaces));
+        .and_then(|()| write(folder.as_deref(), &spaces_file, &spaces));
         if let Err(error) = written {
             cx.fail(tr!("cannot-keep-the-palettes-settings", error = error));
         }
         self.refresh_workspace_menu();
     }
 
-    /// Shows the registered workspaces in Window, Workspace.
+    /// Shows the presets and the registered workspaces in Window,
+    /// Workspace, and the one in use in Reload.
     pub(crate) fn refresh_workspace_menu(&mut self) {
         let names: Vec<String> = self
             .workspaces
             .iter()
             .map(|space| space.name.clone())
             .collect();
-        crate::menus::set_workspaces(&mut self.menus, &names);
+        crate::menus::set_workspaces_in_use(
+            &mut self.menus,
+            &names,
+            self.current_workspace.as_deref(),
+        );
     }
 
-    /// The current palette layout as a workspace named `name`.
+    /// The current palette layout as a workspace named `name`: the dock's
+    /// lines, the palette switches, the menu bar, the layout style, how
+    /// the strip opens its palettes, and the command bar's items. While
+    /// Hide All Palettes hides them, the palettes as they were.
     pub(crate) fn workspace_now(&self, name: &str) -> Workspace {
-        let mut lines = self.dock.to_lines();
-        lines.push(panels_line(&self.panels));
-        lines.push(tr!("menus", value = u8::from(!self.menus_hidden)));
+        let (panels, dock) = self
+            .hidden_all
+            .as_ref()
+            .map_or((&self.panels, &self.dock), |(panels, dock)| (panels, dock));
+        let mut lines = dock.to_lines();
+        lines.push(panels_line(panels));
+        lines.push(format!("{MENUS_WORD} {}", u8::from(!self.menus_hidden)));
+        lines.push(format!("{STYLE_WORD} {}", self.layout_style));
+        if self.strip_as_tab {
+            lines.push(format!("{STRIP_WORD} tab"));
+        }
+        lines.push(BAR_WORD.to_owned());
+        let bar = command_bar_text(&self.bar_hidden, &self.bar_extra);
+        lines.extend(bar.lines().map(|line| format!("{BAR_WORD} {line}")));
         Workspace {
             name: name.to_owned(),
             lines,
@@ -458,9 +788,10 @@ impl SuePaint {
     /// where Reset to Default goes back to, kept in the data folder.
     pub(crate) fn set_default_workspace(&mut self, cx: &mut AppletContext<'_>) {
         let space = self.workspace_now(&tr!("workspace"));
-        let text = write_sections(std::iter::once((space.name.as_str(), space.lines.clone())));
+        let text = workspaces_text(std::slice::from_ref(&space));
         let folder = crate::colorsets::folder(cx);
-        match write(folder.as_deref(), DEFAULT_FILE, &text) {
+        let file = crate::layout_style::file_for(self.layout_style, DEFAULT_FILE);
+        match write(folder.as_deref(), &file, &text) {
             Ok(()) => cx.notify(tr!("default-workspace-saved")),
             Err(error) => cx.fail(tr!("cannot-keep-the-palettes-settings", error = error)),
         }
@@ -468,25 +799,80 @@ impl SuePaint {
         self.default_workspace = Some(space);
     }
 
-    /// Lays the palettes out as workspace `index` says.
+    /// Lays the palettes out as workspace `index` says; it becomes the one
+    /// checked in Window, Workspace.
     pub(crate) fn use_workspace(&mut self, index: usize) {
         if let Some(space) = self.workspaces.get(index).cloned() {
             self.apply_layout(&space.lines);
+            self.current_workspace = Some(space.name);
+            self.refresh_workspace_menu();
         }
     }
 
-    /// Lays the palettes out as [`Self::workspace_now`]'s `lines` say.
+    /// Reload: the workspace in use as it was registered.
+    pub(crate) fn reload_workspace(&mut self) {
+        if let Some(index) = self
+            .current_workspace
+            .as_ref()
+            .and_then(|name| self.workspaces.iter().position(|space| space.name == *name))
+        {
+            self.use_workspace(index);
+        }
+    }
+
+    /// Lays the palettes out as the preset workspace `id` says.
+    pub(crate) fn use_preset(&mut self, id: &str) {
+        if let Some(preset) = PRESETS.iter().find(|preset| preset.id == id) {
+            self.hidden_all = None;
+            let mut dock = self.style_layout();
+            let mut panels = Panels::default();
+            (preset.arrange)(&mut dock, &mut panels);
+            self.dock = dock;
+            self.panels = panels;
+            self.menus_hidden = false;
+            self.current_workspace = None;
+            self.refresh_workspace_menu();
+        }
+    }
+
+    /// Lays the palettes out as [`Self::workspace_now`]'s `lines` say (or
+    /// such lines in another language); palettes the lines lack go where
+    /// the layout style in use has them.
     pub(crate) fn apply_layout(&mut self, lines: &[String]) {
-        if let Some(dock) = crate::dock::Dock::from_lines(lines) {
+        self.hidden_all = None;
+        if let Some(dock) = Self::read_layout(lines, &self.style_layout()) {
             self.dock = dock;
         }
+        let mut bar: Option<(HashSet<String>, Vec<String>)> = None;
+        self.strip_as_tab = false;
         for line in lines {
             if let Some(panels) = panels_from(line) {
                 self.panels = panels;
+            } else if let Some(shown) = menus_from(line) {
+                self.menus_hidden = !shown;
+            } else if let Some(how) = line.strip_prefix(&format!("{STRIP_WORD} ")) {
+                self.strip_as_tab = how == "tab";
+            } else if line == BAR_WORD {
+                bar = Some((HashSet::new(), Vec::new()));
+            } else if let Some(item) = line.strip_prefix(&format!("{BAR_WORD} "))
+                && let Some((hidden, added)) = bar.as_mut()
+            {
+                let registry = crate::commands::registry();
+                if let Some(command) = item.strip_prefix("hide ")
+                    && registry.has(command)
+                {
+                    hidden.insert(command.to_owned());
+                } else if let Some(command) = item.strip_prefix("add ")
+                    && registry.has(command)
+                {
+                    added.push(command.to_owned());
+                }
             }
-            if let Some(shown) = line.strip_prefix("menus ") {
-                self.menus_hidden = shown == "0";
-            }
+        }
+        // A workspace kept before it held the command bar leaves it as is.
+        if let Some((hidden, added)) = bar {
+            self.bar_hidden = hidden;
+            self.bar_extra = added;
         }
     }
 
@@ -505,7 +891,9 @@ impl SuePaint {
     /// Keeps `command` in the auto action being recorded.
     pub(crate) fn record_auto(&mut self, command: &str) {
         if let Some(index) = self.auto.recording
-            && recordable(command)
+            && crate::commands::registry()
+                .flags(command)
+                .has(sue_wm::Flags::RECORDABLE)
             && let Some(set) = self.auto.sets.get_mut(index)
         {
             set.steps.push(command.to_owned());
@@ -761,9 +1149,11 @@ mod tests {
     fn auto_actions_items_and_panels_round_trip_as_text() {
         let sets = AutoActions::builtin();
         assert_eq!(AutoActions::parse(&AutoActions::write(&sets)), sets);
-        assert!(
-            recordable("canvas.flip_h") && !recordable("file.open") && !recordable("auto.play")
-        );
+        // Auto Actions keep what the registry flags as recordable.
+        let flags = |name| crate::commands::registry().flags(name);
+        assert!(flags("canvas.flip_h").has(sue_wm::Flags::RECORDABLE));
+        assert!(!flags("file.open").has(sue_wm::Flags::RECORDABLE));
+        assert!(!flags("auto.play").has(sue_wm::Flags::RECORDABLE));
         let item = Item::of(&Tool::Pen.sub_tools()[0]);
         assert_eq!(
             Item::from_line(&item.to_line()).map(|back| back.name),
@@ -775,5 +1165,171 @@ mod tests {
             ..Panels::default()
         };
         assert_eq!(panels_from(&panels_line(&panels)), Some(panels));
+    }
+
+    #[test]
+    fn workspace_lines_are_the_same_in_every_language() {
+        let mut paint = SuePaint::default();
+        paint.panels.navigator = false;
+        paint.menus_hidden = true;
+        paint.bar_hidden.insert("edit.undo".to_owned());
+        paint.bar_extra = vec!["view.fit".to_owned(), "layer.new".to_owned()];
+        let english = {
+            let _english = sue_lang::scope(sue_lang::ENGLISH);
+            paint.workspace_now("Inking").lines
+        };
+        for language in ["de", "fr", "ar", "ja"] {
+            let _scope = sue_lang::scope(language);
+            let lines = paint.workspace_now("Inking").lines;
+            assert_eq!(lines, english, "{language}");
+            // Read back in that language: the same palettes and bar.
+            let mut back = SuePaint::default();
+            back.apply_layout(&lines);
+            assert_eq!(back.panels, paint.panels, "{language}");
+            assert!(back.menus_hidden, "{language}");
+            assert_eq!(back.bar_hidden, paint.bar_hidden, "{language}");
+            assert_eq!(back.bar_extra, paint.bar_extra, "{language}");
+            assert_eq!(back.workspace_now("Inking").lines, lines, "{language}");
+        }
+        assert!(english.contains(&"panels 1111111011".to_owned()));
+        assert!(english.contains(&"menus 0".to_owned()));
+        assert!(english.contains(&"style classic".to_owned()));
+        assert!(english.contains(&"bar hide edit.undo".to_owned()));
+    }
+
+    #[test]
+    fn lines_written_in_another_language_are_read_once_and_kept_in_english() {
+        let panels = Panels {
+            timeline: false,
+            ..Panels::default()
+        };
+        for line in [
+            "Panels 1111111110",
+            "cases 1111111110",
+            "لوحات 1111111110",
+            "パネル 1111111110",
+            "panels 1111111110",
+        ] {
+            assert_eq!(panels_from(line), Some(panels), "{line}");
+            assert_eq!(canonical_line(line), "panels 1111111110", "{line}");
+        }
+        for (line, shown) in [("Menüs 0", false), ("menu 1", true), ("菜单 0", false)] {
+            assert_eq!(menus_from(line), Some(shown), "{line}");
+        }
+        assert_eq!(canonical_line("Menüs 0"), "menus 0");
+        // Not a palette line: kept as it is.
+        assert_eq!(canonical_line("Panels 12"), "Panels 12");
+        assert_eq!(
+            canonical_line("column left 46 1:tool"),
+            "column left 46 1:tool"
+        );
+        // A registered workspace written in German.
+        let text = "[Inking]\ncolumn left 46 1:tool\nPanels 1111111110\nMenüs 0\n";
+        let (spaces, old) = workspaces_from(text);
+        assert!(old);
+        assert_eq!(
+            spaces[0].lines,
+            ["column left 46 1:tool", "panels 1111111110", "menus 0"]
+        );
+        let (_, old) = workspaces_from(&workspaces_text(&spaces));
+        assert!(!old, "written again in English, read as it is");
+    }
+
+    #[test]
+    fn the_command_bar_file_keeps_one_line_per_item() {
+        let hidden: HashSet<String> = ["view.fit", "edit.undo"].map(String::from).into();
+        let added = vec!["layer.new".to_owned(), "select.all".to_owned()];
+        let text = command_bar_text(&hidden, &added);
+        assert_eq!(
+            text,
+            "hide edit.undo\nhide view.fit\nadd layer.new\nadd select.all\n"
+        );
+        assert_eq!(
+            command_bar_from(&text),
+            (hidden.clone(), added.clone(), false)
+        );
+        // As 0.0.75 wrote it: every line run together, in English or in
+        // German (whose words come after the command).
+        for old in [
+            "hide edit.undohide view.fitadd layer.newadd select.all",
+            "edit.undo ausblendenview.fit ausblendenlayer.new hinzufügenselect.all hinzufügen",
+            "ocultar edit.undoocultar view.fitañadir layer.newañadir select.all",
+        ] {
+            assert_eq!(
+                command_bar_from(old),
+                (hidden.clone(), added.clone(), true),
+                "{old}"
+            );
+        }
+        assert_eq!(command_bar_from(""), (HashSet::new(), Vec::new(), false));
+    }
+
+    #[test]
+    fn the_old_words_are_what_each_language_wrote() {
+        let languages: Vec<String> = sue_lang::languages()
+            .into_iter()
+            .map(|info| info.tag)
+            .collect();
+        for (language, panels, menus, hide, add) in OLD_WORDS {
+            if !languages.iter().any(|known| known == language) {
+                continue;
+            }
+            let _scope = sue_lang::scope(language);
+            // The keys stay while a language still has them; once they are
+            // gone the table alone reads old files.
+            let wrote = |key: &str, name: &str, value: &str| {
+                let text = sue_lang::text_with("paint", key, &[(name, value.into())]);
+                (text != key).then_some(text)
+            };
+            let fits = |text: Option<String>, word: &str, value: &str| {
+                text.is_none_or(|text| {
+                    let expected = if word.starts_with(' ') {
+                        format!("{value}{word}")
+                    } else {
+                        format!("{word}{value}")
+                    };
+                    text.trim() == expected.trim()
+                })
+            };
+            assert!(
+                fits(wrote("panels", "bits", "1"), panels, "1"),
+                "{language}"
+            );
+            assert!(fits(wrote("menus", "value", "1"), menus, "1"), "{language}");
+            assert!(fits(wrote("hide", "command", "x"), hide, "x"), "{language}");
+            assert!(fits(wrote("add-3", "command", "x"), add, "x"), "{language}");
+        }
+    }
+
+    #[test]
+    fn an_emptied_workspace_stays_empty() {
+        let mut paint = SuePaint::default();
+        for &palette in <crate::dock::Palette as sue_wm::dock::DockPanel>::all() {
+            paint.close_palette(palette);
+        }
+        let lines = paint.workspace_now("Empty").lines;
+        let mut back = SuePaint::default();
+        back.apply_layout(&lines);
+        for &palette in <crate::dock::Palette as sue_wm::dock::DockPanel>::all() {
+            assert!(!back.palette_showing(palette), "{palette:?} came back");
+        }
+        assert_eq!(back.workspace_now("Empty").lines, lines);
+    }
+
+    #[test]
+    fn a_workspace_kept_before_the_command_bar_was_in_it_leaves_the_bar() {
+        let mut paint = SuePaint {
+            bar_extra: vec!["view.fit".to_owned()],
+            ..SuePaint::default()
+        };
+        let old: Vec<String> = ["panels 1111111111", "menus 1"].map(String::from).to_vec();
+        paint.apply_layout(&old);
+        assert_eq!(paint.bar_extra, ["view.fit"]);
+        // One kept now holds the bar, an empty one too.
+        paint.bar_extra.clear();
+        let now = paint.workspace_now("").lines;
+        paint.bar_extra = vec!["view.fit".to_owned()];
+        paint.apply_layout(&now);
+        assert!(paint.bar_extra.is_empty());
     }
 }

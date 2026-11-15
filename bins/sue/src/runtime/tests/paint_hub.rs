@@ -135,17 +135,17 @@ fn closing_the_last_canvas_leaves_the_palettes_menus_and_new_and_open() {
     );
 
     // The Window menu opens a palette that was not showing.
-    assert!(paint.rect_of("Color History").is_none());
+    assert!(paint.rect_of("Item Bank").is_none());
     paint.click_text("Window");
     assert!(
         paint.rect_of("Hide All Palettes").is_some(),
         "Window opened"
     );
-    paint.click_text("Color History");
+    paint.click_text("Item Bank");
     paint.settle(10);
     assert!(paint.rect_of("Hide All Palettes").is_none(), "it closed");
     assert!(
-        paint.rect_of("Color History").is_some(),
+        paint.rect_of("Item Bank").is_some(),
         "the palette shows: {:?}",
         paint.texts
     );

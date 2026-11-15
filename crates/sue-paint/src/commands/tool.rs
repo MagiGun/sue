@@ -347,16 +347,10 @@ mod tests {
 
     #[test]
     fn the_group_is_recordable_and_stays_on_the_canvas() {
-        // `RECORDABLE` keeps what `recordable()` decided for these names,
-        // and no command of the group leaves the canvas.
+        // Every command of the group is recordable, and none leaves the
+        // canvas.
         for entry in COMMANDS {
             assert!(entry.flags.has(Flags::RECORDABLE), "{}", entry.name);
-            assert_eq!(
-                entry.flags.has(Flags::RECORDABLE),
-                crate::extras::recordable(entry.name),
-                "{}",
-                entry.name
-            );
             assert!(!entry.flags.has(Flags::LEAVES_CANVAS), "{}", entry.name);
         }
     }

@@ -1610,7 +1610,20 @@ fn the_data_folder_of_0_0_75_loads_into_the_studio() {
         .iter()
         .map(|group| group.tabs.clone())
         .collect();
-    assert_eq!(left, [vec![Palette::SubTool], vec![Palette::Color]]);
+    // Tool Property, Brush Size and the color palettes were tabs of Sub
+    // Tool and Color Wheel then; they come back as those palettes' tabs.
+    assert_eq!(
+        left,
+        [
+            vec![Palette::SubTool, Palette::ToolProperty, Palette::BrushGrid],
+            vec![
+                Palette::Color,
+                Palette::ColorSlider,
+                Palette::Intermediate,
+                Palette::Approximate
+            ]
+        ]
+    );
     assert_eq!(
         paint.dock.top.first().map(|group| group.tabs.clone()),
         Some(vec![Palette::CommandBar])
