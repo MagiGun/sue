@@ -248,11 +248,12 @@ fn frame_insert_delete(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: C
     let Some((sequence, length)) = here.timeline else {
         return;
     };
-    let (by, new_length) = if call.name == "anim.frame.insert" {
-        (1, length + 1)
-    } else {
-        (-1, length.saturating_sub(1).max(1))
-    };
+    // Insert Frame asks how many first (panels/timeline/edit.rs).
+    if call.name == "anim.frame.insert" {
+        paint.ask_insert_frames(cx);
+        return;
+    }
+    let (by, new_length) = (-1, length.saturating_sub(1).max(1));
     let sequence = anim::shift(&sequence, here.frame, by, new_length);
     let edit = Edit::new(if by > 0 {
         tr!("insert-frame")
@@ -970,7 +971,12 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "animation-folder",
         layer_folder,
     ),
-    c("anim.layer.camera", "camera-folder", "film", layer_camera),
+    c(
+        "anim.layer.camera",
+        "camera-folder-2d",
+        "film",
+        layer_camera,
+    ),
     c("anim.cel.new", "new-animation-cel", "cel-new", cel_new),
     c(
         "anim.cel.assign",

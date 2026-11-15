@@ -10,7 +10,7 @@ use sue_model::Sequence;
 use sue_wm::AppletContext;
 
 use super::Edit;
-use super::forms::{LabelForm, TimelineForm};
+use super::forms::{InsertForm, LabelForm, TimelineForm};
 use crate::anim;
 use crate::anim::editing::{self, Selection, TrackLabel};
 use crate::anim::motion::Ease;
@@ -325,6 +325,74 @@ impl SuePaint {
             frame,
             name,
         }))));
+    }
+
+    /// Insert Frame asks how many frames, on which tracks and how.
+    pub(crate) fn ask_insert_frames(&mut self, cx: &mut AppletContext<'_>) {
+        if self.timeline_here(&cx.world.arena).is_none() {
+            cx.fail(tr!("make-timeline-first-animation-timeline-new"));
+            return;
+        }
+        let frame = self.doc().map_or(0, |doc| doc.frame);
+        self.dialog = Some(Dialog::Anim(Box::new(AnimDialog::Insert(InsertForm {
+            frame,
+            count: 1,
+            selected_only: false,
+            split: false,
+        }))));
+    }
+
+    /// Inserts the frames `form` asks for, one undo step: the keys after
+    /// its frame move on, on every track or the picked ones; with Split
+    /// Clip the new frames are blank and the cel showing at the frame
+    /// shows again after them.
+    pub(crate) fn insert_frames(&mut self, cx: &mut AppletContext<'_>, form: &InsertForm) {
+        let Some((picture, sequence, length)) = self.timeline_here(&cx.world.arena) else {
+            return;
+        };
+        let count = form.count.max(1);
+        let new_length = length + count;
+        let picked = form
+            .selected_only
+            .then(|| self.timeline_selection(&sequence).tracks);
+        let mut out = editing::shift_tracks(
+            &sequence,
+            form.frame,
+            i64::from(count),
+            new_length,
+            picked.as_deref(),
+        );
+        if form.split {
+            let tracks: Vec<usize> = picked.clone().unwrap_or_else(|| anim::folders(&sequence));
+            for track in tracks {
+                let Some(row) = sequence
+                    .tracks
+                    .get(track)
+                    .filter(|row| row.kind == anim::CELS)
+                else {
+                    continue;
+                };
+                let Some(cel) = anim::cel_at(row, sequence.rate, form.frame) else {
+                    continue;
+                };
+                let after = form.frame + 1;
+                let next_key = anim::keys(&out.tracks[track], out.rate)
+                    .into_iter()
+                    .any(|(at, _)| at == after + count);
+                out = anim::assign(&out, track, after, None, picture, new_length);
+                if !next_key && after + count < new_length {
+                    out = anim::assign(&out, track, after + count, Some(cel), picture, new_length);
+                }
+            }
+        }
+        let edit = Edit::new(tr!("insert-frame"))
+            .then(sue_core::txn::SetExtension::set(picture, out))
+            .then(SetProperty::new(
+                picture,
+                anim::LENGTH,
+                i64::from(new_length),
+            ));
+        Self::apply(cx, edit);
     }
 
     /// Keeps a timeline label's name; an empty one takes it away.

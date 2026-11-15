@@ -72,6 +72,69 @@ impl SuePaint {
         }
     }
 
+    /// Record Timelapse: starts recording at once; stopping asks first
+    /// whether the frames kept so far stay, when there are any.
+    pub(crate) fn toggle_timelapse(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        if !self.recording(&cx.world.arena, picture) {
+            self.set_recording(cx, picture, true);
+            return;
+        }
+        let kept = crate::colorsets::folder(cx).map_or(0, |base| {
+            crate::timelapse::frames(&crate::timelapse::folder(&base, picture)).len()
+        });
+        if kept == 0 {
+            self.set_recording(cx, picture, false);
+        } else {
+            self.dialog = Some(crate::dialogs::Dialog::Anim(Box::new(
+                crate::dialogs::AnimDialog::StopTimelapse(false, kept),
+            )));
+        }
+    }
+
+    /// Stops recording the timelapse, and with `delete` deletes the frames
+    /// kept (the recording's own files, outside the document: what undoes
+    /// is the switch, not the frames).
+    pub(crate) fn stop_timelapse(&mut self, cx: &mut AppletContext<'_>, delete: bool) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        if !self.set_recording(cx, picture, false) || !delete {
+            return;
+        }
+        if let Some(base) = crate::colorsets::folder(cx) {
+            let dir = crate::timelapse::folder(&base, picture);
+            match sue_platform::fs::remove_dir_all(&dir) {
+                Ok(()) => {
+                    self.timelapse.remove(&picture);
+                    cx.notify(tr!("the-timelapse-was-deleted"));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => cx.fail(tr!(
+                    "cannot-delete-the-timelapse",
+                    error = error.to_string()
+                )),
+            }
+        }
+    }
+
+    /// Turns `picture`'s recording on or off, a step that undoes.
+    fn set_recording(&mut self, cx: &mut AppletContext<'_>, picture: EntityId, on: bool) -> bool {
+        let edit = doc::Edit::new(if on {
+            tr!("record-timelapse-2")
+        } else {
+            tr!("stop-recording-timelapse")
+        })
+        .then(sue_core::txn::SetProperty::new(
+            picture,
+            crate::timelapse::RECORD,
+            on,
+        ));
+        Self::apply(cx, edit)
+    }
+
     /// Asks where to export the timelapse laid out as `export`.
     pub(crate) fn ask_export_timelapse(
         &mut self,

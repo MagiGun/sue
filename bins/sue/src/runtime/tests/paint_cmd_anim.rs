@@ -100,13 +100,13 @@ fn every_animation_command_runs_and_each_change_undoes_and_redoes() {
         }
     }
     // The commands that change the picture did, and were undone.
-    // (New Timeline opens its dialog, which Escape closed.)
+    // (New Timeline and Insert Frame open their dialogs, which Escape
+    // closed.)
     for name in [
         "anim.layer.folder",
         "anim.layer.camera",
         "anim.cel.new",
         "anim.cel.assign",
-        "anim.frame.insert",
         "anim.frame.delete",
     ] {
         assert!(

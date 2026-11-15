@@ -97,6 +97,16 @@ fn rows(
     out
 }
 
+/// A layer's palette color as the timeline draws it (the person's own
+/// color, opaque).
+fn palette_ink(color: sue_core::Color) -> egui::Color32 {
+    let [r, g, b] = color
+        .to_space(sue_core::ColorSpace::Srgb)
+        .rgb
+        .map(|part| (part.clamp(0.0, 1.0) * 255.0).round() as u8);
+    egui::Color32::from_rgb(r, g, b)
+}
+
 /// The entity whose keyframes a row shows: the camera folder, a layer's
 /// own, or the animation folder's.
 fn keyed(track: &Track) -> Option<EntityId> {
@@ -728,6 +738,21 @@ impl SuePaint {
                 .map_or(!track.muted, |entity| {
                     sue_model::picture::LayerStyle::of(entity).visible
                 });
+            // The layer's palette color, as a strip at the left of its
+            // name and the line of what each cel holds.
+            let tint = target
+                .and_then(|layer| crate::doc::palette_color(&cx.world.arena, layer))
+                .map(palette_ink);
+            if let Some(tint) = tint {
+                names_painter.rect_filled(
+                    Rect::from_min_max(
+                        pos2(names.left(), top),
+                        pos2(names.left() + theme.space(Space::S2), top + row.height),
+                    ),
+                    CornerRadius::ZERO,
+                    tint,
+                );
+            }
             let icon_side = density.icon();
             let eye_rect = Rect::from_center_size(
                 pos2(names.left() + pad + icon_side / 2.0, line),
@@ -737,7 +762,11 @@ impl SuePaint {
                 let eye = wm_ui::icon_button(
                     ("timeline-eye", row.track),
                     icon(if visible { "eye" } else { "eye-off" }),
-                    &tr!("show-or-hide-the-animation-folder"),
+                    &if row.kind == Kind::Cels {
+                        tr!("show-or-hide-the-animation-folder")
+                    } else {
+                        tr!("show-or-hide")
+                    },
                 )
                 .quiet()
                 .show_at(ui, eye_rect.intersect(rows_area), theme);
@@ -863,11 +892,14 @@ impl SuePaint {
                             cells_painter.hline(
                                 (x + pad / 2.0)..=column(end) - pad / 2.0,
                                 top + row_size - pad / 2.0,
-                                Stroke::new(theme.hairline().width, theme.text_muted()),
+                                tint.map_or_else(
+                                    || Stroke::new(theme.hairline().width, theme.text_muted()),
+                                    |tint| Stroke::new(thick, tint),
+                                ),
                             );
                             if thumb_height > 0.0 {
                                 let width = ((end - at) as f32 * step - pad / 2.0)
-                                    .clamp(pad, thumb_height * 1.4);
+                                    .clamp(pad, thumb_height * aspect);
                                 let rect = Rect::from_min_size(
                                     pos2(x + pad / 4.0, top + row_size),
                                     vec2(width, thumb_height - pad),

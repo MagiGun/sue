@@ -424,6 +424,21 @@ pub(crate) struct LabelForm {
     pub name: String,
 }
 
+/// Insert Frame: how many frames go in after the frame shown, on which
+/// tracks, and whether the cel showing there is split around them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct InsertForm {
+    /// The frame they go in after, from 0.
+    pub frame: u32,
+    /// How many.
+    pub count: u32,
+    /// Only on the tracks picked (the frame's track when none is).
+    pub selected_only: bool,
+    /// The cel showing at the frame shows again after the new frames,
+    /// which stay blank, instead of being held through them.
+    pub split: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

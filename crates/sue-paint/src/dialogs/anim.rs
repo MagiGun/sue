@@ -194,8 +194,8 @@ impl SuePaint {
 // ----- The timeline's dialogs -------------------------------------------------
 
 use crate::panels::timeline::forms::{
-    Animated, AnimatedForm, AudioClipForm, CelsForm, LabelForm, MovieForm, Range, SequenceForm,
-    TimelineForm,
+    Animated, AnimatedForm, AudioClipForm, CelsForm, InsertForm, LabelForm, MovieForm, Range,
+    SequenceForm, TimelineForm,
 };
 use sue_wm::ui::{self as wm_ui, TextRole};
 
@@ -216,6 +216,11 @@ pub(crate) enum AnimDialog {
     AudioClip(AudioClipForm),
     /// A timeline label's name.
     Label(LabelForm),
+    /// Stopping Record Timelapse: keep what was recorded, or delete it
+    /// (`true`). It holds the frames kept so far.
+    StopTimelapse(bool, usize),
+    /// Insert Frame: how many, where and how.
+    Insert(InsertForm),
 }
 
 impl AnimDialog {
@@ -234,6 +239,8 @@ impl AnimDialog {
             Self::Cels(_) => tr!("export-animation-cels"),
             Self::AudioClip(_) => tr!("audio-clip-settings"),
             Self::Label(_) => tr!("timeline-label"),
+            Self::StopTimelapse(..) => tr!("stop-recording-timelapse"),
+            Self::Insert(_) => tr!("insert-frame"),
         }
     }
 
@@ -247,7 +254,8 @@ impl AnimDialog {
             Self::Animated(_) => 11.0,
             Self::Cels(_) => 6.0,
             Self::AudioClip(_) => 12.0,
-            Self::Label(_) => 5.0,
+            Self::Label(_) | Self::StopTimelapse(..) => 5.0,
+            Self::Insert(_) => 7.0,
         };
         let row = wm_ui::Density::Regular.row();
         egui::Vec2::new(row * 15.0, row * (rows + 2.0) * 1.2)
@@ -263,6 +271,8 @@ impl AnimDialog {
             Self::Cels(form) => cels_ui(ui, form, theme),
             Self::AudioClip(form) => audio_clip_ui(ui, form, theme),
             Self::Label(form) => label_ui(ui, form, theme),
+            Self::StopTimelapse(delete, frames) => stop_timelapse_ui(ui, delete, *frames, theme),
+            Self::Insert(form) => insert_ui(ui, form, theme),
         }
     }
 }
@@ -278,6 +288,8 @@ impl SuePaint {
             AnimDialog::Cels(form) => self.ask_cels_file(cx, form),
             AnimDialog::AudioClip(form) => self.audio_clip_ok(cx, &form),
             AnimDialog::Label(form) => self.label_ok(cx, &form),
+            AnimDialog::StopTimelapse(delete, _) => self.stop_timelapse(cx, delete),
+            AnimDialog::Insert(form) => self.insert_frames(cx, &form),
         }
     }
 }
@@ -771,6 +783,87 @@ fn label_ui(ui: &mut Ui, form: &mut LabelForm, theme: &Theme) -> Outcome {
         });
     });
     help(ui, &tr!("an-empty-label-is-removed"), theme);
+    ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+/// Stopping Record Timelapse asks what becomes of the frames kept so far:
+/// Keep them to export later, or Delete them (that cannot be undone).
+fn stop_timelapse_ui(ui: &mut Ui, delete: &mut bool, frames: usize, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    ui.label(
+        RichText::new(tr!("stop-timelapse-keep-or-delete", count = frames))
+            .font(theme.text_font(TextRole::Body))
+            .color(theme.text),
+    );
+    help(ui, &tr!("a-kept-timelapse-can-be-exported"), theme);
+    ui.add_space(theme.space(wm_ui::Space::S5));
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
+        if wm_ui::button("anim-timelapse-keep", &tr!("keep-the-recording"))
+            .primary()
+            .show(ui, theme)
+            .clicked()
+        {
+            *delete = false;
+            outcome = Outcome::Ok;
+        }
+        if wm_ui::button("anim-timelapse-delete", &tr!("delete-the-recording"))
+            .danger()
+            .show(ui, theme)
+            .clicked()
+        {
+            *delete = true;
+            outcome = Outcome::Ok;
+        }
+        if wm_ui::button("anim-timelapse-cancel", &tr!("cancel"))
+            .ghost()
+            .show(ui, theme)
+            .clicked()
+        {
+            outcome = Outcome::Cancel;
+        }
+    });
+    outcome
+}
+
+/// Insert Frame: the number of frames, Selected layers only, Split clip.
+fn insert_ui(ui: &mut Ui, form: &mut InsertForm, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    wm_ui::form_grid(ui, "anim-insert-form", theme, |grid| {
+        grid.row(&tr!("number-of-frames"), |ui| {
+            whole(
+                ui,
+                "anim-insert-count",
+                &mut form.count,
+                1..=10_000,
+                &tr!("frames"),
+                theme,
+            );
+        });
+        grid.row("", |ui| {
+            tick(
+                ui,
+                "anim-insert-selected",
+                &tr!("selected-layers-only"),
+                &mut form.selected_only,
+                theme,
+            );
+        });
+        grid.row("", |ui| {
+            tick(
+                ui,
+                "anim-insert-split",
+                &tr!("split-clip"),
+                &mut form.split,
+                theme,
+            );
+        });
+    });
+    help(
+        ui,
+        &tr!("frames-go-in-after-frame", value = form.frame + 1),
+        theme,
+    );
     ok_cancel(ui, &mut outcome);
     outcome
 }
