@@ -341,10 +341,23 @@ pub fn rewrite(
     change: impl FnOnce(&mut [u8], u32, u32),
 ) -> Result<Option<RasterEdit>, String> {
     let source = raster(arena, layer).ok_or(tr!("only-raster-layers-can-change"))?;
+    let (width, height) = (source.width(), source.height());
+    if source.format() == PixelFormat::Gray8 {
+        // A mask (Gray8 since 0.0.8): `change` works on it as white
+        // whose alpha is how much shows, and the alpha goes back.
+        let before = source.bytes().ok_or(tr!("layer-not-8-bit"))?;
+        let mut work: Vec<u8> = before
+            .iter()
+            .flat_map(|value| [u8::MAX, u8::MAX, u8::MAX, *value])
+            .collect();
+        change(&mut work, width, height);
+        let after: Vec<u8> = work.chunks_exact(4).map(|pixel| pixel[3]).collect();
+        return Ok(changed_rect(before, &after, width, height, 1)
+            .map(|patch| RasterEdit::new(layer, label, vec![patch])));
+    }
     if source.format() != PixelFormat::Rgba8 {
         return Err(tr!("only-rgba-layers-can-change"));
     }
-    let (width, height) = (source.width(), source.height());
     let before = source.bytes().ok_or(tr!("layer-not-8-bit"))?;
     let mut after = before.to_vec();
     change(&mut after, width, height);
@@ -355,15 +368,26 @@ pub fn rewrite(
 /// The smallest patch that turns `before` into `after` (both full layers).
 #[must_use]
 pub fn diff_patch(before: &[u8], after: &[u8], width: u32, height: u32) -> Option<RasterPatch> {
+    changed_rect(before, after, width, height, 4)
+}
+
+/// [`diff_patch`] for layers of `pixel` bytes a pixel.
+fn changed_rect(
+    before: &[u8],
+    after: &[u8],
+    width: u32,
+    height: u32,
+    pixel: u32,
+) -> Option<RasterPatch> {
     let mut bounds: Option<[u32; 4]> = None;
     for y in 0..height {
-        let row = (y * width * 4) as usize..((y + 1) * width * 4) as usize;
+        let row = (y * width * pixel) as usize..((y + 1) * width * pixel) as usize;
         let (a, b) = (&before[row.clone()], &after[row]);
         if a == b {
             continue;
         }
-        let first = a.iter().zip(b).position(|(x, y)| x != y).unwrap_or(0) as u32 / 4;
-        let last = a.iter().zip(b).rposition(|(x, y)| x != y).unwrap_or(0) as u32 / 4 + 1;
+        let first = a.iter().zip(b).position(|(x, y)| x != y).unwrap_or(0) as u32 / pixel;
+        let last = a.iter().zip(b).rposition(|(x, y)| x != y).unwrap_or(0) as u32 / pixel + 1;
         bounds = Some(match bounds {
             Some([x0, y0, x1, _]) => [x0.min(first), y0, x1.max(last), y + 1],
             None => [first, y, last, y + 1],
@@ -371,10 +395,10 @@ pub fn diff_patch(before: &[u8], after: &[u8], width: u32, height: u32) -> Optio
     }
     let [x0, y0, x1, y1] = bounds?;
     let cut = |pixels: &[u8]| {
-        let mut out = Vec::with_capacity(((x1 - x0) * (y1 - y0) * 4) as usize);
+        let mut out = Vec::with_capacity(((x1 - x0) * (y1 - y0) * pixel) as usize);
         for y in y0..y1 {
-            let at = ((y * width + x0) * 4) as usize;
-            out.extend_from_slice(&pixels[at..at + ((x1 - x0) * 4) as usize]);
+            let at = ((y * width + x0) * pixel) as usize;
+            out.extend_from_slice(&pixels[at..at + ((x1 - x0) * pixel) as usize]);
         }
         out
     };

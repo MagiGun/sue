@@ -38,10 +38,20 @@ pub(crate) struct AreaTarget {
 /// (straight RGBA8), clear around them.
 fn placed(arena: &Arena, id: EntityId, offset: [i64; 2], size: [u32; 2]) -> Option<Vec<u8>> {
     let raster = doc::raster(arena, id)?;
-    let bytes = raster.bytes()?;
     let (width, height) = (raster.width(), raster.height());
+    // A gray mask reads as white whose alpha is how much shows.
+    let bytes: std::borrow::Cow<'_, [u8]> = if raster.format() == sue_core::PixelFormat::Gray8 {
+        raster
+            .bytes()?
+            .iter()
+            .flat_map(|value| [u8::MAX, u8::MAX, u8::MAX, *value])
+            .collect::<Vec<u8>>()
+            .into()
+    } else {
+        raster.bytes()?.into()
+    };
     if offset == [0, 0] && [width, height] == size {
-        return Some(bytes.to_vec());
+        return Some(bytes.into_owned());
     }
     let mut out = vec![0_u8; size[0] as usize * size[1] as usize * 4];
     for y in 0..height {
