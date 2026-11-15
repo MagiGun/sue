@@ -1313,3 +1313,79 @@ fn the_new_engine_switch_is_read_from_the_rice_file() {
         "the line stays when the file is written back"
     );
 }
+
+/// What the new engine lays on the real canvas from a pen's packets, for
+/// a person to look at: rows of strokes, each frame carrying several
+/// packets, ending four ways (columns: easing off, lifted while pressing,
+/// the driver going quiet before the lift, a quick flick of falling
+/// pressure). `SUE_STROKE_ENDS` names the PNG file.
+#[test]
+#[ignore = "writes a picture of the new engine's strokes for a person to look at"]
+fn new_engine_sheet() {
+    let mut paint = new_engine("paint-engine-sheet");
+    let middle = paint.middle();
+    let mut time = 10.0;
+    for row in 0..4 {
+        for column in 0..4 {
+            let start = middle + vec2(-340.0 + column as f32 * 175.0, -150.0 + row as f32 * 90.0);
+            let count = 60;
+            let mut events = vec![
+                egui::Event::PointerMoved(start),
+                button(start, true, egui::Modifiers::NONE),
+            ];
+            for i in 0..=count {
+                let s = i as f32 / count as f32;
+                let at = start + vec2(150.0 * s, 26.0 * (s * 5.0 + row as f32).sin());
+                let body = 0.2 + 0.25 * row as f32;
+                let rise = (s * 8.0).min(1.0);
+                let pressure = match column {
+                    0 => body * rise * (1.0 - ((s - 0.8).max(0.0) / 0.2) * 0.9),
+                    1 => body * rise,
+                    2 if s > 0.9 => -1.0,
+                    3 => body * rise * (1.0 - s * 0.95),
+                    _ => body * rise,
+                };
+                let kind = if i == 0 {
+                    stylus::PenKind::Down
+                } else {
+                    stylus::PenKind::Move
+                };
+                time += 1.0 / 200.0;
+                let pressure = (pressure >= 0.0).then_some(pressure.max(0.02));
+                stylus::push_for_test(packet(kind, at, time, pressure));
+                if i % 3 == 0 {
+                    events.push(egui::Event::PointerMoved(at));
+                }
+                // About three packets reach a frame.
+                if i % 3 == 2 {
+                    paint.step(std::mem::take(&mut events));
+                }
+            }
+            let end = start + vec2(150.0, 26.0 * (5.0 + row as f32).sin());
+            paint.step(std::mem::take(&mut events));
+            time += 1.0 / 200.0;
+            stylus::push_for_test(packet(stylus::PenKind::Up, end, time, None));
+            paint.step(vec![button(end, false, egui::Modifiers::NONE)]);
+            paint.settle(2);
+        }
+    }
+    let layers = paint.layers();
+    let (_, width, bytes) = layers.last().unwrap();
+    let height = bytes.len() / 4 / width;
+    let mut out = Vec::with_capacity(width * height * 4);
+    for pixel in bytes.chunks(4) {
+        let cover = u32::from(pixel[3]);
+        for channel in 0..3 {
+            let ink = u32::from(pixel[channel]);
+            out.push(((ink * cover + 255 * (255 - cover)) / 255) as u8);
+        }
+        out.push(255);
+    }
+    let png = sue_io::encode_png_rgba(*width as u32, height as u32, &out).unwrap();
+    let path = std::env::var("SUE_STROKE_ENDS").map_or_else(
+        |_| std::env::temp_dir().join("sue-new-engine.png"),
+        PathBuf::from,
+    );
+    std::fs::write(&path, png).unwrap();
+    println!("new engine: {}", path.display());
+}
