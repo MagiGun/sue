@@ -8,6 +8,13 @@
 //! Layers are named by their `EntityId`, so a comp still knows them after
 //! they move; a layer deleted since is passed over, and a layer added
 //! since stays as it is.
+//!
+//! Since 0.0.8 the text starts with the line [`VERSION_LINE`] (it holds no
+//! tab, so older Sue passes over it). Comps kept without it were written
+//! when a folder with no mode stored was listed as `normal` although it
+//! lays its layers on Through; [`read`] takes such a folder's `normal` for
+//! `through`, in memory only, so the file and the undo history stay as
+//! they are.
 
 use sue_core::txn::{Batch, SetProperty};
 use sue_core::{Arena, EntityId, Value};
@@ -15,6 +22,9 @@ use sue_model::picture;
 
 /// A picture's layer comps (`Text`).
 pub const COMPS: &str = "picture.layer_comps";
+
+/// The first line of comps kept by 0.0.8 and later.
+pub const VERSION_LINE: &str = "sue.layer_comps 2";
 
 type Edit = Batch<Arena>;
 
@@ -40,16 +50,31 @@ pub struct Comp {
     pub states: Vec<LayerState>,
 }
 
-/// `picture`'s comps, in the order they were made.
+/// `picture`'s comps, in the order they were made. Comps kept before
+/// [`VERSION_LINE`] existed read a folder with no mode stored as Through
+/// (see the module docs).
 #[must_use]
 pub fn read(arena: &Arena, picture: EntityId) -> Vec<Comp> {
-    arena
+    let Some(text) = arena
         .get_by_id(picture)
         .ok()
         .and_then(|entity| entity.property(COMPS))
         .and_then(Value::as_str)
-        .map(decode)
-        .unwrap_or_default()
+    else {
+        return Vec::new();
+    };
+    let mut comps = decode(text);
+    if text.lines().next() != Some(VERSION_LINE) {
+        for state in comps.iter_mut().flat_map(|comp| comp.states.iter_mut()) {
+            let unset = arena
+                .get_by_id(state.layer)
+                .is_ok_and(|entity| entity.property(picture::BLEND).is_none());
+            if state.blend == "normal" && unset && crate::doc::is_folder(arena, state.layer) {
+                "through".clone_into(&mut state.blend);
+            }
+        }
+    }
+    comps
 }
 
 /// The comps as text (see the module docs).
@@ -84,8 +109,7 @@ pub fn encode(comps: &[Comp]) -> String {
                 .collect();
             format!("{name}\t{}", states.join(";"))
         })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .fold(VERSION_LINE.to_owned(), |text, line| text + "\n" + &line)
 }
 
 /// The comps read back from [`encode`]; parts it cannot read are passed
@@ -243,5 +267,57 @@ mod tests {
         };
         let mut nothing = apply(&arena, picture, &gone, "Gone");
         nothing.apply(&mut arena).unwrap();
+    }
+
+    #[test]
+    fn a_folder_with_no_mode_is_through_in_new_and_old_comps() {
+        let mut arena = Arena::new();
+        let (mut made, picture) = doc::create(&NewPicture {
+            width: 8,
+            height: 8,
+            ..NewPicture::default()
+        })
+        .unwrap();
+        made.apply(&mut arena).unwrap();
+        let layer = doc::layers(&arena, picture).last().unwrap().id;
+        let (mut grouped, folder) = doc::new_folder(&arena, picture, Some(layer), true);
+        grouped.apply(&mut arena).unwrap();
+        // New comps say what the folder does.
+        let now = capture(&arena, picture, "Now");
+        let state = |comp: &Comp| {
+            comp.states
+                .iter()
+                .find(|state| state.layer == folder)
+                .unwrap()
+                .blend
+                .clone()
+        };
+        assert_eq!(state(&now), "through");
+        let mut keep = store(picture, std::slice::from_ref(&now), "Keep");
+        keep.apply(&mut arena).unwrap();
+        assert_eq!(read(&arena, picture), vec![now.clone()]);
+        // Comps of 0.0.75 named such a folder normal: read as Through, so
+        // showing the comp leaves the folder as it is.
+        let old = encode(std::slice::from_ref(&now))
+            .lines()
+            .skip(1)
+            .collect::<String>()
+            .replace("through", "normal");
+        arena
+            .get_by_id_mut(picture)
+            .unwrap()
+            .properties_mut()
+            .set(COMPS, old.as_str());
+        let read_back = read(&arena, picture);
+        assert_eq!(state(&read_back[0]), "through");
+        assert!(apply(&arena, picture, &read_back[0], "Show").is_empty());
+        // A folder given Normal since keeps it from a new comp.
+        let mut normal = SetProperty::new(folder, picture::BLEND, "normal");
+        normal.apply(&mut arena).unwrap();
+        let comp = capture(&arena, picture, "Normal");
+        assert_eq!(state(&comp), "normal");
+        let mut keep = store(picture, std::slice::from_ref(&comp), "Keep");
+        keep.apply(&mut arena).unwrap();
+        assert_eq!(state(&read(&arena, picture)[0]), "normal");
     }
 }

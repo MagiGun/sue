@@ -200,11 +200,18 @@ pub fn layers(arena: &Arena, picture: EntityId) -> Vec<LayerInfo> {
         .into_iter()
         .filter_map(|id| {
             let entity = arena.get_by_id(id).ok()?;
+            let mut style = LayerStyle::of(entity);
+            if is_folder(arena, id) {
+                // A folder with no mode stored lays its layers on Through,
+                // not Normal: the palette, layer comps and every other
+                // reader of this list see what the picture does.
+                style.blend = folder_blend(arena, id);
+            }
             Some(LayerInfo {
                 id,
                 name: entity.name().to_owned(),
                 kind: LayerKind::of(entity),
-                style: LayerStyle::of(entity),
+                style,
                 locked: picture::is_locked(entity),
                 alpha_locked: picture::is_alpha_locked(entity),
                 revision: entity.revision(),
