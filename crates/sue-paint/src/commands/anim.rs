@@ -422,6 +422,15 @@ fn light_register(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
         ));
         if SuePaint::apply(cx, edit) {
             paint.light_table = true;
+            // Its entry is picked in the Animation Cels palette, its
+            // opacity and colors at hand.
+            paint.anim_ui.cels.picked = Some((
+                crate::panels::cels::Table {
+                    from: cel,
+                    general: false,
+                },
+                layer,
+            ));
         }
     }
 }

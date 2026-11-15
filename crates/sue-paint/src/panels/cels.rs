@@ -285,7 +285,6 @@ impl SuePaint {
         let mut did: Option<(Table, EntityId, Did)> = None;
         let dragging = self.layer_drag.is_some();
         wm_ui::ScrollView::vertical("cels-entries").show(&mut inner, theme, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
             match cel {
                 None => self.caption(ui, &tr!("go-frame-cel-see-light-table"), theme),
                 Some(cel) => {
@@ -391,7 +390,11 @@ impl SuePaint {
     fn caption(&self, ui: &mut Ui, text: &str, theme: &Theme) {
         let edge = theme.space(Space::S3).round() as i8;
         egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(edge, 0))
+            .inner_margin(egui::Margin {
+                left: edge,
+                right: edge,
+                ..egui::Margin::ZERO
+            })
             .show(ui, |ui| {
                 ui.add(
                     egui::Label::new(
@@ -712,25 +715,31 @@ impl SuePaint {
         } else {
             vec![dragged]
         };
-        let on = cx.world.arena.relations().targets(table.from, table.kind());
+        let relations = cx.world.arena.relations();
+        let on = relations.targets(table.from, table.kind());
+        // Last on the table, in their order, after the layers on it.
+        let mut order = relations.next_order(table.from, table.kind());
         let mut edit = crate::doc::Edit::new(tr!("register-to-light-table"));
-        let mut any = false;
+        let mut last = None;
         for layer in layers {
             // A cel never traces itself, and a layer is on a table once.
             if layer == table.from || on.contains(&layer) {
                 continue;
             }
-            edit = edit.then(sue_core::txn::Relate::new(sue_core::Relation::new(
-                table.from,
-                table.kind(),
-                layer,
-            )));
-            any = true;
+            edit = edit.then(sue_core::txn::Relate::new(
+                sue_core::Relation::new(table.from, table.kind(), layer).ordered(order.clone()),
+            ));
+            order = sue_core::OrderKey::between(Some(&order), None);
+            last = Some(layer);
         }
-        if any {
-            Self::apply(cx, edit);
-        } else {
-            cx.notify(tr!("already-on-this-light-table"));
+        match last {
+            Some(layer) => {
+                if Self::apply(cx, edit) {
+                    // The entry made is picked, its settings at hand.
+                    self.anim_ui.cels.picked = Some((table, layer));
+                }
+            }
+            None => cx.notify(tr!("already-on-this-light-table")),
         }
         true
     }

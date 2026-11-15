@@ -248,7 +248,7 @@ impl SuePaint {
             ui.ctx(),
             &wm_ui::MenuRequest {
                 id,
-                anchor: rect.left_bottom() + egui::vec2(0.0, theme.space(Space::S1)),
+                anchor: rect.left_bottom() + egui::Vec2::Y * theme.space(Space::S1),
                 owner: rect,
                 items: &items,
                 state: &|command: &str| registry.state(self, &facts, command),

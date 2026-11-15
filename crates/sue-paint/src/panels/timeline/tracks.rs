@@ -922,8 +922,10 @@ impl SuePaint {
             // rows has its fold arrow, which folds it in the Layer palette
             // too.
             let indent = row.depth as f32 * icon_side;
+            // The fold arrows' room, while any row has one.
+            let fold_room = if parents.is_empty() { 0.0 } else { icon_side };
             let fold_rect = Rect::from_center_size(
-                pos2(eye_rect.right() + indent + icon_side / 2.0, line),
+                pos2(eye_rect.right() + indent + fold_room / 2.0, line),
                 egui::Vec2::splat(icon_side),
             );
             if let Some(folder) = target.filter(|folder| parents.contains(folder)) {
@@ -940,7 +942,10 @@ impl SuePaint {
                 }
             }
             let kind_rect = Rect::from_center_size(
-                pos2(fold_rect.right() + icon_side / 2.0, line),
+                pos2(
+                    eye_rect.right() + indent + fold_room + icon_side / 2.0,
+                    line,
+                ),
                 egui::Vec2::splat(icon_side),
             );
             sue_wm::icons::paint(
@@ -1502,11 +1507,7 @@ impl SuePaint {
                 pos2(column(from), below.top()),
                 pos2(column(from + count), below.bottom()),
             );
-            painter.rect_filled(
-                added,
-                CornerRadius::ZERO,
-                theme.focus().gamma_multiply(0.18),
-            );
+            painter.rect_filled(added, CornerRadius::ZERO, theme.fill_selected());
             painter.rect_stroke(
                 added,
                 CornerRadius::ZERO,

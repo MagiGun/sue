@@ -2070,6 +2070,8 @@ mod tests {
                 layer: reference,
                 place: None,
                 only: false,
+                opacity: 1.0,
+                mode: EntryMode::Table,
             }],
             0.5,
             None,
