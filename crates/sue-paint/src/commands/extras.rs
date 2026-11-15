@@ -6,8 +6,9 @@
 //! Only Paste to Canvas is recorded by Auto Actions: the others change a
 //! palette, not the picture. What changes the picture (Paste to Canvas,
 //! an Item Bank picture dropped on the canvas) goes through the
-//! document's history, one undo step each. The Auto Action commands of the family `auto.run.` play an
-//! action by its id; Settings lists one row per action for them.
+//! document's history, one undo step each. The commands of the family
+//! `auto.run.` play an Auto Action by its id; Settings lists one row per
+//! action for them.
 
 use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
