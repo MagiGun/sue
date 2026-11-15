@@ -366,7 +366,7 @@ fn sue_writers_bar_buttons_show_a_focus_ring_when_tabbed_to() {
         let Some(focused) = bars.told.iter().find(|told| told.focused).cloned() else {
             continue;
         };
-        if focused.role != Role::Button {
+        if !matches!(focused.role, Role::Button | Role::ComboBox) {
             continue;
         }
         let place = if focused.rect.top() > 860.0 {
@@ -383,7 +383,10 @@ fn sue_writers_bar_buttons_show_a_focus_ring_when_tabbed_to() {
             focused.rect
         );
         place.push(focused.name);
-        if toolbar.len() >= 3 {
+        if ["Font", "Size", "Paragraph Style"]
+            .iter()
+            .all(|name| toolbar.iter().any(|seen| seen == name))
+        {
             break;
         }
     }
@@ -391,10 +394,14 @@ fn sue_writers_bar_buttons_show_a_focus_ring_when_tabbed_to() {
         status.iter().any(|name| name == "Zoom In"),
         "the status bar's buttons take focus: {status:?}"
     );
-    assert!(
-        toolbar.len() >= 3,
-        "the toolbar's buttons take focus: {toolbar:?}"
-    );
+    // Every kind of the toolbar's controls: its buttons, the text color
+    // and its three boxes.
+    for name in ["Bold", "Font", "Size", "Paragraph Style"] {
+        assert!(
+            toolbar.iter().any(|seen| seen == name),
+            "{name} takes focus and shows a ring: {toolbar:?}"
+        );
+    }
 }
 
 /// The find bar's arrows step through what it found and its cross
@@ -525,5 +532,85 @@ fn sue_writers_font_box_opens_a_search_that_takes_the_keys() {
         !bars.texts.iter().any(|(text, _)| text == "Style's font"),
         "Escape closed the list"
     );
+    assert_eq!(bars.arena(), before);
+}
+
+/// Where the last frame drew `text` lowest on screen (a list's row under
+/// the field that searched for it).
+fn lowest(bars: &Bars, text: &str) -> Pos2 {
+    bars.texts
+        .iter()
+        .filter(|(shown, _)| shown == text)
+        .max_by(|a, b| a.1.top().total_cmp(&b.1.top()))
+        .map(|(_, rect)| rect.center())
+        .unwrap_or_else(|| panic!("the frame shows {text:?}"))
+}
+
+/// A font picked from the font box's list marks the selection in that
+/// face, gives the keyboard back to the text and is undone in one step.
+#[test]
+fn sue_writers_font_box_picks_a_face_and_undo_takes_it_off() {
+    let mut bars = Bars::new("writer-bars-font-pick");
+    bars.type_text("plain words");
+    bars.command("edit.select_all");
+    let before = bars.arena();
+    bars.click("Font");
+    bars.step(vec![egui::Event::Text("Hack".to_owned())]);
+    bars.settle(3);
+    let row = lowest(&bars, "Hack");
+    bars.click_at(row);
+    let (_, marks) = bars.document("plain words");
+    assert!(
+        marks
+            .marks()
+            .iter()
+            .any(|mark| mark.kind == sue_model::mark_kind::FONT),
+        "{marks:?}"
+    );
+    assert!(
+        !bars.texts.iter().any(|(text, _)| text == "Style's font"),
+        "the list closed"
+    );
+    let faced = bars.arena();
+    // The caret is back in the text: what is typed replaces the words.
+    bars.type_text("new");
+    let (text, _) = bars.document("new");
+    assert!(!text.contains("plain words"), "{text:?}");
+    bars.click("Undo");
+    assert_eq!(bars.arena(), faced);
+    bars.click("Undo");
+    assert_eq!(bars.arena(), before, "one undo takes the face off");
+}
+
+/// The size box lists the sizes; one picked sizes the selection, the
+/// keys go back to the text, and undo puts the size back.
+#[test]
+fn sue_writers_size_box_sizes_the_text_and_hands_the_keys_back() {
+    let mut bars = Bars::new("writer-bars-size");
+    bars.type_text("small words");
+    bars.command("edit.select_all");
+    let before = bars.arena();
+    assert_eq!(bars.control("Size").role, Role::ComboBox);
+    bars.click("Size");
+    // 18 is in the first rows of the list (it scrolls past twelve).
+    let row = lowest(&bars, "18");
+    bars.click_at(row);
+    let (_, marks) = bars.document("small words");
+    assert!(
+        marks
+            .marks()
+            .iter()
+            .any(|mark| mark.kind == sue_model::mark_kind::SIZE),
+        "{marks:?}"
+    );
+    let sized = bars.arena();
+    // The text holds the keyboard again: what is typed replaces the
+    // selected words.
+    bars.type_text("big");
+    let (text, _) = bars.document("big");
+    assert!(!text.contains("small words"), "{text:?}");
+    bars.click("Undo");
+    assert_eq!(bars.arena(), sized);
+    bars.click("Undo");
     assert_eq!(bars.arena(), before);
 }

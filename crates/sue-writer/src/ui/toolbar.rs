@@ -387,7 +387,8 @@ impl SueWriter {
             self.editor
                 .set_char(cx, kind::FONT, family.map(Value::Text), &name);
             open = false;
-            font_box.request_focus();
+            // Writing goes on in the face just picked, as after Bold.
+            self.return_to_text();
         }
         ui.data_mut(|data| data.insert_temp(open_id, open));
         let size = chars.size.unwrap_or(para.size);
@@ -416,6 +417,15 @@ impl SueWriter {
                 Some(Value::Float(f64::from(*option))),
                 &tr!("size"),
             );
+            self.return_to_text();
+        }
+    }
+
+    /// Gives the keyboard back to the text after a pick in a box of the
+    /// toolbar, so the caret is where it was.
+    fn return_to_text(&mut self) {
+        if self.view == View::Document {
+            self.editor.focus();
         }
     }
 
