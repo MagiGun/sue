@@ -17,7 +17,7 @@ use crate::colorsets::Standard;
 use crate::studio::SuePaint;
 
 /// The Color Settings dialog's size before the screen clamps it.
-const SETTINGS_SIZE: egui::Vec2 = egui::Vec2::new(680.0, 450.0);
+const SETTINGS_SIZE: egui::Vec2 = egui::Vec2::new(680.0, 490.0);
 /// Edit Color Sets' size.
 const SETS_SIZE: egui::Vec2 = egui::Vec2::new(600.0, 420.0);
 /// The size of the dialogs that ask for a name.
