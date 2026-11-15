@@ -1024,6 +1024,9 @@ icons! {
     Play = "play" => animation::PLAY,
     /// A small square, well inside the square of maximize. Stop playing.
     Stop = "stop" => animation::STOP,
+    /// Two upright bars with round ends, side by side. Hold the playing
+    /// where it is, to go on from there.
+    Pause = "pause" => animation::PAUSE,
     /// Two solid triangles that point to the left, the one at the front
     /// touching the back of the other, at an upright bar they run into.
     /// Go to the first frame.
