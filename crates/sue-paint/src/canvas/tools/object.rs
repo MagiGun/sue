@@ -53,6 +53,20 @@ impl SuePaint {
             let geometry = crate::vector::geometry(&cx.world.arena, info.id);
             let lines = crate::vector::lines(&geometry);
             let reach = 8.0 / doc.view.zoom.max(0.01);
+            // The picked lines' box: its handles, and a drag inside it.
+            let zoom = doc.view.zoom;
+            if self.line_box_press(
+                info.id,
+                local,
+                zoom,
+                &lines,
+                &geometry,
+                offset,
+                modifiers.shift,
+                cx,
+            ) {
+                return;
+            }
             let hit = crate::correct::line_at(&lines, local, reach).map(|(line, _)| line);
             let mut picked = match self.picked_lines.take() {
                 Some((layer, picked)) if layer == info.id => picked,
@@ -63,6 +77,8 @@ impl SuePaint {
                     if !modifiers.shift {
                         picked.clear();
                     }
+                    // A drag from here draws a loop round lines to pick.
+                    self.line_loop_press(info.id, local, offset, modifiers.shift);
                 }
                 Some(line) if modifiers.shift => {
                     if let Some(at) = picked.iter().position(|index| *index == line) {

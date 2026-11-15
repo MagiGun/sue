@@ -35,6 +35,14 @@ impl SuePaint {
         size: [u32; 2],
         cx: &mut AppletContext<'_>,
     ) {
+        if sub.mode < 3 {
+            // A line figure on a vector layer is laid as a vector line.
+            let (min, max) = (from.min(to), from.max(to));
+            let points = Self::figure_points(sub.mode, from, to, min, max);
+            if self.figure_on_vector(&points, sub.mode != 2, sub, cx) {
+                return;
+            }
+        }
         let Ok(info) = self.paintable(&cx.world.arena) else {
             return;
         };
@@ -90,7 +98,15 @@ impl SuePaint {
             }
             return;
         }
-        let points: Vec<[f32; 2]> = match sub.mode {
+        let points = Self::figure_points(sub.mode, from, to, min, max);
+        self.stroke_line(points, sub, cx);
+    }
+
+    /// The points of the line figure `mode` (0 a straight line, 1 a
+    /// rectangle, else an ellipse) dragged from `from` to `to`, whose
+    /// corners are `min` and `max`.
+    fn figure_points(mode: u8, from: Pos2, to: Pos2, min: Pos2, max: Pos2) -> Vec<[f32; 2]> {
+        match mode {
             0 => vec![[from.x, from.y], [to.x, to.y]],
             1 => vec![
                 [min.x, min.y],
@@ -100,8 +116,7 @@ impl SuePaint {
                 [min.x, min.y],
             ],
             _ => ellipse_points(from, to),
-        };
-        self.stroke_line(points, sub, cx);
+        }
     }
 
     /// The Figure tool's lines: `points` (picture pixels) drawn with the

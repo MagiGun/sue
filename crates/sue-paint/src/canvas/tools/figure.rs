@@ -42,7 +42,8 @@ impl SuePaint {
                 to: p,
             });
         } else if !clicks_corners(tool, sub.mode) {
-            if let Err(error) = self.paintable(&cx.world.arena) {
+            // A line figure on a vector layer is laid as a vector line.
+            if let Err(error) = self.figure_target(&cx.world.arena, &sub) {
                 cx.fail(error);
                 return;
             }
@@ -93,6 +94,9 @@ impl SuePaint {
             } else {
                 points
             };
+            if self.figure_on_vector(&line, mode != crate::tools::CURVE, &sub, cx) {
+                return;
+            }
             self.stroke_line(line, &sub, cx);
         }
     }

@@ -68,8 +68,11 @@ impl SuePaint {
         let vector = target.is_none() && crate::vector::is_vector(&cx.world.arena, info.id);
         if vector && tip.eraser {
             // The eraser takes vector lines away, as its Vector
-            // setting says.
-            self.vector_erase_press(info.id, offset, tip.size, &sub, press, cx);
+            // setting says: on every picked vector layer when several
+            // are picked, else on this one.
+            if !self.vector_erase_layers_press(press.p, tip.size, &sub, cx) {
+                self.vector_erase_press(info.id, offset, tip.size, &sub, press, cx);
+            }
             return;
         }
         let (target, rgb, locked) = match target {

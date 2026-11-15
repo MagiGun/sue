@@ -585,52 +585,9 @@ impl SuePaint {
                 );
             }
         }
-        if tool == Tool::Operation
-            && let Some((layer, picked)) = &self.picked_lines
-            && doc.layer == Some(*layer)
-            && !picked.is_empty()
-        {
-            // The picked lines, outlined, in their box.
-            let offset = doc::layers(&cx.world.arena, doc.picture)
-                .into_iter()
-                .find(|info| info.id == *layer)
-                .map_or([0, 0], |info| info.style.offset);
-            let base = crate::vector::lines(&crate::vector::geometry(&cx.world.arena, *layer));
-            let lines = match &self.gesture {
-                Some(Gesture::MoveLines { base, by, .. }) => {
-                    crate::vector::moved(base, picked, *by)
-                }
-                _ => base,
-            };
-            let blue = Color32::from_rgb(70, 130, 255);
-            let (mut min, mut max) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
-            for line in picked.iter().filter_map(|index| lines.get(*index)) {
-                let points: Vec<Pos2> = line
-                    .samples
-                    .iter()
-                    .map(|sample| {
-                        for axis in 0..2 {
-                            min[axis] = min[axis].min(sample.at[axis]);
-                            max[axis] = max[axis].max(sample.at[axis]);
-                        }
-                        screen([
-                            sample.at[0] + offset[0] as f32,
-                            sample.at[1] + offset[1] as f32,
-                        ])
-                    })
-                    .collect();
-                painter.add(Shape::line(points, Stroke::new(1.5, blue)));
-            }
-            if min[0].is_finite() {
-                let corners = [
-                    [min[0], min[1]],
-                    [max[0], min[1]],
-                    [max[0], max[1]],
-                    [min[0], max[1]],
-                ]
-                .map(|[x, y]| screen([x + offset[0] as f32, y + offset[1] as f32]));
-                painter.add(Shape::closed_line(corners.to_vec(), Stroke::new(1.0, blue)));
-            }
+        if tool == Tool::Operation {
+            // The picked vector lines, their box and the loop being drawn.
+            self.lines_overlay(&painter, &screen, &cx.world.arena, theme);
         }
         if response.hovered()
             && (tool.paints()

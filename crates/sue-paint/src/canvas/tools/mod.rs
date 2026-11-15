@@ -149,6 +149,7 @@ impl SuePaint {
                 self.trace_drag(pos, viewport, size);
             }
             Some(Gesture::Move { .. }) => self.move_drag(pos, viewport, size, cx),
+            Some(Gesture::Lines(_)) => self.lines_drag(pos, viewport, size, cx),
         }
     }
 
@@ -256,6 +257,7 @@ impl SuePaint {
             | Gesture::Transform { .. }
             | Gesture::BrushSize { .. } => {}
             gesture @ Gesture::Blend { .. } => self.blend_release(gesture, cx),
+            Gesture::Lines(gesture) => self.lines_release(*gesture, cx),
         }
     }
 }
