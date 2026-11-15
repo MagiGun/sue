@@ -747,8 +747,7 @@ Once a canvas is open:
   across and down with the gutters you set, and **Combine Frames** makes
   the panels picked one. On a story's page a Rectangle frame snaps to
   the page's default border. A new balloon layer lines its balloons in
-  the color you draw with and fills them with the other one; a line
-  width of 0 draws no edge.
+  the color you draw with and fills them with the other one.
   The Figure tool's Saturated Line (drag the clear middle) and Speed Line
   (drag the direction) each draw on an effect line layer that stays
   editable: the Object tool drags its ends, and Tool Property sets how many

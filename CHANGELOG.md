@@ -28,7 +28,8 @@ follow [Semantic Versioning](https://semver.org/).
   Frames work on the panels the Object tool picks (Shift picks more). A
   Rectangle frame drawn on a story's page snaps to its default border.
 - Sue Paint: balloons are lined in the color you draw with and filled
-  with the other color; a line width of 0 draws them with no edge.
+  with the other color, and a balloon layer keeps the colors it was
+  made with.
 
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,

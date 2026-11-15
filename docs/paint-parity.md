@@ -320,7 +320,7 @@ The order of work is the plan at the end.
 | Divide Frame Border Equally | Layer > Ruler/Frame | done | On the panel the Object tool picked: panels across and down, the gutters between |
 | Combine Frames | Layer > Ruler/Frame | done | The panels picked (Shift adds) become one |
 | Frames snap to the default border | Frame Border tool | done | A Rectangle frame's corners snap onto a story page's default border |
-| Balloon line and fill color, no edge | Balloon tool | partial | The line takes the drawing color and the inside the other color; line width 0 draws no edge. Tool Property has no color, toning or tail rows yet |
+| Balloon line and fill color, no edge | Balloon tool | partial | The line takes the drawing color and the inside the other color. Drawing handles a line width of 0 (no edge), but Tool Property's Line width starts at 1, and it has no color, toning or tail rows yet |
 
 ## Story: multi-page works (EX)
 
