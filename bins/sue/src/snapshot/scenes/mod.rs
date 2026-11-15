@@ -86,6 +86,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     hub::lists(tour)?;
     shell::languages(tour)?;
     shell::layouts(tour)?;
+    // 19l and 19m. Notices, and the question when quitting.
+    shell::overlays(tour)?;
 
     // 20 to 23. The touch layouts: the Hub, Sue Paint and Sue Writer on a
     // phone and on a tablet.

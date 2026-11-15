@@ -1,70 +1,83 @@
-//! The status bar along the bottom, and the notice in it.
+//! The status bar along the bottom, and the notices (the toast stack)
+//! above it.
 
-use egui::{Align2, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use std::path::PathBuf;
+use std::time::Duration;
+
+use egui::{Align2, Rect, Ui, pos2, vec2};
 
 use super::{Shell, ShellIo, profile_label};
+use crate::ui::{Toast, ToastEvent};
 use crate::{ShellRequest, Theme};
 
 impl Shell {
-    /// Without the status bar, its message shows as a small notice at the
-    /// bottom of the window while it lasts; a saved file's shows the file
-    /// when clicked.
+    /// Puts a notice on the stack for `stay`, worn as an error, a saved
+    /// file (which offers to show the file, `reveal`) or plain news.
+    pub(super) fn push_notice(
+        &mut self,
+        text: &str,
+        error: bool,
+        stay: Duration,
+        reveal: Option<PathBuf>,
+    ) {
+        let toast = if error {
+            Toast::error(text)
+        } else if reveal.is_some() {
+            Toast::success(text).action(tr!("show-in-folder"))
+        } else {
+            Toast::info(text)
+        };
+        let id = self.toasts.push(toast.seconds(stay.as_secs_f32()));
+        // Each saved file's notice keeps its own file, whatever is said
+        // after it; the same words again are the same notice.
+        if let Some(path) = reveal {
+            self.revealed.retain(|(shown, _)| *shown != id);
+            self.revealed.push((id, path));
+        }
+    }
+
+    /// The notices, at the bottom of `room` (the page, so they never
+    /// cover the bar or the status bar). A saved file's shows the file
+    /// in its folder when its button is pressed.
     pub(super) fn notice_ui(
         &mut self,
         ctx: &egui::Context,
-        screen: Rect,
+        room: Rect,
         io: &mut ShellIo<'_>,
         theme: &Theme,
     ) {
-        let Some((text, error)) = self.message() else {
-            return;
-        };
-        let text = if error {
-            format!("! {text}")
-        } else {
-            text.to_owned()
-        };
-        let path = self.message_path.clone();
-        let font = theme.font(theme.small_size);
-        let galley = ctx.fonts_mut(|fonts| {
-            fonts.layout(text, font, theme.text, (screen.width() - 48.0).max(80.0))
-        });
-        let size = galley.size() + vec2(theme.padding * 2.0, theme.padding);
-        let rect = Rect::from_center_size(
-            pos2(screen.center().x, screen.bottom() - 16.0 - size.y / 2.0),
-            size,
-        );
-        egui::Area::new(Id::unique("sue-notice"))
-            .order(egui::Order::Foreground)
-            .fixed_pos(rect.min)
-            .interactable(path.is_some())
-            .show(ctx, |ui| {
-                let (shown, response) = ui.allocate_exact_size(size, Sense::click());
-                let painter = ui.painter();
-                painter.rect(
-                    shown,
-                    0.0,
-                    theme.panel,
-                    theme.hairline(),
-                    StrokeKind::Inside,
-                );
-                painter.galley(
-                    shown.min + vec2(theme.padding, theme.padding / 2.0),
-                    galley,
-                    theme.text,
-                );
-                if let Some(path) = &path {
-                    let response = response
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text(path.display().to_string());
-                    if response.clicked() {
-                        io.requests.push(ShellRequest::Command(format!(
-                            "reveal-file:{}",
-                            path.display()
-                        )));
-                    }
-                }
-            });
+        for event in self.toasts.show(ctx, room, theme) {
+            let (ToastEvent::Action(id) | ToastEvent::Dismissed(id) | ToastEvent::Expired(id)) =
+                event;
+            let Some(at) = self.revealed.iter().position(|(shown, _)| *shown == id) else {
+                continue;
+            };
+            let (_, path) = self.revealed.remove(at);
+            if matches!(event, ToastEvent::Action(_)) {
+                io.requests.push(ShellRequest::Command(format!(
+                    "reveal-file:{}",
+                    path.display()
+                )));
+            }
+        }
+        // Notices taken away without a word (all at once) leave no file.
+        let toasts = &self.toasts;
+        self.revealed.retain(|(id, _)| toasts.get(*id).is_some());
+    }
+
+    /// How many notices the stack holds, those leaving included.
+    #[must_use]
+    pub fn notices(&self) -> usize {
+        self.toasts.len()
+    }
+
+    /// Where the notice of the last saved file and its buttons were drawn
+    /// last, while it shows (scripted runs and tests).
+    #[must_use]
+    pub fn saved_notice_rects(&self) -> Option<crate::ui::ToastRects> {
+        self.revealed
+            .last()
+            .and_then(|(id, _)| self.toasts.rects(*id))
     }
 
     pub(super) fn status_ui(
@@ -122,49 +135,6 @@ impl Shell {
                 painter.vline(x, rect.shrink2(vec2(0.0, 5.0)).y_range(), theme.hairline());
                 x -= theme.padding;
             }
-        }
-        if let Some((text, error)) = self.message() {
-            let text = if error {
-                format!("! {text}")
-            } else {
-                text.to_owned()
-            };
-            let at = pos2(placed.right() + theme.padding * 3.0, rect.center().y);
-            let galley = painter.layout_no_wrap(text, font.clone(), theme.muted);
-            // The message keeps to the room the counters left.
-            let painter = painter.with_clip_rect(Rect::from_min_max(
-                pos2(at.x, rect.top()),
-                pos2(x.max(at.x), rect.bottom()),
-            ));
-            let area =
-                Rect::from_min_size(pos2(at.x, rect.top()), vec2(galley.size().x, rect.height()));
-            let mut color = if error { theme.text } else { theme.muted };
-            if let Some(path) = self.message_path.clone() {
-                // A saved file's message shows the file when clicked.
-                let response = root
-                    .interact(area, Id::unique("sue-status-message"), Sense::click())
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    .on_hover_text(path.display().to_string());
-                if response.hovered() {
-                    color = theme.text;
-                    painter.hline(
-                        area.x_range(),
-                        rect.center().y + galley.size().y / 2.0,
-                        Stroke::new(1.0, theme.muted),
-                    );
-                }
-                if response.clicked() {
-                    io.requests.push(ShellRequest::Command(format!(
-                        "reveal-file:{}",
-                        path.display()
-                    )));
-                }
-            }
-            painter.galley(
-                pos2(at.x, rect.center().y - galley.size().y / 2.0),
-                galley,
-                color,
-            );
         }
     }
 }

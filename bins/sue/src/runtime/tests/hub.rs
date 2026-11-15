@@ -186,7 +186,9 @@ fn the_hub_lists_recent_files_saved_projects_and_unsaved_work() {
     assert_eq!(first, [album.as_path(), photo.as_path()]);
     assert_eq!(runtime.work().projects().len(), 1);
     assert_eq!(runtime.work().projects()[0].page.as_ref(), Some(&paint));
-    // The Sue menu opens them too.
+    // The Sue menu opens them too, on the Hub (in a studio its own File
+    // menu does).
+    runtime.request(ShellRequest::Hub, &mut NoTextures, start);
     runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
     assert_eq!(
         runtime.shell.sue_menu_labels(&["File", "Open Recent"]),
@@ -358,12 +360,9 @@ fn a_pinned_studio_opens_at_launch_and_the_pin_undoes() {
         Some(sue_writer::ID)
     );
     assert!(again.shell.reveal() > 0.999, "no trip through the Hub");
-    // Its Sue menu takes the pin away; the next start is on the Hub.
-    again.request(ShellRequest::SueMenu, &mut NoTextures, start);
-    let unpinned = again.with_shell(&mut NoTextures, start, |shell, io, now| {
-        shell.sue_menu_pick(&["Open Sue Writer at Launch"], io, now)
-    });
-    assert!(unpinned);
+    // Taking the pin away (Settings or the palette): the next start is
+    // on the Hub.
+    again.request(ShellRequest::Pin(None), &mut NoTextures, start);
     frames(&mut again, &ctx, size, start, |_| Vec::new());
     let third = Runtime::new(Engine::boot(&host).unwrap()).unwrap();
     let mut third = third;

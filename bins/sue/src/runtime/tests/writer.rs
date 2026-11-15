@@ -269,7 +269,9 @@ fn sue_writers_caret_glides_after_typing_then_asks_for_no_frames() {
         output.drop_without_applying_deltas();
         delay
     };
-    // Let the studio come in and egui's own fades finish.
+    // The notice that says the novel was made has its time, then the
+    // studio comes in and egui's own fades (the notice's too) finish.
+    step(&mut runtime, Vec::new(), 5.0);
     for _ in 0..300 {
         step(&mut runtime, Vec::new(), 0.008);
     }
@@ -454,13 +456,12 @@ fn sue_writer_makes_a_novel_types_undoes_takes_a_picture_and_compiles() {
     );
 
     // Sue Writer's menus sit in the top bar after the Sue button; the
-    // Sue menu offers the pin.
+    // Sue menu is Sue's own (the pin lives in Settings and on the Hub).
     runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
     let first = runtime.shell.sue_menu_labels(&[]);
     assert!(
-        first
-            .iter()
-            .any(|label| label == "Open Sue Writer at Launch"),
+        first.iter().any(|label| label == "Settings")
+            && !first.iter().any(|label| label.ends_with("at Launch")),
         "{first:?}"
     );
     runtime.shell.dismiss_overlays();

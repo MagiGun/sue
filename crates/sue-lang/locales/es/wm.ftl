@@ -17,23 +17,17 @@ open-project-ellipsis = Abrir proyecto...
 save-project = Guardar proyecto
 save-project-as = Guardar proyecto como
 save-project-as-ellipsis = Guardar proyecto como...
-open-at-launch = Abrir { $name } al iniciar
-command-palette = Paleta de comandos ({ $command_palette })
 settings = Ajustes
 quit-sue = Salir de Sue
-language-menu = Idioma (Language)
 language-system = Sistema ({ $language })
 language-follow-sue = Seguir a Sue ({ $language })
 language-changed = Sue habla { $language }
 could-not-change-language = No se pudo cambiar el idioma: { $error }
-layout-menu = Disposición
 layout-automatic = Automática ({ $layout })
 layout-desktop = Escritorio
 layout-tablet = Tableta
 layout-phone = Teléfono
 layout-phone-shaped = Con forma de teléfono
-layout-changed = Sue usa la disposición { $layout }
-could-not-change-layout = No se pudo cambiar la disposición: { $error }
 
 ## El Hub y la chincheta
 
@@ -103,7 +97,6 @@ ago-days = { $count ->
     [one] hace un día
    *[other] hace { $count } días
 }
-click-to-show-it = {"."} Haz clic para mostrarlo
 discard = Descartar
 really-discard = Descartar de verdad
 recover = Recuperar
@@ -115,7 +108,6 @@ open-recent = Abrir recientes
 opened = Abierto
 projects-you-save-sue-menu-project = Aquí aparecen los proyectos que guardas (menú Sue, Proyecto, Guardar proyecto).
 recent = Recientes
-saved = { $name }{ $note } guardado{ $folder }{ $click }
 saved-2 = Guardado
 saved-in-folder = {" "}en { $folder }
 saved-projects = Proyectos guardados

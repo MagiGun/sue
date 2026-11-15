@@ -1,5 +1,5 @@
 //! Scenes of the shell: the Sue menu, the command palette, entering a
-//! studio, languages and the Layout menu.
+//! studio, languages and the Interface menu.
 
 use sue_rice::RiceValue;
 use sue_wm::ShellRequest;
@@ -52,13 +52,11 @@ pub(super) fn entering(tour: &mut Tour<'_>) -> Result<(), String> {
     Ok(())
 }
 
-/// 19d. Sue in Japanese, chosen from the Sue menu's Language submenu;
+/// 19d. Sue in Japanese (chosen in Settings) in the Sue menu;
 /// 19e. Sue Paint set apart in Spanish while Sue stays Japanese.
 pub(super) fn languages(tour: &mut Tour<'_>) -> Result<(), String> {
     to_the_hub(tour);
-    click_the_sue_button(tour);
-    let japanese = sue_lang::name("ja");
-    tour.sue_menu_pick(&["Language", &japanese]);
+    tour.request(ShellRequest::Language("ja".to_owned()));
     tour.settle();
     click_the_sue_button(tour);
     tour.shoot("19d-sue-menu-japanese")?;
@@ -83,24 +81,67 @@ fn layout(tour: &mut Tour<'_>, path: &[&str]) {
     tour.sue_menu_pick(path);
 }
 
-/// 19f to 19k. The Sue menu's Layout in a computer's window: the phone
+/// 19f to 19k. The Sue menu's Interface in a computer's window: the phone
 /// layout filling it and phone shaped, the tablet layout, and back.
 pub(super) fn layouts(tour: &mut Tour<'_>) -> Result<(), String> {
     to_the_hub(tour);
     click_the_sue_button(tour);
     tour.shoot("19f-sue-menu-layout")?;
     tour.runtime.shell.dismiss_overlays();
-    layout(tour, &["Layout", "Phone"]);
+    layout(tour, &["Interface", "Phone"]);
     tour.shoot("19g-desktop-as-phone-hub")?;
     open_paint(tour);
     tour.shoot("19h-desktop-as-phone-sue-paint")?;
-    layout(tour, &["Layout", "Phone Shaped"]);
+    layout(tour, &["Interface", "Phone Shaped"]);
     tour.shoot("19i-desktop-phone-shaped-sue-paint")?;
-    layout(tour, &["Layout", "Tablet"]);
+    layout(tour, &["Interface", "Tablet"]);
     tour.shoot("19j-desktop-as-tablet-sue-paint")?;
-    layout(tour, &["Layout", "Automatic (Desktop)"]);
+    layout(tour, &["Interface", "Automatic (Desktop)"]);
     to_the_hub(tour);
     tour.shoot("19k-desktop-again-hub")?;
     tour.set(sue_wm::PHONE_FRAME_KEY, RiceValue::Bool(false));
+    Ok(())
+}
+
+/// 19l. Notices on the toast stack over Sue Paint: a saved file, with
+/// its button that shows the file, and a command that is not there.
+/// 19m. Quitting with Sue Paint's work not saved: the question in the
+/// dialog host. Escape answers Cancel, so the tour goes on.
+pub(super) fn overlays(tour: &mut Tour<'_>) -> Result<(), String> {
+    open_paint(tour);
+    tour.settle();
+    let home = tour.runtime.engine.catalog.folders["home"].clone();
+    tour.request(ShellRequest::Saved {
+        path: home.join("Picture.png"),
+        note: "PNG".to_owned(),
+    });
+    tour.request(ShellRequest::AppletCommand {
+        applet: tour.paint.clone(),
+        command: "no.such.command".to_owned(),
+    });
+    tour.shoot("19l-notices")?;
+    let unsaved = tour
+        .runtime
+        .applets
+        .get(&tour.paint)
+        .map(|applet| applet.unsaved(&tour.runtime.engine.world.arena))
+        .unwrap_or_default();
+    if unsaved.is_empty() {
+        return Err("Sue Paint has no work to ask about".to_owned());
+    }
+    tour.runtime.shell.begin_quit();
+    tour.shoot("19m-quit-question")?;
+    tour.camera.input.push(Vec::new());
+    tour.camera.input.push(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    tour.settle();
+    if tour.runtime.shell.quitting() {
+        return Err("Escape did not answer the quit question".to_owned());
+    }
     Ok(())
 }

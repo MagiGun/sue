@@ -3,12 +3,16 @@
 use super::*;
 
 #[test]
-fn saved_files_say_where_they_went_and_show_on_a_click() {
+fn saved_files_say_where_they_went_in_a_notice_that_shows_the_file() {
     let (mut runtime, root) = runtime("saved");
     std::fs::create_dir_all(&root).unwrap();
     let path = root.join("out.jxl");
     std::fs::write(&path, b"jxl").unwrap();
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
     let start = Instant::now();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    assert_eq!(runtime.shell.notices(), 0, "nothing to say yet");
     runtime.request(
         ShellRequest::Saved {
             path: path.clone(),
@@ -20,15 +24,145 @@ fn saved_files_say_where_they_went_and_show_on_a_click() {
     let (text, error) = runtime.shell.message().unwrap();
     assert!(!error);
     assert!(text.contains("out.jxl") && text.contains(&root.display().to_string()));
-    assert_eq!(runtime.shell.message_path(), Some(path.as_path()));
-    // Headless, showing the file names it instead of opening Explorer.
-    runtime.request(
-        ShellRequest::Command(format!("reveal-file:{}", path.display())),
-        &mut NoTextures,
-        start,
+    assert!(
+        !text.contains("Click"),
+        "the notice's button says it: {text}"
     );
-    assert!(runtime.shell.message().unwrap().0.starts_with("File: "));
+    assert_eq!(runtime.shell.message_path(), Some(path.as_path()));
+
+    // It shows on the toast stack, over the page and so above the status
+    // bar, with a button that shows the file; news said after it leaves
+    // that button alone.
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    assert_eq!(runtime.shell.notices(), 1);
+    runtime.shell.notify("Nothing to undo", false);
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    assert_eq!(runtime.shell.notices(), 2);
+    let rects = runtime
+        .shell
+        .saved_notice_rects()
+        .expect("the notice shows");
+    let page = runtime.shell.page_rect();
+    assert!(page.contains_rect(rects.toast), "{rects:?} in {page:?}");
+    let button = rects.action.expect("Show in Folder");
+    // Headless, showing the file names it instead of opening Explorer.
+    frames(&mut runtime, &ctx, size, start, click_at(button.center()));
+    let shown = runtime.shell.message().unwrap().0;
+    assert!(
+        shown.starts_with("File: ") && shown.contains("out.jxl"),
+        "{shown}"
+    );
     assert_eq!(runtime.shell.message_path(), None);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn notices_stack_as_toasts_and_twins_do_not_pile_up() {
+    let (mut runtime, root) = runtime("notices");
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
+    let start = Instant::now();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    runtime.shell.notify("One", false);
+    runtime.shell.notify("Two", true);
+    runtime.shell.notify("Two", true);
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    assert_eq!(runtime.shell.notices(), 2, "the same words twice are one");
+    assert_eq!(runtime.shell.message(), Some(("Two", true)));
+    // Without the status bar (a phone) they show all the same.
+    runtime
+        .engine
+        .world
+        .rice
+        .set(
+            sue_wm::INTERFACE_KEY,
+            sue_rice::RiceValue::Text("phone".to_owned()),
+        )
+        .unwrap();
+    let phone = vec2(393.0, 851.0);
+    frames(&mut runtime, &ctx, phone, start, |_| Vec::new());
+    runtime.shell.notify("Three", false);
+    frames(&mut runtime, &ctx, phone, start, |_| Vec::new());
+    assert_eq!(runtime.shell.notices(), 3);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn quitting_asks_about_unsaved_work_in_the_dialog_host() {
+    let (mut runtime, root) = runtime("quit");
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
+    let start = Instant::now();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    // A new picture in Sue Paint, with a stroke on it: work not saved.
+    runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
+    assert!(
+        runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
+            shell.sue_menu_pick(&["New", "Picture", "Square Post"], io, now)
+        })
+    );
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    let middle = paint_middle(&runtime);
+    let drag = move |frame: usize| match frame {
+        0 => vec![egui::Event::PointerMoved(middle)],
+        1 => vec![egui::Event::PointerButton {
+            pos: middle,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        2..=6 => vec![egui::Event::PointerMoved(
+            middle + vec2(frame as f32 * 12.0, frame as f32 * 6.0),
+        )],
+        7 => vec![egui::Event::PointerButton {
+            pos: middle + vec2(72.0, 36.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        _ => Vec::new(),
+    };
+    frames(&mut runtime, &ctx, size, start, drag);
+    let paint = AppletId::new(sue_paint::ID).unwrap();
+    let unsaved = |runtime: &Runtime| {
+        runtime
+            .applets
+            .get(&paint)
+            .map(|applet| applet.unsaved(&runtime.engine.world.arena))
+            .unwrap_or_default()
+    };
+    assert_eq!(unsaved(&runtime).len(), 1, "the stroke left work to save");
+
+    // Quitting asks first (headless runs quit at once, so the question
+    // is started as a window's close button starts it).
+    let ask = |runtime: &mut Runtime| {
+        runtime.shell.begin_quit();
+        frames(runtime, &ctx, size, start, |_| Vec::new());
+        assert!(runtime.shell.quitting(), "Sue asks");
+    };
+    // Escape is Cancel: Sue stays open.
+    ask(&mut runtime);
+    frames(&mut runtime, &ctx, size, start, |frame| {
+        if frame == 1 {
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)]
+        } else {
+            Vec::new()
+        }
+    });
+    assert!(!runtime.shell.quitting(), "Cancel keeps Sue open");
+    assert!(!runtime.wants_exit());
+    assert_eq!(unsaved(&runtime).len(), 1);
+
+    // Do Not Save, one Tab from Save (which holds focus first), lets it
+    // go, and Sue quits.
+    ask(&mut runtime);
+    frames(&mut runtime, &ctx, size, start, |frame| match frame {
+        1 => vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+        3 => vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+        _ => Vec::new(),
+    });
+    assert!(!runtime.shell.quitting());
+    assert!(runtime.wants_exit(), "nothing more to ask about");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -147,6 +281,14 @@ fn studios_keep_the_keys_they_reserve() {
     frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, |_| {
         Vec::new()
     });
+    // So the Sue menu shows Tab beside Command Palette.
+    let palette_key = |runtime: &mut Runtime| {
+        runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
+        let key = runtime.shell.sue_menu_key(&["Command Palette"]);
+        runtime.shell.dismiss_overlays();
+        key.expect("Command Palette is in the Sue menu")
+    };
+    assert_eq!(palette_key(&mut runtime), "Tab");
     // In Sue Paint, Tab hides the palettes, as in Clip Studio Paint.
     runtime.request(
         ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
@@ -164,6 +306,9 @@ fn studios_keep_the_keys_they_reserve() {
         vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
     );
     assert!(!runtime.shell.palette_open(), "Tab stayed with Sue Paint");
+    // There the menu shows no key Sue Paint keeps for itself (Tab, and /
+    // for the Zoom tool).
+    assert_eq!(palette_key(&mut runtime), "");
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -188,7 +333,8 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
         "New",
         "File",
         "Project",
-        "Command Palette (Tab)",
+        "Interface",
+        "Command Palette",
         "Settings",
         "Quit Sue",
     ] {
@@ -197,9 +343,25 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
             "{wanted} in {first:?}"
         );
     }
+    // The language and the studio Sue opens at launch are Settings'.
+    for gone in ["Language", "Layout"] {
+        assert!(
+            !first.iter().any(|label| label == gone),
+            "{gone} in {first:?}"
+        );
+    }
     assert!(
         !first.iter().any(|label| label.ends_with("at Launch")),
-        "the Hub has nothing to pin"
+        "{first:?}"
+    );
+    // The palette's key stands in the key column, as Settings' does.
+    assert_eq!(
+        runtime.shell.sue_menu_key(&["Command Palette"]).as_deref(),
+        Some("Tab")
+    );
+    assert_eq!(
+        runtime.shell.sue_menu_key(&["Settings"]).as_deref(),
+        Some("Ctrl+,")
     );
     assert_eq!(
         runtime.shell.sue_menu_labels(&["Studios"]),
@@ -241,17 +403,35 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
         .map(|(_, entity)| entity.id())
         .unwrap();
 
-    // In Sue Paint: Send To offers the others, and the pin.
+    // In Sue Paint: Send To offers the others. Opening and saving are
+    // Sue Paint's own File menu's, and nothing pins.
     runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
     let send = runtime.shell.sue_menu_labels(&["Send To"]);
     assert_eq!(send, ["Sue Writer"], "the other studio, and only it");
+    let inside = runtime.shell.sue_menu_labels(&[]);
+    for gone in ["File", "Project", "Language"] {
+        assert!(
+            !inside.iter().any(|label| label == gone),
+            "{gone} in {inside:?}"
+        );
+    }
     assert!(
-        runtime
-            .shell
-            .sue_menu_labels(&[])
-            .iter()
-            .any(|label| label == "Open Sue Paint at Launch")
+        !inside.iter().any(|label| label.ends_with("at Launch")),
+        "{inside:?}"
     );
+    for kept in [
+        "Hub",
+        "Studios",
+        "New",
+        "Interface",
+        "Command Palette",
+        "Settings",
+    ] {
+        assert!(
+            inside.iter().any(|label| label == kept),
+            "{kept} in {inside:?}"
+        );
+    }
 
     // The picture goes to Sue Writer by its id: no file is written.
     let files_before =
@@ -296,7 +476,7 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
 }
 
 #[test]
-fn the_sue_menus_layout_switches_the_hub_and_sue_paint_and_stays() {
+fn the_sue_menus_interface_switches_the_hub_and_sue_paint_and_stays() {
     let (host, root) = temp_host("layout");
     let ctx = egui::Context::default();
     let size = vec2(1440.0, 900.0);
@@ -308,7 +488,7 @@ fn the_sue_menus_layout_switches_the_hub_and_sue_paint_and_stays() {
     let pick = |runtime: &mut Runtime, layout: &str| {
         runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
         let picked = runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
-            shell.sue_menu_pick(&["Layout", layout], io, now)
+            shell.sue_menu_pick(&["Interface", layout], io, now)
         });
         assert!(picked, "{layout}");
         frames(runtime, &ctx, size, start, |_| Vec::new());
@@ -390,32 +570,27 @@ fn settings_fits_each_screen_and_how_it_is_held() {
 }
 
 #[test]
-fn the_sue_menu_changes_the_language_and_a_tool_can_keep_its_own() {
+fn the_sue_menu_speaks_sues_language_and_a_tool_can_keep_its_own() {
     let (mut runtime, root) = runtime("language");
     let ctx = egui::Context::default();
     let size = vec2(1440.0, 900.0);
     let start = Instant::now();
     frames(&mut runtime, &ctx, size, start, |_| Vec::new());
 
-    // Headless runs start in English; the Sue menu offers every language.
-    runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
-        shell.open_sue_menu(io)
-    });
-    let languages = runtime.shell.sue_menu_labels(&["Language"]);
-    let japanese = sue_lang::name("ja");
-    assert!(languages.contains(&japanese), "{languages:?}");
-    assert!(languages.contains(&sue_lang::name("es")), "{languages:?}");
-
-    // Picking Japanese is an undoable rice edit, and the menu speaks it.
-    let picked = runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
-        shell.sue_menu_pick(&["Language", &japanese], io, now)
-    });
-    assert!(picked);
+    // Headless runs start in English. The language is chosen in
+    // Settings, as an undoable rice edit, and the Sue menu speaks it.
+    let depth = runtime.engine.history.depth();
+    runtime.request(
+        ShellRequest::Language("ja".to_owned()),
+        &mut NoTextures,
+        start,
+    );
     frames(&mut runtime, &ctx, size, start, |_| Vec::new());
     assert_eq!(
         runtime.engine.world.rice.get_str(sue_wm::LANGUAGE_KEY),
         Some("ja")
     );
+    assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
     runtime.with_shell(&mut NoTextures, start, |shell, io, _| {
         shell.open_sue_menu(io)
     });

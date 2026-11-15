@@ -1005,19 +1005,24 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     )?;
 
     // The Sue button opens the Sue menu over the studio: the way back to
-    // the Hub, every studio and tool, files, projects and Settings.
+    // the Hub, every studio and tool, the interface and Settings. Files
+    // and projects are the studio's own File menu's.
     click_at(runtime, &ctx, &mut clock, sue.center());
     ensure(
         runtime.shell.sue_menu_open(),
         "the Sue button did not open the Sue menu",
     )?;
     let labels = runtime.shell.sue_menu_labels(&[]);
-    for wanted in [
-        "Hub", "Studios", "New", "File", "Project", "Settings", "Quit Sue",
-    ] {
+    for wanted in ["Hub", "Studios", "New", "Interface", "Settings", "Quit Sue"] {
         ensure(
             labels.iter().any(|label| label == wanted),
             &format!("the Sue menu has no {wanted}"),
+        )?;
+    }
+    for gone in ["File", "Project"] {
+        ensure(
+            !labels.iter().any(|label| label == gone),
+            &format!("the Sue menu over a studio still has {gone}"),
         )?;
     }
     ensure(
@@ -1086,7 +1091,8 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     ensure(runtime.shell.hub_open(), "the Hub did not come back")?;
 
     // Then the shell sleeps, and egui asks for no frame either (its own hover
-    // fades finish first, a second or so of headless time). The cards'
+    // fades finish first, a second or so of headless time, and the notice
+    // of the saved file has its ten seconds and fades out). The cards'
     // pictures are made on background threads in real time, so they are
     // waited for first (on a busy machine they take a while).
     let begun = std::time::Instant::now();
@@ -1098,8 +1104,8 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         std::thread::sleep(Duration::from_millis(5));
     }
     run_frames(runtime, &ctx, &mut clock, Vec::new());
-    clock += Duration::from_secs(2);
-    for _ in 0..2 {
+    clock += Duration::from_secs(12);
+    for _ in 0..40 {
         let now = clock;
         ctx.run_ui(raw_input(now, Vec::new()), |ui| {
             runtime.ui(ui, &mut NoTextures, now);

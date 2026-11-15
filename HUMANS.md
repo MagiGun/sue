@@ -43,9 +43,12 @@ Nothing is exported, imported or converted between them.
 
 Sue's window has a **bar along the top** and the **page** under it. A thin
 **status bar** along the bottom is off at first: Settings, Appearance &
-Rice, **Status bar** turns it on. Without it, what the status bar would say
-(a file saved, something that went wrong) shows for a moment as a small
-notice at the bottom of the window. Out of the box Sue is black,
+Rice, **Status bar** turns it on. What Sue has to tell you (a file saved,
+something that went wrong) shows as a **notice** at the bottom of the page,
+above the status bar: each wears a sign of what it is (news, done, mind
+this, failed), stays a few seconds (longer while the pointer is over it)
+and has a button that closes it; the notice of a saved file has **Show in
+Folder**. New notices stack under the older ones. Out of the box Sue is black,
 white and grays only, so your own pictures and words are the only color you
 see (you can color it yourself in Settings).
 
@@ -142,15 +145,24 @@ The Sue button opens the **Sue menu**, for Sue as a whole:
 - **Send To**: the thing you are working on, into another studio or tool,
   with no exporting and importing. A picture in Sue Paint goes into the
   text in Sue Writer. Studios that come later appear here by themselves;
-- **Language**: the language Sue speaks;
-- **Layout**: Automatic (what your device is), Desktop, Tablet or Phone,
+- **Interface**: Automatic (what your device is), Desktop, Tablet or Phone,
   for the whole of Sue at once. On a computer, Tablet and Phone show the
   same buttons, bars and sheets as on a tablet or phone, in your window;
   **Phone Shaped** keeps the phone layout to a phone-wide column in the
   middle. Phones and tablets switch between their two layouts. It works in
   the browser too, and Sue remembers it;
-- **Open ... at Launch**: pin what is open, as the Hub's pin does;
-- the command palette, **Check for Updates**, Settings and Quit Sue.
+- **Command Palette** (its key stands beside it, as Settings' and Quit
+  Sue's do; where the studio you are in keeps that key for itself, none
+  is shown), **Check for Updates**, Settings and Quit Sue.
+
+Inside a studio, File and Project are not in the Sue menu: the studio's own
+File menu opens and saves. The language Sue speaks and what Sue opens at
+launch are chosen in Settings (General, and Language); the Hub's pin and the
+command palette pin too.
+
+When you quit with work not saved, Sue asks about each piece in a dialog:
+**Save** (or `Enter`), **Do Not Save**, or **Cancel** (or `Escape`), which
+keeps Sue open.
 
 The Sue menu and the menus along the top work from the keyboard too: Up and
 Down walk the items, Home and End jump to the first and the last, Right
@@ -266,15 +278,16 @@ history, History forgets the steps of the canvas in front.
 
 ### Settings
 
-The Sue menu's **Settings** (or `Ctrl+,`) opens Settings as a floating
-window. A list of categories runs down the left (General, Language,
-Appearance, Display and Performance, Sound, Files, a page for each studio,
-Keyboard Shortcuts, Extensions and Advanced), and the right side shows only
-that category. Rows most people never need wait under closed titles (the
-colors, sizes and spacing, animation details); a click opens one. Type in
-"Filter settings..." to search all of them; Clip Studio Paint's names for
-an option find Sue Paint's setting too ("Brush-type cursor" finds Brush
-cursor). A setting you changed shows **Reset**
+The Sue menu's **Settings** (or `Ctrl+,`) opens Settings as a dialog over
+the page (on a phone it fills the screen); `Escape`, its close button or a
+click beside it closes it. A list of categories runs down the left
+(General, Language, Appearance, Display and Performance, Sound, Files, a
+page for each studio, Keyboard Shortcuts, Extensions and Advanced), and
+the right side shows only that category. Rows most people never need wait
+under closed titles (the colors, sizes and spacing, animation details); a
+click opens one. Type in "Filter settings..." to search all of them; Clip
+Studio Paint's names for an option find Sue Paint's setting too
+("Brush-type cursor" finds Brush cursor). A setting you changed shows **Reset**
 beside it to go back to how Sue comes; **Reset This Page** and **Reset All
 Settings** (click it twice) do the same for a page or for everything, and
 each reset undoes with `Ctrl+Z`.

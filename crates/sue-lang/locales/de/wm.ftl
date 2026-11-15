@@ -16,24 +16,18 @@ open-project-ellipsis = Projekt öffnen...
 save-project = Projekt speichern
 save-project-as = Projekt speichern unter
 save-project-as-ellipsis = Projekt speichern unter...
-open-at-launch = { $name } beim Start öffnen
-command-palette = Befehlspalette ({ $command_palette })
 check-for-updates = Nach Updates suchen
 settings = Einstellungen
 quit-sue = Sue beenden
-language-menu = Sprache
 language-system = System ({ $language })
 language-follow-sue = Sue folgen ({ $language })
 language-changed = Sue spricht { $language }
 could-not-change-language = Sprache konnte nicht geändert werden: { $error }
-layout-menu = Layout
 layout-automatic = Automatisch ({ $layout })
 layout-desktop = Desktop
 layout-tablet = Tablet
 layout-phone = Telefon
 layout-phone-shaped = Telefonformat
-layout-changed = Sue verwendet das Layout { $layout }
-could-not-change-layout = Layout konnte nicht geändert werden: { $error }
 
 ## Hub
 sue-hub-every-studio-tool-files = Sue: Hub, alle Studios und Werkzeuge, Dateien, Projekte und Einstellungen
@@ -118,9 +112,7 @@ transfer-import = Importieren
 transfer-export = Exportieren
 transfer-copy = Kopieren
  transfer-copy = Kopieren
-click-to-show-it = {"."} Zum Anzeigen klicken
 in-folder = { $lead } in { $folder }
-saved = { $name } gespeichert{ $note }{ $folder }{ $click }
 saved-in-folder = {" "}in { $folder }
 
 ## files/: the files browser (copied from paint.ftl, which keeps its own until Sue Paint's start page goes)

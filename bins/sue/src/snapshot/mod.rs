@@ -174,12 +174,19 @@ impl Camera2 {
         self.input.push(vec![button(false)]);
     }
 
-    /// Runs frames until the shell sleeps.
+    /// Runs frames until the shell sleeps and egui asks for no frame at
+    /// once (what fades in by egui's clock, a dialog or a notice, has
+    /// come in).
     fn settle(&mut self, runtime: &mut Runtime) {
         for count in 0.. {
             let output = self.frame(runtime);
+            let egui_moving = output
+                .viewport_output
+                .values()
+                .any(|viewport| viewport.repaint_delay.is_zero());
             self.painter.apply_textures(output.textures_delta);
-            let asleep = !matches!(runtime.pacing(self.now), FramePacing::Animate { .. });
+            let asleep =
+                !egui_moving && !matches!(runtime.pacing(self.now), FramePacing::Animate { .. });
             if (asleep && count > 3 && self.input.is_empty()) || count > 600 {
                 break;
             }

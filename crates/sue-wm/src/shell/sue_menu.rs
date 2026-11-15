@@ -4,7 +4,7 @@ use sue_platform::FormFactor;
 use sue_platform::time::Instant;
 use sue_rice::{RiceValue, SetRiceValue};
 
-use super::{INTERFACE_KEY, PHONE_FRAME_KEY, Shell, ShellIo, layout_name, pinned, templates};
+use super::{INTERFACE_KEY, PHONE_FRAME_KEY, Shell, ShellIo, layout_name, templates};
 use crate::{AppletRole, FilePick, MenuItem, RiceEdit, ShellRequest, WmConfig, sue_menu};
 
 /// An item of the Sue menu that runs `request`.
@@ -77,20 +77,31 @@ impl Shell {
                     self.config = config;
                 }
                 let layout = layout_name(self.form_factor());
-                self.notify(tr!("layout-changed", layout = layout), false);
+                self.notify(tr!("interface-changed", interface = layout), false);
             }
-            Err(error) => self.notify(tr!("could-not-change-layout", error = error), true),
+            Err(error) => self.notify(tr!("could-not-change-interface", error = error), true),
         }
     }
 
     /// Builds the Sue menu for what is open: the Hub, the studios and
-    /// tools, new files, files, projects, Send To for what the page works
-    /// on, every submenu applets add to, the pin, the palette, Settings.
+    /// tools, new files, files and projects (on the Hub and in a tool: a
+    /// studio has a File menu of its own), Send To for what the page works
+    /// on, every submenu applets add to, the interface, the palette,
+    /// Settings. The language and the studio Sue opens at launch are
+    /// chosen in Settings.
     pub(super) fn build_sue_menu(&mut self, io: &ShellIo<'_>) {
         let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
         let mut runs = Vec::new();
         let run = &mut runs;
         let keymap = &self.config.keymap;
+        // A key shows where it works: not where the open studio keeps it.
+        let reserved = self.reserved_keys(io);
+        let key = |binds: &[&sue_rice::Keybinds]| Self::shown_key(&reserved, binds);
+        let in_studio = self
+            .page
+            .as_ref()
+            .and_then(|page| io.applets.manifest(page))
+            .is_some_and(|manifest| manifest.role == AppletRole::Studio);
         let mut items = vec![sue_item(
             run,
             tr!("hub"),
@@ -157,7 +168,7 @@ impl Shell {
                         ShellRequest::Command("file.open".to_owned()),
                         false,
                     )
-                    .key(keymap.open_file.to_string()),
+                    .key(key(&[&keymap.open_file])),
                 ];
                 let recent: Vec<MenuItem> = io
                     .work
@@ -198,7 +209,7 @@ impl Shell {
                         ShellRequest::Command("file.save".to_owned()),
                         false,
                     )
-                    .key(keymap.save.to_string()),
+                    .key(key(&[&keymap.save])),
                     sue_item(
                         run,
                         tr!("save-project-as-ellipsis"),
@@ -249,29 +260,17 @@ impl Shell {
                 add(&mut named, &action.menu, item);
             }
         }
+        // Inside a studio its own File menu opens and saves.
+        if in_studio {
+            named.retain(|(name, _)| name != sue_menu::FILE && name != sue_menu::PROJECT);
+        }
         items.extend(
             named
                 .into_iter()
                 .filter(|(_, list)| !list.is_empty())
                 .map(|(name, list)| MenuItem::sub(submenu_title(&name), list)),
         );
-        // Language: Sue's own, which every studio and tool follows unless
-        // set apart in its own settings.
-        let setting = io
-            .world
-            .rice
-            .get_str(crate::LANGUAGE_KEY)
-            .map_or(sue_lang::SYSTEM, str::trim)
-            .to_owned();
-        let languages = crate::sue_language_choices()
-            .into_iter()
-            .map(|choice| {
-                let on = choice.value == setting;
-                sue_item(run, choice.label, ShellRequest::Language(choice.value), on)
-            })
-            .collect();
-        items.push(MenuItem::sub(tr!("language-menu"), languages));
-        // Layout: the device's own, or the desktop, tablet or phone
+        // Interface: the device's own, or the desktop, tablet or phone
         // layout for the whole app. Phones and tablets switch only between
         // their two.
         let interface = self.config.interface.as_str();
@@ -310,23 +309,17 @@ impl Shell {
                 self.config.phone_frame,
             ));
         }
-        items.push(MenuItem::sub(tr!("layout-menu"), layouts));
+        items.push(MenuItem::sub(tr!("interface-menu"), layouts));
         items.push(MenuItem::Separator);
-        if let Some(page) = self.page.clone() {
-            let pinned = pinned(&io.world.rice, io.applets).as_ref() == Some(&page);
-            let name = io
-                .applets
-                .manifest(&page)
-                .map_or_else(String::new, |manifest| manifest.title());
-            items.push(sue_item(
+        items.push(
+            sue_item(
                 run,
-                tr!("open-at-launch", name = name),
-                ShellRequest::Pin((!pinned).then_some(page)),
-                pinned,
-            ));
-        }
-        let palette = tr!("command-palette", command_palette = keymap.command_palette);
-        items.push(sue_item(run, palette, ShellRequest::Palette, false));
+                tr!("command-palette-item"),
+                ShellRequest::Palette,
+                false,
+            )
+            .key(key(&[&keymap.command_palette, &keymap.command_palette_alt])),
+        );
         items.push(sue_item(
             run,
             tr!("check-for-updates"),
@@ -340,7 +333,7 @@ impl Shell {
                 ShellRequest::OpenSettings(None),
                 false,
             )
-            .key(keymap.open_settings.to_string()),
+            .key(key(&[&keymap.open_settings])),
         );
         items.push(
             sue_item(
@@ -349,7 +342,7 @@ impl Shell {
                 ShellRequest::Command("app.quit".to_owned()),
                 false,
             )
-            .key(keymap.quit.to_string()),
+            .key(key(&[&keymap.quit])),
         );
         self.sue_items = items;
         self.sue_runs = runs;
@@ -387,6 +380,27 @@ impl Shell {
                 MenuItem::Separator => None,
             })
             .collect()
+    }
+
+    /// The key the Sue menu shows beside its item at `path` (its submenus,
+    /// then its label): empty for none, `None` when there is no such item
+    /// (scripted runs).
+    #[must_use]
+    pub fn sue_menu_key(&self, path: &[&str]) -> Option<String> {
+        let (last, submenus) = path.split_last()?;
+        let mut items = &self.sue_items;
+        for step in submenus {
+            items = items.iter().find_map(|item| match item {
+                MenuItem::Sub { label, items } if label == step => Some(items),
+                _ => None,
+            })?;
+        }
+        items.iter().find_map(|item| match item {
+            MenuItem::Action {
+                label, shortcut, ..
+            } if label == last => Some(shortcut.clone()),
+            _ => None,
+        })
     }
 
     /// Picks the Sue menu's item at `path` (its submenus, then its label),

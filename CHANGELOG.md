@@ -184,6 +184,17 @@ follow [Semantic Versioning](https://semver.org/).
   The Help menu now also links to the basic tips, this guide online,
   frequently asked questions, contact and feedback.
 - The start pages draw Sue's icons and have rounded corners.
+- The Sue menu's Layout is now called **Interface**. Inside a studio the
+  Sue menu leaves out File and Project (the studio's own File menu opens
+  and saves), and Language and "Open ... at Launch" left it for Settings.
+  Command Palette shows its key in the key column, and no key where the
+  studio you are in keeps it.
+- What Sue tells you (a file saved, something that failed) shows as
+  notices that stack at the bottom of the page, with a button that closes
+  each; a saved file's has **Show in Folder**.
+- The question about unsaved work when quitting, and Settings on a
+  computer or a tablet, use Sue's own dialog: the same title, close
+  button, buttons, `Enter` and `Escape` as every other dialog.
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an
   empty or single color tile costs a byte, a tile found twice (a duplicated
