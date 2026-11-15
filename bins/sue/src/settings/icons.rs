@@ -28,9 +28,10 @@ const PICK_OVERRIDE: &str = "icon-override";
 /// The Icons rows between frames.
 #[derive(Default)]
 pub(super) struct IconsUi {
-    /// The installed packs, read; `None` until first shown or after a
-    /// change.
-    packs: Option<Vec<Pack>>,
+    /// The installed packs, the one chosen and the icons replaced one by
+    /// one, as read from the icon home; `None` until first shown or after
+    /// a change, so the page reads the disk only then, not each frame.
+    packs: Option<Installed>,
     /// The pack whose sheet is open (its id; empty for Sue's own), and its
     /// set, kept while the sheet is open rather than made each frame.
     sheet: Option<(String, IconSet)>,
@@ -52,10 +53,28 @@ pub(super) struct IconsUi {
 impl fmt::Debug for IconsUi {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IconsUi")
-            .field("packs", &self.packs.as_ref().map(Vec::len))
+            .field("packs", &self.packs.as_ref().map(|found| found.packs.len()))
             .field("sheet", &self.sheet.as_ref().map(|(id, _)| id))
             .field("message", &self.message)
             .finish_non_exhaustive()
+    }
+}
+
+/// What the icon home holds, read once per change.
+#[derive(Clone)]
+struct Installed {
+    packs: Vec<Pack>,
+    chosen: Option<String>,
+    overrides: Vec<(Icon, IconStyle)>,
+}
+
+impl Installed {
+    fn read(home: &IconHome) -> Self {
+        Self {
+            packs: home.packs(),
+            chosen: home.chosen(),
+            overrides: home.overrides(),
+        }
     }
 }
 
@@ -131,13 +150,19 @@ fn pick(
 }
 
 /// A small sheet of `set`'s icons, Sue's own drawn where the pack has none.
-fn sheet(ui: &mut Ui, set: &IconSet, theme: &Theme) {
+/// Gives the icon clicked: the one to replace on its own.
+fn sheet(ui: &mut Ui, set: &IconSet, theme: &Theme) -> Option<Icon> {
+    let mut clicked = None;
     let side = theme.ui_size * 1.6;
     let columns = ((ui.available_width() / (side + 4.0)).floor() as usize).max(1);
     for row in Icon::ALL.chunks(columns) {
         ui.horizontal(|ui| {
             for icon in row {
-                let (rect, response) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
+                let (rect, response) = ui.allocate_exact_size(vec2(side, side), Sense::click());
+                if response.hovered() {
+                    let radius = theme.radius(sue_wm::ui::tokens::Radius::Sm);
+                    ui.painter().rect_filled(rect, radius, theme.hover);
+                }
                 let drawn = set.drawing(*icon, IconStyle::Line).is_some();
                 let tint = if drawn || set.is_empty() {
                     theme.text
@@ -152,10 +177,13 @@ fn sheet(ui: &mut Ui, set: &IconSet, theme: &Theme) {
                     IconStyle::Line,
                     tint,
                 );
-                response.on_hover_text(icon.name());
+                if response.on_hover_text(icon.name()).clicked() {
+                    clicked = Some(*icon);
+                }
             }
         });
     }
+    clicked
 }
 
 impl Settings {
@@ -169,8 +197,14 @@ impl Settings {
         if state.stale {
             state.show_again(ui, &home);
         }
-        let packs = state.packs.get_or_insert_with(|| home.packs()).clone();
-        let chosen = home.chosen();
+        let Installed {
+            packs,
+            chosen,
+            overrides,
+        } = state
+            .packs
+            .get_or_insert_with(|| Installed::read(&home))
+            .clone();
         ui.add(egui::Label::new(RichText::new(tr!("icons-note")).color(theme.muted)).wrap());
         // Which set Sue draws with: its own, or a pack.
         let mut choose: Option<Option<String>> = None;
@@ -189,7 +223,10 @@ impl Settings {
         });
         if let Some(choice) = choose {
             match home.choose(choice.as_deref()) {
-                Ok(()) => state.show_again(ui, &home),
+                Ok(()) => {
+                    state.packs = None;
+                    state.show_again(ui, &home);
+                }
                 Err(error) => state.message = Some(tr!("icons-failed", error = error.message())),
             }
         }
@@ -208,6 +245,7 @@ impl Settings {
         // Each pack: what it says about itself, and what to do with it.
         let mut remove = None;
         let mut open_sheet = None;
+        let mut picked = None;
         let sue_sheet = state.sheet.as_ref().is_some_and(|(id, _)| id.is_empty());
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(tr!("icons-sues-own")).color(theme.text));
@@ -273,11 +311,17 @@ impl Settings {
                 }
             });
             if open && let Some((_, set)) = &state.sheet {
-                sheet(ui, set, &theme);
+                picked = sheet(ui, set, &theme).or(picked);
             }
         }
         if sue_sheet && let Some((_, set)) = &state.sheet {
-            sheet(ui, set, &theme);
+            picked = sheet(ui, set, &theme).or(picked);
+        }
+        // A click on an icon of a sheet makes it the one to replace.
+        if let Some(icon) = picked
+            && let Some(index) = Icon::ALL.iter().position(|known| *known == icon)
+        {
+            state.replace = index;
         }
         if let Some(id) = open_sheet {
             let open = state.sheet.as_ref().is_some_and(|(open, _)| *open == id);
@@ -382,7 +426,7 @@ impl Settings {
             }
         });
         let mut give_back = None;
-        for (icon, style) in home.overrides() {
+        for (icon, style) in overrides {
             ui.horizontal_wrapped(|ui| {
                 let side = theme.ui_size * 1.4;
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
@@ -406,6 +450,7 @@ impl Settings {
             if let Err(error) = home.clear_override(icon, style) {
                 state.message = Some(tr!("icons-failed", error = error.message()));
             }
+            state.packs = None;
             state.show_again(ui, &home);
         }
     }
