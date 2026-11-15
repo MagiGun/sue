@@ -505,6 +505,8 @@ impl SueApplet for SuePaint {
             "open" => self.open_picked(cx, path, false),
             // A file opened anywhere in Sue that Sue Paint takes itself
             // (see `opens_file`).
+            // A picture dropped on the canvas becomes its layer.
+            "import" if self.take_canvas_drop(path) => self.open_picked(cx, path, true),
             "import" => self.take_file(cx, path),
             "layer" => self.open_picked(cx, path, true),
             "import-layers" => self.open_picked(cx, path, true),
@@ -777,5 +779,15 @@ impl SueApplet for SuePaint {
             }
             _ => false,
         }
+    }
+
+    /// A canvas in a window of its own (see `canvas/window.rs`).
+    fn view_ui(&mut self, view: &str, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.canvas_window_ui(view, ui, cx);
+    }
+
+    /// The window of a canvas closed: the canvas goes back in the tabs.
+    fn view_closed(&mut self, view: &str, cx: &mut AppletContext<'_>) {
+        self.canvas_window_closed(view, cx);
     }
 }

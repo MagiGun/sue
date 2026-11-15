@@ -5,17 +5,23 @@
 //! Pointer input is read as egui's raw event stream, in order, so a fast
 //! stroke keeps every sample between frames and a pen's pressure arrives
 //! with it (from touch events that carry force).
+//!
+//! The chrome around the view (the tab strip, the status strip, the
+//! scroll bars, canvases in windows of their own and pictures dropped on
+//! the canvas) is drawn by `tabs.rs`, `status.rs`, `view.rs` and
+//! `window.rs`; what they keep between frames is [`Chrome`].
 
-use egui::epaint::Vertex;
-use egui::{Color32, Id, Key, Mesh, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use egui::{Id, Key, Rect, Sense, Ui, pos2};
 use sue_model::picture;
+use sue_wm::ui::Density;
 use sue_wm::{AppletContext, Theme};
 
-use crate::icons::Icon;
-use crate::panels::{child, icon_button};
+use crate::panels::child;
 use crate::studio::SuePaint;
 use crate::tools::Tool;
 use view::{SCROLLBAR, scrollbar};
+
+pub(crate) use window::Chrome;
 
 pub(crate) mod engine;
 mod fill;
@@ -24,8 +30,20 @@ mod overlays;
 mod pick;
 mod shape;
 mod status;
+mod tabs;
 mod tools;
 mod view;
+mod window;
+
+/// What surrounds the view in the canvas column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Column {
+    /// Sue Paint's own column: the tab strip over the view.
+    Main,
+    /// A canvas in a window of its own: no tabs, the window's title names
+    /// it.
+    Window,
+}
 
 impl SuePaint {
     /// The canvas column: tabs, view and status strip.
@@ -36,31 +54,75 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
+        self.keep_windows(cx);
         // While the studio comes in or goes out, the tabs and the status
         // strip slide off with the panels and the view takes their room.
         // Simple Mode shows the canvas bare: no tabs, no status strip.
-        let chrome = if self.bare { 0.0 } else { 26.0 };
+        let chrome = if self.bare { 0.0 } else { chrome_height(ui) };
         let slide = self.hide * chrome;
-        let tabs = Rect::from_min_size(rect.min - vec2(0.0, slide), vec2(rect.width(), chrome));
+        let tabs = Rect::from_min_max(
+            pos2(rect.left(), rect.top() - slide),
+            pos2(rect.right(), rect.top() - slide + chrome),
+        );
+        self.take_drops(ui, tabs, cx);
         if !self.bare {
             self.tabs(ui, tabs, cx, theme);
         }
-        let status = Rect::from_min_max(
-            pos2(rect.left(), rect.bottom() - chrome + slide),
-            pos2(rect.right(), rect.bottom() + slide),
-        );
+        let below = Rect::from_min_max(pos2(rect.left(), tabs.bottom()), rect.max);
+        match self.column_doc() {
+            Some(index) if index != self.active => {
+                // The current canvas is in a window of its own: the column
+                // shows the one it showed last, which a press makes
+                // current again.
+                self.column_for(index, ui, below, slide, cx, theme);
+            }
+            Some(_) => self.canvas_column(ui, below, slide, Column::Main, cx, theme),
+            None => {
+                let status = status_rect(below, chrome, slide);
+                let viewport = Rect::from_min_max(below.min, pos2(below.right(), status.top()));
+                ui.painter()
+                    .rect_filled(viewport, egui::CornerRadius::ZERO, theme.void);
+                if self.docs.is_empty() {
+                    self.viewport = viewport;
+                    self.empty_canvas(ui, viewport, cx, theme);
+                } else {
+                    self.all_in_windows(ui, viewport, cx, theme);
+                }
+                if !self.bare {
+                    self.status_strip(ui, status, None, Column::Main, cx, theme);
+                }
+            }
+        }
+        self.keep_window_viewport();
+    }
+
+    /// The view of the current canvas in `rect` with the status strip
+    /// under it (`slide` points of it below `rect` while the studio comes
+    /// in) and the scroll bars, in Sue Paint's column or in a window of
+    /// its own.
+    fn canvas_column(
+        &mut self,
+        ui: &mut Ui,
+        rect: Rect,
+        slide: f32,
+        column: Column,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let chrome = if self.bare { 0.0 } else { chrome_height(ui) };
+        let status = status_rect(rect, chrome, slide);
         let bars = self.scroll_bars && !self.bare;
         let scroll = if bars { SCROLLBAR } else { 0.0 };
-        let mut viewport = Rect::from_min_max(
-            pos2(rect.left(), tabs.bottom()),
-            pos2(rect.right() - scroll, status.top()),
-        );
-        if self.tiled && self.docs.len() > 1 {
+        let mut viewport = Rect::from_min_max(rect.min, pos2(rect.right() - scroll, status.top()));
+        if column == Column::Main && self.tiled && self.main_docs().len() > 1 {
             viewport = self.tile_others(ui, viewport, cx, theme);
         }
         self.viewport = viewport;
-        ui.painter()
-            .rect_filled(viewport, 0.0, theme.void.gamma_multiply(self.cover));
+        ui.painter().rect_filled(
+            viewport,
+            egui::CornerRadius::ZERO,
+            theme.void.gamma_multiply(self.cover),
+        );
         let size = self
             .picture()
             .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
@@ -68,7 +130,7 @@ impl SuePaint {
         let Some(size) = size else {
             self.empty_canvas(ui, viewport, cx, theme);
             if !self.bare {
-                self.status_strip(ui, status, None, theme);
+                self.status_strip(ui, status, None, column, cx, theme);
             }
             return;
         };
@@ -82,11 +144,14 @@ impl SuePaint {
                 doc.view.fit(viewport, size);
             }
         }
-        let response = ui.interact(
-            viewport,
-            Id::unique("sue-paint-canvas"),
-            Sense::click_and_drag(),
-        );
+        let salt = match column {
+            Column::Main => Id::unique("sue-paint-canvas"),
+            Column::Window => Id::unique((
+                "sue-paint-canvas-window",
+                self.doc().and_then(|doc| doc.window),
+            )),
+        };
+        let response = ui.interact(viewport, salt, Sense::click_and_drag());
         self.canvas_input(ui, viewport, &response, size, cx);
         self.draw_picture(ui, viewport, size, cx, theme);
         self.tone_overlay(ui, viewport, size, cx);
@@ -137,14 +202,17 @@ impl SuePaint {
             self.transform_ui(ui, viewport, size, cx, theme);
         }
         if !self.bare {
-            self.status_strip(ui, status, Some(size), theme);
+            self.status_strip(ui, status, Some(size), column, cx, theme);
         }
         if bars {
             let bar = Rect::from_min_max(
                 pos2(viewport.right(), viewport.top()),
                 pos2(viewport.right() + SCROLLBAR, viewport.bottom()),
             );
-            ui.painter().rect_filled(bar, 0.0, theme.panel);
+            let salt = match column {
+                Column::Main => "sue-paint-scroll-v",
+                Column::Window => "sue-paint-scroll-v-window",
+            };
             if let Some(doc) = self.docs.get_mut(self.active) {
                 let extent = size[1] as f32 * doc.view.zoom;
                 if let Some(pan) = scrollbar(
@@ -154,241 +222,12 @@ impl SuePaint {
                     doc.view.pan.y,
                     extent,
                     viewport.height(),
-                    "sue-paint-scroll-v",
+                    salt,
                     theme,
                 ) {
                     doc.view.pan.y = pan;
                 }
             }
-        }
-    }
-
-    /// Window, Canvas, Tile: every open canvas in a grid cell of `area`,
-    /// the current one live in its cell (returned), the others as they
-    /// last showed; a click on one makes it current.
-    fn tile_others(
-        &mut self,
-        ui: &mut Ui,
-        area: Rect,
-        cx: &mut AppletContext<'_>,
-        theme: &Theme,
-    ) -> Rect {
-        let count = self.docs.len();
-        let columns = (count as f32).sqrt().ceil().max(1.0) as usize;
-        let rows = count.div_ceil(columns);
-        let cell_size = vec2(area.width() / columns as f32, area.height() / rows as f32);
-        let cell = |index: usize| {
-            let (column, row) = (index % columns, index / columns);
-            Rect::from_min_size(
-                area.min + vec2(column as f32 * cell_size.x, row as f32 * cell_size.y),
-                cell_size,
-            )
-            .shrink(1.0)
-        };
-        let mut pick = None;
-        for index in (0..count).filter(|index| *index != self.active) {
-            let rect = cell(index);
-            let doc = &self.docs[index];
-            let painter = ui.painter().with_clip_rect(rect);
-            painter.rect_filled(rect, 0.0, theme.void);
-            let size = cx
-                .world
-                .arena
-                .get_by_id(doc.picture)
-                .ok()
-                .and_then(picture::size);
-            let (pixels, shown, version) = doc.compositor.display();
-            if let Some(size) = size.filter(|size| *size == shown) {
-                let mut view = doc.view;
-                view.fit(rect, size);
-                let corners = view.corners(rect, size);
-                let compositor = &doc.compositor;
-                if let Some(texture) = cx.textures.texture_changed(
-                    crate::studio::texture_key(doc.picture, 0),
-                    version,
-                    size,
-                    4,
-                    pixels,
-                    false,
-                    &|since| compositor.changed_since(since),
-                ) {
-                    let mut mesh = Mesh::with_texture(texture);
-                    for (corner, uv) in corners.iter().zip([
-                        pos2(0.0, 0.0),
-                        pos2(1.0, 0.0),
-                        pos2(1.0, 1.0),
-                        pos2(0.0, 1.0),
-                    ]) {
-                        mesh.vertices.push(Vertex {
-                            pos: *corner,
-                            uv,
-                            color: Color32::WHITE,
-                        });
-                    }
-                    mesh.indices = vec![0, 1, 2, 0, 2, 3];
-                    painter.add(Shape::mesh(mesh));
-                }
-            }
-            painter.rect_stroke(
-                rect,
-                0.0,
-                Stroke::new(1.0, theme.border),
-                egui::StrokeKind::Inside,
-            );
-            if ui
-                .interact(rect, Id::unique(("sue-paint-tile", index)), Sense::click())
-                .clicked()
-            {
-                pick = Some(index);
-            }
-        }
-        if let Some(index) = pick {
-            self.active = index;
-        }
-        let own = cell(self.active);
-        ui.painter().rect_stroke(
-            own,
-            0.0,
-            Stroke::new(1.0, theme.border_active),
-            egui::StrokeKind::Outside,
-        );
-        own
-    }
-
-    fn tabs(&mut self, ui: &mut Ui, strip: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
-        ui.painter().rect_filled(strip, 0.0, theme.pill);
-        ui.painter()
-            .hline(strip.x_range(), strip.bottom(), theme.hairline());
-        let font = theme.font(theme.small_size + 0.5);
-        let mut x = strip.left() + 2.0;
-        let mut pick = None;
-        let mut tab_menu = None;
-        let mut close = None;
-        for (index, doc) in self.docs.iter().enumerate() {
-            let name = cx
-                .world
-                .arena
-                .get_by_id(doc.picture)
-                .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned());
-            let (_, _, version) = doc.compositor.display();
-            // A picture never saved is clean as it first showed.
-            if version > 0 {
-                self.clean.entry(doc.picture).or_insert(version);
-            }
-            let modified = self
-                .clean
-                .get(&doc.picture)
-                .is_some_and(|clean| *clean != version);
-            let galley = ui.painter().layout_no_wrap(name, font.clone(), theme.text);
-            let tab = Rect::from_min_size(
-                pos2(x, strip.top() + 2.0),
-                vec2(
-                    galley.size().x + 38.0 + if modified { 12.0 } else { 0.0 },
-                    24.0,
-                ),
-            );
-            x = tab.right() + 2.0;
-            let chosen = index == self.active;
-            let response = ui.interact(
-                tab,
-                Id::unique(("sue-paint-doc-tab", doc.picture.to_u128())),
-                Sense::click(),
-            );
-            ui.painter().rect_filled(
-                tab,
-                0.0,
-                if chosen {
-                    theme.panel
-                } else if response.hovered() {
-                    theme.hover
-                } else {
-                    theme.pill
-                },
-            );
-            let text_width = galley.size().x;
-            ui.painter().galley(
-                pos2(tab.left() + 10.0, tab.center().y - galley.size().y / 2.0),
-                galley,
-                if chosen { theme.text } else { theme.muted },
-            );
-            if modified {
-                // Changed since it was opened or saved.
-                ui.painter().circle_filled(
-                    pos2(tab.left() + 16.0 + text_width, tab.center().y),
-                    3.0,
-                    if chosen { theme.text } else { theme.muted },
-                );
-            }
-            let cross =
-                Rect::from_center_size(pos2(tab.right() - 13.0, tab.center().y), vec2(16.0, 16.0));
-            let cross_response = ui.interact(
-                cross,
-                Id::unique(("sue-paint-doc-close", doc.picture.to_u128())),
-                Sense::click(),
-            );
-            let cross_color = if cross_response.hovered() {
-                theme.text
-            } else {
-                theme.muted
-            };
-            ui.painter().line_segment(
-                [
-                    cross.left_top() + vec2(4.0, 4.0),
-                    cross.right_bottom() - vec2(4.0, 4.0),
-                ],
-                Stroke::new(1.2, cross_color),
-            );
-            ui.painter().line_segment(
-                [
-                    cross.right_top() + vec2(-4.0, 4.0),
-                    cross.left_bottom() + vec2(4.0, -4.0),
-                ],
-                Stroke::new(1.2, cross_color),
-            );
-            if cross_response
-                .on_hover_text(tr!("close-picture-stays-your-project"))
-                .clicked()
-            {
-                close = Some(index);
-            } else if response.clicked() || response.secondary_clicked() {
-                pick = Some(index);
-            }
-            // Right-click on a tab: what can be done with that canvas.
-            response.context_menu(|ui| {
-                for (label, command) in [
-                    (tr!("save"), "file.save"),
-                    (tr!("save-as-ellipsis"), "file.save_as"),
-                    (tr!("close"), "file.close"),
-                ] {
-                    if ui.button(label).clicked() {
-                        tab_menu = Some((index, command));
-                        ui.close();
-                    }
-                }
-            });
-        }
-        let plus = Rect::from_min_size(pos2(x + 2.0, strip.top() + 3.0), vec2(22.0, 22.0));
-        if icon_button(
-            ui,
-            plus,
-            Icon::NewLayer,
-            true,
-            false,
-            &tr!("new-ctrl-n"),
-            theme,
-        ) {
-            self.run("file.new", cx);
-        }
-        if let Some(index) = pick {
-            self.active = index;
-        }
-        if let Some(index) = close {
-            self.active = index;
-            self.run("file.close", cx);
-        }
-        if let Some((index, command)) = tab_menu {
-            self.active = index;
-            self.run(command, cx);
         }
     }
 
@@ -441,6 +280,31 @@ impl SuePaint {
             None => {}
         }
     }
+}
+
+/// How tall the tab strip and the status strip are: a compact strip on
+/// the desktop, a finger's on a touch screen.
+fn chrome_height(ui: &Ui) -> f32 {
+    density(ui).tab_strip()
+}
+
+/// The density of the canvas chrome: compact as the palettes around it,
+/// finger sized on a touch screen.
+fn density(ui: &Ui) -> Density {
+    if sue_wm::widgets::is_touch(ui.ctx()) {
+        Density::Touch
+    } else {
+        Density::Compact
+    }
+}
+
+/// The status strip at the bottom of `column`, `chrome` tall, `slide`
+/// points of it below while the studio comes in.
+fn status_rect(column: Rect, chrome: f32, slide: f32) -> Rect {
+    Rect::from_min_max(
+        pos2(column.left(), column.bottom() - chrome + slide),
+        pos2(column.right(), column.bottom() + slide),
+    )
 }
 
 #[cfg(test)]

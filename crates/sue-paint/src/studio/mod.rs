@@ -112,6 +112,9 @@ pub(crate) struct Doc {
     pub selection: Option<Selection>,
     pub last_selection: Option<Selection>,
     pub edges: Option<Vec<[[f32; 2]; 2]>>,
+    /// The window of its own this canvas shows in, by the number its
+    /// view is named with (`None`: a tab of the canvas column).
+    pub window: Option<u64>,
 }
 
 impl Doc {
@@ -133,6 +136,7 @@ impl Doc {
             selection: None,
             last_selection: None,
             edges: None,
+            window: None,
         }
     }
 
@@ -738,6 +742,9 @@ pub struct SuePaint {
     /// The pen's samples since its latest touch down, for a stroke of the
     /// new brush engine (see `canvas/engine.rs`).
     pub(crate) pen_stream: Vec<sue_platform::stylus::PenSample>,
+    /// The canvas chrome between frames: canvases in windows of their
+    /// own, pictures dropped on the canvas, the tab menu.
+    pub(crate) chrome: crate::canvas::Chrome,
 }
 
 impl Default for SuePaint {
@@ -914,6 +921,7 @@ impl Default for SuePaint {
             current_workspace: None,
             kept_styles: Vec::new(),
             pen_stream: Vec::new(),
+            chrome: crate::canvas::Chrome::default(),
         }
     }
 }

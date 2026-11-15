@@ -23,10 +23,12 @@ pub(super) const RECORDABLE: [&str; 0] = [];
 
 /// The commands of this group that go outside the canvas, so a test that
 /// runs every command on a canvas skips them: New Window opens a second
-/// view and tiles the canvases, and each interface choice changes the
-/// setting `display.interface`, which lays the whole studio out anew.
-pub(super) const LEAVES_CANVAS: [&str; 5] = [
+/// view of the canvas, Canvas in Its Own Window moves the canvas out of
+/// the column, and each interface choice changes the setting
+/// `display.interface`, which lays the whole studio out anew.
+pub(super) const LEAVES_CANVAS: [&str; 6] = [
     "window.new",
+    "window.float",
     "window.interface.auto",
     "window.interface.desktop",
     "window.interface.tablet",
@@ -157,6 +159,21 @@ fn new_window(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
         view.track = doc.track;
         paint.docs.insert(paint.active + 1, view);
         paint.active += 1;
+    }
+}
+
+/// Canvas in Its Own Window: the current canvas moves into a window of
+/// its own, which can go to another screen; run again (or in that
+/// window), it comes back into the tabs.
+fn float(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.toggle_canvas_window(cx);
+}
+
+/// Checked while the current canvas is in a window of its own.
+fn float_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    match paint.doc() {
+        Some(doc) => flag(doc.window.is_some()),
+        None => ItemState::off(),
     }
 }
 
@@ -670,6 +687,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "picture",
         canvas,
         canvas_state,
+    ),
+    c(
+        "window.float",
+        "canvas-in-its-own-window",
+        "external",
+        float,
+        float_state,
     ),
 ];
 

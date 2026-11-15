@@ -2,8 +2,12 @@
 //! frames, rulers along the edges and the scrollbars.
 
 use egui::epaint::Vertex;
-use egui::{Align2, Color32, Id, Mesh, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use egui::{
+    Align2, Color32, CornerRadius, Id, Key, Mesh, Pos2, Rect, Role, Sense, Shape, Stroke, Ui, Vec2,
+    WidgetInfo, pos2,
+};
 use sue_model::picture;
+use sue_wm::ui::{Density, Radius, Space, TextRole};
 use sue_wm::{AppletContext, Theme};
 
 use crate::doc;
@@ -100,21 +104,11 @@ impl SuePaint {
             mask,
             false,
         ) {
-            let mut mesh = Mesh::with_texture(texture);
-            for (corner, uv) in doc.view.corners(viewport, size).iter().zip([
-                pos2(0.0, 0.0),
-                pos2(1.0, 0.0),
-                pos2(1.0, 1.0),
-                pos2(0.0, 1.0),
-            ]) {
-                mesh.vertices.push(Vertex {
-                    pos: *corner,
-                    uv,
-                    color: Color32::WHITE,
-                });
-            }
-            mesh.indices = vec![0, 1, 2, 0, 2, 3];
-            ui.painter().with_clip_rect(viewport).add(Shape::mesh(mesh));
+            ui.painter().with_clip_rect(viewport).add(picture_quad(
+                texture,
+                doc.view.corners(viewport, size),
+                1.0,
+            ));
         }
     }
 
@@ -195,13 +189,13 @@ impl SuePaint {
         if self.bleed && bleed > 0.0 {
             outline(
                 quad(0.5, 0.5, w - 0.5, h - 0.5),
-                Stroke::new(1.0, Color32::from_rgb(230, 60, 60)),
+                Stroke::new(theme.border_width, Color32::from_rgb(230, 60, 60)),
             );
         }
         if self.crop_frame {
             outline(
                 quad(bleed, bleed, w - bleed, h - bleed),
-                Stroke::new(1.0, Color32::from_rgb(40, 110, 230)),
+                Stroke::new(theme.border_width, Color32::from_rgb(40, 110, 230)),
             );
             if inner > 0.0 {
                 outline(
@@ -211,11 +205,14 @@ impl SuePaint {
                         w - bleed - inner,
                         h - bleed - inner,
                     ),
-                    Stroke::new(1.0, Color32::from_rgb(40, 110, 230).gamma_multiply(0.6)),
+                    Stroke::new(
+                        theme.border_width,
+                        Color32::from_rgb(40, 110, 230).gamma_multiply(0.6),
+                    ),
                 );
             }
             // Crop marks at each corner, outside the finished page.
-            let mark = Stroke::new(1.0, theme.text.gamma_multiply(0.8));
+            let mark = Stroke::new(theme.border_width, theme.text_muted());
             for (cx_, cy_, sx, sy) in [
                 (bleed, bleed, -1.0, -1.0),
                 (w - bleed, bleed, 1.0, -1.0),
@@ -242,11 +239,16 @@ impl SuePaint {
         };
         let view = doc.view;
         let painter = ui.painter().with_clip_rect(viewport);
-        let thick = 18.0;
-        let top = Rect::from_min_size(viewport.min, vec2(viewport.width(), thick));
-        let left = Rect::from_min_size(viewport.min, vec2(thick, viewport.height()));
-        painter.rect_filled(top, 0.0, theme.panel);
-        painter.rect_filled(left, 0.0, theme.panel);
+        let thick = Density::Compact.icon() + theme.space(Space::S1);
+        let top = Rect::from_min_max(viewport.min, pos2(viewport.right(), viewport.top() + thick));
+        let left = Rect::from_min_max(
+            viewport.min,
+            pos2(viewport.left() + thick, viewport.bottom()),
+        );
+        painter.rect_filled(top, CornerRadius::ZERO, theme.panel);
+        painter.rect_filled(left, CornerRadius::ZERO, theme.panel);
+        let tick = Stroke::new(theme.border_width, theme.text_muted());
+        let inset = theme.space(Space::S1);
         // A step of 1, 2 or 5 times a power of ten, about 60 points apart.
         let points_per_pixel = view.zoom.max(1e-3);
         let raw = 60.0 / points_per_pixel;
@@ -256,7 +258,7 @@ impl SuePaint {
             .map(|m| m * power)
             .find(|s| *s >= raw)
             .unwrap_or(raw);
-        let font = theme.font(theme.small_size - 1.0);
+        let font = theme.text_font(TextRole::Caption);
         let ticks = |along: Rect, horizontal: bool| {
             let count = if horizontal {
                 along.width()
@@ -277,19 +279,25 @@ impl SuePaint {
                     let major = index.rem_euclid(5) == 0;
                     let length = if major { thick * 0.6 } else { thick * 0.25 };
                     let (a, b) = if horizontal {
-                        (at, at - vec2(0.0, length))
+                        (at, pos2(at.x, at.y - length))
                     } else {
-                        (at, at - vec2(length, 0.0))
+                        (at, pos2(at.x - length, at.y))
                     };
-                    painter.line_segment([a, b], Stroke::new(1.0, theme.muted));
+                    painter.line_segment([a, b], tick);
                     if major {
                         let label = format!("{}", (index as f32 * step / 5.0).round() as i64);
                         let text_at = if horizontal {
-                            at + vec2(2.0, -thick + 1.0)
+                            pos2(at.x + inset, at.y - thick + inset)
                         } else {
-                            at + vec2(-thick + 1.0, 2.0)
+                            pos2(at.x - thick + inset, at.y + inset)
                         };
-                        painter.text(text_at, Align2::LEFT_TOP, label, font.clone(), theme.muted);
+                        painter.text(
+                            text_at,
+                            Align2::LEFT_TOP,
+                            label,
+                            font.clone(),
+                            theme.text_muted(),
+                        );
                     }
                 }
                 last = Some(index);
@@ -298,8 +306,8 @@ impl SuePaint {
         ticks(top, true);
         ticks(left, false);
         painter.rect_filled(
-            Rect::from_min_size(viewport.min, vec2(thick, thick)),
-            0.0,
+            Rect::from_min_size(viewport.min, Vec2::splat(thick)),
+            CornerRadius::ZERO,
             theme.panel,
         );
     }
@@ -360,23 +368,7 @@ impl SuePaint {
             .flatten();
         match texture {
             Some(texture) => {
-                let mut mesh = Mesh::with_texture(texture);
-                let uvs = [
-                    pos2(0.0, 0.0),
-                    pos2(1.0, 0.0),
-                    pos2(1.0, 1.0),
-                    pos2(0.0, 1.0),
-                ];
-                let tint = Color32::WHITE.gamma_multiply(self.cover);
-                for (corner, uv) in corners.iter().zip(uvs) {
-                    mesh.vertices.push(Vertex {
-                        pos: *corner,
-                        uv,
-                        color: tint,
-                    });
-                }
-                mesh.indices = vec![0, 1, 2, 0, 2, 3];
-                painter.add(Shape::mesh(mesh));
+                painter.add(picture_quad(texture, corners, self.cover));
             }
             None => {
                 painter.add(Shape::convex_polygon(
@@ -399,7 +391,8 @@ pub(super) const SCROLLBAR: f32 = 12.0;
 /// A scrollbar along `bar` for a picture `extent` points long seen through
 /// a view `seen` long, at `pan` (the picture's center from the view's).
 /// The picture can scroll until its edge reaches the view's middle. The new
-/// pan while the thumb is dragged.
+/// pan while the thumb is dragged, or while the bar has the keyboard and
+/// an arrow key along it is pressed.
 #[allow(clippy::too_many_arguments, reason = "a scrollbar's whole state")]
 pub(super) fn scrollbar(
     ui: &mut Ui,
@@ -421,33 +414,95 @@ pub(super) fn scrollbar(
     let start = |rect: Rect| if horizontal { rect.left() } else { rect.top() };
     let reach = (extent + seen) / 2.0;
     let length = along(bar);
-    let thumb = (length * seen / (extent + seen).max(1.0)).clamp(16.0, length);
+    let least = Density::Compact.icon().min(length);
+    let thumb = (length * seen / (extent + seen).max(1.0)).clamp(least, length);
     // Panning right moves the picture right, so the thumb goes left.
     let t = ((reach - pan) / (2.0 * reach).max(1.0)).clamp(0.0, 1.0);
     let at = start(bar) + t * (length - thumb);
+    let inset = theme.space(Space::S1);
     let thumb_rect = if horizontal {
-        Rect::from_min_size(pos2(at, bar.top() + 2.0), vec2(thumb, bar.height() - 4.0))
+        Rect::from_min_max(
+            pos2(at, bar.top() + inset),
+            pos2(at + thumb, bar.bottom() - inset),
+        )
     } else {
-        Rect::from_min_size(pos2(bar.left() + 2.0, at), vec2(bar.width() - 4.0, thumb))
+        Rect::from_min_max(
+            pos2(bar.left() + inset, at),
+            pos2(bar.right() - inset, at + thumb),
+        )
     };
     let response = ui.interact(bar, Id::unique(salt), Sense::click_and_drag());
+    let name = if horizontal {
+        tr!("scroll-left-and-right")
+    } else {
+        tr!("scroll-up-and-down")
+    };
+    response.widget_info(|| WidgetInfo::labeled(Role::ScrollBar, ui.is_enabled(), &name));
     let painter = ui.painter();
-    painter.rect_filled(bar, 0.0, theme.void);
+    painter.rect_filled(bar, CornerRadius::ZERO, theme.void);
+    let lit = response.dragged() || response.hovered() || response.has_focus();
     painter.rect_filled(
         thumb_rect,
-        3.0,
-        if response.dragged() || response.hovered() {
-            theme.text.gamma_multiply(0.8)
+        theme.corner(Radius::Full),
+        if lit {
+            theme.text_muted()
         } else {
-            theme.muted.gamma_multiply(0.75)
+            theme.border_strong()
         },
     );
-    let pointer = response
+    sue_wm::ui::focus_ring(ui, &response, theme.radius(Radius::Full), theme);
+    // With the keyboard: the arrows along the bar move a tenth of a view.
+    let mut stepped = None;
+    if response.has_focus() {
+        let (back, forth) = if horizontal {
+            (Key::ArrowLeft, Key::ArrowRight)
+        } else {
+            (Key::ArrowUp, Key::ArrowDown)
+        };
+        let steps = ui.input(|input| {
+            f32::from(u8::from(input.key_pressed(forth)))
+                - f32::from(u8::from(input.key_pressed(back)))
+        });
+        if steps != 0.0 {
+            stepped = Some((pan - steps * seen / 10.0).clamp(-reach, reach));
+        }
+    }
+    let response = sue_wm::ui::tooltip(
+        response,
+        &sue_wm::ui::Tip::new(&name).shortcut(&tr!("space-and-drag")),
+        theme,
+    );
+    let Some(pointer) = response
         .interact_pointer_pos()
-        .filter(|_| response.dragged() || response.clicked())?;
+        .filter(|_| response.dragged() || response.clicked())
+    else {
+        return stepped;
+    };
     let p = if horizontal { pointer.x } else { pointer.y };
     let t = ((p - start(bar) - thumb / 2.0) / (length - thumb).max(1.0)).clamp(0.0, 1.0);
     Some(reach - t * 2.0 * reach)
+}
+
+/// The picture's texture laid on the quad `corners` (top left, top
+/// right, bottom right, bottom left), faded to `opacity`: the picture
+/// itself, or a mask drawn over it.
+pub(super) fn picture_quad(texture: egui::TextureId, corners: [Pos2; 4], opacity: f32) -> Shape {
+    let mut mesh = Mesh::with_texture(texture);
+    let tint = Color32::WHITE.gamma_multiply(opacity);
+    for (corner, uv) in corners.iter().zip([
+        pos2(0.0, 0.0),
+        pos2(1.0, 0.0),
+        pos2(1.0, 1.0),
+        pos2(0.0, 1.0),
+    ]) {
+        mesh.vertices.push(Vertex {
+            pos: *corner,
+            uv,
+            color: tint,
+        });
+    }
+    mesh.indices = vec![0, 1, 2, 0, 2, 3];
+    Shape::mesh(mesh)
 }
 
 /// Layer rectangles moved by the layer's `offset` onto the picture.
