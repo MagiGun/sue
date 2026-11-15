@@ -444,9 +444,9 @@ fn sue_writers_start_page_shows_presets_as_pages_and_a_click_starts_one() {
 }
 
 /// On a phone, the top bar's buttons are Sue's icon buttons that name
-/// themselves: Undo cannot be used before anything was done, Find opens
-/// the find bar and is lit while it is open, and resting on it says its
-/// name and its keys.
+/// themselves: Redo cannot be used before anything was undone, resting on
+/// Find says its name and its keys, Find opens the find bar and Find again
+/// closes it.
 #[test]
 fn sue_writers_phone_bar_names_its_buttons_and_find_opens_the_find_bar() {
     let mut writer = Writer::sized("writer-phone-bar", vec2(430.0, 932.0), Some("phone"));
@@ -458,6 +458,11 @@ fn sue_writers_phone_bar_names_its_buttons_and_find_opens_the_find_bar() {
         Some(false),
         "nothing to redo"
     );
+    assert!(
+        writer.rect_of("Replace...").is_none(),
+        "the find bar is closed at first: {:?}",
+        writer.shown()
+    );
     let (find, _) = writer.control("Find").unwrap();
     writer.step(vec![egui::Event::PointerMoved(find.center())]);
     writer.settle(60);
@@ -467,23 +472,87 @@ fn sue_writers_phone_bar_names_its_buttons_and_find_opens_the_find_bar() {
         writer.shown()
     );
     writer.click(find.center());
-    let open = writer
-        .named
-        .iter()
-        .any(|(label, role, ..)| label == "Find" && *role == Role::Button);
-    assert!(open, "Find is still there");
     assert!(
-        writer.runtime.applets.get(&Writer::id()).is_some(),
-        "Sue Writer is open"
-    );
-    assert!(
-        writer.rect_of("Replace").is_some()
-            || writer
-                .named
-                .iter()
-                .any(|(label, ..)| label.contains("Replace")),
+        writer.rect_of("Replace...").is_some(),
         "the find bar is open: {:?}",
         writer.shown()
+    );
+    // Find again closes it.
+    writer.click(find.center());
+    assert!(
+        writer.rect_of("Replace...").is_none(),
+        "the find bar closed: {:?}",
+        writer.shown()
+    );
+}
+
+/// A new comment: the typing goes straight into its field, Tab leaves the
+/// field for the footer's Add Comment (the field does not pull focus back
+/// every frame), and a second comment's field takes the typing again.
+#[test]
+fn sue_writers_comment_field_takes_the_typing_and_lets_tab_reach_the_footer() {
+    let mut writer = Writer::new("writer-dialog-comment");
+    writer.command("review.comment");
+    assert!(
+        writer.rect_of("New Comment").is_some(),
+        "{:?}",
+        writer.shown()
+    );
+    writer.type_text("First thought");
+    assert!(
+        writer.rect_of("First thought").is_some(),
+        "typed into the field: {:?}",
+        writer.shown()
+    );
+    writer.press(egui::Key::Tab, egui::Modifiers::NONE);
+    assert_eq!(writer.focused.as_deref(), Some("Add Comment"));
+    writer.press(egui::Key::Escape, egui::Modifiers::NONE);
+    assert!(writer.rect_of("New Comment").is_none(), "Escape closed it");
+    writer.command("review.comment");
+    writer.type_text("Second thought");
+    assert!(
+        writer.rect_of("Second thought").is_some(),
+        "the field took the typing again: {:?}",
+        writer.shown()
+    );
+}
+
+/// Project Settings: the heading font's box opens a search that keeps what
+/// is typed into it (it was emptied again every frame), as the body
+/// font's does.
+#[test]
+fn sue_writers_heading_font_search_keeps_what_is_typed() {
+    let mut writer = Writer::new("writer-dialog-fonts");
+    writer.command("project.settings");
+    for name in ["Body font", "Heading font"] {
+        let (rect, usable) = writer
+            .control(name)
+            .unwrap_or_else(|| panic!("{name} is a control: {:?}", writer.named));
+        assert!(usable, "{name} can be used");
+        let (title, _) = writer.control("Title").expect("the title field");
+        assert!(
+            (rect.width() - title.width()).abs() < 1.0,
+            "{name} is as wide as the title field: {rect:?} {title:?}"
+        );
+    }
+    writer.click_control("Heading font");
+    writer.type_text("Zq");
+    writer.settle(10);
+    assert!(
+        writer.rect_of("Zq").is_some(),
+        "the search kept its text: {:?}",
+        writer.shown()
+    );
+    writer.press(egui::Key::Escape, egui::Modifiers::NONE);
+    assert!(writer.rect_of("Zq").is_none(), "Escape closed the fonts");
+    assert!(
+        writer.rect_of("Project Settings").is_some(),
+        "Escape closed the fonts first, not the dialog"
+    );
+    writer.press(egui::Key::Escape, egui::Modifiers::NONE);
+    assert!(
+        writer.rect_of("Project Settings").is_none(),
+        "a second Escape cancels the dialog"
     );
 }
 
