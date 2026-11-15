@@ -2928,6 +2928,7 @@ fn generate_the_paint_folder() {
             height: 12_800,
             dpi: 144.0,
             paper: true,
+            more: Vec::new(),
         },
         crate::dialogs::CanvasPreset {
             name: "Sticker".to_owned(),
@@ -2935,6 +2936,7 @@ fn generate_the_paint_folder() {
             height: 320,
             dpi: 72.0,
             paper: false,
+            more: Vec::new(),
         },
     ];
     // The command bar: two buttons hidden, two added.

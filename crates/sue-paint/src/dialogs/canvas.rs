@@ -3,12 +3,17 @@
 //! Convert Layer, New 3D Layer, Register Material and Create Perspective
 //! Ruler.
 
-use egui::{RichText, Ui, vec2};
-use sue_core::EntityId;
+use std::sync::{Arc, Mutex};
+
+use egui::{Rect, Response, Sense, Ui};
+use sue_core::{Arena, EntityId, ReversibleTransaction, TxnError};
+use sue_model::BlendMode;
+use sue_wm::ui::{Radius, Space, Tip, dropdown, focus_ring, form_grid, radio, slider, text_field};
 use sue_wm::{AppletContext, Theme};
 
-use super::{Outcome, label, ok_cancel};
-use crate::doc;
+use super::fill::{Reads, check, number};
+use super::{Outcome, bare, note, row_height, tip};
+use crate::doc::{self, Edit};
 use crate::studio::SuePaint;
 
 /// Change Canvas Size: the new size and where the old picture sits in it.
@@ -51,58 +56,201 @@ pub(crate) struct CanvasProperties {
     pub paper_shown: bool,
 }
 
-/// Change Canvas Size: width, height and the anchor.
-pub(super) fn canvas_ui(ui: &mut Ui, canvas: &mut CanvasDialog, theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
-    egui::Grid::new("sue-paint-canvas-size")
-        .num_columns(2)
-        .spacing(vec2(12.0, 8.0))
-        .show(ui, |ui| {
-            label(ui, &tr!("width"), theme);
-            ui.add(
-                egui::DragValue::new(&mut canvas.size[0])
-                    .range(1..=doc::MAX_SIDE)
-                    .suffix(tr!("px")),
-            );
-            ui.end_row();
-            label(ui, &tr!("height"), theme);
-            ui.add(
-                egui::DragValue::new(&mut canvas.size[1])
-                    .range(1..=doc::MAX_SIDE)
-                    .suffix(tr!("px")),
-            );
-            ui.end_row();
-            label(ui, &tr!("reference-point"), theme);
-            egui::Grid::new("sue-paint-anchor")
-                .spacing(vec2(2.0, 2.0))
-                .show(ui, |ui| {
-                    for index in 0..9_u8 {
-                        let chosen = canvas.anchor == index;
-                        let button =
-                            egui::Button::new(if chosen { "\u{25CF}" } else { "\u{25CB}" })
-                                .min_size(vec2(24.0, 22.0))
-                                .selected(chosen);
-                        if ui.add(button).clicked() {
-                            canvas.anchor = index;
-                        }
-                        if index % 3 == 2 {
-                            ui.end_row();
-                        }
-                    }
-                });
-            ui.end_row();
+/// Create Perspective Ruler: how many vanishing points, and whether the
+/// ruler gets a new layer of its own (on at first, as in Clip Studio
+/// Paint).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PerspectiveDialog {
+    /// 1 to 3.
+    pub count: u32,
+    pub new_layer: bool,
+}
+
+impl PerspectiveDialog {
+    /// The dialog for a ruler of `count` vanishing points, on a new layer.
+    pub(crate) fn new(count: u32) -> Self {
+        Self {
+            count: count.clamp(1, 3),
+            new_layer: true,
+        }
+    }
+}
+
+/// Convert Layer: what the layer becomes, as Clip Studio Paint's dialog
+/// asks it: its name, its type, its expression color, its blending mode,
+/// and whether the original stays beside it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ConvertDialog {
+    pub layer: EntityId,
+    pub name: String,
+    /// 0 raster, 1 vector.
+    pub kind: u8,
+    /// 0 color, 1 gray, 2 monochrome (an index of
+    /// `crate::effects::EXPRESSIONS`).
+    pub expression: u8,
+    /// The blending mode, or `None` to keep the layer's own.
+    pub blend: Option<BlendMode>,
+    /// Keep the original layer and convert a copy above it.
+    pub keep: bool,
+}
+
+impl ConvertDialog {
+    /// Converting `layer` (named `name`) to `kind`, keeping the rest.
+    pub(crate) fn new(layer: EntityId, kind: u8, name: String) -> Self {
+        Self {
+            layer,
+            name,
+            kind,
+            expression: 0,
+            blend: None,
+            keep: false,
+        }
+    }
+}
+
+/// The nine reference points of a frame, row by row from the top left,
+/// as a grid of cells to click: the chosen one filled. Returns whether
+/// the choice changed.
+pub(super) fn anchor_ui(ui: &mut Ui, salt: &str, anchor: &mut u8, theme: &Theme) -> bool {
+    let names = [
+        tr!("anchor-top-left"),
+        tr!("anchor-top"),
+        tr!("anchor-top-right"),
+        tr!("anchor-left"),
+        tr!("anchor-middle"),
+        tr!("anchor-right"),
+        tr!("anchor-bottom-left"),
+        tr!("anchor-bottom"),
+        tr!("anchor-bottom-right"),
+    ];
+    let cell = row_height(ui);
+    let gap = theme.space(Space::S1);
+    // Three cells a side and the two gaps between them.
+    let side = cell * 3.0 + gap * 2.0;
+    let (grid, _) = ui.allocate_exact_size(egui::Vec2::splat(side), Sense::hover());
+    let corner = theme.radius(Radius::Sm);
+    let mut changed = false;
+    for (index, name) in names.iter().enumerate() {
+        let (column, row) = ((index % 3) as f32, (index / 3) as f32);
+        let rect = Rect::from_min_size(
+            grid.min + egui::Vec2::new(column * (cell + gap), row * (cell + gap)),
+            egui::Vec2::splat(cell),
+        );
+        let id = ui.scope_id().with((salt, index));
+        let response = ui.interact(rect, id, Sense::click());
+        let chosen = usize::from(*anchor) == index;
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::Role::RadioButton, true, chosen, name)
         });
-    ui.label(
-        RichText::new(tr!(
-            "now-by-px",
-            value = canvas.old[0],
-            value2 = canvas.old[1]
-        ))
-        .size(theme.small_size)
-        .color(theme.muted),
+        let fill = if response.hovered() {
+            theme.fill_hover()
+        } else {
+            theme.surface(2)
+        };
+        ui.painter().rect_filled(rect, corner, fill);
+        ui.painter()
+            .rect_stroke(rect, corner, theme.hairline(), egui::StrokeKind::Inside);
+        if chosen {
+            // The point the picture keeps to: a solid square in the
+            // text color.
+            ui.painter().rect_filled(
+                rect.shrink(cell / 3.0),
+                theme.radius(Radius::Xs),
+                theme.text,
+            );
+        }
+        focus_ring(ui, &response, corner, theme);
+        let response = tooltip_named(response, name, theme);
+        if response.clicked() && !chosen {
+            *anchor = index as u8;
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn tooltip_named(response: Response, name: &str, theme: &Theme) -> Response {
+    sue_wm::ui::tooltip(response, &Tip::new(name), theme)
+}
+
+/// A size in pixels in a form row. Returns whether it changed.
+fn pixels(ui: &mut Ui, salt: &str, value: &mut u32, name: &str, theme: &Theme) -> bool {
+    let px = tr!("px");
+    let mut number_now = f64::from(*value);
+    let reads = Reads {
+        range: 1.0..=f64::from(doc::MAX_SIDE),
+        decimals: 0,
+        suffix: &px,
+    };
+    if number(ui, salt, &mut number_now, &reads, name, theme) {
+        *value = number_now.round() as u32;
+        return true;
+    }
+    false
+}
+
+/// A resolution in dots an inch in a form row.
+fn resolution_field(ui: &mut Ui, salt: &str, dpi: &mut f64, theme: &Theme) -> bool {
+    let name = bare(tr!("resolution"));
+    let unit = tr!("dpi");
+    let reads = Reads {
+        range: 1.0..=2400.0,
+        decimals: 0,
+        suffix: &unit,
+    };
+    number(ui, salt, dpi, &reads, &name, theme)
+}
+
+/// Radio buttons, one per option, in a row; `chosen` follows a click.
+fn radios<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    salt: &str,
+    chosen: &mut T,
+    options: &[(T, String)],
+    theme: &Theme,
+) {
+    for (index, (value, name)) in options.iter().enumerate() {
+        let response = radio((salt, index), name, *chosen == *value).show(ui, theme);
+        if tip(response, name, "", theme).clicked() {
+            *chosen = *value;
+        }
+    }
+}
+
+/// Change Canvas Size: width, height and the reference point. The old
+/// picture keeps to the reference point; the rest is new canvas.
+pub(super) fn canvas_ui(ui: &mut Ui, canvas: &mut CanvasDialog, theme: &Theme) -> Outcome {
+    form_grid(ui, "sue-paint-canvas-size", theme, |form| {
+        let name = bare(tr!("width"));
+        form.row(&name, |ui| {
+            pixels(
+                ui,
+                "sue-paint-canvas-width",
+                &mut canvas.size[0],
+                &name,
+                theme,
+            );
+        });
+        let name = bare(tr!("height"));
+        form.row(&name, |ui| {
+            pixels(
+                ui,
+                "sue-paint-canvas-height",
+                &mut canvas.size[1],
+                &name,
+                theme,
+            );
+        });
+        form.row(&bare(tr!("reference-point")), |ui| {
+            anchor_ui(ui, "sue-paint-canvas-anchor", &mut canvas.anchor, theme);
+        });
+    });
+    note(
+        ui,
+        &tr!("now-by-px", value = canvas.old[0], value2 = canvas.old[1]),
+        theme,
     );
-    ok_cancel(ui, &mut outcome);
-    outcome
+    Outcome::Open
 }
 
 /// Change Image Resolution: the size in pixels (keeping its shape) and the
@@ -112,51 +260,52 @@ pub(super) fn resolution_ui(
     resolution: &mut ResolutionDialog,
     theme: &Theme,
 ) -> Outcome {
-    let mut outcome = Outcome::Open;
-    let ratio = resolution.old[1] as f64 / resolution.old[0].max(1) as f64;
-    egui::Grid::new("sue-paint-resolution")
-        .num_columns(2)
-        .spacing(vec2(12.0, 8.0))
-        .show(ui, |ui| {
-            label(ui, &tr!("width"), theme);
-            if ui
-                .add(
-                    egui::DragValue::new(&mut resolution.size[0])
-                        .range(1..=doc::MAX_SIDE)
-                        .suffix(tr!("px")),
-                )
-                .changed()
-                && resolution.keep
+    let ratio = f64::from(resolution.old[1]) / f64::from(resolution.old[0].max(1));
+    form_grid(ui, "sue-paint-resolution", theme, |form| {
+        let name = bare(tr!("width"));
+        form.row(&name, |ui| {
+            if pixels(
+                ui,
+                "sue-paint-resolution-width",
+                &mut resolution.size[0],
+                &name,
+                theme,
+            ) && resolution.keep
             {
                 resolution.size[1] =
                     ((f64::from(resolution.size[0]) * ratio).round() as u32).max(1);
             }
-            ui.end_row();
-            label(ui, &tr!("height"), theme);
-            if ui
-                .add(
-                    egui::DragValue::new(&mut resolution.size[1])
-                        .range(1..=doc::MAX_SIDE)
-                        .suffix(tr!("px")),
-                )
-                .changed()
-                && resolution.keep
+        });
+        let name = bare(tr!("height"));
+        form.row(&name, |ui| {
+            if pixels(
+                ui,
+                "sue-paint-resolution-height",
+                &mut resolution.size[1],
+                &name,
+                theme,
+            ) && resolution.keep
             {
                 resolution.size[0] =
                     ((f64::from(resolution.size[1]) / ratio.max(1e-6)).round() as u32).max(1);
             }
-            ui.end_row();
-            label(ui, &tr!("resolution"), theme);
-            ui.add(
-                egui::DragValue::new(&mut resolution.dpi)
-                    .range(1.0..=2400.0)
-                    .suffix(tr!("dpi")),
-            );
-            ui.end_row();
         });
-    ui.checkbox(&mut resolution.keep, tr!("keep-the-shape"));
-    ok_cancel(ui, &mut outcome);
-    outcome
+        form.row(&bare(tr!("resolution")), |ui| {
+            resolution_field(ui, "sue-paint-resolution-dpi", &mut resolution.dpi, theme);
+        });
+        form.wide(|ui| {
+            let name = tr!("keep-the-shape");
+            check(
+                ui,
+                "sue-paint-resolution-keep",
+                &mut resolution.keep,
+                &name,
+                "",
+                theme,
+            );
+        });
+    });
+    Outcome::Open
 }
 
 /// Print Settings, or Print when `printing`.
@@ -166,61 +315,102 @@ pub(super) fn print_ui(
     printing: bool,
     theme: &Theme,
 ) -> Outcome {
-    let mut outcome = Outcome::Open;
-    ui.horizontal(|ui| {
-        label(ui, &tr!("paper"), theme);
-        egui::ComboBox::from_id_salt("sue-paint-paper")
-            .selected_text(crate::localize(crate::print::PAPERS[settings.paper].0))
-            .show_ui(ui, |ui| {
-                for (index, (name, ..)) in crate::print::PAPERS.iter().enumerate() {
-                    ui.selectable_value(&mut settings.paper, index, crate::localize(name));
+    let papers: Vec<String> = crate::print::PAPERS
+        .iter()
+        .map(|(name, ..)| crate::localize(name))
+        .collect();
+    form_grid(ui, "sue-paint-print", theme, |form| {
+        let name = bare(tr!("paper"));
+        form.row(&name, |ui| {
+            let response = dropdown("sue-paint-paper", &mut settings.paper, &papers)
+                .label(&name)
+                .show(ui, theme);
+            tip(response, &name, "", theme);
+        });
+        form.row(&bare(tr!("orientation")), |ui| {
+            let options = [
+                (0, tr!("auto")),
+                (1, tr!("portrait")),
+                (2, tr!("landscape")),
+            ];
+            radios(
+                ui,
+                "sue-paint-print-orientation",
+                &mut settings.orientation,
+                &options,
+                theme,
+            );
+        });
+        form.row(&bare(tr!("size")), |ui| {
+            let options = [
+                (0, tr!("fit-to-page")),
+                (1, tr!("print-size")),
+                (2, tr!("scale")),
+            ];
+            radios(
+                ui,
+                "sue-paint-print-size",
+                &mut settings.size,
+                &options,
+                theme,
+            );
+        });
+        if settings.size == 2 {
+            let name = tr!("scale");
+            form.row(&name, |ui| {
+                let mut percent = f64::from(settings.percent);
+                let response = slider("sue-paint-print-scale", &mut percent, 1.0..=400.0)
+                    .name(&name)
+                    .suffix(" %")
+                    .show(ui, theme);
+                if response.changed() {
+                    settings.percent = percent as f32;
                 }
+                tip(response, &name, "", theme);
             });
+        }
+        let name = bare(tr!("margin"));
+        form.row(&name, |ui| {
+            let mut margin = f64::from(settings.margin);
+            let mm = tr!("mm");
+            let response = slider("sue-paint-print-margin", &mut margin, 0.0..=50.0)
+                .name(&name)
+                .suffix(&mm)
+                .show(ui, theme);
+            if response.changed() {
+                settings.margin = margin as f32;
+            }
+            tip(response, &name, "", theme);
+        });
+        form.wide(|ui| {
+            let name = tr!("every-page-of-the-story");
+            check(
+                ui,
+                "sue-paint-print-all",
+                &mut settings.all_pages,
+                &name,
+                "",
+                theme,
+            );
+        });
     });
-    ui.horizontal(|ui| {
-        label(ui, &tr!("orientation"), theme);
-        ui.radio_value(&mut settings.orientation, 0, tr!("auto"));
-        ui.radio_value(&mut settings.orientation, 1, tr!("portrait"));
-        ui.radio_value(&mut settings.orientation, 2, tr!("landscape"));
-    });
-    ui.horizontal(|ui| {
-        label(ui, &tr!("size"), theme);
-        ui.radio_value(&mut settings.size, 0, tr!("fit-to-page"));
-        ui.radio_value(&mut settings.size, 1, tr!("print-size"));
-        ui.radio_value(&mut settings.size, 2, tr!("scale"));
-    });
-    if settings.size == 2 {
-        ui.add(egui::Slider::new(&mut settings.percent, 1.0..=400.0).suffix(" %"));
-    }
-    ui.horizontal(|ui| {
-        label(ui, &tr!("margin"), theme);
-        ui.add(egui::Slider::new(&mut settings.margin, 0.0..=50.0).suffix(tr!("mm")));
-    });
-    ui.checkbox(&mut settings.all_pages, tr!("every-page-of-the-story"));
     if printing {
-        ui.label(
-            RichText::new(tr!("pages-open-as-pdf-your-viewer"))
-                .size(theme.small_size)
-                .color(theme.muted),
-        );
+        note(ui, &tr!("pages-open-as-pdf-your-viewer"), theme);
     }
-    ok_cancel(ui, &mut outcome);
-    outcome
+    Outcome::Open
 }
 
 /// Color Profile Preview Settings: which profile.
 pub(super) fn proof_ui(ui: &mut Ui, profile: &mut usize, theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
-    ui.label(
-        RichText::new(tr!("how-picture-would-print-shown-while"))
-            .size(theme.small_size)
-            .color(theme.muted),
-    );
+    note(ui, &tr!("how-picture-would-print-shown-while"), theme);
     for (index, (name, ..)) in crate::proof::PROFILES.iter().enumerate() {
-        ui.radio_value(profile, index, crate::localize(name));
+        let name = crate::localize(name);
+        let response = radio(("sue-paint-proof", index), &name, *profile == index).show(ui, theme);
+        if tip(response, &name, "", theme).clicked() {
+            *profile = index;
+        }
     }
-    ok_cancel(ui, &mut outcome);
-    outcome
+    Outcome::Open
 }
 
 /// Canvas Properties: the name, resolution and paper.
@@ -229,107 +419,382 @@ pub(super) fn canvas_properties_ui(
     props: &mut CanvasProperties,
     theme: &Theme,
 ) -> Outcome {
-    let mut outcome = Outcome::Open;
-    ui.horizontal(|ui| {
-        label(ui, &tr!("name"), theme);
-        ui.text_edit_singleline(&mut props.name);
-    });
-    ui.horizontal(|ui| {
-        label(ui, &tr!("resolution"), theme);
-        ui.add(
-            egui::DragValue::new(&mut props.dpi)
-                .range(1.0..=2400.0)
-                .suffix(tr!("dpi")),
-        );
-    });
-    if props.paper.is_some() {
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut props.paper_shown, tr!("paper-2"));
-            ui.color_edit_button_srgb(&mut props.paper_color);
+    form_grid(ui, "sue-paint-canvas-properties", theme, |form| {
+        let name = bare(tr!("name"));
+        form.row(&name, |ui| {
+            let response = text_field("sue-paint-canvas-name", &mut props.name)
+                .label(&name)
+                .show(ui, theme);
+            tip(response, &name, "", theme);
         });
-    }
-    ok_cancel(ui, &mut outcome);
-    outcome
+        form.row(&bare(tr!("resolution")), |ui| {
+            resolution_field(ui, "sue-paint-canvas-dpi", &mut props.dpi, theme);
+        });
+        if props.paper.is_some() {
+            form.row(&tr!("paper-2"), |ui| {
+                let name = tr!("paper-2");
+                check(
+                    ui,
+                    "sue-paint-canvas-paper",
+                    &mut props.paper_shown,
+                    &name,
+                    "",
+                    theme,
+                );
+                let [r, g, b] = props.paper_color;
+                let mut rgba = [r, g, b, 255];
+                let salt = "sue-paint-canvas-paper-color";
+                if sue_wm::color_button(ui, salt, &mut rgba, false, theme).changed {
+                    props.paper_color = [rgba[0], rgba[1], rgba[2]];
+                }
+            });
+        }
+    });
+    Outcome::Open
 }
 
-/// Convert Layer: to raster or vector, and its name.
-pub(super) fn convert_ui(ui: &mut Ui, kind: &mut u8, name: &mut String, theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
-    ui.horizontal(|ui| {
-        label(ui, &tr!("name"), theme);
-        ui.text_edit_singleline(name);
+/// Convert Layer: its name, type, expression color and blending mode, and
+/// whether the original layer stays.
+pub(super) fn convert_ui(ui: &mut Ui, convert: &mut ConvertDialog, theme: &Theme) -> Outcome {
+    form_grid(ui, "sue-paint-convert", theme, |form| {
+        let name = bare(tr!("name"));
+        form.row(&name, |ui| {
+            let response = text_field("sue-paint-convert-name", &mut convert.name)
+                .label(&name)
+                .show(ui, theme);
+            tip(response, &name, "", theme);
+        });
+        form.row(&bare(tr!("type")), |ui| {
+            let options = [(0, tr!("raster-layer")), (1, tr!("vector-layer"))];
+            radios(
+                ui,
+                "sue-paint-convert-type",
+                &mut convert.kind,
+                &options,
+                theme,
+            );
+        });
+        let name = tr!("expression-color");
+        form.row(&name, |ui| {
+            let colors = expressions();
+            let mut chosen = usize::from(convert.expression);
+            let response = dropdown("sue-paint-convert-expression", &mut chosen, &colors)
+                .label(&name)
+                .show(ui, theme);
+            if tip(response, &name, "", theme).changed() {
+                convert.expression = chosen as u8;
+            }
+        });
+        let name = tr!("blending-mode");
+        form.row(&name, |ui| {
+            let mut modes = vec![tr!("convert-blend-as-it-is")];
+            modes.extend(
+                BlendMode::ALL
+                    .iter()
+                    .map(|mode| sue_lang::translate("model", mode.label())),
+            );
+            let mut chosen = convert
+                .blend
+                .and_then(|blend| BlendMode::ALL.iter().position(|mode| *mode == blend))
+                .map_or(0, |index| index + 1);
+            let response = dropdown("sue-paint-convert-blend", &mut chosen, &modes)
+                .label(&name)
+                .show(ui, theme);
+            if tip(response, &name, "", theme).changed() {
+                convert.blend = chosen.checked_sub(1).map(|index| BlendMode::ALL[index]);
+            }
+        });
+        form.wide(|ui| {
+            let name = tr!("keep-original-layer");
+            check(
+                ui,
+                "sue-paint-convert-keep",
+                &mut convert.keep,
+                &name,
+                "",
+                theme,
+            );
+        });
     });
-    ui.horizontal(|ui| {
-        label(ui, &tr!("type"), theme);
-        ui.radio_value(kind, 0, tr!("raster-layer"));
-        ui.radio_value(kind, 1, tr!("vector-layer"));
-    });
-    ui.label(
-        RichText::new(tr!("vector-pixels-are-traced-lines-down"))
-            .size(theme.small_size)
-            .color(theme.muted),
-    );
-    ok_cancel(ui, &mut outcome);
-    outcome
+    note(ui, &tr!("vector-pixels-are-traced-lines-down"), theme);
+    Outcome::Open
+}
+
+/// The expression colors as people read them.
+fn expressions() -> Vec<String> {
+    crate::effects::EXPRESSIONS
+        .iter()
+        .map(|name| crate::localize(name))
+        .collect()
 }
 
 /// New 3D Layer: which shape.
 pub(super) fn shape_3d_ui(ui: &mut Ui, kind: &mut usize, theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
-    label(ui, &tr!("shape"), theme);
-    for (index, name) in crate::three::SHAPES.iter().enumerate() {
-        ui.radio_value(kind, index, crate::localize(name));
-    }
-    ui.label(
-        RichText::new(tr!("file-import-3d-data-brings-models"))
-            .size(theme.small_size)
-            .color(theme.muted),
-    );
-    ok_cancel(ui, &mut outcome);
-    outcome
+    let options: Vec<(usize, String)> = crate::three::SHAPES
+        .iter()
+        .enumerate()
+        .map(|(index, name)| (index, crate::localize(name)))
+        .collect();
+    form_grid(ui, "sue-paint-shape-3d", theme, |form| {
+        form.row(&bare(tr!("shape")), |ui| {
+            ui.vertical(|ui| radios(ui, "sue-paint-shape-3d", kind, &options, theme));
+        });
+    });
+    note(ui, &tr!("file-import-3d-data-brings-models"), theme);
+    Outcome::Open
 }
 
 /// Register Material, Image: its name.
 pub(super) fn material_ui(ui: &mut Ui, name: &mut String, theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
-    ui.horizontal(|ui| {
-        label(ui, &tr!("material-name"), theme);
-        ui.add(egui::TextEdit::singleline(name).desired_width(200.0));
+    form_grid(ui, "sue-paint-material", theme, |form| {
+        let label = bare(tr!("material-name"));
+        form.row(&label, |ui| {
+            let response = text_field("sue-paint-material-name", name)
+                .label(&label)
+                .show(ui, theme);
+            tip(response, &label, "", theme);
+        });
     });
-    ui.label(
-        RichText::new(tr!("current-layer-goes-into-material-palette"))
-            .size(theme.small_size)
-            .color(theme.muted),
-    );
-    ok_cancel(ui, &mut outcome);
-    outcome
+    note(ui, &tr!("current-layer-goes-into-material-palette"), theme);
+    Outcome::Open
 }
 
-/// Create Perspective Ruler: how many vanishing points.
-pub(super) fn perspective_ui(ui: &mut Ui, count: &mut u32, theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
-    ui.horizontal(|ui| {
-        label(ui, &tr!("type"), theme);
-        ui.vertical(|ui| {
-            for (points, name) in [
+/// Create Perspective Ruler: how many vanishing points, and whether it
+/// gets a new layer.
+pub(super) fn perspective_ui(
+    ui: &mut Ui,
+    perspective: &mut PerspectiveDialog,
+    theme: &Theme,
+) -> Outcome {
+    form_grid(ui, "sue-paint-perspective", theme, |form| {
+        form.row(&bare(tr!("type")), |ui| {
+            let options = [
                 (1, tr!("n-1-point-perspective")),
                 (2, tr!("n-2-point-perspective")),
                 (3, tr!("n-3-point-perspective")),
-            ] {
-                ui.radio_value(count, points, name);
-            }
+            ];
+            ui.vertical(|ui| {
+                radios(
+                    ui,
+                    "sue-paint-perspective-type",
+                    &mut perspective.count,
+                    &options,
+                    theme,
+                );
+            });
+        });
+        form.wide(|ui| {
+            let name = tr!("create-new-layer");
+            check(
+                ui,
+                "sue-paint-perspective-layer",
+                &mut perspective.new_layer,
+                &name,
+                "",
+                theme,
+            );
         });
     });
-    ui.label(
-        RichText::new(tr!("strokes-run-toward-vanishing-points-while"))
-            .size(theme.small_size)
-            .color(theme.muted),
-    );
-    ok_cancel(ui, &mut outcome);
-    outcome
+    note(ui, &tr!("strokes-run-toward-vanishing-points-while"), theme);
+    Outcome::Open
+}
+
+/// A step made of a first edit and a second one worked out from the
+/// picture as the first left it, undone and redone as one. The second is
+/// worked out once, on the first apply, and kept, so a redo puts back the
+/// very same entities.
+struct Then<F> {
+    label: String,
+    first: Edit,
+    then: Option<F>,
+    second: Option<Edit>,
+}
+
+impl<F> ReversibleTransaction<Arena> for Then<F>
+where
+    F: FnOnce(&Arena) -> Result<Edit, String> + Send,
+{
+    fn label(&self) -> String {
+        self.label.clone()
+    }
+
+    fn apply(&mut self, arena: &mut Arena) -> Result<(), TxnError> {
+        self.first.apply(arena)?;
+        if self.second.is_none()
+            && let Some(then) = self.then.take()
+        {
+            match then(arena) {
+                Ok(edit) => self.second = Some(edit),
+                Err(error) => {
+                    self.first.revert(arena)?;
+                    return Err(TxnError::new(error));
+                }
+            }
+        }
+        if let Some(second) = &mut self.second
+            && let Err(error) = second.apply(arena)
+        {
+            self.first.revert(arena)?;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn revert(&mut self, arena: &mut Arena) -> Result<(), TxnError> {
+        if let Some(second) = &mut self.second {
+            second.revert(arena)?;
+        }
+        self.first.revert(arena)
+    }
+}
+
+/// The edit that converts `layer` as `convert` asks, and the id the
+/// layer has after it (a new one when its type changes).
+fn convert_edit(
+    arena: &Arena,
+    picture: EntityId,
+    layer: EntityId,
+    convert: &ConvertDialog,
+) -> Result<(Edit, EntityId), String> {
+    let vector = crate::vector::is_vector(arena, layer);
+    let (mut edit, id) = match (convert.kind, vector) {
+        (1, false) => doc::vectorize(arena, picture, layer)?,
+        (0, true) => doc::rasterize(arena, picture, layer)?,
+        _ => (Edit::new(tr!("convert-layer")), layer),
+    };
+    let entity = arena.get_by_id(layer).map_err(|error| error.to_string())?;
+    let name = convert.name.trim();
+    if !name.is_empty() && (id != layer || name != entity.name()) {
+        edit = edit.then(sue_core::txn::Rename::new(id, name));
+    }
+    let expression = entity
+        .property(crate::effects::EXPRESSION)
+        .and_then(sue_core::Value::as_i64)
+        .unwrap_or(0);
+    if id != layer || expression != i64::from(convert.expression) {
+        edit = edit.then(sue_core::txn::SetProperty::new(
+            id,
+            crate::effects::EXPRESSION,
+            i64::from(convert.expression),
+        ));
+    }
+    if let Some(blend) = convert.blend {
+        edit = edit.then(sue_core::txn::SetProperty::new(
+            id,
+            sue_model::picture::BLEND,
+            blend.name(),
+        ));
+    }
+    Ok((edit, id))
 }
 
 impl SuePaint {
+    /// Converts the layer as Convert Layer asks, as one undo step; with
+    /// Keep original layer, a copy above it is converted and the layer
+    /// stays as it was.
+    pub(super) fn convert_ok(&mut self, cx: &mut AppletContext<'_>, convert: &ConvertDialog) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let arena = &cx.world.arena;
+        let made = if convert.keep {
+            doc::duplicate(arena, picture, convert.layer).map(|(first, copy)| {
+                let landed = Arc::new(Mutex::new(copy));
+                let found = Arc::clone(&landed);
+                let settings = convert.clone();
+                let step = Then {
+                    label: tr!("convert-layer"),
+                    first,
+                    then: Some(move |arena: &Arena| {
+                        let (edit, id) = convert_edit(arena, picture, copy, &settings)?;
+                        if let Ok(mut landed) = found.lock() {
+                            *landed = id;
+                        }
+                        Ok(edit)
+                    }),
+                    second: None,
+                };
+                (Some(step), None, landed)
+            })
+        } else {
+            convert_edit(arena, picture, convert.layer, convert)
+                .map(|(edit, id)| (None, Some(edit), Arc::new(Mutex::new(id))))
+        };
+        let (kept, plain, landed) = match made {
+            Ok(made) => made,
+            Err(error) => {
+                cx.fail(error);
+                return;
+            }
+        };
+        let applied = match (kept, plain) {
+            (Some(step), _) => Self::apply(cx, step),
+            (None, Some(edit)) if !edit.is_empty() => Self::apply(cx, edit),
+            _ => false,
+        };
+        if applied
+            && let Ok(id) = landed.lock()
+            && let Some(doc) = self.doc_mut()
+        {
+            doc.layer = Some(*id);
+        }
+    }
+
+    /// Lays the perspective ruler, on a new layer of its own when asked
+    /// (one undo step).
+    pub(super) fn perspective_ok(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        perspective: PerspectiveDialog,
+    ) {
+        if !perspective.new_layer {
+            self.make_perspective(cx, perspective.count);
+            return;
+        }
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let arena = &cx.world.arena;
+        let Some(size) = arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(sue_model::picture::size)
+        else {
+            return;
+        };
+        let label = tr!("create-perspective-ruler");
+        let (spawn, layer) = match doc::add_raster_layer(
+            arena,
+            picture,
+            self.layer(),
+            tr!("perspective-ruler-layer"),
+            None,
+        ) {
+            Ok(made) => made,
+            Err(error) => {
+                cx.fail(error);
+                return;
+            }
+        };
+        let ruler = crate::rulers::Perspective::new(perspective.count, size);
+        let edit = Edit::new(label.clone())
+            .then(spawn)
+            .then(crate::rulers::edit(
+                picture,
+                crate::rulers::PERSPECTIVE,
+                Some(ruler.to_text()),
+                &label,
+            ));
+        if Self::apply(cx, edit) {
+            self.pick_ruler(1);
+            if let Some(doc) = self.doc_mut() {
+                doc.layer = Some(layer);
+                doc.ruler_on = true;
+                doc.show_rulers = true;
+            }
+        }
+    }
+
     /// Keeps the print settings, and prints when `printing`.
     pub(super) fn print_ok(
         &mut self,
@@ -367,48 +832,6 @@ impl SuePaint {
                 ));
         }
         Self::apply(cx, edit);
-    }
-
-    /// Converts `layer` to raster (0) or vector (1) and names it.
-    pub(super) fn convert_ok(
-        &mut self,
-        cx: &mut AppletContext<'_>,
-        layer: EntityId,
-        kind: u8,
-        name: &str,
-    ) {
-        let Some(picture) = self.picture() else {
-            return;
-        };
-        let arena = &cx.world.arena;
-        let vector = crate::vector::is_vector(arena, layer);
-        let made = match (kind, vector) {
-            (1, false) => crate::doc::vectorize(arena, picture, layer).map(Some),
-            (0, true) => crate::doc::rasterize(arena, picture, layer).map(Some),
-            _ => Ok(None),
-        };
-        match made {
-            Ok(Some((mut edit, id))) => {
-                if !name.trim().is_empty() {
-                    edit = edit.then(sue_core::txn::Rename::new(id, name.trim()));
-                }
-                if Self::apply(cx, edit)
-                    && let Some(doc) = self.doc_mut()
-                {
-                    doc.layer = Some(id);
-                }
-            }
-            Ok(None) => {
-                if !name.trim().is_empty() {
-                    Self::apply(
-                        cx,
-                        crate::doc::Edit::new(tr!("rename-layer"))
-                            .then(sue_core::txn::Rename::new(layer, name.trim())),
-                    );
-                }
-            }
-            Err(error) => cx.fail(error),
-        }
     }
 
     /// Adds a 3D layer with shape `kind`.

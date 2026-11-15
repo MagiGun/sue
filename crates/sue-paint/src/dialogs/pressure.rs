@@ -1,11 +1,12 @@
 //! Pen Pressure Settings: the curve every tool uses, fitted to a hand.
 
-use egui::{RichText, Sense, Ui, vec2};
+use egui::{Sense, Ui};
 use sue_model::Response;
 use sue_rice::{RiceValue, SetRiceValue};
+use sue_wm::ui::{Radius, Space, TextRole, button, checkbox};
 use sue_wm::{AppletContext, Theme, widgets};
 
-use super::Outcome;
+use super::{Outcome, note, tip};
 use crate::studio::SuePaint;
 
 /// The setting that holds the pen pressure curve every tool uses.
@@ -77,80 +78,62 @@ impl PressureDialog {
         points.push([1.0, 1.0]);
         Some(Response::new(&points))
     }
+
+    /// Reset to default: the curve Sue Paint starts with, and the pad
+    /// cleared.
+    pub(crate) fn reset(&mut self) {
+        self.curve = DEFAULT_PEN_PRESSURE.parse().unwrap_or_default();
+        self.raw.clear();
+        self.lines.clear();
+        self.checked = false;
+    }
 }
 
 /// Pen Pressure Settings: the words, the buttons, the pad and the graph.
+/// OK keeps the curve as it stands, tried out or shaped on the graph by
+/// hand; Reset to default sits in the footer.
 pub(super) fn pressure_ui(ui: &mut Ui, pressure: &mut PressureDialog, theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
     let words = if pressure.checked {
         tr!("draw-again-try-adjusted-pressure-stronger")
     } else {
         tr!("draw-freely-pad-pen-while-drawing")
     };
-    ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
-            ui.set_width(330.0);
-            ui.label(RichText::new(words).color(theme.muted));
-        });
-        ui.vertical(|ui| {
-            ui.set_width(ui.available_width());
-            let wide = vec2(ui.available_width(), 22.0);
-            if pressure.checked {
-                ui.horizontal(|ui| {
-                    let half = vec2(wide.x / 2.0 - 4.0, wide.y);
-                    if ui
-                        .add_sized(half, egui::Button::new(tr!("stronger")))
-                        .clicked()
-                    {
-                        pressure.curve = pressure.curve.map_outputs(|y| y.powf(0.8));
-                    }
-                    if ui
-                        .add_sized(half, egui::Button::new(tr!("lighter")))
-                        .clicked()
-                    {
-                        pressure.curve = pressure.curve.map_outputs(|y| y.powf(1.25));
-                    }
-                });
-                if ui.add_sized(wide, egui::Button::new(tr!("done"))).clicked() {
-                    outcome = Outcome::Ok;
-                }
-            } else {
-                let enough = pressure.raw.len() >= PressureDialog::ENOUGH;
-                let check = ui
-                    .add_enabled_ui(enough, |ui| {
-                        ui.add_sized(wide, egui::Button::new(tr!("check-adjusted-settings")))
-                    })
-                    .inner
-                    .on_disabled_hover_text(tr!("draw-few-lines-pen-first"));
-                if check.clicked()
-                    && let Some(curve) = PressureDialog::fit(&pressure.raw)
-                {
-                    pressure.curve = curve;
-                    pressure.checked = true;
-                    pressure.lines.clear();
-                }
+    note(ui, &words, theme);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = theme.space(Space::S4);
+        if pressure.checked {
+            let label = tr!("stronger");
+            let pressed = button("sue-paint-pressure-stronger", &label).show(ui, theme);
+            if tip(pressed, &label, "", theme).clicked() {
+                pressure.curve = pressure.curve.map_outputs(|y| y.powf(0.8));
             }
-            if ui
-                .add_sized(wide, egui::Button::new(tr!("cancel")))
-                .clicked()
-            {
-                outcome = Outcome::Cancel;
+            let label = tr!("lighter");
+            let pressed = button("sue-paint-pressure-lighter", &label).show(ui, theme);
+            if tip(pressed, &label, "", theme).clicked() {
+                pressure.curve = pressure.curve.map_outputs(|y| y.powf(1.25));
             }
-            if ui
-                .add_sized(wide, egui::Button::new(tr!("reset-to-default")))
-                .clicked()
+        } else {
+            let enough = pressure.raw.len() >= PressureDialog::ENOUGH;
+            let label = tr!("check-adjusted-settings");
+            let hint = tr!("draw-few-lines-pen-first");
+            let pressed = button("sue-paint-pressure-check", &label)
+                .enabled(enough)
+                .hint(if enough { "" } else { &hint })
+                .show(ui, theme);
+            if tip(pressed, &label, "", theme).clicked()
+                && let Some(curve) = PressureDialog::fit(&pressure.raw)
             {
-                pressure.curve = DEFAULT_PEN_PRESSURE.parse().unwrap_or_default();
-                pressure.raw.clear();
+                pressure.curve = curve;
+                pressure.checked = true;
                 pressure.lines.clear();
-                pressure.checked = false;
             }
-        });
+        }
     });
-    ui.add_space(6.0);
 
     // The pad: lines as wide as the adjusted pressure makes them.
-    let (pad, response) = ui.allocate_exact_size(vec2(ui.available_width(), 150.0), Sense::drag());
+    let height = theme.space(Space::S9) * 3.75;
+    let (pad, response) =
+        ui.allocate_exact_size(egui::Vec2::new(ui.available_width(), height), Sense::drag());
     let touch = ui.input(|input| {
         input.events.iter().rev().find_map(|event| match event {
             egui::Event::Touch { phase, force, .. } => Some(match phase {
@@ -185,41 +168,52 @@ pub(super) fn pressure_ui(ui: &mut Ui, pressure: &mut PressureDialog, theme: &Th
         }
     }
     let painter = ui.painter_at(pad);
-    painter.rect_filled(pad, 4.0, egui::Color32::from_gray(245));
+    // The pad is a sheet of the theme's lightest surface, inked in its
+    // text color.
+    painter.rect_filled(pad, theme.radius(Radius::Md), theme.surface(0));
+    painter.rect_stroke(
+        pad,
+        theme.radius(Radius::Md),
+        theme.hairline(),
+        egui::StrokeKind::Inside,
+    );
     for line in &pressure.lines {
         for pair in line.windows(2) {
-            let width = 0.6 + 9.0 * pressure.curve.eval(pair[1].1);
+            let width = theme.space(Space::S1) * (0.3 + 4.5 * pressure.curve.eval(pair[1].1));
             painter.line_segment(
                 [pad.min + pair[0].0, pad.min + pair[1].0],
-                egui::Stroke::new(width, egui::Color32::from_gray(20)),
+                egui::Stroke {
+                    width,
+                    color: theme.text,
+                },
             );
         }
     }
     if pressure.lines.iter().any(|line| !line.is_empty()) && pressure.raw.is_empty() {
         painter.text(
-            pad.center_bottom() - vec2(0.0, 8.0),
+            pad.center_bottom() - egui::Vec2::new(0.0, theme.space(Space::S4)),
             egui::Align2::CENTER_BOTTOM,
-            "This pointer reports no pen pressure",
-            egui::FontId::proportional(theme.small_size),
-            egui::Color32::from_gray(110),
+            tr!("pointer-reports-no-pen-pressure"),
+            theme.text_font(TextRole::Caption),
+            theme.text_muted(),
         );
     }
-    ui.add_space(6.0);
-    ui.checkbox(
-        &mut pressure.show_graph,
-        RichText::new(tr!("show-pen-pressure-graph")).color(theme.text),
-    );
+    let label = tr!("show-pen-pressure-graph");
+    let shown = checkbox("sue-paint-pressure-graph", &label, pressure.show_graph).show(ui, theme);
+    if tip(shown, &label, "", theme).clicked() {
+        pressure.show_graph = !pressure.show_graph;
+    }
     if pressure.show_graph {
         widgets::response_curve(
             ui,
             "pen-pressure",
             &mut pressure.curve,
-            150.0,
+            height,
             widgets::CurveLabels::pressure(),
             theme,
         );
     }
-    outcome
+    Outcome::Open
 }
 
 impl SuePaint {

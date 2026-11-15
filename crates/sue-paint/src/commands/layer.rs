@@ -7,7 +7,7 @@ use sue_model::picture::{self, LayerKind};
 use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
 use super::{doc_open, flag, when};
-use crate::dialogs::Dialog;
+use crate::dialogs::{ConvertDialog, Dialog, PerspectiveDialog};
 use crate::doc;
 use crate::filters::Filter;
 use crate::select::{Op, Selection};
@@ -343,7 +343,7 @@ fn show_rulers(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
 
 fn perspective_ruler(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
     if paint.picture().is_some() {
-        paint.dialog = Some(Dialog::Perspective(2));
+        paint.dialog = Some(Dialog::Perspective(PerspectiveDialog::new(2)));
     }
 }
 
@@ -1088,7 +1088,11 @@ fn merge_selected(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
 fn convert(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     if let Some(info) = paint.layer_info(&cx.world.arena) {
         let vector = crate::vector::is_vector(&cx.world.arena, info.id);
-        paint.dialog = Some(Dialog::Convert(info.id, u8::from(!vector), info.name));
+        paint.dialog = Some(Dialog::Convert(ConvertDialog::new(
+            info.id,
+            u8::from(!vector),
+            info.name,
+        )));
     }
 }
 

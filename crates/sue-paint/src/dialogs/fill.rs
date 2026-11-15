@@ -2,10 +2,15 @@
 //! dialogs: Expand, Shrink, Blur Border, Outline Selection and Select
 //! Color Gamut.
 
-use egui::{Rect, RichText, Sense, Ui, vec2};
+use egui::{Color32, Rect, Response, Sense, Ui};
 use sue_wm::Theme;
 
-use super::{Outcome, label, ok_cancel, right_label};
+use sue_wm::ui::{
+    Radius, Space, Tip, checkbox, dropdown, focus_ring, form_grid, number_field, segmented, slider,
+    tooltip,
+};
+
+use super::{Outcome, bare, note, row_height, tip};
 use crate::studio::SuePaint;
 
 /// Edit, Advanced Fill's settings, kept from one use to the next as Clip
@@ -59,9 +64,130 @@ pub(crate) fn target_label(target: crate::fill::Target) -> String {
     }
 }
 
+/// One of Advanced Fill's three color chips: the main color, the sub
+/// color, or see-through (a checker). Returns the chip's response.
+fn color_chip(
+    ui: &mut Ui,
+    color: Option<[u8; 3]>,
+    chosen: bool,
+    name: &str,
+    theme: &Theme,
+) -> Response {
+    let side = row_height(ui);
+    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(side), Sense::click());
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, true, chosen, name));
+    let corner = theme.radius(Radius::Sm);
+    let fill = if chosen {
+        theme.fill_selected()
+    } else if response.hovered() {
+        theme.fill_hover()
+    } else {
+        theme.surface(2)
+    };
+    ui.painter().rect_filled(rect, corner, fill);
+    if chosen {
+        ui.painter().rect_stroke(
+            rect,
+            corner,
+            theme.selected_stroke(),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let chip = rect.shrink(theme.space(Space::S3));
+    let small = theme.radius(Radius::Xs);
+    match color {
+        // The drawing color itself: what will be laid down, not a
+        // styling color.
+        Some([r, g, b]) => {
+            ui.painter()
+                .rect_filled(chip, small, Color32::from_rgb(r, g, b));
+        }
+        None => {
+            // A checker for see-through, in the theme's own two tones.
+            let half = chip.size() / 2.0;
+            for (column, row) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+                let light = column == row;
+                let corner = chip.min + egui::Vec2::new(column * half.x, row * half.y);
+                ui.painter().rect_filled(
+                    Rect::from_min_size(corner, half),
+                    egui::CornerRadius::ZERO,
+                    if light {
+                        theme.surface(0)
+                    } else {
+                        theme.border_strong()
+                    },
+                );
+            }
+        }
+    }
+    ui.painter()
+        .rect_stroke(chip, small, theme.hairline(), egui::StrokeKind::Outside);
+    focus_ring(ui, &response, corner, theme);
+    tip(response, name, "", theme)
+}
+
+/// A dropdown of `options` with its tooltip. Returns whether the choice
+/// changed.
+fn choice(
+    ui: &mut Ui,
+    salt: &str,
+    chosen: &mut usize,
+    options: &[String],
+    name: &str,
+    theme: &Theme,
+) -> bool {
+    let response = dropdown(salt, chosen, options).label(name).show(ui, theme);
+    tip(response, name, "", theme).changed()
+}
+
+/// How a number field reads: its range, its decimals and its unit.
+pub(super) struct Reads<'a> {
+    pub range: std::ops::RangeInclusive<f64>,
+    pub decimals: usize,
+    pub suffix: &'a str,
+}
+
+/// A number field with its tooltip. Returns whether it changed.
+pub(super) fn number(
+    ui: &mut Ui,
+    salt: &str,
+    value: &mut f64,
+    reads: &Reads<'_>,
+    name: &str,
+    theme: &Theme,
+) -> bool {
+    let response = number_field(salt, value)
+        .range(reads.range.clone())
+        .decimals(reads.decimals)
+        .suffix(reads.suffix)
+        .label(name)
+        .show(ui, theme);
+    tip(response, name, "", theme).changed()
+}
+
+/// A checkbox that flips `on` when clicked, with its tooltip (`help`
+/// under its name when not empty). Returns whether it flipped.
+pub(super) fn check(
+    ui: &mut Ui,
+    salt: &str,
+    on: &mut bool,
+    name: &str,
+    help: &str,
+    theme: &Theme,
+) -> bool {
+    let response = checkbox(salt, name, *on).show(ui, theme);
+    let response = tooltip(response, &Tip::new(name).help(help), theme);
+    if response.clicked() {
+        *on = !*on;
+        return true;
+    }
+    false
+}
+
 /// Advanced Fill's dialog, laid out as Clip Studio Paint's: the color and
-/// how it lays down, then what it fills, then what it refers to; OK and
-/// Cancel at the right.
+/// how it lays down, then what it fills, then what it refers to.
+#[allow(clippy::too_many_lines, reason = "the whole Advanced Fill dialog")]
 pub(super) fn advanced_fill_ui(
     ui: &mut Ui,
     fill: &mut AdvancedFill,
@@ -70,245 +196,218 @@ pub(super) fn advanced_fill_ui(
     theme: &Theme,
 ) -> Outcome {
     use crate::fill::Target;
-    let mut outcome = Outcome::Open;
-    let column = 118.0;
-    ui.spacing_mut().item_spacing = vec2(8.0, 7.0);
-    ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
-            ui.set_width(ui.available_width() - 96.0);
-            ui.horizontal(|ui| {
-                right_label(ui, &tr!("drawing-color"), column, theme);
-                for (index, (color, tip)) in [
-                    (Some(main), tr!("main-color")),
-                    (Some(sub), tr!("sub-color")),
-                    (None, tr!("transparent-color")),
-                ]
+    let px = tr!("px");
+    let percent = |decimals| Reads {
+        range: 0.0..=100.0,
+        decimals,
+        suffix: " %",
+    };
+    form_grid(ui, "sue-paint-advanced-fill", theme, |form| {
+        form.row(&tr!("drawing-color"), |ui| {
+            for (index, (color, name)) in [
+                (Some(main), tr!("main-color")),
+                (Some(sub), tr!("sub-color")),
+                (None, tr!("transparent-color")),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let chosen = usize::from(fill.color) == index;
+                if color_chip(ui, color, chosen, &name, theme).clicked() {
+                    fill.color = index as u8;
+                }
+            }
+            let mut rgba = [fill.rgb[0], fill.rgb[1], fill.rgb[2], 255];
+            let pick =
+                sue_wm::color_button(ui, "sue-paint-advanced-fill-color", &mut rgba, false, theme);
+            if pick.changed {
+                fill.rgb = [rgba[0], rgba[1], rgba[2]];
+                fill.color = 3;
+            }
+        });
+        let name = tr!("opacity");
+        form.row(&name, |ui| {
+            let mut opacity = f64::from(fill.opacity);
+            let salt = "sue-paint-advanced-fill-opacity";
+            if number(ui, salt, &mut opacity, &percent(0), &name, theme) {
+                fill.opacity = opacity as f32;
+            }
+        });
+        let name = tr!("blending-mode");
+        form.row(&name, |ui| {
+            let modes: Vec<String> = sue_model::BlendMode::ALL
+                .iter()
+                .map(|mode| sue_lang::translate("model", mode.label()))
+                .collect();
+            let mut chosen = sue_model::BlendMode::ALL
+                .iter()
+                .position(|mode| *mode == fill.blend)
+                .unwrap_or(0);
+            let salt = "sue-paint-advanced-fill-blend";
+            if choice(ui, salt, &mut chosen, &modes, &name, theme) {
+                fill.blend = sue_model::BlendMode::ALL[chosen];
+            }
+        });
+        form.wide(|ui| {
+            let name = tr!("anti-aliasing");
+            let salt = "sue-paint-advanced-fill-aa";
+            check(ui, salt, &mut fill.area.anti_alias, &name, "", theme);
+        });
+        form.section(&tr!("advanced-fill-area"));
+        let name = tr!("target-color");
+        form.row(&name, |ui| {
+            let targets: Vec<Target> = Target::ALL
                 .into_iter()
-                .enumerate()
-                {
-                    let (rect, response) = ui.allocate_exact_size(vec2(24.0, 22.0), Sense::click());
-                    let chosen = usize::from(fill.color) == index;
-                    ui.painter().rect_filled(
-                        rect,
-                        2.0,
-                        if chosen { theme.selection } else { theme.pill },
-                    );
-                    let chip = rect.shrink(5.0);
-                    match color {
-                        Some([r, g, b]) => {
-                            ui.painter()
-                                .rect_filled(chip, 1.0, egui::Color32::from_rgb(r, g, b));
-                        }
-                        None => {
-                            // A checker for see-through.
-                            let half = chip.size() / 2.0;
-                            for (dx, dy, light) in [
-                                (0.0, 0.0, true),
-                                (1.0, 0.0, false),
-                                (0.0, 1.0, false),
-                                (1.0, 1.0, true),
-                            ] {
-                                ui.painter().rect_filled(
-                                    Rect::from_min_size(
-                                        chip.min + vec2(dx * half.x, dy * half.y),
-                                        half,
-                                    ),
-                                    0.0,
-                                    if light {
-                                        egui::Color32::WHITE
-                                    } else {
-                                        egui::Color32::GRAY
-                                    },
-                                );
-                            }
-                        }
-                    }
-                    if response.on_hover_text(tip).clicked() {
-                        fill.color = index as u8;
-                    }
-                }
-                let mut rgba = [fill.rgb[0], fill.rgb[1], fill.rgb[2], 255];
-                let pick = sue_wm::color_button(
-                    ui,
-                    "sue-paint-advanced-fill-color",
-                    &mut rgba,
-                    false,
-                    theme,
-                );
-                if pick.changed {
-                    fill.rgb = [rgba[0], rgba[1], rgba[2]];
-                    fill.color = 3;
-                }
-            });
-            ui.horizontal(|ui| {
-                right_label(ui, &tr!("opacity"), column, theme);
-                ui.add(
-                    egui::DragValue::new(&mut fill.opacity)
-                        .range(0.0..=100.0)
-                        .max_decimals(0),
-                );
-            });
-            ui.horizontal(|ui| {
-                right_label(ui, &tr!("blending-mode"), column, theme);
-                egui::ComboBox::from_id_salt("sue-paint-advanced-fill-blend")
-                    .selected_text(sue_lang::translate("model", fill.blend.label()))
-                    .width(180.0)
-                    .height(360.0)
-                    .show_ui(ui, |ui| {
-                        for mode in sue_model::BlendMode::ALL {
-                            ui.selectable_value(
-                                &mut fill.blend,
-                                mode,
-                                sue_lang::translate("model", mode.label()),
-                            );
-                        }
-                    });
-            });
-            ui.checkbox(&mut fill.area.anti_alias, tr!("anti-aliasing"));
-            ui.separator();
-            ui.horizontal(|ui| {
-                right_label(ui, &tr!("target-color"), column, theme);
-                egui::ComboBox::from_id_salt("sue-paint-advanced-fill-target")
-                    .selected_text(target_label(fill.area.target))
-                    .width(220.0)
-                    .show_ui(ui, |ui| {
-                        for target in Target::ALL
-                            .into_iter()
-                            .filter(|target| target.offered(fill.area.closed))
-                        {
-                            ui.selectable_value(
-                                &mut fill.area.target,
-                                target,
-                                target_label(target),
-                            );
-                        }
-                    });
-            });
-            ui.horizontal(|ui| {
-                right_label(ui, &tr!("tolerance"), column, theme);
-                let mut percent = fill.area.tolerance * 100.0;
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut percent)
-                            .range(0.0..=100.0)
-                            .max_decimals(2),
-                    )
-                    .changed()
-                {
-                    fill.area.tolerance = percent / 100.0;
-                }
-            });
-            ui.horizontal(|ui| {
-                right_label(ui, &tr!("area-scaling"), column, theme);
-                ui.add(
-                    egui::DragValue::new(&mut fill.area.scaling)
-                        .range(-50..=50)
-                        .suffix(tr!("px")),
-                );
-            });
-            ui.horizontal(|ui| {
-                right_label(ui, &tr!("scaling-mode"), column, theme);
-                egui::ComboBox::from_id_salt("sue-paint-advanced-fill-scaling")
-                    .selected_text(if fill.area.round {
-                        tr!("round")
-                    } else {
-                        tr!("rectangle")
-                    })
-                    .width(180.0)
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut fill.area.round, false, tr!("rectangle"));
-                        ui.selectable_value(&mut fill.area.round, true, tr!("round"));
-                    });
-            });
-            if ui
-                .checkbox(&mut fill.area.closed, tr!("fill-closed-area"))
-                .changed()
+                .filter(|target| target.offered(fill.area.closed))
+                .collect();
+            let labels: Vec<String> = targets.iter().map(|target| target_label(*target)).collect();
+            let mut chosen = targets
+                .iter()
+                .position(|target| *target == fill.area.target)
+                .unwrap_or(0);
+            let salt = "sue-paint-advanced-fill-target";
+            if choice(ui, salt, &mut chosen, &labels, &name, theme) {
+                fill.area.target = targets[chosen];
+            }
+        });
+        let name = tr!("tolerance");
+        form.row(&name, |ui| {
+            let mut tolerance = f64::from(fill.area.tolerance) * 100.0;
+            let salt = "sue-paint-advanced-fill-tolerance";
+            if number(ui, salt, &mut tolerance, &percent(2), &name, theme) {
+                fill.area.tolerance = (tolerance / 100.0) as f32;
+            }
+        });
+        let name = tr!("area-scaling");
+        form.row(&name, |ui| {
+            let mut scaling = f64::from(fill.area.scaling);
+            let reads = Reads {
+                range: -50.0..=50.0,
+                decimals: 0,
+                suffix: &px,
+            };
+            let salt = "sue-paint-advanced-fill-scaling";
+            if number(ui, salt, &mut scaling, &reads, &name, theme) {
+                fill.area.scaling = scaling.round() as i32;
+            }
+        });
+        let name = tr!("scaling-mode");
+        form.row(&name, |ui| {
+            let modes = [tr!("rectangle"), tr!("round")];
+            let mut chosen = usize::from(fill.area.round);
+            let salt = "sue-paint-advanced-fill-scaling-mode";
+            if choice(ui, salt, &mut chosen, &modes, &name, theme) {
+                fill.area.round = chosen == 1;
+            }
+        });
+        form.wide(|ui| {
+            let name = tr!("fill-closed-area");
+            let salt = "sue-paint-advanced-fill-closed";
+            if check(ui, salt, &mut fill.area.closed, &name, "", theme)
                 && !fill.area.target.offered(fill.area.closed)
             {
                 fill.area.target = Target::All;
             }
-            ui.add_enabled_ui(fill.area.closed, |ui| {
-                ui.horizontal(|ui| {
-                    right_label(ui, &tr!("close-gap"), column, theme);
-                    ui.add(
-                        egui::DragValue::new(&mut fill.area.gap)
-                            .range(0..=50)
-                            .suffix(tr!("px")),
-                    );
-                });
-            });
-            ui.separator();
-            ui.checkbox(&mut fill.refer_all, tr!("refer-multiple"))
-                .on_hover_text(tr!("refer-multiple-hint"));
-            ui.checkbox(&mut fill.area.border, tr!("refer-to-image-border"));
         });
-        ui.vertical(|ui| {
-            if ui
-                .add(
-                    egui::Button::new(
-                        RichText::new(tr!("ok"))
-                            .strong()
-                            .color(theme.selection_text),
-                    )
-                    .fill(theme.selection)
-                    .min_size(vec2(80.0, 24.0)),
-                )
-                .clicked()
-            {
-                outcome = Outcome::Ok;
-            }
-            if ui
-                .add(egui::Button::new(tr!("cancel")).min_size(vec2(80.0, 24.0)))
-                .clicked()
-            {
-                outcome = Outcome::Cancel;
-            }
+        let name = tr!("close-gap");
+        form.row(&name, |ui| {
+            ui.add_enabled_ui(fill.area.closed, |ui| {
+                let mut gap = f64::from(fill.area.gap);
+                let reads = Reads {
+                    range: 0.0..=50.0,
+                    decimals: 0,
+                    suffix: &px,
+                };
+                if number(
+                    ui,
+                    "sue-paint-advanced-fill-gap",
+                    &mut gap,
+                    &reads,
+                    &name,
+                    theme,
+                ) {
+                    fill.area.gap = gap.round() as u32;
+                }
+            });
+        });
+        form.section(&tr!("advanced-fill-refer"));
+        form.wide(|ui| {
+            let (name, help) = (tr!("refer-multiple"), tr!("refer-multiple-hint"));
+            let salt = "sue-paint-advanced-fill-refer";
+            check(ui, salt, &mut fill.refer_all, &name, &help, theme);
+        });
+        form.wide(|ui| {
+            let name = tr!("refer-to-image-border");
+            let salt = "sue-paint-advanced-fill-border";
+            check(ui, salt, &mut fill.area.border, &name, "", theme);
         });
     });
-    outcome
+    Outcome::Open
 }
 
 /// Expand, Shrink or Blur the border of the selection, or Outline
-/// Selection: by how many pixels.
+/// Selection: by how many pixels and, for Expand, with round or square
+/// corners.
 pub(super) fn select_by_ui(ui: &mut Ui, kind: &mut u8, amount: &mut f32, theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
-    ui.horizontal(|ui| {
-        label(
-            ui,
-            &if *kind == 2 {
-                tr!("blur-width")
-            } else {
-                tr!("width")
-            },
-            theme,
-        );
-        ui.add(egui::Slider::new(amount, 1.0..=100.0).suffix(tr!("px")));
+    let px = tr!("px");
+    form_grid(ui, "sue-paint-select-by", theme, |form| {
+        let name = if *kind == 2 {
+            bare(tr!("blur-width"))
+        } else {
+            bare(tr!("width"))
+        };
+        form.row(&name, |ui| {
+            let mut width = f64::from(*amount);
+            let response = slider("sue-paint-select-by-width", &mut width, 1.0..=100.0)
+                .name(&name)
+                .suffix(&px)
+                .show(ui, theme);
+            if response.changed() {
+                *amount = width as f32;
+            }
+            tip(response, &name, "", theme);
+        });
+        if matches!(*kind, 0 | 4) {
+            let name = tr!("expansion-type");
+            form.row(&name, |ui| {
+                let types = [tr!("expansion-round"), tr!("expansion-square")];
+                let chosen = usize::from(*kind == 4);
+                let strip =
+                    segmented("sue-paint-select-by-type", &types, Some(chosen)).show(ui, theme);
+                tip(strip.response, &name, "", theme);
+                match strip.picked {
+                    Some(0) => *kind = 0,
+                    Some(1) => *kind = 4,
+                    _ => {}
+                }
+            });
+        }
     });
-    ok_cancel(ui, &mut outcome);
-    outcome
+    Outcome::Open
 }
 
 /// Select Color Gamut: the tolerance and whether it looks at every layer.
 pub(super) fn gamut_ui(ui: &mut Ui, tolerance: &mut f32, all: &mut bool, theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
-    ui.label(
-        RichText::new(tr!("selects-colors-near-drawing-color"))
-            .size(theme.small_size)
-            .color(theme.muted),
-    );
-    ui.horizontal(|ui| {
-        label(ui, &tr!("color-margin"), theme);
-        let mut percent = *tolerance * 100.0;
-        if ui
-            .add(egui::Slider::new(&mut percent, 0.0..=100.0).suffix(" %"))
-            .changed()
-        {
-            *tolerance = percent / 100.0;
-        }
+    note(ui, &tr!("selects-colors-near-drawing-color"), theme);
+    form_grid(ui, "sue-paint-gamut", theme, |form| {
+        let name = bare(tr!("color-margin"));
+        form.row(&name, |ui| {
+            let mut percent = f64::from(*tolerance) * 100.0;
+            let response = slider("sue-paint-gamut-margin", &mut percent, 0.0..=100.0)
+                .name(&name)
+                .suffix(" %")
+                .show(ui, theme);
+            if response.changed() {
+                *tolerance = (percent / 100.0) as f32;
+            }
+            tip(response, &name, "", theme);
+        });
+        form.wide(|ui| {
+            let name = tr!("refer-to-all-layers");
+            check(ui, "sue-paint-gamut-all", all, &name, "", theme);
+        });
     });
-    ui.checkbox(all, tr!("refer-to-all-layers"));
-    ok_cancel(ui, &mut outcome);
-    outcome
+    Outcome::Open
 }
 
 impl SuePaint {
@@ -319,6 +418,7 @@ impl SuePaint {
         {
             let changed = match kind {
                 0 => selection.expanded(amount),
+                4 => selection.expanded_square(amount),
                 1 => selection.shrunk(amount),
                 _ => selection.blurred(amount),
             };
