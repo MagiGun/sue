@@ -9,6 +9,7 @@ use sue_wm::AppletId;
 
 mod hub;
 mod menus;
+mod paint_3d;
 mod paint_anim;
 mod paint_basics;
 mod paint_brush;

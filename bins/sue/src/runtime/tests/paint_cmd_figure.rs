@@ -117,6 +117,13 @@ fn sue_paint_runs_every_figure_command() {
             "figure.flip",
             "figure.reset",
             "figure.preset.",
+            "figure.object.ground",
+            "figure.object.reset_position",
+            "figure.object.reset_angle",
+            "figure.object.reset_scale",
+            "figure.object.angle.",
+            "figure.body.initialize",
+            "figure.body.register",
         ]
     );
 
@@ -129,6 +136,13 @@ fn sue_paint_runs_every_figure_command() {
         "figure.flip",
         "figure.reset",
         "figure.preset.1",
+        "figure.object.ground",
+        "figure.object.reset_position",
+        "figure.object.reset_angle",
+        "figure.object.reset_scale",
+        "figure.object.angle.1",
+        "figure.body.initialize",
+        "figure.body.register",
     ] {
         does_nothing(&mut paint, command);
     }
@@ -167,6 +181,55 @@ fn sue_paint_runs_every_figure_command() {
     let kept = materials.join("poses").join("Figure pose 1.pose");
     let text = std::fs::read_to_string(&kept).expect("the pose is kept");
     assert!(text.starts_with("body\n"), "{text}");
+
+    // The object's angles, resets and Put on the ground: each one step.
+    for index in 1..sue_paint::three::ANGLES.len() {
+        undo_pair(&mut paint, &format!("figure.object.angle.{index}"));
+    }
+    does_nothing(&mut paint, "figure.object.angle.99");
+    let layer = {
+        let arena = &paint.runtime.engine.world.arena;
+        sue_paint::doc::layers(arena, picture(&paint))
+            .into_iter()
+            .rev()
+            .find(|info| sue_paint::figure::of_layer(arena, info.id).is_some())
+            .map(|info| info.id)
+            .unwrap()
+    };
+    let model = |paint: &PaintDriver| {
+        let arena = &paint.runtime.engine.world.arena;
+        arena
+            .get_by_id(sue_paint::figure::of_layer(arena, layer).unwrap())
+            .unwrap()
+            .clone()
+    };
+    let placed = |paint: &PaintDriver| sue_paint::three::Placement::of(&model(paint));
+    let low =
+        |paint: &PaintDriver| sue_paint::three::lowest(&model(paint), &placed(paint)).unwrap();
+    // Lying face down reaches below the ground; Put on the ground lifts
+    // it, and a second time finds nothing to do.
+    assert!(low(&paint) < -0.1, "lying down, below the ground");
+    undo_pair(&mut paint, "figure.object.ground");
+    assert!(low(&paint).abs() < 1e-3, "on the ground: {}", low(&paint));
+    keeps_the_document(&mut paint, "figure.object.ground");
+    undo_pair(&mut paint, "figure.object.reset_angle");
+    assert_eq!(placed(&paint).turn, [0.0; 3]);
+    undo_pair(&mut paint, "figure.object.reset_position");
+    assert_eq!(placed(&paint).position, [0.0; 3]);
+    keeps_the_document(&mut paint, "figure.object.reset_scale");
+
+    // A body shape kept as a material comes back onto the figure; a body
+    // as made has nothing to initialize.
+    keeps_the_document(&mut paint, "figure.body.initialize");
+    keeps_the_document(&mut paint, "figure.body.register");
+    let shape = materials.join("bodies").join("Body shape 1.body");
+    let text = std::fs::read_to_string(&shape).expect("the body shape is kept");
+    assert!(text.contains("build=male"), "{text}");
+    std::fs::write(&shape, text.replace("build=male", "build=female")).unwrap();
+    undo_pair(&mut paint, "edit.material.paste");
+    let body = sue_paint::figure::Body::of(&model(&paint));
+    assert_eq!(body.build, sue_paint::figure::Build::Female);
+    undo_pair(&mut paint, "figure.body.initialize");
 
     // A 3D hand: its own presets, and the Hand Scanner but not the Pose
     // Scanner.

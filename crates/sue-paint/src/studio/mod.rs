@@ -652,10 +652,19 @@ pub struct SuePaint {
     pub(crate) pose_before: Option<(EntityId, crate::figure::Pose, Vec<u8>)>,
     pub(crate) pending_pose: Option<(EntityId, crate::figure::Pose)>,
     pub(crate) pose_release: bool,
-    /// A figure's body shape being dragged in Tool Property, and the one let
-    /// go of this frame, to keep.
-    pub(crate) body_drag: Option<(EntityId, crate::figure::Body)>,
+    /// A figure's body shape let go of this frame, to keep (Tool Property
+    /// now shapes figures live through `pending_shape`).
     pub(crate) pending_body: Option<(EntityId, crate::figure::Body)>,
+    /// A 3D layer and its model as they were before a drag of Tool
+    /// Property or the canvas changed them in place, to record the drag
+    /// as one step when it is let go.
+    pub(crate) three_draft: Option<crate::studio::three::Draft3d>,
+    /// The object placement and the body shape Tool Property asked for
+    /// this frame, shown at once and kept when let go.
+    pub(crate) pending_place: Option<(EntityId, crate::three::Placement)>,
+    pub(crate) pending_shape: Option<(EntityId, crate::figure::Body)>,
+    /// The body part the body shape chart shapes (0 the full body).
+    pub(crate) figure_part: usize,
     /// A camera being set up and not keyed yet: its folder, the frame and
     /// where it stands.
     pub(crate) camera_pending: Option<(EntityId, u32, crate::camera::Camera)>,
@@ -953,8 +962,11 @@ impl Default for SuePaint {
             pose_before: None,
             pending_pose: None,
             pose_release: false,
-            body_drag: None,
             pending_body: None,
+            three_draft: None,
+            pending_place: None,
+            pending_shape: None,
+            figure_part: 0,
             view3d_release: false,
             material_kind: 0,
             material_pick: None,

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use sue_core::txn::SetProperty;
+use sue_core::txn::{ReplaceComponent, SetProperty};
 use sue_core::{EntityId, Value};
 use sue_model::picture;
 use sue_wm::AppletContext;
@@ -50,15 +50,7 @@ impl SuePaint {
         match crate::materials::register_pose(&folder, &name, body.kind, &pose) {
             Ok(_) => {
                 cx.notify(tr!("is-in-the-material-palette", name = name));
-                self.panels.color_set = true;
-                self.set_tab = 2;
-                self.material_kind = self
-                    .material_kinds
-                    .iter()
-                    .position(|kind| kind.id == crate::materials::POSE)
-                    .map_or(0, |index| index as u8 + 1);
-                self.hub.materials_changed();
-                self.material_pick = Some(name);
+                self.show_material(crate::materials::POSE, name);
             }
             Err(error) => cx.fail(error),
         }
@@ -71,6 +63,10 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         material: &crate::materials::Material,
     ) {
+        if material.kind == crate::materials::BODY {
+            self.apply_body_material(cx, material);
+            return;
+        }
         let Some((kind, pose)) = crate::materials::pose_of(material) else {
             cx.fail(tr!("cannot-read-the-material", name = material.name));
             return;
@@ -91,6 +87,83 @@ impl SuePaint {
         let model = crate::figure::new_of(&material.name, kind)
             .with_property(crate::figure::POSE, Value::from(pose.to_text()));
         self.add_3d_layer(cx, &material.name, model);
+    }
+
+    /// Shapes the current drawing figure as body shape material
+    /// `material`, as one step, else makes a new figure of that shape.
+    fn apply_body_material(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        material: &crate::materials::Material,
+    ) {
+        let Some(shaped) = crate::materials::body_of(material) else {
+            cx.fail(tr!("cannot-read-the-material", name = material.name));
+            return;
+        };
+        let current = self.layer().filter(|layer| {
+            crate::figure::of_layer(&cx.world.arena, *layer)
+                .and_then(|model| cx.world.arena.get_by_id(model).ok())
+                .is_some_and(|model| {
+                    crate::figure::Body::of(model).kind == crate::figure::Kind::Body
+                })
+        });
+        if current.is_some() {
+            self.shape_figure(cx, &material.name, |now| {
+                now.with_shape_text(&shaped.shape_text())
+            });
+            return;
+        }
+        let model = crate::figure::new_model(&material.name);
+        let model = body_values(&shaped)
+            .into_iter()
+            .fold(model, |model, (key, value)| model.with_property(key, value));
+        self.add_3d_layer(cx, &material.name, model);
+    }
+
+    /// Keeps the body shape of the figure on the current 3D layer as a body
+    /// shape material, to use again (Clip Studio Paint's Register body
+    /// shape as material).
+    pub(crate) fn register_body_shape(&mut self, cx: &mut AppletContext<'_>) {
+        let (Some(folder), Some(layer)) = (crate::materials::location(cx), self.layer()) else {
+            return;
+        };
+        let Some(body) = crate::figure::of_layer(&cx.world.arena, layer)
+            .and_then(|model| cx.world.arena.get_by_id(model).ok())
+            .map(crate::figure::Body::of)
+            .filter(|body| body.kind == crate::figure::Kind::Body)
+        else {
+            cx.notify(tr!("pick-a-drawing-figure-layer"));
+            return;
+        };
+        let taken: Vec<String> = crate::materials::library(Some(&folder))
+            .into_iter()
+            .filter(|material| material.kind == crate::materials::BODY)
+            .map(|material| material.name)
+            .collect();
+        let name = (1..)
+            .map(|number| tr!("body-shape-material-name", number = number))
+            .find(|name| !taken.contains(name))
+            .unwrap_or_default();
+        match crate::materials::register_body(&folder, &name, &body) {
+            Ok(_) => {
+                cx.notify(tr!("is-in-the-material-palette", name = name));
+                self.show_material(crate::materials::BODY, name);
+            }
+            Err(error) => cx.fail(error),
+        }
+    }
+
+    /// Opens the Material palette on kind `kind` with `name` picked.
+    fn show_material(&mut self, kind: &str, name: String) {
+        self.panels.color_set = true;
+        self.set_tab = 2;
+        self.material_kind = self
+            .material_kinds
+            .iter()
+            .position(|known| known.id == kind)
+            .map_or(0, |index| index as u8 + 1);
+        self.hub.materials_changed();
+        self.material_pick = Some(name);
     }
 
     /// Adds a 3D layer showing `model` (a new model entity) above the
@@ -141,8 +214,10 @@ impl SuePaint {
         }
     }
 
-    /// Shows 3D layer `layer` as `view` sees it, in place (while it is being
-    /// changed; [`Self::finish_view3d`] records it).
+    /// Shows 3D layer `layer` as `view` sees it, in place, with the object
+    /// placement and body shape Tool Property asked for this frame (while
+    /// it is being changed; [`Self::finish_view3d`] records it). The first
+    /// change of a drag keeps the layer and its model as they were.
     pub(crate) fn preview_view3d(
         &mut self,
         cx: &mut AppletContext<'_>,
@@ -153,38 +228,81 @@ impl SuePaint {
             return;
         };
         let size = [raster.width(), raster.height()];
+        self.begin_draft(&cx.world.arena, layer);
+        let model = crate::three::model_of(&cx.world.arena, layer);
+        let place = self.pending_place.take().filter(|(id, _)| *id == layer);
+        let shape = self.pending_shape.take().filter(|(id, _)| *id == layer);
+        if let Some(model) = model
+            && let Ok(entity) = cx.world.arena.get_by_id_mut(model)
+        {
+            let properties = entity.properties_mut();
+            if let Some((_, place)) = place {
+                for (key, value) in place.values() {
+                    properties.set(key, value);
+                }
+            }
+            if let Some((_, body)) = shape {
+                for (key, value) in body_values(&body) {
+                    properties.set(key, value);
+                }
+            }
+        }
+        if let Ok(entity) = cx.world.arena.get_by_id_mut(layer) {
+            let properties = entity.properties_mut();
+            for (key, value) in view.values() {
+                properties.set(key, value);
+            }
+        }
+        if let Some(draft) = self.three_draft.as_mut() {
+            draft.shown = shown_now(&cx.world.arena, layer, draft.model);
+        }
         let Some(drawn) = crate::three::buffers_of(&cx.world.arena, layer, view, size)
             .and_then(|buffers| crate::three::draw(&buffers, view))
         else {
             return;
         };
-        if let Ok(entity) = cx.world.arena.get_by_id_mut(layer) {
-            let properties = entity.properties_mut();
-            for (key, value) in [
-                (crate::three::YAW, f64::from(view.yaw)),
-                (crate::three::PITCH, f64::from(view.pitch)),
-                (crate::three::DISTANCE, f64::from(view.distance)),
-                (crate::three::FOV, f64::from(view.fov)),
-                (crate::three::LIGHT, f64::from(view.light)),
-                (crate::three::LINE_WIDTH, f64::from(view.line_width)),
-                (crate::three::CREASE, f64::from(view.crease)),
-                (crate::three::PAN_X, f64::from(view.pan[0])),
-                (crate::three::PAN_Y, f64::from(view.pan[1])),
-            ] {
-                properties.set(key, value);
-            }
-            properties.set(crate::three::STYLE, i64::from(view.style));
-        }
         if let (Some(into), Some(from)) = (
             doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut),
             drawn.bytes(),
-        ) {
+        ) && into.len() == from.len()
+        {
             into.copy_from_slice(from);
         }
         if let Some(doc) = self.doc_mut() {
             doc.compositor
                 .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
         }
+    }
+
+    /// Keeps 3D layer `layer` and its model as they are now, before a drag
+    /// changes them in place, unless a drag of the same layer already did.
+    ///
+    /// A draft left by a drag that never ended (a gesture taken away, a
+    /// second finger) is dropped when anything has changed the layer or
+    /// its model since that drag last showed them (an undo, a command),
+    /// so a drag never records against a state that is gone.
+    fn begin_draft(&mut self, arena: &sue_core::Arena, layer: EntityId) {
+        let model = crate::three::model_of(arena, layer);
+        if self.three_draft.as_ref().is_some_and(|draft| {
+            draft.layer == layer
+                && draft.model == model
+                && draft.shown == shown_now(arena, layer, model)
+        }) {
+            return;
+        }
+        self.three_draft = Some(Draft3d {
+            layer,
+            model,
+            layer_props: snapshot(arena, layer, &view_keys()),
+            model_props: model
+                .map(|model| snapshot(arena, model, &MODEL_KEYS))
+                .unwrap_or_default(),
+            pixels: doc::raster(arena, layer)
+                .and_then(|raster| raster.bytes())
+                .map(<[u8]>::to_vec)
+                .unwrap_or_default(),
+            shown: shown_now(arena, layer, model),
+        });
     }
 
     /// Shows the drawing figure of 3D layer `layer` posed as `pose`, in
@@ -273,9 +391,90 @@ impl SuePaint {
         }
     }
 
-    /// Records a 3D layer's view change as one step: back to `base` and
-    /// `before` (its pixels), then the change.
+    /// Records a drag of a 3D layer's camera, its object's placement or a
+    /// figure's body shape as one step: everything back as it was before
+    /// the drag (exactly, properties it did not have included), then the
+    /// properties that changed and the layer drawn anew. `base` and
+    /// `before` are the view and pixels the drag began from, used when no
+    /// draft was kept.
     pub(crate) fn finish_view3d(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        layer: EntityId,
+        base: crate::three::View3D,
+        before: &[u8],
+    ) {
+        let Some(draft) = self.three_draft.take().filter(|draft| draft.layer == layer) else {
+            self.finish_view3d_plain(cx, layer, base, before);
+            return;
+        };
+        let arena = &cx.world.arena;
+        let Some(raster) = doc::raster(arena, layer) else {
+            return;
+        };
+        let size = [raster.width(), raster.height()];
+        let Some(view) = arena.get_by_id(layer).ok().map(crate::three::View3D::of) else {
+            return;
+        };
+        let drawn = crate::three::buffers_of(arena, layer, &view, size)
+            .and_then(|buffers| crate::three::draw(&buffers, &view));
+        let layer_now = snapshot(arena, layer, &view_keys());
+        let model_now = draft
+            .model
+            .map(|model| snapshot(arena, model, &MODEL_KEYS))
+            .unwrap_or_default();
+        let changed = |was: &[(&'static str, Option<Value>)],
+                       now: Vec<(&'static str, Option<Value>)>| {
+            now.into_iter()
+                .zip(was.iter())
+                .filter(|((_, now), (_, was))| now != was)
+                .filter_map(|((key, now), _)| now.map(|now| (key, now)))
+                .collect::<Vec<_>>()
+        };
+        let layer_changed = changed(&draft.layer_props, layer_now);
+        let model_changed = changed(&draft.model_props, model_now);
+        // Back as it was.
+        restore(&mut cx.world.arena, layer, &draft.layer_props);
+        if let Some(model) = draft.model {
+            restore(&mut cx.world.arena, model, &draft.model_props);
+        }
+        if let Some(into) =
+            doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut)
+            && into.len() == draft.pixels.len()
+        {
+            into.copy_from_slice(&draft.pixels);
+        }
+        if let Some(doc) = self.doc_mut() {
+            doc.compositor
+                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+        let (Some(drawn), false) = (drawn, layer_changed.is_empty() && model_changed.is_empty())
+        else {
+            return;
+        };
+        let shaped = model_changed.iter().any(|(key, _)| BODY_KEYS.contains(key));
+        let label = if shaped {
+            tr!("body-shape")
+        } else if model_changed.is_empty() {
+            tr!("move-camera")
+        } else {
+            tr!("place-object")
+        };
+        let mut edit = doc::Edit::new(&label);
+        for (key, value) in layer_changed {
+            edit = edit.then(SetProperty::new(layer, key, value));
+        }
+        if let Some(model) = draft.model {
+            for (key, value) in model_changed {
+                edit = edit.then(SetProperty::new(model, key, value));
+            }
+        }
+        Self::apply(cx, edit.then(ReplaceComponent::new(layer, drawn, &label)));
+    }
+
+    /// [`Self::finish_view3d`] without a draft: back to `base` and
+    /// `before`, then the view now as one step.
+    fn finish_view3d_plain(
         &mut self,
         cx: &mut AppletContext<'_>,
         layer: EntityId,
@@ -294,7 +493,12 @@ impl SuePaint {
         if now == base {
             return;
         }
-        self.preview_view3d(cx, layer, &base);
+        if let Ok(entity) = cx.world.arena.get_by_id_mut(layer) {
+            let properties = entity.properties_mut();
+            for (key, value) in base.values() {
+                properties.set(key, value);
+            }
+        }
         if let Some(into) =
             doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut)
             && into.len() == before.len()
@@ -304,6 +508,76 @@ impl SuePaint {
         if let Some(edit) =
             crate::three::set_view(&cx.world.arena, layer, &now, &tr!("move-camera"))
         {
+            Self::apply(cx, edit);
+        }
+    }
+
+    /// The current layer when it is a 3D layer, and the model it shows.
+    pub(crate) fn object_3d(&self, arena: &sue_core::Arena) -> Option<(EntityId, EntityId)> {
+        let layer = self
+            .layer()
+            .filter(|layer| crate::three::is_3d(arena, *layer))?;
+        Some((layer, crate::three::model_of(arena, layer)?))
+    }
+
+    /// Places the object of the current 3D layer as `next` says, given its
+    /// placement now and its model, as one step named `label`. `None`
+    /// leaves it.
+    pub(crate) fn place_object(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        label: &str,
+        next: impl FnOnce(crate::three::Placement, &sue_core::Entity) -> Option<crate::three::Placement>,
+    ) {
+        let Some((layer, model)) = self.object_3d(&cx.world.arena) else {
+            cx.notify(tr!("pick-a-3d-layer"));
+            return;
+        };
+        let Ok(entity) = cx.world.arena.get_by_id(model) else {
+            return;
+        };
+        let now = crate::three::Placement::of(entity);
+        let Some(next) = next(now, entity).filter(|next| *next != now) else {
+            return;
+        };
+        if let Some(edit) = crate::three::set_placement(&cx.world.arena, layer, &next, label) {
+            Self::apply(cx, edit);
+        }
+    }
+
+    /// Put on the ground: the object lifted or lowered so its lowest point
+    /// touches the ground, as one step.
+    pub(crate) fn ground_object(&mut self, cx: &mut AppletContext<'_>) {
+        self.place_object(cx, &tr!("put-on-ground"), |place, model| {
+            let low = crate::three::lowest(model, &place)?;
+            let mut grounded = place;
+            grounded.position[1] -= low;
+            Some(grounded)
+        });
+    }
+
+    /// Shapes the drawing figure of the current layer as `next` says,
+    /// given its body now, as one step named `label`.
+    pub(crate) fn shape_figure(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        label: &str,
+        next: impl FnOnce(crate::figure::Body) -> Option<crate::figure::Body>,
+    ) {
+        let Some(layer) = self.layer() else {
+            return;
+        };
+        let Some(model) = crate::figure::of_layer(&cx.world.arena, layer)
+            .and_then(|model| cx.world.arena.get_by_id(model).ok())
+        else {
+            cx.notify(tr!("pick-a-drawing-figure-layer"));
+            return;
+        };
+        let now = crate::figure::Body::of(model);
+        let Some(next) = next(now).filter(|next| *next != now) else {
+            return;
+        };
+        if let Some(edit) = crate::figure::set_body(&cx.world.arena, layer, &next, label) {
             Self::apply(cx, edit);
         }
     }
@@ -501,6 +775,119 @@ impl SuePaint {
             && let Some(doc) = self.doc_mut()
         {
             doc.layer = Some(ids[1]);
+        }
+    }
+}
+
+/// A 3D layer and its model as they were before a drag changed them in
+/// place: the properties a drag may change (`None` where one was not
+/// set) and the layer's pixels.
+#[derive(Clone, Debug)]
+pub(crate) struct Draft3d {
+    layer: EntityId,
+    model: Option<EntityId>,
+    layer_props: Vec<(&'static str, Option<Value>)>,
+    model_props: Vec<(&'static str, Option<Value>)>,
+    pixels: Vec<u8>,
+    /// The properties as the drag last showed them, to tell a draft whose
+    /// drag never ended from one still going.
+    shown: Shown,
+}
+
+/// A 3D layer's view properties and its model's, as [`snapshot`] reads
+/// them.
+type Shown = (
+    Vec<(&'static str, Option<Value>)>,
+    Vec<(&'static str, Option<Value>)>,
+);
+
+/// What [`Draft3d::shown`] compares: layer `layer` and model `model` now.
+fn shown_now(arena: &sue_core::Arena, layer: EntityId, model: Option<EntityId>) -> Shown {
+    (
+        snapshot(arena, layer, &view_keys()),
+        model
+            .map(|model| snapshot(arena, model, &MODEL_KEYS))
+            .unwrap_or_default(),
+    )
+}
+
+/// The properties of a figure's body shape.
+const BODY_KEYS: [&str; 5] = [
+    crate::figure::HEIGHT,
+    crate::figure::HEADS,
+    crate::figure::BUILD,
+    crate::figure::SHAPE,
+    crate::figure::FOLLOW,
+];
+
+/// The properties of a 3D layer's model a drag may change: its placement
+/// and a figure's body shape.
+const MODEL_KEYS: [&str; 12] = [
+    crate::three::OBJECT_X,
+    crate::three::OBJECT_Y,
+    crate::three::OBJECT_Z,
+    crate::three::OBJECT_YAW,
+    crate::three::OBJECT_PITCH,
+    crate::three::OBJECT_ROLL,
+    crate::three::OBJECT_SCALE,
+    crate::figure::HEIGHT,
+    crate::figure::HEADS,
+    crate::figure::BUILD,
+    crate::figure::SHAPE,
+    crate::figure::FOLLOW,
+];
+
+/// The properties of a 3D layer's view.
+fn view_keys() -> Vec<&'static str> {
+    crate::three::View3D::default()
+        .values()
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect()
+}
+
+/// A body shape as the properties of its model.
+fn body_values(body: &crate::figure::Body) -> [(&'static str, Value); 5] {
+    [
+        (crate::figure::HEIGHT, Value::from(f64::from(body.height))),
+        (crate::figure::HEADS, Value::from(f64::from(body.heads))),
+        (crate::figure::BUILD, Value::from(body.build.key())),
+        (crate::figure::SHAPE, Value::from(body.shape.to_text())),
+        (crate::figure::FOLLOW, Value::from(body.follow)),
+    ]
+}
+
+/// The values of `keys` on entity `id` now.
+fn snapshot(
+    arena: &sue_core::Arena,
+    id: EntityId,
+    keys: &[&'static str],
+) -> Vec<(&'static str, Option<Value>)> {
+    let entity = arena.get_by_id(id).ok();
+    keys.iter()
+        .map(|key| {
+            (
+                *key,
+                entity.and_then(|entity| entity.property(key)).cloned(),
+            )
+        })
+        .collect()
+}
+
+/// Puts the values `props` back on entity `id`, taking away those it did
+/// not have.
+fn restore(arena: &mut sue_core::Arena, id: EntityId, props: &[(&'static str, Option<Value>)]) {
+    if let Ok(entity) = arena.get_by_id_mut(id) {
+        let properties = entity.properties_mut();
+        for (key, value) in props {
+            match value {
+                Some(value) => {
+                    properties.set(*key, value.clone());
+                }
+                None => {
+                    properties.remove(key);
+                }
+            }
         }
     }
 }

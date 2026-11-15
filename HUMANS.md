@@ -867,6 +867,20 @@ Once a canvas is open:
   ratio. Convert to Lines and Tones makes line art from
   the pose to draw over; Convert to Vector Lines and Tones makes those
   lines strokes you can reshape with the vector tools.
+- **3D Tool Property:** with the Object tool on a 3D layer, Tool
+  Property is in sections. **3D object**: drag its buttons to move the
+  object, turn it, or slide it along the ground (or focus one and use
+  the arrow keys); pick an angle such as Facing back or Lying face up;
+  set its turns, position and Object scale; **Put on the ground**, and
+  reset its angle, position or scale. **Camera**: drag buttons turn,
+  move and bring the camera nearer, beside the view presets and
+  sliders, and **Manga Perspective** makes what comes toward you
+  larger. A drawing figure adds **Body shape**: Male or Female, Height,
+  Head to body ratio (with **Adjust head to body ratio with height**),
+  a body part and the **body shape chart** (thin to fat across, less to
+  more muscle up), **Initialize**, and **Register body shape**, which
+  keeps it in the Material palette's Body shapes. Every drag is one
+  step to undo.
 - **3D hands and heads:** Layer, New Layer, **3D Hand** and **3D Head**
   pose the same way: drag a finger joint to curl it, or the neck or jaw
   to turn, tilt or open the mouth. Their presets include a fist,
