@@ -20,8 +20,10 @@ use view::{SCROLLBAR, scrollbar};
 pub(crate) mod engine;
 mod fill;
 mod input;
+pub(crate) mod marks;
 mod overlays;
 mod pick;
+pub(crate) mod puppet;
 mod shape;
 mod status;
 mod tools;
@@ -98,6 +100,7 @@ impl SuePaint {
         self.selection_launcher(ui, viewport, size, cx, theme);
         self.text_launcher(ui, viewport, size, cx, theme);
         self.object_launcher(ui, viewport, size, cx, theme);
+        self.light_table_launcher(ui, viewport, size, cx, theme);
         if self.ruler_bar {
             self.ruler_bars(ui, viewport, size, theme);
         }
