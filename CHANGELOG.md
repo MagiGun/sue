@@ -141,7 +141,8 @@ follow [Semantic Versioning](https://semver.org/).
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
   the update. It now takes the theme as it ships; colors you picked
-  yourself stay.
+  yourself stay. Sue Paint's Custom colors also start from today's Gray,
+  with its readable secondary text.
 - Recording a shortcut in Settings over Sue Paint no longer also runs the
   key in Sue Paint (recording R picked the Rotate tool).
 - Instant transitions and Animation speed (Settings, Motion) now reach
