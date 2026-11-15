@@ -544,6 +544,31 @@ fn every_menu_item_shows_the_chord_that_runs_it() {
         checked += 1;
     }
     assert!(checked > 45, "{checked} chords pressed");
+    // And the other way: no item hides a key that runs it.
+    fn all(items: &[MenuItem], out: &mut Vec<String>) {
+        for item in items {
+            match item {
+                MenuItem::Action { command, .. } => out.push(command.clone()),
+                MenuItem::Sub { items, .. } => all(items, out),
+                MenuItem::Separator => {}
+            }
+        }
+    }
+    let mut every = Vec::new();
+    for menu in &menus {
+        all(&menu.items, &mut every);
+    }
+    for command in every {
+        let keyed = table
+            .iter()
+            .any(|row| row.command == command && !row.chords.is_empty());
+        if keyed {
+            assert!(
+                items.iter().any(|(name, _)| *name == command),
+                "{command} has a key the menu does not show"
+            );
+        }
+    }
     // The defects the menus had: Delete Outside Selection showed
     // Shift+Del, which filled; Rotate Right showed a key it was not bound
     // to; Preferences showed Ctrl+, while Ctrl+K opened it.
