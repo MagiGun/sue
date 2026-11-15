@@ -71,9 +71,11 @@ fn sue_paint_keeps_drawing_while_an_export_runs_and_exports_what_was_there() {
     let now = root.join("Now.gif");
     export_now(&mut paint, "file.export.gif", "anim-gif", &now);
     let reference = std::fs::read(&now).expect("the export made at once");
-    // The same export in the background, held before it writes.
+    // The same export in the background, held before it reads anything
+    // of its snapshot, so whatever is drawn meanwhile is drawn before it
+    // renders a frame.
     let gif = root.join("Walk.gif");
-    sue_paint::hold_exports_to(&gif, true);
+    sue_paint::hold_export_starts(&gif, true);
     start_export(&mut paint, "file.export.gif", "anim-gif", &gif);
     // The window draws every frame meanwhile, and each shows the
     // export's notice with its progress and Cancel.
@@ -106,7 +108,7 @@ fn sue_paint_keeps_drawing_while_an_export_runs_and_exports_what_was_there() {
         before,
         "the stroke went in"
     );
-    sue_paint::hold_exports_to(&gif, false);
+    sue_paint::hold_export_starts(&gif, false);
     paint.finish_exports();
     // It exported the document as it was when it began, not the stroke
     // drawn meanwhile.
@@ -131,6 +133,16 @@ fn sue_paint_keeps_drawing_while_an_export_runs_and_exports_what_was_there() {
         .collect();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].state, sue_wm::TransferState::Done);
+    // The stroke is in the animation: an export started now has it, so
+    // the equal file above is the snapshot at work, not a stroke the
+    // export could not have seen anyway.
+    let after = root.join("After.gif");
+    export_now(&mut paint, "file.export.gif", "anim-gif", &after);
+    assert_ne!(
+        std::fs::read(&after).unwrap(),
+        reference,
+        "the stroke shows"
+    );
 }
 
 #[test]
@@ -316,3 +328,4 @@ fn sue_paint_export_timelapse_previews_the_video_and_takes_its_shape() {
         assert_eq!(&bytes[..4], b"RIFF");
     }
 }
+

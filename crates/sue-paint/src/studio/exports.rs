@@ -149,13 +149,26 @@ pub fn hold_exports_to(path: &Path, hold: bool) {
     }
 }
 
-/// Waits while `path` is held, then goes on unless it was cancelled.
-///
-/// # Errors
-/// When the export was cancelled.
-pub(crate) fn before_writing(path: &Path, steps: Steps<'_>) -> Result<(), String> {
+/// Exports that may not begin yet (tests): an export to one of these, or
+/// into the folder, waits before it reads anything of its snapshot.
+static HELD_AT_START: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Holds every export to `path` (or into that folder) before it begins
+/// (`hold`), or lets it go: a test draws meanwhile, to see that the
+/// export makes the document as it was when it was started.
+#[doc(hidden)]
+pub fn hold_export_starts(path: &Path, hold: bool) {
+    let mut held = HELD_AT_START.lock().unwrap_or_else(PoisonError::into_inner);
+    held.retain(|kept| kept != path);
+    if hold {
+        held.push(path.to_path_buf());
+    }
+}
+
+/// Waits while `path` is in `list`, until it is let go or cancelled.
+fn wait_while_held(list: &Mutex<Vec<PathBuf>>, path: &Path, steps: Steps<'_>) {
     let held = || {
-        HELD.lock()
+        list.lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .any(|kept| path.starts_with(kept))
@@ -163,6 +176,14 @@ pub(crate) fn before_writing(path: &Path, steps: Steps<'_>) -> Result<(), String
     while steps.0.is_some() && held() && steps.go_on().is_ok() {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
+}
+
+/// Waits while `path` is held, then goes on unless it was cancelled.
+///
+/// # Errors
+/// When the export was cancelled.
+pub(crate) fn before_writing(path: &Path, steps: Steps<'_>) -> Result<(), String> {
+    wait_while_held(&HELD, path, steps);
     steps.go_on()
 }
 
@@ -342,12 +363,16 @@ impl SuePaint {
         }
         let done: Arc<Mutex<Option<Done>>> = Arc::default();
         let into = Arc::clone(&done);
+        let starts = path.to_path_buf();
         let transfer = cx.transfers.spawn_noticed(
             TransferKind::Export,
             &name,
             Some(path.to_path_buf()),
             move |job| {
-                let made = work(Steps(Some(job)))?;
+                let steps = Steps(Some(job));
+                wait_while_held(&HELD_AT_START, &starts, steps);
+                steps.go_on()?;
+                let made = work(steps)?;
                 *into.lock().unwrap_or_else(PoisonError::into_inner) = Some(made);
                 Ok(())
             },
