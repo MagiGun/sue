@@ -923,7 +923,7 @@ fn plain(text: &str) -> String {
     out.replace("**", "").replace('`', "")
 }
 
-// How Sue names itself to GitHub.
+/// How Sue names itself to GitHub.
 fn user_agent() -> String {
     format!("Sue/{SUE_VERSION}")
 }
