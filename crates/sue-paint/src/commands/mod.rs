@@ -29,6 +29,8 @@ mod tool;
 mod view;
 mod window;
 
+pub(crate) use view::{ViewMarks, special_snaps};
+
 /// Commands the shell's own keys run (`keys.undo`, `keys.redo`,
 /// `keys.open_file`, `keys.save`, `keys.quit`): they get no row in the
 /// studio's shortcuts, so the menus show the shell's keys beside them.

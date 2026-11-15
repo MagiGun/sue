@@ -24,6 +24,7 @@ mod paint_rulers;
 mod paint_select;
 mod paint_vector_3d;
 mod settings;
+mod paint_view;
 mod shell;
 mod writer;
 

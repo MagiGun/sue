@@ -475,6 +475,8 @@ pub struct SuePaint {
     pub(crate) page_image: bool,
     /// Screen tone layers are tinted (View, Tone Area).
     pub(crate) tone_area: bool,
+    /// The View menu's safety margin, vector paths and playback rate.
+    pub(crate) view_marks: crate::commands::ViewMarks,
     /// The picture shows as printed (View, Color Profile, Preview).
     pub(crate) proof_on: bool,
     /// Which of [`crate::proof::PROFILES`].
@@ -739,6 +741,7 @@ impl Default for SuePaint {
             bleed: true,
             page_image: false,
             tone_area: false,
+            view_marks: crate::commands::ViewMarks::default(),
             proof_on: false,
             proof_profile: 0,
             proof_cache: None,

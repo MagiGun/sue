@@ -41,6 +41,14 @@ follow [Semantic Versioning](https://semver.org/).
   Vectors Within Area: on a vector layer they pick the lines the selected
   area touches, or holds whole, for the Object tool, which then moves or
   deletes them.
+- Sue Paint's View menu has Safety Margin (a line inside a page's trim
+  that the art you must keep stays within), Show Vector Paths (the paths
+  of vector lines on the selected layers or on every vector layer, with
+  their end points or every control point), Show Playback FPS (the frame
+  rate the canvas really shows while the timeline plays) and, under
+  Snap, Toggle Special Ruler Snapping (Ctrl+4: the picture's special,
+  perspective and symmetrical rulers stop snapping, as one step undo
+  takes back).
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.

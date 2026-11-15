@@ -631,8 +631,21 @@ pub fn menus() -> Vec<Menu> {
                 item("view.crop_frame"),
                 item("view.bleed"),
                 item("view.page_image"),
+                item("view.safety_margin"),
                 item("view.paper"),
                 item("view.tone_area"),
+                sub(
+                    &tr!("show-vector-paths"),
+                    vec![
+                        item("view.vector_paths.selected"),
+                        item("view.vector_paths.all"),
+                        SEP,
+                        item("view.vector_paths.ends"),
+                        item("view.vector_paths.points"),
+                    ],
+                ),
+                SEP,
+                item("view.playback_fps"),
                 SEP,
                 sub(
                     &tr!("snap"),
@@ -640,6 +653,7 @@ pub fn menus() -> Vec<Menu> {
                         item("view.snap_ruler"),
                         item("view.snap_special"),
                         item("view.snap_grid"),
+                        item("view.special_ruler_snapping"),
                     ],
                 ),
                 sub(

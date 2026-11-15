@@ -202,6 +202,7 @@ view_ruler_bar = "Ctrl+R"      # @keybind Ruler Bar
 view_snap_ruler = "Ctrl+1"     # @keybind Snap to Ruler
 view_snap_special = "Ctrl+2"   # @keybind Snap to Special Ruler
 view_snap_grid = "Ctrl+3"      # @keybind Snap to Grid
+view_special_ruler_snapping = "Ctrl+4" # @keybind Toggle Special Ruler Snapping
 view_rotate_left = "-"         # @keybind Rotate Left
 view_rotate_right = "="        # @keybind Rotate Right
 window_prev_tab = "Ctrl+Shift+Tab" # @keybind Previous Canvas
