@@ -348,6 +348,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Writer: in a new comment, a footnote or an endnote, Tab now
+  leaves the text for the dialog's buttons (the comment field took the
+  keys back at once). In Project Settings, the heading font's search
+  keeps what you type (it emptied itself), and both font boxes look and
+  work like Sue's other boxes; Escape closes their list first.
 - Sue Writer: Undo after Insert Table takes the whole table away at
   once (it took three steps, and the first left the table behind).
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
