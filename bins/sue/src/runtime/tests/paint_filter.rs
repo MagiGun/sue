@@ -476,6 +476,55 @@ fn gradient_map_offers_its_set_and_maps_with_stops() {
 }
 
 #[test]
+fn a_click_on_the_gradient_bar_adds_a_stop_and_delete_takes_it_away() {
+    // CTV-12: stops are added on the bar; the bar's tooltip names Delete,
+    // and Delete takes the stop being edited away again.
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let (mut driver, _) = canvas("paint-filter-gradient-stops");
+    driver.command("filter.gradient_map");
+    driver.settle(4);
+    let position = driver.rect_of("Position (%)").expect("the stop's place");
+    // The stop being edited is the first, at 0.
+    let field = |driver: &PaintDriver| -> Vec<String> {
+        driver
+            .texts
+            .iter()
+            .filter(|(_, rect)| (rect.center().y - position.center().y).abs() < 6.0)
+            .map(|(text, _)| text.clone())
+            .collect()
+    };
+    assert!(field(&driver).contains(&"0".to_owned()), "{:?}", field(&driver));
+    // The bar lies over the stop's settings, in the same column.
+    let at = egui::pos2(position.left() + 90.0, position.top() - 52.0);
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    driver.step(vec![egui::Event::PointerMoved(at)]);
+    driver.step(vec![press(true)]);
+    driver.step(vec![press(false)]);
+    driver.settle(4);
+    let added = field(&driver);
+    assert!(
+        !added.contains(&"0".to_owned()),
+        "a new stop, between the ends, is edited: {added:?}"
+    );
+    driver.step(vec![key(egui::Key::Delete, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    assert!(
+        field(&driver).contains(&"0".to_owned()),
+        "Delete took it away: {:?}",
+        field(&driver)
+    );
+    // Two stops are the least: Delete does nothing more.
+    driver.step(vec![key(egui::Key::Delete, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    assert!(driver.rect_of("Position (%)").is_some(), "still open");
+}
+
+#[test]
 fn radial_blur_turns_round_the_centre_put_on_its_pad() {
     // FGV-52: the centre is put by a click on the picture.
     let (mut driver, layer) = canvas("paint-filter-radial");

@@ -1770,14 +1770,24 @@ fn gradient_bar(ui: &mut Ui, map: &mut GradientMap, stop: &mut usize, theme: &Th
             }
         }
     }
-    // Keys: Left and Right move the stop being edited.
+    // A stop picked, moved or added with the pointer takes the keys
+    // next, so Delete right after a click takes that stop away.
+    if response.clicked() || response.drag_started() {
+        response.request_focus();
+    }
+    // Keys: Left and Right move the stop being edited, Delete (or
+    // Backspace) takes it away while more than two are left.
     if response.has_focus() {
-        let (left, right) = ui.input(|input| {
+        let (left, right, delete) = ui.input(|input| {
             (
                 input.key_pressed(egui::Key::ArrowLeft),
                 input.key_pressed(egui::Key::ArrowRight),
+                input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace),
             )
         });
+        if delete && map.remove(*stop) {
+            *stop = stop.saturating_sub(1);
+        }
         let shift = if right {
             0.01
         } else if left {
