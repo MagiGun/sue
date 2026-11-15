@@ -142,7 +142,7 @@ impl SueWriter {
             ui::ScrollView::vertical("writer-binder")
                 .on(theme.panel)
                 .show(ui, theme, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
                     let top: Vec<EntityId> = manuscript::children(cx.arena(), root);
                     for id in top {
                         self.binder_row(ui, id, 0, cx, theme, &mut run, &mut moves);
@@ -320,6 +320,22 @@ impl SueWriter {
         if !item.included {
             tree = tree.row(|row| row.note(&left_out));
         }
+        // Dragging an item onto another moves it: above or below it, or
+        // into a folder. The drag has a sense of its own under the row
+        // (egui gives a click to nothing under a widget that only drags),
+        // so that clicks stay the row's.
+        let fixed = item.role.is_some();
+        if !fixed {
+            let height = ui::ListRow::height(theme, Density::of(ui), false);
+            let under =
+                Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), height));
+            ui.interact(
+                under,
+                ui.scope_id().with(("writer-binder-drag", id)),
+                Sense::drag(),
+            )
+            .dnd_set_drag_payload(id);
+        }
         let shown = tree.show(ui, theme);
         let response = shown.response;
         let rect = response.rect;
@@ -349,7 +365,16 @@ impl SueWriter {
                 .label(&tr!("rename"))
                 .show_at(ui, field, theme);
             if !edit.has_focus() && !edit.lost_focus() {
+                // Renaming starts with the whole name chosen, so typing
+                // replaces it and the arrows keep it.
                 edit.request_focus();
+                let mut state = egui::TextEdit::load_state(ui.ctx(), edit.id).unwrap_or_default();
+                let all = egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(text.chars().count()),
+                );
+                state.cursor.set_char_range(Some(all));
+                state.store(ui.ctx(), edit.id);
             }
             if edit.lost_focus() {
                 self.renaming = None;
@@ -382,12 +407,16 @@ impl SueWriter {
                 self.editor.select(id, 0..0);
                 // A phone's binder covers the text: back to writing.
                 self.phone_binder = false;
+            } else {
+                // The keys stay with the binder: F2 renames, Delete
+                // throws away, the arrows walk on. (A document's click
+                // gives them to its text, to write in at once.)
+                response.request_focus();
             }
         }
         if response.secondary_clicked() {
             self.selected = Some(id);
         }
-        let fixed = item.role.is_some();
         if !fixed && response.double_clicked() {
             self.renaming = Some((id, item.name.clone()));
         }
@@ -423,13 +452,6 @@ impl SueWriter {
         if let Some(command) = picked {
             self.selected = Some(id);
             *run = Some(command);
-        }
-        // Dragging an item onto another moves it: above or below it, or
-        // into a folder. The drag has a sense of its own over the row, so
-        // that clicks stay the row's.
-        if !fixed {
-            ui.interact(rect, response.id.with("writer-binder-drag"), Sense::drag())
-                .dnd_set_drag_payload(id);
         }
         if let (Some(dragged), Some(pointer)) = (
             response.dnd_hover_payload::<EntityId>(),
