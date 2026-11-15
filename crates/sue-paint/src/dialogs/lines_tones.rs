@@ -18,6 +18,10 @@ use crate::studio::SuePaint;
 /// The longest side of the preview, in pixels of the layer's copy.
 const PREVIEW_SIDE: u32 = 256;
 
+/// The smallest tone cell the preview draws, in its pixels: finer dots
+/// would only read as gray there.
+const MIN_PREVIEW_CELL: f32 = 2.5;
+
 /// The preview's picture, uploaded once per change of the settings.
 #[derive(Clone, Default)]
 pub(crate) struct Shown(Option<(LinesAndTones, egui::TextureHandle)>);
@@ -81,10 +85,11 @@ impl LinesTonesDialog {
             .apply(&mut lines, width, self.small_size[1], None, [0, 0]);
             lines
         });
-        // The tone's dots as large on the copy as on the layer.
+        // The tone's dots as large on the copy as on the layer, but never
+        // finer than the preview can show.
         let cell = (self.dpi as f32 / settings.frequency.max(1.0)).max(3.0) * self.scale;
         let tone = Effects {
-            tone: Some((cell.max(1.0), settings.angle.to_radians())),
+            tone: Some((cell.max(MIN_PREVIEW_CELL), settings.angle.to_radians())),
             tone_levels: settings.levels,
             tone_shape: settings.shape.min(TONE_SHAPES.len() as u8 - 1),
             ..Effects::default()
@@ -291,7 +296,7 @@ fn preview_ui(ui: &mut Ui, dialog: &mut LinesTonesDialog, theme: &Theme) {
     let Some((_, texture)) = &dialog.shown.0 else {
         return;
     };
-    let room = theme.space(Space::S9) * 4.0;
+    let room = theme.space(Space::S9) * 6.0;
     let [width, height] = dialog.small_size.map(|side| side as f32);
     let fit = (room / width.max(height)).min(ui.available_width() / width);
     let size = egui::Vec2::new(width * fit, height * fit);
