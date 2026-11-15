@@ -486,7 +486,7 @@ fn radial_blur_turns_round_the_centre_put_on_its_pad() {
     walk_to(&mut driver, from.0);
     driver.command("filter.radial_blur");
     driver.settle(4);
-    let heading = driver.rect_of("Centre").expect("the centre pad's heading");
+    let heading = driver.rect_of("Center").expect("the center pad's heading");
     // The pad lies under its heading; its top left corner.
     let at = heading.left_bottom() + vec2(heading.height(), heading.height() * 1.5);
     let press = |pressed| egui::Event::PointerButton {

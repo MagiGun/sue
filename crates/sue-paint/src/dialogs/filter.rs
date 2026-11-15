@@ -1398,7 +1398,7 @@ fn curve_ui(
 /// A blur's centre: the layer small, the centre marked on it; a click or
 /// a drag puts it there. The numbers beside it type it.
 fn center_pad(ui: &mut Ui, center: &mut [f32; 2], params: &mut Params<'_>, theme: &Theme) {
-    heading(ui, &tr!("blur-centre"), theme);
+    heading(ui, &tr!("blur-center"), theme);
     let side = Density::of(ui).control_height() * 4.0;
     ui.horizontal(|ui| {
         let (rect, response) =
@@ -1427,7 +1427,7 @@ fn center_pad(ui: &mut Ui, center: &mut [f32; 2], params: &mut Params<'_>, theme
                 pad_picture(&painter, texture, picture);
             }
         }
-        let name = tr!("blur-centre");
+        let name = tr!("blur-center");
         if (response.clicked() || response.dragged())
             && let Some(at) = response.interact_pointer_pos()
         {
@@ -1454,15 +1454,15 @@ fn center_pad(ui: &mut Ui, center: &mut [f32; 2], params: &mut Params<'_>, theme
         ui::focus_ring(ui, &response, radius, theme);
         ui::tooltip(
             response,
-            &Tip::new(&name).help(&tr!("blur-centre-help")),
+            &Tip::new(&name).help(&tr!("blur-center-help")),
             theme,
         );
     });
     let mut across = center[0] * 100.0;
     if number(
         ui,
-        "centre-x",
-        &tr!("centre-x"),
+        "center-x",
+        &tr!("center-x"),
         &mut across,
         0.0..=100.0,
         0,
@@ -1473,8 +1473,8 @@ fn center_pad(ui: &mut Ui, center: &mut [f32; 2], params: &mut Params<'_>, theme
     let mut down = center[1] * 100.0;
     if number(
         ui,
-        "centre-y",
-        &tr!("centre-y"),
+        "center-y",
+        &tr!("center-y"),
         &mut down,
         0.0..=100.0,
         0,
