@@ -643,22 +643,28 @@ impl SuePaint {
 
     /// Cut and Paste: the selected part of the layer leaves it for a new
     /// layer in the same place, as one undo step.
+    /// What was copied before stays copied: the
+    /// launcher's pastes do not go through the clipboard.
     pub(crate) fn cut_and_paste(&mut self, cx: &mut AppletContext<'_>) {
         let label = tr!("cut-and-paste");
+        let kept = self.clipboard.take();
         one_step(cx, label.clone(), |cx| {
             if self.copy(cx) {
                 self.run_clear(cx, false, &label);
                 self.paste(cx, &label);
             }
         });
+        self.clipboard = kept;
     }
 
     /// Copy and Paste: the selected part of the layer is copied onto a
-    /// new layer in the same place.
+    /// new layer in the same place. What was copied before stays copied.
     pub(crate) fn copy_and_paste(&mut self, cx: &mut AppletContext<'_>) {
+        let kept = self.clipboard.take();
         if self.copy(cx) {
             self.paste(cx, &tr!("copy-and-paste"));
         }
+        self.clipboard = kept;
     }
 
     /// While the Light table tool is out: the box around what the light

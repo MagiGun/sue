@@ -262,6 +262,39 @@ fn sue_paint_cut_and_copy_and_paste_make_a_new_layer_in_one_step() {
     assert_eq!(layers(&driver).len(), count + 1);
     assert_eq!(drawn(&driver, first), None, "the original is cut");
     assert!(alpha(&driver, top(&driver), cx, cy) > 0, "the copy has it");
+
+    // What was copied before stays copied: the launcher's pastes do not
+    // go through the clipboard. The whole box is copied, a smaller part
+    // cut and pasted, then Paste brings the whole box.
+    let mut driver = PaintDriver::new("paint-cut-paste-3");
+    filled_box(
+        &mut driver,
+        middle - vec2(50.0, 30.0),
+        middle + vec2(50.0, 30.0),
+    );
+    let whole = drawn(&driver, top(&driver)).expect("the box is drawn");
+    driver.command("edit.copy");
+    driver.step(vec![key(egui::Key::M, egui::Modifiers::NONE)]);
+    driver.drag(
+        middle - vec2(20.0, 10.0),
+        middle + vec2(20.0, 10.0),
+        egui::PointerButton::Primary,
+    );
+    driver.settle(2);
+    click_button(&mut driver, "edit.cut_paste");
+    let part = drawn(&driver, top(&driver)).expect("the part is pasted");
+    assert!(
+        part[2] - part[0] < whole[2] - whole[0],
+        "{part:?} {whole:?}"
+    );
+    driver.command("select.none");
+    driver.command("edit.paste");
+    driver.settle(4);
+    assert_eq!(
+        drawn(&driver, top(&driver)),
+        Some(whole),
+        "Paste still brings what was copied"
+    );
 }
 
 /// Starts a transform with `command` on a filled box around the canvas's
