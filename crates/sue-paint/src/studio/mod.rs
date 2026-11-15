@@ -738,6 +738,9 @@ pub struct SuePaint {
     /// The pen's samples since its latest touch down, for a stroke of the
     /// new brush engine (see `canvas/engine.rs`).
     pub(crate) pen_stream: Vec<sue_platform::stylus::PenSample>,
+    /// A Figure line under way between clicks: a Curve to bend, a
+    /// Bezier Curve's handles (see `canvas/shape.rs`).
+    pub(crate) figure_draft: crate::canvas::FigureDraft,
 }
 
 impl Default for SuePaint {
@@ -914,6 +917,7 @@ impl Default for SuePaint {
             current_workspace: None,
             kept_styles: Vec::new(),
             pen_stream: Vec::new(),
+            figure_draft: crate::canvas::FigureDraft::default(),
         }
     }
 }

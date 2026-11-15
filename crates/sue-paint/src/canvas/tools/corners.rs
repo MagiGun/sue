@@ -1,7 +1,8 @@
 //! The sub tools that lay corners one click at a time (a polyline
 //! selection, a polyline or curve balloon, a polyline frame, the Figure
-//! tool's polyline and curve): each click a corner; the first or last
-//! one again (a double-click), or Enter, closes them.
+//! tool's polyline and continuous curve): each click a corner; the first
+//! or last one again (a double-click), or Enter, closes them. (The Figure
+//! tool's Bezier Curve lays its anchors in `figure.rs`, a drag each.)
 
 use egui::pos2;
 use sue_wm::AppletContext;
@@ -17,7 +18,10 @@ pub(super) fn clicks_corners(tool: Tool, mode: u8) -> bool {
         Tool::Balloon => matches!(mode, CURVE_BALLOON | POLYLINE_BALLOON),
         Tool::Frame => mode == POLYLINE_FRAME,
         Tool::Select => mode == 3,
-        Tool::Figure => matches!(mode, crate::tools::POLYLINE | crate::tools::CURVE),
+        Tool::Figure => matches!(
+            mode,
+            crate::tools::POLYLINE | crate::tools::CONTINUOUS_CURVE
+        ),
         _ => false,
     }
 }

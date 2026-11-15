@@ -23,6 +23,7 @@ mod input;
 mod overlays;
 mod pick;
 mod shape;
+pub(crate) use shape::FigureDraft;
 mod status;
 mod tools;
 mod view;
@@ -117,6 +118,15 @@ impl SuePaint {
             } else if escape || now != owner {
                 self.polyline.clear();
                 self.polyline_for = None;
+            }
+        }
+        if self.figure_draft.bend.is_some() {
+            // A Curve waiting for its bend: Esc, or another sub tool,
+            // drops it.
+            let escape = ui.input(|input| input.key_pressed(Key::Escape));
+            let now = (self.toolbox.tool(), self.toolbox.current().mode);
+            if escape || now != (Tool::Figure, crate::tools::CURVE) {
+                self.figure_draft.bend = None;
             }
         }
         if !self.curve_points.is_empty() {
