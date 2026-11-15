@@ -641,6 +641,7 @@ pub struct IconButton<'a> {
     salt: IdSalt,
     icon: Icon,
     name: &'a str,
+    shortcut: &'a str,
     kind: ButtonKind,
     on: Option<bool>,
     enabled: bool,
@@ -655,6 +656,7 @@ pub fn icon_button(salt: impl AsIdSalt, icon: Icon, name: &str) -> IconButton<'_
         salt: IdSalt::new(salt),
         icon,
         name,
+        shortcut: "",
         kind: ButtonKind::Ghost,
         on: None,
         enabled: true,
@@ -662,7 +664,7 @@ pub fn icon_button(salt: impl AsIdSalt, icon: Icon, name: &str) -> IconButton<'_
     }
 }
 
-impl IconButton<'_> {
+impl<'a> IconButton<'a> {
     /// Makes it a button of `kind`.
     pub fn kind(mut self, kind: ButtonKind) -> Self {
         self.kind = kind;
@@ -687,6 +689,14 @@ impl IconButton<'_> {
     /// is on should be the one that is seen.
     pub fn quiet(mut self) -> Self {
         self.quiet = true;
+        self
+    }
+
+    /// The keys that run what it does, such as `Ctrl+B`, shown in its
+    /// tooltip after its name ([`tooltip`](super::tooltip)); empty for
+    /// none.
+    pub fn shortcut(mut self, keys: &'a str) -> Self {
+        self.shortcut = keys;
         self
     }
 
@@ -717,8 +727,11 @@ impl IconButton<'_> {
         });
         if name.is_empty() {
             response
-        } else {
+        } else if self.shortcut.is_empty() {
             response.on_hover_text(name)
+        } else {
+            let tip = super::Tip::new(name).shortcut(self.shortcut);
+            super::tooltip(response, &tip, theme)
         }
     }
 
@@ -2004,5 +2017,55 @@ mod tests {
         };
         assert_eq!(fill_of(halves.1), Some(bench.theme.fill_pressed()));
         assert_ne!(fill_of(halves.0), fill_of(halves.1));
+    }
+
+    #[test]
+    fn an_icon_button_with_keys_says_its_name_and_keys_when_the_pointer_rests() {
+        fn texts(output: &FullOutput) -> Vec<String> {
+            fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
+                match shape {
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+                    egui::Shape::Text(text) => out.push(text.galley.text().to_owned()),
+                    _ => {}
+                }
+            }
+            let mut out = Vec::new();
+            for clipped in &output.shapes {
+                walk(&clipped.shape, &mut out);
+            }
+            out
+        }
+        let mut bench = Bench::new(true);
+        let at = std::cell::Cell::new(Rect::NOTHING);
+        let add = |ui: &mut Ui, theme: &Theme| {
+            at.set(
+                icon_button("bold", Icon::Bold, "Bold")
+                    .shortcut("Ctrl+B")
+                    .show(ui, theme)
+                    .rect,
+            );
+        };
+        let (_, output) = bench.frame(Density::Compact, Vec::new(), add);
+        assert!(!texts(&output).iter().any(|text| text == "Ctrl+B"));
+        let middle = at.get().center();
+        let mut shown = Vec::new();
+        for step in 0..60 {
+            let events = if step == 0 {
+                vec![egui::Event::PointerMoved(middle)]
+            } else {
+                Vec::new()
+            };
+            shown = texts(&bench.frame(Density::Compact, events, add).1);
+            if shown.iter().any(|text| text == "Ctrl+B") {
+                break;
+            }
+        }
+        assert!(
+            shown.iter().any(|text| text == "Bold") && shown.iter().any(|text| text == "Ctrl+B"),
+            "the tip names the button and its keys: {shown:?}"
+        );
+        // What assistive technology hears stays the name alone.
+        let (_, output) = bench.frame(Density::Compact, Vec::new(), add);
+        assert_eq!(node(&output, "Bold").1, "Bold");
     }
 }
