@@ -12,16 +12,17 @@
 //! the pen last was.
 //!
 //! A plain stroke is shown by the compositor over its layer until the lift
-//! merges it in as one undo step. A stroke on a layer mask, inside a
-//! selection, on a layer with locked transparent pixels, with symmetry's
-//! copies is laid straight into its rasters
-//! frame by frame instead ([`super::lay`]), so it shows as it will stay.
+//! merges it in as one undo step. A plain round tip's stroke on a layer
+//! mask, inside a selection, on a layer with locked transparent pixels or
+//! with symmetry's copies is laid straight into its rasters frame by
+//! frame instead ([`super::lay`]), so it shows as it will stay.
 //!
 //! What the canvas adds to the samples: the rulers and the grid it snaps
-//! to, Shift's straight line, a flick's run out (more samples past the
-//! pen, pressing less and less), post correction (the samples smoothed
-//! and the stroke drawn again from them) and Smart Shape (the stroke drawn
-//! again as the shape it was meant to be).
+//! to, Shift's straight line, post correction (the samples smoothed and
+//! the stroke drawn again from them) and Smart Shape (the stroke drawn
+//! again as the shape it was meant to be). A flick is the engine's own
+//! (`sue_brush::input`): the canvas only turns it off for a straight line
+//! and a line on a ruler or the grid.
 //!
 //! Every brush sub tool paints here. A plain round tip (the pens and the
 //! pencils) is laid as coverage on the pool's threads, one worker for each
@@ -188,26 +189,6 @@ fn round_of(preset: &BrushPreset) -> BrushPreset {
         .extra
         .retain(|(key, _)| key.starts_with(BrushPreset::LEGACY));
     preset
-}
-
-/// The preset a sub tool's tip makes (see [`brush_of`]).
-#[cfg(test)]
-pub(crate) fn preset_of(sub: &SubTool, eraser: bool, round: bool) -> Option<BrushPreset> {
-    if !sub.tool.paints() {
-        return None;
-    }
-    let mut preset = BrushPreset::from_legacy_text(&sub.tip.to_text());
-    if round {
-        preset.engine = EngineKind::Stroke;
-        preset.tip = TipSource::Round;
-        preset.mix = None;
-        preset.texture = None;
-        preset.build_up = false;
-    }
-    preset.input.stabilization = sub.stabilization;
-    preset.input.by_speed = sub.adjust_by_speed;
-    preset.erase |= eraser;
-    Some(preset)
 }
 
 impl EngineStroke {
@@ -1381,21 +1362,36 @@ mod tests {
 
     #[test]
     fn a_mask_draws_every_brush_as_its_round_tip() {
-        let mut toolbox = crate::tools::Toolbox::default();
-        toolbox.pick(Tool::Pen);
-        let pen = toolbox.current().clone();
-        assert!(preset_of(&pen, false, false).is_some(), "a pen is round");
-        let airbrush = toolbox
-            .subs(Tool::Airbrush)
-            .iter()
-            .find(|sub| preset_of(sub, false, false).is_none())
-            .cloned();
-        if let Some(airbrush) = airbrush {
-            let round = preset_of(&airbrush, false, true).expect("round on a mask");
-            assert_eq!(round.tip, TipSource::Round);
-            assert!(!round.build_up && round.mix.is_none());
+        let toolbox = crate::tools::Toolbox::default();
+        let mut rounded = 0;
+        for tool in [Tool::Pen, Tool::Brush, Tool::Airbrush, Tool::Decoration] {
+            for sub in toolbox.subs(tool) {
+                let brush = brush_of(sub, false, false).expect("a brush");
+                let round = brush_of(sub, false, true).expect("round on a mask");
+                assert_eq!(round.preset.tip, TipSource::Round, "{}", sub.name);
+                assert!(round.pictures.is_empty(), "{}", sub.name);
+                assert!(
+                    !round.preset.build_up
+                        && round.preset.mix.is_none()
+                        && round.preset.texture.is_none(),
+                    "{}",
+                    sub.name
+                );
+                assert!(
+                    Brush::new(round.preset.clone(), [1.0; 3]).is_plain(),
+                    "{}: laid as coverage on a mask",
+                    sub.name
+                );
+                rounded += usize::from(!Brush::new(brush.preset, [1.0; 3]).is_plain());
+            }
         }
-        let eraser = preset_of(&pen, true, false).unwrap();
-        assert!(eraser.erase, "the transparent color erases");
+        assert!(
+            rounded > 10,
+            "brushes with behaviours were rounded: {rounded}"
+        );
+        let mut toolbox = toolbox;
+        toolbox.pick(Tool::Pen);
+        let eraser = brush_of(toolbox.current(), true, false).unwrap();
+        assert!(eraser.preset.erase, "the transparent color erases");
     }
 }
