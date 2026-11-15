@@ -149,6 +149,8 @@ impl SuePaint {
                 self.trace_drag(pos, viewport, size);
             }
             Some(Gesture::Move { .. }) => self.move_drag(pos, viewport, size, cx),
+            Some(Gesture::Bucket { .. }) => self.bucket_drag(pos, viewport, size),
+            Some(Gesture::ShrinkLasso { .. }) => self.shrink_drag(pos, viewport, size),
         }
     }
 
@@ -156,13 +158,21 @@ impl SuePaint {
     /// gradient, a ruler, a frame, a balloon, a dust box) carried on to
     /// `pos`.
     fn shape_drag(&mut self, pos: Pos2, viewport: Rect, size: [u32; 2]) {
-        let (Some(Gesture::Shape { to, .. }), Some(doc)) =
-            (self.gesture.as_mut(), self.docs.get_mut(self.active))
+        let (
+            Some(Gesture::Shape {
+                tool,
+                sub,
+                from,
+                to,
+                ..
+            }),
+            Some(doc),
+        ) = (self.gesture.as_mut(), self.docs.get_mut(self.active))
         else {
             return;
         };
         let p = doc.view.to_picture(viewport, size, pos);
-        *to = p;
+        *to = select::shape_end(*tool, sub, *from, p);
     }
 
     /// An outline traced freehand (the lasso, the balloon pen, Text on
@@ -256,6 +266,8 @@ impl SuePaint {
             | Gesture::Transform { .. }
             | Gesture::BrushSize { .. } => {}
             gesture @ Gesture::Blend { .. } => self.blend_release(gesture, cx),
+            gesture @ Gesture::Bucket { .. } => self.bucket_release(gesture, size, cx),
+            gesture @ Gesture::ShrinkLasso { .. } => self.shrink_release(gesture, size, cx),
         }
     }
 }
