@@ -355,36 +355,10 @@ pub(super) fn page_icon(painter: &Painter, rect: Rect, color: Color32, empty: bo
     }
 }
 
-pub(super) fn folder_icon(painter: &Painter, rect: Rect, color: Color32) {
-    let body = Rect::from_min_max(
-        pos2(rect.left(), rect.top() + 3.0),
-        rect.right_bottom() - vec2(0.0, 1.0),
-    );
-    painter.rect_stroke(body, 1.5, Stroke::new(1.2, color), StrokeKind::Inside);
-    painter.hline(
-        rect.left() + 1.0..=rect.left() + 5.5,
-        rect.top() + 1.6,
-        Stroke::new(1.6, color),
-    );
-}
-
 pub(super) fn book_icon(painter: &Painter, rect: Rect, color: Color32) {
     let body = rect.shrink2(vec2(1.5, 0.5));
     painter.rect_stroke(body, 1.0, Stroke::new(1.2, color), StrokeKind::Inside);
     painter.vline(body.left() + 3.0, body.y_range(), Stroke::new(1.2, color));
-}
-
-pub(super) fn trash_icon(painter: &Painter, rect: Rect, color: Color32) {
-    let can = Rect::from_min_max(
-        pos2(rect.left() + 2.0, rect.top() + 3.5),
-        pos2(rect.right() - 2.0, rect.bottom()),
-    );
-    painter.rect_stroke(can, 1.0, Stroke::new(1.2, color), StrokeKind::Inside);
-    painter.hline(
-        rect.left() + 0.5..=rect.right() - 0.5,
-        rect.top() + 2.0,
-        Stroke::new(1.2, color),
-    );
 }
 
 pub(super) fn picture_icon(painter: &Painter, rect: Rect, color: Color32) {
