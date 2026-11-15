@@ -833,7 +833,7 @@ impl SuePaint {
         if place(&tr!("zoom-in"), Icon::ZoomIn, true, ui) || plus {
             preview.zoom = (preview.zoom * ZOOM_STEP).min(ZOOM_MOST);
         }
-        if place(&tr!("fit-to-window"), Icon::ZoomFit, true, ui) {
+        if place(&tr!("fit-to-screen"), Icon::ZoomFit, true, ui) {
             preview.zoom = 1.0;
         }
         let (left_on, right_on) = if right {

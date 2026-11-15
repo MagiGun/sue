@@ -384,6 +384,28 @@ pub(crate) fn combine_panels(panels: &[Panel], picked: &[usize]) -> Option<(Vec<
     Some((out, at))
 }
 
+/// `true` when `panel` turns the same way at every corner.
+fn is_convex(panel: &Panel) -> bool {
+    let count = panel.len();
+    let mut sign = 0.0_f32;
+    for index in 0..count {
+        let (a, b, c) = (
+            panel[index],
+            panel[(index + 1) % count],
+            panel[(index + 2) % count],
+        );
+        let turn = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+        if turn.abs() < f32::EPSILON {
+            continue;
+        }
+        if sign != 0.0 && turn.signum() != sign {
+            return false;
+        }
+        sign = turn.signum();
+    }
+    count >= 3
+}
+
 /// `p` moved onto the edges of `border` (`[left, top, right, bottom]`)
 /// that are within `reach` of it, each axis on its own.
 pub(crate) fn snap_to_border(p: [f32; 2], border: [f32; 4], reach: f32) -> [f32; 2] {
@@ -1088,10 +1110,18 @@ impl SuePaint {
             && let Some((panels, _, _)) = Self::frame_of(arena, layer)
         {
             for panel in picked.iter().filter_map(|index| panels.get(*index)) {
-                painter.add(egui::Shape::closed_line(
-                    panel.iter().map(|p| screen(*p)).collect(),
-                    stroke,
-                ));
+                let points: Vec<egui::Pos2> = panel.iter().map(|p| screen(*p)).collect();
+                // Tinted as a selection is; a panel that is not convex
+                // (a polyline frame) is outlined only, as a fill could
+                // spill out of it.
+                if is_convex(panel) {
+                    painter.add(egui::Shape::convex_polygon(
+                        points.clone(),
+                        theme.selection,
+                        egui::Stroke::NONE,
+                    ));
+                }
+                painter.add(egui::Shape::closed_line(points, stroke));
             }
         }
         if let Some(crate::studio::Gesture::Shape {
@@ -1300,6 +1330,19 @@ mod tests {
                 fill: [255, 255, 255]
             }
         );
+    }
+
+    #[test]
+    fn convex_panels_are_told_from_others() {
+        assert!(is_convex(&manga::rectangle([0.0, 0.0], [10.0, 5.0])));
+        let notch = vec![
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [5.0, 3.0],
+            [10.0, 10.0],
+            [0.0, 10.0],
+        ];
+        assert!(!is_convex(&notch));
     }
 
     #[test]
