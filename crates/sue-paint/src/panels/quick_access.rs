@@ -79,14 +79,15 @@ impl SuePaint {
             .map(|slot| self.look_of(slot, cx))
             .collect();
         let items = self.holder_items(holder).to_vec();
-        // Columns as wide as a name needs, as many as fit.
+        // Columns as wide as a name needs, as many as fit; laid out from
+        // the top left of the set, then placed where the set scrolls to.
         let row = density.row();
         let least = theme.space(Space::S9) * 4.0;
         let columns = ((body.width() / least).floor() as usize).max(1);
         let column = body.width() / columns as f32;
-        let mut rects = Vec::with_capacity(items.len());
+        let mut places = Vec::with_capacity(items.len());
         let mut at = 0_usize;
-        let mut y = body.top();
+        let mut y = 0.0;
         for slot in &items {
             if slot.item == Item::Separator {
                 if at > 0 {
@@ -94,10 +95,7 @@ impl SuePaint {
                     at = 0;
                 }
                 let line = theme.space(Space::S4);
-                rects.push(Rect::from_min_size(
-                    pos2(body.left(), y),
-                    vec2(body.width(), line),
-                ));
+                places.push(Rect::from_min_size(pos2(0.0, y), vec2(body.width(), line)));
                 y += line;
                 continue;
             }
@@ -105,16 +103,30 @@ impl SuePaint {
                 y += row;
                 at = 0;
             }
-            rects.push(Rect::from_min_size(
-                pos2(body.left() + column * at as f32, y),
+            places.push(Rect::from_min_size(
+                pos2(column * at as f32, y),
                 vec2(column, row),
             ));
             at += 1;
         }
+        let height = if at > 0 { y + row } else { y };
         let background = ui.interact(body, Id::unique("sue-paint-quick-ground"), Sense::click());
         let mut inner = super::child(ui, body, "quick-access-buttons");
-        let (clicked, menu) =
-            self.bar_buttons(&mut inner, holder, &rects, &looks, true, &background, theme);
+        // A set with more buttons than the palette is high scrolls.
+        let shown = sue_wm::ui::ScrollView::vertical(("sue-paint-quick-set", holder))
+            .on(theme.panel)
+            .show(&mut inner, theme, |ui| {
+                let (content, _) =
+                    ui.allocate_exact_size(vec2(body.width(), height), Sense::hover());
+                let rects: Vec<Rect> = places
+                    .iter()
+                    .map(|place| place.translate(content.min.to_vec2()))
+                    .collect();
+                let (clicked, menu) =
+                    self.bar_buttons(ui, holder, &rects, &looks, true, &background, theme);
+                (rects, clicked, menu)
+            });
+        let (rects, clicked, menu) = shown.inner;
         if let Some((index, caret)) = clicked {
             self.press_button(holder, index, rects[index], caret, cx);
         }

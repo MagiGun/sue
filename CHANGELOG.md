@@ -26,7 +26,8 @@ follow [Semantic Versioning](https://semver.org/).
   buttons with their names, Set 1 as Clip Studio Paint ships it, with New
   Set, Delete Set and Quick Access Settings, the same right-click menu
   and drags as the command bar, and buttons dragged between the two.
-  Workspaces keep Quick Access with the command bar.
+  Workspaces keep Quick Access with the command bar; a set taller than
+  the palette scrolls.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
