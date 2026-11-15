@@ -75,6 +75,13 @@ impl Bars {
             .ctx
             .run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
         self.texts = text_rects(&output);
+        // egui writes a warning over two controls that share an id: none
+        // of the bars' controls may (their focus and motion would mix).
+        let clash = self
+            .texts
+            .iter()
+            .find(|(text, _)| text.contains("use of widget ID") || text.contains("ID clash"));
+        assert!(clash.is_none(), "two controls share an id: {clash:?}");
         self.rects = rects(&output);
         self.told = told(&output);
         output.drop_without_applying_deltas();

@@ -82,7 +82,7 @@ impl SueWriter {
             tool_toggle(
                 ui,
                 theme,
-                "writer-find",
+                "writer-find-toggle",
                 Icon::Search,
                 (&name, &keys),
                 self.find.is_some(),
