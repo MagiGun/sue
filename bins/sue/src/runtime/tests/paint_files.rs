@@ -282,7 +282,8 @@ fn a_dropped_sound_file_goes_on_the_timeline_of_the_canvas_in_front() {
         "{message}"
     );
     assert_eq!(sounds(&runtime), 0);
-    command(&mut runtime, "anim.timeline.new");
+    // New Animation Folder makes the timeline (New Timeline asks first).
+    command(&mut runtime, "anim.layer.folder");
     frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
     runtime.request(ShellRequest::OpenFile(sound.clone()), &mut NoTextures, now);
     frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());

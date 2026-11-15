@@ -36,7 +36,6 @@ pub(crate) fn localize(text: &str) -> String {
     sue_lang::translate("paint", text)
 }
 
-mod anim_ui;
 mod bar_items;
 mod canvas;
 pub mod clip_io;

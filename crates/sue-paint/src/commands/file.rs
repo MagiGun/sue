@@ -10,14 +10,13 @@
 use std::path::PathBuf;
 
 use sue_core::Value;
-use sue_core::txn::SetProperty;
 use sue_wm::{
     AppletContext, Call, Command, Facts, FilePick, FileType, Flags, ItemState, ShellRequest,
 };
 
 use super::{doc_open, flag, when};
 use crate::dialogs::{Dialog, PressureDialog};
-use crate::doc::{self, NewPicture};
+use crate::doc::NewPicture;
 use crate::studio::{Clip, SuePaint, export_dir, me_id};
 
 /// The commands of this group that Auto Actions may record: none. Saving,
@@ -339,19 +338,9 @@ fn export_animation(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call
     paint.ask_export_animation(cx, call.name);
 }
 
-/// Export each animation cel as a picture.
-fn export_cels(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    let name = picture_name(paint, cx, &tr!("cel"));
-    cx.request(ShellRequest::PickFile(
-        FilePick::save(
-            Some(me_id()),
-            "anim-cels",
-            &tr!("export-animation-cels"),
-            &format!("{name}.png"),
-        )
-        .types(picture_types())
-        .starting_in(paint.last_dir.clone()),
-    ));
+/// Export each animation cel as a picture: its settings first.
+fn export_cels(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    paint.ask_export_animation(cx, call.name);
 }
 
 /// Batch export: a story's pages, else every open canvas.
@@ -424,20 +413,10 @@ fn export_layer_comps(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<
     ));
 }
 
-/// Record Timelapse: turns the canvas's recording on or off, a step that
-/// undoes.
+/// Record Timelapse: turns the canvas's recording on, or asks before it
+/// stops (studio/media.rs); each switch is a step that undoes.
 fn record_timelapse(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    let Some(picture) = paint.picture() else {
-        return;
-    };
-    let on = paint.recording(&cx.world.arena, picture);
-    let edit = doc::Edit::new(if on {
-        tr!("stop-recording-timelapse")
-    } else {
-        tr!("record-timelapse-2")
-    })
-    .then(SetProperty::new(picture, crate::timelapse::RECORD, !on));
-    SuePaint::apply(cx, edit);
+    paint.toggle_timelapse(cx);
 }
 
 fn export_timelapse(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {

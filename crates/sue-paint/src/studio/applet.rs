@@ -563,6 +563,7 @@ impl SueApplet for SuePaint {
             "subview" => self.add_reference(path, cx),
             "model3d" => self.import_3d(cx, path),
             "anim-audio" => self.import_audio(cx, path),
+            "anim-sound" => self.export_audio(cx, path),
             "colorset-import" => self.import_color_set(cx, path),
             "colorset-export" => self.export_color_set(cx, path),
             _ => {}

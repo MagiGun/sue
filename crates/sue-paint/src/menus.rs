@@ -395,6 +395,7 @@ pub fn menus() -> Vec<Menu> {
                         item("file.export.movie"),
                         item("file.export.cels"),
                         item("file.export.exposure_sheet"),
+                        item("anim.export.audio"),
                     ],
                 ),
                 sub(

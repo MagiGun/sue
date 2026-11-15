@@ -633,7 +633,11 @@ pub struct SuePaint {
     pub(crate) audio_drag: Option<(usize, i64, i64)>,
     /// Where the Timeline palette looks: its zoom, the first frame at its
     /// left and how far its tracks are scrolled.
-    pub(crate) timeline_view: crate::anim_ui::TimelineView,
+    pub(crate) timeline_view: crate::panels::timeline::TimelineView,
+    /// What the Timeline palette keeps besides its view: the frames
+    /// picked, its clipboard, export settings waiting for their file,
+    /// the thumbnail size and time unit, and the drags under way.
+    pub(crate) anim_ui: crate::panels::timeline::AnimUi,
     /// A 3D layer's view being changed in Tool Property, and its view and
     /// pixels from before.
     pub(crate) view3d_before: Option<(EntityId, crate::three::View3D, Vec<u8>)>,
@@ -937,7 +941,8 @@ impl Default for SuePaint {
             audio_mix: None,
             audio_lap: None,
             audio_drag: None,
-            timeline_view: crate::anim_ui::TimelineView::default(),
+            timeline_view: crate::panels::timeline::TimelineView::default(),
+            anim_ui: crate::panels::timeline::AnimUi::default(),
             camera_pending: None,
             view3d_before: None,
             pending_view3d: None,

@@ -339,12 +339,8 @@ impl Palette {
             ],
             Self::CommandBar => &["file.command_bar"],
             Self::QuickAccess => &crate::panels::QUICK_ACCESS_COMMANDS,
-            Self::Timeline => &[
-                "anim.timeline.edit",
-                "anim.onion",
-                "anim.onion_settings",
-                "anim.loop",
-            ],
+            // The Timeline palette's owner keeps its list.
+            Self::Timeline => crate::panels::timeline::MENU,
             Self::Navigator => &crate::panels::NAVIGATOR_COMMANDS,
             Self::SubView => &crate::panels::SUB_VIEW_COMMANDS,
             Self::Info => &crate::panels::INFO_COMMANDS,

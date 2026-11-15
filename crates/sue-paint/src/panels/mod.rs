@@ -26,7 +26,7 @@ mod search_layer;
 mod sub_tool;
 mod sub_view;
 pub(crate) mod sub_tool_detail;
-mod timeline;
+pub(crate) mod timeline;
 pub(crate) mod tool;
 mod tool_property;
 
@@ -283,109 +283,6 @@ impl Flow {
         let rect = Rect::from_min_size(pos2(self.x, self.y), size);
         self.x += advance;
         Some(rect)
-    }
-}
-
-/// Clip Studio Paint's wedge slider: a dark triangle that grows to the
-/// right, lit up to the value, with a thin bar at it. A widget, so its
-/// response says when it changed and when a drag ended.
-pub(crate) struct Wedge<'a> {
-    value: &'a mut f32,
-    range: std::ops::RangeInclusive<f32>,
-    logarithmic: bool,
-    width: f32,
-    theme: &'a Theme,
-}
-
-impl<'a> Wedge<'a> {
-    pub(crate) fn new(
-        value: &'a mut f32,
-        range: std::ops::RangeInclusive<f32>,
-        width: f32,
-        theme: &'a Theme,
-    ) -> Self {
-        Self {
-            value,
-            range,
-            logarithmic: false,
-            width,
-            theme,
-        }
-    }
-
-    fn to_unit(&self, value: f32) -> f32 {
-        let (low, high) = (*self.range.start(), *self.range.end());
-        let t = if self.logarithmic {
-            (value.max(low).ln() - low.max(1e-3).ln()) / (high.ln() - low.max(1e-3).ln())
-        } else {
-            (value - low) / (high - low)
-        };
-        t.clamp(0.0, 1.0)
-    }
-
-    fn value_at(&self, t: f32) -> f32 {
-        let (low, high) = (*self.range.start(), *self.range.end());
-        if self.logarithmic {
-            (low.max(1e-3).ln() + t * (high.ln() - low.max(1e-3).ln())).exp()
-        } else {
-            low + t * (high - low)
-        }
-    }
-}
-
-impl egui::Widget for Wedge<'_> {
-    fn ui(self, ui: &mut Ui) -> egui::Response {
-        let (rect, mut response) =
-            ui.allocate_exact_size(vec2(self.width.max(24.0), 18.0), Sense::click_and_drag());
-        if let Some(pointer) = response.interact_pointer_pos()
-            && (response.dragged() || response.clicked())
-        {
-            let t = ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
-            let value = self.value_at(t);
-            if (value - *self.value).abs() > f32::EPSILON {
-                *self.value = value;
-                response.mark_changed();
-            }
-        }
-        let theme = self.theme;
-        let wedge = rect.shrink2(vec2(1.0, 2.0));
-        let t = self.to_unit(*self.value);
-        let x = wedge.left() + t * wedge.width();
-        // The wedge's top edge at `x`: a point at the left, full height at
-        // the right.
-        let top_at = |x: f32| {
-            let u = (x - wedge.left()) / wedge.width();
-            wedge.bottom() - wedge.height() * (0.08 + 0.92 * u)
-        };
-        let painter = ui.painter();
-        let lit = if response.hovered() || response.dragged() {
-            theme.text
-        } else {
-            theme.text.gamma_multiply(0.78)
-        };
-        let dark = theme.void;
-        let polygon = |from: f32, to: f32, color: Color32| {
-            if to - from < 0.5 {
-                return;
-            }
-            painter.add(Shape::convex_polygon(
-                vec![
-                    pos2(from, wedge.bottom()),
-                    pos2(from, top_at(from)),
-                    pos2(to, top_at(to)),
-                    pos2(to, wedge.bottom()),
-                ],
-                color,
-                Stroke::NONE,
-            ));
-        };
-        polygon(wedge.left(), x, lit);
-        polygon(x, wedge.right(), dark);
-        painter.line_segment(
-            [pos2(x, wedge.top()), pos2(x, wedge.bottom())],
-            Stroke::new(1.5, theme.text),
-        );
-        response
     }
 }
 

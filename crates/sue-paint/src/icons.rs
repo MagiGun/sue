@@ -29,29 +29,16 @@ pub enum Icon {
     Text,
     Balloon,
     CorrectLine,
-    New,
     Save,
     Undo,
     Redo,
     Clear,
-    Reset,
-    ZoomIn,
-    ZoomOut,
-    Eye,
-    Lock,
     Reference,
-    NewFolder,
     Duplicate,
     Delete,
     Paper,
     Swap,
     Play,
-    Stop,
-    First,
-    Last,
-    Prev,
-    Next,
-    Loop,
     Up,
     /// Three lines: a palette's menu.
     Menu,
@@ -69,20 +56,14 @@ pub enum Icon {
     Wrench,
     /// An arrow into a tray: import.
     Import,
-    /// A plus: add.
-    Add,
     /// Two arrows in a circle: replace.
     Replace,
     /// Lines with dots: a list.
     List,
     /// A sheet in a frame: a cel.
     Cel,
-    /// Two overlapping sheets: onion skin.
-    Onion,
     /// A pencil over a line: edit.
     Edit,
-    /// A minus: take away or collapse.
-    Minus,
     /// Brush strokes in a stack: the sub tools.
     SubTool,
     /// Sliders: a tool's settings.
@@ -109,14 +90,6 @@ pub enum Icon {
     LayerProperty,
     /// A strip of film: the timeline.
     Timeline,
-    /// Arrows up and down past each other: reverse the order.
-    Reverse,
-    /// A sheet over a half shaded one: which layers the opacity sets.
-    OpacityTarget,
-    /// A sheet over a glowing box: the light table.
-    LightTable,
-    /// A disc half filled: one color for all.
-    ColorMode,
     /// A sheet with a flower: an illustration.
     ProjectIllustration,
     /// Two tall strips: a webtoon.
@@ -273,45 +246,8 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             }
         }
     };
-    let page = |plus: bool| {
-        closed(&[
-            (0.25, 0.12),
-            (0.6, 0.12),
-            (0.78, 0.3),
-            (0.78, 0.88),
-            (0.25, 0.88),
-        ]);
-        line(&[(0.6, 0.12), (0.6, 0.3), (0.78, 0.3)]);
-        if plus {
-            line(&[(0.38, 0.6), (0.64, 0.6)]);
-            line(&[(0.51, 0.47), (0.51, 0.73)]);
-        }
-    };
-    let folder = |plus: bool| {
-        closed(&[
-            (0.12, 0.25),
-            (0.4, 0.25),
-            (0.48, 0.34),
-            (0.88, 0.34),
-            (0.88, 0.8),
-            (0.12, 0.8),
-        ]);
-        if plus {
-            line(&[(0.38, 0.57), (0.62, 0.57)]);
-            line(&[(0.5, 0.45), (0.5, 0.69)]);
-        }
-    };
-    let lock = || {
-        boxed(
-            Rect::from_min_max(p(0.24, 0.45), p(0.76, 0.86)),
-            side * 0.05,
-        );
-        curve(0.5, 0.45, 0.17, 180.0, 360.0);
-    };
     match icon {
         Icon::Zoom => magnifier(None),
-        Icon::ZoomIn => magnifier(Some(true)),
-        Icon::ZoomOut => magnifier(Some(false)),
         Icon::Hand => {
             for (x, top) in [(0.33, 0.3), (0.45, 0.18), (0.57, 0.2), (0.69, 0.3)] {
                 line(&[(x, top), (x, 0.55)]);
@@ -492,7 +428,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 );
             }
         }
-        Icon::New => page(true),
         Icon::Paper => {
             painter.rect_filled(
                 Rect::from_min_max(p(0.22, 0.14), p(0.78, 0.86)),
@@ -500,7 +435,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 color,
             );
         }
-        Icon::NewFolder => folder(true),
         Icon::Save => {
             closed(&[
                 (0.16, 0.16),
@@ -529,22 +463,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(0.34, 0.34), (0.66, 0.66)]);
             line(&[(0.66, 0.34), (0.34, 0.66)]);
         }
-        Icon::Reset => {
-            curve(0.5, 0.5, 0.3, -60.0, 240.0);
-            filled(&[(0.62, 0.16), (0.82, 0.2), (0.7, 0.36)]);
-        }
-        Icon::Eye => {
-            painter.add(Shape::line(
-                arc(p(0.5, 0.86), 0.5 * side, 223.0, 317.0),
-                stroke,
-            ));
-            painter.add(Shape::line(
-                arc(p(0.5, 0.14), 0.5 * side, 43.0, 137.0),
-                stroke,
-            ));
-            dot(0.5, 0.5, 0.11);
-        }
-        Icon::Lock => lock(),
         Icon::Reference => {
             circle(0.5, 0.5, 0.3);
             dot(0.5, 0.5, 0.1);
@@ -566,31 +484,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             filled(&[(0.64, 0.76), (0.88, 0.76), (0.76, 0.88)]);
         }
         Icon::Play => filled(&[(0.3, 0.18), (0.82, 0.5), (0.3, 0.82)]),
-        Icon::Stop => {
-            painter.rect_filled(Rect::from_min_max(p(0.26, 0.26), p(0.74, 0.74)), 0.0, color);
-        }
-        Icon::First => {
-            line(&[(0.24, 0.2), (0.24, 0.8)]);
-            filled(&[(0.8, 0.2), (0.8, 0.8), (0.3, 0.5)]);
-        }
-        Icon::Last => {
-            line(&[(0.76, 0.2), (0.76, 0.8)]);
-            filled(&[(0.2, 0.2), (0.7, 0.5), (0.2, 0.8)]);
-        }
-        Icon::Prev => {
-            filled(&[(0.5, 0.22), (0.5, 0.78), (0.14, 0.5)]);
-            filled(&[(0.86, 0.22), (0.86, 0.78), (0.5, 0.5)]);
-        }
-        Icon::Next => {
-            filled(&[(0.14, 0.22), (0.5, 0.5), (0.14, 0.78)]);
-            filled(&[(0.5, 0.22), (0.86, 0.5), (0.5, 0.78)]);
-        }
-        Icon::Loop => {
-            curve(0.5, 0.5, 0.3, 20.0, 160.0);
-            curve(0.5, 0.5, 0.3, 200.0, 340.0);
-            filled(&[(0.2, 0.36), (0.12, 0.56), (0.32, 0.54)]);
-            filled(&[(0.8, 0.64), (0.88, 0.44), (0.68, 0.46)]);
-        }
         Icon::Up => line(&[(0.22, 0.64), (0.5, 0.34), (0.78, 0.64)]),
         Icon::Menu => {
             for y in [0.3, 0.5, 0.7] {
@@ -641,10 +534,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(0.32, 0.44), (0.5, 0.62), (0.68, 0.44)]);
             line(&[(0.16, 0.64), (0.16, 0.84), (0.84, 0.84), (0.84, 0.64)]);
         }
-        Icon::Add => {
-            line(&[(0.5, 0.2), (0.5, 0.8)]);
-            line(&[(0.2, 0.5), (0.8, 0.5)]);
-        }
         Icon::Replace => {
             curve(0.5, 0.5, 0.3, 200.0, 340.0);
             curve(0.5, 0.5, 0.3, 20.0, 160.0);
@@ -661,10 +550,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             closed(&[(0.16, 0.16), (0.84, 0.16), (0.84, 0.84), (0.16, 0.84)]);
             closed(&[(0.3, 0.3), (0.7, 0.3), (0.7, 0.7), (0.3, 0.7)]);
         }
-        Icon::Onion => {
-            closed(&[(0.14, 0.14), (0.62, 0.14), (0.62, 0.62), (0.14, 0.62)]);
-            closed(&[(0.38, 0.38), (0.86, 0.38), (0.86, 0.86), (0.38, 0.86)]);
-        }
         Icon::Edit => {
             closed(&[
                 (0.62, 0.16),
@@ -675,7 +560,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             ]);
             line(&[(0.16, 0.88), (0.84, 0.88)]);
         }
-        Icon::Minus => line(&[(0.22, 0.5), (0.78, 0.5)]),
         Icon::SubTool => {
             for (y, w) in [(0.28, 0.5), (0.5, 0.62), (0.72, 0.44)] {
                 painter.add(Shape::line(
@@ -795,30 +679,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 );
             }
         }
-        Icon::Reverse => {
-            line(&[(0.34, 0.84), (0.34, 0.2)]);
-            filled(&[(0.2, 0.3), (0.48, 0.3), (0.34, 0.12)]);
-            line(&[(0.66, 0.16), (0.66, 0.8)]);
-            filled(&[(0.52, 0.7), (0.8, 0.7), (0.66, 0.88)]);
-        }
-        Icon::OpacityTarget => {
-            boxed(
-                Rect::from_min_max(p(0.34, 0.34), p(0.86, 0.86)),
-                side * 0.03,
-            );
-            filled(&[(0.34, 0.34), (0.86, 0.34), (0.34, 0.86)]);
-            boxed(
-                Rect::from_min_max(p(0.14, 0.14), p(0.62, 0.62)),
-                side * 0.03,
-            );
-        }
-        Icon::LightTable => {
-            closed(&[(0.12, 0.62), (0.88, 0.62), (0.88, 0.86), (0.12, 0.86)]);
-            closed(&[(0.26, 0.14), (0.74, 0.14), (0.74, 0.5), (0.26, 0.5)]);
-            for x in [0.3, 0.5, 0.7] {
-                line(&[(x, 0.54), (x, 0.6)]);
-            }
-        }
         Icon::ProjectIllustration => {
             closed(&[(0.2, 0.1), (0.68, 0.1), (0.8, 0.22), (0.8, 0.9), (0.2, 0.9)]);
             for angle in [0.0_f32, 72.0, 144.0, 216.0, 288.0] {
@@ -869,13 +729,5 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             filled(&[(0.42, 0.38), (0.62, 0.5), (0.42, 0.62)]);
         }
         Icon::Down => filled(&[(0.2, 0.35), (0.8, 0.35), (0.5, 0.7)]),
-        Icon::ColorMode => {
-            circle(0.5, 0.5, 0.34);
-            painter.add(Shape::convex_polygon(
-                arc(p(0.5, 0.5), 0.34 * side, 90.0, 270.0),
-                color,
-                Stroke::NONE,
-            ));
-        }
     }
 }

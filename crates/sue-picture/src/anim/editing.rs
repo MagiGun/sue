@@ -290,6 +290,64 @@ pub fn move_range(
     )
 }
 
+/// Where the key of track `track` that starts on `from` may be dragged:
+/// from the frame after the key before it to the frame before the key
+/// after it (the timeline's last frame when none follows). `None` when no
+/// key of an animation folder's track starts on `from`.
+#[must_use]
+pub fn key_moves(
+    sequence: &Sequence,
+    track: usize,
+    from: u32,
+    length: u32,
+) -> Option<std::ops::RangeInclusive<u32>> {
+    let rate = sequence.rate;
+    let old = sequence
+        .tracks
+        .get(track)
+        .filter(|track| track.kind == CELS)?;
+    let keys = by_frame(old, rate);
+    let index = keys.iter().position(|(at, _)| *at == from)?;
+    let low = index.checked_sub(1).map_or(0, |before| keys[before].0 + 1);
+    let high = keys
+        .get(index + 1)
+        .map_or(length.max(1) - 1, |(after, _)| after - 1);
+    Some(low..=high.max(low))
+}
+
+/// `sequence` with the key of track `track` that starts on `from` moved
+/// to start on `to`, kept between its neighbours (see [`key_moves`]): the
+/// cel before it holds longer or shorter, and it shorter or longer, as a
+/// drag of a cel's start along the timeline does. `None` when no key
+/// starts on `from` or it would not move.
+#[must_use]
+pub fn move_key(
+    sequence: &Sequence,
+    track: usize,
+    from: u32,
+    to: u32,
+    length: u32,
+) -> Option<Sequence> {
+    let rate = sequence.rate;
+    let range = key_moves(sequence, track, from, length)?;
+    let to = to.clamp(*range.start(), *range.end());
+    if to == from {
+        return None;
+    }
+    let old = &sequence.tracks[track];
+    let index = old
+        .clips()
+        .iter()
+        .position(|clip| clip.start.frame(rate) == i64::from(from))?;
+    let mut track_out = old.clone();
+    let mut clip = track_out.remove(index)?;
+    clip.start = Time::from_frames(i64::from(to), rate);
+    track_out.insert(clip);
+    let mut out = sequence.clone();
+    out.tracks[track] = tidy(&track_out, rate, length);
+    Some(out)
+}
+
 /// The key `track` holds in effect at `frame`: its frame and clip.
 fn key_at(track: &Track, rate: Rate, frame: u32) -> Option<(u32, Clip)> {
     by_frame(track, rate)
@@ -861,6 +919,44 @@ mod tests {
             shown(&moved, 0, 6),
             vec![Some(a), Some(a), None, None, Some(b), Some(b)]
         );
+    }
+
+    #[test]
+    fn a_dragged_key_changes_the_holds_and_stays_between_its_neighbours() {
+        let (a, b, c) = (EntityId::new(), EntityId::new(), EntityId::new());
+        let sequence = timeline_of(&[(0, Some(a)), (2, Some(b)), (5, Some(c))], 8);
+        assert_eq!(key_moves(&sequence, 0, 2, 8), Some(1..=4));
+        assert_eq!(key_moves(&sequence, 0, 5, 8), Some(3..=7));
+        assert_eq!(key_moves(&sequence, 0, 3, 8), None, "no key starts there");
+        // b's start dragged to 4: a holds two frames longer, b is shorter.
+        let later = move_key(&sequence, 0, 2, 4, 8).unwrap();
+        assert_eq!(
+            shown(&later, 0, 8),
+            vec![
+                Some(a),
+                Some(a),
+                Some(a),
+                Some(a),
+                Some(b),
+                Some(c),
+                Some(c),
+                Some(c)
+            ]
+        );
+        // Dragged back to 1: a holds one frame only.
+        let earlier = move_key(&later, 0, 4, 1, 8).unwrap();
+        assert_eq!(
+            shown(&earlier, 0, 8)[..5],
+            [Some(a), Some(b), Some(b), Some(b), Some(b)]
+        );
+        // Dragged past c, it stops on the frame before c; onto itself it
+        // does not move.
+        let stopped = move_key(&sequence, 0, 2, 7, 8).unwrap();
+        assert_eq!(shown(&stopped, 0, 8)[3..6], [Some(a), Some(b), Some(c)]);
+        assert!(move_key(&sequence, 0, 2, 2, 8).is_none());
+        // The first key dragged right leaves nothing shown before it.
+        let first = move_key(&sequence, 0, 0, 1, 8).unwrap();
+        assert_eq!(shown(&first, 0, 8)[..2], [None, Some(a)]);
     }
 
     #[test]

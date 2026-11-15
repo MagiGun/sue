@@ -25,6 +25,7 @@ use sue_wm::{AppletContext, Theme, widgets};
 use crate::filters::Filter;
 use crate::studio::SuePaint;
 
+pub(crate) use anim::AnimDialog;
 use anim::{onion_ui, timelapse_ui, timeline_ui};
 use canvas::{
     canvas_properties_ui, canvas_ui, convert_ui, material_ui, perspective_ui, print_ui, proof_ui,
@@ -137,6 +138,9 @@ pub(crate) enum Dialog {
     DeleteFolders(bool),
     /// New Layer, Tone: Simple Tone Settings.
     SimpleTone(crate::panels::SimpleTone),
+    /// A dialog of the timeline (New Timeline, the animation exports,
+    /// Audio Clip Settings and the rest).
+    Anim(Box<AnimDialog>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -184,7 +188,7 @@ impl Dialog {
             Dialog::Resolution(_) => (tr!("change-image-resolution"), vec2(380.0, 250.0)),
             Dialog::Text(..) => (tr!("text"), vec2(440.0, 380.0)),
             Dialog::Perspective(_) => (tr!("create-perspective-ruler"), vec2(320.0, 190.0)),
-            Dialog::Onion(_) => (tr!("onion-skin-settings"), vec2(360.0, 330.0)),
+            Dialog::Onion(_) => (tr!("onion-skin-settings"), vec2(360.0, 440.0)),
             Dialog::Timelapse(_) => (tr!("export-timelapse"), vec2(360.0, 230.0)),
             Dialog::Material(_) => (tr!("register-material"), vec2(360.0, 160.0)),
             Dialog::SelectBy(kind, _) => (
@@ -222,6 +226,7 @@ impl Dialog {
                 crate::panels::DELETE_FOLDERS_SIZE,
             ),
             Dialog::SimpleTone(_) => (tr!("simple-tone-settings"), crate::panels::SIMPLE_TONE_SIZE),
+            Dialog::Anim(dialog) => (dialog.title(), dialog.size()),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -438,6 +443,7 @@ impl SuePaint {
             Dialog::Shortcuts => shortcuts_ui(ui, cx, size, change_keys, theme),
             Dialog::DeleteFolders(quiet) => Self::delete_folders_ui(ui, quiet, theme),
             Dialog::SimpleTone(tone) => Self::simple_tone_ui(ui, tone, theme),
+            Dialog::Anim(dialog) => dialog.ui(ui, theme),
             Dialog::Fonts(manager) => {
                 if sue_wm::fonts::manage_ui(ui, manager, theme) {
                     Outcome::Ok
@@ -502,6 +508,7 @@ impl SuePaint {
             Dialog::Resolution(resolution) => self.resolution_ok(cx, &resolution),
             Dialog::DeleteFolders(quiet) => self.delete_folders_ok(cx, quiet),
             Dialog::SimpleTone(tone) => self.simple_tone_ok(cx, &tone),
+            Dialog::Anim(dialog) => self.anim_dialog_ok(cx, *dialog),
             Dialog::Message(..)
             | Dialog::Shortcuts
             | Dialog::Pages(_)
@@ -554,7 +561,8 @@ impl SuePaint {
             | Dialog::Shortcuts
             | Dialog::Fonts(_)
             | Dialog::DeleteFolders(_)
-            | Dialog::SimpleTone(_) => {}
+            | Dialog::SimpleTone(_)
+            | Dialog::Anim(_) => {}
             Dialog::Color(color) => self.color_dialog_cancel(cx, color),
         }
     }

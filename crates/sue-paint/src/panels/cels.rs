@@ -1,16 +1,24 @@
-//! The cels tab.
+//! The Animation Cels palette: the light tables of the cel being drawn.
 
-use egui::{Rect, RichText, Ui, pos2, vec2};
+use egui::{Rect, Ui, pos2};
+use sue_core::EntityId;
+use sue_wm::ui::{self as wm_ui, Density, Space, TextRole};
 use sue_wm::{AppletContext, Theme};
 
-use crate::icons::Icon;
-use crate::panels::{Wedge, child, icon_button};
+use crate::panels::child;
+use crate::panels::timeline::icon;
 use crate::studio::SuePaint;
 
+/// A button of the palette: its row and column, its icon's stable name,
+/// its command, whether it can be used and whether it is lit.
+type Button = (usize, usize, &'static str, &'static str, bool, bool);
+
 impl SuePaint {
-    /// The Animation Cels tab, as Clip Studio Paint's Animation cels
-    /// palette: its three rows of light table and cel buttons with the
-    /// opacity between them, then the layers on the cel's light table.
+    /// The Animation Cels palette, as Clip Studio Paint's: three rows of
+    /// light table and cel buttons with the opacity and color mode on the
+    /// first, then an entry for each layer on the cel's light table and on
+    /// the general one, each with its picture, its name and a button that
+    /// takes it off.
     pub(super) fn cels_tab(
         &mut self,
         ui: &mut Ui,
@@ -23,42 +31,38 @@ impl SuePaint {
         let registered = cel.zip(self.layer()).is_some_and(|(cel, layer)| {
             crate::anim::light_table(&cx.world.arena, cel).contains(&layer)
         });
-        let side = 24.0;
+        let gap = theme.space(Space::S1);
+        let edge = theme.space(Space::S3);
+        // Nine buttons on the second row: they shrink to fit a narrow
+        // palette rather than run off its edge.
+        let columns = 9.0;
+        let side = Density::of(ui)
+            .row()
+            .min((body.width() - edge * 2.0 - gap * (columns - 1.0)) / columns)
+            .max(gap);
         let at = |row: usize, column: usize| {
             Rect::from_min_size(
-                body.min
-                    + vec2(
-                        6.0 + column as f32 * (side + 2.0),
-                        6.0 + row as f32 * (side + 4.0),
-                    ),
+                pos2(
+                    body.left() + edge + column as f32 * (side + gap),
+                    body.top() + edge + row as f32 * (side + gap),
+                ),
                 egui::Vec2::splat(side),
             )
         };
-        // (row, column, icon, tip, command, enabled, active).
-        let buttons = [
+        let buttons: [Button; 14] = [
             (
                 0,
                 0,
-                Icon::Reset,
-                tr!("reset-position-layers-light-table"),
+                "reset",
                 "anim.light_table.reset",
                 has || self.light_general,
                 false,
             ),
-            (
-                0,
-                1,
-                Icon::Reverse,
-                tr!("reverse-layers-vertically-light-table"),
-                "anim.light_table.reverse",
-                has,
-                false,
-            ),
+            (0, 1, "reverse", "anim.light_table.reverse", has, false),
             (
                 0,
                 2,
-                Icon::OpacityTarget,
-                tr!("switch-opacity-target"),
+                "layer-opacity-target",
                 "anim.light_table.opacity_target",
                 true,
                 self.opacity_general,
@@ -66,8 +70,7 @@ impl SuePaint {
             (
                 1,
                 0,
-                Icon::LightTable,
-                tr!("enable-light-table-2"),
+                "light-table",
                 "anim.light_table",
                 true,
                 self.light_table,
@@ -75,44 +78,18 @@ impl SuePaint {
             (
                 1,
                 1,
-                Icon::Lock,
-                tr!("lock-cel-editing-target"),
+                "cel-lock",
                 "anim.cel.lock",
                 has || self.cel_lock.is_some(),
                 self.cel_lock.is_some(),
             ),
-            (
-                1,
-                2,
-                Icon::Prev,
-                tr!("select-previous-cel"),
-                "anim.cel.prev",
-                true,
-                false,
-            ),
-            (
-                1,
-                3,
-                Icon::Next,
-                tr!("select-next-cel"),
-                "anim.cel.next",
-                true,
-                false,
-            ),
-            (
-                1,
-                4,
-                Icon::Cel,
-                tr!("new-animation-cel-2"),
-                "anim.cel.new",
-                true,
-                false,
-            ),
+            (1, 2, "chevron-left", "anim.cel.prev", true, false),
+            (1, 3, "chevron-right", "anim.cel.next", true, false),
+            (1, 4, "cel-new", "anim.cel.new", true, false),
             (
                 1,
                 6,
-                Icon::Import,
-                tr!("select-and-register-file"),
+                "light-table-file",
                 "anim.light_table.file",
                 has,
                 false,
@@ -120,8 +97,7 @@ impl SuePaint {
             (
                 1,
                 7,
-                Icon::Reference,
-                tr!("register-selected-layer-light-table"),
+                "light-table-add",
                 "anim.light_table.register",
                 has,
                 false,
@@ -129,8 +105,7 @@ impl SuePaint {
             (
                 1,
                 8,
-                Icon::Minus,
-                tr!("deregister-selected-light-table"),
+                "light-table-remove",
                 "anim.light_table.deregister",
                 registered,
                 false,
@@ -138,169 +113,172 @@ impl SuePaint {
             (
                 2,
                 0,
-                Icon::Operation,
-                tr!("light-table-tool"),
+                "light-table-tool",
                 "anim.light_table.tool",
                 true,
                 self.light_tool,
             ),
-            (
-                2,
-                1,
-                Icon::Onion,
-                tr!("show-cel-light-table"),
-                "anim.light_table.cel",
-                true,
-                self.light_cel,
-            ),
+            (2, 1, "cel", "anim.light_table.cel", true, self.light_cel),
             (
                 2,
                 2,
-                Icon::Layers,
-                tr!("show-general-light-table"),
+                "layers",
                 "anim.light_table.general",
                 true,
                 self.light_general,
             ),
         ];
         let mut run = None;
-        for (row, column, icon, tip, command, enabled, active) in &buttons {
-            if icon_button(ui, at(*row, *column), *icon, *enabled, *active, tip, theme) {
-                run = Some(*command);
+        for (row, column, name, command, enabled, lit) in buttons {
+            let tip = self.button_name(cx, command);
+            let mut button = wm_ui::icon_button(("cels-button", command), icon(name), &tip)
+                .enabled(enabled)
+                .quiet();
+            if lit {
+                button = button.selected(true);
+            }
+            if button.show_at(ui, at(row, column), theme).clicked() {
+                run = Some(command);
             }
         }
-        // Opacity and Color mode, on the first row after its buttons.
-        let opacity_rect = Rect::from_min_max(
-            pos2(at(0, 3).left() + 4.0, at(0, 3).top()),
-            pos2(body.right() - side - 12.0, at(0, 3).bottom()),
+        // Opacity and Color Mode, on the first row after its buttons. The
+        // slider sets the cel's light table, or the general one (Switch
+        // Opacity Target).
+        let color_rect = Rect::from_min_size(
+            pos2(body.right() - edge - side, at(0, 0).top()),
+            egui::Vec2::splat(side),
         );
-        let mut inner = child(ui, opacity_rect, "cels-opacity");
-        // The slider sets the cel's light table, or the general one
-        // (Switch opacity target).
-        let mut opacity = if self.opacity_general {
+        let opacity_rect = Rect::from_min_max(
+            pos2(at(0, 3).left() + gap, at(0, 3).top()),
+            pos2(color_rect.left() - gap, at(0, 3).bottom()),
+        );
+        let mut opacity = f64::from(if self.opacity_general {
             self.general_opacity
         } else {
             self.light_opacity
-        } * 100.0;
-        let width = (opacity_rect.width() - 50.0).max(30.0);
-        let changed = inner
-            .horizontal(|ui| {
-                let wedge = ui
-                    .add(Wedge::new(&mut opacity, 0.0..=100.0, width, theme))
-                    .on_hover_text(tr!("opacity"));
-                let typed = ui.add(
-                    egui::DragValue::new(&mut opacity)
-                        .range(0.0..=100.0)
-                        .max_decimals(0),
-                );
-                wedge.changed() || typed.changed()
-            })
-            .inner;
-        if changed {
+        }) * 100.0;
+        if opacity_rect.width() > side
+            && wm_ui::wedge("cels-opacity", &mut opacity, 0.0..=100.0)
+                .label(&tr!("opacity"))
+                .show_at(ui, opacity_rect, theme)
+                .changed()
+        {
+            let opacity = (opacity / 100.0) as f32;
             if self.opacity_general {
-                self.general_opacity = opacity / 100.0;
+                self.general_opacity = opacity;
             } else {
-                self.light_opacity = opacity / 100.0;
+                self.light_opacity = opacity;
             }
         }
-        let color_rect = Rect::from_min_size(
-            pos2(body.right() - side - 6.0, at(0, 0).top()),
-            egui::Vec2::splat(side),
-        );
-        if icon_button(
-            ui,
-            color_rect,
-            Icon::ColorMode,
-            true,
-            self.light_color,
-            &tr!("color-mode"),
-            theme,
-        ) {
+        let tip = self.button_name(cx, "anim.light_table.color");
+        let mut color =
+            wm_ui::icon_button("cels-color-mode", icon("layer-color-mode"), &tip).quiet();
+        if self.light_color {
+            color = color.selected(true);
+        }
+        if color.show_at(ui, color_rect, theme).clicked() {
             run = Some("anim.light_table.color");
         }
-        let mut inner = child(
-            ui,
-            Rect::from_min_max(
-                pos2(body.left() + 8.0, at(2, 0).bottom() + 8.0),
-                body.max - vec2(8.0, 8.0),
-            ),
-            "cels-light-table",
+
+        // The entries.
+        let list = Rect::from_min_max(
+            pos2(body.left() + edge, at(2, 0).bottom() + edge),
+            pos2(body.right() - edge, body.bottom() - edge),
         );
-        let small = |text: &str| {
-            RichText::new(text)
-                .size(theme.small_size + 0.5)
-                .color(theme.muted)
+        let mut inner = child(ui, list, "cels-light-table");
+        let caption = |ui: &mut Ui, text: &str| {
+            ui.label(
+                egui::RichText::new(text)
+                    .font(theme.text_font(TextRole::Caption))
+                    .color(theme.text_muted()),
+            );
         };
+        let mut off: Option<(Option<EntityId>, EntityId)> = None;
         match cel {
-            None => {
-                inner.label(small(&tr!("go-frame-cel-see-light-table")));
-            }
+            None => caption(&mut inner, &tr!("go-frame-cel-see-light-table")),
             Some(cel) => {
-                let name = |id: sue_core::EntityId| {
-                    cx.world
-                        .arena
-                        .get_by_id(id)
-                        .map_or_else(|_| tr!("layer-2"), |entity| entity.name().to_owned())
-                };
-                inner.label(small(&tr!("light-table-of-cel", value = name(cel))));
+                let name = self.entity_name(cx, cel);
+                caption(&mut inner, &tr!("light-table-of-cel", value = name));
                 let layers = crate::anim::light_table(&cx.world.arena, cel);
                 if layers.is_empty() {
-                    inner.label(small(&tr!("pick-layer-trace-then-register-last")));
+                    caption(&mut inner, &tr!("pick-layer-trace-then-register-last"));
                 }
-                let mut off = None;
                 for layer in layers {
-                    inner.horizontal(|ui| {
-                        if ui
-                            .small_button("x")
-                            .on_hover_text(tr!("deregister-from-the-light-table"))
-                            .clicked()
-                        {
-                            off = Some(layer);
-                        }
-                        ui.label(name(layer));
-                    });
-                }
-                if let Some(layer) = off {
-                    Self::apply(cx, crate::anim::deregister(cel, &[layer]));
+                    if self.light_table_entry(&mut inner, layer, cx, theme) {
+                        off = Some((Some(cel), layer));
+                    }
                 }
             }
         }
         // The general light table: shown on every cel.
         if let Some(picture) = self.picture() {
-            inner.add_space(8.0);
-            inner.label(small(&tr!("general-light-table")));
-            let layers = crate::anim::general_light_table(&cx.world.arena, picture);
-            let name = |id: sue_core::EntityId| {
-                cx.world
-                    .arena
-                    .get_by_id(id)
-                    .map_or_else(|_| tr!("layer-2"), |entity| entity.name().to_owned())
-            };
-            let mut off = None;
-            for layer in layers {
-                inner.horizontal(|ui| {
-                    if ui
-                        .small_button("x")
-                        .on_hover_text(tr!("deregister-from-the-light-table"))
-                        .clicked()
-                    {
-                        off = Some(layer);
-                    }
-                    ui.label(name(layer));
-                });
+            inner.add_space(theme.space(Space::S4));
+            caption(&mut inner, &tr!("general-light-table"));
+            for layer in crate::anim::general_light_table(&cx.world.arena, picture) {
+                if self.light_table_entry(&mut inner, layer, cx, theme) {
+                    off = Some((None, layer));
+                }
             }
-            if inner
-                .small_button(tr!("register-layer-general-light-table"))
+            let register = tr!("register-layer-general-light-table");
+            if wm_ui::button("cels-register-general", &register)
+                .icon(icon("light-table-add"))
+                .show(&mut inner, theme)
                 .clicked()
             {
                 run = Some("anim.light_table.register_general");
             }
-            if let Some(layer) = off {
-                Self::apply(cx, crate::anim::deregister_general(picture, &[layer]));
+            match off {
+                Some((Some(cel), layer)) => {
+                    Self::apply(cx, crate::anim::deregister(cel, &[layer]));
+                }
+                Some((None, layer)) => {
+                    Self::apply(cx, crate::anim::deregister_general(picture, &[layer]));
+                }
+                None => {}
             }
         }
-        if let Some(command) = run.filter(|command| !command.is_empty()) {
+        if let Some(command) = run {
             self.run(command, cx);
         }
+    }
+
+    /// The name of `id`, or "Layer" when it is gone.
+    fn entity_name(&self, cx: &AppletContext<'_>, id: EntityId) -> String {
+        cx.world
+            .arena
+            .get_by_id(id)
+            .map_or_else(|_| tr!("layer-2"), |entity| entity.name().to_owned())
+    }
+
+    /// One layer on a light table: its picture, its name and a button
+    /// that takes it off. `true` when that button was pressed.
+    fn light_table_entry(
+        &mut self,
+        ui: &mut Ui,
+        layer: EntityId,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) -> bool {
+        let side = Density::of(ui).row();
+        let name = self.entity_name(cx, layer);
+        let mut off = false;
+        ui.horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::hover());
+            self.cel_thumb(ui.painter(), rect, layer, cx, theme);
+            ui.label(
+                egui::RichText::new(&name)
+                    .font(theme.text_font(TextRole::Body))
+                    .color(theme.text),
+            );
+            off = wm_ui::icon_button(
+                ("cels-off", layer),
+                icon("close"),
+                &tr!("deregister-from-the-light-table"),
+            )
+            .quiet()
+            .show(ui, theme)
+            .clicked();
+        });
+        off
     }
 }

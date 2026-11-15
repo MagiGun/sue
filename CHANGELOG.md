@@ -214,6 +214,30 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint: New Layer, Tone opens Simple Tone Settings (frequency with
   Clip Studio Paint's presets, density, dot shape, angle) and makes a
   layer of tone in the selection.
+- Sue Paint's timeline can be edited as Clip Studio Paint's: pick cels
+  with a click, a drag or Shift and a click, drag them to move them,
+  cut, copy, paste and delete frames, split and merge clips, set the
+  playback range by dragging its ends, add timeline and track labels,
+  and key a layer's position with Smooth, Linear or Hold. New Timeline
+  and Change Settings open their dialog, a canvas can hold several
+  timelines, and Insert Frame asks how many frames and where.
+- Sue Paint: File, Export Animation, Movie makes an MP4 (H.264 with the
+  timeline's sound) through Windows' own encoder, with size, frame rate
+  and quality; where Windows has no encoder it makes an AVI and says
+  what brings MP4. Image sequences, animated GIF, PNG and WebP and the
+  cels ask for their settings first (file names, size, loop count,
+  frames), and the cels of two animation folders go in a folder each.
+- Sue Paint: Audio Clip Settings on a sound of the timeline (volume,
+  cuts and fades, one step that undoes), and File, Export Animation,
+  Audio writes the timeline's sound as WAV, FLAC or AIFF.
+- Sue Paint: stopping Record Timelapse asks whether to keep what was
+  recorded or delete it.
+- Sue Paint: on the timeline, drag a picked cel's first frame to make
+  the cel before it hold longer or shorter; a double click on a frame
+  shows there the layer picked before. A movie exported at another
+  frame rate than the timeline's keeps its length and its sound in
+  step. Onion Skin Settings no longer hides its OK button.
+
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
