@@ -293,10 +293,14 @@ impl SuePaint {
                 let snap = snap.or_else(|| {
                     self.snap_grid
                         .then(|| {
+                            // The finest lines of the picture's grid,
+                            // through its origin.
+                            let grid = crate::grid::Grid::of(&cx.world.arena, doc.picture);
+                            let origin = grid.origin_in(size);
                             crate::rulers::Snap::grid(
                                 local,
-                                [offset[0] as f32, offset[1] as f32],
-                                64.0,
+                                [offset[0] as f32 - origin[0], offset[1] as f32 - origin[1]],
+                                grid.step(),
                                 12.0 / doc.view.zoom.max(0.01),
                             )
                         })
