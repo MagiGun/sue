@@ -1375,8 +1375,8 @@ fn new_engine_sheet() {
     let mut out = Vec::with_capacity(width * height * 4);
     for pixel in bytes.chunks(4) {
         let cover = u32::from(pixel[3]);
-        for channel in 0..3 {
-            let ink = u32::from(pixel[channel]);
+        for &ink in &pixel[..3] {
+            let ink = u32::from(ink);
             out.push(((ink * cover + 255 * (255 - cover)) / 255) as u8);
         }
         out.push(255);
