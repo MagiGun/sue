@@ -21,8 +21,6 @@ const SIZES: [f32; 15] = [
 /// The font box's width, in control heights.
 const FONT_BOX: f32 = 6.0;
 
-/// How tall the font list may grow, in control heights.
-const FONT_LIST: f32 = 16.0;
 
 /// The font search field's width, in control heights.
 const FONT_SEARCH: f32 = 8.0;
@@ -562,25 +560,4 @@ impl SueWriter {
         }
         ui.data_mut(|data| data.insert_temp(open_id, open));
     }
-}
-
-/// A font list with a search field, sized like the toolbar's (Settings'
-/// fonts). Its tooltip names it.
-pub(super) fn font_picker(ui: &mut Ui, salt: &str, font: &mut String, filter: &mut String) {
-    let line = Density::of(ui).control_height();
-    let font_box = egui::ComboBox::from_id_salt(salt.to_owned())
-        .selected_text(font.clone())
-        .width(line * FONT_BOX)
-        .height(line * FONT_LIST)
-        .show_ui(ui, |ui| {
-            ui.add(
-                egui::TextEdit::singleline(filter)
-                    .hint_text(tr!("search-fonts"))
-                    .desired_width(line * FONT_SEARCH),
-            );
-            if let Some(family) = sue_wm::fonts::list_ui(ui, font, filter) {
-                *font = family;
-            }
-        });
-    font_box.response.on_hover_text(tr!("font"));
 }

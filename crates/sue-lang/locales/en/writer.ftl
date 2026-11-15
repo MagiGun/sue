@@ -675,3 +675,15 @@ selected-word-count = { $words ->
    *[other] Selected: { $words } words
 }
 research-kept-detail = Sue Writer shows pictures and documents here. This item is kept in the project as it is.
+# P4-11C: dialogs, settings, start page and phone bars
+fonts = Fonts
+targets = Targets
+zero-sets-no-target = 0 sets no target
+puts-the-field-where-you-type = Puts the field where you are typing, or in the footer's middle
+start-title = Sue Writer
+link-hint = https://
+ctrl-enter-adds-the-comment = Ctrl+Enter adds the comment
+day-words = { $day }: { $count ->
+    [one] { $count } word
+   *[other] { $count } words
+}

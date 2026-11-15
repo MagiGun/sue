@@ -2,7 +2,7 @@
 //! the corkboard, or the outliner), the inspector, the status bar, the find
 //! bar, composition mode, the start screen and the dialogs.
 
-use egui::{Color32, CornerRadius, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
+use egui::{Color32, CornerRadius, Rect, Ui, UiBuilder, Vec2, pos2, vec2};
 use sue_model::manuscript::{self, role};
 use sue_wm::ui::Splitter;
 use sue_wm::{AppletContext, AppletId, Facts, ItemState, MenuItem};
@@ -28,9 +28,6 @@ mod widgets;
 use editor::keeps_typing;
 
 const TOOLBAR_HEIGHT: f32 = 36.0;
-/// What a tool button senses: clicks, but never the keyboard's focus,
-/// which stays with the text.
-const TOOL: Sense = Sense::CLICK.union(Sense::HOVER);
 const STATUS_HEIGHT: f32 = 24.0;
 const FIND_HEIGHT: f32 = 34.0;
 /// A thumb-sized button on a phone.

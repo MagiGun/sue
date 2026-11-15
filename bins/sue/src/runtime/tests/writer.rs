@@ -1020,7 +1020,9 @@ impl WriterDriver {
             &mut NoTextures,
             self.now,
         );
-        self.settle(4);
+        // A dialog the command opens takes clicks once it has been laid
+        // out, a few frames after it first shows.
+        self.settle(8);
     }
 
     /// The system's file dialog answering `purpose` with `path`.
@@ -1294,9 +1296,11 @@ fn sue_writer_exports_plain_text_with_crlf_and_tabs_as_four_spaces() {
     for _ in 0..4 {
         writer.step(vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)]);
     }
+    // Enter takes the typed number and, as in every dialog of Sue,
+    // accepts: Export... asks where.
     writer.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
     writer.settle(4);
-    writer.click_text("Export...");
+    assert!(writer.rect_of("Export...").is_none(), "Enter exported");
     let path = writer.home().join("notes.txt");
     writer.picked("compile.txt", &path, true);
     let text = std::fs::read_to_string(&path)

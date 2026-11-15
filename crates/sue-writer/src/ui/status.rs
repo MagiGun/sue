@@ -5,7 +5,7 @@ use sue_core::Value;
 use sue_model::manuscript;
 use sue_wm::icons::Icon;
 use sue_wm::ui::{
-    Density, ProgressBar, Space, TextRole, button, checkbox, icon_button, search_field, segmented,
+    Density, Space, TextRole, button, checkbox, icon_button, search_field, segmented,
     text_field,
 };
 use sue_wm::{AppletContext, Theme};
@@ -15,8 +15,6 @@ use crate::studio::{SueWriter, View};
 
 use super::widgets::tool;
 
-/// The widest a progress bar runs in a panel or a dialog.
-const PROGRESS_WIDTH: f32 = 380.0;
 
 /// The find field's width, in control heights.
 const FIND_FIELD: f32 = 8.0;
@@ -374,9 +372,3 @@ impl SueWriter {
     }
 }
 
-/// A thin bar of `share` (0 to 1).
-pub(super) fn progress(ui: &mut Ui, share: f32, theme: &Theme) {
-    ProgressBar::new(share)
-        .width(ui.available_width().min(PROGRESS_WIDTH))
-        .show(ui, theme);
-}

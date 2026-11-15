@@ -8,13 +8,12 @@
 //! that call them show the shared icons. They go when their last caller
 //! draws the `Icon` itself.
 
-use egui::{Color32, Painter, Pos2, Rect, Response, Sense, Ui, Vec2};
+use egui::{Color32, Pos2, Rect, Response, Ui};
 use sue_core::EntityId;
 use sue_wm::Theme;
-use sue_wm::icons::{self, Icon, IconStyle};
-use sue_wm::ui::{Density, Radius, icon_button};
+use sue_wm::icons::Icon;
+use sue_wm::ui::icon_button;
 
-use super::TOOL;
 
 /// The desk around the pages: the page's color, a step lighter.
 pub(super) fn desk(theme: &Theme) -> Color32 {
@@ -82,100 +81,6 @@ pub(super) fn tool_toggle(
         .selected(on)
         .shortcut(keys)
         .show(ui, theme)
-}
-
-/// A thumb-sized button with a drawn icon at `rect` (a phone's top bar).
-pub(super) fn thumb(
-    ui: &mut Ui,
-    rect: Rect,
-    on: bool,
-    enabled: bool,
-    theme: &Theme,
-    draw: impl FnOnce(&Painter, Rect, Color32),
-) -> Response {
-    let sense = if enabled { TOOL } else { Sense::hover() };
-    let id = ui
-        .scope_id()
-        .with(("writer-thumb", rect.min.x as i32, rect.min.y as i32));
-    let response = ui.interact(rect, id, sense);
-    let radius = theme.radius(Radius::Md);
-    if on {
-        ui.painter()
-            .rect_filled(rect, radius, theme.fill_selected());
-    } else if response.hovered() && enabled {
-        ui.painter().rect_filled(rect, radius, theme.fill_hover());
-    }
-    let color = if !enabled {
-        theme.text_disabled(theme.panel)
-    } else if on || response.hovered() {
-        theme.text
-    } else {
-        theme.text_muted()
-    };
-    let side = Density::Touch.icon().min(rect.width().min(rect.height()));
-    draw(
-        ui.painter(),
-        Rect::from_center_size(rect.center(), Vec2::splat(side)),
-        color,
-    );
-    response
-}
-
-/// Paints `icon` in `color` over `rect`, solid when `solid`.
-fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32, solid: bool) {
-    let style = if solid {
-        IconStyle::Solid
-    } else {
-        IconStyle::Line
-    };
-    icons::paint_styled(painter, rect, icon, style, color);
-}
-
-/// The menus.
-pub(super) fn menu_icon(painter: &Painter, rect: Rect, color: Color32) {
-    paint(painter, rect, Icon::Menu, color, false);
-}
-
-/// Undo, or Redo.
-pub(super) fn undo_icon(painter: &Painter, rect: Rect, color: Color32, redo: bool) {
-    let icon = if redo { Icon::Redo } else { Icon::Undo };
-    paint(painter, rect, icon, color, false);
-}
-
-/// Find.
-pub(super) fn find_icon(painter: &Painter, rect: Rect, color: Color32) {
-    paint(painter, rect, Icon::Search, color, false);
-}
-
-/// The comments.
-pub(super) fn comment_icon(painter: &Painter, rect: Rect, color: Color32) {
-    paint(painter, rect, Icon::Comment, color, false);
-}
-
-/// Save as PDF.
-pub(super) fn export_icon(painter: &Painter, rect: Rect, color: Color32) {
-    paint(painter, rect, Icon::ExportPdf, color, false);
-}
-
-/// A table.
-pub(super) fn table_icon(painter: &Painter, rect: Rect, color: Color32) {
-    paint(painter, rect, Icon::Table, color, false);
-}
-
-/// A document, or one with no words yet.
-pub(super) fn page_icon(painter: &Painter, rect: Rect, color: Color32, empty: bool) {
-    let icon = if empty { Icon::PageEmpty } else { Icon::Page };
-    paint(painter, rect, icon, color, false);
-}
-
-/// The Draft folder, and the binder that holds it.
-pub(super) fn book_icon(painter: &Painter, rect: Rect, color: Color32) {
-    paint(painter, rect, Icon::Binder, color, false);
-}
-
-/// A picture.
-pub(super) fn picture_icon(painter: &Painter, rect: Rect, color: Color32) {
-    paint(painter, rect, Icon::Picture, color, false);
 }
 
 /// The icon of an alignment.
