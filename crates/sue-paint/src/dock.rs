@@ -440,7 +440,7 @@ impl DockPanel for Palette {
             Self::BrushSize => vec2(62.0, 360.0),
             Self::Layer => vec2(300.0, 420.0),
             Self::Timeline => vec2(640.0, 220.0),
-            Self::SubToolDetail => vec2(480.0, 520.0),
+            Self::SubToolDetail => vec2(640.0, 540.0),
             _ => vec2(260.0, 320.0),
         }
     }
