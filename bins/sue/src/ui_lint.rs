@@ -141,15 +141,15 @@ struct Area {
 const AREAS: [Area; 11] = [
     Area {
         folder: "crates/sue-paint/src/panels",
-        baseline: Counts::new([5, 9, 24, 5, 59, 9, 7]),
+        baseline: Counts::new([2, 0, 4, 0, 5, 1, 1]),
     },
     Area {
         folder: "crates/sue-paint/src/canvas",
-        baseline: Counts::new([1, 0, 14, 0, 14, 9, 1]),
+        baseline: Counts::new([0, 0, 0, 0, 0, 0, 0]),
     },
     Area {
         folder: "crates/sue-paint/src/dialogs",
-        baseline: Counts::new([1, 0, 2, 5, 9, 0, 1]),
+        baseline: Counts::new([0, 0, 0, 2, 3, 0, 0]),
     },
     Area {
         folder: "crates/sue-paint/src/studio",
@@ -157,7 +157,7 @@ const AREAS: [Area; 11] = [
     },
     Area {
         folder: "crates/sue-writer/src/ui",
-        baseline: Counts::new([7, 6, 14, 18, 34, 6, 2]),
+        baseline: Counts::new([0, 0, 0, 0, 0, 0, 0]),
     },
     Area {
         folder: "crates/sue-wm/src/shell",
@@ -270,8 +270,9 @@ const INTERFACE: [&str; 5] = [
 /// dots, the outliner's tick and the find bar's arrows and cross.
 ///
 /// P4-18 took the last of `bins/sue/src` (the cross of a key chip and
-/// the arrows of Settings on a phone) to icons.
-const GLYPH_BASELINE: [u32; 5] = [1, 2, 3, 0, 0];
+/// the arrows of Settings on a phone) to icons. After Phase 4 merged,
+/// Sue Paint and Sue Writer draw none either.
+const GLYPH_BASELINE: [u32; 5] = [1, 0, 0, 0, 0];
 
 /// Characters that are text where they stand, not icons: a file or a
 /// folder from the repository root, the character (`None` for every
