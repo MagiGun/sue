@@ -835,6 +835,17 @@ fn shortcut_in<'m>(menus: &'m [sue_wm::Menu], command: &str) -> Option<&'m str> 
     menus.iter().find_map(|menu| find(&menu.items, command))
 }
 
+/// The tool command whose key picks `tool` (`tool.eraser` for the
+/// eraser, `tool.pen` for the pen and the pencil), if one has.
+#[must_use]
+pub(crate) fn tool_command(tool: Tool) -> Option<&'static str> {
+    let key = tool.key()?.to_string();
+    crate::commands::registry()
+        .iter()
+        .find(|command| command.name.starts_with("tool.") && command.chords == key)
+        .map(|command| command.name)
+}
+
 /// The command bar's and Quick Access's lines of a workspace, gathered
 /// while its lines are read.
 #[derive(Default)]
@@ -1007,8 +1018,15 @@ impl SuePaint {
     /// The key that runs `item` now, as menus show it (`Ctrl+Z`); empty
     /// for none.
     pub(crate) fn item_keys(&self, item: &Item, cx: &AppletContext<'_>) -> String {
-        let Item::Command(command) = item else {
-            return String::new();
+        let command = match item {
+            Item::Command(command) => command.as_str(),
+            // A tool's key is the one of its tool command (E for the
+            // eraser), as people set it in Shortcut Settings.
+            Item::Tool(tool) => match tool_command(*tool) {
+                Some(command) => command,
+                None => return String::new(),
+            },
+            _ => return String::new(),
         };
         if let Some(shown) = shortcut_in(&self.menus, command) {
             return shown.to_owned();
@@ -1428,6 +1446,21 @@ mod tests {
                 other => format!("{other:?}"),
             })
             .collect()
+    }
+
+    #[test]
+    fn every_tool_button_has_the_key_of_its_tool_command() {
+        for tool in Tool::ALL {
+            let command = tool_command(tool).unwrap_or_else(|| panic!("{tool:?}"));
+            let (found, _) = crate::commands::registry().find(command).unwrap();
+            assert_eq!(
+                found.chords,
+                tool.key().unwrap().to_string(),
+                "{tool:?} {command}"
+            );
+        }
+        assert_eq!(tool_command(Tool::Eraser), Some("tool.eraser"));
+        assert_eq!(tool_command(Tool::Pencil), Some("tool.pen"));
     }
 
     #[test]
