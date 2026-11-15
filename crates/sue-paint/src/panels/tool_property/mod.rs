@@ -80,6 +80,9 @@ impl SuePaint {
             }
             Tool::Fill | Tool::AutoSelect => {
                 fill::fill_properties(ui, tool, sub, &mut self.select_op, theme);
+                if tool == Tool::Fill {
+                    self.vector_path_row(ui, theme);
+                }
             }
             Tool::Gradient => fill::gradient_properties(ui, sub, theme),
             Tool::Select => select::select_properties(ui, sub, &mut self.select_op, theme),

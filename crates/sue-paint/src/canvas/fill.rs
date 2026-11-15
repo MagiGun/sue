@@ -27,6 +27,19 @@ impl SuePaint {
         let picture_id = self.picture()?;
         let reference = match sub.referred() {
             fill::Refer::Editing => self.layer_on_picture(arena, size)?,
+            // Fill up to vector path: vector layers as their lines' paths.
+            refer if self.fill_vector_path && sub.tool == crate::tools::Tool::Fill => {
+                let picked = self.doc().map(|doc| doc.picked.clone()).unwrap_or_default();
+                crate::vector::path_reference(
+                    arena,
+                    picture_id,
+                    size,
+                    self.layer(),
+                    &picked,
+                    refer,
+                    sub.exclude,
+                )?
+            }
             refer => {
                 let picked = self.doc().map(|doc| doc.picked.clone()).unwrap_or_default();
                 fill::reference(
