@@ -534,8 +534,11 @@ fn place_lines(galley: &Galley, job: &LayoutJob, on_text: &[OnText]) -> Option<G
             // as egui's does.
             let grow = job.sections[section].format.expand_bg;
             let wanted = [
-                (wash.a() > 0)
-                    .then(|| (wash, base - glyph.font_ascent - grow, base + descent + grow)),
+                (wash.a() > 0).then_some((
+                    wash,
+                    base - glyph.font_ascent - grow,
+                    base + descent + grow,
+                )),
                 (!under.is_empty()).then(|| {
                     let (top, bottom) = line(under, base + descent * UNDERLINE_DROP);
                     (under.color, top, bottom)
