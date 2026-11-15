@@ -523,6 +523,10 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint: post correction smooths a shaky line more at its higher
   levels, and still keeps its corners and its ends where they were.
 - Sue Paint: a pen's tilt turns and mirrors with the view.
+- Sue Paint: the sample strokes in the Sub Tool palette and under Tool
+  Property are painted by the brush engine with each sub tool's whole
+  brush, so a spray, a Decoration brush or a textured pencil shows there
+  as it paints on the canvas.
 - Sue Paint paints with its new brush engine. Every brush whose tip is
   round (the pens, the pencils, the hard eraser and more) draws through
   it, on a layer, on a layer's mask, inside a selection, with Lock

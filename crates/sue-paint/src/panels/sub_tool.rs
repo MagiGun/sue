@@ -12,13 +12,13 @@ use sue_wm::icons::Icon;
 use sue_wm::ui::{Density, Radius, Space, TextRole};
 use sue_wm::{AppletContext, ItemState, MenuItem, ShellRequest, Theme};
 
-use crate::brush::Stroke as BrushStroke;
 use crate::color;
 use crate::commands::subtool;
 use crate::panels::child;
 use crate::panels::sub_tool_detail::NamingKind;
 use crate::panels::tool::ToolDrag;
 use crate::studio::SuePaint;
+use crate::tools::SubTool;
 
 /// Where a sub tool dragged in the list would land: before sub tool
 /// `index` of the entry shown (or after the last when it is the list's
@@ -212,7 +212,7 @@ impl SuePaint {
                             (tall - pad).max(8.0) as u32,
                         ];
                         if let Some(texture) =
-                            Self::sub_preview(&mut self.sub_previews, cx, sub.tip, size)
+                            Self::sub_preview(&mut self.sub_previews, cx, sub, size)
                         {
                             ui.painter().image(
                                 texture,
@@ -516,49 +516,50 @@ impl SuePaint {
         }
     }
 
-    /// The texture of `tip`'s sample stroke for the Sub Tool list, `size`
+    /// The texture of `sub`'s sample stroke for the Sub Tool list, `size`
     /// pixels: white ink on clear, tinted when drawn.
     fn sub_preview(
         cache: &mut std::collections::HashMap<u64, Vec<u8>>,
         cx: &mut AppletContext<'_>,
-        mut tip: crate::brush::Tip,
+        sub: &SubTool,
         size: [u32; 2],
     ) -> Option<egui::TextureId> {
         use std::hash::{Hash, Hasher};
+        let mut sub = sub.clone();
         // Thin pens stay thin and big brushes fit the row.
-        tip.size = (tip.size * 0.7).clamp(1.0, size[1] as f32 * 0.4);
+        sub.tip.size = (sub.tip.size * 0.7).clamp(1.0, size[1] as f32 * 0.4);
+        // An eraser's sample is drawn as ink, so it shows.
+        sub.tip.eraser = false;
         let key = {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            format!("{tip:?}{size:?}").hash(&mut hasher);
+            format!("{:?}{}{:?}{size:?}", sub.tool, sub.name, sub.tip).hash(&mut hasher);
             hasher.finish()
         };
         if !cache.contains_key(&key) {
             if cache.len() > 256 {
                 cache.clear();
             }
-            cache.insert(key, Self::render_stroke(tip, size)?);
+            cache.insert(key, Self::render_stroke(&sub, size)?);
         }
         let pixels = cache.get(&key)?;
         cx.textures
             .texture(0x5355_4253_5452_4b45 ^ key, 1, size, 4, pixels, false)
     }
 
-    /// A sample stroke with `tip` in white over nothing, `size` pixels.
-    fn render_stroke(tip: crate::brush::Tip, [width, height]: [u32; 2]) -> Option<Vec<u8>> {
+    /// A sample stroke of `sub` in white over nothing, `size` pixels.
+    fn render_stroke(sub: &SubTool, [width, height]: [u32; 2]) -> Option<Vec<u8>> {
         let mut raster =
             sue_core::RasterTile2D::new(width, height, sue_core::PixelFormat::Rgba8).ok()?;
-        let mut tip = tip;
-        // An eraser's sample is drawn as ink, so it shows.
-        tip.eraser = false;
-        let mut stroke = BrushStroke::new(sue_core::EntityId::NIL, tip, [1.0, 1.0, 1.0], false);
-        for step in 0..=48 {
-            let t = step as f32 / 48.0;
-            let x = 10.0 + t * (width as f32 * 0.62);
-            let y = height as f32 * (0.42 - 0.2 * (t * std::f32::consts::TAU * 0.8).sin());
-            let pressure = (t * std::f32::consts::PI).sin().max(0.05);
-            stroke.to(&mut raster, [x, y], pressure, None);
-        }
-        stroke.end(&mut raster, crate::brush::Finish::default(), None);
+        let points: Vec<[f32; 2]> = (0..=48)
+            .map(|step| {
+                let t = step as f32 / 48.0;
+                [
+                    10.0 + t * (width as f32 * 0.62),
+                    height as f32 * (0.42 - 0.2 * (t * std::f32::consts::TAU * 0.8).sin()),
+                ]
+            })
+            .collect();
+        sample_stroke(sub, [1.0; 3], &points, &mut raster)?;
         raster.bytes().map(<[u8]>::to_vec)
     }
 
@@ -572,14 +573,20 @@ impl SuePaint {
     ) {
         let height = theme.space(Space::S9) + theme.space(Space::S2);
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-        let sub = self.toolbox.current();
+        let mut sub = self.toolbox.current().clone();
         let (width, pixels_high) = (200_u32, 44_u32);
-        let mut tip = sub.tip;
-        tip.size = tip.size.clamp(1.0, 30.0);
+        sub.tip.size = sub.tip.size.clamp(1.0, 30.0);
         let key = {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            format!("{tip:?}{:?}", self.drawing_color()).hash(&mut hasher);
+            format!(
+                "{:?}{}{:?}{:?}",
+                sub.tool,
+                sub.name,
+                sub.tip,
+                self.drawing_color()
+            )
+            .hash(&mut hasher);
             hasher.finish()
         };
         if self
@@ -587,9 +594,12 @@ impl SuePaint {
             .as_ref()
             .is_none_or(|(cached, _)| *cached != key)
         {
-            self.preview =
-                Self::render_preview(tip, color::unit(self.drawing_color()), [width, pixels_high])
-                    .map(|pixels| (key, pixels));
+            self.preview = Self::render_preview(
+                &sub,
+                color::unit(self.drawing_color()),
+                [width, pixels_high],
+            )
+            .map(|pixels| (key, pixels));
         }
         let Some((_, shown)) = &self.preview else {
             return;
@@ -621,31 +631,28 @@ impl SuePaint {
         }
     }
 
-    /// A sample stroke with `tip` over the light preview ground.
-    fn render_preview(
-        tip: crate::brush::Tip,
-        rgb: [f32; 3],
-        [width, height]: [u32; 2],
-    ) -> Option<Vec<u8>> {
+    /// A sample stroke of `sub` in `rgb` over the light preview ground.
+    fn render_preview(sub: &SubTool, rgb: [f32; 3], [width, height]: [u32; 2]) -> Option<Vec<u8>> {
         let mut raster =
             sue_core::RasterTile2D::new(width, height, sue_core::PixelFormat::Rgba8).ok()?;
         // An eraser shows what it takes out of a dark ground.
-        if tip.eraser
+        if sub.tip.eraser
             && let Some(bytes) = raster.bytes_mut()
         {
             for pixel in bytes.as_chunks_mut::<4>().0 {
                 *pixel = [40, 40, 40, 255];
             }
         }
-        let mut stroke = BrushStroke::new(sue_core::EntityId::NIL, tip, rgb, false);
-        for step in 0..=40 {
-            let t = step as f32 / 40.0;
-            let x = 12.0 + t * (width as f32 - 24.0);
-            let y = height as f32 * (0.5 - 0.28 * (t * std::f32::consts::TAU).sin());
-            let pressure = (t * std::f32::consts::PI).sin().max(0.05);
-            stroke.to(&mut raster, [x, y], pressure, None);
-        }
-        stroke.end(&mut raster, crate::brush::Finish::default(), None);
+        let points: Vec<[f32; 2]> = (0..=40)
+            .map(|step| {
+                let t = step as f32 / 40.0;
+                [
+                    12.0 + t * (width as f32 - 24.0),
+                    height as f32 * (0.5 - 0.28 * (t * std::f32::consts::TAU).sin()),
+                ]
+            })
+            .collect();
+        sample_stroke(sub, rgb, &points, &mut raster)?;
         let bytes = raster.bytes()?;
         let mut shown = Vec::with_capacity(bytes.len());
         for pixel in bytes.as_chunks::<4>().0 {
@@ -657,6 +664,35 @@ impl SuePaint {
         }
         Some(shown)
     }
+}
+
+/// Paints a sample stroke of `sub` in `rgb` along `points` onto `raster`
+/// with the brush engine, exactly as the canvas paints the sub tool (its
+/// whole built-in brush: spray, pictures, paper, mixing), pressed lightly
+/// at its ends and fully in its middle. `None` for a sub tool that does
+/// not paint.
+fn sample_stroke(
+    sub: &SubTool,
+    rgb: [f32; 3],
+    points: &[[f32; 2]],
+    raster: &mut sue_core::RasterTile2D,
+) -> Option<()> {
+    let mut brush = crate::canvas::engine::brush_of(sub, false, false)?;
+    // A sample is drawn as laid, not steadied or flicked.
+    brush.preset.input = sue_model::brush::InputSettings::default();
+    brush.preset.erase = sub.tip.eraser;
+    let mut line = crate::vector::figure_engine_line(points, sub.tip, [rgb, rgb], false);
+    let engine = line.engine.as_mut()?;
+    engine.brush_hash = brush.hash();
+    engine.brush = Some(std::sync::Arc::new(brush));
+    engine.device = sue_brush::input::Device::Pen;
+    let count = engine.pen.len().max(2) - 1;
+    for (index, part) in engine.pen.iter_mut().enumerate() {
+        let t = index as f32 / count as f32;
+        part.pressure = Some((t * std::f32::consts::PI).sin().max(0.05));
+    }
+    line.paint_into(raster, false, None);
+    Some(())
 }
 
 /// The Sub Tool palette's right-click menu: Clip Studio Paint's items,
@@ -679,4 +715,105 @@ fn sub_tool_menu() -> Vec<MenuItem> {
         MenuItem::Separator,
         item(tr!("sub-tool-detail-menu"), "detail"),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::{Tool, Toolbox};
+
+    /// Every built-in brush sub tool's sample stroke paints, with the
+    /// brush engine and the sub tool's whole built-in brush: a sub tool
+    /// whose brush has paint behaviours (spray, pictures, paper) shows
+    /// them, so two such sub tools of one tip size show apart.
+    #[test]
+    fn every_brush_sample_paints_with_its_own_brush() {
+        let toolbox = Toolbox::default();
+        let mut seen = std::collections::HashSet::new();
+        for tool in [
+            Tool::Pen,
+            Tool::Pencil,
+            Tool::Brush,
+            Tool::Airbrush,
+            Tool::Decoration,
+            Tool::Eraser,
+        ] {
+            for sub in toolbox.subs(tool) {
+                let mut sub = sub.clone();
+                sub.tip.eraser = false;
+                let pixels = SuePaint::render_stroke(&sub, [160, 40]).expect("a sample");
+                let inked = pixels.chunks(4).filter(|pixel| pixel[3] > 0).count();
+                assert!(inked > 40, "{}: the sample shows ({inked})", sub.name);
+                seen.insert(pixels);
+            }
+        }
+        assert!(seen.len() > 40, "the samples differ: {}", seen.len());
+        // The current brush's sample: an eraser takes from a dark ground.
+        let eraser = toolbox.subs(Tool::Eraser)[0].clone();
+        assert!(eraser.tip.eraser);
+        let shown = SuePaint::render_preview(&eraser, [0.0; 3], [200, 44]).expect("a sample");
+        assert!(
+            shown.chunks(4).any(|pixel| pixel[0] > 200),
+            "the eraser shows the light ground through the dark"
+        );
+    }
+
+    /// Writes every brush sub tool's sample (as the Sub Tool list tints
+    /// it on a dark and a light theme, and the current brush's preview)
+    /// to the PNG `SUE_SUB_SAMPLES` names, for a person to look at.
+    #[test]
+    #[ignore = "writes the Sub Tool samples for a person to look at"]
+    fn sub_tool_samples_sheet() {
+        let Ok(path) = std::env::var("SUE_SUB_SAMPLES") else {
+            return;
+        };
+        let toolbox = Toolbox::default();
+        let (cell, preview) = ([240_u32, 34_u32], [200_u32, 44_u32]);
+        let width = cell[0] * 2 + preview[0];
+        let mut rows: Vec<Vec<u8>> = Vec::new();
+        for tool in [
+            Tool::Pen,
+            Tool::Pencil,
+            Tool::Brush,
+            Tool::Airbrush,
+            Tool::Decoration,
+            Tool::Eraser,
+        ] {
+            for sub in toolbox.subs(tool) {
+                let mut sample = sub.clone();
+                sample.tip.size = (sample.tip.size * 0.7).clamp(1.0, cell[1] as f32 * 0.4);
+                sample.tip.eraser = false;
+                let white = SuePaint::render_stroke(&sample, cell).unwrap();
+                let mut current = sub.clone();
+                current.tip.size = current.tip.size.clamp(1.0, 30.0);
+                let shown = SuePaint::render_preview(&current, [0.1, 0.1, 0.12], preview).unwrap();
+                for y in 0..preview[1] as usize {
+                    let mut row = Vec::with_capacity(width as usize * 4);
+                    for (ground, ink) in [
+                        ([24_u8, 24, 26], [230_u8, 230, 230]),
+                        ([246, 244, 238], [40, 40, 44]),
+                    ] {
+                        for x in 0..cell[0] as usize {
+                            let a = if y < cell[1] as usize {
+                                f32::from(white[(y * cell[0] as usize + x) * 4 + 3]) / 255.0
+                            } else {
+                                0.0
+                            };
+                            for c in 0..3 {
+                                let v = f32::from(ink[c]) * a + f32::from(ground[c]) * (1.0 - a);
+                                row.push(v.round() as u8);
+                            }
+                            row.push(255);
+                        }
+                    }
+                    let i = y * preview[0] as usize * 4;
+                    row.extend_from_slice(&shown[i..i + preview[0] as usize * 4]);
+                    rows.push(row);
+                }
+            }
+        }
+        let bytes: Vec<u8> = rows.concat();
+        let png = sue_io::encode_png_rgba(width, rows.len() as u32, &bytes).unwrap();
+        std::fs::write(path, png).unwrap();
+    }
 }
