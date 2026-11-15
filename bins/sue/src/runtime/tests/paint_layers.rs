@@ -375,16 +375,25 @@ fn sue_paint_masks_hide_without_erasing_the_layer() {
         middle - vec2(15.0, 0.0),
     );
     let arena = &runtime.engine.world.arena;
-    // The row the stroke ran along, wherever the canvas sits on screen.
+    // The row the stroke ran along, wherever the canvas sits on screen:
+    // the middle of its ink at x 880 (a line may be thinner where it
+    // starts).
     let row = {
         let raster = sue_paint::doc::raster(arena, layer).unwrap();
         let bytes = raster.bytes().unwrap();
-        (0..raster.height())
-            .max_by_key(|y| bytes[((y * raster.width() + 880) * 4 + 3) as usize])
-            .unwrap()
+        let inked: Vec<u32> = (0..raster.height())
+            .filter(|y| bytes[((y * raster.width() + 880) * 4 + 3) as usize] > 128)
+            .collect();
+        inked[inked.len() / 2]
     };
+    // How much shows at `x` on that row: the alpha of a layer, the value
+    // of a gray mask.
     let alpha_of = |raster: &sue_core::RasterTile2D, x: u32| {
-        raster.bytes().unwrap()[((row * raster.width() + x) * 4 + 3) as usize]
+        let at = (row * raster.width() + x) as usize;
+        match raster.format() {
+            sue_core::PixelFormat::Gray8 => raster.bytes().unwrap()[at],
+            _ => raster.bytes().unwrap()[at * 4 + 3],
+        }
     };
     let options = sue_paint::composite::RenderOptions {
         paper: false,

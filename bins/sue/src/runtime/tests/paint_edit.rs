@@ -425,12 +425,11 @@ fn sue_paint_lasso_fill_close_and_fill_and_copy_stamp_paint() {
     drag(&mut runtime, &mut step, &around, plain);
     assert_eq!(painted(&runtime), lasso, "no lines, nothing closed off");
     command(&mut runtime, "tool.pen");
-    drag(
-        &mut runtime,
-        &mut step,
-        &ring(middle + vec2(80.0, 0.0), 25.0),
-        plain,
-    );
+    // Round a little past where it began, as a hand closes a ring: the
+    // pen's ends taper to points that would only touch.
+    let pen_ring = ring(middle + vec2(80.0, 0.0), 25.0);
+    let closed: Vec<Pos2> = pen_ring.iter().chain(&pen_ring[1..4]).copied().collect();
+    drag(&mut runtime, &mut step, &closed, plain);
     let lines = painted(&runtime);
     sub(&mut runtime, "tool.fill", 0);
     drag(&mut runtime, &mut step, &around, plain);
