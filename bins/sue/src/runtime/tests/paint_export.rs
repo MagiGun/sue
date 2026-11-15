@@ -411,3 +411,50 @@ fn show_in_folder_shows_the_canvas_file() {
     paint.settle(4);
     assert_eq!(message(&paint), format!("File: {}", webp[0].display()));
 }
+
+#[test]
+fn the_files_dialogs_keep_the_pen_and_the_keys_off_the_canvas() {
+    // While the export settings or Batch Convert Pictures show, a drag
+    // over them paints nothing beneath and Delete clears nothing.
+    let mut paint = PaintDriver::new("paint-export-modal");
+    let paint_id = AppletId::new(sue_paint::ID).unwrap();
+    paint.command("tool.pen");
+    paint.settle(4);
+    let middle = paint_middle(&paint.runtime);
+    let depth = paint.runtime.engine.history.depth();
+    paint.drag(
+        middle + vec2(-40.0, -20.0),
+        middle + vec2(40.0, 20.0),
+        egui::PointerButton::Primary,
+    );
+    assert_eq!(
+        paint.runtime.engine.history.depth(),
+        depth + 1,
+        "the pen paints with no dialog up"
+    );
+    for command in ["file.export.png", "file.batch_convert"] {
+        paint.command(command);
+        paint.settle(40);
+        let depth = paint.runtime.engine.history.depth();
+        paint.drag(
+            middle + vec2(-60.0, 10.0),
+            middle + vec2(60.0, 30.0),
+            egui::PointerButton::Primary,
+        );
+        paint.step(vec![key(egui::Key::Delete, egui::Modifiers::NONE)]);
+        paint.settle(4);
+        assert_eq!(
+            paint.runtime.engine.history.depth(),
+            depth,
+            "{command}: nothing changed under the dialog"
+        );
+        assert!(
+            paint
+                .runtime
+                .applets
+                .get_mut(&paint_id)
+                .is_some_and(|applet| applet.navigate("dialog/close"))
+        );
+        paint.settle(6);
+    }
+}

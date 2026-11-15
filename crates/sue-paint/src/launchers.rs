@@ -90,7 +90,11 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        if !self.text_launcher || self.gesture.is_some() || self.dialog.is_some() {
+        if !self.text_launcher
+            || self.gesture.is_some()
+            || self.dialog.is_some()
+            || self.files.dialog_open()
+        {
             return;
         }
         let tool = self.toolbox.tool();

@@ -141,6 +141,7 @@ impl SuePaint {
         // Puppet warp keeps Enter and Esc for itself.
         if ctx.text_edit_focused()
             || self.dialog.is_some()
+            || self.files.dialog_open()
             || self.menubar.is_open()
             || self.warp.is_some()
             || self.transform.is_some()
