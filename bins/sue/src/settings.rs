@@ -367,9 +367,13 @@ impl Settings {
         let theme = &cx.theme;
         let name = tr!("settings-reset");
         let help = tr!("settings-reset-hint");
+        // No name to the button itself, which would show it as a plain
+        // tooltip over Sue's own; the name is given for assistive
+        // technology here instead.
         let response = ui::icon_button(("sue-setting-reset", entry.path()), Icon::Reset, "")
             .quiet()
             .show(ui, theme);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
         ui::tooltip(response, &Tip::new(&name).help(&help), theme)
             .clicked()
             .then(|| Edit::Set(entry.path().to_owned(), shipped))
