@@ -849,6 +849,9 @@ pub struct SuePaint {
     /// The frame border panels the Object tool picked last, by layer
     /// and index, for Divide Frame Border Equally and Combine Frames.
     pub(crate) comic_picked: Option<(EntityId, Vec<usize>)>,
+    /// What the tool palettes keep between frames: Sub Tool Detail's
+    /// category, the naming dialog, the arrangement last kept.
+    pub(crate) tool_palettes: crate::panels::ToolPalettes,
 }
 
 impl Default for SuePaint {
@@ -1046,6 +1049,7 @@ impl Default for SuePaint {
             fill_vector_path: false,
             page_view: None,
             comic_picked: None,
+            tool_palettes: crate::panels::ToolPalettes::default(),
         }
     }
 }

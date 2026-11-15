@@ -24,8 +24,9 @@ mod quick_access;
 pub(crate) mod run_button;
 mod sub_tool;
 mod sub_view;
+pub(crate) mod sub_tool_detail;
 mod timeline;
-mod tool;
+pub(crate) mod tool;
 mod tool_property;
 
 use egui::{
@@ -45,7 +46,12 @@ pub(crate) use material::{MENU_COMMANDS as MATERIAL_COMMANDS, MaterialView, Thum
 pub(crate) use navigator::MENU_COMMANDS as NAVIGATOR_COMMANDS;
 pub(crate) use quick_access::MENU_COMMANDS as QUICK_ACCESS_COMMANDS;
 pub(crate) use sub_view::MENU_COMMANDS as SUB_VIEW_COMMANDS;
-pub(crate) use tool::{slot_icon, tool_icon};
+pub(crate) use sub_tool_detail::ToolPalettes;
+pub(crate) use tool::{PROPERTY_MENU, SUB_TOOL_MENU, TOOL_MENU, slot_icon, tool_icon};
+
+/// The rice key: the Tool palette shows the main and sub colors under its
+/// tools (its menu's Show Color Icon).
+pub(crate) const TOOL_COLOR_ICON: &str = "sue_paint.tool_color_icon";
 
 /// A child `Ui` confined to `rect`.
 pub(crate) fn child(ui: &mut Ui, rect: Rect, salt: &str) -> Ui {
@@ -274,17 +280,6 @@ impl Flow {
         let rect = Rect::from_min_size(pos2(self.x, self.y), size);
         self.x += advance;
         Some(rect)
-    }
-
-    /// A gap of `width` between groups, unless a line just began; where
-    /// it starts.
-    pub(crate) fn gap(&mut self, width: f32) -> Option<f32> {
-        if self.x <= self.left || self.x + width > self.right {
-            return None;
-        }
-        let at = self.x;
-        self.x += width;
-        Some(at)
     }
 }
 
@@ -548,6 +543,7 @@ impl SuePaint {
                 self.tool_tab = was;
             }
             Palette::BrushGrid => self.brush_size_grid(ui, body.shrink2(vec2(6.0, 6.0)), theme),
+            Palette::SubToolDetail => self.sub_tool_detail(ui, body, cx, theme),
             Palette::ColorSlider => {
                 let mut inner = child(ui, body.shrink(8.0), "color-slider-palette");
                 self.color_sliders(&mut inner, theme);

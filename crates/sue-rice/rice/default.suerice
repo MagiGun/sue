@@ -126,6 +126,7 @@ selection_layer_opacity = 50   # [0..100] Opacity of a new selection layer (%; P
 rotate_step = 15               # [1..90] How far Rotate Left and Rotate Right turn the view (degrees; Preferences, Canvas)
 layout_style = "classic"       # {classic|sue_paint} How Sue Paint's workspace is designed: which palettes there are and where they sit (Window, Layout Style)
 remember_layout = true         # Sue Paint opens with its palettes where they were left (Window, Workspace)
+tool_color_icon = true         # The Tool palette shows the main and sub colors under its tools (Tool palette menu, Show Color Icon)
 language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
 
 [sue_paint_colors]

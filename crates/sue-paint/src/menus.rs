@@ -228,6 +228,7 @@ const WINDOW_PALETTES: [&[(&str, Palette)]; 5] = [
         ("window.tool_property", Palette::ToolProperty),
         ("window.brush_grid", Palette::BrushGrid),
         ("window.brush_size", Palette::BrushSize),
+        ("window.sub_tool_detail", Palette::SubToolDetail),
     ],
     &[
         ("window.color_wheel", Palette::Color),

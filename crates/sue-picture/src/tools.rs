@@ -644,6 +644,9 @@ pub struct SubTool {
     /// The layer [`Self::move_clicked`] moves becomes the current one
     /// (Moved layers become selected).
     pub move_select: bool,
+    /// The settings, by their stable names, that Tool Property leaves
+    /// out (the closed eyes of Sub Tool Detail, which shows every one).
+    pub hidden: Vec<String>,
 }
 
 impl SubTool {
@@ -689,6 +692,7 @@ impl SubTool {
             transparent: 0,
             move_clicked: false,
             move_select: true,
+            hidden: Vec::new(),
         }
     }
 
@@ -1079,9 +1083,11 @@ impl Toolbox {
         slot.picked = slot.put(group, at, copy);
     }
 
-    /// Adds `sub` at the end of the last group of its tool's entry (the
-    /// current entry when it is one of that tool), picks it and makes that
-    /// entry current (the Item Bank's Add).
+    /// Adds `sub` at the end of a group of its tool's entry and picks it,
+    /// making that entry current (the Item Bank's Add, a brush file let
+    /// go on the Sub Tool palette): the current entry when it is one of
+    /// that tool, into the group of its picked sub tool; else the tool's
+    /// own entry, into its last group.
     pub fn add_sub(&mut self, sub: SubTool) {
         let tool = sub.tool;
         let current = (self.slots[self.current].kind == tool).then_some(self.current);
@@ -1097,8 +1103,15 @@ impl Toolbox {
             return;
         };
         let entry = &mut self.slots[slot];
-        let last = entry.groups.len() - 1;
-        entry.picked = entry.put(last, usize::MAX, sub);
+        // Into the group shown when the entry is out (a brush file let go
+        // on the Sub Tool palette lands where it was let go), else its
+        // last.
+        let group = if slot == self.current {
+            entry.group_of(entry.picked)
+        } else {
+            entry.groups.len() - 1
+        };
+        entry.picked = entry.put(group, usize::MAX, sub);
         self.current = slot;
     }
 
@@ -1224,6 +1237,35 @@ impl Toolbox {
         self.slots.insert(to, slot);
         self.current = moved_index(current, from, to);
         true
+    }
+
+    /// Takes entry `slot` off the tool palette with its sub tools (Delete
+    /// Tool). The last entry stays; the current one moves to a neighbour.
+    pub fn remove_slot(&mut self, slot: usize) -> Option<ToolSlot> {
+        if slot >= self.slots.len() || self.slots.len() <= 1 {
+            return None;
+        }
+        let removed = self.slots.remove(slot);
+        if self.current > slot || self.current >= self.slots.len() {
+            self.current = self.current.saturating_sub(1);
+        }
+        Some(removed)
+    }
+
+    /// Puts `entry` on the tool palette at place `at` (clamped), as a
+    /// removed one comes back (Add Tool from Default, undoing Delete
+    /// Tool). Returns its place; the current entry stays current.
+    pub fn insert_slot(&mut self, at: usize, mut entry: ToolSlot) -> usize {
+        if entry.subs.is_empty() {
+            return self.current;
+        }
+        entry.settle();
+        let at = at.min(self.slots.len());
+        self.slots.insert(at, entry);
+        if self.current >= at && self.slots.len() > 1 {
+            self.current += 1;
+        }
+        at
     }
 
     /// Renames entry `slot`.
@@ -2027,14 +2069,17 @@ mod tests {
         let speed = one.slots()[figure].group_range(2).start;
         assert!(one.delete_sub(Tool::Figure, speed));
         assert_eq!(one.slots()[figure].groups().len(), 2);
-        // An Item Bank sub tool lands at the end of its tool.
+        // An Item Bank sub tool lands at the end of the group shown (the
+        // Pen's own while its first sub tool is picked).
         let mut bank = Toolbox::default();
+        bank.pick(Tool::Pen);
         let mut sub = Tool::Pen.sub_tools()[0].clone();
         sub.name = "From the bank".to_owned();
         bank.add_sub(sub);
         assert_eq!(bank.current().name, "From the bank");
         assert_eq!(bank.tool(), Tool::Pen);
-        assert_eq!(groups(&bank, pen)[1], ("Marker".to_owned(), 5));
+        assert_eq!(groups(&bank, pen)[0], ("Pen".to_owned(), 8));
+        assert_eq!(groups(&bank, pen)[1], ("Marker".to_owned(), 4));
     }
 
     #[test]
@@ -2096,5 +2141,58 @@ mod tests {
         toolbox.pick(Tool::Fill);
         toolbox.pick(Tool::Pen);
         assert_eq!(toolbox.current_slot(), home);
+    }
+
+    #[test]
+    fn a_removed_tool_comes_back_where_it_was() {
+        let mut toolbox = Toolbox::default();
+        let fill = slot_named(&toolbox, "Fill");
+        toolbox.pick(Tool::Pen);
+        let pen = toolbox.current_slot();
+        let before = toolbox.clone();
+        let removed = toolbox.remove_slot(fill).unwrap();
+        assert_eq!(removed.name, "Fill");
+        assert_eq!(toolbox.slots().len(), before.slots().len() - 1);
+        assert_eq!(toolbox.current_entry().name, "Pen", "the Pen stays out");
+        assert_eq!(toolbox.insert_slot(fill, removed), fill);
+        assert_eq!(toolbox, before);
+        assert_eq!(toolbox.current_slot(), pen);
+        // The current entry going leaves a neighbour current.
+        toolbox.pick_slot(fill);
+        toolbox.remove_slot(fill).unwrap();
+        assert!(toolbox.current_slot() < toolbox.slots().len());
+        // The last entry stays.
+        let mut one = Toolbox::default();
+        while one.slots().len() > 1 {
+            one.remove_slot(0).unwrap();
+        }
+        assert!(one.remove_slot(0).is_none());
+    }
+
+    #[test]
+    fn a_new_sub_tool_hides_nothing_in_tool_property() {
+        for slot in Toolbox::default().slots() {
+            assert!(slot.subs().iter().all(|sub| sub.hidden.is_empty()));
+        }
+    }
+
+    #[test]
+    fn an_added_sub_tool_lands_in_the_group_shown() {
+        let mut toolbox = Toolbox::default();
+        toolbox.pick(Tool::Pen);
+        let pen = toolbox.current_slot();
+        assert!(
+            toolbox.current_entry().groups().len() > 1,
+            "the Pen has groups"
+        );
+        // The first group is shown: the new sub tool ends it, not the last.
+        toolbox.pick_sub(Tool::Pen, 0);
+        let tip = toolbox.current().tip;
+        toolbox.add_sub(SubTool::new(Tool::Pen, "Dropped", 0, tip));
+        let entry = toolbox.current_entry();
+        assert_eq!(toolbox.current_slot(), pen);
+        assert_eq!(entry.subs()[entry.picked()].name, "Dropped");
+        assert_eq!(entry.group_of(entry.picked()), 0);
+        assert_eq!(entry.picked(), entry.group_range(0).end - 1);
     }
 }

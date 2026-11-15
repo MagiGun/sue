@@ -725,6 +725,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         crate::bar_items::quick_access_settings,
         doc_any,
     ),
+    c(
+        "window.sub_tool_detail",
+        "sub-tool-detail",
+        "wrench",
+        palette,
+        palette_state,
+    ),
 ];
 
 /// A command that works with or without a canvas.

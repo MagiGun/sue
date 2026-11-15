@@ -82,6 +82,8 @@ pub(crate) enum Palette {
     Approximate,
     /// Color History, torn off the color set's tabs.
     ColorHistory,
+    /// Sub Tool Detail: every setting of the picked sub tool.
+    SubToolDetail,
 }
 
 /// The palettes the "Clip Studio" style keeps folded in the strip at the
@@ -166,7 +168,7 @@ pub(crate) fn classic_layout() -> Dock {
 }
 
 /// Every palette.
-const PALETTES: [Palette; 24] = [
+const PALETTES: [Palette; 25] = [
     Palette::CommandBar,
     Palette::QuickAccess,
     Palette::Tools,
@@ -191,6 +193,7 @@ const PALETTES: [Palette; 24] = [
     Palette::Intermediate,
     Palette::Approximate,
     Palette::ColorHistory,
+    Palette::SubToolDetail,
 ];
 
 impl Palette {
@@ -221,6 +224,7 @@ impl Palette {
             Self::Intermediate => tr!("intermediate-color"),
             Self::Approximate => tr!("approximate-color"),
             Self::ColorHistory => tr!("color-history"),
+            Self::SubToolDetail => tr!("sub-tool-detail"),
         }
     }
 
@@ -251,6 +255,7 @@ impl Palette {
             Self::Intermediate => Icon::Intermediate,
             Self::Approximate => Icon::Approximate,
             Self::ColorHistory => Icon::History,
+            Self::SubToolDetail => Icon::Wrench,
         }
     }
 
@@ -280,7 +285,8 @@ impl Palette {
             | Self::ColorSlider
             | Self::Intermediate
             | Self::Approximate
-            | Self::ColorHistory => true,
+            | Self::ColorHistory
+            | Self::SubToolDetail => true,
         }
     }
 
@@ -304,6 +310,7 @@ impl Palette {
             "window.intermediate" => Self::Intermediate,
             "window.approximate" => Self::Approximate,
             "window.color_history" => Self::ColorHistory,
+            "window.sub_tool_detail" => Self::SubToolDetail,
             "window.material" => Self::Material,
             "window.sub_view" => Self::SubView,
             "window.layer_property" => Self::LayerProperty,
@@ -344,6 +351,9 @@ impl Palette {
             Self::ItemBank => &crate::panels::ITEM_BANK_COMMANDS,
             Self::AutoAction => &crate::panels::AUTO_ACTION_COMMANDS,
             Self::Material => &crate::panels::MATERIAL_COMMANDS,
+            Self::Tools => crate::panels::TOOL_MENU,
+            Self::SubTool => crate::panels::SUB_TOOL_MENU,
+            Self::ToolProperty | Self::SubToolDetail => crate::panels::PROPERTY_MENU,
             _ => &[],
         }
     }
@@ -399,6 +409,7 @@ impl DockPanel for Palette {
             Self::Intermediate => "intermediate_color",
             Self::Approximate => "approximate_color",
             Self::ColorHistory => "color_history",
+            Self::SubToolDetail => "sub_tool_detail",
         }
     }
 
@@ -416,6 +427,12 @@ impl DockPanel for Palette {
             Self::BrushSize => Some(86.0),
             _ => None,
         }
+    }
+
+    /// Sub Tool Detail is nowhere until it is opened (Tool Property's
+    /// wrench, Window), and then floats beside the palettes.
+    fn optional(self) -> bool {
+        self == Self::SubToolDetail
     }
 
     fn min_width(self) -> f32 {
@@ -443,6 +460,7 @@ impl DockPanel for Palette {
             Self::BrushSize => vec2(62.0, 360.0),
             Self::Layer => vec2(300.0, 420.0),
             Self::Timeline => vec2(640.0, 220.0),
+            Self::SubToolDetail => vec2(640.0, 540.0),
             _ => vec2(260.0, 320.0),
         }
     }
@@ -1671,7 +1689,8 @@ mod tests {
         assert_eq!(laid.icons, STRIP_PALETTES);
         // Every palette has a place: none is left out, and none shows in
         // two places.
-        for palette in PALETTES {
+        // Sub Tool Detail waits until it is opened.
+        for palette in PALETTES.into_iter().filter(|palette| !palette.optional()) {
             let places = usize::from(dock.find(palette).is_some())
                 + usize::from(dock.iconized.contains(&palette));
             assert_eq!(places, 1, "{palette:?}");
@@ -1892,7 +1911,7 @@ mod tests {
         );
         assert_eq!(read.bottom_height, 210.0);
         assert!(!read.row_folded[1], "the Timeline stays open as it was");
-        for palette in PALETTES {
+        for palette in PALETTES.into_iter().filter(|palette| !palette.optional()) {
             let places = usize::from(read.find(palette).is_some())
                 + usize::from(read.iconized.contains(&palette));
             assert_eq!(places, 1, "{palette:?}");

@@ -373,6 +373,7 @@ pub(crate) const fn palette_icon_name(palette: Palette) -> &'static str {
         Palette::Tools => "palette-tools",
         Palette::SubTool => "palette-sub-tools",
         Palette::ToolProperty => "palette-tool-property",
+        Palette::SubToolDetail => "wrench",
         Palette::BrushSize => "palette-brush-size",
         Palette::BrushGrid => "palette-brush-grid",
         Palette::Color => "palette-color-wheel",

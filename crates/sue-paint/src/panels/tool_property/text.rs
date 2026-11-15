@@ -2,10 +2,10 @@
 
 use egui::Ui;
 use sue_wm::Theme;
+use sue_wm::ui::TextRole;
 
-use super::small_text;
+use super::{Category, Rows};
 use crate::lettering::Typing;
-use crate::panels::slider_row;
 use crate::tools::SubTool;
 
 /// Clip Studio Paint's Text tool property: the font, its size,
@@ -13,13 +13,88 @@ use crate::tools::SubTool;
 /// being typed.
 pub(super) fn text_properties(
     ui: &mut Ui,
+    rows: &mut Rows<'_>,
     sub: &mut SubTool,
     typing: Option<&mut Typing>,
     theme: &Theme,
 ) {
-    let small = small_text(theme);
+    rows.row(ui, "font", Category::Text, |ui, theme, enabled| {
+        ui.add_enabled_ui(enabled, |ui| font_row(ui, sub, theme));
+    });
+    rows.slider(
+        ui,
+        "text-size",
+        Category::Text,
+        &tr!("size-2"),
+        &mut sub.tip.size,
+        6.0..=400.0,
+        &tr!("px"),
+        true,
+    );
+    rows.choice_u8(
+        ui,
+        "text-direction",
+        Category::Text,
+        &tr!("direction"),
+        &mut sub.kind,
+        &[tr!("pref-horizontal"), tr!("pref-vertical")],
+    );
+    rows.check(
+        ui,
+        "text-centered",
+        Category::Text,
+        &tr!("centered"),
+        None,
+        &mut sub.whole,
+    );
+    // Clip Studio Paint's letter spacing, line spacing and justification.
+    rows.slider(
+        ui,
+        "letter-spacing",
+        Category::Text,
+        &tr!("letter-spacing"),
+        &mut sub.tracking,
+        -0.3..=1.5,
+        &tr!("em"),
+        false,
+    );
+    let mut leading = if sub.leading > 0.0 { sub.leading } else { 1.0 };
+    if rows.slider(
+        ui,
+        "line-spacing",
+        Category::Text,
+        &tr!("line-spacing"),
+        &mut leading,
+        0.5..=3.0,
+        "x",
+        false,
+    ) {
+        sub.leading = leading;
+    }
+    rows.choice_u8(
+        ui,
+        "justify",
+        Category::Text,
+        &tr!("justify"),
+        &mut sub.justify,
+        &[
+            tr!("justify-start"),
+            tr!("justify-middle"),
+            tr!("justify-end"),
+        ],
+    );
+    // Ruby (furigana): a reading over the selected words.
+    if let Some(typing) = typing {
+        rows.row(ui, "ruby", Category::Text, |ui, _, _| {
+            ruby_rows(ui, typing, theme)
+        });
+    }
+}
+
+/// The font: Sue's own, or any installed family from Sue's font list.
+fn font_row(ui: &mut Ui, sub: &mut SubTool, theme: &Theme) {
     ui.horizontal(|ui| {
-        ui.label(small(&tr!("font")));
+        ui.label(super::small_text(theme)(&tr!("font")));
         let shown = if sub.font.is_empty() {
             tr!("default-font-ubuntu-light")
         } else {
@@ -27,8 +102,8 @@ pub(super) fn text_properties(
         };
         egui::ComboBox::from_id_salt("sue-paint-text-tool-font")
             .selected_text(shown)
-            .width(ui.available_width().max(80.0))
-            .height(320.0)
+            .width(ui.available_width())
+            .height(theme.text_size(TextRole::Body) * 24.0)
             .show_ui(ui, |ui| {
                 ui.selectable_value(
                     &mut sub.font,
@@ -39,94 +114,53 @@ pub(super) fn text_properties(
                 if let Some(family) = sue_wm::fonts::list_ui(ui, &selected, "") {
                     sub.font = family;
                 }
-            });
+            })
+            .response
+            .on_hover_text(tr!("font"));
     });
-    slider_row(
-        ui,
-        &tr!("size-2"),
-        &mut sub.tip.size,
-        6.0..=400.0,
-        &tr!("px"),
-        true,
-        theme,
-    );
-    ui.horizontal(|ui| {
-        ui.radio_value(&mut sub.kind, 0, small(&tr!("pref-horizontal")));
-        ui.radio_value(&mut sub.kind, 1, small(&tr!("pref-vertical")));
-    });
-    ui.checkbox(&mut sub.whole, small(&tr!("centered")));
-    // Clip Studio Paint's letter spacing, line spacing and
-    // justification.
-    slider_row(
-        ui,
-        &tr!("letter-spacing"),
-        &mut sub.tracking,
-        -0.3..=1.5,
-        &tr!("em"),
-        false,
-        theme,
-    );
-    let mut leading = if sub.leading > 0.0 { sub.leading } else { 1.0 };
-    if slider_row(
-        ui,
-        &tr!("line-spacing"),
-        &mut leading,
-        0.5..=3.0,
-        "x",
-        false,
-        theme,
-    ) {
-        sub.leading = leading;
+}
+
+/// The reading of the words picked, and the buttons that set and remove
+/// it.
+fn ruby_rows(ui: &mut Ui, typing: &mut Typing, theme: &Theme) {
+    let label = tr!("ruby");
+    let field = sue_wm::ui::input::text_field("sue-paint-ruby", &mut typing.reading)
+        .label(&label)
+        .hint(&tr!("ruby-hint"))
+        .show(ui, theme)
+        .on_hover_text(&label);
+    if field.gained_focus() || field.clicked() {
+        typing.reading_focus = true;
+    }
+    if field.lost_focus() {
+        if ui.input(|input| input.key_pressed(egui::Key::Enter)) && !typing.selected.is_empty() {
+            typing.add_ruby();
+        }
+        typing.reading_focus = false;
     }
     ui.horizontal(|ui| {
-        ui.label(small(&tr!("justify")));
-        ui.radio_value(&mut sub.justify, 0, small(&tr!("justify-start")));
-        ui.radio_value(&mut sub.justify, 1, small(&tr!("justify-middle")));
-        ui.radio_value(&mut sub.justify, 2, small(&tr!("justify-end")));
+        let chosen = !typing.selected.is_empty();
+        let set = tr!("set-ruby");
+        let can_set = chosen && !typing.reading.trim().is_empty();
+        let response = sue_wm::ui::button("sue-paint-set-ruby", &set)
+            .enabled(can_set)
+            .show(ui, theme);
+        let response = if can_set {
+            response.on_hover_text(&set)
+        } else {
+            response.on_hover_text(tr!("ruby-needs-selection"))
+        };
+        if response.clicked() {
+            typing.add_ruby();
+        }
+        let remove = tr!("remove-ruby");
+        if sue_wm::ui::button("sue-paint-remove-ruby", &remove)
+            .enabled(chosen && typing.has_ruby())
+            .show(ui, theme)
+            .on_hover_text(&remove)
+            .clicked()
+        {
+            typing.remove_ruby();
+        }
     });
-    // Ruby (furigana): a reading over the selected words.
-    if let Some(typing) = typing {
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.label(small(&tr!("ruby")));
-            let field = ui.add(
-                egui::TextEdit::singleline(&mut typing.reading)
-                    .hint_text(tr!("ruby-hint"))
-                    .desired_width(ui.available_width()),
-            );
-            if field.gained_focus() || field.clicked() {
-                typing.reading_focus = true;
-            }
-            if field.lost_focus() {
-                if ui.input(|input| input.key_pressed(egui::Key::Enter))
-                    && !typing.selected.is_empty()
-                {
-                    typing.add_ruby();
-                }
-                typing.reading_focus = false;
-            }
-        });
-        ui.horizontal(|ui| {
-            let chosen = !typing.selected.is_empty();
-            if ui
-                .add_enabled(
-                    chosen && !typing.reading.trim().is_empty(),
-                    egui::Button::new(small(&tr!("set-ruby"))),
-                )
-                .on_disabled_hover_text(tr!("ruby-needs-selection"))
-                .clicked()
-            {
-                typing.add_ruby();
-            }
-            if ui
-                .add_enabled(
-                    chosen && typing.has_ruby(),
-                    egui::Button::new(small(&tr!("remove-ruby"))),
-                )
-                .clicked()
-            {
-                typing.remove_ruby();
-            }
-        });
-    }
 }

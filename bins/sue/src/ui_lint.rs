@@ -141,7 +141,7 @@ struct Area {
 const AREAS: [Area; 6] = [
     Area {
         folder: "crates/sue-paint/src/panels",
-        baseline: Counts::new([8, 21, 28, 8, 82, 9, 9]),
+        baseline: Counts::new([5, 9, 24, 5, 59, 9, 7]),
     },
     Area {
         folder: "crates/sue-paint/src/canvas",

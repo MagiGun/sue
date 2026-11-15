@@ -61,7 +61,7 @@ fn every_menu_command_is_registered() {
 /// Animation Cels and light table palettes, and the 3D drawing figure's
 /// tool property, and Quick Access's palette menu. Named one by one, so a command no one can reach cannot
 /// hide behind a prefix.
-const IN_PALETTES: [&str; 58] = [
+const IN_PALETTES: [&str; 75] = [
     "anim.camera.key",
     "anim.camera.unkey",
     "anim.light_table.reverse",
@@ -120,6 +120,23 @@ const IN_PALETTES: [&str; 58] = [
     "material.size_small",
     "material.size_large",
     "material.size_list",
+    "tool_palette.settings",
+    "tool_palette.delete",
+    "tool_palette.restore",
+    "tool_palette.reset",
+    "tool_palette.import",
+    "tool_palette.export",
+    "tool_palette.color_icon",
+    "sub_tool.duplicate",
+    "sub_tool.rename",
+    "sub_tool.delete",
+    "sub_tool.reset",
+    "sub_tool.new_group",
+    "sub_tool.rename_group",
+    "sub_tool.import",
+    "sub_tool.detail",
+    "sub_tool.lock",
+    "sub_tool.categories",
 ];
 
 /// The palettes' code, which runs those commands by name: every source
@@ -208,6 +225,7 @@ fn every_command_can_be_reached() {
             "figure.reset",
             "figure.preset.",
             "auto.run.",
+            "subtool.",
         ]
     );
 }
