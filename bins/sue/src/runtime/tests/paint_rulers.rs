@@ -129,10 +129,6 @@ fn sue_paint_perspective_rulers_hold_strokes_and_take_new_vanishing_points() {
         .get(&paint)
         .and_then(|applet| applet.focus())
         .unwrap();
-    let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
-        .last()
-        .unwrap()
-        .id;
     let points = |runtime: &Runtime| {
         sue_paint::rulers::Rulers::of(&runtime.engine.world.arena, picture)
             .perspective
@@ -154,6 +150,11 @@ fn sue_paint_perspective_rulers_hold_strokes_and_take_new_vanishing_points() {
     step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
     step(&mut runtime, Vec::new());
     assert_eq!(points(&runtime), 2);
+    // The ruler lands on a layer of its own (FGV-2): strokes go there.
+    let layer = sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+        .last()
+        .unwrap()
+        .id;
     // How far across the ink on the layer reaches.
     let width = |runtime: &Runtime| {
         let raster = sue_paint::doc::raster(&runtime.engine.world.arena, layer).unwrap();
