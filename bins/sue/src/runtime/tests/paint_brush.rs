@@ -1288,3 +1288,28 @@ fn sue_paint_the_new_engine_draws_from_pointer_events_too() {
     paint.command("edit.undo");
     assert!(paint.profile().is_empty(), "the stroke was one undo step");
 }
+
+/// The switch is a line the owner writes under `[sue_paint]` in the
+/// rice file, not a declared setting: the file with that line is read
+/// as it stands (no migration drops it), keeps the line when Sue writes
+/// the file back, and still says `new` once the shell's declarations are
+/// registered over it, as at start.
+#[test]
+fn the_new_engine_switch_is_read_from_the_rice_file() {
+    let shipped = sue_rice::DEFAULT_RICE;
+    let section = shipped.find("[sue_paint]").expect("a [sue_paint] table");
+    let line_end = section + shipped[section..].find('\n').unwrap() + 1;
+    let text = format!(
+        "{}brush_engine = \"new\"\n{}",
+        &shipped[..line_end],
+        &shipped[line_end..]
+    );
+    assert_eq!(sue_rice::migrate(&text).unwrap(), None, "read as it is");
+    let mut schema = sue_rice::RiceSchema::parse(&text).unwrap();
+    sue_wm::register_rice(&mut schema).unwrap();
+    assert_eq!(schema.get_str("sue_paint.brush_engine"), Some("new"));
+    assert!(
+        schema.to_suerice().contains("brush_engine = \"new\""),
+        "the line stays when the file is written back"
+    );
+}
