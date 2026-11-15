@@ -624,6 +624,56 @@ pub fn move_page(arena: &Arena, story: EntityId, page: EntityId, index: usize) -
     )))
 }
 
+/// A page's borders in picture pixels, each `[left, top, right, bottom]`:
+/// where the printed page is cut (`trim`, the bleed inside the canvas
+/// edge) and the default border inside it (`inner`), where panels go.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Borders {
+    /// The finished page: the canvas less its bleed.
+    pub trim: [f32; 4],
+    /// The default border: the finished page less its inner border.
+    pub inner: [f32; 4],
+}
+
+/// The bleed a page has when it says none, in millimeters.
+pub const DEFAULT_BLEED_MM: f64 = 3.0;
+/// The inner border a page has when it says none, in millimeters.
+pub const DEFAULT_INNER_MM: f64 = 10.0;
+
+/// `page`'s [`Borders`], from its size, resolution, bleed and inner
+/// border. `None` when `page` is in no story, since only a story's pages
+/// are printed and cut.
+#[must_use]
+pub fn borders(arena: &Arena, page: EntityId) -> Option<Borders> {
+    story_of(arena, page)?;
+    let entity = arena.get_by_id(page).ok()?;
+    let [width, height] = picture::size(entity)?;
+    let number = |key: &str| entity.property(key).and_then(Value::as_f64);
+    let mm = number(picture::DPI).unwrap_or(72.0) / 25.4;
+    let (w, h) = (f64::from(width), f64::from(height));
+    // Never more than a page can hold: a quarter of its shorter side.
+    let most = w.min(h) / 4.0;
+    let bleed = (number(PAGE_BLEED).unwrap_or(DEFAULT_BLEED_MM) * mm).clamp(0.0, most);
+    let inner = bleed + (number(PAGE_INNER).unwrap_or(DEFAULT_INNER_MM) * mm).clamp(0.0, most);
+    let rect = |by: f64| [by as f32, by as f32, (w - by) as f32, (h - by) as f32];
+    Some(Borders {
+        trim: rect(bleed),
+        inner: rect(inner),
+    })
+}
+
+/// Where each of `count` pages stands in the Page Manager's webtoon view:
+/// `(column, row)`, pages running down a column of `rows` and on to the
+/// next. Column 0 is the first one read: on the right when
+/// `right_to_left`, so the caller places columns from that side.
+#[must_use]
+pub fn webtoon_slots(count: usize, rows: usize) -> Vec<(usize, usize)> {
+    let rows = rows.max(1);
+    (0..count)
+        .map(|index| (index / rows, index % rows))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -636,6 +686,89 @@ mod tests {
             height: 60,
             ..NewPicture::default()
         }
+    }
+
+    #[test]
+    fn a_page_knows_its_cut_and_its_default_border() {
+        let mut arena = Arena::new();
+        let mut spec = spec();
+        spec.width = 254;
+        spec.height = 400;
+        let (mut edit, _, ids) = create(&spec, 1, "Borders", false).unwrap();
+        edit.apply(&mut arena).unwrap();
+        let page = ids[0];
+        let dpi = arena
+            .get_by_id(page)
+            .unwrap()
+            .property(picture::DPI)
+            .and_then(Value::as_f64)
+            .unwrap_or(72.0);
+        // Set 2 mm of bleed and 5 mm inside, at the page's resolution.
+        let mm = dpi / 25.4;
+        let mut set = Edit::new("borders")
+            .then(sue_core::txn::SetProperty::new(page, PAGE_BLEED, 2.0))
+            .then(sue_core::txn::SetProperty::new(page, PAGE_INNER, 5.0));
+        set.apply(&mut arena).unwrap();
+        let borders = borders(&arena, page).unwrap();
+        let near = |a: f32, b: f64| (f64::from(a) - b).abs() < 0.01;
+        assert!(near(borders.trim[0], 2.0 * mm), "{borders:?}");
+        assert!(near(borders.trim[3], 400.0 - 2.0 * mm), "{borders:?}");
+        assert!(near(borders.inner[1], 7.0 * mm), "{borders:?}");
+        assert!(near(borders.inner[2], 254.0 - 7.0 * mm), "{borders:?}");
+        // A picture in no story is never cut.
+        let (mut lone, alone) = doc::create(&spec).unwrap();
+        lone.apply(&mut arena).unwrap();
+        assert_eq!(super::borders(&arena, alone), None);
+    }
+
+    #[test]
+    fn webtoon_pages_run_down_their_columns() {
+        assert_eq!(
+            webtoon_slots(5, 2),
+            vec![(0, 0), (0, 1), (1, 0), (1, 1), (2, 0)]
+        );
+        // Room for no row still shows each page, one to a column.
+        assert_eq!(webtoon_slots(2, 0), vec![(0, 0), (1, 0)]);
+        assert!(webtoon_slots(0, 3).is_empty());
+    }
+
+    /// The ids in `arena` and every relation with its order, sorted: what
+    /// moving a page may change.
+    fn state(arena: &Arena) -> (Vec<EntityId>, Vec<String>) {
+        let mut ids: Vec<EntityId> = arena.iter().map(|(_, entity)| entity.id()).collect();
+        ids.sort();
+        let mut relations: Vec<String> = arena
+            .relations()
+            .iter()
+            .map(|relation| {
+                format!(
+                    "{:?} {} {:?} {:?}",
+                    relation.from, relation.kind, relation.to, relation.order
+                )
+            })
+            .collect();
+        relations.sort();
+        (ids, relations)
+    }
+
+    #[test]
+    fn moving_a_page_undoes_and_redoes_exactly() {
+        let mut arena = Arena::new();
+        let (mut edit, story, ids) = create(&spec(), 3, "Order", false).unwrap();
+        edit.apply(&mut arena).unwrap();
+        let mut history = UndoStack::new();
+        let before = state(&arena);
+        let edit = move_page(&arena, story, ids[2], 0).unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        assert_eq!(pages(&arena, story), vec![ids[2], ids[0], ids[1]]);
+        let after = state(&arena);
+        history.undo(&mut arena).unwrap();
+        assert_eq!(state(&arena), before);
+        assert_eq!(pages(&arena, story), ids);
+        history.redo(&mut arena).unwrap();
+        assert_eq!(state(&arena), after);
+        // Where it already is: nothing to do.
+        assert!(move_page(&arena, story, ids[2], 0).is_none());
     }
 
     #[test]
