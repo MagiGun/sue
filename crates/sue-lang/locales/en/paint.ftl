@@ -2609,3 +2609,6 @@ colorize-hint-note = The current layer is the hint layer: its strokes give the c
 colorize-needs-line-art = Colorize needs a layer of line art besides the hint layer.
 colorize-needs-hints = Paint a stroke of each color on the hint layer first.
 artistic-line-opacity = Line Opacity
+stop-main-color = Main Color
+stop-sub-color = Sub Color
+filter-color = Color

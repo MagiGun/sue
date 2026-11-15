@@ -198,19 +198,20 @@ const WIDE: f32 = 680.0;
 /// A row of controls in a dialog, with its gap.
 const ROW: f32 = 38.0;
 /// The dialog's frame, its title and the row of OK and Cancel.
-const BASE: f32 = 150.0;
+const BASE: f32 = 190.0;
 
 /// How many rows of controls a filter's settings take.
 fn rows(filter: &Filter) -> f32 {
     match filter.upgraded() {
         Filter::Gradient { .. } => 12.0,
-        Filter::ChannelLevels { .. } => 7.0,
-        Filter::ToneCurve { .. } => 7.0,
-        Filter::Artistic { .. } => 10.0,
-        Filter::RadialBlur { .. } | Filter::ZoomBlur { .. } => 6.0,
+        Filter::ChannelLevels { .. } => 8.0,
+        Filter::ToneCurve { .. } => 8.0,
+        Filter::Artistic { .. } => 11.5,
+        Filter::RadialBlur { .. } | Filter::ZoomBlur { .. } => 8.0,
         Filter::PerlinNoise { .. } => 6.0,
-        Filter::DropShadow { .. } | Filter::FocusLines { .. } | Filter::SpeedLines { .. } => 5.0,
-        Filter::ColorBalance { .. } | Filter::SmartSmooth { .. } => 4.0,
+        Filter::DropShadow { .. } => 6.0,
+        Filter::FocusLines { .. } | Filter::SpeedLines { .. } => 5.0,
+        Filter::ColorBalance { .. } | Filter::SmartSmooth { .. } | Filter::Glow { .. } => 4.0,
         _ => 3.0,
     }
 }
@@ -502,6 +503,12 @@ struct Params<'a> {
     pad: &'a mut Thumbs,
 }
 
+/// The room a slider's name takes, so the longest of them fit and the
+/// tracks of a dialog line up.
+fn label_room(theme: &Theme) -> f32 {
+    theme.space(Space::S9) * 3.0
+}
+
 /// A slider for `value` with its name before it and in its tooltip.
 fn number(
     ui: &mut Ui,
@@ -519,6 +526,7 @@ fn number(
         f64::from(*range.start())..=f64::from(*range.end()),
     )
     .label(label)
+    .label_width(label_room(theme))
     .decimals(decimals)
     .show(ui, theme);
     let changed = response.changed();
@@ -545,6 +553,7 @@ fn size(
         f64::from(*range.start())..=f64::from(*range.end()),
     )
     .label(label)
+    .label_width(label_room(theme))
     .decimals(1)
     .logarithmic()
     .show(ui, theme);
@@ -572,6 +581,7 @@ fn whole(
         f64::from(*range.start())..=f64::from(*range.end()),
     )
     .label(label)
+    .label_width(label_room(theme))
     .step(1.0)
     .show(ui, theme);
     let changed = response.changed();
@@ -877,7 +887,7 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, params: &mut Params<'_>, them
                 2,
                 theme,
             );
-            color(ui, "glow-color", &tr!("color"), rgb, theme);
+            color(ui, "glow-color", &tr!("filter-color"), rgb, theme);
         }
         Filter::DropShadow {
             dx,
@@ -914,7 +924,7 @@ fn filter_params(ui: &mut Ui, filter: &mut Filter, params: &mut Params<'_>, them
                 theme,
             );
             number(ui, "opacity", &tr!("opacity"), opacity, 0.0..=1.0, 2, theme);
-            color(ui, "shadow-color", &tr!("color"), rgb, theme);
+            color(ui, "shadow-color", &tr!("filter-color"), rgb, theme);
         }
         Filter::Inflate { size: round, depth } => {
             number(
@@ -1431,14 +1441,9 @@ fn center_pad(ui: &mut Ui, center: &mut [f32; 2], params: &mut Params<'_>, theme
             picture.top() + picture.height() * center[1],
         );
         let (reach, span) = (theme.space(Space::S3), theme.space(Space::S5));
-        let halo = egui::Stroke {
-            color: theme.panel,
-            ..theme.selected_stroke()
-        };
-        let ink = egui::Stroke {
-            color: theme.text,
-            ..theme.focus_stroke()
-        };
+        let ink = theme.focus_stroke();
+        let halo = egui::Stroke::new(ink.width + theme.selected_stroke().width, theme.panel);
+        let ink = egui::Stroke::new(ink.width, theme.text);
         for stroke in [halo, ink] {
             painter.circle_stroke(mark, reach, stroke);
             let (across, down) = (egui::Vec2::X * span, egui::Vec2::Y * span);
@@ -1452,33 +1457,31 @@ fn center_pad(ui: &mut Ui, center: &mut [f32; 2], params: &mut Params<'_>, theme
             &Tip::new(&name).help(&tr!("blur-centre-help")),
             theme,
         );
-        ui.vertical(|ui| {
-            let mut across = center[0] * 100.0;
-            if number(
-                ui,
-                "centre-x",
-                &tr!("centre-x"),
-                &mut across,
-                0.0..=100.0,
-                0,
-                theme,
-            ) {
-                center[0] = across / 100.0;
-            }
-            let mut down = center[1] * 100.0;
-            if number(
-                ui,
-                "centre-y",
-                &tr!("centre-y"),
-                &mut down,
-                0.0..=100.0,
-                0,
-                theme,
-            ) {
-                center[1] = down / 100.0;
-            }
-        });
     });
+    let mut across = center[0] * 100.0;
+    if number(
+        ui,
+        "centre-x",
+        &tr!("centre-x"),
+        &mut across,
+        0.0..=100.0,
+        0,
+        theme,
+    ) {
+        center[0] = across / 100.0;
+    }
+    let mut down = center[1] * 100.0;
+    if number(
+        ui,
+        "centre-y",
+        &tr!("centre-y"),
+        &mut down,
+        0.0..=100.0,
+        0,
+        theme,
+    ) {
+        center[1] = down / 100.0;
+    }
 }
 
 /// The pad's small copy of the layer, drawn in `rect`.
@@ -1851,7 +1854,11 @@ fn stop_ui(
     if moved {
         edited.at = place / 100.0;
     }
-    let sources = [tr!("stop-own-color"), tr!("main-color"), tr!("sub-color")];
+    let sources = [
+        tr!("stop-own-color"),
+        tr!("stop-main-color"),
+        tr!("stop-sub-color"),
+    ];
     let mut source = StopColor::ALL
         .iter()
         .position(|kind| *kind == edited.color)
@@ -1865,7 +1872,13 @@ fn stop_ui(
         }
     }
     ui.add_enabled_ui(edited.color == StopColor::Own, |ui| {
-        color(ui, "stop-color", &tr!("color"), &mut edited.rgb, theme);
+        color(
+            ui,
+            "stop-color",
+            &tr!("filter-color"),
+            &mut edited.rgb,
+            theme,
+        );
     });
     let mut opacity = f32::from(edited.alpha) / 255.0 * 100.0;
     if number(
