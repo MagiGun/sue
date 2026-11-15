@@ -414,7 +414,7 @@ mod tests {
                     let ra = 2.0 + 90.0 * next() * next();
                     let rb = (ra * (0.5 + next())).max(2.0);
                     let length = 0.5 + 40.0 * next() * next();
-                    let turn = 6.283_185 * next();
+                    let turn = std::f32::consts::TAU * next();
                     let at = [300.5 + 7.0 * next(), 300.25 + 7.0 * next()];
                     let a = Disc::new(at, ra, 1.0).drawn(true);
                     let b = Disc::new(
@@ -426,10 +426,11 @@ mod tests {
                     let tip = RoundTip::new(hardness, edge);
                     let lay = |second: Swept| {
                         let mut buffer = StrokeBuffer::new(Combine::Max);
-                        let mut painter = buffer.committed();
-                        painter.fill(&Swept::whole(a, a, tip));
-                        painter.fill(&second);
-                        drop(painter);
+                        {
+                            let mut painter = buffer.committed();
+                            painter.fill(&Swept::whole(a, a, tip));
+                            painter.fill(&second);
+                        }
                         buffer
                     };
                     let ahead = lay(Swept::after(a, b, tip));
