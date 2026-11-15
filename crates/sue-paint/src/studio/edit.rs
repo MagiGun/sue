@@ -375,23 +375,28 @@ impl SuePaint {
         if outside {
             selection.invert();
         }
+        // While the mask is edited, Delete hides on the mask and leaves
+        // the layer's pixels alone (CT-2).
+        if let Ok(target) = self.area_target(&cx.world.arena)
+            && target.mask
+        {
+            let offset = target.offset;
+            match crate::doc::rewrite(&cx.world.arena, target.id, label, |pixels, width, _| {
+                clear_selected(pixels, width, offset, &selection);
+            }) {
+                Ok(Some(edit)) => {
+                    Self::apply(cx, edit);
+                }
+                Ok(None) => cx.notify(tr!("nothing-changed", label = label)),
+                Err(error) => cx.fail(error),
+            }
+            return;
+        }
         let offset = self
             .layer_info(&cx.world.arena)
             .map_or([0, 0], |info| info.style.offset);
-        self.rewrite(cx, label, |pixels, width, height| {
-            for y in 0..height {
-                for x in 0..width {
-                    let (px, py) = (i64::from(x) + offset[0], i64::from(y) + offset[1]);
-                    if px < 0 || py < 0 {
-                        continue;
-                    }
-                    let cover = selection.at(px as u32, py as u32);
-                    if cover > 0.0 {
-                        let at = ((y * width + x) * 4 + 3) as usize;
-                        pixels[at] = (f32::from(pixels[at]) * (1.0 - cover)).round() as u8;
-                    }
-                }
-            }
+        self.rewrite(cx, label, |pixels, width, _| {
+            clear_selected(pixels, width, offset, &selection);
         });
     }
 
@@ -551,6 +556,28 @@ impl SuePaint {
                 }
             }
             Err(error) => cx.fail(error),
+        }
+    }
+}
+
+/// Takes away as much of each pixel's alpha (straight RGBA8, rows
+/// `width` wide, the top left at `offset` in the picture) as `selection`
+/// covers it.
+fn clear_selected(
+    pixels: &mut [u8],
+    width: u32,
+    offset: [i64; 2],
+    selection: &crate::select::Selection,
+) {
+    for (index, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let (x, y) = (index as u32 % width.max(1), index as u32 / width.max(1));
+        let (px, py) = (i64::from(x) + offset[0], i64::from(y) + offset[1]);
+        if px < 0 || py < 0 {
+            continue;
+        }
+        let cover = selection.at(px as u32, py as u32);
+        if cover > 0.0 {
+            pixel[3] = (f32::from(pixel[3]) * (1.0 - cover)).round() as u8;
         }
     }
 }
