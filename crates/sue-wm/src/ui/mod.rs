@@ -75,8 +75,8 @@ pub use dialog::{
 };
 pub use focus::{FocusScope, Roving, focus_ring, focus_visible, paint_focus_ring, watch_focus};
 pub use input::{
-    Combo, Dropdown, NumberField, TextField, combo, dropdown, number_field, search_field,
-    text_field,
+    Combo, Dropdown, NumberField, TextField, combo, dropdown, number_field, picker_box,
+    search_field, text_field,
 };
 pub use list::{
     EmptyState, Leading, ListRow, RowAction, RowOutput, TreeOutput, TreeRow, divider, empty_state,
