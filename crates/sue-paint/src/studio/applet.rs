@@ -202,6 +202,12 @@ impl SueApplet for SuePaint {
                 "Sue Paint opens with its palettes where they were left (Window, Workspace)",
             )
             .labeled("Remember the palette layout"),
+            RiceDeclaration::new(
+                crate::studio::ASK_DELETE_FOLDERS,
+                RiceParameter::Bool { value: true },
+                "Ask before deleting picked layer folders (the question's \"Do not show again\" turns it off)",
+            )
+            .labeled("Ask before deleting layer folders"),
         ]);
         for (key, name, choices) in crate::dialogs::MODIFIERS {
             declarations.push(RiceDeclaration::new(

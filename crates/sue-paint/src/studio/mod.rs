@@ -31,6 +31,7 @@ mod edit;
 mod files;
 mod frame;
 mod layers;
+pub(crate) use layers::ASK_DELETE_FOLDERS;
 mod materials;
 mod media;
 mod rulers;
@@ -738,6 +739,9 @@ pub struct SuePaint {
     /// The pen's samples since its latest touch down, for a stroke of the
     /// new brush engine (see `canvas/engine.rs`).
     pub(crate) pen_stream: Vec<sue_platform::stylus::PenSample>,
+    /// What the Layer palette keeps between frames: two panes, the
+    /// search, the palette color menu, where its buttons are.
+    pub(crate) layer_palette: crate::panels::LayerPalette,
 }
 
 impl Default for SuePaint {
@@ -914,6 +918,7 @@ impl Default for SuePaint {
             current_workspace: None,
             kept_styles: Vec::new(),
             pen_stream: Vec::new(),
+            layer_palette: crate::panels::LayerPalette::default(),
         }
     }
 }

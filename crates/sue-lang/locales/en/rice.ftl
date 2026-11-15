@@ -574,3 +574,5 @@ sue_writer_keys-insert_mark_nbsp = Insert mark nbsp
     .description = Non-breaking Space
 sue_writer_keys-file_save_as = File save as
     .description = Save As
+sue_paint-ask_delete_folders = Ask before deleting layer folders
+    .description = Ask before deleting picked layer folders (the question's "Do not show again" turns it off)

@@ -129,7 +129,10 @@ pub(crate) fn page(title: &str) -> SettingsPage {
             group(tr!("settings-group-touch"), touch),
             group(
                 tr!("settings-group-layers"),
-                params(&["sue_paint.selection_layer_opacity"]),
+                params(&[
+                    "sue_paint.selection_layer_opacity",
+                    crate::studio::ASK_DELETE_FOLDERS,
+                ]),
             ),
             group(
                 tr!("settings-group-colors"),

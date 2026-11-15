@@ -17,6 +17,7 @@ mod layer;
 mod layer_property;
 mod material;
 mod navigator;
+mod search_layer;
 mod sub_tool;
 mod timeline;
 mod tool;
@@ -31,6 +32,8 @@ use crate::icons::{self, Icon};
 use crate::studio::SuePaint;
 
 pub(crate) use command_bar::BAR_GROUPS;
+pub(crate) use layer::{DELETE_FOLDERS_SIZE, LayerPalette};
+pub(crate) use layer_property::{SIMPLE_TONE_SIZE, SimpleTone};
 pub(crate) use material::material_thumb;
 pub(crate) use tool::{slot_icon, tool_icon};
 

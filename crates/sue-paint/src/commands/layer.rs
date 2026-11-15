@@ -43,25 +43,40 @@ fn overlap_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState 
     when(selection(paint) && raster(paint, facts))
 }
 
+/// Merge Selected Layers: two or more picked layers of any kind, or a
+/// folder alone (it is baked into one layer).
 fn merge_selected_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
-    when(paint.doc().is_some_and(|doc| !doc.picked.is_empty()) && raster(paint, facts))
+    let folder = paint
+        .layer()
+        .is_some_and(|layer| doc::is_folder(facts.arena, layer));
+    when(paint.doc().is_some_and(|doc| !doc.picked.is_empty()) || folder)
 }
 
 fn from_selection_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
     when(selection(paint) && raster(paint, facts))
 }
 
+/// Merge with Layer Below: any layer but the paper, a folder with what
+/// it holds, onto a raster layer right under it (under all a folder
+/// holds).
 fn merge_down_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
     let arena = facts.arena;
+    let picture = paint.picture().unwrap_or_default();
     let below_raster = paint.layer_info(arena).is_some_and(|info| {
-        let stack = doc::layers(arena, paint.picture().unwrap_or_default());
+        if info.kind == LayerKind::Paper {
+            return false;
+        }
+        let stack = doc::layers(arena, picture);
+        let block = doc::with_members(arena, picture, &[info.id]);
         stack
             .iter()
-            .position(|layer| layer.id == info.id)
+            .position(|layer| block.contains(&layer.id))
             .and_then(|at| at.checked_sub(1))
-            .is_some_and(|below| stack[below].kind == LayerKind::Raster)
+            .is_some_and(|below| {
+                stack[below].kind == LayerKind::Raster && !doc::is_folder(arena, stack[below].id)
+            })
     });
-    when(raster(paint, facts) && below_raster)
+    when(below_raster)
 }
 
 fn new_paper_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
@@ -120,12 +135,12 @@ fn reference_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemStat
         })
 }
 
+/// Rasterize: anything Rasterize changes (a folder, a vector, text, 3D
+/// or frame layer, a raster layer with effects on).
 fn rasterize_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
-    when(
-        paint
-            .layer_info(facts.arena)
-            .is_some_and(|info| crate::vector::is_vector(facts.arena, info.id)),
-    )
+    when(paint.layer().is_some_and(|layer| {
+        doc::rasterizes(facts.arena, layer) || crate::vector::is_vector(facts.arena, layer)
+    }))
 }
 
 /// Mask Outside Selection works on a raster layer without a mask; Mask
@@ -133,9 +148,13 @@ fn rasterize_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemStat
 /// mask.
 fn new_mask_state(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
     let masked = masked(paint, facts);
-    let mut state = when(
-        raster(paint, facts) && !masked && (call.name == "layer.mask.outside" || selection(paint)),
-    );
+    // Any layer takes a mask but the paper: a raster layer, a folder, a
+    // correction layer.
+    let maskable = paint
+        .layer_info(facts.arena)
+        .is_some_and(|info| info.kind != LayerKind::Paper);
+    let mut state =
+        when(maskable && !masked && (call.name == "layer.mask.outside" || selection(paint)));
     state.checked = Some(masked);
     state
 }
@@ -218,10 +237,12 @@ fn new_raster_top(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
     paint.run("layer.new", cx);
 }
 
-/// A new layer of tone, in the selection if there is one.
-fn new_tone(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.run("layer.new", cx);
-    paint.run("filter.tone", cx);
+/// New Layer, Tone: Simple Tone Settings, then a new layer of tone in
+/// the selection if there is one.
+fn new_tone(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    if paint.picture().is_some() {
+        paint.dialog = Some(Dialog::SimpleTone(crate::panels::SimpleTone::default()));
+    }
 }
 
 fn new_frame(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
@@ -481,21 +502,10 @@ fn duplicate(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     }
 }
 
-/// Deletes the current layer, or the current folder with what it holds;
-/// the last layer stays.
+/// Deletes the current layer and every picked one, a folder with what it
+/// holds (asking first for folders, see `SuePaint::delete_layers`).
 fn delete(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    if let (Some(picture), Some(layer)) = (paint.picture(), paint.layer()) {
-        if doc::is_folder(&cx.world.arena, layer) {
-            let edit = crate::anim::delete_folder(&cx.world.arena, picture, layer);
-            SuePaint::apply(cx, edit);
-            return;
-        }
-        if doc::layers(&cx.world.arena, picture).len() <= 1 {
-            cx.fail(tr!("picture-keeps-least-one-layer"));
-            return;
-        }
-        SuePaint::apply(cx, doc::delete(layer));
-    }
+    paint.delete_layers(cx, false);
 }
 
 fn toggle_visible(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
@@ -659,10 +669,13 @@ fn toggle_layer_color(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<
     paint.toggle_layer(cx, crate::effects::COLOR, false);
 }
 
-/// The Layer palette, on its Layer Property tab.
+/// Layer Property: the palette comes forward.
 fn properties(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
     paint.panels.layer = true;
+    // A phone's sheet shows it as the Layer palette's tab; the dock has
+    // Layer Property as a palette of its own, which comes forward.
     paint.layer_tab = 1;
+    paint.show_palette(crate::dock::Palette::LayerProperty);
 }
 
 /// Clip Studio Paint's Select all layers: every layer picked with the
@@ -735,7 +748,20 @@ fn folder(paint: &mut SuePaint, cx: &mut AppletContext<'_>, insert: bool) {
     apply_and_pick(paint, cx, edit, folder);
 }
 
+/// Create Folder and Insert Layer: every picked layer goes into one new
+/// folder, in their order (one layer alone as before).
 fn folder_insert(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let picked = paint.picked_layers(&cx.world.arena);
+    if picked.len() > 1
+        && let Some(picture) = paint.picture()
+        && let Some((edit, folder)) = doc::folder_insert(&cx.world.arena, picture, &picked)
+    {
+        apply_and_pick(paint, cx, edit, folder);
+        if let Some(doc) = paint.doc_mut() {
+            doc.picked.clear();
+        }
+        return;
+    }
     folder(paint, cx, true);
 }
 
@@ -1084,6 +1110,15 @@ fn merge_selected(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
     }
 }
 
+/// Change Palette Color: the offered color the command is named after
+/// (`layer.palette_color.<name>`, `none` for No Palette Color), on every
+/// picked layer.
+fn palette_color(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    if let Some(name) = call.name.strip_prefix("layer.palette_color.") {
+        paint.set_palette_color_named(cx, name);
+    }
+}
+
 /// Convert Layer: its dialog, set to the kind the layer is not.
 fn convert(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     if let Some(info) = paint.layer_info(&cx.world.arena) {
@@ -1357,6 +1392,48 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         lines_tones_vector,
     )
     .icon("extract-line"),
+    c(
+        "layer.palette_color.none",
+        "no-palette-color",
+        palette_color,
+    )
+    .icon("palette-color-set"),
+    c(
+        "layer.palette_color.red",
+        "palette-color-red",
+        palette_color,
+    )
+    .icon("palette-color-set"),
+    c(
+        "layer.palette_color.orange",
+        "palette-color-orange",
+        palette_color,
+    )
+    .icon("palette-color-set"),
+    c(
+        "layer.palette_color.yellow",
+        "palette-color-yellow",
+        palette_color,
+    )
+    .icon("palette-color-set"),
+    c(
+        "layer.palette_color.green",
+        "palette-color-green",
+        palette_color,
+    )
+    .icon("palette-color-set"),
+    c(
+        "layer.palette_color.blue",
+        "palette-color-blue",
+        palette_color,
+    )
+    .icon("palette-color-set"),
+    c(
+        "layer.palette_color.purple",
+        "palette-color-purple",
+        palette_color,
+    )
+    .icon("palette-color-set"),
 ];
 
 #[cfg(test)]

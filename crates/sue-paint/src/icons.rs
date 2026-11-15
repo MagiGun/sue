@@ -49,16 +49,10 @@ pub enum Icon {
     Actual,
     Eye,
     Lock,
-    LockAlpha,
-    Clip,
-    Draft,
     Reference,
-    Mask,
     NewLayer,
-    NewVector,
     NewFolder,
     Duplicate,
-    MergeDown,
     Delete,
     Paper,
     Swap,
@@ -132,12 +126,6 @@ pub enum Icon {
     LayerProperty,
     /// A strip of film: the timeline.
     Timeline,
-    /// An arrow down onto a sheet: transfer to the lower layer.
-    TransferDown,
-    /// A sheet with a mask: create a layer mask.
-    NewMask,
-    /// A mask pressed onto a sheet: apply the mask.
-    ApplyMask,
     /// Arrows up and down past each other: reverse the order.
     Reverse,
     /// A sheet over a half shaded one: which layers the opacity sets.
@@ -146,8 +134,6 @@ pub enum Icon {
     LightTable,
     /// A disc half filled: one color for all.
     ColorMode,
-    /// A shape with a ring around it: the border effect.
-    BorderEffect,
     /// A sheet with a flower: an illustration.
     ProjectIllustration,
     /// Two tall strips: a webtoon.
@@ -166,14 +152,6 @@ pub enum Icon {
     Cancel,
     /// A tick: confirm.
     Confirm,
-    /// A drop with a darker rim: the watercolor edge.
-    WatercolorEdge,
-    /// A shape traced by its outline: extract line.
-    ExtractLine,
-    /// Dots shrinking across: a tone.
-    Tone,
-    /// A sheet with a color chip: the layer color.
-    LayerColor,
 }
 
 /// Triangles filling the simple polygon `points` (ear clipping), for the
@@ -552,10 +530,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 color,
             );
         }
-        Icon::NewVector => {
-            page(false);
-            curve(0.5, 0.75, 0.16, 200.0, 340.0);
-        }
         Icon::Open => folder(false),
         Icon::NewFolder => folder(true),
         Icon::Save => {
@@ -648,49 +622,13 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             dot(0.5, 0.5, 0.11);
         }
         Icon::Lock => lock(),
-        Icon::LockAlpha => {
-            lock();
-            for (x, y) in [
-                (0.32, 0.52),
-                (0.5, 0.52),
-                (0.41, 0.66),
-                (0.59, 0.66),
-                (0.32, 0.78),
-                (0.5, 0.78),
-            ] {
-                painter.rect_filled(
-                    Rect::from_min_size(p(x, y), vec2(side * 0.09, side * 0.09)),
-                    0.0,
-                    color,
-                );
-            }
-        }
-        Icon::Clip => {
-            line(&[(0.3, 0.14), (0.3, 0.7), (0.72, 0.7)]);
-            filled(&[(0.86, 0.7), (0.7, 0.58), (0.7, 0.82)]);
-        }
-        Icon::Draft => {
-            closed(&[(0.22, 0.64), (0.66, 0.2), (0.82, 0.36), (0.38, 0.8)]);
-            for x in [0.14, 0.32, 0.5, 0.68] {
-                line(&[(x, 0.92), (x + 0.1, 0.92)]);
-            }
-        }
         Icon::Reference => {
             circle(0.5, 0.5, 0.3);
             dot(0.5, 0.5, 0.1);
         }
-        Icon::Mask => {
-            boxed(Rect::from_min_max(p(0.16, 0.16), p(0.84, 0.84)), 0.0);
-            dot(0.5, 0.5, 0.2);
-        }
         Icon::Duplicate => {
             boxed(Rect::from_min_max(p(0.14, 0.14), p(0.62, 0.62)), 0.0);
             boxed(Rect::from_min_max(p(0.38, 0.38), p(0.86, 0.86)), 0.0);
-        }
-        Icon::MergeDown => {
-            line(&[(0.5, 0.12), (0.5, 0.6)]);
-            filled(&[(0.34, 0.5), (0.66, 0.5), (0.5, 0.7)]);
-            line(&[(0.16, 0.84), (0.84, 0.84)]);
         }
         Icon::Delete => {
             line(&[(0.18, 0.26), (0.82, 0.26)]);
@@ -949,30 +887,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 );
             }
         }
-        Icon::TransferDown => {
-            boxed(
-                Rect::from_min_max(p(0.14, 0.62), p(0.86, 0.86)),
-                side * 0.03,
-            );
-            line(&[(0.5, 0.12), (0.5, 0.46)]);
-            filled(&[(0.34, 0.4), (0.66, 0.4), (0.5, 0.58)]);
-            dashed_box(0.26, 0.12, 0.74, 0.3);
-        }
-        Icon::NewMask => {
-            boxed(
-                Rect::from_min_max(p(0.14, 0.18), p(0.74, 0.78)),
-                side * 0.03,
-            );
-            dot(0.44, 0.48, 0.16);
-            line(&[(0.66, 0.84), (0.9, 0.84)]);
-            line(&[(0.78, 0.72), (0.78, 0.96)]);
-        }
-        Icon::ApplyMask => {
-            boxed(Rect::from_min_max(p(0.14, 0.4), p(0.86, 0.86)), side * 0.03);
-            dot(0.5, 0.63, 0.12);
-            line(&[(0.5, 0.1), (0.5, 0.3)]);
-            filled(&[(0.38, 0.24), (0.62, 0.24), (0.5, 0.36)]);
-        }
         Icon::Reverse => {
             line(&[(0.34, 0.84), (0.34, 0.2)]);
             filled(&[(0.2, 0.3), (0.48, 0.3), (0.34, 0.12)]);
@@ -1052,42 +966,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(0.76, 0.24), (0.24, 0.76)]);
         }
         Icon::Confirm => line(&[(0.2, 0.52), (0.42, 0.74), (0.82, 0.28)]),
-        Icon::BorderEffect => {
-            circle(0.5, 0.5, 0.36);
-            dot(0.5, 0.5, 0.22);
-        }
-        Icon::WatercolorEdge => {
-            closed(&[
-                (0.5, 0.12),
-                (0.74, 0.5),
-                (0.74, 0.66),
-                (0.62, 0.84),
-                (0.38, 0.84),
-                (0.26, 0.66),
-                (0.26, 0.5),
-            ]);
-            curve(0.5, 0.64, 0.16, 20.0, 160.0);
-        }
-        Icon::ExtractLine => {
-            dashed_box(0.16, 0.16, 0.84, 0.84);
-            curve(0.5, 0.5, 0.2, 0.0, 360.0);
-        }
-        Icon::Tone => {
-            for row in 0..3 {
-                for column in 0..3 {
-                    let r = 0.1 - 0.025 * column as f32;
-                    dot(0.24 + 0.26 * column as f32, 0.24 + 0.26 * row as f32, r);
-                }
-            }
-        }
-        Icon::LayerColor => {
-            boxed(Rect::from_min_max(p(0.14, 0.14), p(0.7, 0.7)), side * 0.03);
-            painter.rect_filled(
-                Rect::from_min_max(p(0.46, 0.46), p(0.86, 0.86)),
-                side * 0.03,
-                color,
-            );
-        }
         Icon::ColorMode => {
             circle(0.5, 0.5, 0.34);
             painter.add(Shape::convex_polygon(

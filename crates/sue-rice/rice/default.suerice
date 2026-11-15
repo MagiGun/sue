@@ -127,6 +127,7 @@ rotate_step = 15               # [1..90] How far Rotate Left and Rotate Right tu
 layout_style = "classic"       # {classic|sue_paint} How Sue Paint's workspace is designed: which palettes there are and where they sit (Window, Layout Style)
 remember_layout = true         # Sue Paint opens with its palettes where they were left (Window, Workspace)
 language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
+ask_delete_folders = true      # Ask before deleting picked layer folders (the question's "Do not show again" turns it off)
 
 [sue_paint_colors]
 void = "#2b2b2b"               # Around the picture
