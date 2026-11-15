@@ -172,7 +172,7 @@ impl Dialog {
             Dialog::Resolution(_) => (tr!("change-image-resolution"), vec2(380.0, 250.0)),
             Dialog::Text(..) => (tr!("text"), vec2(440.0, 380.0)),
             Dialog::Perspective(_) => (tr!("create-perspective-ruler"), vec2(320.0, 190.0)),
-            Dialog::Onion(_) => (tr!("onion-skin-settings"), vec2(360.0, 330.0)),
+            Dialog::Onion(_) => (tr!("onion-skin-settings"), vec2(360.0, 440.0)),
             Dialog::Timelapse(_) => (tr!("export-timelapse"), vec2(360.0, 230.0)),
             Dialog::Material(_) => (tr!("register-material"), vec2(360.0, 160.0)),
             Dialog::SelectBy(kind, _) => (

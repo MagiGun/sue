@@ -72,8 +72,8 @@ pub(super) fn onion_ui(ui: &mut Ui, onion: &mut crate::anim::Onion, theme: &Them
         }
         if let Some((start, step)) = onion.opacity.as_mut() {
             for (salt, name, value) in [
-                ("anim-onion-start", tr!("start"), start),
-                ("anim-onion-step", tr!("step-opacity"), step),
+                ("anim-onion-start", tr!("onion-first-opacity"), start),
+                ("anim-onion-step", tr!("onion-opacity-step"), step),
             ] {
                 grid.row(&name, |ui| {
                     let mut percent = (f64::from(*value) * 100.0).round();

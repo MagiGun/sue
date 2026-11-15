@@ -2643,3 +2643,5 @@ onion-cels-before = Cels before
 onion-cels-after = Cels after
 onion-color-before = Color before
 onion-color-after = Color after
+onion-first-opacity = Nearest cel
+onion-opacity-step = Fainter per cel
