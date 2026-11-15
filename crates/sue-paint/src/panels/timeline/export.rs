@@ -52,6 +52,21 @@ fn scaled(tile: RasterTile2D, size: [u32; 2]) -> RasterTile2D {
     RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, resized).unwrap_or(tile)
 }
 
+/// Which of `count` frames played at `from` frames a second each frame of
+/// a movie at `to` frames a second shows, so the movie lasts as long as
+/// the timeline and stays with its sound: at a lower rate frames are left
+/// out, at a higher one they show for longer.
+fn retimed(count: usize, from: f64, to: u32) -> Vec<usize> {
+    let (from, to) = (from.max(1.0), f64::from(to.max(1)));
+    if count == 0 || (from - to).abs() < 1e-9 {
+        return (0..count).collect();
+    }
+    let total = (count as f64 / from * to).round().max(1.0) as usize;
+    (0..total)
+        .map(|index| ((index as f64 / to * from + 1e-9).floor() as usize).min(count - 1))
+        .collect()
+}
+
 /// The part `[x, y, width, height]` of `tile`, outside it transparent.
 fn cropped(tile: &RasterTile2D, [x, y, width, height]: [i64; 4]) -> Option<RasterTile2D> {
     let (w, h) = (u32::try_from(width).ok()?, u32::try_from(height).ok()?);
@@ -269,7 +284,9 @@ impl SuePaint {
             // From the first frame written, as long as the frames last.
             let from = (f64::from(rendered.first) / rendered.fps.max(1.0)
                 * f64::from(anim::MIX_RATE)) as usize;
-            let frames = (rendered.frames.len() as f64 / f64::from(form.fps.max(1))
+            // The movie lasts as long as the timeline's frames, whatever its
+            // own frame rate (see `retimed`).
+            let frames = (rendered.frames.len() as f64 / rendered.fps.max(1.0)
                 * f64::from(anim::MIX_RATE))
             .ceil() as usize;
             let samples = pcm.samples();
@@ -279,8 +296,16 @@ impl SuePaint {
         });
         let result = (|| -> Result<(usize, usize), sue_io::MovieError> {
             let mut sink = sue_platform::movie::open(form.chosen(), settings)?;
-            for frame in rendered.frames {
-                sink.push_frame(&scaled(frame, form.size))?;
+            let order = retimed(rendered.frames.len(), rendered.fps, form.fps);
+            let mut last: Option<(usize, RasterTile2D)> = None;
+            for index in order {
+                // A frame shown twice in a row is scaled once.
+                if last.as_ref().is_none_or(|(was, _)| *was != index) {
+                    last = Some((index, scaled(rendered.frames[index].clone(), form.size)));
+                }
+                if let Some((_, frame)) = &last {
+                    sink.push_frame(frame)?;
+                }
             }
             if let Some(samples) = &sound {
                 sink.push_sound(samples)?;
@@ -476,8 +501,23 @@ impl SuePaint {
 
 #[cfg(test)]
 mod tests {
-    use super::{cropped, scaled};
+    use super::{cropped, retimed, scaled};
     use sue_core::{PixelFormat, RasterTile2D};
+
+    #[test]
+    fn a_movie_at_another_frame_rate_lasts_as_long_as_the_timeline() {
+        // The same rate: every frame once.
+        assert_eq!(retimed(4, 24.0, 24), vec![0, 1, 2, 3]);
+        // Half the rate: every other frame, half as many.
+        assert_eq!(retimed(6, 24.0, 12), vec![0, 2, 4]);
+        // Twice the rate: each frame twice.
+        assert_eq!(retimed(3, 12.0, 24), vec![0, 0, 1, 1, 2, 2]);
+        // 24 frames at 24 a second make one second at 30 a second.
+        let thirty = retimed(24, 24.0, 30);
+        assert_eq!(thirty.len(), 30);
+        assert_eq!((thirty[0], thirty[29]), (0, 23));
+        assert!(retimed(0, 24.0, 30).is_empty());
+    }
 
     fn card(width: u32, height: u32) -> RasterTile2D {
         let pixels = (0..width * height)
