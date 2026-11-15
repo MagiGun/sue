@@ -37,12 +37,23 @@ impl SuePaint {
             return false;
         };
         heading(ui, &tr!("editing-vector"), theme);
+        // One width for the row labels, so their controls line up.
+        let width = label_width(
+            ui,
+            &[
+                tr!("mode"),
+                tr!("main-color"),
+                tr!("sub-color"),
+                tr!("brush-shape"),
+            ],
+            theme,
+        );
         let lines = vector::lines(&vector::geometry(arena, layer));
         let picked = self.picked_on(layer).unwrap_or_default();
         // Mode and Adjust line thickness when scaling: how the box works.
         let modes = [tr!("scale"), tr!("free-transform")];
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(tr!("mode")).color(theme.muted));
+            row_label(ui, &tr!("mode"), width, theme);
             let strip = segmented(
                 "sue-paint-lines-mode",
                 &modes,
@@ -102,7 +113,7 @@ impl SuePaint {
                 self.line_hex[slot] = crate::color::hex(rgb);
             }
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(&name).color(theme.muted));
+                row_label(ui, &name, width, theme);
                 let mut rgba = [rgb[0], rgb[1], rgb[2], 255];
                 let pick = sue_wm::color_button(
                     ui,
@@ -219,7 +230,7 @@ impl SuePaint {
             .map_or(0, |at| at + 1);
         let was = chosen;
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(tr!("brush-shape")).color(theme.muted));
+            row_label(ui, &tr!("brush-shape"), width, theme);
             let response = dropdown("sue-paint-lines-shape", &mut chosen, &names)
                 .label(&tr!("brush-shape"))
                 .show(ui, theme);
@@ -295,4 +306,31 @@ impl SuePaint {
             theme,
         );
     }
+}
+
+/// The widest of the row labels `names`, in points.
+fn label_width(ui: &Ui, names: &[String], theme: &Theme) -> f32 {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    names
+        .iter()
+        .map(|name| {
+            ui.painter()
+                .layout_no_wrap(name.clone(), font.clone(), theme.muted)
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max)
+}
+
+/// A row's label, muted, `width` wide and centred on the row's controls.
+fn row_label(ui: &mut Ui, text: &str, width: f32, theme: &Theme) {
+    let height = ui.spacing().interact_size.y;
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, height),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(width);
+            ui.label(egui::RichText::new(text).color(theme.muted));
+        },
+    );
 }
