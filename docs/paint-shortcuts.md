@@ -31,9 +31,10 @@ with the shell's `keys` where shared) and the menu defaults in
 | Save | Ctrl+S | Ctrl+S | yes |
 | Save as | Shift+Alt+S, Ctrl+Shift+S, Ctrl+Alt+S | Shift+Alt+S, Ctrl+Shift+S, Ctrl+Alt+S | yes |
 | Print | Ctrl+P | Ctrl+P | yes |
-| Preferences | Ctrl+K | Ctrl+K in the keymap; the menu default shows Ctrl+, | differs |
-| Shortcut Settings | Ctrl+Shift+Alt+K | Ctrl+Alt+Shift+K, and F1 or Alt+I | yes, Sue adds F1 and Alt+I |
-| Modifier Key Settings | Ctrl+Shift+Alt+Y | no key | missing in Sue |
+| Preferences | Ctrl+K | Ctrl+K | yes |
+| Shortcut Settings | Ctrl+Shift+Alt+K | Ctrl+Alt+Shift+K | yes |
+| Keyboard Shortcuts (the list, Help menu) | none | F1 or Alt+I | Sue's own |
+| Modifier Key Settings | Ctrl+Shift+Alt+Y | Ctrl+Alt+Shift+Y | yes |
 | Quit | Ctrl+Q | Ctrl+Q | yes |
 
 ## Edit
@@ -47,8 +48,8 @@ with the shell's `keys` where shared) and the menu defaults in
 | Paste | Ctrl+V or F4 | Ctrl+V or F4 | yes |
 | Paste to shown position | Ctrl+Shift+V | Ctrl+Shift+V | yes |
 | Delete | Delete, Backspace, Ctrl+Delete, Ctrl+Backspace | Delete, Backspace, Ctrl+Delete, Ctrl+Backspace | yes |
-| Delete Outside Selection | Shift+Delete, Shift+Backspace | Shift+Delete in the menu; the keymap gives Shift+Delete to Fill | differs |
-| Fill | Alt+Delete, Alt+Backspace | Alt+Delete or Alt+Backspace, and Shift+Delete or Shift+Backspace | differs, Sue adds Shift+Delete |
+| Delete Outside Selection | Shift+Delete, Shift+Backspace | Shift+Delete or Shift+Backspace | yes |
+| Fill | Alt+Delete, Alt+Backspace | Alt+Delete or Alt+Backspace | yes |
 | Hue/Saturation/Luminosity | Ctrl+U | Ctrl+U | yes |
 | Reverse Gradient | Ctrl+I | Ctrl+I | yes |
 | Scale/Rotate | Ctrl+T | Ctrl+T | yes |
@@ -199,9 +200,8 @@ default key, and neither does its opposite number in Sue.
 
 1. Reduce and increase opacity, Ctrl+[ and Ctrl+], are missing in Sue.
    The most used pair of all for painting.
-2. Shift+Delete does two different things: Delete Outside Selection in
-   Clip Studio (and in Sue's own menu), Fill in Sue's keymap. Sue's
-   Alt+Delete matches Clip Studio's Fill. One chord should be settled.
+2. Shift+Delete deletes outside the selection and Alt+Delete fills, as
+   in Clip Studio: settled in 0.0.8 (Shift+Delete used to fill).
 3. Switch using layer color, Ctrl+B, was missing; Sue Paint has it now
    (0.0.8).
 4. Toggle refer multiple, 0, is missing.
@@ -212,13 +212,14 @@ default key, and neither does its opposite number in Sue.
 7. Paste to shown position, Ctrl+Shift+V: settled, Sue has it too.
 8. Reset display (Ctrl+@) and Toggle special ruler snapping (Ctrl+4)
    are missing.
-9. Modifier Key Settings (Ctrl+Shift+Alt+Y) is missing, and Sue has no
-   modifier key settings dialog to rebind any of the modifier rows.
-10. Rotate right: Clip Studio uses ^, Sue's keymap = (Sue's own menu
-    default shows ^, so the keymap and the menu disagree).
-11. Preferences: both keymaps use Ctrl+K; Sue's menu default shows
-    Ctrl+,.
-12. F1 opens Sue's shortcut list, not a training page.
+9. Modifier Key Settings has Clip Studio's Ctrl+Shift+Alt+Y since
+   0.0.8, but Sue has no modifier key settings dialog yet to rebind any
+   of the modifier rows.
+10. Rotate right: Clip Studio uses ^, Sue =. Every menu shows the key
+    that really runs its item since 0.0.8.
+11. Preferences: Ctrl+K in both, and the menu shows it.
+12. F1 opens Sue's shortcut list, not a training page; Ctrl+Shift+Alt+K
+    opens Shortcut Settings, as in Clip Studio.
 13. Sue adds: Alt+I for the shortcut list, Ctrl+Shift+2 for Reset
     Rotation, and the Studio Mode keys T1 to T7.
 14. Holding a tool's key to borrow the tool temporarily works in Clip

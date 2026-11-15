@@ -23,6 +23,11 @@ follow [Semantic Versioning](https://semver.org/).
   them can get a key, not only those that ship with one. Search finds a
   command by its name or its key. A key that two commands hold is marked
   on both rows, with a button to take it from the other one.
+- Sue Paint: every tool that shares its letter with others (Pen and
+  Pencil on P, Brush, Airbrush and Decoration on B, Fill and Gradient on
+  G, Figure, Frame Border and Ruler on U, Text and Balloon on T) has a
+  command of its own, such as Pencil Tool, that the command palette
+  finds and Settings can give a key of its own.
 - Sue Paint: Manage Fonts shows Sue's font list, the one every font menu
   of Sue offers, with a search, each family drawn in its own font, and its
   faces and a sample line; Pose Scanner (Scan Pose from Image) runs from
@@ -129,6 +134,18 @@ follow [Semantic Versioning](https://semver.org/).
   nothing. Typing a Clip Studio option's name in the Settings filter finds
   Sue's setting. Studio Mode's keys T1 to T7 are picked from a list of
   commands instead of typed as command names.
+- Sue Paint's menus follow Clip Studio Paint's order and read in Title
+  Case. File puts the exports before Import, then the settings, Manage
+  Fonts and Pen Pressure Settings; Import has Pose Scanner. Animation
+  starts with New Animation Layer, lists Play/Stop and each frame move
+  once, and Edit Track has Rename in Timeline Order, Rename in Layer
+  Order and Select Previous and Next Cel. Window names each palette as
+  the palette's own title does (Sub Tool, Tool Property, Layer Property,
+  Auto Action, Information), in groups, and Window, Canvas lists the
+  open canvases with a check on the current one. Help adds the online
+  guide, Tips, the FAQ, Contact and Feedback. Layer Settings has Switch
+  Using Layer Color, Story the Webtoon Reading Direction, and View's
+  first submenu is Rotate/Flip.
 - Sue Paint: Edit, Paste to Shown Position answers to Ctrl+Shift+V, as
   in Clip Studio Paint (it had no key).
 - A Sue project (`.sue`) with pictures is far smaller and the same on
@@ -191,6 +208,15 @@ follow [Semantic Versioning](https://semver.org/).
   with its readable secondary text.
 - Recording a shortcut in Settings over Sue Paint no longer also runs the
   key in Sue Paint (recording R picked the Rotate tool).
+- Sue Paint's History names steps as the menus do: New Animation Folder
+  and Convert to Drawing Color, and a duplicated layer or page is called
+  "<name> Copy" with a capital, as in Clip Studio Paint. The help on the
+  color palettes says that X switches between the main and sub color.
+- Sue Paint's keys match its menus and Clip Studio Paint: Shift+Delete
+  deletes outside the selection (it used to fill, while the menu showed
+  it on Delete Outside Selection), Ctrl+Shift+Alt+K opens Shortcut
+  Settings and Ctrl+Shift+Alt+Y Modifier Key Settings; the read-only key
+  list keeps F1 and Alt+I.
 - Sue Paint's History names the steps of Edit, Rotate/Flip Canvas as the
   menu does: Flip Horizontal, Flip Vertical and Rotate 180 Degrees, where
   it used to say "Flip Canvas" for both flips and "Rotate Canvas".

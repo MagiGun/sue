@@ -550,6 +550,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "clear-outside",
         clear_outside,
     )
+    .keys("Shift+Delete or Shift+Backspace")
     .state(with_selection),
     c(
         "edit.smart_smoothing",
@@ -558,7 +559,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         smart_smoothing,
     ),
     c("edit.fill", "fill", "fill-selection", fill)
-        .keys("Shift+Delete or Shift+Backspace or Alt+Delete or Alt+Backspace")
+        .keys("Alt+Delete or Alt+Backspace")
         .state(on_raster),
     c(
         "edit.advanced_fill",

@@ -34,10 +34,10 @@ has dedicated camera modes. The camera view can be centered on the
 selection with "Focus on editing target".
 
 - Presets: "Specify camera angle from preset" on the Object launcher,
-  or Tool Settings > Camera > Angle > Preset, offers Front, Back, Left,
+  or Tool Property > Camera > Angle > Preset, offers Front, Back, Left,
   Right, Top and Bottom views (the All Sides View palette, EX only,
   shows the layer from four of these sides at once).
-- Camera category (Tool Settings or Advanced Tool Settings): "Duplicate
+- Camera category (Tool Property or Advanced Tool Settings): "Duplicate
   current camera" makes a second camera on the layer and switches to it;
   "Current camera" lists the layer's cameras, each with a lock to keep
   the angle, a name editable by double tap, and Delete. "Camera
@@ -52,7 +52,7 @@ selection with "Focus on editing target".
 list: two directional lights (Directional Light 1 and 2; 2 is hidden
 until selected in the Object list) and ambient light.
 
-- Direction: drag the "Light Source" ball in Tool Settings > Light
+- Direction: drag the "Light Source" ball in Tool Property > Light
   Source; the ball moves Directional Light 1. Its color (Color settings
   dialog) and intensity are sliders beside it.
 - Ambient light: color from a single color, an image file (.clip, BMP,
@@ -129,7 +129,7 @@ button performs its action without changing the mode.
 
 **The root manipulator.** Tapping a material with the Object tool shows
 it: handles in red, blue and green to move, rotate and resize the whole
-material. Its visibility follows Tool Settings > On-screen Manipulator.
+material. Its visibility follows Tool Property > On-screen Manipulator.
 It is not shown for panorama or 3D background materials, for parts of
 figures or characters (a local manipulator shows instead, section 3), or
 for materials on a Ver. 1.5 compatible layer.
@@ -208,7 +208,7 @@ joint.
   right spreads them, up opens the hand, down closes it into one of four
   fist presets); fingers can be locked individually.
 - "Straighten pose": tapping Torso (or another part named in the Advanced
-  Tool Settings' pose list) makes the neck and torso upright.
+  Tool Property' pose list) makes the neck and torso upright.
 
 **Pose materials.** Materials > 3D > Pose holds full body poses, hand
 poses and pose sequences. Apply with "Use 3D pose material" (launcher

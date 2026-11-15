@@ -148,6 +148,70 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     })
     .keys("Y")
     .icon("tool-correct-line"),
+    // One command for each tool that shares its key with others, so each
+    // can be given a key of its own in Settings (Clip Studio Paint lists
+    // every tool in Shortcut Settings). They ship with no key: the shared
+    // letters above keep picking the tools in turn.
+    c("tool.pick.pen", "pen-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Pen);
+    })
+    .icon("tool-pen")
+    .with(Flags::PALETTE),
+    c("tool.pick.pencil", "pencil-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Pencil);
+    })
+    .icon("tool-pencil")
+    .with(Flags::PALETTE),
+    c("tool.pick.brush", "brush-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Brush);
+    })
+    .icon("tool-brush")
+    .with(Flags::PALETTE),
+    c("tool.pick.airbrush", "airbrush-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Airbrush);
+    })
+    .icon("tool-airbrush")
+    .with(Flags::PALETTE),
+    c("tool.pick.decoration", "decoration-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Decoration);
+    })
+    .icon("tool-decoration")
+    .with(Flags::PALETTE),
+    c("tool.pick.fill", "fill-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Fill);
+    })
+    .icon("tool-fill")
+    .with(Flags::PALETTE),
+    c("tool.pick.gradient", "gradient-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Gradient);
+    })
+    .icon("tool-gradient")
+    .with(Flags::PALETTE),
+    c("tool.pick.figure", "figure-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Figure);
+    })
+    .icon("tool-figure")
+    .with(Flags::PALETTE),
+    c("tool.pick.frame", "frame-border-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Frame);
+    })
+    .icon("tool-frame")
+    .with(Flags::PALETTE),
+    c("tool.pick.ruler", "ruler-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Ruler);
+    })
+    .icon("tool-ruler")
+    .with(Flags::PALETTE),
+    c("tool.pick.text", "text-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Text);
+    })
+    .icon("tool-text")
+    .with(Flags::PALETTE),
+    c("tool.pick.balloon", "balloon-tool", |paint, _, _| {
+        paint.toolbox.pick(Tool::Balloon);
+    })
+    .icon("tool-balloon")
+    .with(Flags::PALETTE),
     // The sub tool list runs top to bottom: the one above, the one below.
     c("tool.previous_sub", "previous-sub-tool", |paint, _, _| {
         paint.toolbox.step_sub(false);
@@ -255,9 +319,15 @@ mod tests {
             let name = entry.name;
             assert_eq!(entry.group, "tool", "{name}");
             assert!(sue_lang::has("paint", entry.label), "{name}: no label");
-            assert!(!entry.chords.is_empty(), "{name}: no default key");
-            assert!(
-                !entry.default_chords().is_empty(),
+            // Only the tools that share a letter go without a key.
+            assert_eq!(
+                entry.chords.is_empty(),
+                name.starts_with("tool.pick."),
+                "{name}: a default key"
+            );
+            assert_eq!(
+                entry.default_chords().is_empty(),
+                entry.chords.is_empty(),
                 "{name}: {:?} does not parse",
                 entry.chords
             );
@@ -418,6 +488,33 @@ mod tests {
             paint.toolbox.current_mut().tip.size = 1990.0;
             assert!(paint.tool_key("brush.bigger", cx));
             assert!((paint.toolbox.current().tip.size - 2000.0).abs() < 1e-4);
+        });
+    }
+
+    #[test]
+    fn each_tool_that_shares_a_key_has_a_command_of_its_own() {
+        with_studio(|paint, cx| {
+            for (name, tool) in [
+                ("tool.pick.pen", Tool::Pen),
+                ("tool.pick.pencil", Tool::Pencil),
+                ("tool.pick.brush", Tool::Brush),
+                ("tool.pick.airbrush", Tool::Airbrush),
+                ("tool.pick.decoration", Tool::Decoration),
+                ("tool.pick.fill", Tool::Fill),
+                ("tool.pick.gradient", Tool::Gradient),
+                ("tool.pick.figure", Tool::Figure),
+                ("tool.pick.frame", Tool::Frame),
+                ("tool.pick.ruler", Tool::Ruler),
+                ("tool.pick.text", Tool::Text),
+                ("tool.pick.balloon", Tool::Balloon),
+            ] {
+                paint.toolbox.pick(Tool::Zoom);
+                assert!(paint.tool_key(name, cx), "{name}");
+                assert_eq!(paint.toolbox.tool(), tool, "{name}");
+                // Again: it stays on its tool, it does not go round.
+                assert!(paint.tool_key(name, cx), "{name}");
+                assert_eq!(paint.toolbox.tool(), tool, "{name} twice");
+            }
         });
     }
 }

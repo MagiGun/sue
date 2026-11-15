@@ -108,17 +108,7 @@ impl SuePaint {
             return;
         }
         self.record_auto(command);
-        if (command.starts_with("anim.")
-            || command.starts_with("file.export.gif")
-            || command == "file.export.apng"
-            || command == "file.export.webp_animation"
-            || command == "file.export.exposure_sheet"
-            || command == "file.import.exposure_sheet"
-            || command == "file.export.sequence"
-            || command == "file.export.movie"
-            || command == "file.export.cels")
-            && self.anim_command(command, cx)
-        {
+        if command.starts_with("anim.") && self.anim_command(command, cx) {
             return;
         }
         if !self.state(command, &Facts::of(cx)).enabled {
@@ -187,6 +177,25 @@ impl SuePaint {
     }
 }
 
+impl SuePaint {
+    /// Keeps Window, Canvas listing the open canvases by the names their
+    /// tabs show; the list's keys are written again when it changed.
+    pub(crate) fn follow_canvases(&mut self, arena: &Arena) {
+        let names: Vec<String> = self
+            .docs
+            .iter()
+            .map(|doc| {
+                arena
+                    .get_by_id(doc.picture)
+                    .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned())
+            })
+            .collect();
+        if crate::menus::set_canvases(&mut self.menus, &names) {
+            self.bound.invalidate();
+        }
+    }
+}
+
 /// What most commands' state looks at, worked out once per item.
 pub(super) struct Basis {
     /// A canvas is open.
@@ -235,11 +244,6 @@ pub(super) fn when(on: bool) -> ItemState {
 pub(super) fn doc_open(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
     when(paint.doc().is_some())
 }
-
-/// A command the studio runs before the registry: Animation
-/// commands by their own match. Through the registry they do nothing,
-/// as they did through the one match.
-pub(super) fn nothing(_: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {}
 
 #[cfg(test)]
 mod tests;

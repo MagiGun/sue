@@ -164,6 +164,7 @@ impl SuePaint {
             self.refresh_workspace_menu();
             self.bound.invalidate();
         }
+        self.follow_canvases(&cx.world.arena);
         self.bound
             .refresh(&mut self.menus, cx.rice(), KEYS_SECTION, shortcut_table());
     }
