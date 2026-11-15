@@ -13,6 +13,25 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint's Auto Actions come in sets you can share: pick a set at
+  the top of the Auto Action palette, turn each action and each of its
+  steps on or off with its box, unfold an action to see its steps, and
+  import or export a set as a `.sueactions` file. Nine actions of Sue
+  Paint's own come ready, Record turns into Stop while it records, every
+  command you run is recorded (keys, the command bar and palette buttons
+  too), and each action can be given a key in Keyboard Shortcuts.
+- Sue Paint's Item Bank keeps pictures as well as sub tools: keep the
+  current layer or add a picture, then drag it onto the canvas or
+  double-click it.
+- The Material palette has a folder tree, a search over names and tags,
+  tags you type, small or large thumbnails or a list, favorites, several
+  materials picked at once, and materials dragged onto the canvas.
+- Sub View can flip its picture, and its menu turns on Switch to
+  Eyedropper Automatically, Show Command Bar and Show Rotate and Flip.
+- The Information palette shows the memory the picture's pixels take and
+  the length of a drag on the canvas, in pixels, millimeters,
+  centimeters or inches, as its menu chooses.
+
 - Sue Paint's command bar holds more than menu commands: tools, sub
   tools, drawing colors, palettes that pop up under their button, Auto
   Actions, lines between groups, and groups of buttons with a list. Right-click
@@ -345,6 +364,10 @@ follow [Semantic Versioning](https://semver.org/).
   crash in the middle loses at most the last change kept.
 
 ### Fixed
+
+- Sue Paint's Navigator frames the part of the picture the canvas shows
+  in the theme's own colors, and its buttons run the View commands, so
+  they say their keys and follow keys you change.
 
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
