@@ -119,14 +119,9 @@ impl SueWriter {
     /// most wanted first.
     fn quick_tools(&self) -> Vec<(QuickTool, String)> {
         vec![
-            (
-                QuickTool::Pages,
-                if self.pages_shown() {
-                    tr!("quick-draft-view")
-                } else {
-                    tr!("quick-page-view")
-                },
-            ),
+            // One name whether lit or not: lit says the pages show, and
+            // pressing it again goes back to the flowing draft.
+            (QuickTool::Pages, tr!("quick-page-view")),
             (QuickTool::Picture, tr!("quick-picture")),
             (QuickTool::Comments, tr!("comments")),
             (QuickTool::Pdf, tr!("quick-export-pdf")),
