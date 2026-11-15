@@ -62,6 +62,27 @@ fn placed(arena: &Arena, id: EntityId, offset: [i64; 2], size: [u32; 2]) -> Opti
     Some(out)
 }
 
+/// `true` if pixel `b` of `reference` (straight RGBA8) is like pixel `a`
+/// within `tolerance` (0 to 1), compared premultiplied as a fill compares.
+fn like(reference: &[u8], a: usize, b: usize, tolerance: f32) -> bool {
+    let premultiplied = |index: usize| {
+        reference.get(index * 4..index * 4 + 4).map(|p| {
+            let alpha = u32::from(p[3]);
+            [
+                u32::from(p[0]) * alpha / 255,
+                u32::from(p[1]) * alpha / 255,
+                u32::from(p[2]) * alpha / 255,
+                alpha,
+            ]
+        })
+    };
+    let limit = (tolerance.clamp(0.0, 1.0) * 255.0).round() as u32;
+    match (premultiplied(a), premultiplied(b)) {
+        (Some(a), Some(b)) => a.iter().zip(b).all(|(a, b)| a.abs_diff(b) <= limit),
+        _ => false,
+    }
+}
+
 impl SuePaint {
     /// Where a fill lays its color now, or why it cannot: the editing
     /// layer, or its mask while Edit Mask is on. On a mask any color
@@ -157,10 +178,15 @@ impl SuePaint {
         }
         let reference = self.fill_reference(sub, size, arena)?;
         let settings = sub.area();
+        // A drag fills the areas like the one it started in: crossing a
+        // line on the way to the next area leaves the line alone.
+        let first = (seeds[0][1] * size[0] + seeds[0][0]) as usize;
         let mut mask: Option<Vec<u8>> = None;
         for seed in seeds {
             let index = (seed[1] * size[0] + seed[0]) as usize;
-            if mask.as_ref().is_some_and(|mask| mask[index] > 0) {
+            if mask.as_ref().is_some_and(|mask| mask[index] > 0)
+                || !like(&reference, first, index, settings.tolerance)
+            {
                 continue;
             }
             let area = fill::area(&reference, size, seed, &settings);
@@ -631,5 +657,35 @@ pub(in crate::canvas) mod tests {
                 assert_eq!(alpha(cx, ids[1], 70), 255, "left out, it holds nothing");
             },
         );
+    }
+
+    /// The pixel of `layer` at picture pixel `(x, 10)`.
+    fn pixel(cx: &AppletContext<'_>, layer: EntityId, x: u32) -> [u8; 4] {
+        let bytes = doc::raster(&cx.world.arena, layer)
+            .and_then(|raster| raster.bytes().map(<[u8]>::to_vec))
+            .unwrap();
+        let at = ((10 * SIZE[0] + x) * 4) as usize;
+        [bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]
+    }
+
+    #[test]
+    fn a_drag_fill_across_a_line_fills_both_sides_and_leaves_the_line() {
+        // AB-20: the drag crosses the line to reach the next area; the
+        // line itself is not an area the drag means to fill.
+        let wall = picture(|x, _| (38..42).contains(&x));
+        with_layers(vec![(wall, false)], |paint, cx, ids| {
+            paint.main = [255, 0, 0];
+            let fill = sub(Tool::Fill, 0);
+            let seeds: Vec<[f32; 2]> = (10..=70).map(|x| [x as f32, 10.0]).collect();
+            paint.bucket(&seeds, &fill, SIZE, cx);
+            assert_eq!(pixel(cx, ids[0], 10), [255, 0, 0, 255]);
+            assert_eq!(pixel(cx, ids[0], 70), [255, 0, 0, 255], "both sides");
+            assert_eq!(pixel(cx, ids[0], 40), [0, 0, 0, 255], "the line stays");
+            // Started on the line, a drag fills the line alone.
+            assert!(cx.history.undo(cx.world).is_ok());
+            paint.bucket(&[[40.0, 10.0], [60.0, 10.0]], &fill, SIZE, cx);
+            assert_eq!(pixel(cx, ids[0], 40), [255, 0, 0, 255]);
+            assert_eq!(pixel(cx, ids[0], 60), [0, 0, 0, 0]);
+        });
     }
 }
