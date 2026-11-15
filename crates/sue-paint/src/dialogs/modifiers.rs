@@ -122,9 +122,13 @@ pub(super) fn modifiers_ui(ui: &mut Ui, dialog: &mut ModifiersDialog, theme: &Th
     }
     let scope = dialog.scope();
     let map = &mut dialog.map;
+    // The rows take the room the dialog has, less its foot (Reset, the
+    // note about the file, OK and Cancel), so no gap is left under them.
+    let foot = theme.space(Space::S9) * 2.5;
+    let rows_height = (ui.available_height() - foot).max(theme.space(Space::S9) * 3.0);
     egui::ScrollArea::vertical()
         .id_salt("sue-paint-modifiers-rows")
-        .max_height(theme.space(Space::S9) * 9.0)
+        .max_height(rows_height)
         .auto_shrink([false, true])
         .show(ui, |ui| {
             sue_wm::ui::form_grid(
