@@ -1868,8 +1868,8 @@ events in order and turns them into gestures; `tools/` holds what each
 tool does as the pen goes down, moves and lifts, one file per tool or
 group of tools (`tools/mod.rs` only hands each press to its tool and
 each drag and release to its gesture, and `tools/keys.rs` is what the
-modifier keys do first); `pick.rs` finds the color, layer or figure part under the pen;
-`fill.rs` has the bucket, lasso fill, auto select and gradients;
+modifier keys do first); `pick.rs` finds the color, layer or figure
+part under the pen; `fill.rs` has the bucket, lasso fill, auto select and gradients;
 `shape.rs` figures and straight lines; `view.rs` draws the picture with
 its tone overlay, page frames, edge rulers and scrollbars; `overlays.rs`
 draws selections, previews, the brush outline, rulers, the selection
