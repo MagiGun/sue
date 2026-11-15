@@ -262,14 +262,17 @@ impl SuePaint {
         // general one.
         // The entry picked, while it is still on its table: its settings
         // sit at the foot of the palette, apart from the list that scrolls.
+        // Only an entry of a table the palette shows: the cel's, or the
+        // general one.
         let picked = self.anim_ui.cels.picked.filter(|(table, layer)| {
-            cx.world
-                .arena
-                .relations()
-                .get(table.from, table.kind(), *layer)
-                .is_some()
+            (table.general || Some(table.from) == cel)
+                && cx
+                    .world
+                    .arena
+                    .relations()
+                    .get(table.from, table.kind(), *layer)
+                    .is_some()
         });
-        self.anim_ui.cels.picked = picked;
         let foot_height = if picked.is_some() {
             Density::of(ui).control_height() * 2.0 + theme.space(Space::S2) * 3.0
         } else {
