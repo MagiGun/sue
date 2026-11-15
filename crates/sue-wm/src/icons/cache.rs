@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::{Color32, ColorImage, Context, Id, TextureHandle, TextureId, TextureOptions};
 
+use super::pack::{self, IconSet};
 use super::{Icon, IconStyle};
 
 /// The most tiles kept. When one more is needed they are all dropped
@@ -22,6 +23,9 @@ const MOST: usize = 1024;
 /// What makes one tile different from another.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct Key {
+    /// The set of drawings it was made from ([`IconSet::key`]): 0 for
+    /// Sue's own.
+    set: u64,
     icon: Icon,
     style: IconStyle,
     /// The side of the tile, in pixels.
@@ -39,10 +43,11 @@ fn tiles(ctx: &Context) -> Tiles {
 }
 
 /// The texture of `icon` in `style`, `pixels` wide, drawn with a pen
-/// `stroke` pixels wide: made now if it was never drawn like that
-/// before.
+/// `stroke` pixels wide, from `set` or else from the set `ctx` shows
+/// ([`pack::show`]): made now if it was never drawn like that before.
 pub(super) fn texture(
     ctx: &Context,
+    set: Option<&IconSet>,
     icon: Icon,
     style: IconStyle,
     pixels: usize,
@@ -54,7 +59,16 @@ pub(super) fn texture(
     } else {
         IconStyle::Line
     };
+    let showing;
+    let set = match set {
+        Some(set) => set,
+        None => {
+            showing = pack::showing(ctx);
+            showing.as_ref()
+        }
+    };
     let key = Key {
+        set: set.key(),
         icon,
         style,
         pixels: pixels as u32,
@@ -68,7 +82,7 @@ pub(super) fn texture(
     if held.len() >= MOST {
         held.clear();
     }
-    let tile = icon.tile(style, pixels, key.stroke as f32 / 64.0);
+    let tile = set.tile(icon, style, pixels, key.stroke as f32 / 64.0);
     // White with the coverage as its opacity, so that the tint a quad
     // is drawn with becomes the color of the icon.
     let image = ColorImage::new(
@@ -78,7 +92,12 @@ pub(super) fn texture(
             .map(|alpha| Color32::from_white_alpha(*alpha))
             .collect(),
     );
-    let name = format!("sue-icon {} {} {pixels}", icon.name(), style.name());
+    let name = format!(
+        "sue-icon {} {} {pixels} {}",
+        icon.name(),
+        style.name(),
+        key.set
+    );
     // The quad covers exactly the tile's pixels, where linear sampling
     // gives each pixel its own value; only an icon larger than the
     // largest tile is really scaled.
@@ -86,6 +105,16 @@ pub(super) fn texture(
     let id = texture.id();
     held.insert(key, texture);
     id
+}
+
+/// Drops every tile `ctx` holds, so that each is made again from the
+/// set it shows now.
+pub(super) fn forget(ctx: &Context) {
+    tiles(ctx)
+        .0
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
 }
 
 /// How many tiles `ctx` holds.
@@ -293,6 +322,7 @@ mod tests {
         for step in 0..=MOST {
             let _ = texture(
                 &ctx,
+                None,
                 Icon::Info,
                 IconStyle::Line,
                 8,

@@ -87,6 +87,11 @@
 //! never named after where it is used, or after another program's word
 //! for it.
 //!
+//! A name is saved data and never changes once released: icon packs and
+//! the icons people replace one by one are files named after it
+//! ([`pack`], `docs/icon-packs.md`), and a ledger test
+//! (`tests/icon_names.rs`) fails when one disappears.
+//!
 //! # How an icon reaches the screen
 //!
 //! The path data is cut into straight pieces a fiftieth of a pixel true
@@ -99,6 +104,11 @@
 //! every edge is anti-aliased by area. [`svg`] writes the same art as an
 //! SVG file and [`sheet`] draws the contact sheet the set is reviewed
 //! on.
+//!
+//! What is drawn for an icon can be replaced: by a single icon a person
+//! put in place of it, else by the icon pack they chose, else it is
+//! Sue's own ([`pack`]). The set an egui context draws from is swapped
+//! with [`pack::show`], and the next frame draws the new icons.
 
 mod animation;
 mod cache;
@@ -110,6 +120,7 @@ mod file;
 pub mod fit;
 mod hub;
 mod layers;
+pub mod pack;
 mod palettes;
 pub mod path;
 pub mod raster;
@@ -243,7 +254,7 @@ impl Art {
 }
 
 /// How an icon is drawn.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum IconStyle {
     /// As a line of one weight: the style of every icon.
     #[default]
@@ -359,6 +370,19 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, tint: Color32) {
 /// `rect` and in its middle. The picture is a tile made for exactly the
 /// pixels it covers, with its corners on whole pixels.
 pub fn paint_styled(painter: &Painter, rect: Rect, icon: Icon, style: IconStyle, tint: Color32) {
+    paint_with(painter, rect, icon, style, tint, None);
+}
+
+/// Draws as [`paint_styled`] does, from `set` when it is given and from
+/// the set the context shows ([`pack::show`]) otherwise.
+fn paint_with(
+    painter: &Painter,
+    rect: Rect,
+    icon: Icon,
+    style: IconStyle,
+    tint: Color32,
+    set: Option<&pack::IconSet>,
+) {
     let side = rect.width().min(rect.height());
     if !(side > 0.0 && side.is_finite()) || tint == Color32::TRANSPARENT {
         return;
@@ -367,7 +391,7 @@ pub fn paint_styled(painter: &Painter, rect: Rect, icon: Icon, style: IconStyle,
     let pixels = (side * scale).round().max(1.0);
     let made = pixels.min(LARGEST);
     let stroke = weight(side) * scale * made / pixels;
-    let texture = cache::texture(painter.ctx(), icon, style, made as usize, stroke);
+    let texture = cache::texture(painter.ctx(), set, icon, style, made as usize, stroke);
     let middle = rect.center();
     let corner = |at: f32| ((at * scale) - pixels / 2.0).round() / scale;
     let place = Rect::from_min_size(

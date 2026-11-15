@@ -234,3 +234,39 @@ ok = OK
 dialog-close = Close
 toast-dismiss = Dismiss
 notices = Notices
+## icons/pack.rs: what an icon pack could not read, and why a pack
+## action failed. { $file } is a file of the pack, as it is named there.
+
+icon-pack-not-text = { $file } is not a text file, so it is not an SVG.
+icon-pack-too-large = { $file } is too large for an icon ({ $bytes } bytes).
+icon-pack-no-svg = { $file } has no svg element.
+icon-pack-empty = { $file } draws nothing Sue can read.
+icon-pack-path-data = In { $file }, the path data of a { $element } cannot be read from byte { $at } on; what comes before it is drawn.
+icon-pack-bad-value = In { $file }, the { $attribute } of a { $element } cannot be read.
+icon-pack-not-drawn = In { $file }, the { $element } is not drawn: Sue draws paths and shapes only.
+icon-pack-ignored = In { $file }, { $attribute } is not used; the shape is drawn without it.
+icon-pack-style-sheet = In { $file }, style sheets and classes are not read; write fill and stroke as attributes.
+icon-pack-plain-ink = In { $file }, gradients and patterns are drawn in the one ink of the theme.
+icon-pack-no-mask = In { $file }, the mask { $id } is not found; what it would hide is drawn.
+icon-pack-too-deep = In { $file }, elements are nested more than { $most } deep; what lies deeper is left out.
+icon-pack-too-detailed = { $file } has more than { $most } path segments; the shapes after them are left out.
+icon-pack-no-manifest = The pack { $file } has no icon-pack.txt; its folder name stands for its name.
+icon-pack-manifest-line = Line { $line } of { $file } is not key = value.
+icon-pack-unknown-key = { $file } has a key Sue does not know: { $key }.
+icon-pack-no-name = { $file } gives the pack no name.
+icon-pack-no-format = { $file } names no format; format 1 is assumed.
+icon-pack-newer-format = { $file } is for pack format { $format }, newer than this Sue reads; what Sue can read is used.
+icon-pack-unknown-icon = { $file } is named after no icon of Sue ({ $name }).
+icon-pack-no-solid-twin = { $file } is not used: the icon { $name } has no filled twin.
+icon-pack-no-solid = { $file } replaces { $name } but not its filled twin, so Sue's own filled twin is drawn.
+icon-pack-skipped = { $file } is no part of an icon pack and was left out.
+icon-pack-too-many-files = The pack { $file } has more files than a pack may hold; the rest were left out.
+icon-pack-chosen-missing = The icon pack { $id } is no longer installed, so Sue's own icons are drawn.
+icon-pack-bad-id = { $id } cannot name an icon pack.
+icon-pack-not-installed = No icon pack { $id } is installed.
+icon-pack-not-a-pack = This is not an icon pack: it has no icon-pack.txt and no icon Sue knows.
+icon-pack-archive = The archive cannot be read. { $why }
+icon-pack-pack-too-large = The icon pack is too large.
+icon-pack-icon-no-solid = The icon { $name } has no filled twin to replace.
+icon-pack-unusable = The SVG cannot be used. { $why }
+icon-pack-io = A file could not be read or written: { $why }
