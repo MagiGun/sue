@@ -16,6 +16,8 @@ macro_rules! tr {
 mod icons;
 mod keys;
 
+pub(crate) use keys::{SUE_KEYMAP, sue_keymap};
+
 use std::collections::{HashMap, HashSet};
 
 use egui::{Align, Layout, RichText, ScrollArea, Sense, Stroke, Ui, vec2};
@@ -1084,7 +1086,7 @@ impl Settings {
     fn item_finds(&self, item: &SettingsItem, needle: &str, cx: &AppletContext<'_>) -> bool {
         match item {
             SettingsItem::Keys(id) => cx.catalog.keymap(id).is_some_and(|map| {
-                let resolved = keys::resolve(cx.rice(), map);
+                let resolved = keys::resolve(cx.rice(), map, &cx.catalog.keymaps);
                 map.groups.iter().any(|group| {
                     group.commands.iter().any(|command| {
                         let chords = resolved
@@ -1490,6 +1492,11 @@ mod tests {
         ("rice", "sue_paint-custom_key_5"),
         ("rice", "sue_paint-custom_key_6"),
         ("rice", "sue_paint-custom_key_7"),
+        ("rice", "keys-command_palette"),
+        ("rice", "keys-command_palette_alt"),
+        ("rice", "keys-open_settings"),
+        ("rice", "keys-open_file"),
+        ("rice", "keys-redo_alt"),
     ];
 
     /// The language files of every language but English, as (language,
@@ -1700,7 +1707,8 @@ mod tests {
             .keymap(sue_paint::ID)
             .expect("Sue Paint's keys")
             .clone();
-        let before = keys::resolve(&rice, &map);
+        let maps = engine.catalog.keymaps.clone();
+        let before = keys::resolve(&rice, &map, &maps);
         let r: sue_rice::Keybind = "R".parse().unwrap();
         assert!(keys::others(&before, "brush.bigger", &r).is_empty());
         // Bigger Brush on R as well as ]: both rows say who else holds it.
@@ -1711,7 +1719,7 @@ mod tests {
             &"] or R".parse().unwrap(),
         );
         rice.set(&path, value).unwrap();
-        let now = keys::resolve(&rice, &map);
+        let now = keys::resolve(&rice, &map, &maps);
         assert_eq!(
             keys::others(&now, "brush.bigger", &r),
             [keys::Holder::Command("tool.rotate".to_owned())]
@@ -1722,11 +1730,11 @@ mod tests {
         );
         // The offer takes R from Rotate and leaves Bigger Brush whole.
         let other = keys::Holder::Command("tool.rotate".to_owned());
-        let Some(Edit::Set(path, value)) = keys::take_from(&rice, &map, &now, &other, &r) else {
+        let Some(Edit::Set(path, value)) = keys::take_from(&rice, &map, &maps, &other, &r) else {
             panic!("an edit");
         };
         rice.set(&path, value).unwrap();
-        let after = keys::resolve(&rice, &map);
+        let after = keys::resolve(&rice, &map, &maps);
         assert!(keys::others(&after, "brush.bigger", &r).is_empty());
         let chords = |name: &str| {
             after
@@ -1750,8 +1758,67 @@ mod tests {
         rice.set(&path, value).unwrap();
         let bracket: sue_rice::Keybind = "]".parse().unwrap();
         assert_eq!(
-            keys::others(&keys::resolve(&rice, &map), &unkeyed, &bracket),
+            keys::others(&keys::resolve(&rice, &map, &maps), &unkeyed, &bracket),
             [keys::Holder::Command("brush.bigger".to_owned())]
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Sue's own keys run before a studio's, so a studio's command on one
+    /// of them never runs: both rows say so, and either can let go.
+    #[test]
+    fn a_key_of_sue_and_of_a_studio_is_marked_on_both_rows() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let (engine, _, root) = booted();
+        let rice = engine.world.rice.clone();
+        let maps = engine.catalog.keymaps.clone();
+        let sue = engine.catalog.keymap(SUE_KEYMAP).expect("Sue's keys");
+        let paint = engine.catalog.keymap(sue_paint::ID).expect("Sue Paint's");
+        assert_eq!(maps[0].id, SUE_KEYMAP, "Sue's own keys come first");
+        let tab: sue_rice::Keybind = "Tab".parse().unwrap();
+        // Tab ships as the command palette and as Hide All Palettes.
+        let on_sue = keys::resolve(&rice, sue, &maps);
+        let held = keys::others(&on_sue, "command_palette", &tab);
+        let hide = keys::Holder::Other {
+            map: sue_paint::ID.to_owned(),
+            command: "window.hide_all".to_owned(),
+        };
+        assert_eq!(held, std::slice::from_ref(&hide));
+        assert_eq!(
+            keys::holder_label(&hide, sue, &maps),
+            "Hide All Palettes in Sue Paint"
+        );
+        let on_paint = keys::resolve(&rice, paint, &maps);
+        let palette = keys::Holder::Other {
+            map: SUE_KEYMAP.to_owned(),
+            command: "command_palette".to_owned(),
+        };
+        assert_eq!(keys::others(&on_paint, "window.hide_all", &tab), [palette]);
+        // Two studios never meet: only one is in front.
+        let writer = engine.catalog.keymap(sue_writer::ID).expect("Sue Writer's");
+        assert!(
+            keys::resolve(&rice, writer, &maps)
+                .conflicts
+                .iter()
+                .flat_map(|conflict| &conflict.commands)
+                .all(|name| !name.starts_with(sue_paint::ID))
+        );
+        // Taken from Sue Paint on Sue's row: Tab is the palette's alone.
+        let Some(Edit::Set(path, value)) = keys::take_from(&rice, sue, &maps, &hide, &tab) else {
+            panic!("an edit");
+        };
+        assert_eq!(path, "sue_paint_keys.window_hide_all");
+        let mut after = rice.clone();
+        after.set(&path, value).unwrap();
+        assert!(
+            keys::others(&keys::resolve(&after, sue, &maps), "command_palette", &tab).is_empty()
+        );
+        assert_eq!(
+            after
+                .get_keybind("keys.command_palette")
+                .unwrap()
+                .to_string(),
+            "Tab"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

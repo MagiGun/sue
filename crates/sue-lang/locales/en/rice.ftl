@@ -311,13 +311,13 @@ sue_writer-language = Language
 
 ## [keys]
 
-keys-command_palette = Command palette
+keys-command_palette = Command Palette
     .description = Open the command palette
-keys-command_palette_alt = Command palette alt
+keys-command_palette_alt = Command Palette, Second Key
     .description = Open the command palette (alternative)
-keys-open_settings = Open settings
+keys-open_settings = Open Settings
     .description = Open Settings
-keys-open_file = Open file
+keys-open_file = Open a File
     .description = Open a file
 keys-save = Save
     .description = Save the project
@@ -327,7 +327,7 @@ keys-undo = Undo
     .description = Undo the last change
 keys-redo = Redo
     .description = Redo
-keys-redo_alt = Redo alt
+keys-redo_alt = Redo, Second Key
     .description = Redo (alternative)
 
 ## [sue_paint_keys]

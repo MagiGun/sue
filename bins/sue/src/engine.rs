@@ -420,14 +420,18 @@ impl Engine {
                 catalog.choices.insert(path, choices);
             }
         }
+        // Sue's own keys first: they run before any studio's.
+        catalog
+            .keymaps
+            .insert(0, crate::settings::sue_keymap(&self.world.rice));
         let mut shortcuts = vec![group(
             tr!("sue"),
             vec![
                 SettingsItem::Note(tr!("every-action-can-have-as-many").to_owned()),
-                section("keys"),
+                SettingsItem::Keys(crate::settings::SUE_KEYMAP.to_owned()),
             ],
         )];
-        shortcuts.extend(catalog.keymaps.iter().map(|keys| {
+        shortcuts.extend(catalog.keymaps.iter().skip(1).map(|keys| {
             group(
                 keys.title.clone(),
                 vec![SettingsItem::Keys(keys.id.clone())],

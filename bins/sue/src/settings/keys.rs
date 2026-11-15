@@ -15,42 +15,94 @@ macro_rules! tr {
 use egui::{Align, Layout, RichText, Ui};
 use sue_rice::{Keybind, Keybinds, RiceParameter, RiceSchema, RiceValue};
 use sue_wm::shortcuts::{self, Conflict, SparseKeys};
-use sue_wm::{AppletContext, KeyMap};
+use sue_wm::{AppletContext, KeyCommand, KeyGroup, KeyMap};
 
 use super::{Edit, Settings};
 
 /// Sue's own keys (the `[keys]` section): run before any studio's.
 pub(super) const SUE_KEYS: &str = "keys";
 
-/// Who holds a key: a command of the studio, or one of Sue's own keys
-/// (its setting's path).
+/// The id of the key map of Sue's own keys.
+pub(crate) const SUE_KEYMAP: &str = "sue";
+
+/// Sue's own keys as a key map of one group, in the language in use: one
+/// row per setting of `[keys]`, each a command named by its setting's key
+/// (`command_palette` is `keys.command_palette`), so its rows look, search
+/// and warn like a studio's.
+pub(crate) fn sue_keymap(rice: &RiceSchema) -> KeyMap {
+    let commands = rice
+        .entries()
+        .iter()
+        .filter(|entry| entry.section() == SUE_KEYS)
+        .filter_map(|entry| {
+            let RiceParameter::Keybind { value } = entry.parameter() else {
+                return None;
+            };
+            let name = entry.path().strip_prefix("keys.")?;
+            let defaults = match super::default_of(entry.path()) {
+                Some(RiceValue::Keybind(shipped)) => shipped,
+                _ => value.clone(),
+            };
+            Some(KeyCommand {
+                command: name.to_owned(),
+                label: super::label_of(entry),
+                defaults,
+            })
+        })
+        .collect();
+    KeyMap {
+        id: SUE_KEYMAP.to_owned(),
+        title: tr!("sue"),
+        section: SUE_KEYS.to_owned(),
+        groups: vec![KeyGroup {
+            title: tr!("sue"),
+            commands,
+        }],
+    }
+}
+
+/// Who holds a key: a command of the key map shown, or a command of
+/// another (one of Sue's own keys under a studio's, a studio's command
+/// under Sue's own).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Holder {
     /// A command of the key map.
     Command(String),
-    /// One of Sue's own keys, by its setting.
-    Sue(String),
+    /// A command of the key map `map`.
+    Other {
+        /// That key map's id.
+        map: String,
+        /// The command.
+        command: String,
+    },
 }
 
 /// The keys of a key map as they are set now.
 pub(super) struct Resolved {
     /// Each command once, with its chords, in the map's order.
     pub rows: Vec<(String, Keybinds)>,
-    /// The chords held by more than one command (or by a command and one
-    /// of Sue's own keys).
+    /// The chords held by more than one command (a command of the map
+    /// and another of it, or of a key map it meets).
     pub conflicts: Vec<Conflict>,
 }
 
+/// Parts the map's id from the command's in the name of a command of
+/// another key map.
+const OTHER: char = '\u{1f}';
+
 /// The name a holder of a key goes by.
 fn holder_of(name: &str) -> Holder {
-    match name.strip_prefix("sue:") {
-        Some(path) => Holder::Sue(path.to_owned()),
+    match name.split_once(OTHER) {
+        Some((map, command)) => Holder::Other {
+            map: map.to_owned(),
+            command: command.to_owned(),
+        },
         None => Holder::Command(name.to_owned()),
     }
 }
 
-/// Resolves `map` against `rice`.
-pub(super) fn resolve(rice: &RiceSchema, map: &KeyMap) -> Resolved {
+/// Each command of `map` once, with its chords as set now.
+fn rows_of(rice: &RiceSchema, map: &KeyMap) -> Vec<(String, Keybinds)> {
     let sparse = SparseKeys::read(rice, &map.section);
     let mut rows: Vec<(String, Keybinds)> = Vec::new();
     for command in map.commands() {
@@ -66,31 +118,34 @@ pub(super) fn resolve(rice: &RiceSchema, map: &KeyMap) -> Resolved {
         );
         rows.push((command.command.clone(), chords));
     }
-    // Sue's own keys come first: a press of one never reaches a studio.
-    let mut all: Vec<(String, Keybinds)> = rice
-        .entries()
-        .iter()
-        .filter(|entry| entry.section() == SUE_KEYS)
-        .filter_map(|entry| match entry.parameter() {
-            RiceParameter::Keybind { value } => {
-                Some((format!("sue:{}", entry.path()), value.clone()))
-            }
-            _ => None,
-        })
-        .collect();
-    all.extend(rows.iter().cloned());
+    rows
+}
+
+/// Resolves `map` against `rice` and the key maps of `maps` it meets: a
+/// studio's keys meet Sue's own (which run first, so a press of one never
+/// reaches the studio), and Sue's own meet every studio's. Two studios
+/// never meet: only one of them is in front.
+pub(super) fn resolve(rice: &RiceSchema, map: &KeyMap, maps: &[KeyMap]) -> Resolved {
+    let rows = rows_of(rice, map);
+    let mine = map.section == SUE_KEYS;
+    let mut all: Vec<(String, Keybinds)> = rows.clone();
+    for other in maps {
+        if other.id == map.id || !(mine || other.section == SUE_KEYS) {
+            continue;
+        }
+        all.extend(
+            rows_of(rice, other)
+                .into_iter()
+                .map(|(command, chords)| (format!("{}{OTHER}{command}", other.id), chords)),
+        );
+    }
     let borrowed: Vec<(&str, Keybinds)> = all
         .iter()
         .map(|(name, chords)| (name.as_str(), chords.clone()))
         .collect();
     let mut conflicts = shortcuts::conflicts_among(&borrowed);
-    // Two of Sue's own keys on one chord is the [keys] rows' business.
-    conflicts.retain(|conflict| {
-        conflict
-            .commands
-            .iter()
-            .any(|name| !name.starts_with("sue:"))
-    });
+    // Only a chord a command of this map holds is this map's business.
+    conflicts.retain(|conflict| conflict.commands.iter().any(|name| !name.contains(OTHER)));
     Resolved { rows, conflicts }
 }
 
@@ -119,49 +174,57 @@ fn conflict_press(chord: &Keybind) -> (bool, bool, bool, String) {
     )
 }
 
-/// What `holder` is called, in the language in use.
-pub(super) fn holder_label(holder: &Holder, map: &KeyMap, rice: &RiceSchema) -> String {
+/// What `holder` is called, in the language in use: a command of `map` by
+/// its name, one of another key map with whose it is.
+pub(super) fn holder_label(holder: &Holder, map: &KeyMap, maps: &[KeyMap]) -> String {
     match holder {
         Holder::Command(command) => map
             .find(command)
             .map_or_else(|| command.clone(), |found| found.label.clone()),
-        Holder::Sue(path) => {
-            let name = rice
-                .entry(path)
-                .map_or_else(|| path.clone(), super::label_of);
-            tr!("keys-sue-key", name = name)
+        Holder::Other { map: id, command } => {
+            let Some(other) = maps.iter().find(|other| &other.id == id) else {
+                return command.clone();
+            };
+            let name = other
+                .find(command)
+                .map_or_else(|| command.clone(), |found| found.label.clone());
+            if other.section == SUE_KEYS {
+                tr!("keys-sue-key", name = name)
+            } else {
+                tr!(
+                    "keys-studio-key",
+                    name = name,
+                    studio = other.title.as_str()
+                )
+            }
         }
     }
 }
 
-/// The edit that takes `chord` from `holder`.
+/// The edit that takes `chord` from `holder` (a command of `map`, or of
+/// another key map of `maps`).
 pub(super) fn take_from(
     rice: &RiceSchema,
     map: &KeyMap,
-    resolved: &Resolved,
+    maps: &[KeyMap],
     holder: &Holder,
     chord: &Keybind,
 ) -> Option<Edit> {
-    let keep = |chords: &Keybinds| {
-        let mut left = Keybinds::default();
-        for kept in chords.chords() {
-            if conflict_press(kept) != conflict_press(chord) {
-                left.push(*kept);
-            }
-        }
-        left
+    let (map, command) = match holder {
+        Holder::Command(command) => (map, command),
+        Holder::Other { map: id, command } => (maps.iter().find(|other| &other.id == id)?, command),
     };
-    match holder {
-        Holder::Command(command) => {
-            let (_, chords) = resolved.rows.iter().find(|(name, _)| name == command)?;
-            let (path, value) = shortcuts::bind(rice, &map.section, command, &keep(chords));
-            Some(Edit::Set(path, value))
-        }
-        Holder::Sue(path) => {
-            let chords = rice.get_keybind(path)?;
-            Some(Edit::Set(path.clone(), RiceValue::Keybind(keep(&chords))))
+    let (_, chords) = rows_of(rice, map)
+        .into_iter()
+        .find(|(name, _)| name == command)?;
+    let mut left = Keybinds::default();
+    for kept in chords.chords() {
+        if conflict_press(kept) != conflict_press(chord) {
+            left.push(*kept);
         }
     }
+    let (path, value) = shortcuts::bind(rice, &map.section, command, &left);
+    Some(Edit::Set(path, value))
 }
 
 /// `true` when `needle` (lower case) finds the command `label` (`name`)
@@ -192,7 +255,11 @@ impl Settings {
             return;
         };
         let theme = cx.theme.clone();
-        let resolved = resolve(cx.rice(), &map);
+        let maps = cx.catalog.keymaps.clone();
+        let resolved = resolve(cx.rice(), &map, &maps);
+        // A map of one group (Sue's own keys) is its rows under the
+        // page's heading, with no title of its own to open.
+        let folds = map.groups.len() > 1;
         let mut edit = None;
         for group in &map.groups {
             let shown: Vec<_> = group
@@ -236,11 +303,11 @@ impl Settings {
                     count = held_twice
                 )
             };
-            if !self.fold(ui, &key, &title, needle.is_empty(), &theme) {
+            if folds && !self.fold(ui, &key, &title, needle.is_empty(), &theme) {
                 continue;
             }
             for command in shown {
-                if let Some(next) = self.key_row(ui, &map, &resolved, command, cx) {
+                if let Some(next) = self.key_row(ui, &map, &maps, &resolved, command, cx) {
                     edit = Some(next);
                 }
             }
@@ -257,8 +324,9 @@ impl Settings {
         &mut self,
         ui: &mut Ui,
         map: &KeyMap,
+        maps: &[KeyMap],
         resolved: &Resolved,
-        command: &sue_wm::KeyCommand,
+        command: &KeyCommand,
         cx: &AppletContext<'_>,
     ) -> Option<Edit> {
         let theme = cx.theme.clone();
@@ -335,7 +403,7 @@ impl Settings {
         // it from the other one.
         for chord in chords.chords() {
             for other in others(resolved, name, chord) {
-                let who = holder_label(&other, map, rice);
+                let who = holder_label(&other, map, maps);
                 ui.horizontal_wrapped(|ui| {
                     let (_, mark) = ui.allocate_space(egui::Vec2::splat(theme.small_size + 2.0));
                     sue_wm::icons::paint(
@@ -363,7 +431,7 @@ impl Settings {
                         .show(ui, &theme)
                         .clicked()
                     {
-                        edit = take_from(rice, map, resolved, &other, chord);
+                        edit = take_from(rice, map, maps, &other, chord);
                     }
                 });
             }
@@ -383,10 +451,10 @@ impl Settings {
             {
                 let mut after = rice.clone();
                 if after.set(&path, value.clone()).is_ok() {
-                    let now = resolve(&after, map);
+                    let now = resolve(&after, map, maps);
                     let held: Vec<String> = others(&now, name, chord)
                         .iter()
-                        .map(|other| holder_label(other, map, rice))
+                        .map(|other| holder_label(other, map, maps))
                         .collect();
                     self.notice = (!held.is_empty()).then(|| {
                         tr!(

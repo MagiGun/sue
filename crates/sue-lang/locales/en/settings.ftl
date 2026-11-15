@@ -122,6 +122,7 @@ studio-or-tool = Studio or tool
 ## settings/keys.rs: Keyboard Shortcuts
 
 keys-sue-key = Sue's { $name }
+keys-studio-key = { $name } in { $studio }
 keys-group-held-twice = { $group } ({ $count } held twice)
 keys-held-twice = { $chord } also runs { $other }; a press runs only one of them.
 keys-take-from = Take { $chord } from { $other }
