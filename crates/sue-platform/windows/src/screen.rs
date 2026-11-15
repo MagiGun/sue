@@ -19,21 +19,25 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CLR_INVALID, GetDC, GetPixel, MONITOR_DEFAULTTONULL, MonitorFromPoint, ReleaseDC,
+    BeginPaint, CLR_INVALID, CreateSolidBrush, DEFAULT_GUI_FONT, DT_LEFT, DT_NOPREFIX,
+    DeleteObject, DrawTextW, EndPaint, FillRect, GetDC, GetPixel, GetStockObject, InvalidateRect,
+    MONITOR_DEFAULTTONULL, MonitorFromPoint, PAINTSTRUCT, ReleaseDC, SelectObject, SetBkMode,
+    SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    EnumWindows, GetMessageW, GetSystemMetrics, GetWindowThreadProcessId, IDC_CROSS,
+    EnumWindows, GetMessageW, GetSystemMetrics, GetWindowThreadProcessId, HWND_TOPMOST, IDC_CROSS,
     IsWindowVisible, LWA_ALPHA, LoadCursorW, MSG, PostMessageW, PostQuitMessage, RegisterClassExW,
     SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_HIDE, SW_SHOW,
-    SW_SHOWNA, SetForegroundWindow, SetLayeredWindowAttributes, SetWindowDisplayAffinity,
-    ShowWindow, TranslateMessage, UnregisterClassW, WDA_EXCLUDEFROMCAPTURE, WM_CLOSE, WM_DESTROY,
-    WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_RBUTTONDOWN, WNDCLASSEXW, WS_EX_LAYERED,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    SW_SHOWNA, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetForegroundWindow, SetLayeredWindowAttributes,
+    SetWindowDisplayAffinity, SetWindowPos, ShowWindow, TranslateMessage, UnregisterClassW,
+    WDA_EXCLUDEFROMCAPTURE, WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEMOVE,
+    WM_PAINT, WM_RBUTTONDOWN, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -124,6 +128,8 @@ struct Shared {
     window: AtomicIsize,
     /// Set by [`Pick::cancel`], also before the window is up.
     ended: std::sync::atomic::AtomicBool,
+    /// The first line of the label by the pointer (the command's name).
+    title: String,
     /// Called after each change of state, so the interface draws again.
     wake: Box<dyn Fn() + Send + Sync>,
 }
@@ -148,14 +154,16 @@ pub struct Pick {
 impl Pick {
     /// Starts a pick: a clear window over every screen waits for a click.
     /// With `hide`, Sue's own windows are hidden first and shown again
-    /// when the pick ends. `wake` is called (on the picker's thread)
-    /// whenever [`Pick::state`] changes.
+    /// when the pick ends. A small label by the pointer reads `title`
+    /// and the colour under it as "R=245 G=214 B=201". `wake` is called
+    /// (on the picker's thread) whenever [`Pick::state`] changes.
     #[must_use]
-    pub fn start(hide: bool, wake: Box<dyn Fn() + Send + Sync>) -> Self {
+    pub fn start(hide: bool, title: String, wake: Box<dyn Fn() + Send + Sync>) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(PickState::Waiting(None)),
             window: AtomicIsize::new(0),
             ended: std::sync::atomic::AtomicBool::new(false),
+            title,
             wake,
         });
         let thread = Arc::clone(&shared);
@@ -191,6 +199,15 @@ impl Pick {
         let (cx, cy) = (x - left, y - top);
         let packed = ((cy & 0xffff) << 16) | (cx & 0xffff);
         self.post(WM_LBUTTONDOWN, 0, packed as isize);
+    }
+
+    /// Acts as the pointer moved to screen point `x`, `y`, for tests.
+    #[doc(hidden)]
+    pub fn move_to(&self, x: i32, y: i32) {
+        let [left, top, ..] = virtual_screen();
+        let (cx, cy) = (x - left, y - top);
+        let packed = ((cy & 0xffff) << 16) | (cx & 0xffff);
+        self.post(WM_MOUSEMOVE, 0, packed as isize);
     }
 
     /// Acts as Esc pressed over the picker, for tests.
@@ -261,6 +278,11 @@ thread_local! {
     /// The pick this thread's window serves (the window procedure reads
     /// it; one picker window per thread).
     static SERVING: RefCell<Option<Arc<Shared>>> = const { RefCell::new(None) };
+    /// The label by the pointer (0 while there is none).
+    static LABEL: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+    /// The label's two lines and its swatch.
+    static LABEL_TEXT: RefCell<(Vec<u16>, Vec<u16>, COLORREF)> =
+        const { RefCell::new((Vec::new(), Vec::new(), COLORREF(0))) };
     /// The windows of this process found while hiding them.
     static FOUND: RefCell<Vec<isize>> = const { RefCell::new(Vec::new()) };
 }
@@ -299,15 +321,21 @@ fn run_pick(shared: &Arc<Shared>, hide: bool) {
     }
     shared.window.store(0, Ordering::Release);
     SERVING.with(|serving| *serving.borrow_mut() = None);
-    // SAFETY: the class was registered by this module (or registering
-    // failed, and then this fails harmlessly); its window is gone.
+    // SAFETY: the classes were registered by this module (or
+    // registering failed, and then this fails harmlessly); their windows
+    // are gone.
     let _ = unsafe { UnregisterClassW(CLASS, None) };
+    // SAFETY: as above.
+    let _ = unsafe { UnregisterClassW(LABEL_CLASS, None) };
     show_again(&hidden);
     // A window that went before answering counts as cancelled.
     shared.set(PickState::Cancelled);
 }
 
 const CLASS: PCWSTR = w!("SueScreenPick");
+const LABEL_CLASS: PCWSTR = w!("SueScreenPickLabel");
+/// The label's size, in pixels.
+const LABEL_SIZE: [i32; 2] = [196, 44];
 
 /// Makes the clear window over every screen and brings it to the front.
 #[allow(
@@ -368,7 +396,169 @@ fn make_window(shared: &Shared) -> Result<(), ScreenError> {
         let _ = ShowWindow(window, SW_SHOW);
         let _ = SetForegroundWindow(window);
     }
+    // The label by the pointer: a small window of its own that never
+    // takes the click or the focus. Without it the pick still works.
+    let label_class = WNDCLASSEXW {
+        cbSize: size_of::<WNDCLASSEXW>() as u32,
+        lpfnWndProc: Some(label_procedure),
+        hInstance: module.into(),
+        hCursor: cursor,
+        lpszClassName: LABEL_CLASS,
+        ..WNDCLASSEXW::default()
+    };
+    // SAFETY: as for the picker's class above.
+    let _ = unsafe { RegisterClassExW(&raw const label_class) };
+    LABEL_TEXT.with(|text| {
+        text.borrow_mut().0 = shared.title.encode_utf16().collect();
+    });
+    // SAFETY: the label class was registered above; static names; owned
+    // by the picker's window, so it goes with it. It starts hidden.
+    let label = unsafe {
+        CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
+            LABEL_CLASS,
+            w!("Sue"),
+            WS_POPUP,
+            left,
+            top,
+            LABEL_SIZE[0],
+            LABEL_SIZE[1],
+            Some(window),
+            None,
+            Some(module.into()),
+            None,
+        )
+    };
+    if let Ok(label) = label {
+        // SAFETY: the label window just made on this thread.
+        let _ = unsafe { SetWindowDisplayAffinity(label, WDA_EXCLUDEFROMCAPTURE) };
+        LABEL.with(|cell| cell.set(label.0 as isize));
+    }
     Ok(())
+}
+
+/// Moves the label next to the pointer at `x`, `y` and shows `color`.
+#[allow(
+    unsafe_code,
+    reason = "moving and redrawing a window has no safe route (standing approval, rule 13)"
+)]
+fn follow(x: i32, y: i32, color: [u8; 3]) {
+    let label = LABEL.with(std::cell::Cell::get);
+    if label == 0 {
+        return;
+    }
+    LABEL_TEXT.with(|text| {
+        let mut text = text.borrow_mut();
+        text.1 = format!("R={} G={} B={}", color[0], color[1], color[2])
+            .encode_utf16()
+            .collect();
+        text.2 = COLORREF(
+            u32::from(color[0]) | (u32::from(color[1]) << 8) | (u32::from(color[2]) << 16),
+        );
+    });
+    let [left, top, width, height] = virtual_screen();
+    // Below right of the pointer, kept on the screen.
+    let mut at = [x + 18, y + 22];
+    if at[0] + LABEL_SIZE[0] > left + width {
+        at[0] = x - 18 - LABEL_SIZE[0];
+    }
+    if at[1] + LABEL_SIZE[1] > top + height {
+        at[1] = y - 22 - LABEL_SIZE[1];
+    }
+    let label = HWND(label as *mut _);
+    // SAFETY: the label window of this thread, alive until the pick
+    // ends; the calls only move it and ask it to draw again.
+    unsafe {
+        let _ = SetWindowPos(
+            label,
+            Some(HWND_TOPMOST),
+            at[0],
+            at[1],
+            LABEL_SIZE[0],
+            LABEL_SIZE[1],
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+        let _ = InvalidateRect(Some(label), None, false);
+    }
+}
+
+/// The label's procedure: a dark plate, a swatch and two lines.
+#[allow(
+    unsafe_code,
+    reason = "painting a window is GDI and window calls (standing approval, rule 13)"
+)]
+unsafe extern "system" fn label_procedure(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if message != WM_PAINT {
+        // SAFETY: Windows' own handling, with the arguments it passed.
+        return unsafe { DefWindowProcW(window, message, wparam, lparam) };
+    }
+    let (mut title, mut values, swatch) = LABEL_TEXT.with(|text| text.borrow().clone());
+    let mut paint = PAINTSTRUCT::default();
+    // SAFETY: BeginPaint and EndPaint pair on this window in this
+    // WM_PAINT; every brush made here is deleted after use; the font is
+    // a stock one (never deleted) and the old one is selected back.
+    unsafe {
+        let dc = BeginPaint(window, &raw mut paint);
+        let boxes = [
+            (
+                COLORREF(0x0020_2020),
+                RECT {
+                    left: 0,
+                    top: 0,
+                    right: LABEL_SIZE[0],
+                    bottom: LABEL_SIZE[1],
+                },
+            ),
+            (
+                COLORREF(0x00f0_f0f0),
+                RECT {
+                    left: 6,
+                    top: 6,
+                    right: 38,
+                    bottom: 38,
+                },
+            ),
+            (
+                swatch,
+                RECT {
+                    left: 7,
+                    top: 7,
+                    right: 37,
+                    bottom: 37,
+                },
+            ),
+        ];
+        for (color, area) in boxes {
+            let brush = CreateSolidBrush(color);
+            FillRect(dc, &raw const area, brush);
+            let _ = DeleteObject(brush.into());
+        }
+        let old = SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, COLORREF(0x00f0_f0f0));
+        let mut first = RECT {
+            left: 46,
+            top: 6,
+            right: LABEL_SIZE[0] - 4,
+            bottom: 22,
+        };
+        DrawTextW(dc, &mut title, &raw mut first, DT_LEFT | DT_NOPREFIX);
+        let mut second = RECT {
+            left: 46,
+            top: 22,
+            right: LABEL_SIZE[0] - 4,
+            bottom: 40,
+        };
+        DrawTextW(dc, &mut values, &raw mut second, DT_LEFT | DT_NOPREFIX);
+        SelectObject(dc, old);
+        let _ = EndPaint(window, &raw const paint);
+    }
+    LRESULT(0)
 }
 
 /// The picker window's procedure, on the picker thread.
@@ -398,6 +588,7 @@ unsafe extern "system" fn procedure(
         (WM_MOUSEMOVE, Some(shared)) => {
             let [x, y] = point();
             if let Ok(color) = pixel_at(x, y) {
+                follow(x, y, color);
                 shared.set(PickState::Waiting(Some(([x, y], color))));
             }
             LRESULT(0)
@@ -406,8 +597,15 @@ unsafe extern "system" fn procedure(
             let [x, y] = point();
             // Read with the picker out of the way, so the colour is the
             // screen's own to the last level.
-            // SAFETY: hides this thread's own live window.
-            let _ = unsafe { ShowWindow(window, SW_HIDE) };
+            // SAFETY: hides this thread's own live windows (the label is
+            // 0, so left alone, when it could not be made).
+            unsafe {
+                let _ = ShowWindow(window, SW_HIDE);
+                let label = LABEL.with(std::cell::Cell::get);
+                if label != 0 {
+                    let _ = ShowWindow(HWND(label as *mut _), SW_HIDE);
+                }
+            }
             std::thread::sleep(Duration::from_millis(60));
             shared.set(match pixel_at(x, y) {
                 Ok(color) => PickState::Picked(color),
@@ -427,6 +625,8 @@ unsafe extern "system" fn procedure(
             LRESULT(0)
         }
         (WM_DESTROY, _) => {
+            // The label is owned by the picker and goes with it.
+            LABEL.with(|cell| cell.set(0));
             // SAFETY: ends this thread's message loop; takes a number.
             unsafe { PostQuitMessage(0) };
             LRESULT(0)
@@ -497,7 +697,7 @@ mod tests {
     //! These read the real screen of this machine's desktop session.
     use super::*;
     use std::time::Instant;
-    use windows::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, HBRUSH, UpdateWindow};
+    use windows::Win32::Graphics::Gdi::{HBRUSH, UpdateWindow};
     use windows::Win32::UI::WindowsAndMessaging::{PM_REMOVE, PeekMessageW};
 
     /// Windows' own handling for the swatch.
@@ -617,6 +817,7 @@ mod tests {
         let count = Arc::clone(&woken);
         let pick = Pick::start(
             false,
+            "Pick Screen Color".to_owned(),
             Box::new(move || {
                 count.fetch_add(1, Ordering::Relaxed);
             }),
@@ -625,13 +826,17 @@ mod tests {
         while !pick.window_up() && start.elapsed() < Duration::from_secs(10) {
             std::thread::sleep(Duration::from_millis(10));
         }
+        // Moving over it shows its colour while the pick waits.
+        pick.move_to(middle[0], middle[1]);
+        let state = wait_for(&pick, |state| matches!(state, PickState::Waiting(Some(_))));
+        assert_eq!(state, PickState::Waiting(Some((middle, color))), "hover");
         pick.click_at(middle[0], middle[1]);
         let state = wait_for(&pick, |state| !matches!(state, PickState::Waiting(_)));
         assert_eq!(state, PickState::Picked(color), "picked");
         assert!(woken.load(Ordering::Relaxed) > 0, "the interface was woken");
 
         // Esc, and a cancel from Sue, end a pick without a colour.
-        let pick = Pick::start(false, Box::new(|| {}));
+        let pick = Pick::start(false, String::new(), Box::new(|| {}));
         let start = Instant::now();
         while !pick.window_up() && start.elapsed() < Duration::from_secs(10) {
             std::thread::sleep(Duration::from_millis(10));
@@ -639,7 +844,7 @@ mod tests {
         pick.press_escape();
         let state = wait_for(&pick, |state| !matches!(state, PickState::Waiting(_)));
         assert_eq!(state, PickState::Cancelled, "Esc");
-        let pick = Pick::start(false, Box::new(|| {}));
+        let pick = Pick::start(false, String::new(), Box::new(|| {}));
         pick.cancel();
         let state = wait_for(&pick, |state| !matches!(state, PickState::Waiting(_)));
         assert_eq!(state, PickState::Cancelled, "cancel");
@@ -649,7 +854,7 @@ mod tests {
         // SAFETY: reads a fact of the swatch window, alive until `done`.
         let shown = || unsafe { IsWindowVisible(HWND(swatch_window as *mut _)) }.as_bool();
         assert!(shown());
-        let pick = Pick::start(true, Box::new(|| {}));
+        let pick = Pick::start(true, String::new(), Box::new(|| {}));
         let start = Instant::now();
         while !pick.window_up() && start.elapsed() < Duration::from_secs(10) {
             std::thread::sleep(Duration::from_millis(10));

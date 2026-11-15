@@ -76,22 +76,27 @@ pub struct ScreenPick {
 
 impl ScreenPick {
     /// Starts a pick. With `hide`, Sue's own windows are hidden while it
-    /// waits and shown again after. `wake` is called, from another
+    /// waits and shown again after. A label by the pointer reads `title`
+    /// and the colour under it. `wake` is called, from another
     /// thread, whenever [`ScreenPick::state`] changes, so the interface
     /// draws again.
     ///
     /// # Errors
     /// [`ScreenError::Unsupported`] where there is no route.
-    pub fn start(hide: bool, wake: Box<dyn Fn() + Send + Sync>) -> Result<Self, ScreenError> {
+    pub fn start(
+        hide: bool,
+        title: String,
+        wake: Box<dyn Fn() + Send + Sync>,
+    ) -> Result<Self, ScreenError> {
         #[cfg(target_os = "windows")]
         {
             Ok(Self {
-                pick: sue_windows::screen::Pick::start(hide, wake),
+                pick: sue_windows::screen::Pick::start(hide, title, wake),
             })
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = (hide, wake);
+            let _ = (hide, title, wake);
             Err(ScreenError::Unsupported)
         }
     }
