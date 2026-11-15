@@ -335,6 +335,14 @@ fn sue_writers_bar_buttons_are_named_and_their_tooltips_show_their_keys() {
     bars.settle(3);
     let shown = bars.hover("Bold");
     assert!(shown.iter().any(|text| text == "Ctrl+Shift+B"), "{shown:?}");
+    // The find bar's boxes and its Replace button say their names too
+    // (the name drawn beside a box is one text; its tooltip is another).
+    for name in ["Match case", "Whole words", "Replace..."] {
+        let before = bars.texts.iter().filter(|(text, _)| text == name).count();
+        let shown = bars.hover(name);
+        let after = shown.iter().filter(|text| *text == name).count();
+        assert!(after > before, "{name} shows a tooltip: {shown:?}");
+    }
 }
 
 /// Shift and Tab walk the keyboard's focus back from the end of the
