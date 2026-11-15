@@ -338,6 +338,26 @@ fn the_sub_view_flips_and_its_menu_hides_its_rows() {
         kept.node("Flip Horizontally", Some(Role::Button)).on,
         Some(true)
     );
+    // The picture is square in a wider area, so its left half lies left
+    // of the middle by up to half the area's height.
+    let shown = kept.node("Reference Picture", None).rect;
+    let left = shown.center() - vec2(shown.height() * 0.25, 0.0);
+    kept.press_at(left, Modifiers::NONE);
+    // A new layer filled with the drawing color shows what was picked.
+    kept.driver.command("layer.new");
+    kept.driver.command("edit.fill");
+    kept.settle(4);
+    let arena = &kept.driver.runtime.engine.world.arena;
+    let filled: Vec<[u8; 4]> = sue_paint::doc::layers(arena, kept.picture())
+        .iter()
+        .filter_map(|layer| sue_paint::doc::raster(arena, layer.id))
+        .filter_map(|raster| raster.bytes().map(|bytes| [bytes[0], bytes[1], bytes[2], bytes[3]]))
+        .collect();
+    assert!(
+        filled.contains(&[0, 0, 255, 255]),
+        "the flipped picture shows blue at its left: {filled:?}"
+    );
+    assert!(!filled.contains(&[255, 0, 0, 255]), "not the red under it");
     // The menu's switches: hiding the buttons takes them away.
     kept.driver.command("subview.show_bar");
     kept.settle(4);
@@ -480,6 +500,56 @@ fn auto_actions_come_in_sets_with_switches_and_play_with_a_key() {
 }
 
 #[test]
+fn auto_action_sets_are_shared_as_files() {
+    // Owner note 12: a set is a file people can share. The set in use is
+    // exported, and importing the file brings it back as a set of its
+    // own, in use, with every action and step it had.
+    let mut kept = Kept::new("extras-auto-share");
+    kept.show("auto_action");
+    kept.click("New Clipped Layer", Some(Role::CheckBox));
+    let shared = kept.driver.root.join("mine.sueactions");
+    let answer = |kept: &mut Kept, command: &str, purpose: &str| {
+        kept.driver.command(command);
+        kept.settle(2);
+        let pick = kept
+            .driver
+            .runtime
+            .pending_pick
+            .take()
+            .expect("asks for a file");
+        assert_eq!(pick.purpose, purpose);
+        kept.driver.runtime.request(
+            ShellRequest::Picked {
+                pick,
+                path: shared.clone(),
+            },
+            &mut NoTextures,
+            kept.driver.now,
+        );
+        kept.settle(4);
+    };
+    answer(&mut kept, "auto.export_set", "auto-export");
+    let text = std::fs::read_to_string(&shared).expect("the set was written");
+    assert!(text.starts_with("sue-auto-actions 1"), "{text}");
+    assert!(text.contains("[New Clipped Layer]\nid new-clipped-layer\noff\n"));
+    answer(&mut kept, "auto.import_set", "auto-import");
+    let file = kept.data("auto_actions.txt");
+    assert_eq!(
+        file.matches("set Sue Paint Actions").count(),
+        2,
+        "the shared set is read in beside the one it came from: {file}"
+    );
+    // Its ids were told apart, so a key still plays one action only.
+    assert!(file.contains("id new-clipped-layer-2"), "{file}");
+    // The imported set is the one in use, its action still off.
+    assert!(file.contains("set Sue Paint Actions\nin-use\n"), "{file}");
+    assert_eq!(
+        kept.node("New Clipped Layer", Some(Role::CheckBox)).on,
+        Some(false)
+    );
+}
+
+#[test]
 fn recording_keeps_commands_from_menus_keys_and_filters() {
     // CT-33 and step 115: Merge Selected Layers, a filter and the Select
     // Next Cel key, recorded; Record turns into Stop while it records.
@@ -600,6 +670,25 @@ fn materials_are_searched_tagged_and_dragged_onto_the_canvas() {
     kept.driver.command("material.favorite");
     kept.settle(4);
     assert_eq!(kept.node("Favorite", Some(Role::Button)).on, Some(true));
+    // The column is too narrow for the tree, so its folders are a
+    // picker: Favorites holds the two just made favorites.
+    let thumbs = |kept: &Kept| -> Vec<String> {
+        kept.nodes
+            .iter()
+            .filter(|node| node.role == Role::Button && all.iter().any(|t| t.name == node.name))
+            .map(|node| node.name.clone())
+            .collect()
+    };
+    kept.click("Folder", None);
+    kept.click("Favorites", None);
+    let mut favorites = thumbs(&kept);
+    favorites.sort();
+    let mut expected = vec![all[0].name.clone(), all[1].name.clone()];
+    expected.sort();
+    assert_eq!(favorites, expected, "Favorites shows the favorites");
+    kept.click("Folder", None);
+    kept.click("All", None);
+    assert_eq!(thumbs(&kept).len(), all.len(), "All shows every one again");
     // Tagged: the tag is the library's, and the search finds it.
     kept.press_at(all[3].rect.center(), Modifiers::NONE);
     kept.click("Tags", None);

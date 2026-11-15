@@ -340,14 +340,21 @@ impl SuePaint {
         } else {
             0.0
         };
-        if tree_width > 0.0 {
+        // Without room for the tree, the same folders are a picker above
+        // the materials, so Favorites and Recent stay one click away.
+        let picker = if tree_width > 0.0 {
             let tree = Rect::from_min_size(middle.min, vec2(tree_width, middle.height()));
             self.material_tree(ui, tree, theme);
-        }
+            0.0
+        } else {
+            let rect = Rect::from_min_size(middle.min, vec2(middle.width(), control));
+            self.material_folder_picker(ui, rect, theme);
+            control + gap
+        };
         let grid = Rect::from_min_max(
             pos2(
                 middle.left() + tree_width + if tree_width > 0.0 { gap } else { 0.0 },
-                middle.top(),
+                middle.top() + picker,
             ),
             middle.max,
         );
@@ -583,6 +590,36 @@ impl SuePaint {
             self.paste_entry(&entry, None, cx);
         }
         self.canvas_drops(ui.ctx(), cx);
+    }
+
+    /// The folders of the tree as one picker, for a palette too narrow
+    /// for the tree: All, each kind, Favorites and Recent.
+    fn material_folder_picker(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
+        let mut nodes = vec![(Node::All, tr!("all"))];
+        nodes.extend(
+            self.material_kinds
+                .iter()
+                .map(|kind| (Node::Kind(kind.id.clone()), crate::localize(&kind.name))),
+        );
+        nodes.push((Node::Favorite, tr!("material-favorites")));
+        nodes.push((Node::Recent, tr!("material-recent")));
+        let names: Vec<String> = nodes.iter().map(|(_, name)| name.clone()).collect();
+        let view = &mut self.extras.material;
+        let mut chosen = nodes
+            .iter()
+            .position(|(node, _)| *node == view.folder)
+            .unwrap_or(0);
+        let label = tr!("material-folder");
+        let mut inner = crate::panels::child(ui, rect, "material-folder");
+        let response = sue_wm::ui::dropdown("sue-paint-material-folder", &mut chosen, &names)
+            .label(&label)
+            .show_at(&mut inner, rect, theme);
+        sue_wm::ui::tooltip(response, &Tip::new(&label), theme);
+        if let Some((node, _)) = nodes.get(chosen)
+            && *node != view.folder
+        {
+            view.folder = node.clone();
+        }
     }
 
     /// The tree of folders: All with each kind under it, Favorites and

@@ -147,6 +147,14 @@ impl SuePaint {
                 Id::unique("sue-paint-sub-view"),
                 Sense::click_and_drag(),
             );
+            let name = tr!("sub-view-picture");
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, &name));
+            let help = if view.eyedropper {
+                tr!("sub-view-picture-pick")
+            } else {
+                tr!("sub-view-picture-look")
+            };
+            let response = sue_wm::ui::tooltip(response, &Tip::new(&name).help(&help), theme);
             if view.eyedropper
                 && (response.clicked() || response.dragged())
                 && let Some(pointer) = response.interact_pointer_pos()
