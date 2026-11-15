@@ -440,7 +440,7 @@ the two modes too.
 
 **Draw with Fingers** decides what a finger does on the canvas. On, a
 finger draws with the tool. Off, a finger only moves the view and the pen
-draws, so a resting hand never leaves a mark. Settings, Sue Paint, Phones
+draws, so a stray finger never leaves a mark. Settings, Sue Paint, Phones
 and Tablets also says what a two-finger swipe, pinch and rotation do (move,
 zoom and turn the canvas, or nothing), next to the two- and three-finger
 taps for Undo and Redo.
