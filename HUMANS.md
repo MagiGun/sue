@@ -544,7 +544,8 @@ Once a canvas is open:
   quarter, cancel and OK. Under a text layer's words: edit, smaller,
   larger, vertical and centered. Under the layer's drawing with the
   Operation tool: scale and rotate, flip, its properties and delete. View
-  turns each launcher on or off.
+  turns each launcher on or off. Each button names itself and its key
+  when the pointer rests on it, and is grayed while it cannot run.
 - **Quick Filters and Quick Effects:** Filter, Quick Filters (colors such
   as Vivid, Sepia or Night) and Quick Effects (styles such as Glow,
   Halftone or Pixel art) show every look on a small copy of your layer;
@@ -624,10 +625,18 @@ Once a canvas is open:
   length, thinning the line, fading it or both, longer when you draw fast.
   Color jitter changes the color of every dab (brushes that stamp) or of
   each whole stroke.
-- **Transform** (Ctrl+T, Ctrl+Shift+T): the selection, or the whole layer,
-  in a box. Drag a corner to scale (Shift frees the shape), an edge to
-  stretch, inside to move and outside to turn, or type the size and angle;
-  Free Transform moves each corner on its own. Enter keeps it.
+- **Transform** (Ctrl+T, Ctrl+Shift+T, Edit, Transform): the selection,
+  the whole layer, every layer of the current folder or the layers picked
+  together, in a box. Drag a corner to scale (Shift frees the shape, or
+  keeps it when Keep aspect ratio is off), an edge to stretch, inside to
+  move and outside to turn around the cross in the middle: drag the cross
+  anywhere, or put it on a corner or an edge from the bar. Ctrl on a
+  corner moves that corner alone. The bar over the canvas also picks the
+  mode (Scale/Rotate, Scale, Rotate, Free Transform, Skew, Distort,
+  Perspective), keeps the original under it, and takes the size, angle and
+  place as numbers. **Mesh Transformation** lays a lattice of as many
+  points across and down as you ask for; drag them to bend the picture.
+  Enter keeps it as one undo step, Esc puts everything back.
 - **Vector layers** (Layer, New Layer, Vector Layer, or the button beside
   New Raster Layer): lines drawn on one are kept as lines. The eraser's
   **Vector** setting decides what it takes: only where it touches, the
@@ -710,8 +719,14 @@ Once a canvas is open:
   twirls it under the brush. **Copy stamp** copies one part of a layer to
   another: Alt and click where to copy from, then paint.
 - **Puppet warp** (Edit, Transform): click to put pins on a layer, drag one
-  and the drawing bends around the others while keeping its shape; Alt and
-  click takes a pin away. OK (or Enter) keeps it, Cancel (or Esc) does not.
+  and the drawing bends around the others while keeping its shape; a part
+  of the drawing that does not touch another bends only by its own pins.
+  Shift and click picks several pins to move together, the ring round
+  picked pins turns them and what is under them, Alt and click takes a pin
+  away and Delete the picked ones. The bar has Keep original image, Show
+  mesh, Click to add pins, Pick several pins, Correct pin rotation,
+  Expansion and the interpolation. OK (or Enter) keeps it, Cancel (or Esc)
+  does not.
 - **Comics and manga:** File, New, Comic makes a story of pages, bound on the
   right for manga or on the left. The Story menu adds, inserts, duplicates
   and deletes pages and steps through them, and the **Page Manager** shows
@@ -855,7 +870,12 @@ Once a canvas is open:
   keeps a selection as a layer and takes it back, and has **Quick Mask**
   (paint the selection in red, then turn it back). A bar of handy buttons
   (the Selection Launcher) sits under every selection, as in Clip Studio
-  Paint.
+  Paint: Deselect, Crop, Invert, Expand, Shrink, Delete, Delete outside,
+  Cut and Paste and Copy and Paste (to a new layer in the same place),
+  Scale/Rotate, Fill and New Tone. Its last button, Selection Launcher
+  Settings, adds any command of the menus (search for it by name), moves
+  and takes off buttons, adds separators and restores the default; the set
+  is kept in a file you can share.
 - **Layer Property effects:** give a layer a **Border effect** (an outline
   of any thickness and color round what is on it), a **Tone** (halftone
   dots at the frequency and angle you choose), a **Layer color**, or show it

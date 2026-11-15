@@ -13,6 +13,36 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: the Selection launcher has Clip Studio Paint's buttons in
+  its order (with Cut and Paste, Copy and Paste and New Tone, also new in
+  the Edit menu) and ends with Selection Launcher Settings: add any menu
+  command by searching for it, move buttons, take them off, add
+  separators or restore the default. The set is kept in a file you can
+  share (`docs/paint-launcher-format.md`). Every launcher button shows its
+  name and key in its tooltip and is grayed while it cannot run.
+- Sue Paint: transforms have their settings on the bar over the canvas:
+  the mode (Scale/Rotate, Scale, Rotate, Free Transform, Skew, Distort,
+  Perspective), the center of rotation (any corner, edge, the middle, or
+  dragged anywhere), Keep aspect ratio, Keep original image, and the
+  scale, angle and position as numbers. Ctrl on a corner distorts it in
+  any mode. Mesh Transformation takes the number of points across and
+  down. A folder, or several layers picked together, transform as one,
+  in one undo step.
+- Sue Paint: Puppet warp bends each separate part of a drawing by its own
+  pins. Shift and click picks several pins to move together, the ring
+  round picked pins turns them and the part under them, Delete takes the
+  picked ones away. Its bar has Keep original image, Show mesh, Click to
+  add pins, Pick several pins, Correct pin rotation, Expansion and the
+  interpolation.
+- Sue Paint: the 2D camera's frame has handles on its corners and edges
+  and a turning handle on a stalk; Alt zooms about the middle, Shift keeps
+  a move to one axis and turns in steps of 15 degrees. Its name sits under
+  its corner, guides run to the canvas corners, and its path through its
+  keyframes and the frames at the keys before and after show faintly.
+- Sue Paint: the Light table tool shows a box round the light table's
+  drawing with handles to scale it, a stalk to turn it, and a launcher to
+  flip it, put it back or put the tool away.
+
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
