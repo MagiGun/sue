@@ -343,6 +343,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint, Ruler tool: with Shift held, the line shown while dragging
+  a ruler now keeps to 45 degrees, as the ruler it lays does.
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
   the update. It now takes the theme as it ships; colors you picked
