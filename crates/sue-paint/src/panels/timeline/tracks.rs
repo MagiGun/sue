@@ -642,7 +642,7 @@ impl SuePaint {
             let x = column(label.frame);
             sue_wm::icons::paint(
                 &painter,
-                Rect::from_min_size(pos2(x, ruler_rect.top()), egui::Vec2::splat(ruler / 2.0)),
+                Rect::from_min_size(pos2(x, ruler_rect.top()), egui::Vec2::splat(ruler_half)),
                 icon("tag"),
                 theme.text,
             );
