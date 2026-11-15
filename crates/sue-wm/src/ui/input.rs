@@ -396,6 +396,7 @@ pub struct TextField<'a> {
     width: Option<f32>,
     password: bool,
     search: bool,
+    lines: usize,
 }
 
 /// A field that holds one line of `text`. `salt` names it among the
@@ -410,6 +411,7 @@ pub fn text_field(salt: impl AsIdSalt, text: &mut String) -> TextField<'_> {
         width: None,
         password: false,
         search: false,
+        lines: 1,
     }
 }
 
@@ -456,13 +458,50 @@ impl<'a> TextField<'a> {
         self
     }
 
+    /// Makes it a field of several lines, `lines` tall, for a note or a
+    /// summary: Enter starts a new line, the text wraps at its width, and
+    /// it grows past `lines` as more is written. 1 (the default) is a
+    /// field of one line. A search field stays one line.
+    pub fn lines(mut self, lines: usize) -> Self {
+        self.lines = lines.max(1);
+        self
+    }
+
+    /// How many lines it shows: more than one only for a field asked to
+    /// hold several and that is not a search field.
+    fn shown_lines(&self) -> usize {
+        if self.search { 1 } else { self.lines }
+    }
+
+    /// The height of a field of `lines` lines: a control's height for one,
+    /// and room for each line and the field's padding for more.
+    fn height(ui: &Ui, theme: &Theme, density: Density, lines: usize) -> f32 {
+        if lines <= 1 {
+            return density.control_height();
+        }
+        let row = ui.fonts_mut(|fonts| fonts.row_height(&theme.text_font(TextRole::Body)));
+        let pad = side_padding(theme, density) / 2.0;
+        (row * lines as f32 + pad * 2.0)
+            .max(density.control_height())
+            .ceil()
+    }
+
     /// Shows it in the layout of `ui`. The response is that of the text:
     /// `changed()` when something was typed or cleared, `lost_focus()`
     /// when typing ended (with Enter, Tab, a click elsewhere or Escape).
     pub fn show(self, ui: &mut Ui, theme: &Theme) -> Response {
         let density = Density::of(ui);
         let width = field_width(ui, self.width, density);
-        let rect = ui.allocate_space(vec2(width, density.control_height())).1;
+        let lines = self.shown_lines();
+        let mut height = Self::height(ui, theme, density, lines);
+        if lines > 1 {
+            // A field of several lines grows with what it holds: last
+            // frame's height of the text, kept under its id.
+            let grown: Option<f32> =
+                ui.data(|data| data.get_temp(control_id(ui, self.salt).with("sue-grown")));
+            height = height.max(grown.unwrap_or(0.0));
+        }
+        let rect = ui.allocate_space(vec2(width, height)).1;
         self.show_at(ui, rect, theme)
     }
 
@@ -481,17 +520,35 @@ impl<'a> TextField<'a> {
         };
         let fill = body_fill(theme, Body::Inset, rest);
         let hint = RichText::new(self.hint).color(quiet_ink(theme, rest, fill));
-        let edit = TextEdit::singleline(&mut *self.text)
+        let lines = self.shown_lines();
+        let edit = if lines > 1 {
+            let pad = edit_margin(side_padding(theme, density) / 2.0, 0.0).left;
+            let mut margin = edit_margin(left, right);
+            margin.top = pad;
+            margin.bottom = pad;
+            TextEdit::multiline(&mut *self.text)
+                .frame(Frame::NONE.inner_margin(margin))
+                .desired_rows(lines)
+                .align(Align2::LEFT_TOP)
+        } else {
+            TextEdit::singleline(&mut *self.text)
+                .frame(Frame::NONE.inner_margin(edit_margin(left, right)))
+                .align(Align2::LEFT_CENTER)
+        };
+        let edit = edit
             .id(id)
-            .frame(Frame::NONE.inner_margin(edit_margin(left, right)))
             .font(theme.text_font(TextRole::Body))
             .text_color(field_ink(theme, rest))
             .hint_text(hint)
             .password(self.password)
-            .align(Align2::LEFT_CENTER)
             .interactive(enabled)
             .desired_width(rect.width());
-        let mut response = ui.put(rect, edit).with_new_rect(rect);
+        let shown = ui.put(rect, edit);
+        if lines > 1 {
+            let grown = shown.rect.height();
+            ui.data_mut(|data| data.insert_temp(id.with("sue-grown"), grown));
+        }
+        let mut response = shown.with_new_rect(rect);
         let look = Look::of(ui, &response, enabled, response.has_focus());
         let look = Look { focus: 0.0, ..look };
         ui.painter()
