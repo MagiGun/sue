@@ -494,3 +494,36 @@ fn sue_writers_highlight_button_offers_its_colors_and_undoes() {
     bars.click("Undo");
     assert_eq!(bars.arena(), before);
 }
+
+/// The font box looks like the boxes beside it and opens the installed
+/// fonts under a search field that takes the typing at once; Escape
+/// closes it with the text untouched.
+#[test]
+fn sue_writers_font_box_opens_a_search_that_takes_the_keys() {
+    let mut bars = Bars::new("writer-bars-font");
+    bars.type_text("plain words");
+    bars.command("edit.select_all");
+    let before = bars.arena();
+    let font = bars.control("Font");
+    assert_eq!(font.role, Role::ComboBox, "a box like the size's");
+    assert!(bars.hover("Font").iter().any(|text| text == "Font"));
+    bars.click("Font");
+    assert!(
+        bars.texts.iter().any(|(text, _)| text == "Style's font"),
+        "the list opened"
+    );
+    bars.step(vec![egui::Event::Text("no such face".to_owned())]);
+    bars.settle(3);
+    assert!(
+        bars.texts.iter().any(|(text, _)| text == "no such face"),
+        "the search field took the typing"
+    );
+    assert_eq!(bars.arena(), before, "the text did not");
+    bars.step(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    bars.settle(3);
+    assert!(
+        !bars.texts.iter().any(|(text, _)| text == "Style's font"),
+        "Escape closed the list"
+    );
+    assert_eq!(bars.arena(), before);
+}

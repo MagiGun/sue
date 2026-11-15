@@ -77,6 +77,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 14 to 19a. Sue Writer on a sample novel.
     writer_document::open(tour)?;
     writer_bars::find_bar(tour)?;
+    writer_bars::font_list(tour)?;
     writer_corkboard::corkboard(tour)?;
     writer_outliner::outliner(tour)?;
     writer_document::composition(tour)?;
