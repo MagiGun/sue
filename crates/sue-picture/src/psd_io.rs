@@ -86,10 +86,18 @@ fn pixels_of(arena: &Arena, info: &doc::LayerInfo, size: [u32; 2]) -> Option<Psd
             if let Some(mask) = doc::mask_of(arena, info.id)
                 .filter(|_| doc::mask_on(arena, info.id))
                 .and_then(|mask| doc::raster(arena, mask))
-                .and_then(RasterTile2D::bytes)
+                && let Some(place) = doc::mask_offset(arena, info.id)
             {
-                for (pixel, cover) in pixels.chunks_mut(4).zip(mask.chunks(4)) {
-                    pixel[3] = ((u32::from(pixel[3]) * u32::from(cover[3])) / 255) as u8;
+                // Whatever the mask's pixels (a `Gray8` mask, an old
+                // `Rgba8` one) and wherever it sits.
+                let width = raster.width() as usize;
+                let at = info.style.offset;
+                let shift = [at[0] - place[0], at[1] - place[1]];
+                for (index, pixel) in pixels.chunks_mut(4).enumerate() {
+                    let (x, y) = ((index % width) as i64, (index / width) as i64);
+                    let shown = doc::cover(mask, x + shift[0], y + shift[1]);
+                    let shown = (shown * 255.0).round() as u32;
+                    pixel[3] = ((u32::from(pixel[3]) * shown) / 255) as u8;
                 }
             }
             (pixels, raster.width(), raster.height(), info.style.offset)
