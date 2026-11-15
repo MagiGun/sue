@@ -89,6 +89,9 @@ const ACTIONS: [&str; 9] = [
 struct RowEvents {
     /// A plain click: the layer becomes the only one picked.
     pick: Option<EntityId>,
+    /// A right click on a picked layer: it becomes the current one and
+    /// every picked layer stays picked.
+    current: Option<EntityId>,
     /// Ctrl+click or the box: the layer joins the picked ones or leaves.
     also: Option<EntityId>,
     /// Shift+click: every layer from the current one to it.
@@ -1240,6 +1243,10 @@ impl SuePaint {
                     } else if response.clicked() && modifiers.command {
                         // Ctrl+click picks more layers.
                         events.also = Some(info.id);
+                    } else if response.secondary_clicked() && also {
+                        // A right click on one of the picked layers keeps
+                        // them all picked, so its list acts on every one.
+                        events.current = Some(info.id);
                     } else if response.clicked() || response.secondary_clicked() {
                         events.pick = Some(info.id);
                         if let (Some(folder), Some(sequence)) = (folder, sequence.as_ref())
@@ -1403,6 +1410,15 @@ impl SuePaint {
                 doc.picked.clear();
             }
             doc.layer = Some(id);
+        }
+        if let Some(id) = events.current
+            && let Some(doc) = self.doc_mut()
+        {
+            doc.picked.retain(|known| *known != id);
+            if let Some(before) = doc.layer.replace(id) {
+                doc.picked.push(before);
+            }
+            doc.mask_edit = false;
         }
         if let Some((track, frame)) = events.cel {
             if let Some(doc) = self.doc_mut() {

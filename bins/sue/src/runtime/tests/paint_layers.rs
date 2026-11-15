@@ -1513,3 +1513,32 @@ fn the_layer_color_button_switches_the_layer_color() {
     assert_eq!(driver.flag(layer, sue_paint::effects::COLOR), Some(true));
     assert_eq!(driver.control("Switch Using Layer Color").on, Some(true));
 }
+
+#[test]
+fn a_right_click_on_a_picked_layer_keeps_every_one_picked() {
+    let mut driver = PaintDriver::new("paint-layer-menu-picked");
+    driver.command("layer.new");
+    driver.command("layer.new");
+    driver.settle(3);
+    let [_, first, second, third] = driver.stack()[..] else {
+        panic!("paper and three layers");
+    };
+    // The third is current; its box picks the first beside it.
+    let name = format!("Pick {} with the others", driver.name_of(first));
+    driver.click_control(&name);
+    // A right click on the first: its own list, and both stay picked, so
+    // Merge Selected Layers there merges the two.
+    let row = driver.row(&driver.name_of(first));
+    driver.press(
+        row.center(),
+        egui::PointerButton::Secondary,
+        egui::Modifiers::NONE,
+    );
+    undo_pair(&mut driver, |driver| {
+        driver.click_text("Merge Selected Layers");
+    });
+    let stack = driver.stack();
+    assert_eq!(stack.len(), 3, "two of the three merged: {stack:?}");
+    assert!(stack.contains(&second), "the unpicked one stays");
+    assert!(!stack.contains(&third) || !stack.contains(&first));
+}
