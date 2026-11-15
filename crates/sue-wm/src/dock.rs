@@ -28,6 +28,20 @@ use egui::{
 };
 
 use crate::Theme;
+use crate::icons::Icon;
+use crate::ui::{Density, Tab, TabStrip};
+
+/// How a palette's tab in a dock header looks: its name, its icon and the
+/// keys that show it (empty for none).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TabFace {
+    /// What the palette is called.
+    pub name: String,
+    /// Its icon; a tab with one shows only it when names do not fit.
+    pub icon: Option<Icon>,
+    /// The keys that show it, for its tooltip.
+    pub keys: String,
+}
 
 /// A palette a studio's dock holds.
 pub trait DockPanel: Copy + Eq + std::fmt::Debug + 'static {
@@ -78,6 +92,20 @@ pub trait DockPanel: Copy + Eq + std::fmt::Debug + 'static {
     /// out of room (a tool strip).
     fn anchored(self) -> bool {
         false
+    }
+
+    /// Whether the dock draws its name over it in a header, also when it
+    /// is alone in its group. A group with more than one palette always
+    /// has one, its tabs. A headed palette draws no title of its own: the
+    /// header is its one title, and dragging it moves the palette.
+    fn headed(self) -> bool {
+        false
+    }
+
+    /// The room its header leaves at its left, for a button the studio
+    /// draws there (a palette's menu).
+    fn header_inset(self) -> f32 {
+        0.0
     }
 
     /// Every layout style the studio has, the default one first. A studio
@@ -383,6 +411,9 @@ pub struct DockLayout<P> {
     /// Palettes people closed for good: [`Self::fill_missing`] leaves them
     /// closed, and saved layouts remember it.
     pub closed: Vec<P>,
+    /// Floating palettes rolled up to their header (Clip Studio Paint's
+    /// Minimize). Not kept in the layout's lines: a palette opens whole.
+    pub rolled: Vec<P>,
     drag: Option<Drag<P>>,
 }
 
@@ -401,8 +432,10 @@ pub const COLUMN_BAR: f32 = 12.0;
 /// How wide a closed side's bar is.
 pub const HANDLE: f32 = 14.0;
 
-/// The height of a group's tab strip, when it has more than one tab.
-pub const TAB_STRIP: f32 = 22.0;
+/// The height of a group's header: its tab strip, when it has more than
+/// one tab or its palette is [headed](DockPanel::headed). The height of a
+/// compact tab strip, which it is drawn with.
+pub const TAB_STRIP: f32 = crate::ui::Density::Compact.tab_strip();
 
 /// The work area never gets narrower than this while columns can
 /// collapse.
@@ -427,9 +460,11 @@ pub struct LaidGroup<P> {
     pub tabs: Vec<P>,
     /// The tab showing.
     pub active: P,
-    /// Where the palette showing is drawn: below the tab strip, if any.
+    /// Where the palette showing is drawn: below the header, if any.
     pub body: Rect,
-    /// Each tab's rect in the tab strip (empty for a lone palette).
+    /// Each tab's rect in the header (empty without one): shared out
+    /// evenly by [`DockLayout::layout`], where the strip laid them once
+    /// it is drawn ([`DockLayout::tabs_ui`]).
     pub tab_rects: Vec<(P, Rect)>,
 }
 
@@ -524,9 +559,10 @@ fn share(length: f32, entries: &[(f32, f32)]) -> Vec<f32> {
     sizes
 }
 
-/// Equal tabs across a group's tab strip.
+/// Equal tabs across a group's tab strip: where the tabs are until the
+/// strip is drawn and says where it laid them ([`DockLayout::tabs_ui`]).
 fn tab_rects<P: Copy>(strip: Rect, tabs: &[P]) -> Vec<(P, Rect)> {
-    if tabs.len() < 2 {
+    if tabs.is_empty() {
         return Vec::new();
     }
     let width = (strip.width() / tabs.len() as f32).min(140.0);
@@ -542,6 +578,65 @@ fn tab_rects<P: Copy>(strip: Rect, tabs: &[P]) -> Vec<(P, Rect)> {
         .collect()
 }
 
+/// Where the tab of the palette whose key is `key` is in a dock header,
+/// as the last frame drew it (none when no header drew it then): for what
+/// points at a palette (a tour, a test), whether its name shows or only
+/// its icon.
+pub fn tab_place(ctx: &egui::Context, key: &str) -> Option<Rect> {
+    let now = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<(u64, Rect)>(tab_place_id(key)))
+        .filter(|(pass, _)| pass + 1 >= now)
+        .map(|(_, place)| place)
+}
+
+/// Where [`tab_place`] keeps a tab's place.
+fn tab_place_id(key: &str) -> Id {
+    Id::unique(("sue-dock-tab-place", key))
+}
+
+/// Whether a group of `tabs` has a header: more than one tab, or one
+/// that is [headed](DockPanel::headed).
+fn has_header<P: DockPanel>(tabs: &[P]) -> bool {
+    tabs.len() > 1 || tabs.iter().any(|tab| tab.headed())
+}
+
+/// A drop at `at` on `group`'s header: between the tabs, before the
+/// first whose middle lies right of `at`, else after the last. The line
+/// shows where the tab goes.
+fn header_drop<P: Copy>(group: &LaidGroup<P>, at: Pos2) -> Option<(Target<P>, Rect)> {
+    let (first, last) = (group.tab_rects.first()?, group.tab_rects.last()?);
+    let strip = Rect::from_min_max(
+        pos2(group.rect.left(), first.1.top()),
+        pos2(group.rect.right(), first.1.bottom()),
+    );
+    if !strip.contains(at) {
+        return None;
+    }
+    let line = |x: f32| Rect::from_min_size(pos2(x - 1.5, strip.top()), vec2(3.0, strip.height()));
+    Some(
+        match group
+            .tab_rects
+            .iter()
+            .find(|(_, rect)| at.x < rect.center().x)
+        {
+            Some((tab, rect)) => (
+                Target::Join {
+                    anchor: *tab,
+                    before: true,
+                },
+                line(rect.left()),
+            ),
+            None => (
+                Target::Join {
+                    anchor: last.0,
+                    before: false,
+                },
+                line(last.1.right()),
+            ),
+        },
+    )
+}
+
 /// A group's place in `rect`: its tab strip and body.
 fn lay_group<P: DockPanel>(
     holder: Holder,
@@ -552,11 +647,15 @@ fn lay_group<P: DockPanel>(
 ) -> Option<LaidGroup<P>> {
     let tabs = group.visible(shown);
     let active = group.current(shown)?;
-    let (body, tab_rects) = if tabs.len() > 1 {
+    let (body, tab_rects) = if has_header(&tabs) {
         let strip = Rect::from_min_size(rect.min, vec2(rect.width(), TAB_STRIP));
+        let inset = active.header_inset().min(strip.width());
         (
             Rect::from_min_max(pos2(rect.left(), strip.bottom()), rect.max),
-            tab_rects(strip, &tabs),
+            tab_rects(
+                Rect::from_min_max(pos2(strip.left() + inset, strip.top()), strip.max),
+                &tabs,
+            ),
         )
     } else {
         (rect, Vec::new())
@@ -594,6 +693,7 @@ impl<P: DockPanel> DockLayout<P> {
             row_hidden: [false; 2],
             icon_joined: Vec::new(),
             closed: Vec::new(),
+            rolled: Vec::new(),
             drag: None,
         }
     }
@@ -633,6 +733,16 @@ impl<P: DockPanel> DockLayout<P> {
                 from,
                 at: from,
             });
+        }
+    }
+
+    /// The palette being dragged and how far the pointer went since the
+    /// drag began: what a floating palette's window moves by while its
+    /// header is dragged.
+    pub fn panel_drag(&self) -> Option<(P, Vec2)> {
+        match self.drag {
+            Some(Drag::Panel { panel, from, at }) => Some((panel, at - from)),
+            _ => None,
         }
     }
 
@@ -1487,7 +1597,7 @@ impl<P: DockPanel> DockLayout<P> {
                     let group = &column.groups[*at];
                     let tabs = group.visible(shown);
                     let least = tabs.iter().map(|tab| tab.min_height()).fold(0.0, f32::max)
-                        + if tabs.len() > 1 { TAB_STRIP } else { 0.0 };
+                        + if has_header(&tabs) { TAB_STRIP } else { 0.0 };
                     (group.weight, least)
                 })
                 .collect();
@@ -1683,17 +1793,8 @@ impl<P: DockPanel> DockLayout<P> {
             }
             let anchor = group.active;
             let joins = !fixed && group.tabs.iter().all(|tab| tab.fixed_width().is_none());
-            if joins
-                && let Some((tab, rect)) =
-                    group.tab_rects.iter().find(|(_, rect)| rect.contains(at))
-            {
-                return (
-                    Target::Join {
-                        anchor: *tab,
-                        before: true,
-                    },
-                    Rect::from_min_size(rect.min, vec2(3.0, rect.height())),
-                );
+            if joins && let Some(found) = header_drop(group, at) {
+                return found;
             }
             let rect = group.rect;
             match group.holder {
@@ -1843,54 +1944,107 @@ impl<P: DockPanel> DockLayout<P> {
         }
     }
 
-    /// A group's tab strip, when it has more than one tab: a click shows a
-    /// tab, a drag moves it (to another place in the strip, too).
+    /// A group's header, when it has one: its tabs through the shared
+    /// tab strip ([`crate::ui::TabStrip`]), each its palette's icon and
+    /// name, the one showing underlined. When the names do not all fit,
+    /// the tabs give up their names for their icons (the one showing
+    /// last), and a tab without its name shows it on hover: no name is
+    /// ever cut short. A click shows a tab, the arrow keys walk them, a
+    /// drag moves one to another place in the strip and out of it onto
+    /// the dock. A lone palette's tab only clicks, so a drag on it moves
+    /// the palette at once, by the grip under the header
+    /// ([`Self::grip`]).
+    ///
+    /// Returns where each tab was laid, for [`Self::drop_at`]: the caller
+    /// puts them in the group's [`LaidGroup::tab_rects`].
     pub fn tabs_ui(
         &mut self,
         ui: &mut Ui,
         group: &LaidGroup<P>,
-        title: &dyn Fn(P) -> String,
+        face: &dyn Fn(P) -> TabFace,
         theme: &Theme,
-    ) {
+    ) -> Vec<(P, Rect)> {
         if group.tab_rects.is_empty() {
-            return;
+            return Vec::new();
         }
         let strip = Rect::from_min_size(group.rect.min, vec2(group.rect.width(), TAB_STRIP));
-        let painter = ui.painter().with_clip_rect(strip);
-        painter.rect_filled(strip, 0.0, theme.void);
-        for (tab, rect) in &group.tab_rects {
-            let response = ui.interact(
-                *rect,
-                Id::unique(("sue-dock-tab", tab.key())),
-                Sense::click_and_drag(),
-            );
-            if response.drag_started()
-                && let Some(from) = response.interact_pointer_pos()
-            {
-                self.begin_drag(*tab, from);
-            }
-            let chosen = *tab == group.active;
-            if chosen {
-                painter.rect_filled(*rect, 0.0, theme.panel);
-            } else if response.hovered() {
-                painter.rect_filled(*rect, 0.0, theme.hover);
-            }
-            painter.vline(rect.right(), rect.y_range(), theme.hairline());
-            let text = title(*tab);
-            let galley = painter.layout_no_wrap(
-                text.clone(),
-                theme.font(theme.small_size),
-                if chosen { theme.text } else { theme.muted },
-            );
-            let at = pos2(rect.left() + 6.0, rect.center().y - galley.size().y / 2.0);
-            painter
-                .with_clip_rect(rect.shrink2(vec2(2.0, 0.0)).intersect(strip))
-                .galley(at, galley, theme.text);
-            if response.on_hover_text(text).clicked() {
-                self.choose(*tab);
-            }
+        ui.painter().rect_filled(strip, 0.0, theme.pill);
+        let inset = group.active.header_inset().min(strip.width());
+        let area = Rect::from_min_max(pos2(strip.left() + inset, strip.top()), strip.max);
+        let faces: Vec<TabFace> = group.tabs.iter().map(|tab| face(*tab)).collect();
+        let tabs: Vec<Tab<'_>> = group
+            .tabs
+            .iter()
+            .zip(&faces)
+            .map(|(tab, face)| {
+                let made = Tab::new(("sue-dock-tab", tab.key()), &face.name).shortcut(&face.keys);
+                match face.icon {
+                    Some(icon) => made.icon(icon),
+                    None => made,
+                }
+            })
+            .collect();
+        let chosen = group
+            .tabs
+            .iter()
+            .position(|tab| *tab == group.active)
+            .unwrap_or(0);
+        let many = group.tabs.len() > 1;
+        let label = faces[chosen].name.clone();
+        let output = ui
+            .scope_builder(
+                egui::UiBuilder::new()
+                    .id_salt(("sue-dock-header", group.holder, group.index))
+                    .max_rect(area)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                |ui| {
+                    ui.set_clip_rect(area.intersect(ui.clip_rect()));
+                    Density::Compact.scope(ui, |ui| {
+                        TabStrip::new(("sue-dock-tabs", group.holder, group.index), &tabs, chosen)
+                            .reorder(many)
+                            .tear(many)
+                            .label(&label)
+                            .show(ui, theme)
+                    })
+                },
+            )
+            .inner;
+        // The hairline under the whole header, the menu's room too.
+        ui.painter().hline(
+            strip.x_range(),
+            strip.bottom() - theme.border_width / 2.0,
+            theme.hairline(),
+        );
+        if let Some(index) = output.chosen {
+            self.choose(group.tabs[index]);
         }
-        painter.hline(strip.x_range(), strip.bottom(), theme.hairline());
+        if let Some((from, to)) = output.moved {
+            let moving = group.tabs[from];
+            let drop = match group.tabs.get(to + usize::from(to > from)) {
+                Some(anchor) => Target::Join {
+                    anchor: *anchor,
+                    before: true,
+                },
+                None => Target::Join {
+                    anchor: group.tabs[to],
+                    before: false,
+                },
+            };
+            self.put(moving, drop);
+            // The palette showing stays: a tab moved is not chosen.
+            self.choose(group.active);
+        }
+        if let Some((index, at)) = output.torn {
+            self.begin_drag(group.tabs[index], at);
+        }
+        let places: Vec<(P, Rect)> = group.tabs.iter().copied().zip(output.places).collect();
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.data_mut(|data| {
+            for (tab, place) in &places {
+                data.insert_temp(tab_place_id(tab.key()), (pass, *place));
+            }
+        });
+        places
     }
 
     /// Dragging columns' edges, the lines between groups and the bottom
@@ -2078,6 +2232,14 @@ impl<P: DockPanel> DockLayout<P> {
             return;
         }
         ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+        // A floating palette dragged by its header moves its own window
+        // ([`Self::panel_drag`]): nothing more to show until it is over
+        // a place it docks in.
+        if matches!(drop, Target::Float(_))
+            && self.floating.iter().any(|(found, _)| *found == panel)
+        {
+            return;
+        }
         let painter = ui
             .ctx()
             .layer_painter(LayerId::new(Order::Tooltip, Id::unique("sue-dock-drop")));
