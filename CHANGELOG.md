@@ -17,13 +17,15 @@ follow [Semantic Versioning](https://semver.org/).
   the top of the Auto Action palette, turn each action and each of its
   steps on or off with its box, unfold an action to see its steps, and
   import or export a set as a `.sueactions` file. Nine actions of Sue
-  Paint's own come ready, Record turns into Stop while it records, every
-  command you run is recorded (keys, the command bar and palette buttons
-  too), and each action can be given a key in Keyboard Shortcuts.
+  Paint's own come ready, Record turns into Stop while it records,
+  commands are recorded wherever you run them (menus, keys, the command
+  bar and palette buttons), and each action can be given a key in
+  Keyboard Shortcuts.
 - Sue Paint's Item Bank keeps pictures as well as sub tools: keep the
   current layer or add a picture, then drag it onto the canvas or
   double-click it.
-- The Material palette has a folder tree, a search over names and tags,
+- The Material palette has a folder tree (a folder picker when the
+  palette is narrow), a search over names and tags,
   tags you type, small or large thumbnails or a list, favorites, several
   materials picked at once, and materials dragged onto the canvas.
 - Sub View can flip its picture, and its menu turns on Switch to
