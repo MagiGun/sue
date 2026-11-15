@@ -191,7 +191,7 @@ follow [Semantic Versioning](https://semver.org/).
   alone, as a filter and as a correction layer.
 - Sue Paint: Filter, Distort, Curved Surface and Filter, Effect, Artistic
   (lines and flat colors with Clip Studio Paint's nine settings).
-- Sue Paint: Radial Blur and Zoom Blur turn round a centre you put with a
+- Sue Paint: Radial Blur and Zoom Blur turn round a center you put with a
   click on a small picture of the layer; Perlin Noise has Scale,
   Amplitude, Attenuation, Repetition and Offset X and Y; Smart Smoothing
   has Weak, Medium and Strong and Remove Noise.

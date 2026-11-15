@@ -13,12 +13,12 @@
 //! all", which needs a trained model) is not built (Q5 of the v0.0.8
 //! plan).
 
-use std::cmp::Reverse;
-use std::collections::BinaryHeap;
-
 /// What a step into a pixel costs: 1 in the open, and this much more on
 /// a line of full ink.
 const LINE_COST: f32 = 400.0;
+
+/// The most one step costs: a step onto a line of full ink.
+const MAX_STEP: u32 = 1 + LINE_COST as u32;
 
 /// How much of a line a pixel of `line` (straight RGBA) is, 0 to 1: dark
 /// and opaque is a line, light or clear is not.
@@ -38,7 +38,11 @@ fn ink(line: [u8; 4]) -> f32 {
 pub fn colorize(lines: &[u8], hints: &[u8], width: u32, height: u32, blur: f32) -> Option<Vec<u8>> {
     let (w, h) = (width as usize, height as usize);
     let count = w * h;
-    if lines.len() < count * 4 || hints.len() < count * 4 || count == 0 {
+    if lines.len() < count * 4
+        || hints.len() < count * 4
+        || count == 0
+        || u32::try_from(count).is_err()
+    {
         return None;
     }
     let step: Vec<u32> = lines
@@ -46,23 +50,38 @@ pub fn colorize(lines: &[u8], hints: &[u8], width: u32, height: u32, blur: f32) 
         .0
         .iter()
         .take(count)
-        .map(|pixel| (1.0 + ink(*pixel) * LINE_COST).round() as u32)
+        .map(|pixel| ((1.0 + ink(*pixel) * LINE_COST).round() as u32).clamp(1, MAX_STEP))
         .collect();
     let mut cost = vec![u32::MAX; count];
     let mut color = vec![[0_u8; 3]; count];
-    let mut queue = BinaryHeap::new();
+    // Every step costs 1 to MAX_STEP, so the cheapest pixel left is
+    // always within MAX_STEP of the last one: a ring of buckets, one per
+    // cost (Dial's way), finds it without sorting, in four bytes a
+    // waiting pixel, which keeps a large canvas quick and small.
+    let ring = MAX_STEP as usize + 1;
+    let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); ring];
+    let mut waiting = 0_usize;
     for (index, pixel) in hints.as_chunks::<4>().0.iter().take(count).enumerate() {
         if pixel[3] >= 128 {
             cost[index] = 0;
             color[index] = [pixel[0], pixel[1], pixel[2]];
-            queue.push(Reverse((0_u32, index)));
+            buckets[0].push(index as u32);
+            waiting += 1;
         }
     }
-    if queue.is_empty() {
+    if waiting == 0 {
         return None;
     }
-    while let Some(Reverse((spent, index))) = queue.pop() {
-        if spent > cost[index] {
+    let mut spent = 0_u32;
+    while waiting > 0 {
+        let Some(index) = buckets[spent as usize % ring].pop() else {
+            spent += 1;
+            continue;
+        };
+        waiting -= 1;
+        let index = index as usize;
+        if cost[index] != spent {
+            // Reached more cheaply since it was put here.
             continue;
         }
         let (x, y) = (index % w, index / w);
@@ -73,11 +92,12 @@ pub fn colorize(lines: &[u8], hints: &[u8], width: u32, height: u32, blur: f32) 
             (y + 1 < h).then(|| index + w),
         ];
         for next in neighbours.into_iter().flatten() {
-            let reach = spent.saturating_add(step[next]);
+            let reach = spent + step[next];
             if reach < cost[next] {
                 cost[next] = reach;
                 color[next] = color[index];
-                queue.push(Reverse((reach, next)));
+                buckets[reach as usize % ring].push(next as u32);
+                waiting += 1;
             }
         }
     }
