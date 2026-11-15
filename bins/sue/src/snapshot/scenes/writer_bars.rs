@@ -74,3 +74,24 @@ pub(super) fn font_list(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.settle();
     Ok(())
 }
+
+/// How far the text color button's middle lies right of the size box's
+/// number, in points, on the desk's toolbar.
+const TEXT_COLOR_FROM_SIZE: f32 = 157.0;
+
+/// 14d. The toolbar's text color open on the novel: the letter A over a
+/// bar of the text's color, and under it the wheel; Escape closes it.
+pub(super) fn text_color(tour: &mut Tour<'_>) -> Result<(), String> {
+    tour.settle();
+    // The text color sits after the size box, Bold, Italic and Underline:
+    // on the desk's compact toolbar its middle is this far right of the
+    // size box's "12".
+    let size = text_above(tour, "12", 80.0).ok_or("the toolbar shows no size box reading 12")?;
+    let at = egui::pos2(size.left() + TEXT_COLOR_FROM_SIZE, size.center().y);
+    tour.camera.click(at);
+    tour.settle();
+    tour.shoot("14d-sue-writer-text-color")?;
+    tour.camera.input.push(vec![key(egui::Key::Escape)]);
+    tour.settle();
+    Ok(())
+}

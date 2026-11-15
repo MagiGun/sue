@@ -27,6 +27,17 @@ const FONT_LIST: f32 = 16.0;
 /// The font search field's width, in control heights.
 const FONT_SEARCH: f32 = 8.0;
 
+/// The grid an icon is drawn on, and how much of a button its square
+/// takes at most (as `sue_wm::ui::icon_button` draws it).
+const ICON_GRID: f32 = 24.0;
+const ICON_SHARE: f32 = 0.75;
+
+/// The bar of the text color icon on that grid: left, top, right, bottom.
+const COLOR_BAR: (f32, f32, f32, f32) = (3.0, 17.5, 21.0, 21.0);
+
+/// How wide the text color's wheel is, in points.
+const COLOR_WHEEL: f32 = 180.0;
+
 /// The highlight colors, by the name the command takes.
 const HIGHLIGHTS: [&str; 5] = ["yellow", "green", "blue", "pink", "none"];
 
@@ -429,6 +440,73 @@ impl SueWriter {
         }
     }
 
+    /// The text color: a button with the letter A over a stripe of the
+    /// color, which opens a color wheel. A change is applied when a drag
+    /// on the wheel ends, so one pick is one undo step.
+    fn text_color(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+        chars: &sue_type::CharFormat,
+    ) {
+        // Text with no color of its own is drawn in the paper's ink.
+        let ink = sue_type::Ink::paper().text.to_array();
+        let mut rgba = chars.color.map_or(ink, |[r, g, b]| [r, g, b, u8::MAX]);
+        let open_id = Id::unique("writer-color-open");
+        let mut open = ui.data(|data| data.get_temp::<bool>(open_id).unwrap_or(false));
+        let name = tr!("text-color");
+        let button = icon_button("writer-color", Icon::TextColor, &name)
+            .quiet()
+            .selected(open)
+            .show(ui, theme);
+        // The icon's bar takes the color itself, outlined so that black
+        // reads on a dark bar and white on a light one. The bar lies where
+        // the icon's description puts it, along the foot of its square.
+        let side = Density::of(ui)
+            .icon()
+            .min(button.rect.width().min(button.rect.height()) * ICON_SHARE)
+            .round();
+        let unit = side / ICON_GRID;
+        let square = Rect::from_center_size(button.rect.center(), Vec2::splat(side));
+        let bar = Rect::from_min_max(
+            square.min + Vec2::new(COLOR_BAR.0, COLOR_BAR.1) * unit,
+            square.min + Vec2::new(COLOR_BAR.2, COLOR_BAR.3) * unit,
+        );
+        let [r, g, b, _] = rgba;
+        ui.painter().rect(
+            bar,
+            egui::CornerRadius::same(unit.round().clamp(0.0, 255.0) as u8),
+            egui::Color32::from_rgb(r, g, b),
+            egui::Stroke::new(theme.border_width, theme.border_strong()),
+            egui::StrokeKind::Inside,
+        );
+        if button.clicked() {
+            open = !open;
+        }
+        let pick = popover(
+            ui.ctx(),
+            open_id.with("wheel"),
+            button.rect,
+            &mut open,
+            theme,
+            |ui| sue_wm::color_wheel(ui, open_id.with("hue"), &mut rgba, COLOR_WHEEL),
+        );
+        if let Some(pick) = pick
+            && (pick.released || (pick.changed && !pick.dragging))
+        {
+            let hex = format!(
+                "#{r:02x}{g:02x}{b:02x}",
+                r = rgba[0],
+                g = rgba[1],
+                b = rgba[2]
+            );
+            self.editor
+                .set_char(cx, kind::COLOR, Some(Value::Text(hex)), &name);
+        }
+        ui.data_mut(|data| data.insert_temp(open_id, open));
+    }
+
     /// The text color and the highlight.
     fn color_controls(
         &mut self,
@@ -438,15 +516,7 @@ impl SueWriter {
         chars: &sue_type::CharFormat,
         run: &mut Option<String>,
     ) {
-        // Text with no color of its own is drawn in the paper's ink.
-        let ink = sue_type::Ink::paper().text.to_array();
-        let mut rgba = chars.color.map_or(ink, |[r, g, b]| [r, g, b, u8::MAX]);
-        let pick = sue_wm::color_button(ui, "writer-color", &mut rgba, false, theme);
-        if pick.released || (pick.changed && !pick.dragging) {
-            let hex = format!("#{:02x}{:02x}{:02x}", rgba[0], rgba[1], rgba[2]);
-            self.editor
-                .set_char(cx, kind::COLOR, Some(Value::Text(hex)), &tr!("text-color"));
-        }
+        self.text_color(ui, cx, theme, chars);
         let open_id = Id::unique("writer-highlight-open");
         let mut open = ui.data(|data| data.get_temp::<bool>(open_id).unwrap_or(false));
         let name = tr!("highlight");

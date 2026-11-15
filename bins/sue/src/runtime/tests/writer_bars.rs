@@ -396,7 +396,7 @@ fn sue_writers_bar_buttons_show_a_focus_ring_when_tabbed_to() {
     );
     // Every kind of the toolbar's controls: its buttons, the text color
     // and its three boxes.
-    for name in ["Bold", "Font", "Size", "Paragraph Style"] {
+    for name in ["Bold", "Text Color", "Font", "Size", "Paragraph Style"] {
         assert!(
             toolbar.iter().any(|seen| seen == name),
             "{name} takes focus and shows a ring: {toolbar:?}"
@@ -611,6 +611,60 @@ fn sue_writers_size_box_sizes_the_text_and_hands_the_keys_back() {
     assert!(!text.contains("small words"), "{text:?}");
     bars.click("Undo");
     assert_eq!(bars.arena(), sized);
+    bars.click("Undo");
+    assert_eq!(bars.arena(), before);
+}
+
+/// The text color button shows the letter A over the color and opens a
+/// wheel; a click on the wheel colors the selection, and undo takes the
+/// color off.
+#[test]
+fn sue_writers_text_color_opens_a_wheel_that_colors_the_selection() {
+    let mut bars = Bars::new("writer-bars-color");
+    bars.type_text("red words");
+    bars.command("edit.select_all");
+    let before = bars.arena();
+    let button = bars.control("Text Color");
+    assert_eq!(button.role, Role::Button);
+    assert!(
+        bars.hover("Text Color")
+            .iter()
+            .any(|text| text == "Text Color")
+    );
+    bars.click("Text Color");
+    assert_eq!(
+        bars.control("Text Color").on,
+        Some(true),
+        "it shows it is open"
+    );
+    // The wheel opens in a popover under the button. The text is black,
+    // which no hue changes: a click up and right of the middle, in the
+    // square of bright colors, picks one.
+    let frame = bars
+        .rects
+        .iter()
+        .map(|(rect, _, _)| *rect)
+        .filter(|rect| {
+            rect.top() > button.rect.bottom()
+                && rect.top() < button.rect.bottom() + 24.0
+                && rect.width() > 180.0
+                && rect.width() < 260.0
+                && rect.height() > 180.0
+        })
+        .min_by(|a, b| a.width().total_cmp(&b.width()))
+        .expect("a popover opened under the button");
+    let at = frame.center() + vec2(30.0, -30.0);
+    bars.click_at(at);
+    let (_, marks) = bars.document("red words");
+    assert!(
+        marks
+            .marks()
+            .iter()
+            .any(|mark| mark.kind == sue_model::mark_kind::COLOR),
+        "{marks:?}"
+    );
+    bars.step(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    bars.settle(3);
     bars.click("Undo");
     assert_eq!(bars.arena(), before);
 }

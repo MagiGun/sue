@@ -78,6 +78,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     writer_document::open(tour)?;
     writer_bars::find_bar(tour)?;
     writer_bars::font_list(tour)?;
+    writer_bars::text_color(tour)?;
     writer_corkboard::corkboard(tour)?;
     writer_outliner::outliner(tour)?;
     writer_document::composition(tour)?;
