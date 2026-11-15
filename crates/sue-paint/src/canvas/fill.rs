@@ -341,7 +341,7 @@ impl SuePaint {
         size: [u32; 2],
         cx: &mut AppletContext<'_>,
     ) {
-        let Some(mask) = self.flood_mask(&[[p.x, p.y]], sub, size, &cx.world.arena, true) else {
+        let Some(mask) = self.flood_mask(&[[p.x, p.y]], sub, size, &cx.world.arena, false) else {
             return;
         };
         if let Some(doc) = self.doc_mut() {
