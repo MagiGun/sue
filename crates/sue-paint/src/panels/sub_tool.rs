@@ -7,7 +7,7 @@
 //! of its own; a tool dragged here from the Tool palette goes back into
 //! the tool shown. Right-click a sub tool for everything else.
 
-use egui::{Align2, Color32, Pos2, Rect, RichText, Sense, Ui, pos2, vec2};
+use egui::{Align2, Color32, Id, Pos2, Rect, RichText, Sense, Ui, pos2, vec2};
 use sue_wm::icons::Icon;
 use sue_wm::ui::{Density, Radius, Space, TextRole};
 use sue_wm::{AppletContext, ItemState, MenuItem, ShellRequest, Theme};
@@ -167,12 +167,18 @@ impl SuePaint {
         let mut action: Option<(String, usize)> = None;
         let mut add_row = None;
         let keys = subtool::keys(cx.rice());
+        // Solid bars: the list says when it holds more than shows. (They
+        // are the area's own style, so it is set before the area.)
+        inner.spacing_mut().scroll = egui::style::ScrollStyle::solid();
+        // The list scrolls to the chosen sub tool when the choice changes
+        // (a key, a click on the canvas's launcher, another tool), once,
+        // so it can still be scrolled away by hand.
+        let followed = Id::unique(("sue-paint-subs-followed", slot, shown_group));
+        let follow = inner.ctx().data(|data| data.get_temp::<usize>(followed)) != Some(picked);
         egui::ScrollArea::vertical()
             .id_salt(("sue-paint-subs", slot, shown_group))
             .auto_shrink([false, false])
             .show(&mut inner, |ui| {
-                // Solid bars: the list says when it holds more than shows.
-                ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
                 for (offset, name) in names.iter().enumerate() {
                     let index = range.start + offset;
                     let sub = &entry.subs()[index];
@@ -183,6 +189,10 @@ impl SuePaint {
                         Sense::click_and_drag(),
                     );
                     rows.push((index, row));
+                    if chosen && follow {
+                        ui.scroll_to_rect(row, None);
+                        ui.ctx().data_mut(|data| data.insert_temp(followed, picked));
+                    }
                     let command = subtool::command_name(sub.tool, &sub.name);
                     let key = subtool::key_text(&keys, &command);
                     let tip = match &key {

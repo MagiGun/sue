@@ -224,9 +224,9 @@ impl SuePaint {
                 | Gesture::LassoFill { points, .. }
                 | Gesture::ShrinkLasso { points, .. },
             ) => {
-                // Two tones, so the path reads on light and dark drawing.
+                // Two tones, so the path reads on any color of drawing.
                 let path = points.iter().copied().map(screen).collect::<Vec<_>>();
-                marks::guide(&painter, path, false, theme);
+                marks::selection_path(&painter, path, false, theme);
             }
             Some(Gesture::Comic(edit)) => {
                 for outline in edit.outlines() {
@@ -273,6 +273,14 @@ impl SuePaint {
                     .map(screen)
                     .collect();
                 marks::guide(&painter, path, true, theme);
+            } else if matches!(self.polyline_for, Some((Tool::Select, _))) {
+                // A polyline selection: the path of a selection.
+                marks::selection_path(
+                    &painter,
+                    points.iter().copied().map(screen).collect(),
+                    false,
+                    theme,
+                );
             } else {
                 marks::guide(
                     &painter,

@@ -1442,9 +1442,21 @@ impl SuePaint {
             return;
         };
         // The collapsed palette, beside the strip, until a click elsewhere.
+        // A palette that knows how high it is whole is made that high when
+        // the strip has the room (Quick Access, so a set's last buttons are
+        // never below its edge); it scrolls past that.
+        let room = (strip.height() - 8.0).max(220.0);
         let size = match palette.fixed_width() {
             Some(width) => vec2(width + 8.0, (strip.height() * 0.7).max(240.0)),
-            None => vec2(280.0, (strip.height() * 0.7).clamp(220.0, 560.0)),
+            None => {
+                let width = 280.0;
+                let whole = (palette == Palette::QuickAccess)
+                    .then(|| self.quick_access_height(width, Density::of(ui), theme) + TAB_STRIP);
+                let height = whole.map_or((strip.height() * 0.7).clamp(220.0, 560.0), |whole| {
+                    whole.clamp(220.0, room)
+                });
+                vec2(width, height)
+            }
         };
         let at = match side {
             Side::Left => pos2(strip.right() + 4.0, strip.top() + 4.0),
