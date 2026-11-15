@@ -625,7 +625,7 @@ fn sue_writers_research_shows_a_picture_and_says_why_another_item_is_blank() {
         panes
             .shown()
             .iter()
-            .any(|text| text.starts_with("Only pictures show here")),
+            .any(|text| text.starts_with("Sue Writer shows pictures and documents here")),
         "{:?}",
         panes.shown()
     );

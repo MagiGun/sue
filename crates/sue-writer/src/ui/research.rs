@@ -73,10 +73,23 @@ impl SueWriter {
                 None => ui::paint_skeleton(ui, shown, corner, theme),
             }
         } else {
+            // A picture whose pixels could not be read is worked on in
+            // Sue Paint; anything else is only kept here.
+            let picture = cx.arena().get_by_id(id).is_ok_and(|entity| {
+                sue_model::picture::is_picture(entity)
+                    || entity
+                        .component(sue_core::ComponentKind::RasterTile2D)
+                        .is_some()
+            });
+            let detail = if picture {
+                tr!("research-empty-detail")
+            } else {
+                tr!("research-kept-detail")
+            };
             let mut child = ui.new_child(UiBuilder::new().max_rect(rect));
             ui::empty_state(("writer-research-empty", id), &tr!("research-empty"))
                 .icon(Icon::Picture)
-                .detail(&tr!("research-empty-detail"))
+                .detail(&detail)
                 .show(&mut child, theme);
         }
         let pad = theme.space(Space::S6);

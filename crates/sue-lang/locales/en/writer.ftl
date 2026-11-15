@@ -665,7 +665,7 @@ inspector-empty = Choose something in the binder to see it here
 comments-empty-detail = Select some words and choose Review, New Comment.
 comments-go-to-words = Select these words in the text
 research-empty = Nothing to show
-research-empty-detail = Only pictures show here. Open it in Sue Paint to work on it.
+research-empty-detail = Sue Writer could not read this picture. Open it in Sue Paint to work on it.
 reading-time = { $minutes ->
     [one] About a minute to read
    *[other] About { $minutes } minutes to read
@@ -674,3 +674,4 @@ selected-word-count = { $words ->
     [one] Selected: one word
    *[other] Selected: { $words } words
 }
+research-kept-detail = Sue Writer shows pictures and documents here. This item is kept in the project as it is.
