@@ -67,9 +67,10 @@ fn press(tour: &mut Tour<'_>, at: Pos2, button: egui::PointerButton, times: usiz
     }
 }
 
-/// 11c1 to 11c4. Where the Page Manager scene (11c) left the story of
-/// five pages: a page opened from the Page Manager, which docks beside
-/// it; its right-click menu; webtoon columns; the 3D preview.
+/// 11c1 to 11c4, 11c8 and 11c9. Where the Page Manager scene (11c)
+/// left the story of five pages: a page opened from the Page Manager,
+/// which docks beside it; its right-click menu; webtoon columns; the 3D
+/// preview; Change Story Information and Change Page Settings.
 pub(super) fn pages(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.paint_command("story.manager");
     tour.settle();
@@ -89,6 +90,13 @@ pub(super) fn pages(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.paint_command("edit.undo");
     tour.paint_command("story.preview_binding");
     tour.shoot("11c4-sue-paint-binding-preview")?;
+    tour.paint_go(&["dialog/close"]);
+    // The story's dialogs on the design system's forms.
+    tour.paint_command("story.info");
+    tour.shoot("11c8-sue-paint-story-info")?;
+    tour.paint_go(&["dialog/close"]);
+    tour.paint_command("story.page_settings");
+    tour.shoot("11c9-sue-paint-page-settings")?;
     tour.paint_go(&["dialog/close"]);
     tour.paint_command("story.first");
     tour.settle();
