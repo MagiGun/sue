@@ -29,8 +29,9 @@ What can be done to sets:
   `color.edit_sets`, which can be given keys): New Color Set asks for a
   name; Rename Color Set; Edit Color Sets lists every set, which can be
   dragged by its grip or moved with Alt and Up or Down, renamed,
-  duplicated, deleted (never the last one), and Add Standard Set brings
-  back a copy of one of Sue's four sets.
+  duplicated, deleted (never the last one; a set that holds colors asks
+  first, since a deleted set cannot be brought back), and Add Standard
+  Set brings back a copy of one of Sue's four sets.
 - Import and Export, the two buttons beside the wrench.
 
 ## The file Sue keeps
