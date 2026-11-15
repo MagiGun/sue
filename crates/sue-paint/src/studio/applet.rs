@@ -104,7 +104,7 @@ impl SueApplet for SuePaint {
             RiceDeclaration::new(
                 crate::clip_io::SAVE_FORMAT_KEY,
                 RiceParameter::EnumChoice {
-                    value: "clip".to_owned(),
+                    value: "sue".to_owned(),
                     options: vec!["clip".to_owned(), "sue".to_owned()],
                 },
                 "How Save keeps a picture: a Clip Studio Paint .clip file, or a Sue project",
@@ -390,7 +390,9 @@ impl SueApplet for SuePaint {
         };
         Some(tr!(
             "paint-window-title",
-            name = picture.name(),
+            name = self
+                .save_title(doc.picture)
+                .unwrap_or_else(|| picture.name().to_owned()),
             unsaved = if unsaved { "*" } else { "" },
             width = width.to_string(),
             height = height.to_string(),
@@ -481,6 +483,7 @@ impl SueApplet for SuePaint {
             Ok((edit, picture)) => {
                 if Self::apply(cx, edit) {
                     self.activate(&cx.world.arena, picture);
+                    self.came_from_picture(cx, entity, picture);
                     cx.request(ShellRequest::Open(me_id()));
                 }
             }
@@ -768,6 +771,7 @@ impl SueApplet for SuePaint {
             }
             "dialog/close" => {
                 self.dialog = None;
+                self.save_ask = None;
                 self.menubar.close();
                 true
             }

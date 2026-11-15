@@ -52,9 +52,9 @@ rows are at the end.
 | Materials and assets | 6 | 3 | 1 | 75 |
 | Print | 0 | 2 | 2 | 25 |
 | Preferences and settings | 5 | 2 | 1 | 75 |
-| File formats | 10 | 2 | 2 | 79 |
+| File formats | 9 | 3 | 2 | 75 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 271 | 61 | 26 | 84 |
+| **All of Sue Paint** | 271 | 62 | 26 | 84 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -113,10 +113,10 @@ The order of work is the plan at the end.
 | Create New from Clipboard | File > Create New from Clipboard | done | A new canvas from the picture on the clipboard |
 | Create new from movie | File > Create new from movie | missing | An animation project from a video |
 | Open pictures and projects | File > Open | done | PNG, JPEG, JPEG XL and Sue projects through the system's own dialog (`FilePick`) |
-| Open .clip files | File > Open | partial | Layers, folders, blend modes, opacity, clipping and tones come in; pixel, text and vector layers arrive as the pixels Clip Studio last drew, and correction, gradient and fill layers as empty layers |
+| Open .clip files | File > Open | partial | Layers, folders with their own blend mode and clipping, masks as masks, paper as paper, gray layers, pixels off the canvas, draft and reference come in; text and vector layers arrive as the pixels Clip Studio last drew, and correction, gradient and fill layers as empty layers, each with its Clip Studio data kept for the way back. The status bar says per layer what was not exact |
 | Recent files, Clear Recent Files | File > Recent | done | |
 | Close | File > Close | done | |
-| Save (keeps the .clip format) | File > Save | done | Save keeps a .clip that Clip Studio opens with everything; the file also carries Sue's own copy of the picture |
+| Save | File > Save | done | Writes the Sue project. A canvas opened from a flat picture saves back in its format, and asks first when layers would be merged, as Clip Studio does; one opened from a .clip asks once whether to export back to it or keep a Sue project beside it. The title names the file Save writes |
 | Save as | File > Save as | done | A Sue project, a Photoshop document or a flat picture |
 | Save Duplicate: BMP, JPEG, PNG, TIFF, Targa, WebP, PSB, PSD | File > Save Duplicate | done | JPEG XL too |
 | Revert | File > Revert | done | Reloads the last saved file, and says so when nothing was saved yet |
@@ -563,7 +563,7 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | Sue project (.sue) | (Sue's own) | done | |
-| Clip Studio (.clip) save | File > Save | done | Clip Studio opens it with everything |
+| Clip Studio (.clip) export | File > Export Back to the Same .clip, Save Duplicate | partial | Layers, folders with blend mode and clipping, masks, paper, draft and reference marks; a layer not changed in Sue goes back exactly as it was read. No hidden copy of the Sue project any more. verify: not yet opened in Clip Studio |
 | Clip Studio (.clip) open | File > Open | partial | See File: open, for what arrives and what does not |
 | Photoshop (PSD, PSB) save | File > Save Duplicate | done | |
 | Photoshop open | File > Open | partial | A reader exists; verify what it keeps |

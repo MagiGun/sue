@@ -2470,3 +2470,29 @@ create-timeline-label = Create Timeline Label
 delete-timeline-label = Delete Timeline Label
 change-playback-settings = Playback Settings
 set-output-frame = Output Frame
+clip-folders-too-deep = The file's folders are nested too deep to open
+clip-layer-too-big = A layer of the file is too big to open
+clip-report-own-copy = opened from the copy of the Sue project it carries
+clip-report-stale-copy = the copy of the Sue project inside does not match the layers (they were changed after Sue saved it), so it opened from the layers
+clip-report-exact = { $count ->
+    [one] 1 layer converted exactly
+   *[other] { $count } layers converted exactly
+}
+clip-report-approximated = approximated: { $names }
+clip-report-kept = kept as Clip Studio data: { $names }
+clip-report-flattened = written as their pixels: { $names }
+clip-report-left-out = left out: { $names }
+clip-report-canvas-dropped = the canvas changed size, so what the file held beyond its layers was left behind
+clip-report-empty = nothing to convert
+clip-report-unnamed = (no name)
+clip-report-more = { $names } and { $count } more
+clip-report-opened = Opened { $file }: { $summary }
+clip-report-wrote = Wrote { $file }: { $summary }
+export-back-to-the-same-clip = Export Back to the Same .clip
+save-clip-title = Save
+save-clip-message = This canvas was opened from { $file }. Export it back to that Clip Studio Paint file, or keep working in a Sue project beside it? Sue asks only once for this canvas.
+save-clip-accept = Export to the .clip
+save-keep-in-project = Keep in a Sue Project
+save-merge-title = Save
+save-merge-message = { $file } is a { $format } picture, which holds one layer. Saving merges this canvas's layers into it; the canvas keeps them. Save it as { $format }, or keep working in a Sue project beside it?
+save-merge-accept = Save as { $format }

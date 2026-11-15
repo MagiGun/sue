@@ -226,6 +226,7 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
+        self.save_ask_ui(ctx, cx, theme);
         let Some(mut dialog) = self.dialog.take() else {
             return;
         };

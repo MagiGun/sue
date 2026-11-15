@@ -15,6 +15,7 @@ mod paint_color;
 mod paint_dialogs;
 mod paint_dock;
 mod paint_layers;
+mod paint_saving;
 mod paint_start;
 mod paint_timeline;
 mod paint_tools;
@@ -120,6 +121,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 30. The gallery of the design system: per preset, at 1.5 and 2.0
     // pixels per point and per density, with the focus ring showing.
     gallery::scenes(tour)?;
+    // 31a and 31b. Save's question on a canvas from a .clip and from a
+    // PNG.
+    paint_saving::questions(tour)?;
     Ok(())
 }
 

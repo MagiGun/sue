@@ -350,6 +350,7 @@ pub fn menus() -> Vec<Menu> {
                 item("file.close"),
                 item("file.save"),
                 item("file.save_as"),
+                item("file.export.clip_back"),
                 sub(
                     &tr!("save-duplicate"),
                     vec![

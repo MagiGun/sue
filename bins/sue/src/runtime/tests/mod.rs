@@ -31,6 +31,7 @@ mod paint_menus;
 mod paint_palettes;
 mod paint_rulers;
 mod paint_select;
+mod paint_saving;
 mod paint_vector_3d;
 mod paint_view;
 mod paint_window;

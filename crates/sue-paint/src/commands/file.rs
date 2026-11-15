@@ -155,19 +155,25 @@ fn close(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
     }
 }
 
-/// Save: back into the `.clip` the canvas came from when it saves
-/// `.clip` files, else the project through the shell.
+/// Save: the project, or the file the canvas was opened from (see
+/// `studio/saving.rs`).
 fn save(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    if crate::clip_io::saves_clip(cx) && paint.picture().is_some() {
-        paint.save_clip(cx);
-        return;
-    }
-    cx.request(ShellRequest::Command("file.save".to_owned()));
-    paint.mark_clean();
-    let at = cx.history.cursor();
-    for doc in &paint.docs {
-        paint.saved_at.insert(doc.picture, at);
-    }
+    paint.save(cx);
+}
+
+/// File, Export Back to the Same .clip: writes the canvas into the
+/// `.clip` it was opened from, in one step.
+fn export_clip_back(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.export_clip_back(cx);
+}
+
+/// Works while the canvas in front came from a `.clip`.
+fn clip_back_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(
+        paint
+            .picture()
+            .is_some_and(|picture| paint.clip_paths.contains_key(&picture)),
+    )
 }
 
 fn save_as(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
@@ -633,6 +639,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "export",
         export_flat,
     ),
+    c(
+        "file.export.clip_back",
+        "export-back-to-the-same-clip",
+        "export",
+        export_clip_back,
+    )
+    .state(clip_back_state),
     c("file.revert", "revert", "reload", revert),
     c(
         "file.import.image",
