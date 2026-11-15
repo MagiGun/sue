@@ -761,6 +761,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A dialog keeps its place while what it holds grows or shrinks: a
+  row added to a list no longer moves the buttons under the pointer.
+  Dialogs that drew their own OK and Cancel (Gradient Map, Color
+  Settings, Colorize) are as tall as what they hold again, and Edit
+  Color Sets no longer covers the window.
+- Fills, gradients and Edit, Fill reach a layer mask while it is
+  edited.
+- On a phone, Sue Writer's find bar shows Replace beside the field.
 - A layer with keyframes on no longer takes brush or Blend strokes it
   would lose: Sue Paint says why and paints nothing.
 - Exporting a PSD reads a layer mask wherever it sits, also a gray one.
