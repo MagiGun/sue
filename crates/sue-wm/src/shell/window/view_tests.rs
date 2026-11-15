@@ -30,7 +30,12 @@ struct Viewer(Arc<Mutex<Heard>>);
 
 impl SueApplet for Viewer {
     fn manifest(&self) -> AppletManifest {
-        AppletManifest::new("viewer", "Viewer", AppletRole::Studio, "*")
+        AppletManifest::new(
+            "viewer",
+            "Viewer",
+            AppletRole::Studio,
+            crate::icons::Icon::AppGeneric,
+        )
     }
 
     fn page_ui(&mut self, ui: &mut Ui, _cx: &mut AppletContext<'_>) {
