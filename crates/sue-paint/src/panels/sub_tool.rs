@@ -250,7 +250,12 @@ impl SuePaint {
                             Align2::RIGHT_TOP,
                             key,
                             theme.text_font(TextRole::Micro),
-                            theme.text_muted(),
+                            // Readable on the chosen row's fill too.
+                            if fill == Color32::TRANSPARENT {
+                                theme.text_muted()
+                            } else {
+                                theme.text_muted_on(fill)
+                            },
                         );
                     }
                     sue_wm::ui::focus_ring(ui, &response, radius, theme);

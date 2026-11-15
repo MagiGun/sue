@@ -82,10 +82,15 @@ impl SuePaint {
                 egui::WidgetInfo::selected(egui::Role::ListItem, !locked, chosen, &name)
             });
             let radius = theme.radius(Radius::Sm);
-            if chosen {
-                painter.rect_filled(rect, radius, theme.fill_selected());
+            let fill = if chosen {
+                Some(theme.fill_selected())
             } else if response.hovered() && !locked {
-                painter.rect_filled(rect, radius, theme.fill_hover());
+                Some(theme.fill_hover())
+            } else {
+                None
+            };
+            if let Some(fill) = fill {
+                painter.rect_filled(rect, radius, fill);
             }
             let dot = rect
                 .shrink2(egui::Vec2::Y * theme.space(Space::S3))
@@ -99,7 +104,8 @@ impl SuePaint {
                 Align2::CENTER_BOTTOM,
                 size_text(*size),
                 theme.text_font(TextRole::Micro),
-                theme.text_muted(),
+                // The chosen size reads on its fill in every preset.
+                fill.map_or_else(|| theme.text_muted(), |fill| theme.text_muted_on(fill)),
             );
             sue_wm::ui::focus_ring(ui, &response, radius, theme);
             if response.on_hover_text(&name).clicked() {
