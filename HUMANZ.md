@@ -1875,6 +1875,19 @@ its tone overlay, page frames, edge rulers and scrollbars; `overlays.rs`
 draws selections, previews, the brush outline, rulers, the selection
 launcher and puppet warp over it; `status.rs` is the strip below.
 
+**Sue Paint's canvas chrome.** `canvas/tabs.rs` draws the tab strip
+with Sue's own `ui::tab_strip` (reorder, tear off, a tab's right-click
+menu) and Window, Canvas, Tile; `canvas/window.rs` keeps canvases in
+windows of their own. Such a canvas is still one of Sue Paint's `Doc`s,
+marked with the number of its window (`Doc::window`); its view is
+`canvas:<number>`, opened with `ShellRequest::OpenView` and drawn by
+`SueApplet::view_ui`, which makes that `Doc` current for the frame and
+keeps it current only when a button went down in its window. The same
+holds for the column while the current canvas is in a window. A
+picture dropped on the canvas is noted for that frame
+(`Chrome::drops`), so the file the shell hands back as `import` becomes
+a layer; anything else handed to Sue Paint opens as a canvas.
+
 **Sue Writer's commands.** `crates/sue-writer/src/commands` holds Sue
 Writer's registry: one file per menu (`file.rs`, `edit.rs`, `view.rs`,
 `insert.rs`, `format.rs`, `table.rs`, `review.rs`, `project.rs`,
