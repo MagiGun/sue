@@ -42,6 +42,13 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint: the Light table tool shows a box round the light table's
   drawing with handles to scale it, a stalk to turn it, and a launcher to
   flip it, put it back or put the tool away.
+- Sue Paint: the Light table tool turns around a centre of rotation you
+  can move: Alt and drag puts it anywhere, and a turn keeps it in place.
+- Sue Paint: Cut and Paste and Copy and Paste leave what you copied before
+  on the clipboard. Selection Launcher Settings lists the selection
+  commands first, under "On the launcher" and "More commands".
+- Sue Paint: the path of the lasso and of the polyline is now
+  drawn in two tones, so it reads on white paper and on dark drawing.
 
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
