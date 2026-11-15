@@ -1636,6 +1636,13 @@ impl SuePaint {
         at: Option<Pos2>,
         cx: &mut AppletContext<'_>,
     ) {
+        // Let go over a light table of the Animation Cels palette: it is
+        // registered there.
+        if let Some(at) = at
+            && self.register_dropped(dragged, at, cx)
+        {
+            return;
+        }
         let target = at.and_then(|at| {
             self.layer_palette
                 .drop_targets

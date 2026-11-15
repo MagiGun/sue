@@ -1386,7 +1386,59 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     )
     .state(has_sound)
     .with(Flags::PALETTE),
+    c("anim.audio.scrub", "audio-scrubbing", "audio", audio_scrub).state(scrub_on),
+    c(
+        "anim.timeline.prev",
+        "go-to-previous-timeline",
+        "chevron-left",
+        timeline_step,
+    )
+    .state(timeline_step_state),
+    c(
+        "anim.timeline.next",
+        "go-to-next-timeline",
+        "chevron-right",
+        timeline_step,
+    )
+    .state(timeline_step_state),
 ];
+
+/// Audio Scrubbing: moving through the frames by hand plays the sound of
+/// each frame reached.
+fn audio_scrub(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.anim_ui.scrub = !paint.anim_ui.scrub;
+}
+
+/// Checked while Audio Scrubbing is on.
+fn scrub_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    flag(paint.anim_ui.scrub)
+}
+
+/// The timeline beside the one shown, before it (`anim.timeline.prev`)
+/// or after it, in the picker's order: none past either end.
+fn timeline_beside(paint: &SuePaint, arena: &sue_core::Arena, name: &str) -> Option<EntityId> {
+    let picture = paint.picture()?;
+    let timelines = anim::setup::timelines(arena, picture);
+    let shown = timelines.iter().position(|entry| entry.aside.is_none())?;
+    let to = if name == "anim.timeline.prev" {
+        shown.checked_sub(1)?
+    } else {
+        shown + 1
+    };
+    timelines.get(to)?.aside
+}
+
+/// Go to Previous Timeline, Go to Next Timeline.
+fn timeline_step(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    if let Some(aside) = timeline_beside(paint, &cx.world.arena, call.name) {
+        paint.timeline_action(cx, crate::panels::timeline::Action::Switch(aside));
+    }
+}
+
+/// Grayed where there is no timeline that way.
+fn timeline_step_state(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    super::when(timeline_beside(paint, facts.arena, call.name).is_some())
+}
 
 #[cfg(test)]
 mod tests {

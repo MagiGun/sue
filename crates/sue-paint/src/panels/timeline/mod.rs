@@ -10,6 +10,7 @@ mod edit;
 mod export;
 mod exposure;
 pub(crate) mod forms;
+pub(crate) mod menu;
 mod playback;
 mod tracks;
 mod view;
@@ -33,14 +34,50 @@ use crate::studio::SuePaint;
 
 pub(crate) type Edit = sue_core::txn::Batch<sue_core::Arena>;
 
-/// The Timeline palette's own commands, at the top of its menu, in Clip
-/// Studio Paint's order: the timeline, its settings and how it looks,
-/// then onion skin and playback. (`Palette::menu_commands` reads it.)
+/// The Timeline palette's own commands, in the order its menu reads them
+/// ([`menu::TREE`], which lays them out in submenus; a test keeps the
+/// two the same). `Palette::menu_commands` reads it.
 pub(crate) const MENU: &[&str] = &[
+    "anim.layer.folder",
+    "anim.layer.camera",
+    "anim.cel.new",
+    "anim.cel.assign",
+    "anim.cel.rename_timeline",
+    "anim.cel.rename_layer",
+    "anim.cel.prev",
+    "anim.cel.next",
+    "anim.key.add",
+    "anim.key.delete",
+    "anim.key.layer",
+    "anim.keyframes",
+    "anim.frame.insert",
+    "anim.frame.delete",
+    "anim.play",
+    "anim.loop",
+    "anim.audio.scrub",
+    "anim.play_range.start",
+    "anim.play_range.end",
+    "anim.play_range.clear",
+    "anim.first",
+    "anim.prev",
+    "anim.next",
+    "anim.last",
+    "anim.label",
+    "anim.track_label.inbetween",
+    "anim.track_label.none",
+    "anim.timeline.enable",
     "anim.timeline.new",
+    "anim.timeline.prev",
+    "anim.timeline.next",
     "anim.timeline.settings",
     "anim.timeline.edit",
     "anim.exposure_sheet",
+    "anim.onion",
+    "anim.onion_settings",
+    "anim.light_table",
+    "anim.light_table.register",
+    "anim.light_table.register_general",
+    "anim.light_table.clear",
     "anim.thumbnails.none",
     "anim.thumbnails.smallest",
     "anim.thumbnails.small",
@@ -50,13 +87,6 @@ pub(crate) const MENU: &[&str] = &[
     "anim.time_unit.frames",
     "anim.time_unit.seconds",
     "anim.time_unit.timecode",
-    "anim.label",
-    "anim.play_range.start",
-    "anim.play_range.end",
-    "anim.play_range.clear",
-    "anim.onion",
-    "anim.onion_settings",
-    "anim.loop",
     "anim.audio.settings",
     "anim.export.audio",
 ];
@@ -195,6 +225,15 @@ pub(crate) struct AnimUi {
     pub clock: Option<(std::time::Instant, u32)>,
     /// The frames a second playback reached.
     pub measured: f64,
+    /// The Animation Cels palette's picked entry, held slider and drop
+    /// places.
+    pub cels: crate::panels::cels::CelsUi,
+    /// Audio Scrubbing: moving through the frames by hand plays the sound
+    /// of each frame reached.
+    pub scrub: bool,
+    /// The frame shown when the frames were last looked at, so a move by
+    /// hand is told from standing still.
+    pub scrubbed: Option<u32>,
 }
 
 /// The keys that run `command` now, as people read them (`Ctrl+K`), or

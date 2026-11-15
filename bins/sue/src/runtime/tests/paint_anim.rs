@@ -721,7 +721,7 @@ fn arena_bytes(paint: &PaintDriver) -> Vec<u8> {
 }
 
 /// The picture open in Sue Paint.
-fn open_picture(paint: &PaintDriver) -> sue_core::EntityId {
+pub(super) fn open_picture(paint: &PaintDriver) -> sue_core::EntityId {
     paint
         .runtime
         .applets
@@ -1538,7 +1538,12 @@ fn sue_paint_timeline_plays_its_range_reads_in_seconds_and_keeps_labels_and_keys
 /// and notes each tooltip that comes up with where it came up first: how
 /// buttons drawn as icons alone are found by name, never by a fixed
 /// place.
-fn tips_along(paint: &mut PaintDriver, y: f32, from: f32, to: f32) -> Vec<(String, Pos2)> {
+pub(super) fn tips_along(
+    paint: &mut PaintDriver,
+    y: f32,
+    from: f32,
+    to: f32,
+) -> Vec<(String, Pos2)> {
     paint.step(vec![egui::Event::PointerMoved(Pos2::new(from, y - 300.0))]);
     let quiet: std::collections::HashSet<String> =
         paint.settle(3).into_iter().map(|(text, _)| text).collect();
@@ -1561,7 +1566,7 @@ fn tips_along(paint: &mut PaintDriver, y: f32, from: f32, to: f32) -> Vec<(Strin
 }
 
 /// Where the tooltip holding `name` came up.
-fn tip(found: &[(String, Pos2)], name: &str) -> Pos2 {
+pub(super) fn tip(found: &[(String, Pos2)], name: &str) -> Pos2 {
     found
         .iter()
         .find(|(text, _)| text.contains(name))
@@ -1570,7 +1575,7 @@ fn tip(found: &[(String, Pos2)], name: &str) -> Pos2 {
 }
 
 /// A press and a release of the primary button at `at`.
-fn click_at(paint: &mut PaintDriver, at: Pos2) -> Vec<(String, egui::Rect)> {
+pub(super) fn click_at(paint: &mut PaintDriver, at: Pos2) -> Vec<(String, egui::Rect)> {
     let button = |pressed| egui::Event::PointerButton {
         pos: at,
         button: egui::PointerButton::Primary,
@@ -1809,20 +1814,80 @@ fn sue_paint_timeline_menus_insert_frames_and_timelapse_ask_first() {
     );
     let menu = tip(&found, "Timeline");
     let texts = click_at(&mut paint, menu);
+    // ABV-6: the whole list, in Clip Studio Paint's order, top to bottom.
+    let mut above = f32::MIN;
     for name in [
-        "New Timeline...",
-        "Change Settings...",
-        "Thumbnails: None",
-        "Show Time in Seconds and Frames",
-        "Timeline Label...",
-        "Playback Starts Here",
-        "Audio Clip Settings...",
+        "New Animation Layer",
+        "New Animation Cel",
+        "Edit Track",
+        "Play/Stop",
+        "Playback Settings",
+        "Move Frame",
+        "Label",
+        "Timeline",
+        "Show Animation Cels",
+        "Light Table",
+        "Thumbnail Size",
+        "Time Unit",
+        "Audio",
+        "Hide Timeline Palette",
     ] {
-        assert!(
-            texts.iter().any(|(text, _)| text == name),
-            "{name} in the palette's menu: {texts:?}"
-        );
+        let at = texts
+            .iter()
+            .filter(|(text, rect)| text == name && rect.top() > above && rect.top() < header.top())
+            .map(|(_, rect)| *rect)
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .unwrap_or_else(|| panic!("{name} in the palette's menu, below the last: {texts:?}"));
+        above = at.top();
     }
+    // Each submenu opens on the pointer and holds its commands.
+    for (submenu, names) in [
+        (
+            "Timeline",
+            &[
+                "New Timeline...",
+                "Change Settings...",
+                "Go to Previous Timeline",
+            ][..],
+        ),
+        ("Thumbnail Size", &["Thumbnails: None"][..]),
+        ("Time Unit", &["Show Time in Seconds and Frames"][..]),
+        ("Label", &["Timeline Label..."][..]),
+        (
+            "Playback Settings",
+            &["Playback Starts Here", "Audio Scrubbing", "Loop"][..],
+        ),
+        ("Audio", &["Audio Clip Settings..."][..]),
+    ] {
+        let row = paint
+            .texts
+            .iter()
+            .filter(|(text, rect)| text == submenu && rect.top() < header.top())
+            .map(|(_, rect)| *rect)
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .unwrap_or_else(|| panic!("{submenu}: {:?}", paint.texts));
+        paint.step(vec![egui::Event::PointerMoved(row.center())]);
+        let texts = paint.settle(30);
+        for name in names {
+            assert!(
+                texts.iter().any(|(text, _)| text == name),
+                "{name} under {submenu}: {texts:?}"
+            );
+        }
+    }
+    // Picking one runs it: the cels' pictures go.
+    paint.click_text("Thumbnails: None");
+    paint.settle(2);
+    let texts = click_at(&mut paint, menu);
+    let row = texts
+        .iter()
+        .find(|(text, rect)| text == "Thumbnail Size" && rect.top() < header.top())
+        .map(|(_, rect)| *rect)
+        .expect("Thumbnail Size again");
+    paint.step(vec![egui::Event::PointerMoved(row.center())]);
+    paint.settle(30);
+    paint.click_text("Thumbnails: Medium");
+    paint.settle(2);
     press(&mut paint, egui::Key::Escape);
     // ABV-7: Change Settings is its own dialog, apart from the frame rate.
     paint.command("anim.timeline.settings");

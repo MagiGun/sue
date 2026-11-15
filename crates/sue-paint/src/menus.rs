@@ -644,7 +644,10 @@ pub fn menus() -> Vec<Menu> {
                 ),
                 SEP,
                 item("anim.play"),
-                sub(&tr!("playback-settings"), vec![item("anim.loop")]),
+                sub(
+                    &tr!("playback-settings"),
+                    vec![item("anim.loop"), item("anim.audio.scrub")],
+                ),
                 sub(
                     &tr!("move-frame"),
                     vec![
@@ -660,6 +663,8 @@ pub fn menus() -> Vec<Menu> {
                     vec![
                         item("anim.timeline.enable"),
                         item("anim.timeline.new"),
+                        item("anim.timeline.prev"),
+                        item("anim.timeline.next"),
                         item("anim.timeline.edit"),
                         item("anim.exposure_sheet"),
                     ],

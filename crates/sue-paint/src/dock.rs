@@ -835,16 +835,23 @@ impl SuePaint {
     /// Palette". Where it goes runs as [`PLACE`] and a word.
     fn palette_menu_items(&self, palette: Palette, embedded: bool) -> Vec<MenuItem> {
         let registry = crate::commands::registry();
-        let mut items: Vec<MenuItem> = palette
-            .menu_commands()
-            .iter()
-            .map(|command| {
-                let label = registry
-                    .label(command)
-                    .unwrap_or_else(|| (*command).to_owned());
-                MenuItem::action(label, *command).key(self.keys_of(command))
+        // The Timeline palette's menu has submenus, as Clip Studio Paint's.
+        let mut items: Vec<MenuItem> = if palette == Palette::Timeline {
+            crate::panels::timeline::menu::items(crate::panels::timeline::menu::TREE, &|command| {
+                self.keys_of(command)
             })
-            .collect();
+        } else {
+            palette
+                .menu_commands()
+                .iter()
+                .map(|command| {
+                    let label = registry
+                        .label(command)
+                        .unwrap_or_else(|| (*command).to_owned());
+                    MenuItem::action(label, *command).key(self.keys_of(command))
+                })
+                .collect()
+        };
         if !items.is_empty() {
             items.push(MenuItem::Separator);
         }
@@ -1016,6 +1023,25 @@ impl SuePaint {
         self.set_switch(palette, true);
         if !self.dock.has(palette) {
             self.place_as_style(palette);
+        }
+        // The Animation Cels palette takes layers dragged from the Layer
+        // palette, so shown by its Window item it docks in a column of its
+        // own beside the Layer palette's, both whole and in sight, rather
+        // than popping out of its icon over them and closing at the first
+        // click elsewhere.
+        if palette == Palette::Cels
+            && self.dock.iconized.contains(&palette)
+            && let Some(Holder::Column(side, _)) =
+                self.dock.find(Palette::Layer).map(|(holder, _)| holder)
+        {
+            self.dock.put(
+                palette,
+                Target::Column {
+                    side,
+                    beside: Some((Palette::Layer, true)),
+                },
+            );
+            self.dock.choose(Palette::Layer);
         }
         self.dock.choose(palette);
         if self.dock.iconized.contains(&palette) {

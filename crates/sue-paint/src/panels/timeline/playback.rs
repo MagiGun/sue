@@ -142,6 +142,7 @@ impl SuePaint {
     /// which cels this frame shows.
     pub(crate) fn animate(&mut self, cx: &mut AppletContext<'_>, ctx: &egui::Context) {
         let now = cx.view.now;
+        self.anim_ui.cels.next_frame();
         self.sound_export_ui(cx, ctx);
         // An older project's cels go into their animation folders once a
         // session (undo takes that back and it stays back).
@@ -205,6 +206,16 @@ impl SuePaint {
             self.anim_ui.measured = 0.0;
         }
         self.sync_audio(cx, &sequence, lap.zip(moved));
+        if let Some(frame) = self
+            .doc()
+            .filter(|doc| doc.playing.is_none())
+            .map(|doc| doc.frame)
+        {
+            self.scrub_audio(cx, &sequence, frame);
+        } else {
+            // Playback moves the frames: no scrubbing until it stops.
+            self.anim_ui.scrubbed = None;
+        }
         let settings = self
             .picture()
             .map(|picture| anim::Onion::of(&cx.world.arena, picture))
@@ -217,28 +228,50 @@ impl SuePaint {
             .unwrap_or([0, 0]);
         let traced = if self.light_table && self.light_cel {
             self.editing_cel(&cx.world.arena)
-                .map(|cel| {
-                    anim::traced(
-                        &cx.world.arena,
-                        &anim::light_table(&cx.world.arena, cel),
-                        size_now,
-                    )
-                })
+                .map(|cel| anim::traced_on(&cx.world.arena, cel, anim::LIGHT_TABLE, size_now))
                 .unwrap_or_default()
         } else {
             Vec::new()
         };
         let general = match self.picture() {
-            Some(picture) if self.light_table && self.light_general => anim::traced(
+            Some(picture) if self.light_table && self.light_general => anim::traced_on(
                 &cx.world.arena,
-                &anim::general_light_table(&cx.world.arena, picture),
+                picture,
+                anim::GENERAL_LIGHT_TABLE,
                 size_now,
             ),
             _ => Vec::new(),
         };
+        // An entry's opacity shows at once while its slider is held.
+        let held = |table: crate::panels::cels::Table, mut traced: Vec<anim::Traced>| {
+            for one in &mut traced {
+                one.opacity = self.anim_ui.cels.opacity(table, one.layer, one.opacity);
+            }
+            traced
+        };
+        let traced = match self.editing_cel(&cx.world.arena) {
+            Some(cel) => held(
+                crate::panels::cels::Table {
+                    from: cel,
+                    general: false,
+                },
+                traced,
+            ),
+            None => traced,
+        };
+        let general = match self.picture() {
+            Some(picture) => held(
+                crate::panels::cels::Table {
+                    from: picture,
+                    general: true,
+                },
+                general,
+            ),
+            None => general,
+        };
         let general_opacity = self.general_opacity;
         let opacity = self.light_opacity;
-        let light_color = self.light_color.then_some([0.25, 0.45, 1.0]);
+        let light_color = self.light_color.then_some(anim::LIGHT_TABLE_TINT);
         // The camera folders at the frame shown.
         let (arena, picture) = (&cx.world.arena, self.picture());
         let size = picture
@@ -314,7 +347,38 @@ impl SuePaint {
             return;
         }
         self.audio_lap = Some(lap);
-        // Mixed again only when the sound changed.
+        let Some(mixed) = self.mixed_sound(cx, sequence) else {
+            return;
+        };
+        let seconds = at.max(0) as f64 / anim::fps(sequence).max(1.0);
+        let start = (seconds * f64::from(anim::MIX_RATE)) as usize;
+        let end = mixed.frames();
+        if start >= end {
+            if cx.transport.is_playing_for(OWNER) {
+                cx.transport.stop(cx.audio.as_deref_mut());
+            }
+            return;
+        }
+        cx.transport.load(
+            sue_wm::Clip {
+                source: sue_wm::ClipSource::Stream(mixed),
+                start,
+                end,
+                gain: 1.0,
+                owner: OWNER.to_owned(),
+            },
+            cx.audio.as_deref_mut(),
+        );
+        cx.transport.set_playing(true, cx.audio.as_deref_mut());
+    }
+
+    /// The timeline's sound mixed into one stream, mixed again only when
+    /// the sound changed.
+    fn mixed_sound(
+        &mut self,
+        cx: &AppletContext<'_>,
+        sequence: &sue_model::Sequence,
+    ) -> Option<sue_core::Shared<sue_core::PCMFloat1D>> {
         let signature = {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -345,16 +409,32 @@ impl SuePaint {
             self.audio_mix = anim::mix(&cx.world.arena, sequence)
                 .map(|pcm| (signature, sue_core::Shared::new(pcm)));
         }
-        let Some((_, mixed)) = self.audio_mix.clone() else {
+        self.audio_mix.clone().map(|(_, mixed)| mixed)
+    }
+
+    /// Audio Scrubbing: the frame shown moved by hand (not by playback)
+    /// to `frame`, so the sound of that frame plays, one frame long (at
+    /// least a twelfth of a second, so it is heard).
+    fn scrub_audio(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        sequence: &sue_model::Sequence,
+        frame: u32,
+    ) {
+        const OWNER: &str = "sue-paint";
+        let before = self.anim_ui.scrubbed.replace(frame);
+        if !self.anim_ui.scrub || before.is_none_or(|before| before == frame) {
+            return;
+        }
+        let Some(mixed) = self.mixed_sound(cx, sequence) else {
             return;
         };
-        let seconds = at.max(0) as f64 / anim::fps(sequence).max(1.0);
-        let start = (seconds * f64::from(anim::MIX_RATE)) as usize;
-        let end = mixed.frames();
+        let fps = anim::fps(sequence).max(1.0);
+        let rate = f64::from(anim::MIX_RATE);
+        let start = (f64::from(frame) / fps * rate) as usize;
+        let long = ((rate / fps).max(rate / 12.0)) as usize;
+        let end = (start + long).min(mixed.frames());
         if start >= end {
-            if cx.transport.is_playing_for(OWNER) {
-                cx.transport.stop(cx.audio.as_deref_mut());
-            }
             return;
         }
         cx.transport.load(
