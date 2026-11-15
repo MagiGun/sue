@@ -566,7 +566,13 @@ impl SuePaint {
             None if selected < self.auto.sets.len() => {
                 self.auto.sets.remove(selected);
                 self.auto.selected = selected.saturating_sub(1);
-                self.auto.recording = None;
+                // Recording goes on into the action it was recording
+                // into, unless that one is gone.
+                self.auto.recording = match self.auto.recording {
+                    Some(at) if at == selected => None,
+                    Some(at) if at > selected => Some(at - 1),
+                    other => other,
+                };
             }
             None => return,
         }
@@ -581,6 +587,12 @@ impl SuePaint {
         copy.name = tr!("auto-copy-of", name = copy.name);
         copy.id = self.auto.fresh_id(&copy.name);
         self.auto.sets.insert(self.auto.selected + 1, copy);
+        // The action being recorded stays the one recorded into.
+        if let Some(recording) = self.auto.recording.as_mut()
+            && *recording > self.auto.selected
+        {
+            *recording += 1;
+        }
         self.auto.selected += 1;
         self.auto.step = None;
         self.save_auto(cx);
