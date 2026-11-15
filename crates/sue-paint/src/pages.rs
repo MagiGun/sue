@@ -430,21 +430,31 @@ impl SuePaint {
         ui.painter()
             .hline(header.x_range(), header.bottom(), theme.hairline());
         let mut act = None;
+        // Add and Delete work when their commands do (a story's last page
+        // cannot be deleted), so they gray out as the menu's items do.
+        let (add_on, delete_on) = {
+            let facts = sue_wm::Facts::of(cx);
+            (
+                self.state("story.add", &facts).enabled,
+                self.state("story.delete", &facts).enabled,
+            )
+        };
         // The buttons, from the right edge in.
         let mut right = header.right() - pad;
-        let mut next = |name: &str, icon: Icon, on: Option<bool>, ui: &mut Ui| {
+        let mut next = |name: &str, icon: Icon, on: Option<bool>, enabled: bool, ui: &mut Ui| {
             let rect = Rect::from_min_size(
                 pos2(right - button.x, header.center().y - button.y / 2.0),
                 button,
             );
             right = rect.left() - theme.space(Space::S2);
-            let mut control = icon_button(("sue-paint-page-manager", name), icon, name);
+            let mut control =
+                icon_button(("sue-paint-page-manager", name), icon, name).enabled(enabled);
             if let Some(on) = on {
                 control = control.selected(on);
             }
             control.show_at(ui, rect, theme).clicked()
         };
-        if next(&tr!("close-page-manager"), Icon::Close, None, ui) {
+        if next(&tr!("close-page-manager"), Icon::Close, None, true, ui) {
             act = Some(PageAct::Close);
         }
         let (dock_name, dock_icon) = if view.docked {
@@ -452,7 +462,7 @@ impl SuePaint {
         } else {
             (tr!("page-manager-dock-beside-page"), Icon::PaletteSubView)
         };
-        if next(&dock_name, dock_icon, None, ui) {
+        if next(&dock_name, dock_icon, None, true, ui) {
             act = Some(PageAct::Command("pages.dock".to_owned()));
         }
         if !view.docked {
@@ -460,6 +470,7 @@ impl SuePaint {
                 &tr!("page-manager-webtoon-columns"),
                 Icon::DocWebtoon,
                 Some(view.webtoon),
+                true,
                 ui,
             ) {
                 act = Some(PageAct::Command(
@@ -474,13 +485,13 @@ impl SuePaint {
             let delete = crate::commands::registry()
                 .label("story.delete")
                 .unwrap_or_default();
-            if next(&delete, Icon::Delete, None, ui) {
+            if next(&delete, Icon::Delete, None, delete_on, ui) {
                 act = Some(PageAct::Command("story.delete".to_owned()));
             }
             let add = crate::commands::registry()
                 .label("story.add")
                 .unwrap_or_default();
-            if next(&add, Icon::FileNew, None, ui) {
+            if next(&add, Icon::FileNew, None, add_on, ui) {
                 act = Some(PageAct::Command("story.add".to_owned()));
             }
         }
@@ -1038,12 +1049,17 @@ impl PageLayout {
             .floor()
             .max(1.0) as usize;
         let mut out = vec![Rect::NOTHING; count];
-        for (number, pair) in story::spreads_from(count, right, paired).iter().enumerate() {
+        let spreads = story::spreads_from(count, right, paired);
+        // The rows stand in the middle of the room, as a book lies open
+        // in front of the reader.
+        let used = across.min(spreads.len()).max(1) as f32;
+        let edge = ((self.width - used * spread.x - (used - 1.0) * gap.x) / 2.0).max(self.pad);
+        for (number, pair) in spreads.iter().enumerate() {
             let (row, column) = ((number / across) as f32, (number % across) as f32);
             let x = if right {
-                self.width - self.pad - (column + 1.0) * spread.x - column * gap.x
+                self.width - edge - (column + 1.0) * spread.x - column * gap.x
             } else {
-                self.pad + column * (spread.x + gap.x)
+                edge + column * (spread.x + gap.x)
             };
             let y = self.pad + row * (spread.y + gap.y);
             for (side, slot) in pair.iter().enumerate() {
