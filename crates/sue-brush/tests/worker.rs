@@ -713,3 +713,35 @@ fn png(width: usize, height: usize, pixels: &[[u8; 3]]) -> Vec<u8> {
     chunk(&mut out, b"IEND", &[]);
     out
 }
+
+// ---------------------------------------------------------------------
+// Reading what is shown a tile at a time
+// ---------------------------------------------------------------------
+
+/// A tile read whole from the live view holds what the view shows pixel
+/// by pixel, and a tile the stroke never reached reads as nothing.
+#[test]
+fn a_tile_of_the_live_view_reads_as_its_pixels() {
+    let brush = black(pen(18.0, 1.0));
+    let stroke = draw(
+        Arc::new(JobPool::inline()),
+        &brush,
+        &wave([20.0, 40.0], [180.0, 60.0], 0.3, 6.0),
+        8,
+    );
+    let live = stroke.live();
+    let key = sue_brush::buffer::TileKey::of_pixel(64, 48);
+    let mut tile = vec![0_u16; sue_brush::buffer::AREA];
+    assert!(live.tile_coverage(key, &mut tile), "the stroke crosses it");
+    let [ox, oy] = key.origin();
+    for y in 0..TILE {
+        for x in 0..TILE {
+            assert_eq!(
+                tile[(y * TILE + x) as usize],
+                live.coverage(i64::from(ox + x), i64::from(oy + y))
+            );
+        }
+    }
+    let far = sue_brush::buffer::TileKey::of_pixel(4000, 4000);
+    assert!(!live.tile_coverage(far, &mut tile), "nothing there");
+}

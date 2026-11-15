@@ -136,6 +136,22 @@ impl LiveView {
         })
     }
 
+    /// Writes the coverage shown in tile `key` into `out` (row by row,
+    /// [`AREA`] values) and answers `true`, or leaves `out` alone and
+    /// answers `false` when the tile covers nothing. One read of the view
+    /// for a whole tile, for a caller that lays the stroke itself (a mask,
+    /// a selection, symmetry copies).
+    pub fn tile_coverage(&self, key: TileKey, out: &mut [u16]) -> bool {
+        let shown = self.shown.read().unwrap_or_else(PoisonError::into_inner);
+        match shown.tiles.get(&key) {
+            Some(tile) if out.len() >= AREA => {
+                out[..AREA].copy_from_slice(tile);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Layer pixel `(x, y)` with the stroke on it: `under` (straight RGBA
     /// from 0 to 1) with the ink laid by the coverage there, through the
     /// same row kernel the merge uses, so what is shown is what the merge

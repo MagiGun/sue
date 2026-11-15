@@ -1,5 +1,7 @@
 //! The Blend tool on the canvas: blur, finger tip and copy stamp dabbed
-//! along the drag, the whole drag one undo step.
+//! along the drag, the whole drag one undo step. Editing a layer's mask,
+//! they blend the mask (softening its edge, say), in its own pixels where
+//! it sits.
 
 use egui::{Pos2, Rect};
 use sue_wm::{AppletContext, ArenaEdit};
@@ -21,6 +23,9 @@ impl SuePaint {
     /// source set first).
     pub(super) fn blend_press(&mut self, press: &Press, sub: &SubTool, cx: &mut AppletContext<'_>) {
         let p = press.p;
+        if self.refuse_keyframed(cx) {
+            return;
+        }
         let info = match self.paintable(&cx.world.arena) {
             Ok(info) => info,
             Err(error) => {
@@ -28,13 +33,27 @@ impl SuePaint {
                 return;
             }
         };
-        let Some(before) = doc::raster(&cx.world.arena, info.id)
-            .and_then(|raster| raster.bytes())
-            .map(<[u8]>::to_vec)
-        else {
+        let arena = &cx.world.arena;
+        // Editing the mask: the mask is what blends.
+        let mask = self
+            .docs
+            .get(self.active)
+            .filter(|doc| doc.mask_edit)
+            .and_then(|_| doc::mask_of(arena, info.id))
+            .zip(doc::mask_offset(arena, info.id));
+        let (target, offset) = mask.unwrap_or((info.id, info.style.offset));
+        let Some(raster) = doc::raster(arena, target) else {
             return;
         };
-        let offset = info.style.offset;
+        let Some(mut before) = raster.bytes().map(<[u8]>::to_vec) else {
+            return;
+        };
+        // A gray mask blends as gray RGBA, its value in every channel.
+        let work: Option<Vec<u8>> = (raster.format() == sue_core::PixelFormat::Gray8)
+            .then(|| before.iter().flat_map(|&v| [v, v, v, 255]).collect());
+        if let Some(work) = &work {
+            before.clone_from(work);
+        }
         if sub.mode == crate::blend::COPY_STAMP {
             match &mut self.stamp {
                 None => {
@@ -50,12 +69,13 @@ impl SuePaint {
             }
         }
         self.gesture = Some(Gesture::Blend {
-            layer: info.id,
+            layer: target,
             before,
             last: [p.x - offset[0] as f32, p.y - offset[1] as f32],
             since: 0.0,
             offset,
             label: crate::localize(&sub.name),
+            work,
         });
     }
 
@@ -81,6 +101,7 @@ impl SuePaint {
             last,
             since,
             offset,
+            work,
             ..
         }) = self.gesture.as_mut()
         else {
@@ -98,7 +119,12 @@ impl SuePaint {
         let mut dirty: Option<[u32; 4]> = None;
         if let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer) {
             let (width, height) = (raster.width(), raster.height());
-            if let Some(pixels) = raster.bytes_mut() {
+            let gray = work.is_some();
+            let pixels = match work.as_mut() {
+                Some(work) => Some(work.as_mut_slice()),
+                None => raster.bytes_mut(),
+            };
+            if let Some(pixels) = pixels {
                 let mut along = step - *since;
                 let unit = [dx / length, dy / length];
                 while along <= length {
@@ -138,6 +164,18 @@ impl SuePaint {
                 }
                 *since = length - (along - step);
             }
+            // A gray mask takes back the values the dabs left.
+            if gray
+                && let (Some(work), Some([x0, y0, x1, y1]), Some(values)) =
+                    (work.as_ref(), dirty, raster.bytes_mut())
+            {
+                for y in y0..y1.min(height) {
+                    for x in x0..x1.min(width) {
+                        let at = (y * width + x) as usize;
+                        values[at] = work[at * 4];
+                    }
+                }
+            }
         }
         *last = to;
         if let (Some([x0, y0, x1, y1]), Some(doc)) = (dirty, self.docs.get_mut(self.active)) {
@@ -163,11 +201,17 @@ impl SuePaint {
         else {
             return;
         };
-        if let Some(after) = doc::raster(&cx.world.arena, layer).and_then(|raster| {
-            let size = [raster.width(), raster.height()];
-            raster.bytes().map(|bytes| (bytes.to_vec(), size))
-        }) && let Some(patch) = doc::diff_patch(&before, &after.0, after.1[0], after.1[1])
-        {
+        let Some(raster) = doc::raster(&cx.world.arena, layer) else {
+            return;
+        };
+        let patch = if raster.format() == sue_core::PixelFormat::Gray8 {
+            gray_patch(&before, raster)
+        } else {
+            raster
+                .bytes()
+                .and_then(|after| doc::diff_patch(&before, after, raster.width(), raster.height()))
+        };
+        if let Some(patch) = patch {
             cx.record(ArenaEdit(sue_core::txn::RasterEdit::new(
                 layer,
                 label,
@@ -175,4 +219,46 @@ impl SuePaint {
             )));
         }
     }
+}
+
+/// The one patch that takes a gray raster from `before` (its values as
+/// gray RGBA) to what it holds now: the rectangle around every value that
+/// changed.
+fn gray_patch(
+    before: &[u8],
+    raster: &sue_core::RasterTile2D,
+) -> Option<sue_core::txn::RasterPatch> {
+    let after = raster.bytes()?;
+    let width = raster.width() as usize;
+    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+    for (at, (a, b)) in before.as_chunks::<4>().0.iter().zip(after).enumerate() {
+        if a[0] != *b {
+            let (x, y) = (at % width, at / width);
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x + 1);
+            y1 = y1.max(y + 1);
+        }
+    }
+    if x0 >= x1 {
+        return None;
+    }
+    let rows = |bytes: &[u8], per: usize| -> Vec<u8> {
+        (y0..y1)
+            .flat_map(|y| {
+                bytes[(y * width + x0) * per..(y * width + x1) * per]
+                    .iter()
+                    .step_by(per)
+                    .copied()
+            })
+            .collect()
+    };
+    Some(sue_core::txn::RasterPatch {
+        x: x0 as u32,
+        y: y0 as u32,
+        width: (x1 - x0) as u32,
+        height: (y1 - y0) as u32,
+        before: rows(before, 4),
+        after: rows(after, 1),
+    })
 }

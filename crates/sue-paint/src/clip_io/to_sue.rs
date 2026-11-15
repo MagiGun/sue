@@ -187,7 +187,7 @@ impl Making<'_> {
     }
 
     /// `layer`'s mask, for a layer whose pixels cover `area` (`x0, y0,
-    /// x1, y1`, picture pixels): as Sue paints masks, color whose alpha
+    /// x1, y1`, picture pixels): as Sue paints masks, gray whose value
     /// is the cover, over at least the layer, with what the file's mask
     /// does not cover as the file fills it.
     fn mask(&self, layer: &ClipLayer, area: [i64; 4]) -> Result<Option<Entity>, String> {
@@ -210,15 +210,15 @@ impl Making<'_> {
         if u64::from(w) * u64::from(h) > 1 << 28 {
             return Err(tr!("clip-layer-too-big"));
         }
-        let mut rgba = [255, 255, 255, outside].repeat(w as usize * h as usize);
+        let mut gray = vec![outside; w as usize * h as usize];
         let (vw, dx, dy) = (values.width as usize, mx - x0, my - y0);
         for y in 0..values.height as usize {
             let row = (dy as usize + y) * w as usize + dx as usize;
             for x in 0..vw {
-                rgba[(row + x) * 4 + 3] = values.data[(y * vw + x) * step + step - 1];
+                gray[row + x] = values.data[(y * vw + x) * step + step - 1];
             }
         }
-        let raster = RasterTile2D::from_bytes(w, h, PixelFormat::Rgba8, rgba)
+        let raster = RasterTile2D::from_bytes(w, h, PixelFormat::Gray8, gray)
             .map_err(|error| error.to_string())?;
         // Linked to its layer: its place is from the layer's.
         let mut entity = Entity::new(tr!("mask"), raster).with_class(doc::MASK_CLASS);

@@ -2,10 +2,11 @@
 //! or any other layer) that says how much of it shows.
 //!
 //! A mask is an entity of class [`MASK_CLASS`] related to its layer by
-//! [`MASK`]. Its raster is either `Rgba8`, whose alpha is the cover (what
-//! Sue writes and paints today, and what 0.0.75 reads), or `Gray8`, whose
-//! value is the cover (what imported masks and a later Sue may hold):
-//! every reader goes through [`cover`], so both show the same.
+//! [`MASK`]. Its raster is `Gray8`, whose value is the cover: what Sue
+//! makes and paints. Masks of 0.0.75 and of the first 0.0.8 builds are
+//! `Rgba8`, whose alpha is the cover; they become `Gray8` when their
+//! picture opens ([`migrate_masks`]), and every reader goes through
+//! [`cover`], so both show the same until then.
 //!
 //! Where a mask sits: while it is linked to its layer ([`MASK_LINKED`],
 //! the default) its own `layer.x` and `layer.y` are relative to the
@@ -139,16 +140,16 @@ pub fn new_mask(
         }
     };
     let offset = LayerStyle::of(entity).offset;
-    let mut pixels = vec![255; (width * height * 4) as usize];
+    let mut pixels = vec![255; (width * height) as usize];
     for y in 0..height {
         for x in 0..width {
             let cover = show(i64::from(x) + offset[0], i64::from(y) + offset[1]).clamp(0.0, 1.0);
-            pixels[((y * width + x) * 4 + 3) as usize] = (cover * 255.0).round() as u8;
+            pixels[(y * width + x) as usize] = (cover * 255.0).round() as u8;
         }
     }
     let mask = Entity::new(
         tr!("mask"),
-        RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels)
+        RasterTile2D::from_bytes(width, height, PixelFormat::Gray8, pixels)
             .map_err(|error| error.to_string())?,
     )
     .with_class(MASK_CLASS);
@@ -189,6 +190,51 @@ pub fn set_mask_linked(arena: &Arena, layer: EntityId, linked: bool) -> Option<E
         .then(SetProperty::new(mask, picture::Y, own[1]))
         .then(SetProperty::new(layer, MASK_LINKED, linked)),
     )
+}
+
+/// Turns every `Rgba8` layer mask in `arena` (0.0.75's, and the first
+/// 0.0.8 builds') into the `Gray8` mask Sue makes, its alpha becoming the
+/// value, so each pixel covers as it did. A migration on load: it puts
+/// nothing on the undo stack, and a picture whose masks it turned looks
+/// and saves as before. Answers how many masks it turned; a second run
+/// turns none.
+pub fn migrate_masks(arena: &mut Arena) -> usize {
+    let old: Vec<EntityId> = arena
+        .iter()
+        .filter(|(_, entity)| entity.class() == MASK_CLASS)
+        .filter(|(_, entity)| {
+            entity
+                .component(sue_core::ComponentKind::RasterTile2D)
+                .and_then(sue_core::ComponentData::as_raster)
+                .is_some_and(|tile| tile.format() == PixelFormat::Rgba8 && tile.bytes().is_some())
+        })
+        .map(|(_, entity)| entity.id())
+        .collect();
+    let mut turned = 0;
+    for id in old {
+        let Some(gray) = raster(arena, id).and_then(gray_of) else {
+            continue;
+        };
+        if let Ok(entity) = arena.get_by_id_mut(id)
+            && let Some(data) = entity.component_mut(sue_core::ComponentKind::RasterTile2D)
+        {
+            *data = sue_core::ComponentData::RasterTile2D(gray);
+            turned += 1;
+        }
+    }
+    turned
+}
+
+/// The `Gray8` raster whose values are `tile`'s alpha (an `Rgba8` mask).
+fn gray_of(tile: &RasterTile2D) -> Option<RasterTile2D> {
+    let bytes = tile.bytes()?;
+    let values = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| pixel[3])
+        .collect();
+    RasterTile2D::from_bytes(tile.width(), tile.height(), PixelFormat::Gray8, values).ok()
 }
 
 /// The edit that takes `layer`'s mask away (undo brings it back).
@@ -232,4 +278,81 @@ pub fn apply_mask(arena: &Arena, layer: EntityId) -> Result<Edit, String> {
             tr!("apply-mask-to-layer"),
         ))
         .then(DespawnEntity::new(mask)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::composite::{RenderOptions, render};
+    use crate::doc::{NewPicture, create, layers, raster_mut};
+
+    /// A picture 4 by 1 with a white layer, and that layer.
+    fn white_picture() -> (Arena, sue_core::UndoStack<Arena>, EntityId, EntityId) {
+        let mut arena = Arena::new();
+        let mut history: sue_core::UndoStack<Arena> = sue_core::UndoStack::new();
+        let (edit, picture) = create(&NewPicture {
+            width: 4,
+            height: 1,
+            paper: None,
+            ..NewPicture::default()
+        })
+        .unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        let layer = layers(&arena, picture)[0].id;
+        if let Some(bytes) = raster_mut(&mut arena, layer).and_then(RasterTile2D::bytes_mut) {
+            bytes.fill(255);
+        }
+        (arena, history, picture, layer)
+    }
+
+    fn shown(arena: &Arena, picture: EntityId) -> Vec<u8> {
+        render(arena, picture, [0, 0, 4, 1], RenderOptions::default())
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[3])
+            .collect()
+    }
+
+    #[test]
+    fn a_new_mask_is_gray() {
+        let (mut arena, mut history, picture, layer) = white_picture();
+        let (edit, mask) =
+            new_mask(&arena, layer, |x, _| [1.0, 0.5, 0.0, 1.0][x as usize]).unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        let tile = raster(&arena, mask).unwrap();
+        assert_eq!(tile.format(), PixelFormat::Gray8);
+        assert_eq!(tile.bytes().unwrap(), &[255, 128, 0, 255]);
+        assert_eq!(shown(&arena, picture), vec![255, 128, 0, 255]);
+        history.undo(&mut arena).unwrap();
+        assert_eq!(mask_of(&arena, layer), None, "undo takes it away");
+    }
+
+    /// An `Rgba8` mask as 0.0.75 wrote it (color white, alpha the cover)
+    /// becomes `Gray8` and shows the same; the undo stack is untouched and
+    /// a second run changes nothing.
+    #[test]
+    fn old_rgba_masks_turn_gray_and_show_the_same() {
+        let (mut arena, history, picture, layer) = white_picture();
+        let covers = [255_u8, 200, 77, 0];
+        let pixels = covers.iter().flat_map(|&a| [255, 255, 255, a]).collect();
+        let old = Entity::new(
+            "Mask",
+            RasterTile2D::from_bytes(4, 1, PixelFormat::Rgba8, pixels).unwrap(),
+        )
+        .with_class(MASK_CLASS);
+        let mask = old.id();
+        arena.insert(old);
+        arena.relate(Relation::new(layer, MASK, mask)).unwrap();
+        let before = shown(&arena, picture);
+        let steps = history.len();
+        assert_eq!(migrate_masks(&mut arena), 1);
+        let tile = raster(&arena, mask).unwrap();
+        assert_eq!(tile.format(), PixelFormat::Gray8);
+        assert_eq!(tile.bytes().unwrap(), &covers);
+        assert_eq!(shown(&arena, picture), before, "it shows as it did");
+        assert_eq!(history.len(), steps, "nothing on the undo stack");
+        assert_eq!(mask_of(&arena, layer), Some(mask), "the same entity");
+        assert_eq!(migrate_masks(&mut arena), 0, "a second run turns none");
+    }
 }

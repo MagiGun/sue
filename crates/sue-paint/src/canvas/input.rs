@@ -268,7 +268,7 @@ impl SuePaint {
         // each point of a stroke has the pressure and lean it had there.
         let mut samples = sue_platform::stylus::take_samples();
         // Every packet of the pen, for a stroke of the new brush engine.
-        self.engine_take_samples(cx);
+        self.engine_take_samples();
         if sue_platform::stylus::pressure().is_some()
             || samples.iter().any(|sample| sample.pressure.is_some())
         {

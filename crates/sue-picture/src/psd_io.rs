@@ -86,10 +86,18 @@ fn pixels_of(arena: &Arena, info: &doc::LayerInfo, size: [u32; 2]) -> Option<Psd
             if let Some(mask) = doc::mask_of(arena, info.id)
                 .filter(|_| doc::mask_on(arena, info.id))
                 .and_then(|mask| doc::raster(arena, mask))
-                .and_then(RasterTile2D::bytes)
+                && let Some(place) = doc::mask_offset(arena, info.id)
             {
-                for (pixel, cover) in pixels.chunks_mut(4).zip(mask.chunks(4)) {
-                    pixel[3] = ((u32::from(pixel[3]) * u32::from(cover[3])) / 255) as u8;
+                // Whatever the mask's pixels (a `Gray8` mask, an old
+                // `Rgba8` one) and wherever it sits.
+                let width = raster.width() as usize;
+                let at = info.style.offset;
+                let shift = [at[0] - place[0], at[1] - place[1]];
+                for (index, pixel) in pixels.chunks_mut(4).enumerate() {
+                    let (x, y) = ((index % width) as i64, (index / width) as i64);
+                    let shown = doc::cover(mask, x + shift[0], y + shift[1]);
+                    let shown = (shown * 255.0).round() as u32;
+                    pixel[3] = ((u32::from(pixel[3]) * shown) / 255) as u8;
                 }
             }
             (pixels, raster.width(), raster.height(), info.style.offset)
@@ -379,6 +387,54 @@ mod tests {
             doc::layers(&other, fresh).len(),
             before,
             "undo takes them away"
+        );
+    }
+
+    /// A layer's gray mask goes out in the layer's alpha, read where the
+    /// mask sits (here two pixels right of its layer).
+    #[test]
+    fn a_gray_mask_goes_out_in_its_layers_alpha() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = doc::create(&doc::NewPicture {
+            name: "Page".to_owned(),
+            width: 8,
+            height: 2,
+            paper: None,
+            ..doc::NewPicture::default()
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let top = doc::layers(&arena, picture).last().map(|layer| layer.id);
+        let raster =
+            RasterTile2D::from_bytes(8, 2, PixelFormat::Rgba8, [0, 0, 0, 255].repeat(16)).unwrap();
+        let (spawn, ink) =
+            doc::add_layer_pixels(&arena, picture, top, "Ink".to_owned(), raster).unwrap();
+        let mut edit = Edit::new("Ink").then(spawn);
+        edit.apply(&mut arena).unwrap();
+        let (mut edit, mask) =
+            doc::new_mask(&arena, ink, |x, _| if x < 4 { 1.0 } else { 0.0 }).unwrap();
+        edit.apply(&mut arena).unwrap();
+        assert_eq!(
+            doc::raster(&arena, mask).unwrap().format(),
+            PixelFormat::Gray8
+        );
+        let alpha = |arena: &Arena| -> Vec<u8> {
+            let psd = to_psd(arena, picture).unwrap();
+            let layer = psd.layers.iter().find(|layer| layer.name == "Ink").unwrap();
+            let mut row = vec![0_u8; 8];
+            for x in 0..layer.width as usize {
+                let at = x * 4 + 3;
+                row[layer.left as usize + x] = layer.pixels[at];
+            }
+            row
+        };
+        assert_eq!(alpha(&arena), [255, 255, 255, 255, 0, 0, 0, 0]);
+        let mut moved = Edit::new("Move").then(SetProperty::new(mask, picture::X, 2_i64));
+        moved.apply(&mut arena).unwrap();
+        assert_eq!(
+            alpha(&arena),
+            [0, 0, 255, 255, 255, 255, 0, 0],
+            "read where the mask sits"
         );
     }
 

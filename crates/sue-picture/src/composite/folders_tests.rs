@@ -269,21 +269,20 @@ fn gray_masks_show_as_the_alpha_of_color_masks() {
         before.iter().map(|pixel| pixel[3]).collect::<Vec<_>>(),
         [255, 191, 64, 0]
     );
-    // The same cover as a gray mask.
-    let alpha: Vec<u8> = doc::raster(&arena, mask)
-        .unwrap()
+    // The same cover as a color mask (0.0.75's), its alpha the cover.
+    let tile = doc::raster(&arena, mask).unwrap();
+    assert_eq!(tile.format(), PixelFormat::Gray8, "a new mask is gray");
+    let color: Vec<u8> = tile
         .bytes()
         .unwrap()
         .iter()
-        .skip(3)
-        .step_by(4)
-        .copied()
+        .flat_map(|&value| [255, 255, 255, value])
         .collect();
-    let gray = RasterTile2D::from_bytes(4, 1, PixelFormat::Gray8, alpha).unwrap();
+    let color = RasterTile2D::from_bytes(4, 1, PixelFormat::Rgba8, color).unwrap();
     history
         .apply(
             &mut arena,
-            doc::Edit::new("Gray").then(ReplaceComponent::new(mask, gray, "Gray")),
+            doc::Edit::new("Color").then(ReplaceComponent::new(mask, color, "Color")),
         )
         .unwrap();
     assert_eq!(shown(&arena, picture, 4), before);

@@ -232,53 +232,11 @@ fn paint_stroke_frames(keys: &[egui::Key], bigger: usize) -> (f64, f64, f64, f64
 /// carries the line's far end with it, and lifting the pen keeps what
 /// the drag left. Clip Studio Paint does the same, and a shape broken by
 /// a stray stroke or a leftover of the old one would show here as ink
-/// away from the line through the two ends.
+/// away from the line through the two ends. The brush engine shows a
+/// stroke over its layer until the lift, so the ink is read once the pen
+/// lifted: rested and lifted, and rested, dragged and lifted.
 #[test]
 fn sue_paint_a_corrected_line_follows_the_pen_until_it_lifts() {
-    let (mut runtime, root) = runtime("paint-smart-drag");
-    let ctx = egui::Context::default();
-    let mut now = Instant::now();
-    runtime.request(
-        ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
-        &mut NoTextures,
-        now,
-    );
-    frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
-    let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
-        frame_with(runtime, &ctx, now, events);
-        now += Duration::from_millis(16);
-    };
-    step(
-        &mut runtime,
-        vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
-    );
-    step(
-        &mut runtime,
-        vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
-    );
-    // The ink as it stands, as the points it covers.
-    let ink = |runtime: &Runtime| -> Vec<(usize, usize)> {
-        let arena = &runtime.engine.world.arena;
-        let picture = arena
-            .iter()
-            .find(|(_, entity)| sue_model::picture::is_picture(entity))
-            .map(|(_, entity)| entity.id())
-            .unwrap();
-        let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
-        let raster = sue_paint::doc::raster(arena, layer).unwrap();
-        let bytes = raster.bytes().unwrap();
-        let width = raster.width() as usize;
-        let height = raster.height() as usize;
-        let mut points = Vec::new();
-        for y in 0..height {
-            for x in 0..width {
-                if bytes[(y * width + x) * 4 + 3] > 128 {
-                    points.push((x, y));
-                }
-            }
-        }
-        points
-    };
     // How far the ink strays from the straight line it should be: the
     // widest distance off the line fitted through all of it.
     let straightness = |points: &[(usize, usize)]| -> f64 {
@@ -297,52 +255,6 @@ fn sue_paint_a_corrected_line_follows_the_pen_until_it_lifts() {
             .map(|(x, y)| ((*x as f64 - mean_x) * -sin + (*y as f64 - mean_y) * cos).abs())
             .fold(0.0, f64::max)
     };
-    let touch = |phase, pos| egui::Event::Touch {
-        device_id: egui::TouchDeviceId(1),
-        id: egui::TouchId(1),
-        phase,
-        pos,
-        force: Some(0.6),
-    };
-    let button = |pos, pressed| egui::Event::PointerButton {
-        pos,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: egui::Modifiers::NONE,
-    };
-    // The New dialog closes over its own frames, before the canvas
-    // behind it takes a stroke.
-    for _ in 0..5 {
-        step(&mut runtime, Vec::new());
-    }
-    // A line drawn by hand: mostly straight, a little wobble.
-    let start = paint_middle(&runtime) - vec2(140.0, 60.0);
-    step(
-        &mut runtime,
-        vec![
-            touch(egui::TouchPhase::Start, start),
-            egui::Event::PointerMoved(start),
-            button(start, true),
-        ],
-    );
-    let mut at = start;
-    for index in 0..40 {
-        at += vec2(7.0, 3.0);
-        if index % 7 == 0 {
-            at += vec2(0.0, 1.5);
-        }
-        step(
-            &mut runtime,
-            vec![
-                touch(egui::TouchPhase::Move, at),
-                egui::Event::PointerMoved(at),
-            ],
-        );
-    }
-    // The pen rests: Smart Shape makes it the line it was meant to be.
-    for _ in 0..70 {
-        step(&mut runtime, Vec::new());
-    }
     // How wide the line is: its ink spread over the way it runs.
     let width_of = |points: &[(usize, usize)]| -> f64 {
         let first = points[0];
@@ -352,7 +264,51 @@ fn sue_paint_a_corrected_line_follows_the_pen_until_it_lifts() {
             .max(1.0);
         points.len() as f64 / length
     };
-    let corrected = ink(&runtime);
+    // A line drawn by hand (mostly straight, a little wobble), rested on
+    // until Smart Shape makes it the line it was meant to be, dragged
+    // down `drag` times 6 points, and lifted: the ink it leaves.
+    let line = |tag: &str, drag: usize| -> Vec<(usize, usize)> {
+        let mut paint = Paint::new(tag);
+        let touch = |phase, pos| egui::Event::Touch {
+            device_id: egui::TouchDeviceId(1),
+            id: egui::TouchId(1),
+            phase,
+            pos,
+            force: Some(0.6),
+        };
+        let start = paint.middle() - vec2(140.0, 60.0);
+        paint.step(vec![
+            touch(egui::TouchPhase::Start, start),
+            egui::Event::PointerMoved(start),
+            button(start, true, egui::Modifiers::NONE),
+        ]);
+        let mut at = start;
+        for index in 0..40 {
+            at += vec2(7.0, 3.0);
+            if index % 7 == 0 {
+                at += vec2(0.0, 1.5);
+            }
+            paint.step(vec![
+                touch(egui::TouchPhase::Move, at),
+                egui::Event::PointerMoved(at),
+            ]);
+        }
+        paint.settle(70);
+        for _ in 0..drag {
+            at += vec2(0.0, 6.0);
+            paint.step(vec![
+                touch(egui::TouchPhase::Move, at),
+                egui::Event::PointerMoved(at),
+            ]);
+        }
+        paint.step(vec![
+            touch(egui::TouchPhase::End, at),
+            button(at, false, egui::Modifiers::NONE),
+        ]);
+        paint.settle(5);
+        paint.ink()
+    };
+    let corrected = line("paint-smart-rest", 0);
     assert!(corrected.len() > 100, "the line was drawn");
     assert!(
         straightness(&corrected) < width_of(&corrected) * 0.5 + 2.0,
@@ -361,18 +317,7 @@ fn sue_paint_a_corrected_line_follows_the_pen_until_it_lifts() {
         width_of(&corrected)
     );
     let before = (corrected[0], corrected[corrected.len() - 1]);
-    // Dragging, the pen still down, carries the far end down the canvas.
-    for _ in 0..40 {
-        at += vec2(0.0, 6.0);
-        step(
-            &mut runtime,
-            vec![
-                touch(egui::TouchPhase::Move, at),
-                egui::Event::PointerMoved(at),
-            ],
-        );
-    }
-    let dragged = ink(&runtime);
+    let dragged = line("paint-smart-drag", 40);
     assert!(
         straightness(&dragged) < width_of(&dragged) * 0.5 + 2.0,
         "the dragged line is still straight: strays {:.1} px over {:.1} px of width",
@@ -398,22 +343,6 @@ fn sue_paint_a_corrected_line_follows_the_pen_until_it_lifts() {
         dragged.len(),
         corrected.len()
     );
-    // Lifting the pen keeps what the drag left.
-    step(
-        &mut runtime,
-        vec![touch(egui::TouchPhase::End, at), button(at, false)],
-    );
-    for _ in 0..5 {
-        step(&mut runtime, Vec::new());
-    }
-    let released = ink(&runtime);
-    assert!(
-        released.len().abs_diff(dragged.len()) < dragged.len() / 100 + 5,
-        "the line stayed as the drag left it: {} px against {}",
-        released.len(),
-        dragged.len()
-    );
-    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -815,6 +744,18 @@ impl Paint {
             .filter(|(_, thick)| *thick > 0)
             .collect()
     }
+
+    /// The top layer's ink as the pixels more than half covered, row by
+    /// row.
+    fn ink(&self) -> Vec<(usize, usize)> {
+        let layers = self.layers();
+        let (_, width, bytes) = layers.last().unwrap();
+        let height = bytes.len() / 4 / width;
+        (0..height)
+            .flat_map(|y| (0..*width).map(move |x| (x, y)))
+            .filter(|(x, y)| bytes[(y * width + x) * 4 + 3] > 128)
+            .collect()
+    }
 }
 
 impl Drop for Paint {
@@ -1179,24 +1120,10 @@ fn stroke_ends_sheet() {
     println!("stroke ends: {}", path.display());
 }
 
-/// Sue Paint with the new brush engine on (`sue_paint.brush_engine`), and
-/// a bigger G-pen, so a line's width can be read.
+/// Sue Paint with a bigger G-pen, so a line's width can be read. The
+/// brush engine draws it: it is what Sue Paint paints with.
 fn new_engine(tag: &str) -> Paint {
     let mut paint = Paint::new(tag);
-    // The key is hidden (not in the shipped rice): as the owner turns it
-    // on, by writing it into the rice file.
-    let _ = paint
-        .runtime
-        .engine
-        .world
-        .rice
-        .register(&sue_rice::RiceDeclaration::new(
-            "sue_paint.brush_engine",
-            sue_rice::RiceParameter::Text {
-                value: "new".to_owned(),
-            },
-            "",
-        ));
     for _ in 0..8 {
         paint.step(vec![key(egui::Key::CloseBracket, egui::Modifiers::NONE)]);
     }
@@ -1289,31 +1216,6 @@ fn sue_paint_the_new_engine_draws_from_pointer_events_too() {
     assert!(paint.profile().is_empty(), "the stroke was one undo step");
 }
 
-/// The switch is a line the owner writes under `[sue_paint]` in the
-/// rice file, not a declared setting: the file with that line is read
-/// as it stands (no migration drops it), keeps the line when Sue writes
-/// the file back, and still says `new` once the shell's declarations are
-/// registered over it, as at start.
-#[test]
-fn the_new_engine_switch_is_read_from_the_rice_file() {
-    let shipped = sue_rice::DEFAULT_RICE;
-    let section = shipped.find("[sue_paint]").expect("a [sue_paint] table");
-    let line_end = section + shipped[section..].find('\n').unwrap() + 1;
-    let text = format!(
-        "{}brush_engine = \"new\"\n{}",
-        &shipped[..line_end],
-        &shipped[line_end..]
-    );
-    assert_eq!(sue_rice::migrate(&text).unwrap(), None, "read as it is");
-    let mut schema = sue_rice::RiceSchema::parse(&text).unwrap();
-    sue_wm::register_rice(&mut schema).unwrap();
-    assert_eq!(schema.get_str("sue_paint.brush_engine"), Some("new"));
-    assert!(
-        schema.to_suerice().contains("brush_engine = \"new\""),
-        "the line stays when the file is written back"
-    );
-}
-
 /// What the new engine lays on the real canvas from a pen's packets, for
 /// a person to look at: rows of strokes, each frame carrying several
 /// packets, ending four ways (columns: easing off, lifted while pressing,
@@ -1388,4 +1290,633 @@ fn new_engine_sheet() {
     );
     std::fs::write(&path, png).unwrap();
     println!("new engine: {}", path.display());
+}
+
+// The brush engine is what Sue Paint paints with (P4-1a): the strokes
+// the compositor cannot show live (a mask, a selection, locked
+// transparent pixels) are laid straight into their rasters, Shift draws
+// a straight line, a layer with keyframes on takes no stroke, and old
+// masks become gray when their picture opens.
+
+impl Paint {
+    /// The top layer's id.
+    fn top(&self) -> sue_core::EntityId {
+        let arena = &self.runtime.engine.world.arena;
+        let picture = arena
+            .iter()
+            .find(|(_, entity)| sue_model::picture::is_picture(entity))
+            .map(|(_, entity)| entity.id())
+            .unwrap();
+        sue_paint::doc::layers(arena, picture).last().unwrap().id
+    }
+
+    /// The top layer's mask: its pixel format and bytes.
+    fn mask(&self) -> Option<(sue_core::PixelFormat, Vec<u8>)> {
+        let arena = &self.runtime.engine.world.arena;
+        let mask = sue_paint::doc::mask_of(arena, self.top())?;
+        let raster = sue_paint::doc::raster(arena, mask)?;
+        Some((raster.format(), raster.bytes()?.to_vec()))
+    }
+
+    /// A slow stroke from `from` to `to`, 6 points a frame, lifted where
+    /// it last moved: no flick.
+    fn slow(&mut self, from: Pos2, to: Pos2, modifiers: egui::Modifiers) {
+        self.step(vec![egui::Event::PointerMoved(from)]);
+        self.step(vec![button(from, true, modifiers)]);
+        let frames = (from.distance(to) / 6.0).ceil().max(1.0) as usize;
+        for index in 1..=frames {
+            let at = from + (to - from) * (index as f32 / frames as f32);
+            self.step(vec![egui::Event::PointerMoved(at)]);
+        }
+        self.step(vec![button(to, false, modifiers)]);
+        self.settle(3);
+    }
+
+    /// The text of Sue's notice, if one shows.
+    fn notice(&self) -> String {
+        self.runtime
+            .shell
+            .message()
+            .map(|(text, _)| text.to_owned())
+            .unwrap_or_default()
+    }
+}
+
+/// The Eraser on a layer's mask hides the layer where it goes, in the
+/// mask's own gray pixels, and leaves the layer's pixels alone; the Pen
+/// shows it again; each stroke is one undo step.
+#[test]
+fn sue_paint_strokes_on_a_mask_paint_its_gray_pixels() {
+    let mut paint = new_engine("paint-engine-mask");
+    paint.command("select.all");
+    paint.command("edit.fill");
+    paint.command("layer.mask.outside");
+    paint.command("select.none");
+    let layer = paint.layers().last().unwrap().2.clone();
+    let (format, shown) = paint.mask().expect("a mask");
+    assert_eq!(format, sue_core::PixelFormat::Gray8, "a new mask is gray");
+    assert!(shown.iter().all(|&v| v == 255), "it shows the whole layer");
+    paint.command("layer.mask.edit");
+    paint.command("tool.eraser");
+    let from = paint.middle() - vec2(120.0, 0.0);
+    let to = paint.middle() + vec2(120.0, 0.0);
+    paint.slow(from, to, egui::Modifiers::NONE);
+    let (format, hidden) = paint.mask().unwrap();
+    assert_eq!(format, sue_core::PixelFormat::Gray8);
+    let gone = hidden.iter().filter(|&&v| v < 128).count();
+    assert!(gone > 500, "the eraser hid a line of it: {gone} px");
+    assert_eq!(
+        paint.layers().last().unwrap().2,
+        layer,
+        "the layer's own pixels are untouched"
+    );
+    paint.command("tool.pen");
+    paint.slow(from, to, egui::Modifiers::NONE);
+    let (_, again) = paint.mask().unwrap();
+    let back = again.iter().filter(|&&v| v < 128).count();
+    assert!(back < gone / 4, "the pen shows it again: {back} px hidden");
+    paint.command("edit.undo");
+    assert_eq!(paint.mask().unwrap().1, hidden, "undo takes the pen back");
+    paint.command("edit.undo");
+    assert_eq!(paint.mask().unwrap().1, shown, "and the eraser");
+    paint.command("edit.redo");
+    assert_eq!(paint.mask().unwrap().1, hidden, "redo lays it again");
+}
+
+/// A mask that sits apart from its layer (its own place, or unlinked) is
+/// painted where it sits on the canvas, not where the layer does.
+#[test]
+fn sue_paint_a_mask_apart_from_its_layer_is_painted_where_it_sits() {
+    let mut paint = new_engine("paint-engine-mask-apart");
+    let from = paint.middle() - vec2(120.0, 0.0);
+    let to = paint.middle() + vec2(120.0, 0.0);
+    paint.command("select.all");
+    paint.command("layer.mask.outside");
+    paint.command("select.none");
+    paint.command("layer.mask.edit");
+    paint.command("tool.eraser");
+    // The first column of the mask an eraser stroke hides.
+    let first = |paint: &mut Paint| {
+        paint.slow(from, to, egui::Modifiers::NONE);
+        let (_, bytes) = paint.mask().unwrap();
+        let width = paint.layers().last().unwrap().1;
+        let first = (0..width)
+            .find(|&x| bytes.iter().skip(x).step_by(width).any(|&v| v < 128))
+            .expect("the eraser hid some of it");
+        paint.command("edit.undo");
+        first
+    };
+    let at_layer = first(&mut paint);
+    // The mask moved 40 pixels right of its layer.
+    let mask = {
+        let arena = &paint.runtime.engine.world.arena;
+        sue_paint::doc::mask_of(arena, paint.top()).unwrap()
+    };
+    let mut edit = sue_paint::doc::Edit::new("Move").then(sue_core::txn::SetProperty::new(
+        mask,
+        sue_model::picture::X,
+        40_i64,
+    ));
+    sue_core::ReversibleTransaction::apply(&mut edit, &mut paint.runtime.engine.world.arena)
+        .unwrap();
+    let apart = first(&mut paint);
+    assert!(
+        apart.abs_diff(at_layer - 40) <= 1,
+        "the stroke landed where the mask sits: column {apart}, with the layer {at_layer}"
+    );
+}
+
+/// A stroke stays inside the selection: it is cut where the selection
+/// ends, and its undo takes it all back.
+#[test]
+fn sue_paint_a_stroke_stays_inside_the_selection() {
+    let mut paint = new_engine("paint-engine-selection");
+    let middle = paint.middle();
+    let (from, to) = (middle - vec2(120.0, 0.0), middle + vec2(120.0, 0.0));
+    paint.slow(from, to, egui::Modifiers::NONE);
+    let whole = paint.profile();
+    assert!(whole.len() > 100, "the stroke was drawn");
+    paint.command("edit.undo");
+    // The selection: the stroke's left half.
+    paint.command("tool.selection");
+    paint.drag(
+        middle - vec2(200.0, 80.0),
+        middle + vec2(0.0, 80.0),
+        middle + vec2(0.0, 80.0),
+        egui::Modifiers::NONE,
+    );
+    paint.command("tool.pen");
+    paint.slow(from, to, egui::Modifiers::NONE);
+    let cut = paint.profile();
+    assert!(!cut.is_empty(), "the selected part was drawn");
+    let (first, last) = (cut[0].0, cut[cut.len() - 1].0);
+    assert!(first.abs_diff(whole[0].0) <= 2, "it starts where it did");
+    let middle_x = (whole[0].0 + whole[whole.len() - 1].0) / 2;
+    assert!(
+        last.abs_diff(middle_x) <= 4,
+        "it ends where the selection does: {last}, the middle {middle_x}"
+    );
+    paint.command("edit.undo");
+    assert!(paint.profile().is_empty(), "one undo step takes it back");
+}
+
+/// With the layer's transparent pixels locked, a stroke paints only where
+/// the layer has paint already: crossing a line adds no pixel.
+#[test]
+fn sue_paint_locked_transparent_pixels_stay_transparent() {
+    let mut paint = new_engine("paint-engine-lock");
+    let middle = paint.middle();
+    paint.slow(
+        middle - vec2(120.0, 0.0),
+        middle + vec2(120.0, 0.0),
+        egui::Modifiers::NONE,
+    );
+    let inked = paint.ink();
+    paint.command("layer.toggle.lock_alpha");
+    paint.slow(
+        middle - vec2(0.0, 100.0),
+        middle + vec2(0.0, 100.0),
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(paint.ink(), inked, "no pixel was added off the line");
+}
+
+/// Shift and a drag draw one straight line from the press to the lift,
+/// whatever way the pen went between.
+#[test]
+fn sue_paint_shift_draws_a_straight_line() {
+    let mut paint = new_engine("paint-engine-shift");
+    let from = paint.middle() - vec2(150.0, 0.0);
+    let shift = egui::Modifiers::SHIFT;
+    paint.step(vec![egui::Event::PointerMoved(from)]);
+    paint.step(vec![button(from, true, shift)]);
+    let legs = [
+        vec2(0.0, 0.0),
+        vec2(60.0, 60.0),
+        vec2(120.0, -70.0),
+        vec2(300.0, 0.0),
+    ];
+    for leg in legs.windows(2) {
+        for step in 1..=10 {
+            let at = from + leg[0] + (leg[1] - leg[0]) * (step as f32 / 10.0);
+            paint.step(vec![egui::Event::PointerMoved(at)]);
+        }
+    }
+    let to = from + vec2(300.0, 0.0);
+    paint.step(vec![button(to, false, shift)]);
+    paint.settle(3);
+    let ink = paint.ink();
+    assert!(!ink.is_empty(), "the line was drawn");
+    let (top, bottom) = (
+        ink.iter().map(|(_, y)| *y).min().unwrap(),
+        ink.iter().map(|(_, y)| *y).max().unwrap(),
+    );
+    let thick = paint
+        .profile()
+        .iter()
+        .map(|(_, thick)| *thick)
+        .max()
+        .unwrap();
+    assert!(
+        bottom - top <= thick + 4,
+        "one straight line, not the way the pen went: rows {top} to {bottom}, {thick} px thick"
+    );
+    assert!(paint.profile().len() > 150, "from the press to the lift");
+}
+
+/// A layer whose keyframes are on takes no stroke: nothing is painted,
+/// nothing goes on the undo stack, and a notice says why.
+#[test]
+fn sue_paint_a_layer_with_keyframes_on_refuses_strokes() {
+    let mut paint = new_engine("paint-engine-keyframes");
+    let layer = paint.top();
+    let mut on = sue_paint::anim::motion::enable_keyframes(layer, true);
+    sue_core::ReversibleTransaction::apply(&mut on, &mut paint.runtime.engine.world.arena).unwrap();
+    let depth = paint.runtime.engine.history.depth();
+    let middle = paint.middle();
+    paint.slow(
+        middle - vec2(100.0, 0.0),
+        middle + vec2(100.0, 0.0),
+        egui::Modifiers::NONE,
+    );
+    assert!(paint.profile().is_empty(), "nothing was painted");
+    assert_eq!(
+        paint.runtime.engine.history.depth(),
+        depth,
+        "nothing to undo"
+    );
+    assert!(
+        paint.notice().to_lowercase().contains("keyframes"),
+        "a notice says why: {:?}",
+        paint.notice()
+    );
+}
+
+/// A picture with a mask as 0.0.75 wrote it (RGBA, its alpha the cover),
+/// as a file brings it into the arena: once Sue Paint shows it, the mask
+/// is gray with the same cover, the picture looks the same, nothing is on
+/// the undo stack and the picture is not unsaved.
+#[test]
+fn sue_paint_old_rgba_masks_become_gray_and_the_picture_stays_clean() {
+    let (mut runtime, root) = runtime("paint-engine-old-mask");
+    let (mut made, picture) = sue_paint::doc::create(&sue_paint::doc::NewPicture {
+        name: "Old".to_owned(),
+        width: 64,
+        height: 32,
+        ..sue_paint::doc::NewPicture::default()
+    })
+    .unwrap();
+    let arena = &mut runtime.engine.world.arena;
+    sue_core::ReversibleTransaction::apply(&mut made, arena).unwrap();
+    let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
+    if let Some(bytes) =
+        sue_paint::doc::raster_mut(arena, layer).and_then(sue_core::RasterTile2D::bytes_mut)
+    {
+        bytes.fill(255);
+    }
+    let covers: Vec<u8> = (0..64 * 32).map(|i| ((i % 64) * 4) as u8).collect();
+    let pixels = covers.iter().flat_map(|&a| [255, 255, 255, a]).collect();
+    let old = sue_core::Entity::new(
+        "Mask",
+        sue_core::RasterTile2D::from_bytes(64, 32, sue_core::PixelFormat::Rgba8, pixels).unwrap(),
+    )
+    .with_class(sue_paint::doc::MASK_CLASS);
+    let mask = old.id();
+    arena.insert(old);
+    arena
+        .relate(sue_core::Relation::new(layer, sue_paint::doc::MASK, mask))
+        .unwrap();
+    let looks = |arena: &sue_core::Arena| {
+        sue_paint::composite::render(
+            arena,
+            picture,
+            [0, 0, 64, 32],
+            sue_paint::composite::RenderOptions::default(),
+        )
+    };
+    let before = looks(&runtime.engine.world.arena);
+    let depth = runtime.engine.history.depth();
+    let ctx = egui::Context::default();
+    let now = Instant::now();
+    runtime.request(
+        ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+        &mut NoTextures,
+        now,
+    );
+    frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+    let arena = &runtime.engine.world.arena;
+    let tile = sue_paint::doc::raster(arena, mask).unwrap();
+    assert_eq!(
+        tile.format(),
+        sue_core::PixelFormat::Gray8,
+        "the mask is gray"
+    );
+    assert_eq!(
+        tile.bytes().unwrap(),
+        covers.as_slice(),
+        "with the same cover"
+    );
+    assert_eq!(
+        sue_paint::doc::mask_of(arena, layer),
+        Some(mask),
+        "the same mask"
+    );
+    assert_eq!(looks(arena), before, "the picture looks as it did");
+    assert_eq!(runtime.engine.history.depth(), depth, "nothing to undo");
+    let unsaved = runtime
+        .applets
+        .get(&AppletId::new(sue_paint::ID).unwrap())
+        .map(|applet| applet.unsaved(&runtime.engine.world.arena))
+        .unwrap_or_default();
+    assert!(
+        unsaved.is_empty(),
+        "the picture is not unsaved: {unsaved:?}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// One stroke of the strokes sheet: its frames (how far the pen moves in
+/// each, in points, and how hard it presses) and how long it rests before
+/// it lifts.
+type SheetStroke = (&'static str, Vec<(egui::Vec2, f32)>);
+
+/// Writes a picture of real strokes drawn through the canvas with the
+/// brush engine, for a person to look at: rows slow, fast, light, heavy,
+/// a tap, a flick and a lift while moving; columns a pen's packets (four
+/// to a frame), the window's pointer events with a driver's pressure, and
+/// a mouse. `SUE_STROKE_SHEET` names the PNG file.
+#[test]
+#[ignore = "writes a picture of the brush engine's strokes for a person to look at"]
+fn engine_strokes_sheet() {
+    let mut paint = new_engine("paint-engine-strokes-sheet");
+    let ease = |s: f32| (s * std::f32::consts::PI).sin().max(0.0);
+    let rows: Vec<SheetStroke> = vec![
+        (
+            "slow",
+            (0..60)
+                .map(|i| (vec2(2.5, 0.0), 0.15 + 0.5 * ease(i as f32 / 59.0)))
+                .collect(),
+        ),
+        (
+            "fast",
+            (0..10)
+                .map(|i| (vec2(15.0, 0.0), 0.2 + 0.5 * ease(i as f32 / 9.0)))
+                .collect(),
+        ),
+        ("light", (0..30).map(|_| (vec2(5.0, 0.0), 0.12)).collect()),
+        ("heavy", (0..30).map(|_| (vec2(5.0, 0.0), 0.95)).collect()),
+        ("tap", vec![(vec2(0.0, 0.0), 0.5), (vec2(0.3, 0.0), 0.5)]),
+        (
+            "flick",
+            (0..12)
+                .map(|i| {
+                    (
+                        vec2(4.0 + i as f32 * 2.0, -0.5 * i as f32),
+                        0.5 - 0.03 * i as f32,
+                    )
+                })
+                .collect(),
+        ),
+        (
+            "lift moving",
+            (0..20).map(|_| (vec2(7.5, 0.0), 0.6)).collect(),
+        ),
+    ];
+    let middle = paint.middle();
+    let mut time = 20.0;
+    for (row, (_, legs)) in rows.iter().enumerate() {
+        for column in 0..3 {
+            let start = middle + vec2(-330.0 + column as f32 * 230.0, -215.0 + row as f32 * 62.0);
+            let pressure0 = legs.first().map_or(0.5, |leg| leg.1);
+            let mut at = start;
+            match column {
+                0 => {
+                    let mut events = vec![
+                        egui::Event::PointerMoved(start),
+                        button(start, true, egui::Modifiers::NONE),
+                    ];
+                    time += 0.005;
+                    stylus::push_for_test(packet(
+                        stylus::PenKind::Down,
+                        start,
+                        time,
+                        Some(pressure0),
+                    ));
+                    for (by, pressure) in legs {
+                        // Four packets to a frame.
+                        for quarter in 1..=4 {
+                            let p = at + *by * (quarter as f32 / 4.0);
+                            time += 0.004;
+                            stylus::push_for_test(packet(
+                                stylus::PenKind::Move,
+                                p,
+                                time,
+                                Some(*pressure),
+                            ));
+                        }
+                        at += *by;
+                        events.push(egui::Event::PointerMoved(at));
+                        paint.step(std::mem::take(&mut events));
+                    }
+                    time += 0.004;
+                    stylus::push_for_test(packet(stylus::PenKind::Up, at, time, None));
+                    paint.step(vec![button(at, false, egui::Modifiers::NONE)]);
+                }
+                _ => {
+                    let pen = column == 1;
+                    if pen {
+                        stylus::set_for_test(PenSource::WinTab, Some(pressure0));
+                    }
+                    paint.step(vec![egui::Event::PointerMoved(start)]);
+                    paint.step(vec![button(start, true, egui::Modifiers::NONE)]);
+                    for (by, pressure) in legs {
+                        at += *by;
+                        if pen {
+                            stylus::set_for_test(PenSource::WinTab, Some(*pressure));
+                        }
+                        paint.step(vec![egui::Event::PointerMoved(at)]);
+                    }
+                    if pen {
+                        stylus::set_for_test(PenSource::WinTab, None);
+                    }
+                    paint.step(vec![button(at, false, egui::Modifiers::NONE)]);
+                    stylus::forget_for_test();
+                }
+            }
+            paint.settle(3);
+        }
+    }
+    let layers = paint.layers();
+    let (_, width, bytes) = layers.last().unwrap();
+    let height = bytes.len() / 4 / width;
+    let mut out = Vec::with_capacity(width * height * 4);
+    for pixel in bytes.chunks(4) {
+        let cover = u32::from(pixel[3]);
+        for &ink in &pixel[..3] {
+            let ink = u32::from(ink);
+            out.push(((ink * cover + 255 * (255 - cover)) / 255) as u8);
+        }
+        out.push(255);
+    }
+    let png = sue_io::encode_png_rgba(*width as u32, height as u32, &out).unwrap();
+    let path = std::env::var("SUE_STROKE_SHEET").map_or_else(
+        |_| std::env::temp_dir().join("sue-engine-strokes.png"),
+        PathBuf::from,
+    );
+    std::fs::write(&path, png).unwrap();
+    println!("engine strokes: {}", path.display());
+}
+
+/// The Blend tool on a layer's mask blends the mask: a hard edge the
+/// eraser left goes soft, the layer's own pixels stay, and the drag is
+/// one undo step (the Crash Course softens a mask so).
+#[test]
+fn sue_paint_the_blend_tool_softens_a_mask() {
+    let mut paint = new_engine("paint-engine-blend-mask");
+    paint.command("select.all");
+    paint.command("edit.fill");
+    paint.command("layer.mask.outside");
+    paint.command("select.none");
+    paint.command("layer.mask.edit");
+    paint.command("tool.eraser");
+    let middle = paint.middle();
+    paint.slow(
+        middle - vec2(150.0, 0.0),
+        middle + vec2(150.0, 0.0),
+        egui::Modifiers::NONE,
+    );
+    let layer = paint.layers().last().unwrap().2.clone();
+    let (_, hard) = paint.mask().unwrap();
+    let soft = |values: &[u8]| values.iter().filter(|&&v| v > 8 && v < 247).count();
+    paint.command("tool.blend");
+    for row in -2..=2 {
+        let y = row as f32 * 6.0;
+        paint.slow(
+            middle - vec2(100.0, 40.0 - y),
+            middle + vec2(100.0, 40.0 + y),
+            egui::Modifiers::NONE,
+        );
+    }
+    let (format, blended) = paint.mask().unwrap();
+    assert_eq!(format, sue_core::PixelFormat::Gray8, "still a gray mask");
+    assert!(
+        soft(&blended) > soft(&hard) + 100,
+        "the edge went soft: {} soft values, {} before",
+        soft(&blended),
+        soft(&hard)
+    );
+    assert_eq!(
+        paint.layers().last().unwrap().2,
+        layer,
+        "the layer is untouched"
+    );
+    for _ in 0..5 {
+        paint.command("edit.undo");
+    }
+    assert_eq!(paint.mask().unwrap().1, hard, "each drag was one undo step");
+}
+
+/// A vector layer brought in with a mask (a `.clip` file may hold one):
+/// with Edit Mask on, the Eraser hides it in the mask's gray pixels, and
+/// no line is added to the layer.
+#[test]
+fn sue_paint_a_vector_layers_mask_takes_strokes() {
+    let mut paint = new_engine("paint-engine-vector-mask");
+    paint.command("layer.new.vector");
+    let layer = paint.top();
+    assert!(
+        sue_paint::vector::is_vector(&paint.runtime.engine.world.arena, layer),
+        "a vector layer"
+    );
+    let (mut edit, _) =
+        sue_paint::doc::new_mask(&paint.runtime.engine.world.arena, layer, |_, _| 1.0).unwrap();
+    sue_core::ReversibleTransaction::apply(&mut edit, &mut paint.runtime.engine.world.arena)
+        .unwrap();
+    paint.settle(2);
+    paint.command("layer.mask.edit");
+    paint.command("tool.eraser");
+    let middle = paint.middle();
+    paint.slow(
+        middle - vec2(120.0, 0.0),
+        middle + vec2(120.0, 0.0),
+        egui::Modifiers::NONE,
+    );
+    let (format, values) = paint.mask().unwrap();
+    assert_eq!(format, sue_core::PixelFormat::Gray8);
+    let hidden = values.iter().filter(|&&v| v < 128).count();
+    assert!(hidden > 500, "the eraser hid a line of it: {hidden} px");
+    paint.command("edit.undo");
+    assert!(
+        paint.mask().unwrap().1.iter().all(|&v| v == 255),
+        "one undo step takes it back"
+    );
+}
+
+/// With the layer's transparent pixels locked, a stroke across a line
+/// recolors the line where it crosses (and adds nothing off it).
+#[test]
+fn sue_paint_locked_transparent_pixels_still_take_paint() {
+    let mut paint = new_engine("paint-engine-lock-paints");
+    let middle = paint.middle();
+    paint.slow(
+        middle - vec2(120.0, 0.0),
+        middle + vec2(120.0, 0.0),
+        egui::Modifiers::NONE,
+    );
+    let before = paint.layers().last().unwrap().2.clone();
+    paint.command("layer.toggle.lock_alpha");
+    // The sub color (white), so the crossing shows.
+    paint.command("color.swap");
+    paint.slow(
+        middle - vec2(0.0, 100.0),
+        middle + vec2(0.0, 100.0),
+        egui::Modifiers::NONE,
+    );
+    let after = paint.layers().last().unwrap().2.clone();
+    let alphas = |bytes: &[u8]| bytes.iter().skip(3).step_by(4).copied().collect::<Vec<_>>();
+    assert_eq!(alphas(&after), alphas(&before), "no alpha changed");
+    let recolored = before
+        .chunks(4)
+        .zip(after.chunks(4))
+        .filter(|(a, b)| a[3] > 0 && a[..3] != b[..3])
+        .count();
+    assert!(
+        recolored > 50,
+        "the crossing took the new color: {recolored} px"
+    );
+}
+
+/// The Blend tool on a layer with keyframes on is refused like a brush:
+/// nothing changes and nothing goes on the undo stack.
+#[test]
+fn sue_paint_a_layer_with_keyframes_on_refuses_the_blend_tool() {
+    let mut paint = new_engine("paint-engine-keyframes-blend");
+    let middle = paint.middle();
+    paint.slow(
+        middle - vec2(120.0, 0.0),
+        middle + vec2(120.0, 0.0),
+        egui::Modifiers::NONE,
+    );
+    let layer = paint.top();
+    let mut on = sue_paint::anim::motion::enable_keyframes(layer, true);
+    sue_core::ReversibleTransaction::apply(&mut on, &mut paint.runtime.engine.world.arena).unwrap();
+    let before = paint.layers().last().unwrap().2.clone();
+    let depth = paint.runtime.engine.history.depth();
+    paint.command("tool.blend");
+    paint.slow(
+        middle - vec2(0.0, 60.0),
+        middle + vec2(0.0, 60.0),
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(paint.layers().last().unwrap().2, before, "nothing blended");
+    assert_eq!(
+        paint.runtime.engine.history.depth(),
+        depth,
+        "nothing to undo"
+    );
+    assert!(
+        paint.notice().to_lowercase().contains("keyframes"),
+        "a notice says why: {:?}",
+        paint.notice()
+    );
 }

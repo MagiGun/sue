@@ -42,7 +42,7 @@ pub use layers::{
 pub use lines_tones::{LinesAndTones, lines_and_tones};
 pub use masks::{
     MASK, MASK_CLASS, MASK_LINKED, MASK_ON, apply_mask, cover, delete_mask, mask_linked, mask_of,
-    mask_offset, mask_on, new_mask, set_mask_linked, shown_at,
+    mask_offset, mask_on, migrate_masks, new_mask, set_mask_linked, shown_at,
 };
 pub(crate) use order::key_above;
 pub use order::{key_below, keys_above, landing, move_block, reorder};
