@@ -769,6 +769,7 @@ pub fn menus() -> Vec<Menu> {
                 item("layer.convert"),
                 item("filter.lines_tones"),
                 item("layer.lines_tones_vector"),
+                item("layer.update_lines"),
                 item("select.from_layer"),
             ],
         ),

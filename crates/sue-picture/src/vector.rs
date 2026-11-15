@@ -1704,27 +1704,19 @@ fn legacy_step(from: &Sample, to: &Sample) -> f32 {
     (distance / speed).clamp(0.001, 0.05)
 }
 
-/// The legacy `line` as a line of the brush engine: its brush read from
-/// its text (`BrushPreset::from_legacy_text`) with its tip pictures kept
-/// by hash, the pen's pressure and lean as it said them, time made from
-/// the speeds it kept, the pen dwelling a moment where it landed, a lift
-/// where it ended, and the seed the legacy
-/// engine took from its first place. `None` for a line already of the
-/// engine, or one with no samples.
-#[must_use]
-pub fn to_engine(line: &Line) -> Option<Line> {
-    if line.engine.is_some() || line.samples.is_empty() {
-        return None;
-    }
-    let mut preset = BrushPreset::from_legacy_text(&line.tip.to_text());
+/// The brush of the engine a legacy `tip` finished with `finish` is: its
+/// text read as a preset (`BrushPreset::from_legacy_text`), with its tip
+/// pictures kept by hash.
+fn legacy_brush(tip: &Tip, finish: Finish) -> LineBrush {
+    let mut preset = BrushPreset::from_legacy_text(&tip.to_text());
     // The finish it was drawn with is the brush's in the engine.
-    preset.input.post_correction = line.finish.correction;
-    preset.input.flick = line.finish.flick.is_some();
+    preset.input.post_correction = finish.correction;
+    preset.input.flick = finish.flick.is_some();
     let mut pictures = Vec::new();
     if let TipSource::Images { pictures: refs, .. } = &mut preset.tip {
-        let count = line.tip.shape_count.max(1);
+        let count = tip.shape_count.max(1);
         let mut kept = Vec::new();
-        for id in line.tip.shape..line.tip.shape.saturating_add(count) {
+        for id in tip.shape..tip.shape.saturating_add(count) {
             if let Some(picture) = crate::brush::shape(id)
                 .as_deref()
                 .and_then(BrushPicture::of_shape)
@@ -1738,7 +1730,22 @@ pub fn to_engine(line: &Line) -> Option<Line> {
             *refs = kept;
         }
     }
-    let brush = LineBrush { preset, pictures };
+    LineBrush { preset, pictures }
+}
+
+/// The legacy `line` as a line of the brush engine: its brush read from
+/// its text (`BrushPreset::from_legacy_text`) with its tip pictures kept
+/// by hash, the pen's pressure and lean as it said them, time made from
+/// the speeds it kept, the pen dwelling a moment where it landed, a lift
+/// where it ended, and the seed the legacy
+/// engine took from its first place. `None` for a line already of the
+/// engine, or one with no samples.
+#[must_use]
+pub fn to_engine(line: &Line) -> Option<Line> {
+    if line.engine.is_some() || line.samples.is_empty() {
+        return None;
+    }
+    let brush = legacy_brush(&line.tip, line.finish);
     // The legacy engine painted the first sample at its full pressure;
     // the engine lets a landing's pressure rise over a few milliseconds
     // (against spikes), so the pen dwells there that long first.
@@ -1800,18 +1807,112 @@ pub fn to_engine(line: &Line) -> Option<Line> {
 /// layer or holds no legacy line.
 #[must_use]
 pub fn update_lines(arena: &mut Arena, layer: EntityId, label: &str) -> Option<Edit> {
+    relined(arena, layer, label, |before| {
+        if before.iter().all(|line| line.engine.is_some()) {
+            return None;
+        }
+        Some(
+            before
+                .iter()
+                .map(|line| to_engine(line).unwrap_or_else(|| line.clone()))
+                .collect(),
+        )
+    })
+}
+
+/// What [`update_lines_kept`] did: how many lines it updated, and how
+/// many legacy lines it left as they were because the engine cannot yet
+/// draw them as they look (a flick, or post correction).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Updated {
+    /// Lines now of the brush engine.
+    pub updated: usize,
+    /// Legacy lines left to the legacy engine.
+    pub kept: usize,
+}
+
+/// `true` when the brush engine draws `line` with everything the legacy
+/// engine gave it: engine 1 has no flick and no post correction, so a
+/// line finished with either would lose it.
+#[must_use]
+pub fn updates_unchanged(line: &Line) -> bool {
+    line.finish.flick.is_none() && line.finish.correction == 0
+}
+
+/// The menu's "Update Lines to New Brush Engine": [`update_lines`], but
+/// a legacy line that would lose its flick or its post correction stays
+/// a legacy line ([`updates_unchanged`]), so nothing a person drew
+/// changes how it ends or how smooth it is. `None` when there is
+/// nothing to update; else the step and what it did.
+#[must_use]
+pub fn update_lines_kept(
+    arena: &mut Arena,
+    layer: EntityId,
+    label: &str,
+) -> Option<(Edit, Updated)> {
+    let mut did = Updated::default();
+    let edit = relined(arena, layer, label, |before| {
+        let after: Vec<Line> = before
+            .iter()
+            .map(|line| {
+                if line.engine.is_some() {
+                    return line.clone();
+                }
+                if !updates_unchanged(line) {
+                    did.kept += 1;
+                    return line.clone();
+                }
+                match to_engine(line) {
+                    Some(updated) => {
+                        did.updated += 1;
+                        updated
+                    }
+                    None => line.clone(),
+                }
+            })
+            .collect();
+        (did.updated > 0).then_some(after)
+    });
+    edit.map(|edit| (edit, did))
+}
+
+/// How many legacy lines the vector `layer` holds, and how many of them
+/// [`update_lines_kept`] would leave as they are.
+#[must_use]
+pub fn legacy_lines(arena: &Arena, layer: EntityId) -> Updated {
+    let mut out = Updated::default();
+    if !is_vector(arena, layer) {
+        return out;
+    }
+    for line in lines(&geometry(arena, layer)) {
+        if line.engine.is_none() && !line.samples.is_empty() {
+            if updates_unchanged(&line) {
+                out.updated += 1;
+            } else {
+                out.kept += 1;
+            }
+        }
+    }
+    out
+}
+
+/// The lines of the vector `layer` changed by `change` (from the lines
+/// there, `None` to change nothing), the layer painted again from them,
+/// as one step named `label` that undo takes back whole. `None` when the
+/// layer is not a vector layer or nothing changed.
+#[must_use]
+pub fn relined(
+    arena: &mut Arena,
+    layer: EntityId,
+    label: &str,
+    change: impl FnOnce(&[Line]) -> Option<Vec<Line>>,
+) -> Option<Edit> {
     if !is_vector(arena, layer) {
         return None;
     }
     let old = geometry(arena, layer);
     let before = lines(&old);
-    if before.iter().all(|line| line.engine.is_some()) {
-        return None;
-    }
-    let after: Vec<Line> = before
-        .iter()
-        .map(|line| to_engine(line).unwrap_or_else(|| line.clone()))
-        .collect();
+    let after = change(&before)?;
     let raster = crate::doc::raster_mut(arena, layer)?;
     let (width, height) = (raster.width(), raster.height());
     let was = raster.bytes()?.to_vec();
@@ -1820,6 +1921,445 @@ pub fn update_lines(arena: &mut Arena, layer: EntityId, label: &str) -> Option<E
     let pixels = crate::doc::diff_patch(&was, painted.bytes()?, width, height)
         .map(|patch| RasterEdit::new(layer, label, vec![patch]));
     Some(keep(arena, layer, old, &after, pixels, label))
+}
+
+// ----- Editing lines: Tool Property, the Object tool's box, figures --------------
+
+/// What Tool Property sets on picked lines: each part `None` stays as
+/// each line has it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Restyle {
+    /// The main color (sRGB, 0 to 1).
+    pub main: Option<[f32; 3]>,
+    /// The sub color.
+    pub sub: Option<[f32; 3]>,
+    /// The brush size, in layer pixels.
+    pub size: Option<f32>,
+    /// The brush shape: a sub tool's brush, taken with each line's own
+    /// size and its eraser setting.
+    pub shape: Option<Tip>,
+}
+
+impl Restyle {
+    /// `true` when it changes nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// The smallest brush a line keeps, in layer pixels.
+const MIN_SIZE: f32 = 0.1;
+
+/// The brush of a line of the engine changed to `tip` (a new shape) or
+/// to `size`: its preset made again, its hash with it.
+fn rebrushed(engine: &mut EngineLine, tip: Option<&Tip>, finish: Finish, size: f32) {
+    let mut brush = match (tip, &engine.brush) {
+        (Some(tip), _) => legacy_brush(tip, finish),
+        (None, Some(brush)) => (**brush).clone(),
+        // A brush the layer lacks paints nothing; nothing to resize.
+        (None, None) => return,
+    };
+    brush.preset.set(sue_model::brush::param::SIZE, size);
+    engine.brush_hash = brush.hash();
+    engine.brush = Some(Arc::new(brush));
+}
+
+/// `lines` with the ones at `picked` restyled as `restyle` says.
+#[must_use]
+pub fn restyled(lines: &[Line], picked: &[usize], restyle: &Restyle) -> Vec<Line> {
+    let mut out = lines.to_vec();
+    for index in picked {
+        let Some(line) = out.get_mut(*index) else {
+            continue;
+        };
+        if let Some(main) = restyle.main {
+            line.colors[0] = main.map(|value| value.clamp(0.0, 1.0));
+        }
+        if let Some(sub) = restyle.sub {
+            line.colors[1] = sub.map(|value| value.clamp(0.0, 1.0));
+        }
+        if restyle.shape.is_none() && restyle.size.is_none() {
+            continue;
+        }
+        let size = restyle.size.unwrap_or(line.tip.size).max(MIN_SIZE);
+        if let Some(shape) = restyle.shape {
+            line.tip = Tip {
+                size,
+                eraser: line.tip.eraser,
+                ..shape
+            };
+        } else {
+            line.tip.size = size;
+        }
+        let (tip, finish) = (line.tip, line.finish);
+        if let Some(engine) = &mut line.engine {
+            rebrushed(
+                engine,
+                restyle.shape.is_some().then_some(&tip),
+                finish,
+                size,
+            );
+        }
+    }
+    out
+}
+
+/// The box round the lines at `picked`: `[left, top, right, bottom]` of
+/// their paths in layer pixels; `None` when none of them has a sample.
+#[must_use]
+pub fn bounds(lines: &[Line], picked: &[usize]) -> Option<[f32; 4]> {
+    let mut out = [
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    ];
+    for line in picked.iter().filter_map(|index| lines.get(*index)) {
+        for sample in &line.samples {
+            out[0] = out[0].min(sample.at[0]);
+            out[1] = out[1].min(sample.at[1]);
+            out[2] = out[2].max(sample.at[0]);
+            out[3] = out[3].max(sample.at[1]);
+        }
+    }
+    out[0].is_finite().then_some(out)
+}
+
+/// The corners of the box `[left, top, right, bottom]`: top left, top
+/// right, bottom right, bottom left.
+#[must_use]
+pub fn corners(rect: [f32; 4]) -> [[f32; 2]; 4] {
+    [
+        [rect[0], rect[1]],
+        [rect[2], rect[1]],
+        [rect[2], rect[3]],
+        [rect[0], rect[3]],
+    ]
+}
+
+/// The place `at` in the box `from` (`[left, top, right, bottom]`) takes
+/// when the box's corners go to `to` (top left, top right, bottom right,
+/// bottom left): blended between them as it sits in the box, so a box
+/// scaled stays a box and a corner moved alone bends it (free transform).
+#[must_use]
+pub fn map_point(at: [f32; 2], from: [f32; 4], to: &[[f32; 2]; 4]) -> [f32; 2] {
+    let part = |value: f32, low: f32, high: f32| {
+        if (high - low).abs() > f32::EPSILON {
+            (value - low) / (high - low)
+        } else {
+            0.0
+        }
+    };
+    let (u, v) = (part(at[0], from[0], from[2]), part(at[1], from[1], from[3]));
+    let mix = |axis: usize| {
+        (1.0 - u) * (1.0 - v) * to[0][axis]
+            + u * (1.0 - v) * to[1][axis]
+            + u * v * to[2][axis]
+            + (1.0 - u) * v * to[3][axis]
+    };
+    [mix(0), mix(1)]
+}
+
+/// The area inside the four corners `quad`, in order round it.
+fn quad_area(quad: &[[f32; 2]; 4]) -> f32 {
+    let mut twice = 0.0;
+    for index in 0..4 {
+        let (a, b) = (quad[index], quad[(index + 1) % 4]);
+        twice += a[0] * b[1] - b[0] * a[1];
+    }
+    (twice / 2.0).abs()
+}
+
+/// `lines` with the ones at `picked` mapped from their box `from` to the
+/// corners `to` ([`map_point`]). With `thicken` (Adjust line thickness
+/// when scaling), each line's brush grows or shrinks as the box's area
+/// does, by the square root of its change.
+#[must_use]
+pub fn transformed(
+    lines: &[Line],
+    picked: &[usize],
+    from: [f32; 4],
+    to: &[[f32; 2]; 4],
+    thicken: bool,
+) -> Vec<Line> {
+    let before = (from[2] - from[0]).abs() * (from[3] - from[1]).abs();
+    let scale = if thicken && before > f32::EPSILON {
+        (quad_area(to) / before).sqrt()
+    } else {
+        1.0
+    };
+    let mut out = lines.to_vec();
+    for index in picked {
+        let Some(line) = out.get_mut(*index) else {
+            continue;
+        };
+        for sample in &mut line.samples {
+            sample.at = map_point(sample.at, from, to);
+        }
+        if (scale - 1.0).abs() > f32::EPSILON {
+            let size = (line.tip.size * scale).max(MIN_SIZE);
+            line.tip.size = size;
+            let finish = line.finish;
+            if let Some(engine) = &mut line.engine {
+                rebrushed(engine, None, finish, size);
+            }
+        }
+    }
+    out
+}
+
+/// `true` when `at` is inside the closed loop `path` (even and odd
+/// crossings).
+fn inside(path: &[[f32; 2]], at: [f32; 2]) -> bool {
+    let Some(mut last) = path.last().copied() else {
+        return false;
+    };
+    let mut odd = false;
+    for point in path {
+        let (a, b) = (last, *point);
+        if (a[1] > at[1]) != (b[1] > at[1]) {
+            let cross = a[0] + (at[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0]);
+            if at[0] < cross {
+                odd = !odd;
+            }
+        }
+        last = b;
+    }
+    odd
+}
+
+/// The lines a freehand loop `path` (layer pixels) drawn round them
+/// picks: those with at least half of their path inside it, so a loose
+/// loop that cuts a line's tip still takes it and one that only crosses
+/// a line does not.
+#[must_use]
+pub fn in_loop(lines: &[Line], path: &[[f32; 2]]) -> Vec<usize> {
+    if path.len() < 3 {
+        return Vec::new();
+    }
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| {
+            let count = line.samples.len();
+            let within = line
+                .samples
+                .iter()
+                .filter(|sample| inside(path, sample.at))
+                .count();
+            count > 0 && within * 2 >= count
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// A line a figure lays on a vector layer: along `points` (layer pixels)
+/// with the brush `tip` and `colors`, at full pressure; every sample a
+/// corner when `corners` (a rectangle or polyline, which Correct Line
+/// edits by its corners), else its control points found from its path
+/// (an ellipse or a curve).
+#[must_use]
+pub fn figure_line(points: &[[f32; 2]], tip: Tip, colors: [[f32; 3]; 2], corners: bool) -> Line {
+    let samples: Vec<Sample> = points
+        .iter()
+        .map(|at| Sample {
+            at: *at,
+            pressure: 1.0,
+            speed: 0.0,
+            tilt: 0.0,
+            lean: [0.0, 0.0],
+            width: 1.0,
+            alpha: 1.0,
+        })
+        .collect();
+    let marks = if corners {
+        vec![CONTROL | CORNER; samples.len()]
+    } else {
+        Vec::new()
+    };
+    Line {
+        samples,
+        tip,
+        colors,
+        finish: Finish::default(),
+        copies: Vec::new(),
+        marks,
+        engine: None,
+    }
+}
+
+/// The ends of `line` within `reach` of an end of one of `others`, or
+/// of its own other end, put there (Vector magnet; an open end drawn
+/// onto the other closes the shape). The line follows the end it moves
+/// over `reach` of its length, so it bends there instead of jumping.
+/// `true` when an end moved.
+pub fn snap_ends(line: &mut Line, others: &[Line], reach: f32) -> bool {
+    // Its own start only for its last end: the first stays where it
+    // began.
+    let first = snap_end(line, false, others, reach, false);
+    snap_end(line, true, others, reach, true) || first
+}
+
+/// One end of `line` (its last with `last`, else its first) within
+/// `reach` of an end of one of `others`, or with `close` of its own
+/// other end, put there as [`snap_ends`] does: an open end dragged onto
+/// the other closes the shape. `true` when it moved.
+pub fn snap_end(line: &mut Line, last: bool, others: &[Line], reach: f32, close: bool) -> bool {
+    let count = line.samples.len();
+    if count < 2 || reach <= 0.0 {
+        return false;
+    }
+    let arcs = arcs(&line.samples);
+    let total = arcs.last().copied().unwrap_or(0.0);
+    let (end, far) = if last { (count - 1, 0) } else { (0, count - 1) };
+    let at = line.samples[end].at;
+    let mut target: Option<([f32; 2], f32)> = None;
+    let mut consider = |to: [f32; 2]| {
+        let away = distance(at, to);
+        if away > 0.0 && away <= reach && target.is_none_or(|(_, best)| away < best) {
+            target = Some((to, away));
+        }
+    };
+    // Its own other end, when the line is long enough to close.
+    if close && total > reach * 3.0 {
+        consider(line.samples[far].at);
+    }
+    for other in others {
+        if let (Some(a), Some(b)) = (other.samples.first(), other.samples.last()) {
+            consider(a.at);
+            consider(b.at);
+        }
+    }
+    let Some((to, _)) = target else {
+        return false;
+    };
+    let by = [to[0] - at[0], to[1] - at[1]];
+    // Over at most a third of the line, so a short line is not dragged
+    // whole.
+    let span = reach.min(total / 3.0).max(f32::EPSILON);
+    for index in 0..count {
+        let t = 1.0 - ((arcs[index] - arcs[end]).abs() / span).min(1.0);
+        if t > 0.0 {
+            let sample = &mut line.samples[index];
+            sample.at[0] += by[0] * t;
+            sample.at[1] += by[1] * t;
+        }
+    }
+    true
+}
+
+/// What a fill looks at with Fill up to vector path (FGV-33): the
+/// layers `refer` names drawn as [`crate::fill::reference`] draws them,
+/// but each vector layer among them as its lines' paths, two pixels wide
+/// and opaque, instead of its pixels. An area filled up to a line then
+/// reaches in under the line to its middle, so no gap shows between the
+/// fill and the line's soft edge. `None` when there is nothing to look
+/// at.
+#[must_use]
+pub fn path_reference(
+    arena: &Arena,
+    picture: EntityId,
+    size: [u32; 2],
+    editing: Option<EntityId>,
+    picked: &[EntityId],
+    refer: crate::fill::Refer,
+    exclude: crate::fill::Exclude,
+) -> Option<Vec<u8>> {
+    let layers = crate::fill::ReferLayer::of_picture(arena, picture);
+    let keep = crate::fill::referred(&layers, editing, picked, refer, exclude);
+    if keep.is_empty() {
+        return None;
+    }
+    let vectors: Vec<EntityId> = keep
+        .iter()
+        .copied()
+        .filter(|layer| is_vector(arena, *layer))
+        .collect();
+    let view = crate::composite::FrameView {
+        hidden: layers
+            .iter()
+            .filter(|layer| {
+                !layer.folder && (!keep.contains(&layer.id) || vectors.contains(&layer.id))
+            })
+            .map(|layer| layer.id)
+            .collect(),
+        ..crate::composite::FrameView::default()
+    };
+    let mut pixels = crate::composite::render_view(
+        arena,
+        picture,
+        [0, 0, size[0], size[1]],
+        crate::composite::RenderOptions {
+            paper: !exclude.paper,
+            drafts: !exclude.drafts,
+        },
+        Some(&view),
+    );
+    for layer in vectors {
+        let offset = arena
+            .get_by_id(layer)
+            .map(|entity| sue_model::picture::LayerStyle::of(entity).offset)
+            .unwrap_or([0, 0])
+            .map(|value| value as f32);
+        for line in lines(&geometry(arena, layer)) {
+            if line.tip.eraser {
+                continue;
+            }
+            draw_path(&mut pixels, size, &line.samples, offset);
+        }
+    }
+    Some(pixels)
+}
+
+/// The path of `samples` (moved by `offset`) drawn two pixels wide in
+/// opaque black into the straight RGBA8 `pixels` of `size`: wide enough
+/// that no fill slips through it between two pixels.
+fn draw_path(pixels: &mut [u8], size: [u32; 2], samples: &[Sample], offset: [f32; 2]) {
+    let mut plot = |x: f32, y: f32| {
+        let (left, top) = ((x - 0.5).floor(), (y - 0.5).floor());
+        for (dx, dy) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+            let (px, py) = (left + dx, top + dy);
+            if px < 0.0 || py < 0.0 || px >= size[0] as f32 || py >= size[1] as f32 {
+                continue;
+            }
+            let at = ((py as usize) * size[0] as usize + px as usize) * 4;
+            if let Some(pixel) = pixels.get_mut(at..at + 4) {
+                pixel.copy_from_slice(&[0, 0, 0, 255]);
+            }
+        }
+    };
+    for (index, sample) in samples.iter().enumerate() {
+        let to = [sample.at[0] + offset[0], sample.at[1] + offset[1]];
+        let from = samples.get(index.wrapping_sub(1)).map_or(to, |before| {
+            [before.at[0] + offset[0], before.at[1] + offset[1]]
+        });
+        let steps = ((to[0] - from[0]).hypot(to[1] - from[1]) / 0.5)
+            .ceil()
+            .max(1.0) as usize;
+        for step in 0..=steps {
+            let t = step as f32 / steps as f32;
+            plot(
+                from[0] + (to[0] - from[0]) * t,
+                from[1] + (to[1] - from[1]) * t,
+            );
+        }
+    }
+}
+
+/// The lines of each vector layer the eraser, `radius` wide, touched
+/// `at` (each in its own layer pixels): for every layer it touched, the
+/// lines left. The Vector eraser over several picked layers.
+#[must_use]
+pub fn erase_layers(
+    layers: &[(EntityId, Vec<Line>, [f32; 2])],
+    radius: f32,
+    mode: Erase,
+) -> Vec<(EntityId, Vec<Line>)> {
+    layers
+        .iter()
+        .filter_map(|(layer, lines, at)| Some((*layer, erase(lines, *at, radius, mode)?)))
+        .collect()
 }
 
 #[cfg(test)]
@@ -2329,5 +2869,322 @@ mod tests {
             new * 10 >= old * 8 && new * 10 <= old * 12,
             "legacy {old} pixels, new {new}"
         );
+    }
+
+    // ----- Editing lines (P4-14) ---------------------------------------------------
+
+    #[test]
+    fn restyling_picked_lines_recolors_and_resizes_only_them() {
+        let lines = vec![line([0.0, 0.0], [10.0, 0.0]), line([0.0, 5.0], [10.0, 5.0])];
+        let restyle = Restyle {
+            main: Some([0.08, 0.08, 0.08]),
+            sub: Some([1.5, -1.0, 0.5]),
+            size: Some(12.0),
+            shape: None,
+        };
+        let out = restyled(&lines, &[1], &restyle);
+        assert_eq!(out[0], lines[0], "a line not picked stays");
+        assert_eq!(out[1].colors, [[0.08; 3], [1.0, 0.0, 0.5]]);
+        assert!((out[1].tip.size - 12.0).abs() < f32::EPSILON);
+        assert_eq!(out[1].samples, lines[1].samples, "the path stays");
+        assert!(Restyle::default().is_empty() && !restyle.is_empty());
+        assert_eq!(restyled(&lines, &[1], &Restyle::default()), lines);
+    }
+
+    #[test]
+    fn a_brush_shape_keeps_each_lines_size_and_eraser() {
+        let mut eraser = line([0.0, 0.0], [10.0, 0.0]);
+        eraser.tip.eraser = true;
+        let lines = vec![line([0.0, 0.0], [10.0, 0.0]), eraser];
+        let shape = Tip {
+            size: 40.0,
+            hardness: 0.25,
+            grain: 0.5,
+            ..Tip::default()
+        };
+        let restyle = Restyle {
+            shape: Some(shape),
+            ..Restyle::default()
+        };
+        let out = restyled(&lines, &[0, 1], &restyle);
+        for (was, now) in lines.iter().zip(&out) {
+            assert!((now.tip.size - was.tip.size).abs() < f32::EPSILON);
+            assert_eq!(now.tip.eraser, was.tip.eraser);
+            assert!((now.tip.hardness - 0.25).abs() < f32::EPSILON);
+            assert!((now.tip.grain - 0.5).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn a_line_of_the_engine_resized_names_its_new_brush() {
+        let engine = to_engine(&line([0.0, 0.0], [30.0, 0.0])).expect("an engine line");
+        let old = engine.engine.clone().unwrap();
+        let out = restyled(
+            &[engine],
+            &[0],
+            &Restyle {
+                size: Some(9.0),
+                ..Restyle::default()
+            },
+        );
+        let new = out[0].engine.as_ref().unwrap();
+        let brush = new.brush.as_ref().unwrap();
+        assert_ne!(new.brush_hash, old.brush_hash, "a new brush, a new hash");
+        assert_eq!(new.brush_hash, brush.hash());
+        assert_eq!(brush.preset.value(sue_model::brush::param::SIZE), Some(9.0));
+        // Kept and read again, the line is the same.
+        let read = lines(&to_geometry(&out));
+        assert_eq!(read[0].engine.as_ref().unwrap().brush_hash, new.brush_hash);
+    }
+
+    #[test]
+    fn the_box_maps_lines_and_thickens_them_when_asked() {
+        let lines = vec![
+            line([0.0, 0.0], [10.0, 10.0]),
+            line([50.0, 50.0], [60.0, 50.0]),
+        ];
+        let from = bounds(&lines, &[0]).expect("a box");
+        assert_eq!(from, [0.0, 0.0, 10.0, 10.0]);
+        assert_eq!(bounds(&lines, &[]), None);
+        // The same corners leave every point where it was.
+        let same = map_point([3.0, 7.0], from, &corners(from));
+        assert!((same[0] - 3.0).abs() < 1e-4 && (same[1] - 7.0).abs() < 1e-4);
+        // Twice as wide and twice as tall from the top left.
+        let to = corners([0.0, 0.0, 20.0, 20.0]);
+        let thin = transformed(&lines, &[0], from, &to, false);
+        let last = thin[0].samples.last().unwrap().at;
+        assert!((last[0] - 20.0).abs() < 1e-4 && (last[1] - 20.0).abs() < 1e-4);
+        assert!((thin[0].tip.size - lines[0].tip.size).abs() < f32::EPSILON);
+        assert_eq!(thin[1], lines[1], "a line not picked stays");
+        let thick = transformed(&lines, &[0], from, &to, true);
+        assert!((thick[0].tip.size - lines[0].tip.size * 2.0).abs() < 1e-4);
+        // Free transform: one corner moved alone bends the box.
+        let mut bent = corners(from);
+        bent[2] = [20.0, 10.0];
+        assert_eq!(map_point([10.0, 10.0], from, &bent), [20.0, 10.0]);
+        assert_eq!(map_point([0.0, 10.0], from, &bent), [0.0, 10.0]);
+        let middle = map_point([5.0, 5.0], from, &bent);
+        assert!((middle[0] - 7.5).abs() < 1e-4 && (middle[1] - 5.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_loop_picks_the_lines_mostly_inside_it() {
+        let lines = vec![
+            line([10.0, 10.0], [20.0, 10.0]),
+            // Two thirds inside: picked.
+            line([20.0, 20.0], [35.0, 20.0]),
+            // Only crossed: left.
+            line([-20.0, 15.0], [60.0, 15.0]),
+            line([100.0, 100.0], [110.0, 100.0]),
+        ];
+        let square = [[0.0, 0.0], [30.0, 0.0], [30.0, 30.0], [0.0, 30.0]];
+        assert_eq!(in_loop(&lines, &square), [0, 1]);
+        assert!(in_loop(&lines, &square[..2]).is_empty(), "no loop yet");
+    }
+
+    #[test]
+    fn a_figure_line_keeps_its_corners_or_finds_them() {
+        let tip = Tip {
+            size: 12.0,
+            grain: 0.8,
+            ..Tip::default()
+        };
+        let square = [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 10.0],
+            [0.0, 10.0],
+            [0.0, 0.0],
+        ];
+        let kept = figure_line(&square, tip, [[0.2; 3], [1.0; 3]], true);
+        assert_eq!(kept.samples.len(), 5);
+        assert!(kept.marks.iter().all(|mark| *mark == CONTROL | CORNER));
+        assert!(kept.samples.iter().all(|sample| sample.pressure == 1.0));
+        assert_eq!(kept.tip, tip, "the sub tool's brush shape");
+        let round = figure_line(&square, tip, [[0.2; 3], [1.0; 3]], false);
+        assert!(round.marks.is_empty());
+        // It reads back as it was kept, and it paints.
+        let read = lines(&to_geometry(std::slice::from_ref(&kept)));
+        assert_eq!(read[0].samples, kept.samples);
+        assert_eq!(read[0].marks, kept.marks);
+        assert!((read[0].tip.size - 12.0).abs() < f32::EPSILON);
+        assert!((read[0].tip.grain - 0.8).abs() < 1e-6);
+        assert!(
+            render(&[kept], 20, 20)
+                .unwrap()
+                .bytes()
+                .unwrap()
+                .chunks(4)
+                .any(|p| p[3] > 0)
+        );
+    }
+
+    #[test]
+    fn an_open_end_near_the_other_closes_the_shape_and_the_magnet_joins_lines() {
+        // Three sides of a square whose end stops 3 pixels short.
+        let mut open = figure_line(
+            &[
+                [0.0, 0.0],
+                [40.0, 0.0],
+                [40.0, 40.0],
+                [0.0, 40.0],
+                [0.0, 3.0],
+            ],
+            Tip::default(),
+            [[0.0; 3], [1.0; 3]],
+            false,
+        );
+        let start = open.samples[0].at;
+        assert!(snap_ends(&mut open, &[], 6.0));
+        assert_eq!(open.samples.last().unwrap().at, start, "closed");
+        assert_eq!(open.samples[0].at, start, "the first end stays");
+        // Too far: nothing moves.
+        let mut far = line([0.0, 0.0], [30.0, 0.0]);
+        let was = far.clone();
+        assert!(!snap_ends(
+            &mut far,
+            &[line([0.0, 20.0], [30.0, 20.0])],
+            6.0
+        ));
+        assert_eq!(far, was);
+        // The magnet: a new line's end goes onto another line's end.
+        let other = line([50.0, 0.0], [80.0, 0.0]);
+        let mut new = line([0.0, 2.0], [48.0, 2.0]);
+        assert!(snap_ends(&mut new, std::slice::from_ref(&other), 6.0));
+        assert_eq!(new.samples.last().unwrap().at, [50.0, 0.0]);
+        assert_eq!(new.samples[0].at, [0.0, 2.0], "the far end stays");
+    }
+
+    #[test]
+    fn a_path_drawn_for_fill_is_closed_to_a_four_way_flood() {
+        // A diagonal path: two pixels wide, so no pixel beside it reaches
+        // across to the other side by an edge.
+        let size = [20, 20];
+        let mut pixels = vec![0; 20 * 20 * 4];
+        let path = line([0.0, 0.0], [19.0, 19.0]).samples;
+        draw_path(&mut pixels, size, &path, [0.0, 0.0]);
+        let ink = |x: u32, y: u32| pixels[((y * 20 + x) * 4 + 3) as usize] == 255;
+        // A four way flood from the top right corner over clear pixels.
+        let mut reached = vec![false; 400];
+        let mut todo = vec![(19_u32, 0_u32)];
+        while let Some((x, y)) = todo.pop() {
+            if reached[(y * 20 + x) as usize] || ink(x, y) {
+                continue;
+            }
+            reached[(y * 20 + x) as usize] = true;
+            if x > 0 {
+                todo.push((x - 1, y));
+            }
+            if x < 19 {
+                todo.push((x + 1, y));
+            }
+            if y > 0 {
+                todo.push((x, y - 1));
+            }
+            if y < 19 {
+                todo.push((x, y + 1));
+            }
+        }
+        assert!(reached[19], "the flood starts");
+        assert!(!reached[19 * 20], "it never crosses the path");
+        assert!(ink(10, 10) && !ink(15, 3));
+    }
+
+    #[test]
+    fn the_first_end_dragged_onto_the_last_closes_too() {
+        let mut open = figure_line(
+            &[
+                [0.0, 3.0],
+                [0.0, 40.0],
+                [40.0, 40.0],
+                [40.0, 0.0],
+                [0.0, 0.0],
+            ],
+            Tip::default(),
+            [[0.0; 3], [1.0; 3]],
+            false,
+        );
+        let end = open.samples.last().unwrap().at;
+        assert!(
+            !snap_end(&mut open, false, &[], 6.0, false),
+            "not asked to close"
+        );
+        assert!(snap_end(&mut open, false, &[], 6.0, true));
+        assert_eq!(open.samples[0].at, end, "closed");
+        assert_eq!(open.samples.last().unwrap().at, end, "the last end stays");
+    }
+
+    #[test]
+    fn the_vector_eraser_over_several_layers_erases_each_where_it_touched() {
+        let (a, b) = (EntityId::from_u128(1), EntityId::from_u128(2));
+        let layers = vec![
+            (a, vec![line([0.0, 0.0], [40.0, 0.0])], [20.0, 0.0]),
+            // The second layer sits 100 pixels to the right: in its own
+            // pixels the eraser is far from its line.
+            (b, vec![line([0.0, 0.0], [40.0, 0.0])], [-80.0, 0.0]),
+        ];
+        let out = erase_layers(&layers, 3.0, Erase::Whole);
+        assert_eq!(out.len(), 1, "only the layer it touched");
+        assert_eq!(out[0].0, a);
+        assert!(out[0].1.is_empty());
+    }
+
+    #[test]
+    fn updating_keeps_lines_that_would_lose_their_flick_or_correction() {
+        let (mut arena, layer) = golden_layer();
+        // One line flicked and one post corrected, as people draw them.
+        let mut drawn = lines(&geometry(&arena, layer));
+        drawn[0].finish.flick = Some([400.0, 0.0]);
+        drawn[2].finish.correction = 3;
+        if let Ok(entity) = arena.get_by_id_mut(layer) {
+            entity.set_ext(Box::new(to_geometry(&drawn)));
+        }
+        let expected = Updated {
+            updated: drawn.iter().filter(|line| updates_unchanged(line)).count(),
+            kept: drawn.iter().filter(|line| !updates_unchanged(line)).count(),
+        };
+        assert!(expected.updated > 0 && expected.kept >= 2, "{expected:?}");
+        assert_eq!(legacy_lines(&arena, layer), expected);
+        let before = saved(&arena);
+        let (mut edit, did) = update_lines_kept(&mut arena, layer, "Update lines").expect("lines");
+        assert_eq!(did, expected);
+        let after = saved(&arena);
+        let now = lines(&geometry(&arena, layer));
+        assert!(now[0].engine.is_none() && now[0].finish.flick.is_some());
+        assert!(now[2].engine.is_none() && now[2].finish.correction == 3);
+        for (was, now) in drawn.iter().zip(&now) {
+            assert_eq!(now.engine.is_some(), updates_unchanged(was));
+        }
+        // Nothing left that it can update.
+        assert!(update_lines_kept(&mut arena, layer, "Update lines").is_none());
+        assert_eq!(legacy_lines(&arena, layer).updated, 0);
+        edit.revert(&mut arena).expect("undone");
+        assert_eq!(saved(&arena), before, "undo takes the whole step back");
+        edit.apply(&mut arena).expect("redone");
+        assert_eq!(saved(&arena), after, "redo makes it again");
+    }
+
+    #[test]
+    fn restyling_a_layer_is_one_step_undo_takes_back() {
+        let (mut arena, layer) = golden_layer();
+        let before = saved(&arena);
+        let restyle = Restyle {
+            main: Some([0.9, 0.1, 0.1]),
+            size: Some(6.0),
+            ..Restyle::default()
+        };
+        let mut edit = relined(&mut arena, layer, "Line style", |lines| {
+            Some(restyled(lines, &[0, 1], &restyle))
+        })
+        .expect("a vector layer");
+        let after = saved(&arena);
+        assert_ne!(after, before);
+        let now = lines(&geometry(&arena, layer));
+        assert_eq!(now[0].colors[0], [0.9, 0.1, 0.1]);
+        assert!(relined(&mut arena, layer, "Nothing", |_| None).is_none());
+        edit.revert(&mut arena).expect("undone");
+        assert_eq!(saved(&arena), before);
+        edit.apply(&mut arena).expect("redone");
+        assert_eq!(saved(&arena), after);
     }
 }

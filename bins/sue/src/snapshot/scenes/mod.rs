@@ -25,6 +25,7 @@ mod paint_start;
 mod paint_timeline;
 mod paint_tools;
 mod paint_touch;
+mod paint_vector;
 mod paint_view;
 mod settings;
 mod shell;
@@ -140,6 +141,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_saving::questions(tour)?;
     // 28n to 28r. The export settings dialog and the batch list.
     ui_export::scenes(tour)?;
+    // 36a and 36b. Picked vector lines and Vector magnet, last, since
+    // their steps stay in Sue Paint's history.
+    paint_vector::scenes(tour)?;
     Ok(())
 }
 

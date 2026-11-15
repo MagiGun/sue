@@ -279,6 +279,10 @@ impl SuePaint {
         if let Some((layer, lines)) = self.pending_effect.take() {
             self.redraw_effect(cx, layer, &lines);
         }
+        // Picked vector lines from Tool Property: shown now, kept when let
+        // go.
+        let held = inner.ctx().input(|input| input.pointer.any_down());
+        self.line_changes(held, cx);
         // A 3D layer's view from Tool Property: shown now, kept when let go.
         if let Some((layer, view)) = self.pending_view3d.take() {
             self.preview_view3d(cx, layer, &view);

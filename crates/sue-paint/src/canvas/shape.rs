@@ -617,6 +617,10 @@ impl SuePaint {
             {
                 points.push(first);
             }
+            // On a vector layer the figure is laid as one vector line.
+            if self.figure_on_vector(&points, sub.mode != 2, sub, cx) {
+                return;
+            }
             self.stroke_line(points, sub, cx);
             return;
         }

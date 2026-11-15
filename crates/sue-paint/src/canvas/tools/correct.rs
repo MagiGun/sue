@@ -254,6 +254,7 @@ impl SuePaint {
             before,
             geometry,
             mut lines,
+            grab,
             path,
             mut changed,
             label,
@@ -271,7 +272,7 @@ impl SuePaint {
                 .map_or(1.0, |doc| doc.view.zoom)
                 .max(0.01))
         .max(sub.tip.size / 2.0);
-        let traced = match sub.mode {
+        let mut traced = match sub.mode {
             5 => {
                 let points: Vec<[f32; 2]> = path.iter().map(|(point, _)| *point).collect();
                 crate::correct::redraw(&mut lines, &points, reach)
@@ -279,6 +280,15 @@ impl SuePaint {
             6 => crate::correct::redraw_width(&mut lines, &path, reach),
             _ => false,
         };
+        // An end dragged onto the line's other end, or onto another
+        // line's end, joins it.
+        if sub.mode == 0
+            && sub.kind == 0
+            && changed
+            && let Some((line, index, _)) = grab
+        {
+            traced |= crate::canvas::lines::join_dragged_end(&mut lines, line, index, reach);
+        }
         if traced {
             if let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer)
                 && let Some(painted) =

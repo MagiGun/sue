@@ -2261,6 +2261,30 @@ so on a vector layer. The Operation tool's Object picks vector lines (Shift
 adds or takes away), drags them and deletes them, each one step; Select
 layer picks the layer under the pointer.
 
+**Editing vector lines (0.0.8, P4-14).** The model is in
+`sue_picture::vector`: `Restyle` and `restyled` (main and sub color,
+brush size, brush shape; a line of the brush engine gets its brush made
+again from the new tip and its `brush_hash` with it), `bounds`,
+`corners`, `map_point` and `transformed` (a box mapped onto four corners
+by blending between them, so a scaled box stays a box and a corner moved
+alone bends it; Adjust line thickness when scaling scales the brush by
+the square root of the area's change), `in_loop` (a line is picked when
+half its samples are inside the loop), `figure_line`, `snap_end` and
+`snap_ends` (Vector magnet, and closing a line), `path_reference` (Fill
+up to vector path: referred vector layers drawn as two pixel paths
+instead of their pixels), and `relined`, which changes a layer's lines
+and paints it again as one undoable step. `update_lines_kept` is the
+menu's Update Lines to New Brush Engine: engine 1 has no flick and no
+post correction, so a legacy line finished with either stays legacy and
+the count is reported. On the canvas, `sue_paint::canvas::lines` runs the
+loop, the box's handles and the eraser over several layers as
+`Gesture::Lines`, and Tool Property's changes as a preview kept on
+release (`line_changes`, called once a frame by the Sub Tool palette).
+A pen stroke on a vector layer is painted in place; with Vector magnet
+on, `magnet_stroke` snaps its ends, takes the stroke's pixel edit back
+and paints the layer again from the lines, so the step holds the joined
+line and its pixels.
+
 **Correct Line.** Every brush sample carries a width and an opacity share
 (`Sample::width`, `Sample::alpha`, 1 as drawn) that scale its dab, so a
 vector line can be made wider, narrower or fainter point by point, and keeps

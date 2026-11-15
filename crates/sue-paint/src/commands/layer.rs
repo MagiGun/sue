@@ -1357,6 +1357,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         lines_tones_vector,
     )
     .icon("extract-line"),
+    c(
+        "layer.update_lines",
+        "update-lines-to-new-brush-engine",
+        crate::canvas::lines::update_lines,
+    )
+    .icon("layer-new-vector")
+    .state(crate::canvas::lines::on_vector_layer),
 ];
 
 #[cfg(test)]

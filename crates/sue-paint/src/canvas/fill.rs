@@ -137,6 +137,19 @@ impl SuePaint {
                 Ok(target) if target.mask => placed(arena, target.id, target.offset, size),
                 _ => self.layer_on_picture(arena, size),
             },
+            // Fill up to vector path: vector layers as their lines' paths.
+            refer if self.fill_vector_path && sub.tool == crate::tools::Tool::Fill => {
+                let picked = self.doc().map(|doc| doc.picked.clone()).unwrap_or_default();
+                crate::vector::path_reference(
+                    arena,
+                    picture_id,
+                    size,
+                    self.layer(),
+                    &picked,
+                    refer,
+                    sub.exclude,
+                )
+            }
             refer => {
                 let picked = self.doc().map(|doc| doc.picked.clone()).unwrap_or_default();
                 fill::reference_in(

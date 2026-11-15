@@ -265,10 +265,6 @@ fn tip_properties(ui: &mut Ui, tip: &mut Tip, theme: &Theme) {
     ) {
         tip.grain = grain / 100.0;
     }
-    ui.add_enabled(
-        false,
-        egui::Checkbox::new(&mut false, small(&tr!("vector-magnet"))),
-    );
 }
 
 /// The Blend tool: its size and strength, and what the sub tool does.

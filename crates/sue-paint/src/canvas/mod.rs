@@ -28,6 +28,7 @@ mod fill;
 mod input;
 mod lay;
 pub(crate) mod marks;
+pub(crate) mod lines;
 mod overlays;
 mod pick;
 pub(crate) mod puppet;

@@ -5,6 +5,7 @@ mod comic;
 mod correct;
 mod effect;
 mod fill;
+mod lines;
 mod paint;
 mod ruler;
 mod select;
@@ -61,14 +62,27 @@ impl SuePaint {
             self.effect_properties(ui, layer, lines, theme);
             return None;
         }
+        // The Object tool on a vector layer: the picked lines' settings.
+        if tool == Tool::Operation && self.line_properties(ui, arena, theme) {
+            return None;
+        }
         ui.spacing_mut().item_spacing.y = 6.0;
         let small = small_text(theme);
         let mut command = None;
         let sub = self.toolbox.current_mut();
         match tool {
-            tool if tool.paints() => paint::paint_properties(ui, tool, sub, theme),
+            tool if tool.paints() => {
+                if matches!(tool, Tool::Pen | Tool::Pencil | Tool::Brush | Tool::Figure) {
+                    self.magnet_row(ui, theme);
+                }
+                let sub = self.toolbox.current_mut();
+                paint::paint_properties(ui, tool, sub, theme);
+            }
             Tool::Fill | Tool::AutoSelect => {
                 fill::fill_properties(ui, tool, sub, &mut self.select_op, theme);
+                if tool == Tool::Fill {
+                    self.vector_path_row(ui, theme);
+                }
             }
             Tool::Gradient => fill::gradient_properties(ui, sub, theme),
             Tool::Select => select::select_properties(ui, sub, &mut self.select_op, theme),

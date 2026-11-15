@@ -91,8 +91,11 @@ impl SuePaint {
         let vector = target.is_none() && crate::vector::is_vector(&cx.world.arena, info.id);
         if vector && tip.eraser {
             // The eraser takes vector lines away, as its Vector
-            // setting says.
-            self.vector_erase_press(info.id, offset, tip.size, &sub, press, cx);
+            // setting says: on every picked vector layer when several
+            // are picked, else on this one.
+            if !self.vector_erase_layers_press(press.p, tip.size, &sub, cx) {
+                self.vector_erase_press(info.id, offset, tip.size, &sub, press, cx);
+            }
             return;
         }
         let (target, rgb, locked) = match target {
@@ -481,16 +484,17 @@ impl SuePaint {
                 match kept {
                     Some(kept) => {
                         // The line stays on the vector layer, in
-                        // the same undo step as its pixels.
+                        // the same undo step as its pixels; Vector
+                        // magnet joins its ends to the ends near them.
                         let old = crate::vector::geometry(&cx.world.arena, layer);
-                        let mut lines = crate::vector::lines(&old);
-                        lines.push(kept);
+                        let lines = crate::vector::lines(&old);
+                        let (lines, pixels) = self.magnet_stroke(cx, layer, kept, lines, edit);
                         let edit = crate::vector::keep(
                             &mut cx.world.arena,
                             layer,
                             old,
                             &lines,
-                            Some(edit),
+                            pixels,
                             &label,
                         );
                         cx.record(ArenaEdit(edit));

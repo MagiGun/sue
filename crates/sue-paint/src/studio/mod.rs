@@ -401,6 +401,9 @@ pub(crate) enum Gesture {
         base: f32,
         moved: bool,
     },
+    /// A loop picking vector lines, the picked lines' box dragged, or
+    /// the Vector eraser over several layers (`canvas/lines.rs`).
+    Lines(Box<crate::canvas::lines::LinesGesture>),
 }
 
 /// Which palettes show.
@@ -815,6 +818,25 @@ pub struct SuePaint {
     /// The canvas chrome between frames: canvases in windows of their
     /// own, pictures dropped on the canvas, the tab menu.
     pub(crate) chrome: crate::canvas::Chrome,
+    /// The Object tool's Mode on picked vector lines: Free transform
+    /// moves the box's corners one by one; off, the handles scale it.
+    pub(crate) line_free: bool,
+    /// Adjust line thickness when scaling picked vector lines.
+    pub(crate) line_thicken: bool,
+    /// Lines drawn or laid on a vector layer join their ends to the ends
+    /// of lines near them (Vector magnet).
+    pub(crate) vector_magnet: bool,
+    /// What Tool Property asked of the picked lines this frame.
+    pub(crate) pending_lines: Option<crate::canvas::lines::LineChange>,
+    /// The picked lines as they were while Tool Property shows a change.
+    pub(crate) line_preview: Option<crate::canvas::lines::LinePreview>,
+    /// The lines Tool Property's change shows now.
+    pub(crate) line_lines_shown: Option<Vec<crate::vector::Line>>,
+    /// The hex codes typed for the picked lines' main and sub color.
+    pub(crate) line_hex: [String; 2],
+    /// Fill, when it looks at vector layers, stops at their lines'
+    /// middles instead of their edges (Fill up to vector path).
+    pub(crate) fill_vector_path: bool,
 }
 
 impl Default for SuePaint {
@@ -1000,6 +1022,14 @@ impl Default for SuePaint {
             transform_prefs: crate::transform_ui::TransformPrefs::default(),
             light_centre: [0.0; 2],
             chrome: crate::canvas::Chrome::default(),
+            line_free: false,
+            line_thicken: true,
+            vector_magnet: false,
+            pending_lines: None,
+            line_preview: None,
+            line_lines_shown: None,
+            line_hex: [String::new(), String::new()],
+            fill_vector_path: false,
         }
     }
 }

@@ -219,6 +219,10 @@ impl SuePaint {
             }
             line
         };
+        // On a vector layer the figure is laid as one vector line.
+        if self.figure_on_vector(&line, mode == POLYLINE, &sub, cx) {
+            return;
+        }
         self.stroke_line(line, &sub, cx);
     }
 
