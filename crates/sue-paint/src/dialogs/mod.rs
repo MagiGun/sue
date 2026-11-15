@@ -132,6 +132,11 @@ pub(crate) enum Dialog {
     DivideFrame(crate::comic::DivideSpec),
     /// Color Settings, Edit Color Sets, and the names of sets and colors.
     Color(ColorDialog),
+    /// Deleting picked layer folders asks first: whether "Do not show
+    /// again" is ticked.
+    DeleteFolders(bool),
+    /// New Layer, Tone: Simple Tone Settings.
+    SimpleTone(crate::panels::SimpleTone),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -212,6 +217,11 @@ impl Dialog {
             Dialog::Convert(..) => (tr!("convert-layer"), vec2(360.0, 190.0)),
             Dialog::Fonts(_) => (tr!("manage-fonts"), sue_wm::fonts::MANAGE_SIZE),
             Dialog::Color(color) => color.title_and_size(),
+            Dialog::DeleteFolders(_) => (
+                tr!("delete-layer-folders"),
+                crate::panels::DELETE_FOLDERS_SIZE,
+            ),
+            Dialog::SimpleTone(_) => (tr!("simple-tone-settings"), crate::panels::SIMPLE_TONE_SIZE),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -426,6 +436,8 @@ impl SuePaint {
             Dialog::Canvas(canvas) => canvas_ui(ui, canvas, theme),
             Dialog::Resolution(resolution) => resolution_ui(ui, resolution, theme),
             Dialog::Shortcuts => shortcuts_ui(ui, cx, size, change_keys, theme),
+            Dialog::DeleteFolders(quiet) => Self::delete_folders_ui(ui, quiet, theme),
+            Dialog::SimpleTone(tone) => Self::simple_tone_ui(ui, tone, theme),
             Dialog::Fonts(manager) => {
                 if sue_wm::fonts::manage_ui(ui, manager, theme) {
                     Outcome::Ok
@@ -488,6 +500,8 @@ impl SuePaint {
             }
             Dialog::Canvas(canvas) => self.canvas_ok(cx, &canvas),
             Dialog::Resolution(resolution) => self.resolution_ok(cx, &resolution),
+            Dialog::DeleteFolders(quiet) => self.delete_folders_ok(cx, quiet),
+            Dialog::SimpleTone(tone) => self.simple_tone_ok(cx, &tone),
             Dialog::Message(..)
             | Dialog::Shortcuts
             | Dialog::Pages(_)
@@ -538,7 +552,9 @@ impl SuePaint {
             | Dialog::StoryEditor(_)
             | Dialog::Convert(..)
             | Dialog::Shortcuts
-            | Dialog::Fonts(_) => {}
+            | Dialog::Fonts(_)
+            | Dialog::DeleteFolders(_)
+            | Dialog::SimpleTone(_) => {}
             Dialog::Color(color) => self.color_dialog_cancel(cx, color),
         }
     }

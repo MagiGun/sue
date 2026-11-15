@@ -701,3 +701,57 @@ fn a_3d_layer_lands_in_the_picked_folder() {
     assert_eq!(folder_of(&arena, layer), Some(folder));
     assert_eq!(&ids(&arena, picture)[1..], &[first, layer, folder]);
 }
+
+#[test]
+fn merging_layers_clipped_to_an_unpicked_layer_keeps_the_clip() {
+    // A base with ink at its left half, two layers clipped to it filled
+    // all over; the two are merged, the base is not: the merged layer
+    // stays clipped to the base and the picture looks the same.
+    let (mut arena, picture, mut history, base) = picture_of(4, 1);
+    for (x, pixel) in raster_mut(&mut arena, base)
+        .unwrap()
+        .bytes_mut()
+        .unwrap()
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .enumerate()
+    {
+        *pixel = if x < 2 { [0, 0, 0, 255] } else { [0; 4] };
+    }
+    let mut clipped = Vec::new();
+    let mut below = base;
+    for rgba in [[200, 0, 0, 255], [0, 200, 0, 128]] {
+        let (spawn, id) =
+            add_raster_layer(&arena, picture, Some(below), "Clipped".to_owned(), None).unwrap();
+        history
+            .apply(&mut arena, Edit::new("Add").then(spawn))
+            .unwrap();
+        fill(&mut arena, id, rgba);
+        history
+            .apply(&mut arena, set(id, picture::CLIP, true))
+            .unwrap();
+        clipped.push(id);
+        below = id;
+    }
+    let before = render(&arena, picture, [0, 0, 4, 1], RenderOptions::default());
+    let (edit, merged) = merge_layers(&arena, picture, &clipped).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    assert_eq!(merged, clipped[0], "the lowest takes the pixels in");
+    assert!(layers(&arena, picture).last().unwrap().style.clip);
+    let alpha: Vec<u8> = raster(&arena, merged)
+        .unwrap()
+        .bytes()
+        .unwrap()
+        .iter()
+        .skip(3)
+        .step_by(4)
+        .copied()
+        .collect();
+    assert_eq!(alpha, [255; 4], "its own pixels went in whole");
+    assert_eq!(
+        render(&arena, picture, [0, 0, 4, 1], RenderOptions::default()),
+        before,
+        "it looks the same"
+    );
+}

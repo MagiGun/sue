@@ -578,7 +578,14 @@ fn describe_pictures(arena: &Arena) -> String {
                 info.name,
                 info.style.visible,
                 info.style.opacity,
-                info.style.blend.name(),
+                // The mode as stored: a folder with none stored reads
+                // Through in `doc::layers` (what it does), Normal here (what
+                // the file holds), so the description stays the file's.
+                arena
+                    .get_by_id(info.id)
+                    .map_or(info.style.blend, |entity| picture::LayerStyle::of(entity)
+                        .blend)
+                    .name(),
                 info.style.clip,
                 numbers(&info.style.offset),
                 info.style.draft,
@@ -954,7 +961,16 @@ fn picture_extras(out: &mut String, arena: &Arena, picture: EntityId) {
             )
         );
     }
-    for comp in crate::comps::read(arena, picture) {
+    // The comps as the file keeps them; `comps::read` takes an old comp's
+    // `normal` for a folder with no mode as Through (its own test).
+    let kept = arena
+        .get_by_id(picture)
+        .ok()
+        .and_then(|entity| entity.property(crate::comps::COMPS))
+        .and_then(sue_core::Value::as_str)
+        .map(crate::comps::decode)
+        .unwrap_or_default();
+    for comp in kept {
         let _ = writeln!(out, "  layer comp {:?}", comp.name);
         for state in comp.states {
             let _ = writeln!(

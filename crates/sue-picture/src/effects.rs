@@ -12,6 +12,10 @@ pub const BORDER: &str = "effect.border";
 pub const BORDER_WIDTH: &str = "effect.border.width";
 /// The border's color (`Color`).
 pub const BORDER_COLOR: &str = "effect.border.color";
+/// The border's edge is smoothed (`Bool`, on when missing): off, every
+/// pixel of the border is either in it or not (Anti-aliasing on border
+/// effect).
+pub const BORDER_AA: &str = "effect.border.antialias";
 /// The paint's edges darkened, as watercolor dries (`Bool`).
 pub const WATERCOLOR: &str = "effect.watercolor";
 /// How far in from the edge it darkens, in pixels (`Float`).
@@ -38,6 +42,13 @@ pub const TONE_SOURCE: &str = "effect.tone.source";
 pub const TONE_LEVELS: &str = "effect.tone.levels";
 /// The shape of the dots (`Int`, see [`TONE_SHAPES`]).
 pub const TONE_SHAPE: &str = "effect.tone.shape";
+/// The layer's opacity sets how dense the tone is, instead of fading
+/// the dots (`Bool`, Reflect layer opacity).
+pub const TONE_REFLECT_OPACITY: &str = "effect.tone.reflect_opacity";
+/// Where the dots' grid starts across, in pixels (`Float`, Dot position).
+pub const TONE_DOT_X: &str = "effect.tone.dot_x";
+/// Where the dots' grid starts down, in pixels (`Float`, Dot position).
+pub const TONE_DOT_Y: &str = "effect.tone.dot_y";
 
 /// What can set the size of a tone's dots, in order.
 pub const TONE_SOURCES: [&str; 2] = ["Brightness", "Opacity"];
@@ -56,6 +67,12 @@ pub const COLOR_SUB: &str = "effect.color.sub";
 pub const EXPRESSION: &str = "effect.expression";
 /// Where monochrome turns black, 0 to 1 (`Float`).
 pub const THRESHOLD: &str = "effect.threshold";
+/// Monochrome may draw black (`Bool`, on when missing); off, what would
+/// be black is see-through.
+pub const MONO_BLACK: &str = "effect.mono.black";
+/// Monochrome may draw white (`Bool`, on when missing); off, what would
+/// be white is see-through.
+pub const MONO_WHITE: &str = "effect.mono.white";
 
 /// The expression colors, in order.
 pub const EXPRESSIONS: [&str; 3] = ["Color", "Gray", "Monochrome"];
@@ -85,6 +102,15 @@ pub struct Effects {
     pub expression: u8,
     /// Where monochrome turns black.
     pub threshold: f32,
+    /// The border's edge is smoothed.
+    pub border_aa: bool,
+    /// With Reflect layer opacity on, the layer's opacity, which then
+    /// sets the tone's density instead of fading the layer.
+    pub tone_opacity: Option<f32>,
+    /// Where the tone's grid starts, in pixels.
+    pub tone_dot: [f32; 2],
+    /// Monochrome draws black, and white.
+    pub mono: [bool; 2],
 }
 
 impl Default for Effects {
@@ -101,8 +127,17 @@ impl Default for Effects {
             sub_color: None,
             expression: 0,
             threshold: 0.5,
+            border_aa: true,
+            tone_opacity: None,
+            tone_dot: [0.0; 2],
+            mono: [true; 2],
         }
     }
+}
+
+/// A switch stored at `key`, `or` when missing.
+fn switch(entity: &Entity, key: &str, or: bool) -> bool {
+    entity.property(key).and_then(Value::as_bool).unwrap_or(or)
 }
 
 fn rgb(entity: &Entity, key: &str, or: [f32; 3]) -> [f32; 3] {
@@ -240,6 +275,44 @@ impl Effects {
                 .and_then(Value::as_i64)
                 .map_or(0, |value| value.clamp(0, 2) as u8),
             threshold: number(entity, THRESHOLD, 0.5) as f32,
+            border_aa: switch(entity, BORDER_AA, true),
+            tone_opacity: (on(entity, TONE) && on(entity, TONE_REFLECT_OPACITY)).then(|| {
+                sue_model::picture::LayerStyle::of(entity)
+                    .opacity
+                    .clamp(0.0, 1.0)
+            }),
+            tone_dot: [
+                number(entity, TONE_DOT_X, 0.0) as f32,
+                number(entity, TONE_DOT_Y, 0.0) as f32,
+            ],
+            mono: [
+                switch(entity, MONO_BLACK, true),
+                switch(entity, MONO_WHITE, true),
+            ],
+        }
+    }
+
+    /// How much of a pixel the border covers, from what its edge says:
+    /// as it is, or all or nothing with anti-aliasing off.
+    #[must_use]
+    pub fn border_cover(&self, cover: f32) -> f32 {
+        if self.border_aa {
+            cover
+        } else if cover >= 0.5 {
+            1.0
+        } else {
+            0.0
+        }
+    }
+
+    /// How opaque the layer is laid on, for its `opacity`: fully when the
+    /// tone takes the opacity in as its density (Reflect layer opacity).
+    #[must_use]
+    pub fn laid_opacity(&self, opacity: f32) -> f32 {
+        if self.tone_opacity.is_some() {
+            1.0
+        } else {
+            opacity
         }
     }
 
@@ -270,8 +343,11 @@ impl Effects {
         let mut out = match self.expression {
             1 => [luma, luma, luma, a],
             2 => {
-                let ink = if luma < self.threshold { 0.0 } else { 1.0 };
-                [ink, ink, ink, a]
+                let white = luma >= self.threshold;
+                let ink = if white { 1.0 } else { 0.0 };
+                // A color the layer may not draw is see-through.
+                let kept = if white { self.mono[1] } else { self.mono[0] };
+                [ink, ink, ink, if kept { a } else { 0.0 }]
             }
             _ => [r, g, b, a],
         };
@@ -284,6 +360,9 @@ impl Effects {
                 1.0 - (0.2126 * out[0] + 0.7152 * out[1] + 0.0722 * out[2])
             }
             .clamp(0.0, 1.0);
+            if let Some(opacity) = self.tone_opacity {
+                density *= opacity;
+            }
             if self.tone_levels >= 2 {
                 let steps = f32::from(self.tone_levels - 1);
                 density = (density * steps).round() / steps;
@@ -292,7 +371,10 @@ impl Effects {
                 if scatter(x, y) < density { 1.0 } else { 0.0 }
             } else {
                 let (sin, cos) = angle.sin_cos();
-                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let (px, py) = (
+                    x as f32 + 0.5 - self.tone_dot[0],
+                    y as f32 + 0.5 - self.tone_dot[1],
+                );
                 let (u, v) = ((px * cos + py * sin) / cell, (-px * sin + py * cos) / cell);
                 let (hu, hv) = (u + 0.5, v + 0.5);
                 match self.tone_shape {
@@ -776,5 +858,65 @@ mod tests {
             &before[..],
             "pixels as they were"
         );
+    }
+
+    #[test]
+    fn border_aliasing_monochrome_inks_and_tone_options() {
+        let layer = |props: &[(&str, Value)]| {
+            let mut entity = Entity::empty("Layer", "layer");
+            for (key, value) in props {
+                entity.properties_mut().set(*key, value.clone());
+            }
+            Effects::of(&entity, 72.0)
+        };
+        // Anti-aliasing on border effect: off, the border's edge is hard.
+        let soft = layer(&[(BORDER, Value::from(true))]);
+        assert!((soft.border_cover(0.3) - 0.3).abs() < 1e-6);
+        let hard = layer(&[(BORDER, Value::from(true)), (BORDER_AA, Value::from(false))]);
+        assert_eq!([hard.border_cover(0.3), hard.border_cover(0.7)], [0.0, 1.0]);
+        // Monochrome with white turned off: white is see-through, black
+        // stays.
+        let mono = layer(&[
+            (EXPRESSION, Value::from(2_i64)),
+            (MONO_WHITE, Value::from(false)),
+        ]);
+        assert_eq!(mono.apply([1.0, 1.0, 1.0, 1.0], 0, 0)[3], 0.0);
+        assert_eq!(mono.apply([0.0, 0.0, 0.0, 1.0], 0, 0), [0.0, 0.0, 0.0, 1.0]);
+        let no_black = layer(&[
+            (EXPRESSION, Value::from(2_i64)),
+            (MONO_BLACK, Value::from(false)),
+        ]);
+        assert_eq!(no_black.apply([0.0, 0.0, 0.0, 1.0], 0, 0)[3], 0.0);
+        // Reflect layer opacity: the layer lays on whole and its opacity
+        // thins the dots instead.
+        let tone = |reflect: bool| {
+            layer(&[
+                (TONE, Value::from(true)),
+                (TONE_REFLECT_OPACITY, Value::from(reflect)),
+                (TONE_SOURCE, Value::from(1_i64)),
+                (sue_model::picture::OPACITY, Value::from(0.25)),
+            ])
+        };
+        let covered = |effects: &Effects| {
+            (0..64)
+                .flat_map(|y| (0..64).map(move |x| (x, y)))
+                .map(|(x, y)| effects.apply([0.0, 0.0, 0.0, 1.0], x, y)[3])
+                .sum::<f32>()
+        };
+        assert!((tone(false).laid_opacity(0.25) - 0.25).abs() < 1e-6);
+        assert!((tone(true).laid_opacity(0.25) - 1.0).abs() < 1e-6);
+        assert!(covered(&tone(true)) < covered(&tone(false)) * 0.5);
+        // Dot position moves the grid.
+        let at = |dot: f64| {
+            let effects = layer(&[
+                (TONE, Value::from(true)),
+                (TONE_SOURCE, Value::from(1_i64)),
+                (TONE_DOT_X, Value::from(dot)),
+            ]);
+            (0..16)
+                .map(|x| effects.apply([0.0, 0.0, 0.0, 0.3], x, 0)[3])
+                .collect::<Vec<_>>()
+        };
+        assert_ne!(at(0.0), at(0.5));
     }
 }

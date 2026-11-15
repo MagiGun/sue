@@ -138,7 +138,7 @@ pub(super) fn fold(layers: &[Layer<'_>], x: u32, y: u32, state: &mut Stack) {
         }
         if let (Some(edge), Some((_, rim))) = (&layer.edge, layer.effects.border) {
             // The border, under the layer.
-            let cover = edge.at(x, y);
+            let cover = layer.effects.border_cover(edge.at(x, y));
             let alpha = source[3] + cover * (1.0 - source[3]);
             if alpha > 0.0 {
                 for channel in 0..3 {
@@ -149,7 +149,7 @@ pub(super) fn fold(layers: &[Layer<'_>], x: u32, y: u32, state: &mut Stack) {
             }
             source[3] = alpha;
         }
-        source[3] *= layer.style.opacity;
+        source[3] *= layer.effects.laid_opacity(layer.style.opacity);
         if layer.style.clip {
             source[3] *= base_alpha;
         } else {

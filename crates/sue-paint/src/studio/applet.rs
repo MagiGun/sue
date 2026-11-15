@@ -207,6 +207,12 @@ impl SueApplet for SuePaint {
                 "The Tool palette shows the main and sub colors under its tools (Tool palette menu, Show Color Icon)",
             )
             .labeled("Tool color icon"),
+            RiceDeclaration::new(
+                crate::studio::ASK_DELETE_FOLDERS,
+                RiceParameter::Bool { value: true },
+                "Ask before deleting picked layer folders (the question's \"Do not show again\" turns it off)",
+            )
+            .labeled("Ask before deleting layer folders"),
         ]);
         for (key, name, choices) in crate::dialogs::MODIFIERS {
             declarations.push(RiceDeclaration::new(

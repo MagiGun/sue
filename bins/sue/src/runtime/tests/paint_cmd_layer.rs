@@ -84,8 +84,8 @@ const CASES: &[Case] = &[
     case("layer.new.balloon", &[], 1),
     case("layer.new.gradient", &[], 1),
     case("layer.new.fill", &[], 1),
-    // A new layer, then the Tone dialog over it, which Esc closes.
-    case("layer.new.tone", &[], 1),
+    // Simple Tone Settings: Enter makes the layer of tone.
+    confirmed("layer.new.tone", 1),
     // The paper goes first: a canvas holds one.
     case(
         "layer.new.paper",
@@ -167,6 +167,13 @@ const CASES: &[Case] = &[
     // A new vector layer has no line to update: a notice, no step. The
     // update itself is driven in paint_vector_3d.rs.
     case("layer.update_lines", &["layer.new.vector"], 0),
+    case("layer.palette_color.none", &["layer.palette_color.red"], 1),
+    case("layer.palette_color.red", &[], 1),
+    case("layer.palette_color.orange", &[], 1),
+    case("layer.palette_color.yellow", &[], 1),
+    case("layer.palette_color.green", &[], 1),
+    case("layer.palette_color.blue", &[], 1),
+    case("layer.palette_color.purple", &[], 1),
 ];
 
 #[test]

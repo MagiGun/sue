@@ -224,7 +224,9 @@ impl SuePaint {
         }
     }
 
-    /// Flips a property of the current layer.
+    /// Flips a property of the current layer, and sets every picked layer
+    /// the same way (Clip Studio Paint's lock, show and the other switches
+    /// work on every picked layer), as one step.
     pub(crate) fn toggle_layer(&mut self, cx: &mut AppletContext<'_>, key: &str, default: bool) {
         let Some(layer) = self.layer() else {
             return;
@@ -237,6 +239,112 @@ impl SuePaint {
             .and_then(|entity| entity.property(key))
             .and_then(Value::as_bool)
             .unwrap_or(default);
-        Self::apply(cx, doc::set(layer, key, !now));
+        let ids = self.picked_layers(&cx.world.arena);
+        if let Some(edit) = doc::set_layers(&cx.world.arena, &ids, key, !now) {
+            Self::apply(cx, edit);
+        }
     }
+
+    /// The current layer and the layers picked with it, bottom first.
+    pub(crate) fn picked_layers(&self, arena: &sue_core::Arena) -> Vec<EntityId> {
+        let (Some(picture), Some(doc)) = (self.picture(), self.doc()) else {
+            return Vec::new();
+        };
+        doc::layers(arena, picture)
+            .into_iter()
+            .map(|info| info.id)
+            .filter(|id| doc.layer == Some(*id) || doc.picked.contains(id))
+            .collect()
+    }
+
+    /// Delete Layer: the current layer and every picked one, a folder with
+    /// what it holds and an animation folder with its tracks, as one step.
+    /// While a folder is among them Sue asks first, unless that was turned
+    /// off (`sue_paint.ask_delete_folders`) or `asked`.
+    pub(crate) fn delete_layers(&mut self, cx: &mut AppletContext<'_>, asked: bool) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let ids = self.picked_layers(&cx.world.arena);
+        let arena = &cx.world.arena;
+        let folders = ids.iter().any(|id| doc::is_folder(arena, *id));
+        if folders && !asked && cx.rice().get_bool(ASK_DELETE_FOLDERS).unwrap_or(true) {
+            self.dialog = Some(crate::dialogs::Dialog::DeleteFolders(false));
+            return;
+        }
+        let edit = match ids[..] {
+            [] => return,
+            [folder] if doc::is_folder(arena, folder) => {
+                Ok(crate::anim::delete_folder(arena, picture, folder))
+            }
+            _ => doc::delete_layers(arena, picture, &ids).map(|edit| {
+                match timeline_without(arena, picture, &doc::with_members(arena, picture, &ids)) {
+                    Some(sequence) => {
+                        edit.then(sue_core::txn::SetExtension::set(picture, sequence))
+                    }
+                    None => edit,
+                }
+            }),
+        };
+        let stack = doc::layers(arena, picture);
+        let gone = doc::with_members(arena, picture, &ids);
+        // What is current after: the layer under the lowest one deleted.
+        let next = stack
+            .iter()
+            .position(|info| gone.contains(&info.id))
+            .and_then(|lowest| stack[..lowest].last())
+            .or_else(|| stack.iter().find(|info| !gone.contains(&info.id)))
+            .map(|info| info.id);
+        match edit {
+            Ok(edit) => {
+                if Self::apply(cx, edit)
+                    && let Some(doc) = self.doc_mut()
+                {
+                    doc.layer = next;
+                    doc.picked.clear();
+                    doc.mask_edit = false;
+                }
+            }
+            Err(error) => cx.fail(error),
+        }
+    }
+}
+
+impl SuePaint {
+    /// Change Palette Color: the offered color named `name` (`none`: No
+    /// Palette Color) on the current and every picked layer, one step.
+    pub(crate) fn set_palette_color_named(&mut self, cx: &mut AppletContext<'_>, name: &str) {
+        let color = doc::named_palette_color(name);
+        if color.is_none() && name != "none" {
+            return;
+        }
+        let ids = self.picked_layers(&cx.world.arena);
+        if let Some(edit) = doc::set_palette_color(&cx.world.arena, &ids, color) {
+            Self::apply(cx, edit);
+        }
+    }
+}
+
+/// Ask before deleting layer folders (`Bool`, on unless "Do not show
+/// again" was ticked).
+pub(crate) const ASK_DELETE_FOLDERS: &str = "sue_paint.ask_delete_folders";
+
+/// `picture`'s timeline without the tracks that stand for any layer of
+/// `gone` (a cel, camera or layer track), or `None` when none does.
+fn timeline_without(
+    arena: &sue_core::Arena,
+    picture: EntityId,
+    gone: &[EntityId],
+) -> Option<sue_model::Sequence> {
+    let sequence = crate::anim::timeline(arena, picture)?;
+    let mut out = sequence.clone();
+    out.tracks.retain(|track| {
+        let stands_for = crate::anim::setup::track_layer(track).or_else(|| {
+            (track.kind == crate::anim::CELS || track.kind == crate::anim::setup::CAMERA)
+                .then(|| crate::anim::track_folder(track))
+                .flatten()
+        });
+        stands_for.is_none_or(|id| !gone.contains(&id))
+    });
+    (out != *sequence).then_some(out)
 }

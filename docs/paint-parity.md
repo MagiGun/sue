@@ -272,7 +272,12 @@ The order of work is the plan at the end.
 | Merge with Layer Below, Merge Selected, Merge Visible, Merge Visible to New, Flatten | Layer | done | |
 | Rasterize | Layer > Rasterize | done | |
 | Convert Layer (kind, expression color) | Layer > Convert Layer | partial | Command exists; verify the dialog |
-| Blend modes and opacity | Layer palette | done | Clip Studio's 28 in its order, Glow Dodge and Add (Glow) included, Brightness as it names it; a folder composites by its own mode or Through, which the palette offers folders from 0.0.8's Layer palette work |
+| Blend modes and opacity | Layer palette | done | Clip Studio's 28 in its order, Glow Dodge and Add (Glow) included, Brightness as it names it; a folder composites by its own mode or Through (the default), and the palette offers a folder Through first. The wheel over the list steps the mode, shown at once |
+| Picking several layers, palette colors, row marks | Layer palette | done | A box in each row (the pen on the edited layer), Ctrl+click and Shift+click; lock, show, delete and palette color take every picked layer; locks, draft bars and effect badges in the rows |
+| Search Layer, Split Layer List | Window > Search Layer; Layer palette | done | In the Layer palette itself (its search button) with Clip Studio's filter list, not a palette of its own |
+| Right-click menu of a layer | Layer palette | done | Its own short list, in Clip Studio's order |
+| Layer Property: anti-aliased border, tone options, monochrome inks | Layer Property | done | Density source, posterization, dot shape, Reflect layer opacity, dot position; black and white for Monochrome; Apply Expression Color of Preview |
+| Simple tone settings | Layer > New Layer > Tone | partial | Frequency with presets, density, dot shape, angle; the noise size and factor and combining tones of the same settings are missing |
 
 ## Selection
 

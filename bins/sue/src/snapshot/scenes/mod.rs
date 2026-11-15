@@ -75,6 +75,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_figure::tool(tour)?;
     paint_canvas::figure(tour)?;
     paint_fill::shrink_selection(tour)?;
+    paint_layers::rows(tour)?;
     shell::sue_menu_in_paint(tour)?;
     paint_dialogs::menu_and_dialogs(tour)?;
     paint_dialogs::pages(tour)?;

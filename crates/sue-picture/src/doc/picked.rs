@@ -290,6 +290,25 @@ pub fn folder_insert(
     ))
 }
 
+/// `true` if `layer` is clipped to a layer below it that is not among
+/// `merged`: the nearest unclipped layer under it in its folder.
+fn clipped_outside(arena: &Arena, picture: EntityId, layer: EntityId, merged: &[EntityId]) -> bool {
+    let stack = layers(arena, picture);
+    let Some(at) = stack.iter().position(|info| info.id == layer) else {
+        return false;
+    };
+    if !stack[at].style.clip {
+        return false;
+    }
+    let folder = folder_of(arena, layer);
+    stack[..at]
+        .iter()
+        .rev()
+        .filter(|info| folder_of(arena, info.id) == folder)
+        .find(|info| !info.style.clip)
+        .is_some_and(|base| !merged.contains(&base.id))
+}
+
 /// What the picked layers show together, as the picture shows them
 /// without the folders around them: a full-size raster, every effect,
 /// mask, mode and folder in it baked.
@@ -309,6 +328,12 @@ fn composite_of(arena: &Arena, picture: EntityId, ids: &[EntityId]) -> Option<Ra
     for id in &picked {
         if let Some(outer) = folder_of(arena, *id) {
             alone.unrelate(outer, MEMBER, *id);
+        }
+        // Clipped to a layer that is not merged: its own pixels go in
+        // whole, and the merged layer keeps the clip (`merge_picked`).
+        if clipped_outside(arena, picture, *id, &shown) {
+            let mut unclip = SetProperty::new(*id, picture::CLIP, false);
+            sue_core::ReversibleTransaction::apply(&mut unclip, &mut alone).ok()?;
         }
     }
     let pixels = render(
@@ -373,6 +398,11 @@ pub fn merge_picked(
         return Err(tr!("is-locked", name = locked.name()));
     }
     let tile = composite_of(arena, picture, &picked).ok_or(tr!("the-picture-has-no-size"))?;
+    // The lowest picked layer clipped to one that is not merged: the
+    // merged layer stays clipped to it, as the lowest one was.
+    let keep_clip = picked
+        .first()
+        .is_some_and(|lowest| clipped_outside(arena, picture, *lowest, &all));
     let label = tr!("merge-selected-layers");
     // A plain raster layer at the bottom takes the pixels in; else a new
     // layer does, in the topmost picked one's place.
@@ -396,7 +426,7 @@ pub fn merge_picked(
                     BlendMode::Normal.name(),
                 ))
                 .then(SetProperty::new(into, picture::VISIBLE, true))
-                .then(SetProperty::new(into, picture::CLIP, false));
+                .then(SetProperty::new(into, picture::CLIP, keep_clip));
             // Its effects are in the pixels now.
             let effects: Vec<String> = arena
                 .get_by_id(into)
@@ -416,7 +446,10 @@ pub fn merge_picked(
         }
         None => {
             let top = *picked.last().ok_or(tr!("layer-not-picture"))?;
-            let (edit, id) = raster_in_place_of(arena, picture, top, tile, &label)?;
+            let (mut edit, id) = raster_in_place_of(arena, picture, top, tile, &label)?;
+            if keep_clip {
+                edit = edit.then(SetProperty::new(id, picture::CLIP, true));
+            }
             (edit, id)
         }
     };

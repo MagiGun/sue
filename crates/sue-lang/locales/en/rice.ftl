@@ -576,3 +576,5 @@ sue_writer_keys-file_save_as = File save as
     .description = Save As
 sue_paint-tool_color_icon = Tool color icon
     .description = The Tool palette shows the main and sub colors under its tools (Tool palette menu, Show Color Icon)
+sue_paint-ask_delete_folders = Ask before deleting layer folders
+    .description = Ask before deleting picked layer folders (the question's "Do not show again" turns it off)

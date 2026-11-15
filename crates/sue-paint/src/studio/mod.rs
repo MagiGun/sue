@@ -31,6 +31,7 @@ mod edit;
 mod files;
 mod frame;
 mod layers;
+pub(crate) use layers::ASK_DELETE_FOLDERS;
 mod materials;
 mod media;
 mod rulers;
@@ -855,6 +856,9 @@ pub struct SuePaint {
     /// What the tool palettes keep between frames: Sub Tool Detail's
     /// category, the naming dialog, the arrangement last kept.
     pub(crate) tool_palettes: crate::panels::ToolPalettes,
+    /// What the Layer palette keeps between frames: two panes, the
+    /// search, the palette color menu, where its buttons are.
+    pub(crate) layer_palette: crate::panels::LayerPalette,
 }
 
 impl Default for SuePaint {
@@ -1054,6 +1058,7 @@ impl Default for SuePaint {
             page_view: None,
             comic_picked: None,
             tool_palettes: crate::panels::ToolPalettes::default(),
+            layer_palette: crate::panels::LayerPalette::default(),
         }
     }
 }
