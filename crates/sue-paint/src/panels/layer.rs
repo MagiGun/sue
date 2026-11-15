@@ -777,13 +777,22 @@ impl SuePaint {
                     let chosen = Some(info.id) == self.layer();
                     let also = self.doc().is_some_and(|doc| doc.picked.contains(&info.id));
                     let painter = ui.painter().clone();
-                    if chosen {
-                        painter.rect_filled(full, CornerRadius::ZERO, theme.fill_selected());
+                    let fill = if chosen {
+                        Some(theme.fill_selected())
                     } else if also {
-                        painter.rect_filled(full, CornerRadius::ZERO, theme.fill_pressed());
+                        Some(theme.fill_pressed())
                     } else if response.hovered() {
-                        painter.rect_filled(full, CornerRadius::ZERO, theme.fill_hover());
+                        Some(theme.fill_hover())
+                    } else {
+                        None
+                    };
+                    if let Some(fill) = fill {
+                        painter.rect_filled(full, CornerRadius::ZERO, fill);
                     }
+                    // Secondary text and marks stay readable on the row's
+                    // fill in every preset (4.5 to 1).
+                    let muted =
+                        fill.map_or_else(|| theme.text_muted(), |fill| theme.text_muted_on(fill));
                     painter.hline(full.x_range(), full.bottom(), theme.hairline());
                     // Where a dragged layer would go: into a folder (the
                     // whole row), or right above a layer (a line on top).
@@ -829,7 +838,7 @@ impl SuePaint {
                         let edge = full.left() + metrics.gap;
                         painter.add(egui::Shape::dashed_line(
                             &[pos2(edge, full.top()), pos2(edge, full.bottom())],
-                            Stroke::new(Theme::STRONG_STROKE, theme.text_muted()),
+                            Stroke::new(Theme::STRONG_STROKE, muted),
                             metrics.pad,
                             metrics.gap,
                         ));
@@ -1056,12 +1065,7 @@ impl SuePaint {
                         at
                     };
                     if info.locked {
-                        mark(
-                            &mut right,
-                            WmIcon::Lock,
-                            theme.text_muted(),
-                            tr!("layer-mark-locked"),
-                        );
+                        mark(&mut right, WmIcon::Lock, muted, tr!("layer-mark-locked"));
                     }
                     if let Ok(entity) = arena.get_by_id(info.id) {
                         let effects = crate::effects::Effects::of(entity, 72.0);
@@ -1069,25 +1073,20 @@ impl SuePaint {
                             let pen = mark(
                                 &mut right,
                                 WmIcon::ToolPen,
-                                theme.text_muted(),
+                                muted,
                                 tr!("layer-mark-keyframes"),
                             );
                             let small = Rect::from_min_size(pen.center(), pen.size() / 2.0);
                             sue_wm::icons::paint(&painter, small, WmIcon::Lock, theme.text);
                         }
                         if effects.tone.is_some() {
-                            mark(
-                                &mut right,
-                                WmIcon::Tone,
-                                theme.text_muted(),
-                                tr!("layer-mark-tone"),
-                            );
+                            mark(&mut right, WmIcon::Tone, muted, tr!("layer-mark-tone"));
                         }
                         if effects.border.is_some() {
                             mark(
                                 &mut right,
                                 WmIcon::BorderEffect,
-                                theme.text_muted(),
+                                muted,
                                 tr!("layer-mark-border"),
                             );
                         }
@@ -1164,7 +1163,7 @@ impl SuePaint {
                             Align2::LEFT_BOTTOM,
                             top_line,
                             caption,
-                            theme.text_muted(),
+                            muted,
                         );
                     let renaming = self
                         .renaming
@@ -1223,11 +1222,7 @@ impl SuePaint {
                                 Align2::LEFT_TOP,
                                 name,
                                 theme.text_font(TextRole::Body),
-                                if visible {
-                                    theme.text
-                                } else {
-                                    theme.text_muted()
-                                },
+                                if visible { theme.text } else { muted },
                             );
                     }
                     if info.style.clip {

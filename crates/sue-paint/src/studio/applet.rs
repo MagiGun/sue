@@ -119,10 +119,10 @@ impl SueApplet for SuePaint {
             RiceDeclaration::new(
                 "sue_paint.theme",
                 RiceParameter::EnumChoice {
-                    value: "gray".to_owned(),
+                    value: sue_wm::STUDIO_THEME_SUE.to_owned(),
                     options: [
-                        "gray",
                         sue_wm::STUDIO_THEME_SUE,
+                        "gray",
                         "void",
                         "graphite",
                         "paper",
@@ -131,7 +131,7 @@ impl SueApplet for SuePaint {
                     .map(String::from)
                     .to_vec(),
                 },
-                "Sue Paint's colors: Gray, Sue's own theme (follows it), a preset, or Custom (below)",
+                "Sue Paint's colors: Sue's own theme (follows it), Gray, a preset, or Custom (below)",
             ),
             RiceDeclaration::new(
                 crate::dialogs::PEN_PRESSURE,
