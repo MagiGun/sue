@@ -282,6 +282,13 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
+        // Shown again after a while away: the folder is read again, so
+        // pictures people put there themselves show.
+        let pass = ui.ctx().cumulative_pass_nr();
+        if self.extras.bank_drawn.is_none_or(|last| last + 1 < pass) {
+            self.extras.pictures = bank_pictures(crate::colorsets::folder(cx).as_deref());
+        }
+        self.extras.bank_drawn = Some(pass);
         let density = Density::of(ui);
         let pad = theme.space(Space::S3);
         let gap = theme.space(Space::S2);

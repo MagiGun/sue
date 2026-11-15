@@ -97,6 +97,8 @@ pub(crate) struct Extras {
     pub pictures: Vec<std::path::PathBuf>,
     /// Thumbnails of the Item Bank's pictures.
     pub bank_thumbs: crate::panels::item_bank::Thumbs,
+    /// The frame the Item Bank was last drawn in.
+    pub bank_drawn: Option<u64>,
     /// The Material palette's view: its folder, search, size and picks.
     pub material: crate::panels::MaterialView,
     /// The library keys of the favorite materials, as of the last frame
