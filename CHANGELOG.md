@@ -32,7 +32,6 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint: Insert Frame shows the result on the timeline while you
   set it (Preview on the timeline), and buttons that do not fit a narrow
   Timeline bar are all under More, Specify Cels included.
-
 - Sue Paint: movie, image sequence, animated GIF, PNG and WebP, cels and
   timelapse exports run in the background. The window keeps drawing and
   you can keep painting; a notice shows how far the export is, with a
