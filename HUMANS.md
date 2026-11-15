@@ -356,13 +356,16 @@ Back to the Same .clip writes the canvas into its `.clip` in one step, and
 File, Save Duplicate, .clip makes a new one. A canvas opened from a PNG,
 JPEG or another picture Sue writes saves back in its format, as in Clip
 Studio Paint; once it has more than one layer, Save says the layers will
-be merged into the picture (the canvas keeps them) and asks first. File,
-Save As can make a Sue project, a `.clip`, a Photoshop document or a flat
-picture; with Settings (Sue Paint, Save format) on Clip Studio Paint, Save
-on a new canvas asks where to write a `.clip` instead of a project. A `.clip` that an older Sue saved opens from the copy
-of the project it carries, as long as its layers still match that copy;
-when they were changed in Clip Studio since, it opens from its layers and
-says so.
+be merged into the picture (the canvas keeps them) and asks first. A
+picture that holds more than Sue Paint shows (frames of an animation,
+pages of a TIFF, more than 8 bits a channel, or float pixels) is never
+written over: Save keeps it in the Sue project instead. File, Save As can
+make a Sue project, a `.clip`, a Photoshop document or a flat picture;
+with Settings (Sue Paint, Save format) on Clip Studio Paint, Save on a new
+canvas asks where to write a `.clip` instead of a project. A `.clip` that
+an older Sue saved opens from the copy of the project it carries, as long
+as its layers still match that copy; when they were changed in Clip
+Studio since, it opens from its layers and says so.
 
 **On a phone or tablet** the start page is laid out for fingers. The top
 bar shows Sue Paint with Help and Settings; Projects starts with three big

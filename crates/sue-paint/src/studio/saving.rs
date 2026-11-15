@@ -88,6 +88,129 @@ fn animated(bytes: &[u8]) -> bool {
     false
 }
 
+/// Whether the TIFF `bytes` hold more than one 8-bit picture: more than
+/// 8 bits or float samples, a second page, or a layout this reading does
+/// not follow (then it is not risked).
+fn tiff_holds_more(bytes: &[u8]) -> bool {
+    let little = match bytes.get(..4) {
+        Some(b"II*\0") => true,
+        Some(b"MM\0*") => false,
+        // BigTIFF, or not a TIFF at all.
+        _ => return true,
+    };
+    let word = |at: usize| {
+        bytes.get(at..at + 2).map(|b| {
+            if little {
+                u16::from_le_bytes([b[0], b[1]])
+            } else {
+                u16::from_be_bytes([b[0], b[1]])
+            }
+        })
+    };
+    let long = |at: usize| {
+        bytes.get(at..at + 4).map(|b| {
+            let b = [b[0], b[1], b[2], b[3]];
+            if little {
+                u32::from_le_bytes(b)
+            } else {
+                u32::from_be_bytes(b)
+            }
+        })
+    };
+    let Some(ifd) = long(4).map(|at| at as usize) else {
+        return true;
+    };
+    let Some(count) = word(ifd).map(usize::from) else {
+        return true;
+    };
+    for entry in 0..count {
+        let at = ifd + 2 + entry * 12;
+        let (Some(tag), Some(values)) = (word(at), long(at + 4)) else {
+            return true;
+        };
+        let values = values as usize;
+        match tag {
+            // BitsPerSample: short values, in the entry when they fit.
+            258 => {
+                let from = if values <= 2 {
+                    at + 8
+                } else {
+                    match long(at + 8) {
+                        Some(from) => from as usize,
+                        None => return true,
+                    }
+                };
+                for sample in 0..values.min(16) {
+                    match word(from + sample * 2) {
+                        Some(bits) if bits <= 8 => {}
+                        _ => return true,
+                    }
+                }
+            }
+            // SampleFormat: 3 is floating point.
+            339 if word(at + 8) == Some(3) => return true,
+            _ => {}
+        }
+    }
+    // A next page.
+    long(ifd + 2 + count * 12).is_none_or(|next| next != 0)
+}
+
+/// Whether the PNM `bytes` hold samples of more than 8 bits.
+fn pnm_holds_more(bytes: &[u8]) -> bool {
+    if !matches!(bytes.get(..2), Some(b"P2" | b"P3" | b"P5" | b"P6")) {
+        return false;
+    }
+    // Width, height and the largest sample, between blanks and comments.
+    let mut numbers = Vec::new();
+    let mut at = 2;
+    while numbers.len() < 3 && at < bytes.len() {
+        match bytes[at] {
+            b'#' => {
+                while at < bytes.len() && bytes[at] != b'\n' {
+                    at += 1;
+                }
+            }
+            byte if byte.is_ascii_digit() => {
+                let mut number = 0_u64;
+                while at < bytes.len() && bytes[at].is_ascii_digit() {
+                    number = number
+                        .saturating_mul(10)
+                        .saturating_add(u64::from(bytes[at] - b'0'));
+                    at += 1;
+                }
+                numbers.push(number);
+                continue;
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    numbers.get(2).is_none_or(|max| *max > 255)
+}
+
+/// Whether writing one 8-bit picture over the file `bytes` of type `ext`
+/// would lose some of it: frames, pages, or samples deeper than 8 bits
+/// that Sue Paint read as 8.
+fn holds_more(ext: &str, bytes: &[u8]) -> bool {
+    match ext {
+        // The bit depth in the header chunk.
+        "png" => animated(bytes) || bytes.get(24).is_none_or(|bits| *bits > 8),
+        "webp" => animated(bytes),
+        "tif" | "tiff" => tiff_holds_more(bytes),
+        "ppm" => pnm_holds_more(bytes),
+        "jxl" => {
+            use sue_io::JxlPipeline;
+            sue_io::NativeJxlPipeline
+                .decode(bytes, sue_io::ProgressiveTarget::DcPreview)
+                .map_or(true, |decoded| {
+                    decoded.info.bits_per_sample > 8 || decoded.info.frames > 1
+                })
+        }
+        _ => false,
+    }
+}
+
 /// The extension of `path`, in lower case.
 fn extension(path: &Path) -> String {
     path.extension()
@@ -95,13 +218,14 @@ fn extension(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Whether Save may write a canvas made of 8-bit `format` pixels read
-/// from `bytes` back over `path`.
+/// Whether Save may write a canvas made of `format` pixels read from
+/// `bytes` back over `path`: only when that loses nothing of the file.
 #[must_use]
 pub(crate) fn writes_back(path: &Path, bytes: &[u8], format: PixelFormat) -> bool {
+    let ext = extension(path);
     format != PixelFormat::RgbaF32
-        && WRITES_BACK.contains(&extension(path).as_str())
-        && !animated(bytes)
+        && WRITES_BACK.contains(&ext.as_str())
+        && !holds_more(&ext, bytes)
 }
 
 /// How many layers of `picture` would be merged into one flat picture:
@@ -368,5 +492,93 @@ mod tests {
         assert!(!writes_back(Path::new("a.png"), &apng, PixelFormat::Rgba8));
         let webp = sue_io::encode_webp_animation(&[frame.clone(), frame], 100).unwrap();
         assert!(!writes_back(Path::new("a.webp"), &webp, PixelFormat::Rgba8));
+    }
+
+    #[test]
+    fn pictures_deeper_than_8_bits_or_of_many_pages_are_not_written_back() {
+        // PNG: the bit depth byte of the header chunk.
+        let still =
+            sue_io::encode_png(&sue_core::RasterTile2D::new(2, 2, PixelFormat::Rgba8).unwrap())
+                .unwrap();
+        assert_eq!(still[24], 8);
+        let mut deep = still.clone();
+        deep[24] = 16;
+        assert!(!writes_back(Path::new("a.png"), &deep, PixelFormat::Rgba8));
+        // TIFF, little and big endian: one 8-bit page is written back;
+        // 16-bit samples, float samples or a second page are not.
+        let tiff = |little: bool, bits: u16, format: u16, next: u32| {
+            let w16 = |v: u16| {
+                if little {
+                    v.to_le_bytes()
+                } else {
+                    v.to_be_bytes()
+                }
+            };
+            let w32 = |v: u32| {
+                if little {
+                    v.to_le_bytes()
+                } else {
+                    v.to_be_bytes()
+                }
+            };
+            let mut out = if little {
+                b"II*\0".to_vec()
+            } else {
+                b"MM\0*".to_vec()
+            };
+            out.extend(w32(8));
+            out.extend(w16(2));
+            for (tag, value) in [(258_u16, bits), (339, format)] {
+                out.extend(w16(tag));
+                out.extend(w16(3));
+                out.extend(w32(1));
+                out.extend(w16(value));
+                out.extend([0, 0]);
+            }
+            out.extend(w32(next));
+            out
+        };
+        let at = |bytes: &[u8]| writes_back(Path::new("a.tif"), bytes, PixelFormat::Rgba8);
+        for little in [true, false] {
+            assert!(at(&tiff(little, 8, 1, 0)), "one 8-bit page");
+            assert!(!at(&tiff(little, 16, 1, 0)), "16-bit");
+            assert!(!at(&tiff(little, 8, 3, 0)), "float");
+            assert!(!at(&tiff(little, 8, 1, 400)), "a second page");
+        }
+        assert!(!at(b"II+\0"), "BigTIFF");
+        let real = sue_io::encode_as(
+            &sue_core::RasterTile2D::new(3, 2, PixelFormat::Rgba8).unwrap(),
+            "tiff",
+            90,
+            1,
+        )
+        .unwrap();
+        assert!(at(&real), "a TIFF Sue wrote");
+        // PNM: the largest sample in the header.
+        let ppm = |max: &str| format!("P6\n# made by hand\n2 1\n{max}\n").into_bytes();
+        assert!(writes_back(
+            Path::new("a.ppm"),
+            &ppm("255"),
+            PixelFormat::Rgba8
+        ));
+        assert!(!writes_back(
+            Path::new("a.ppm"),
+            &ppm("65535"),
+            PixelFormat::Rgba8
+        ));
+        // JPEG XL: what its header says, read by the decoder.
+        let jxl = sue_io::encode_as(
+            &sue_core::RasterTile2D::new(2, 2, PixelFormat::Rgba8).unwrap(),
+            "jxl",
+            90,
+            1,
+        )
+        .unwrap();
+        assert!(writes_back(Path::new("a.jxl"), &jxl, PixelFormat::Rgba8));
+        assert!(!writes_back(
+            Path::new("a.jxl"),
+            b"not a picture",
+            PixelFormat::Rgba8
+        ));
     }
 }
