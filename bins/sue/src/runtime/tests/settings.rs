@@ -163,7 +163,11 @@ fn advanced_groups_start_closed_and_open_on_a_click() {
     // bottom of the page, their last row shows).
     paint.settings(sue_paint::ID);
     paint.scroll_settings(3000.0);
-    assert!(!paint.shows("Shadow under floating surfaces"), "{:?}", paint.texts);
+    assert!(
+        !paint.shows("Shadow under floating surfaces"),
+        "{:?}",
+        paint.texts
+    );
     paint
         .runtime
         .engine
@@ -176,6 +180,10 @@ fn advanced_groups_start_closed_and_open_on_a_click() {
         .unwrap();
     paint.settle(4);
     paint.scroll_settings(3000.0);
-    assert!(paint.shows("Shadow under floating surfaces"), "{:?}", paint.texts);
+    assert!(
+        paint.shows("Shadow under floating surfaces"),
+        "{:?}",
+        paint.texts
+    );
     paint.runtime.shell.close_window();
 }

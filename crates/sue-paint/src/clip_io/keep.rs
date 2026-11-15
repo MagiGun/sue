@@ -9,12 +9,12 @@
 //! gains later starts at its default instead of breaking this file.
 
 use sue_core::codec::{CodecError, Reader, Writer};
+use sue_io::clip::parts;
 use sue_io::clip::{
     AttributePart, BlockList, ClipAttribute, ClipBitmap, ClipBlock, ClipBlocks, ClipChunk,
     ClipDocument, ClipDrawColor, ClipForeign, ClipHead, ClipLayer, ClipMask, ClipRow, ClipShape,
     ClipTable, Columns,
 };
-use sue_io::clip::parts;
 use sue_io::sqlite::Value;
 
 /// The version of both encodings. Version 2 adds, after what version 1
@@ -276,13 +276,20 @@ fn layer_into(out: &mut Writer, layer: &ClipLayer) {
         out.str(content.kind());
         out.bytes(&parts::encode_content(content));
     }
-    option_bytes(out, layer.effects.as_ref().map(parts::encode_effects).as_deref());
     option_bytes(
         out,
-        layer.palette_color.map(parts::encode_color).as_deref(),
+        layer.effects.as_ref().map(parts::encode_effects).as_deref(),
     );
+    option_bytes(out, layer.palette_color.map(parts::encode_color).as_deref());
     out.bytes(&parts::encode_rulers(&layer.rulers));
-    option_bytes(out, layer.thumbnail.as_ref().map(parts::encode_picture).as_deref());
+    option_bytes(
+        out,
+        layer
+            .thumbnail
+            .as_ref()
+            .map(parts::encode_picture)
+            .as_deref(),
+    );
 }
 
 /// Reads the typed parts version 2 added after a layer's columns.
@@ -438,8 +445,14 @@ pub(super) fn picture_bytes(doc: &ClipDocument) -> Vec<u8> {
     out.bytes(&foreign.trailing);
     // Version 2: the document's typed parts.
     out.bytes(&parts::encode_comps(&doc.comps));
-    option_bytes(&mut out, doc.timeline.as_ref().map(parts::encode_timeline).as_deref());
-    option_bytes(&mut out, doc.preview.as_ref().map(parts::encode_picture).as_deref());
+    option_bytes(
+        &mut out,
+        doc.timeline.as_ref().map(parts::encode_timeline).as_deref(),
+    );
+    option_bytes(
+        &mut out,
+        doc.preview.as_ref().map(parts::encode_picture).as_deref(),
+    );
     out.into_bytes()
 }
 
