@@ -26,11 +26,13 @@
 //!   chance, the same bits on every platform.
 //! - [`replay`]: the stored stroke, and painting it again to the same
 //!   bytes.
+//! - [`presets`]: Sue's built-in brushes, written by hand.
 
 pub mod buffer;
 pub mod input;
 pub mod math;
 pub mod paint;
+pub mod presets;
 pub mod raster;
 pub mod worker;
 pub mod replay;

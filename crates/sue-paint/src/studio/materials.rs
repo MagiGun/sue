@@ -150,7 +150,7 @@ impl SuePaint {
         let folder = crate::materials::location(cx).map(|folder| folder.join("tips"));
         let mut added = 0;
         for brush in brushes {
-            let Some(tip) = crate::decoration::imported_tip(&brush, folder.as_deref()) else {
+            let Some(tip) = downloaded_tip(&brush, folder.as_deref()) else {
                 continue;
             };
             self.toolbox
@@ -166,5 +166,40 @@ impl SuePaint {
                 file = file.as_str()
             ));
         }
+    }
+}
+
+/// The tip a downloaded brush paints with: made from its pictures, or,
+/// for a brush without any (a round pen or an airbrush of a `.sut`),
+/// from its settings alone.
+fn downloaded_tip(
+    brush: &sue_io::brushes::ImportedBrush,
+    folder: Option<&Path>,
+) -> Option<crate::brush::Tip> {
+    crate::decoration::imported_tip(brush, folder).or_else(|| {
+        let preset = brush.preset.as_ref().filter(|_| brush.tips.is_empty())?;
+        Some(crate::brush::Tip::from_text(
+            &sue_brush::presets::legacy_text(preset),
+        ))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_downloaded_brush_without_a_picture_paints_with_its_settings() {
+        let pen = sue_brush::presets::find("sue.pen.g_pen").expect("a built-in pen");
+        let brush = sue_io::brushes::ImportedBrush {
+            name: "Round".to_owned(),
+            preset: Some(pen),
+            ..sue_io::brushes::ImportedBrush::default()
+        };
+        let tip = downloaded_tip(&brush, None).expect("no picture is no reason to refuse");
+        assert_eq!((tip.size, tip.taper_start, tip.shape), (10.0, 20.0, 0));
+        // A file that says nothing of its brushes still has nothing to add.
+        let bare = sue_io::brushes::ImportedBrush::default();
+        assert!(downloaded_tip(&bare, None).is_none());
     }
 }

@@ -3755,6 +3755,8 @@ dependencies = [
  "jpeg-encoder",
  "jxl-oxide",
  "miniz_oxide 0.8.9",
+ "sha2",
+ "sue-brush",
  "sue-core",
  "sue-lang",
  "sue-model",

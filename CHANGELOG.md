@@ -369,6 +369,10 @@ follow [Semantic Versioning](https://semver.org/).
   as it says; without Close gap it reached one pixel further.
 - Choosing which layers Fill and Auto Select refer to no longer turns
   Close and fill or Paint unpainted area into a plain fill.
+- Add from downloads takes a Clip Studio Paint sub tool without a picture
+  tip (a round pen, an airbrush) instead of saying the file has no brush,
+  and each sub tool of a `.sut` gets only the tips its own settings name,
+  not every tip in the file.
 - Instant transitions and Animation speed (Settings, Motion) now reach
   the switches in Settings and on the start pages and everything else
   the interface toolkit animates by itself: they used to keep their own

@@ -8,14 +8,20 @@
 //! makes its own brushes from them. Nothing is run and nothing outside the
 //! file is read.
 //!
-//! The layouts were learnt from real files: a `.sut` is a SQLite database
-//! whose `Node` rows name the sub tools, whose `Variant` rows hold their
-//! settings (`BrushSize`, `Opacity`, `BrushInterval`, `BrushRibbon`, ...)
-//! and whose `MaterialFile` rows each hold a tar archive with the tip's
-//! `thumbnail/thumbnail.png`. An `.abr` (version 6) keeps its tips in an
-//! `8BIM samp` block, each a gray picture stored raw or PackBits packed.
+//! A `.sut` is read in full by [`sut`], which maps every setting Sue's
+//! brush model has and writes `.sut` files too; [`read`] gives its sub
+//! tools here as well, each with its own tips and the whole preset. An
+//! `.abr` (version 6) keeps its tips in an `8BIM samp` block, each a gray
+//! picture stored raw or PackBits packed.
+//!
+//! [`library`] keeps brushes as entities: Sue's own and a person's, in
+//! sets, saved as an ordinary `.sue` file.
 
-use crate::sqlite::{self, Table, Value};
+pub mod library;
+pub mod sut;
+
+use sue_model::BrushPreset;
+use sue_model::brush::{Combine, PictureRef, TipSource, input, param};
 
 /// One brush read from a file.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -44,6 +50,9 @@ pub struct ImportedBrush {
     pub ribbon: bool,
     /// The tips paint their own colors.
     pub keep_colors: bool,
+    /// Every setting the file has, as a Sue brush, for a file that says
+    /// more than the fields above (a `.sut`); its pictures are `tips`.
+    pub preset: Option<BrushPreset>,
 }
 
 /// The brushes in `bytes`, a file named `name` (its extension says the
@@ -63,9 +72,12 @@ pub fn read(name: &str, bytes: &[u8]) -> Result<Vec<ImportedBrush>, String> {
         .rsplit_once('.')
         .map(|(_, extension)| extension.to_ascii_lowercase())
         .unwrap_or_default();
-    let brushes = if bytes.starts_with(b"SQLite format 3\0") {
-        sut(bytes, &stem)?
-    } else if bytes.starts_with(b"\x89PNG") {
+    if bytes.starts_with(b"SQLite format 3\0") {
+        // A sub tool without a picture tip (a round pen, an airbrush) is
+        // a brush like any other.
+        return from_sut(bytes, &stem);
+    }
+    let brushes = if bytes.starts_with(b"\x89PNG") {
         vec![picture(&stem, bytes)?]
     } else if extension == "abr" {
         abr(bytes, &stem)?
@@ -336,128 +348,70 @@ fn abr_sample(bytes: &[u8], at: usize, end: usize) -> Result<(u32, u32, Vec<u8>)
 
 // ----- Clip Studio Paint ------------------------------------------------------
 
-/// A `Variant` row by the `VariantID` a node names.
-fn by_id(table: &Table, id: i64) -> Option<&[Value]> {
-    let key = table.column("VariantID")?;
-    table
-        .rows
-        .iter()
-        .find(|(_, row)| row.get(key).and_then(Value::int) == Some(id))
-        .map(|(_, row)| row.as_slice())
-}
-
-/// A file inside a tar archive by its name.
-fn untar<'a>(archive: &'a [u8], wanted: &str) -> Option<&'a [u8]> {
-    let mut at = 0;
-    while at + 512 <= archive.len() {
-        let header = &archive[at..at + 512];
-        if header.iter().all(|byte| *byte == 0) {
-            return None;
-        }
-        let name = String::from_utf8_lossy(header[..100].split(|b| *b == 0).next()?);
-        let size_text = String::from_utf8_lossy(&header[124..136]);
-        let size =
-            usize::from_str_radix(size_text.trim_matches(|c: char| c == '\0' || c == ' '), 8)
-                .ok()?;
-        let data = at + 512;
-        if name == wanted {
-            return archive.get(data..data + size);
-        }
-        at = data + size.div_ceil(512) * 512;
-    }
-    None
-}
-
-/// Clip Studio Paint sub tools (`.sut`): every sub tool with settings, its
-/// tips from the file's materials.
-fn sut(bytes: &[u8], stem: &str) -> Result<Vec<ImportedBrush>, String> {
-    let tables = sqlite::read(bytes)?;
-    let table = |name: &str| tables.iter().find(|table| table.name == name);
-    let (Some(nodes), Some(variants)) = (table("Node"), table("Variant")) else {
-        return Err("not a Clip Studio Paint sub tool".to_owned());
-    };
-    // The tips: each material's picture.
-    let mut tips = Vec::new();
-    if let Some(materials) = table("MaterialFile")
-        && let Some(data) = materials.column("FileData")
-    {
-        for (_, row) in &materials.rows {
-            if let Some(png) = row
-                .get(data)
-                .and_then(Value::bytes)
-                .and_then(|archive| untar(archive, "thumbnail/thumbnail.png"))
-                && let Ok(decoded) = crate::decode_png(png)
-                && let Some(pixels) = decoded.tile.bytes()
-            {
-                tips.push((decoded.tile.width(), decoded.tile.height(), pixels.to_vec()));
+/// Clip Studio Paint sub tools (`.sut`): every sub tool, each with the
+/// tips its own settings name.
+fn from_sut(bytes: &[u8], stem: &str) -> Result<Vec<ImportedBrush>, String> {
+    Ok(sut::import_named(bytes, stem)?
+        .into_iter()
+        .map(|brush| {
+            let preset = brush.preset;
+            let tips = sut::named_pictures(&preset)
+                .into_iter()
+                .filter(|hash| match &preset.tip {
+                    TipSource::Images { pictures, .. } => {
+                        pictures.contains(&PictureRef::Hash(*hash))
+                    }
+                    TipSource::Round => false,
+                })
+                .filter_map(|hash| brush.pictures.iter().find(|picture| picture.hash() == hash))
+                .filter_map(|picture| {
+                    let tile = crate::decode_png(&picture.png).ok()?.tile;
+                    Some((tile.width(), tile.height(), tile.bytes()?.to_vec()))
+                })
+                .collect();
+            let number = |key: &str| preset.value(key);
+            let spray = sue_brush::paint::Behaviours::from_preset(&preset).spray;
+            let size = number(param::SIZE);
+            ImportedBrush {
+                name: preset.name.clone(),
+                tips,
+                size,
+                opacity: number(param::OPACITY),
+                hardness: number(param::HARDNESS),
+                spacing: (preset.spacing != sue_model::brush::Spacing::Auto)
+                    .then(|| number(param::SPACING))
+                    .flatten()
+                    .map(|spacing| spacing.clamp(0.02, 5.0)),
+                angle: number(param::ANGLE),
+                follow: preset.dynamics.iter().any(|binding| {
+                    binding.param == param::ANGLE
+                        && binding.input == input::DIRECTION
+                        && binding.combine == Combine::Add
+                        && binding.on
+                }),
+                // The old engine has no spray: it scatters the tip by the
+                // spray's size over the brush's, as 0.0.75 read it.
+                scatter: spray
+                    .map(|spray| {
+                        if spray.linked {
+                            spray.size
+                        } else {
+                            spray.size / size.unwrap_or(1.0).max(1.0)
+                        }
+                    })
+                    .filter(|scatter| *scatter > 0.0),
+                ribbon: preset.engine == sue_model::brush::EngineKind::Ribbon,
+                keep_colors: matches!(
+                    preset.tip,
+                    TipSource::Images {
+                        keep_colors: true,
+                        ..
+                    }
+                ),
+                preset: Some(preset),
             }
-        }
-    }
-    let column = |table: &Table, row: &[Value], name: &str| -> Option<f64> {
-        let value = row.get(table.column(name)?)?;
-        value
-            .real()
-            .or_else(|| value.int().map(|value| value as f64))
-    };
-    let mut out = Vec::new();
-    let (name_at, variant_at) = (nodes.column("NodeName"), nodes.column("NodeVariantID"));
-    for (_, node) in &nodes.rows {
-        let Some(variant) = variant_at
-            .and_then(|at| node.get(at))
-            .and_then(Value::int)
-            .filter(|id| *id > 0)
-        else {
-            continue;
-        };
-        let Some(row) = by_id(variants, variant) else {
-            continue;
-        };
-        let name = name_at
-            .and_then(|at| node.get(at))
-            .and_then(Value::text)
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or(stem)
-            .to_owned();
-        let get = |name: &str| column(variants, row, name);
-        let on = |name: &str| get(name).is_some_and(|value| value != 0.0);
-        // Sizes in pixels; other units (millimeters, points) fall back to a
-        // size that suits most decorations.
-        let size = get("BrushSize").map(|size| {
-            if get("BrushSizeUnit").unwrap_or(0.0) == 0.0 {
-                size as f32
-            } else {
-                40.0
-            }
-        });
-        let uses_pictures = on("BrushUsePatternImage");
-        // Clip Studio's turn effectors: the 32 bit turns tips along the line.
-        let effector = get("BrushRotationEffector").unwrap_or(0.0) as u32;
-        let scatter = (on("BrushUseSpray"))
-            .then(|| {
-                let spray = get("BrushSpraySize").unwrap_or(0.0) as f32;
-                size.map(|size| spray / size.max(1.0)).unwrap_or(1.0)
-            })
-            .filter(|scatter| *scatter > 0.0);
-        out.push(ImportedBrush {
-            name,
-            tips: if uses_pictures {
-                tips.clone()
-            } else {
-                Vec::new()
-            },
-            size,
-            opacity: get("Opacity").map(|opacity| (opacity / 100.0) as f32),
-            hardness: get("BrushHardness").map(|hardness| (hardness / 100.0) as f32),
-            spacing: get("BrushInterval")
-                .map(|interval| (interval as f32 / 100.0).clamp(0.02, 5.0)),
-            angle: get("BrushRotation").map(|angle| angle as f32),
-            follow: effector & 32 != 0,
-            scatter,
-            ribbon: on("BrushRibbon") && uses_pictures,
-            keep_colors: !on("BrushChangePatternColor"),
-        });
-    }
-    Ok(out)
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -506,8 +460,8 @@ mod tests {
         archive.extend(b"abc");
         archive.resize(1024, 0);
         archive.extend(vec![0; 1024]);
-        assert_eq!(untar(&archive, "a.txt"), Some(&b"abc"[..]));
-        assert_eq!(untar(&archive, "b.txt"), None);
+        assert_eq!(sut::untar(&archive, "a.txt"), Some(&b"abc"[..]));
+        assert_eq!(sut::untar(&archive, "b.txt"), None);
     }
 
     #[test]
