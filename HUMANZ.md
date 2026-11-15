@@ -1872,8 +1872,14 @@ modifier keys do first); `pick.rs` finds the color, layer or figure
 part under the pen; `fill.rs` has the bucket, lasso fill, auto select and gradients;
 `shape.rs` figures and straight lines; `view.rs` draws the picture with
 its tone overlay, page frames, edge rulers and scrollbars; `overlays.rs`
-draws selections, previews, the brush outline, rulers, the selection
-launcher and puppet warp over it; `status.rs` is the strip below.
+draws selections, previews, the brush outline, rulers and the camera
+frame over it; `marks.rs` is how every handle, pin and guide over the
+picture is drawn (from the theme, two tones, so it reads on any
+picture); `puppet.rs` is puppet warp's pins and bar; `status.rs` is the
+strip below. Outside the folder, `launchers.rs` draws the launchers (the
+Selection launcher's buttons are a list of command names kept in
+`selection_launcher.txt`) and `transform_ui.rs` the transform box, its
+modes, rotation centre, lattice and bar.
 
 **Sue Writer's commands.** `crates/sue-writer/src/commands` holds Sue
 Writer's registry: one file per menu (`file.rs`, `edit.rs`, `view.rs`,

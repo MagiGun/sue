@@ -163,6 +163,7 @@ impl SuePaint {
             Some(Gesture::Move { .. }) => self.move_drag(pos, viewport, size, cx),
             Some(Gesture::Bucket { .. }) => self.bucket_drag(pos, viewport, size),
             Some(Gesture::Scrub { .. }) => self.scrub_drag(pos, viewport, size, cx),
+            Some(Gesture::Keyed { .. }) => self.keyed_drag(pos, viewport, size, cx),
         }
     }
 
@@ -275,6 +276,7 @@ impl SuePaint {
             gesture @ Gesture::Scrub { .. } => self.scrub_release(gesture, viewport, size, cx),
             // Move layer's drag of the selected pixels ends with it.
             Gesture::Transform { .. } if self.move_lift => self.move_lift_release(cx),
+            gesture @ Gesture::Keyed { .. } => self.keyed_release(gesture, cx),
             Gesture::Pan { .. }
             | Gesture::Rotate { .. }
             | Gesture::Pick { .. }

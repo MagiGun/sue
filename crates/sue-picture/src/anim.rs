@@ -185,25 +185,24 @@ pub const PLACE: &str = "light_table.place";
 pub const ONLY: &str = "light_table.only";
 
 /// A layer's place on light tables: across, down and turned (degrees).
+/// A place that is also scaled or flipped ([`Place`]) gives its move and
+/// turn here.
 #[must_use]
 pub fn place_of(entity: &sue_core::Entity) -> [f32; 3] {
-    let values: Vec<f32> = entity
-        .property(PLACE)
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .split(',')
-        .filter_map(|value| value.trim().parse().ok())
-        .collect();
-    match values.as_slice() {
-        &[dx, dy, degrees] => [dx, dy, degrees],
-        _ => [0.0; 3],
-    }
+    let place = Place::of(entity);
+    [place.dx, place.dy, place.degrees]
 }
 
 /// The text of a place ([`PLACE`]).
 #[must_use]
 pub fn place_text([dx, dy, degrees]: [f32; 3]) -> String {
-    format!("{dx},{dy},{degrees}")
+    Place {
+        dx,
+        dy,
+        degrees,
+        ..Place::default()
+    }
+    .text()
 }
 
 /// What a canvas point sees on a layer placed at `place` on a `size`
@@ -211,22 +210,183 @@ pub fn place_text([dx, dy, degrees]: [f32; 3]) -> String {
 /// as camera folders use). `None` for a layer where it is.
 #[must_use]
 pub fn place_map(place: [f32; 3], size: [u32; 2]) -> Option<[f32; 6]> {
-    if place == [0.0; 3] {
-        return None;
-    }
     let [dx, dy, degrees] = place;
-    let (cx, cy) = (size[0] as f32 / 2.0, size[1] as f32 / 2.0);
-    let (sin, cos) = (-degrees.to_radians()).sin_cos();
-    // Undo the move, then the turn about the middle.
-    let (ox, oy) = (-dx - cx, -dy - cy);
-    Some([
-        cos,
-        -sin,
-        sin,
-        cos,
-        cos * ox - sin * oy + cx,
-        sin * ox + cos * oy + cy,
-    ])
+    Place {
+        dx,
+        dy,
+        degrees,
+        ..Place::default()
+    }
+    .map(size)
+}
+
+/// Where a layer sits on light tables, as the Light table tool leaves it
+/// without changing the layer: turned (degrees, clockwise on the screen),
+/// scaled and flipped left to right about the canvas's middle, then moved
+/// by `dx`, `dy`. Kept in [`PLACE`] as `dx,dy,degrees`, with
+/// `,scale,flip` after them only when it is scaled or flipped, so a place
+/// that is neither reads and writes as 0.0.75 did.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Place {
+    /// How far it is moved across, in canvas pixels.
+    pub dx: f32,
+    /// How far it is moved down, in canvas pixels.
+    pub dy: f32,
+    /// How far it is turned, in degrees.
+    pub degrees: f32,
+    /// How much it is scaled (1 as it is).
+    pub scale: f32,
+    /// It is flipped left to right.
+    pub flip: bool,
+}
+
+impl Default for Place {
+    fn default() -> Self {
+        Self {
+            dx: 0.0,
+            dy: 0.0,
+            degrees: 0.0,
+            scale: 1.0,
+            flip: false,
+        }
+    }
+}
+
+impl Place {
+    /// The place `entity` has on light tables.
+    #[must_use]
+    pub fn of(entity: &sue_core::Entity) -> Self {
+        Self::parse(
+            entity
+                .property(PLACE)
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        )
+    }
+
+    /// The place `text` says ([`PLACE`]'s form); where it is for text it
+    /// cannot read.
+    #[must_use]
+    pub fn parse(text: &str) -> Self {
+        let values: Vec<f32> = text
+            .split(',')
+            .filter_map(|value| value.trim().parse().ok())
+            .collect();
+        match *values.as_slice() {
+            [dx, dy, degrees] => Self {
+                dx,
+                dy,
+                degrees,
+                ..Self::default()
+            },
+            [dx, dy, degrees, scale, flip] if scale.is_finite() && scale > 0.0 => Self {
+                dx,
+                dy,
+                degrees,
+                scale,
+                flip: flip != 0.0,
+            },
+            _ => Self::default(),
+        }
+    }
+
+    /// Its text ([`PLACE`]'s form).
+    #[must_use]
+    pub fn text(self) -> String {
+        let Self {
+            dx,
+            dy,
+            degrees,
+            scale,
+            flip,
+        } = self;
+        if (scale - 1.0).abs() < f32::EPSILON && !flip {
+            format!("{dx},{dy},{degrees}")
+        } else {
+            format!("{dx},{dy},{degrees},{scale},{}", u8::from(flip))
+        }
+    }
+
+    /// `true` for a layer where it is.
+    #[must_use]
+    pub fn is_still(self) -> bool {
+        self == Self::default()
+    }
+
+    /// The linear part of where it puts a layer: `[a, b, c, d]`, a layer
+    /// vector `(x, y)` going to `(a x + b y, c x + d y)`.
+    fn linear(self) -> [f32; 4] {
+        let (sin, cos) = self.degrees.to_radians().sin_cos();
+        let s = self.scale.max(0.001);
+        let f = if self.flip { -1.0 } else { 1.0 };
+        [cos * s * f, -sin * s, sin * s * f, cos * s]
+    }
+
+    /// Where the layer's point `at` shows on a `size` canvas.
+    #[must_use]
+    pub fn forward(self, at: [f32; 2], size: [u32; 2]) -> [f32; 2] {
+        let [a, b, c, d] = self.linear();
+        let (cx, cy) = (size[0] as f32 / 2.0, size[1] as f32 / 2.0);
+        let (x, y) = (at[0] - cx, at[1] - cy);
+        [cx + self.dx + a * x + b * y, cy + self.dy + c * x + d * y]
+    }
+
+    /// What each canvas point sees on the layer, as an affine map (see
+    /// [`place_map`]); `None` for a layer where it is.
+    #[must_use]
+    pub fn map(self, size: [u32; 2]) -> Option<[f32; 6]> {
+        if self.is_still() {
+            return None;
+        }
+        let [a, b, c, d] = self.linear();
+        let det = a * d - b * c;
+        if det.abs() < 1e-9 {
+            return None;
+        }
+        let [ia, ib, ic, id] = [d / det, -b / det, -c / det, a / det];
+        let (cx, cy) = (size[0] as f32 / 2.0, size[1] as f32 / 2.0);
+        // Undo the move, then the turn, scale and flip about the middle.
+        let (ox, oy) = (-self.dx - cx, -self.dy - cy);
+        Some([
+            ia,
+            ib,
+            ic,
+            id,
+            ia * ox + ib * oy + cx,
+            ic * ox + id * oy + cy,
+        ])
+    }
+
+    /// The same place, then turned `degrees`, scaled by `scale` and (with
+    /// `flip`) flipped left to right, all about the canvas point `about`.
+    #[must_use]
+    pub fn then(
+        self,
+        about: [f32; 2],
+        degrees: f32,
+        scale: f32,
+        flip: bool,
+        size: [u32; 2],
+    ) -> Self {
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let f = if flip { -1.0 } else { 1.0 };
+        let outer = |v: [f32; 2]| {
+            let x = v[0] * f;
+            [
+                scale * (cos * x - sin * v[1]),
+                scale * (sin * x + cos * v[1]),
+            ]
+        };
+        let (cx, cy) = (size[0] as f32 / 2.0, size[1] as f32 / 2.0);
+        let middle = outer([cx + self.dx - about[0], cy + self.dy - about[1]]);
+        Self {
+            dx: about[0] + middle[0] - cx,
+            dy: about[1] + middle[1] - cy,
+            degrees: degrees + if flip { -self.degrees } else { self.degrees },
+            scale: (self.scale * scale).clamp(0.01, 100.0),
+            flip: self.flip != flip,
+        }
+    }
 }
 
 /// The layers on `picture`'s general light table, shown on every cel.
@@ -267,7 +427,7 @@ pub fn reset_places(arena: &Arena, layers: &[EntityId]) -> Edit {
         .filter(|layer| {
             arena
                 .get_by_id(**layer)
-                .is_ok_and(|entity| place_of(entity) != [0.0; 3])
+                .is_ok_and(|entity| !Place::of(entity).is_still())
         })
         .fold(
             Edit::new(tr!("reset-position-layers-light-table")),
@@ -295,7 +455,7 @@ pub fn traced(arena: &Arena, layers: &[EntityId], size: [u32; 2]) -> Vec<Traced>
             let entity = arena.get_by_id(*layer).ok()?;
             Some(Traced {
                 layer: *layer,
-                place: place_map(place_of(entity), size),
+                place: Place::of(entity).map(size),
                 only: entity.property(ONLY).and_then(Value::as_bool) == Some(true),
             })
         })
@@ -1445,6 +1605,74 @@ mod tests {
         let [x, y] = see(turned, 50.0, 50.0);
         assert!((x - 50.0).abs() < 1e-4 && (y - 50.0).abs() < 1e-4);
         assert_eq!(place_text([1.5, -2.0, 30.0]), "1.5,-2,30");
+    }
+
+    #[test]
+    fn a_light_table_place_scales_flips_and_reads_as_0_0_75_wrote_it() {
+        // 0.0.75's three numbers read as they were, and write the same.
+        let old = Place::parse("4,-2,15");
+        assert_eq!(
+            (old.dx, old.dy, old.degrees, old.scale, old.flip),
+            (4.0, -2.0, 15.0, 1.0, false)
+        );
+        assert_eq!(old.text(), "4,-2,15");
+        let new = Place {
+            scale: 2.0,
+            flip: true,
+            ..old
+        };
+        assert_eq!(new.text(), "4,-2,15,2,1");
+        assert_eq!(Place::parse(&new.text()), new);
+        assert!(Place::parse("nonsense").is_still());
+        assert!(
+            Place::parse("1,2,3,0,0").is_still(),
+            "a scale of nothing is refused"
+        );
+        // What a point sees is where it was put.
+        let size = [100, 80];
+        let see = |m: [f32; 6], [x, y]: [f32; 2]| {
+            [m[0] * x + m[1] * y + m[4], m[2] * x + m[3] * y + m[5]]
+        };
+        for point in [[10.0, 20.0], [50.0, 40.0], [93.0, 7.0]] {
+            let shown = new.forward(point, size);
+            let back = see(new.map(size).unwrap(), shown);
+            assert!(
+                (back[0] - point[0]).abs() < 1e-3 && (back[1] - point[1]).abs() < 1e-3,
+                "{back:?}"
+            );
+        }
+        // Scaled twice about a point: that point stays, others go twice
+        // as far.
+        let still = Place::default();
+        let about = [30.0, 30.0];
+        let scaled = still.then(about, 0.0, 2.0, false, size);
+        let kept = scaled.forward(about, size);
+        assert!((kept[0] - 30.0).abs() < 1e-3 && (kept[1] - 30.0).abs() < 1e-3);
+        let far = scaled.forward([40.0, 30.0], size);
+        assert!((far[0] - 50.0).abs() < 1e-3, "{far:?}");
+        // Turned a quarter about a point, then flipped about it.
+        let turned = still.then(about, 90.0, 1.0, false, size);
+        let moved = turned.forward([40.0, 30.0], size);
+        assert!(
+            (moved[0] - 30.0).abs() < 1e-3 && (moved[1] - 40.0).abs() < 1e-3,
+            "{moved:?}"
+        );
+        let flipped = turned.then(about, 0.0, 1.0, true, size);
+        let mirrored = flipped.forward([40.0, 30.0], size);
+        assert!(
+            (mirrored[0] - 30.0).abs() < 1e-3 && (mirrored[1] - 40.0).abs() < 1e-3,
+            "{mirrored:?}"
+        );
+        let side = flipped.forward([30.0, 40.0], size);
+        assert!(
+            (side[0] - 40.0).abs() < 1e-3 && (side[1] - 30.0).abs() < 1e-3,
+            "{side:?}"
+        );
+        // The old map is the same as before for a move and a turn.
+        assert_eq!(
+            place_map([10.0, 5.0, 0.0], [100, 100]),
+            Place::parse("10,5,0").map([100, 100])
+        );
     }
 
     #[test]

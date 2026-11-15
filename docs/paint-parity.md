@@ -191,12 +191,12 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | Scale/Rotate | Edit > Transform | done | Drag the box, or type the size and angle |
-| Scale alone, Rotate alone | Edit > Transform | partial | Commands exist; verify |
+| Scale alone, Rotate alone | Edit > Transform | done | Modes of the transform bar; the rotation centre moves anywhere |
 | Free Transform | Edit > Transform | done | Each corner on its own |
-| Distort, Skew | Edit > Transform | partial | Commands exist; verify |
-| Perspective | Edit > Transform | partial | Command exists; verify |
-| Mesh Transformation | Edit > Transform | partial | Command exists; Clip Studio 5.1 made its points editable |
-| Puppet Warp | Edit > Transform | done | Pins, Alt removes one |
+| Distort, Skew | Edit > Transform | done | Modes of the transform bar; Ctrl on a corner distorts in any mode |
+| Perspective | Edit > Transform | done | A corner and the one across its edge move apart |
+| Mesh Transformation | Edit > Transform | done | A lattice of 2 to 33 points each way, every point dragged |
+| Puppet Warp | Edit > Transform | done | Pins that pick together (Shift), turn (their ring) and bend each part alone; its Tool Property on the bar |
 | Flip Horizontal, Flip Vertical, Rotate 180 (the layer) | Edit > Transform | done | |
 | Change Image Resolution | Edit > Change Image Resolution | done | |
 | Change Canvas Size | Edit > Change Canvas Size | done | Around a reference point |
@@ -286,7 +286,7 @@ The order of work is the plan at the end.
 | Convert to Selection Layer, and back | Select | done | |
 | Quick Mask | Select > Quick Mask | done | Paint the selection in red, then turn it back |
 | Select Overlapping Vectors, Select Vectors Within Area | Select | done | Pick the lines of a vector layer for the Object tool |
-| Selection Launcher bar | View > Selection Launcher | done | |
+| Selection Launcher bar | View > Selection Launcher | done | Clip Studio's buttons and order; Selection Launcher Settings adds any menu command |
 | Select the layer under the pointer | Canvas | done | Ctrl+Shift+click |
 
 ## Rulers and symmetry

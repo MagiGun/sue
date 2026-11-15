@@ -77,6 +77,7 @@ pub use sue_picture::{
 use sue_picture::{comps, smart};
 
 pub use commands::registry;
+pub use launchers::shown_buttons;
 pub use menus::menus;
 pub use studio::{ID, SuePaint, mirror};
 

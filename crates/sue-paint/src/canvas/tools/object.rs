@@ -112,6 +112,11 @@ impl SuePaint {
             self.camera_press(press, cx);
             return;
         }
+        if self.keyed_box(&cx.world.arena).is_some() {
+            // A layer whose keyframes are on: its box's handles key it.
+            self.keyed_press(press, cx);
+            return;
+        }
         let Some(info) = self.layer_info(&cx.world.arena) else {
             return;
         };

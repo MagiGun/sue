@@ -246,12 +246,13 @@ pub(crate) enum Gesture {
     /// Drawing a ruler with the Ruler Pen (picture pixels).
     RulerPen { points: Vec<[f32; 2]> },
     /// The Object tool on a camera folder: where the drag began (picture
-    /// pixels), the camera then, and whether it moves, zooms or turns.
+    /// pixels), the camera then, and the handle it grabbed (inside moves,
+    /// a corner or an edge zooms, the stalk or outside turns).
     Camera {
         folder: EntityId,
         start: [f32; 2],
         base: crate::camera::Camera,
-        mode: u8,
+        grip: crate::transform_ui::FrameGrip,
     },
     /// Painting the selection with the Selection pen (or out of it with
     /// Erase selection): where the pen last was (picture pixels).
@@ -281,8 +282,11 @@ pub(crate) enum Gesture {
         handle: crate::rulers::Handle,
         before: Option<String>,
     },
-    /// Dragging puppet warp pin `index`.
-    Pin { index: usize },
+    /// Dragging puppet warp's pins: moving or turning the picked ones,
+    /// or a box that picks them.
+    Pin {
+        drag: crate::canvas::puppet::PinDrag,
+    },
     /// A Blend tool drag on `layer`: its pixels from before, where the
     /// last dab was (layer pixels), and how far the pen went since.
     Blend {
@@ -296,8 +300,9 @@ pub(crate) enum Gesture {
         /// the blend dabs work on, `before` being its gray bytes.
         work: Option<Vec<u8>>,
     },
-    /// Dragging a transform handle: what it grabbed, where (layer pixels),
-    /// and the box as it was.
+    /// Dragging a transform handle: what it grabbed, where (picture
+    /// pixels), the box as it was, the rotation centre or lattice point
+    /// it grabbed, and the lattice's points then.
     Transform {
         handle: crate::transform_ui::Handle,
         start: [f32; 2],
@@ -305,6 +310,8 @@ pub(crate) enum Gesture {
         center: [f32; 2],
         scale: [f32; 2],
         angle: f32,
+        grab: [f32; 2],
+        points: Vec<[f32; 2]>,
     },
     /// Scrolling the view.
     Pan { last: Pos2 },
@@ -337,12 +344,27 @@ pub(crate) enum Gesture {
         sub: Box<crate::tools::SubTool>,
         points: Vec<[f32; 2]>,
     },
-    /// The Light table tool moving (or, with Shift, turning) the light
-    /// table's layers: each one's place as the drag began.
+    /// The Light table tool moving, scaling or turning the light table's
+    /// layers: each one's place as the drag began (and the value it was
+    /// kept as, for an exact undo), where the drag began
+    /// (picture pixels), the handle of the box it grabbed and the box.
     LightTable {
-        layers: Vec<(EntityId, [f32; 3])>,
+        layers: Vec<(EntityId, crate::anim::Place, Option<Value>)>,
         start: Pos2,
-        turn: bool,
+        grip: crate::transform_ui::FrameGrip,
+        quad: crate::transform::Quad,
+    },
+    /// The Object tool on a layer whose keyframes are on: where the drag
+    /// began (picture pixels), how the layer stood, the handle of its box
+    /// it grabbed and the box, and the key shown while it moves (applied
+    /// in place, put back before the real step).
+    Keyed {
+        layer: EntityId,
+        start: [f32; 2],
+        base: crate::anim::motion::Pose,
+        grip: crate::transform_ui::FrameGrip,
+        quad: crate::transform::Quad,
+        preview: Option<Box<crate::doc::Edit>>,
     },
     /// Moving layers (one, or a folder's): each layer, where it was and
     /// its position properties before.
@@ -778,6 +800,14 @@ pub struct SuePaint {
     /// How a turn of the view snaps: its step in degrees (0 turns
     /// freely), and whether Shift snaps it (by that step, else 45).
     pub(crate) turning: (f32, bool),
+    /// The Selection launcher's buttons and its settings popover.
+    pub(crate) launcher_set: crate::launchers::LauncherSet,
+    /// How transforms, Mesh Transformation and Puppet warp behave: their
+    /// Tool Property, kept between one use and the next.
+    pub(crate) transform_prefs: crate::transform_ui::TransformPrefs,
+    /// Where the Light table tool's centre of rotation is, from the middle
+    /// of its box (picture pixels): it goes along when the box moves.
+    pub(crate) light_centre: [f32; 2],
 }
 
 impl Default for SuePaint {
@@ -959,6 +989,9 @@ impl Default for SuePaint {
             held_tool: None,
             move_lift: false,
             turning: (0.0, true),
+            launcher_set: crate::launchers::LauncherSet::default(),
+            transform_prefs: crate::transform_ui::TransformPrefs::default(),
+            light_centre: [0.0; 2],
         }
     }
 }
@@ -990,10 +1023,12 @@ pub(crate) struct WarpSession {
     pub before: Vec<u8>,
     pub pins: Vec<crate::warp::Pin>,
     pub shown: Vec<crate::warp::Pin>,
-    /// Where the layer's pixels are, for the mesh drawn over them.
-    pub bounds: Option<[u32; 4]>,
     /// The layer's offset in the picture.
     pub offset: [i64; 2],
+    /// The settings the preview last showed.
+    pub shown_settings: Option<crate::warp::PuppetSettings>,
+    /// The mesh's triangles as the pins bend them, for Show mesh.
+    pub mesh: Vec<crate::warp::Triangle>,
 }
 
 impl SuePaint {

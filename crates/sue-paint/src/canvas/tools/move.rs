@@ -49,7 +49,7 @@ impl SuePaint {
         // and the selection with it.
         let selected = self.doc().is_some_and(|doc| doc.selection.is_some());
         if selected && Some(target) == self.layer() && !doc::is_folder(&cx.world.arena, target) {
-            self.start_transform(cx, false);
+            self.start_transform_in(cx, crate::transform::Mode::ScaleRotate, false);
             if self.transform.is_some() {
                 let Some(view) = self.doc().map(|doc| doc.view) else {
                     return;

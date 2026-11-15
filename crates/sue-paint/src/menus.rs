@@ -460,6 +460,8 @@ pub fn menus() -> Vec<Menu> {
                 item("edit.copy_svg"),
                 item("edit.paste"),
                 item("edit.paste_here"),
+                item("edit.cut_paste"),
+                item("edit.copy_paste"),
                 item("edit.clear"),
                 item("edit.clear_outside"),
                 item("edit.smart_smoothing"),

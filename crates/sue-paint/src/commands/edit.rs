@@ -314,13 +314,13 @@ fn luma_to_alpha(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) 
 }
 
 /// Scale/Rotate, Scale and Rotate: the handles that keep the box square.
-fn transform(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.start_transform(cx, false);
+fn transform(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    paint.start_transform_in(cx, crate::transform_ui::mode_of(call.name), false);
 }
 
 /// Free Transform, Distort, Skew and Perspective: each corner on its own.
-fn free_transform(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.start_transform(cx, true);
+fn free_transform(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    paint.start_transform_in(cx, crate::transform_ui::mode_of(call.name), false);
 }
 
 /// Puts the layer back as it was before the transform.
@@ -348,25 +348,26 @@ fn rotate180(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     });
 }
 
-/// Mesh Transformation: a 4 by 4 grid of points over the layer's
-/// pixels, each dragged to bend what is near it.
+/// Mesh Transformation: a lattice of points over what is transformed
+/// (4 by 4 at first, or as many as were chosen last), each dragged to bend
+/// what is near it.
 fn mesh(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.start_warp(cx);
-    if let Some(warp) = paint.warp.as_mut()
-        && warp.pins.is_empty()
-        && let Some([x0, y0, x1, y1]) = warp.bounds
-    {
-        for row in 0..4 {
-            for column in 0..4 {
-                let at = [
-                    x0 as f32 + (x1 - x0) as f32 * column as f32 / 3.0,
-                    y0 as f32 + (y1 - y0) as f32 * row as f32 / 3.0,
-                ];
-                warp.pins.push(crate::warp::Pin::at(at));
-            }
-        }
+    paint.start_transform_in(cx, crate::transform::Mode::ScaleRotate, true);
+    if paint.transform.is_some() {
         cx.notify(tr!("mesh-transformation-drag-points-bend-layer"));
     }
+}
+
+/// Cut and Paste: the selected part leaves the layer for a new layer in
+/// the same place.
+fn cut_paste(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.cut_and_paste(cx);
+}
+
+/// Copy and Paste: the selected part is copied onto a new layer in the
+/// same place.
+fn copy_paste(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.copy_and_paste(cx);
 }
 
 fn puppet(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
@@ -753,6 +754,8 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         material_paste,
     )
     .with(Flags::HIDDEN),
+    c("edit.cut_paste", "cut-and-paste", "cut", cut_paste).state(on_raster),
+    c("edit.copy_paste", "copy-and-paste", "copy", copy_paste).state(on_raster),
 ];
 
 #[cfg(test)]

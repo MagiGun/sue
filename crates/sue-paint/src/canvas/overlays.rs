@@ -1,204 +1,17 @@
 //! What is drawn over the picture: selections, shape previews, the
-//! brush outline, grids, rulers, the selection launcher and puppet warp.
+//! brush outline, grids and rulers.
 
-use egui::{Color32, Id, Key, Pos2, Rect, Response, RichText, Shape, Stroke, Ui, pos2, vec2};
+use egui::{Color32, Pos2, Rect, Response, Shape, Stroke, Ui, Vec2, pos2};
+
+use super::marks;
 use sue_wm::{AppletContext, Theme};
 
 use super::shape::ellipse_points;
 use crate::doc;
-use crate::icons::Icon;
-use crate::panels::icon_button;
-use crate::select::Selection;
 use crate::studio::{Gesture, SuePaint};
 use crate::tools::Tool;
 
 impl SuePaint {
-    /// Clip Studio Paint's Selection Launcher: the commands for a selection,
-    /// in a bar under it.
-    pub(super) fn selection_launcher(
-        &mut self,
-        ui: &mut Ui,
-        viewport: Rect,
-        size: [u32; 2],
-        cx: &mut AppletContext<'_>,
-        theme: &Theme,
-    ) {
-        if !self.launcher || self.gesture.is_some() {
-            return;
-        }
-        let Some(doc) = self.docs.get(self.active) else {
-            return;
-        };
-        let Some([x0, y0, x1, y1]) = doc.selection.as_ref().and_then(Selection::bounds) else {
-            return;
-        };
-        let view = doc.view;
-        let corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
-            .map(|[x, y]| view.to_screen(viewport, size, pos2(x as f32, y as f32)));
-        let bottom = corners
-            .iter()
-            .map(|corner| corner.y)
-            .fold(f32::NEG_INFINITY, f32::max);
-        let middle = corners.iter().map(|corner| corner.x).sum::<f32>() / 4.0;
-        let buttons: [(Icon, &str, &str); 9] = [
-            (Icon::Deselect, &tr!("deselect"), "select.none"),
-            (Icon::Reset, &tr!("invert-selected-area"), "select.invert"),
-            (Icon::ZoomIn, &tr!("expand-selected-area"), "select.expand"),
-            (Icon::ZoomOut, &tr!("shrink-selected-area"), "select.shrink"),
-            (Icon::Clear, &tr!("delete"), "edit.clear"),
-            (
-                Icon::ClearOutside,
-                &tr!("delete-outside-selection"),
-                "edit.clear_outside",
-            ),
-            (Icon::FillSelection, &tr!("fill"), "edit.fill"),
-            (Icon::Fit, &tr!("scale-rotate"), "edit.transform.scale"),
-            (Icon::Frame, &tr!("crop"), "edit.crop"),
-        ];
-        let width = buttons.len() as f32 * 26.0 + 8.0;
-        let bar = Rect::from_min_size(pos2(middle - width / 2.0, bottom + 10.0), vec2(width, 30.0));
-        let bar = bar.translate(vec2(
-            (viewport.left() + 4.0 - bar.left()).max(0.0)
-                + (viewport.right() - 4.0 - bar.right()).min(0.0),
-            (viewport.bottom() - 4.0 - bar.bottom()).min(0.0),
-        ));
-        crate::launchers::note(ui.ctx(), bar);
-        ui.painter()
-            .rect_filled(bar, theme.control_radius, theme.panel);
-        ui.painter().rect_stroke(
-            bar,
-            theme.control_radius,
-            theme.hairline(),
-            egui::StrokeKind::Inside,
-        );
-        let mut run = None;
-        for (index, (icon, tip, command)) in buttons.iter().enumerate() {
-            let at = Rect::from_min_size(
-                pos2(bar.left() + 4.0 + index as f32 * 26.0, bar.top() + 4.0),
-                vec2(22.0, 22.0),
-            );
-            if icon_button(ui, at, *icon, true, false, tip, theme) {
-                run = Some(*command);
-            }
-        }
-        if let Some(command) = run {
-            self.run(command, cx);
-        }
-    }
-
-    #[allow(clippy::too_many_lines, reason = "every overlay of the canvas")]
-    /// Puppet warp's pins, the mesh they bend, and its bar (Reset, Cancel,
-    /// OK; Enter keeps the bend and Esc puts the layer back).
-    pub(super) fn warp_ui(
-        &mut self,
-        ui: &mut Ui,
-        viewport: Rect,
-        size: [u32; 2],
-        cx: &mut AppletContext<'_>,
-        theme: &Theme,
-    ) {
-        let Some(warp) = self.warp.as_ref() else {
-            return;
-        };
-        let Some(view) = self.docs.get(self.active).map(|doc| doc.view) else {
-            return;
-        };
-        let offset = [warp.offset[0] as f32, warp.offset[1] as f32];
-        let screen =
-            |p: [f32; 2]| view.to_screen(viewport, size, pos2(p[0] + offset[0], p[1] + offset[1]));
-        let painter = ui.painter().with_clip_rect(viewport);
-        // The mesh over the layer's pixels, bent as the pins bend them.
-        if let Some([x0, y0, x1, y1]) = warp.bounds {
-            let cells = 10;
-            let (w, h) = ((x1 - x0) as f32, (y1 - y0) as f32);
-            let at = |i: u32, j: u32| {
-                let point = [
-                    x0 as f32 + w * i as f32 / cells as f32,
-                    y0 as f32 + h * j as f32 / cells as f32,
-                ];
-                screen(crate::warp::forward(point, &warp.pins))
-            };
-            let stroke = Stroke::new(1.0, theme.muted.gamma_multiply(0.7));
-            for j in 0..=cells {
-                painter.add(Shape::line((0..=cells).map(|i| at(i, j)).collect(), stroke));
-            }
-            for i in 0..=cells {
-                painter.add(Shape::line((0..=cells).map(|j| at(i, j)).collect(), stroke));
-            }
-        }
-        let held = match self.gesture {
-            Some(Gesture::Pin { index }) => Some(index),
-            _ => None,
-        };
-        for (index, pin) in warp.pins.iter().enumerate() {
-            let at = screen(pin.to);
-            let fill = if held == Some(index) {
-                theme.border_active
-            } else {
-                theme.text
-            };
-            painter.circle_filled(at, 5.5, fill);
-            painter.circle_stroke(at, 5.5, Stroke::new(1.5, Color32::BLACK));
-        }
-        // The bar.
-        let pins = warp.pins.len();
-        let mut action = None;
-        egui::Area::new(Id::unique("sue-paint-warp-bar"))
-            .fade_in(false)
-            .order(egui::Order::Foreground)
-            .fixed_pos(viewport.center_top() + vec2(-200.0, 10.0))
-            .show(ui.ctx(), |ui| {
-                sue_wm::widgets::pill_frame(theme).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(tr!("puppet-warp")).color(theme.text));
-                        ui.label(
-                            RichText::new(match pins {
-                                0 => tr!("click-to-put-pins"),
-                                1 => tr!("n-1-pin"),
-                                count => tr!("pins", count = count),
-                            })
-                            .color(theme.muted),
-                        );
-                        if ui
-                            .button(tr!("reset"))
-                            .on_hover_text(tr!("take-every-pin-away"))
-                            .clicked()
-                        {
-                            action = Some(0);
-                        }
-                        if ui.button(tr!("cancel")).clicked() {
-                            action = Some(1);
-                        }
-                        if ui.button("OK").clicked() {
-                            action = Some(2);
-                        }
-                    });
-                });
-            });
-        let (enter, escape) = ui.input(|input| {
-            (
-                input.key_pressed(Key::Enter),
-                input.key_pressed(Key::Escape),
-            )
-        });
-        if enter {
-            action = Some(2);
-        } else if escape {
-            action = Some(1);
-        }
-        match action {
-            Some(0) => {
-                if let Some(warp) = self.warp.as_mut() {
-                    warp.pins.clear();
-                }
-                self.warp_preview(cx);
-            }
-            Some(1) => self.finish_warp(cx, false),
-            Some(2) => self.finish_warp(cx, true),
-            _ => {}
-        }
-    }
-
     pub(super) fn overlays(
         &mut self,
         ui: &mut Ui,
@@ -257,7 +70,7 @@ impl SuePaint {
             while x <= visible[2] {
                 painter.line_segment(
                     [screen([x, visible[1]]), screen([x, visible[3]])],
-                    Stroke::new(1.0, color),
+                    Stroke::new(marks::hair(theme), color),
                 );
                 x += step;
             }
@@ -265,7 +78,7 @@ impl SuePaint {
             while y <= visible[3] {
                 painter.line_segment(
                     [screen([visible[0], y]), screen([visible[2], y])],
-                    Stroke::new(1.0, color),
+                    Stroke::new(marks::hair(theme), color),
                 );
                 y += step;
             }
@@ -284,8 +97,8 @@ impl SuePaint {
             if edges.len() < 60_000 {
                 for [a, b] in edges.iter() {
                     let (a, b) = (screen(*a), screen(*b));
-                    painter.line_segment([a, b], Stroke::new(2.0, Color32::BLACK));
-                    painter.line_segment([a, b], Stroke::new(1.0, Color32::WHITE));
+                    painter.line_segment([a, b], Stroke::new(marks::bold(theme), Color32::BLACK));
+                    painter.line_segment([a, b], Stroke::new(marks::hair(theme), Color32::WHITE));
                 }
             }
         }
@@ -325,7 +138,7 @@ impl SuePaint {
                 to,
                 ..
             }) => {
-                let outline = Stroke::new(1.0, theme.border_active);
+                let outline = Stroke::new(marks::hair(theme), theme.border_active);
                 let (min, max) = (from.min(*to), from.max(*to));
                 match tool {
                     Tool::Gradient => {
@@ -333,8 +146,12 @@ impl SuePaint {
                             [screen([from.x, from.y]), screen([to.x, to.y])],
                             outline,
                         );
-                        painter.circle_stroke(screen([from.x, from.y]), 4.0, outline);
-                        painter.circle_stroke(screen([to.x, to.y]), 4.0, outline);
+                        painter.circle_stroke(
+                            screen([from.x, from.y]),
+                            marks::knob(theme),
+                            outline,
+                        );
+                        painter.circle_stroke(screen([to.x, to.y]), marks::knob(theme), outline);
                     }
                     Tool::Figure | Tool::Frame | Tool::Balloon | Tool::Ruler
                         if (tool == &Tool::Figure
@@ -391,15 +208,16 @@ impl SuePaint {
                 | Gesture::LassoFill { points, .. }
                 | Gesture::ShrinkLasso { points, .. },
             ) => {
+                // Two tones, so the path reads on light and dark drawing.
                 let path = points.iter().copied().map(screen).collect::<Vec<_>>();
-                painter.add(Shape::line(path, Stroke::new(1.0, theme.border_active)));
+                marks::guide(&painter, path, false, theme);
             }
             Some(Gesture::Comic(edit)) => {
                 for outline in edit.outlines() {
                     let path = outline.into_iter().map(screen).collect::<Vec<_>>();
                     painter.add(Shape::closed_line(
                         path,
-                        Stroke::new(1.5, theme.border_active),
+                        Stroke::new(marks::firm(theme), theme.border_active),
                     ));
                 }
             }
@@ -433,21 +251,22 @@ impl SuePaint {
             }
             let curve = self.polyline_for == Some((Tool::Balloon, crate::comic::CURVE_BALLOON))
                 && points.len() >= 3;
-            let stroke = Stroke::new(1.0, theme.border_active);
             if curve {
                 let path = crate::manga::smooth_closed(&points, 10)
                     .into_iter()
                     .map(screen)
                     .collect();
-                painter.add(Shape::closed_line(path, stroke));
+                marks::guide(&painter, path, true, theme);
             } else {
-                painter.add(Shape::line(
+                marks::guide(
+                    &painter,
                     points.iter().copied().map(screen).collect(),
-                    stroke,
-                ));
+                    false,
+                    theme,
+                );
             }
             for corner in &self.polyline {
-                painter.circle_stroke(screen(*corner), 3.5, stroke);
+                marks::dot(&painter, screen(*corner), false, theme);
             }
         }
         // The Object tool on effect lines: their handles.
@@ -457,7 +276,7 @@ impl SuePaint {
                 .layer
                 .and_then(|layer| Self::effect_of(&cx.world.arena, layer))
         {
-            let stroke = Stroke::new(1.0, theme.border_active);
+            let stroke = Stroke::new(marks::hair(theme), theme.border_active);
             let outline = crate::comic::effect_outline(&lines)
                 .into_iter()
                 .map(screen)
@@ -468,7 +287,7 @@ impl SuePaint {
                 Shape::closed_line(outline, stroke)
             });
             for end in [lines.a, lines.b] {
-                painter.circle_filled(screen(end), 4.0, theme.border_active);
+                painter.circle_filled(screen(end), marks::knob(theme), theme.border_active);
             }
         }
         if doc.show_rulers {
@@ -491,10 +310,12 @@ impl SuePaint {
                 size,
                 view.zoom,
                 &screen,
+                theme,
             );
         }
-        // A curve ruler being placed, or a ruler being drawn with the pen.
-        let violet = Color32::from_rgb(170, 120, 255);
+        // A curve ruler being placed, or a ruler being drawn with the pen,
+        // in the color rulers have.
+        let violet = theme.focus();
         if !self.curve_points.is_empty() {
             let mut points = self.curve_points.clone();
             if let Some(pointer) = self.pointer {
@@ -503,14 +324,18 @@ impl SuePaint {
             }
             let path = crate::rulers::Path::curve(&points);
             let line: Vec<Pos2> = path.points.iter().map(|point| screen(*point)).collect();
-            painter.add(Shape::line(line, Stroke::new(1.5, violet)));
+            painter.add(Shape::line(line, Stroke::new(marks::firm(theme), violet)));
             for point in &self.curve_points {
-                painter.circle_stroke(screen(*point), 4.0, Stroke::new(1.5, violet));
+                painter.circle_stroke(
+                    screen(*point),
+                    marks::knob(theme),
+                    Stroke::new(marks::firm(theme), violet),
+                );
             }
         }
         if let Some(Gesture::RulerPen { points }) = &self.gesture {
             let line: Vec<Pos2> = points.iter().map(|point| screen(*point)).collect();
-            painter.add(Shape::line(line, Stroke::new(1.5, violet)));
+            painter.add(Shape::line(line, Stroke::new(marks::firm(theme), violet)));
         }
         // The brush outline under the pointer.
         let tool = self.toolbox.tool();
@@ -534,15 +359,16 @@ impl SuePaint {
                 for line in &lines {
                     for index in line.controls() {
                         let at = shift(line.samples[index].at);
-                        let rect = Rect::from_center_size(at, vec2(7.0, 7.0));
+                        let rect =
+                            Rect::from_center_size(at, Vec2::splat(marks::control_point(theme)));
                         if line.is_corner(index) {
-                            painter.rect_filled(rect, 0.0, violet);
+                            painter.rect_filled(rect, egui::CornerRadius::ZERO, violet);
                         } else {
-                            painter.rect_filled(rect, 0.0, Color32::WHITE);
+                            painter.rect_filled(rect, egui::CornerRadius::ZERO, Color32::WHITE);
                             painter.rect_stroke(
                                 rect,
-                                0.0,
-                                Stroke::new(1.0, violet),
+                                egui::CornerRadius::ZERO,
+                                Stroke::new(marks::hair(theme), violet),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -553,7 +379,7 @@ impl SuePaint {
                 && path.len() > 1
             {
                 let points: Vec<Pos2> = path.iter().map(|(at, _)| shift(*at)).collect();
-                painter.add(Shape::line(points, Stroke::new(1.5, violet)));
+                painter.add(Shape::line(points, Stroke::new(marks::firm(theme), violet)));
             }
         }
         if tool == Tool::Operation
@@ -561,30 +387,40 @@ impl SuePaint {
                 .layer
                 .filter(|layer| crate::camera::is_camera(&cx.world.arena, *layer))
         {
-            // The camera's frame on the layers it sees.
+            // The camera's frame on the layers it sees, with its handles
+            // and the way it goes.
+            let arena = &cx.world.arena;
             let (frame, time) = {
-                let rate = crate::anim::timeline(&cx.world.arena, doc.picture)
+                let rate = crate::anim::timeline(arena, doc.picture)
                     .map_or(sue_core::Rate::new(24, 1), |sequence| sequence.rate);
                 (doc.frame, crate::camera::time_of(doc.frame, rate))
             };
             let camera = match self.camera_pending {
                 Some((pending, at, camera)) if pending == folder && at == frame => camera,
-                _ => crate::camera::Camera::of(&cx.world.arena, folder, Some(time), size),
+                _ => crate::camera::Camera::of(arena, folder, Some(time), size),
             };
-            let corners = camera.frame(size).map(&screen);
-            let red = Color32::from_rgb(235, 90, 90);
-            painter.add(Shape::closed_line(corners.to_vec(), Stroke::new(2.0, red)));
-            for corner in corners {
-                painter.rect_filled(Rect::from_center_size(corner, vec2(8.0, 8.0)), 0.0, red);
-            }
-            let middle = screen(camera.center);
-            painter.line_segment(
-                [middle - vec2(8.0, 0.0), middle + vec2(8.0, 0.0)],
-                Stroke::new(1.5, red),
-            );
-            painter.line_segment(
-                [middle - vec2(0.0, 8.0), middle + vec2(0.0, 8.0)],
-                Stroke::new(1.5, red),
+            let grip = match &self.gesture {
+                Some(Gesture::Camera { grip, .. }) => Some(*grip),
+                _ => None,
+            };
+            let name = doc::layers(arena, doc.picture)
+                .into_iter()
+                .find(|info| info.id == folder)
+                .map(|info| info.name)
+                .unwrap_or_default();
+            camera_marks(
+                &painter,
+                &CameraView {
+                    arena,
+                    folder,
+                    camera,
+                    time,
+                    size,
+                    grip,
+                    name: &name,
+                },
+                &screen,
+                theme,
             );
         }
         if tool == Tool::Operation
@@ -622,7 +458,11 @@ impl SuePaint {
                 painter.line_segment(
                     [a, b],
                     Stroke::new(
-                        if lit { 2.5 } else { 1.0 },
+                        if lit {
+                            marks::heavy(theme)
+                        } else {
+                            marks::hair(theme)
+                        },
                         if lit {
                             Color32::from_rgb(255, 170, 40)
                         } else {
@@ -632,7 +472,11 @@ impl SuePaint {
                 );
                 painter.circle_filled(
                     a,
-                    if lit { 5.0 } else { 3.5 },
+                    if lit {
+                        marks::ring_small(theme)
+                    } else {
+                        marks::knob_small(theme)
+                    },
                     if lit {
                         Color32::from_rgb(255, 170, 40)
                     } else {
@@ -675,7 +519,7 @@ impl SuePaint {
                         ])
                     })
                     .collect();
-                painter.add(Shape::line(points, Stroke::new(1.5, blue)));
+                painter.add(Shape::line(points, Stroke::new(marks::firm(theme), blue)));
             }
             if min[0].is_finite() {
                 let corners = [
@@ -685,7 +529,10 @@ impl SuePaint {
                     [min[0], max[1]],
                 ]
                 .map(|[x, y]| screen([x + offset[0] as f32, y + offset[1] as f32]));
-                painter.add(Shape::closed_line(corners.to_vec(), Stroke::new(1.0, blue)));
+                painter.add(Shape::closed_line(
+                    corners.to_vec(),
+                    Stroke::new(marks::hair(theme), blue),
+                ));
             }
         }
         if response.hovered()
@@ -694,35 +541,46 @@ impl SuePaint {
                 || (tool == Tool::CorrectLine && matches!(mode, 2 | 3 | 4 | 6)))
             && let Some(pointer) = self.pointer
         {
-            let radius = (self.toolbox.current().tip.size * 0.5 * view.zoom).max(1.5);
+            let radius =
+                (self.toolbox.current().tip.size * 0.5 * view.zoom).max(marks::speck_mid(theme));
             // Preferences, Cursor: the brush's outline, a crosshair or a dot.
             let shape = cx
                 .rice()
                 .get_str("sue_paint.brush_cursor")
                 .unwrap_or("brush");
-            let dark = Stroke::new(2.0, Color32::from_black_alpha(140));
-            let light = Stroke::new(1.0, Color32::from_white_alpha(220));
+            let dark = Stroke::new(marks::bold(theme), Color32::from_black_alpha(140));
+            let light = Stroke::new(marks::hair(theme), Color32::from_white_alpha(220));
             match shape {
                 "crosshair" => {
                     for stroke in [dark, light] {
                         painter.line_segment(
-                            [pointer - vec2(8.0, 0.0), pointer + vec2(8.0, 0.0)],
+                            [
+                                pointer - Vec2::X * marks::arm(theme),
+                                pointer + Vec2::X * marks::arm(theme),
+                            ],
                             stroke,
                         );
                         painter.line_segment(
-                            [pointer - vec2(0.0, 8.0), pointer + vec2(0.0, 8.0)],
+                            [
+                                pointer - Vec2::Y * marks::arm(theme),
+                                pointer + Vec2::Y * marks::arm(theme),
+                            ],
                             stroke,
                         );
                     }
                 }
                 "dot" => {
-                    painter.circle_filled(pointer, 2.5, Color32::from_black_alpha(160));
-                    painter.circle_filled(pointer, 1.5, Color32::WHITE);
+                    painter.circle_filled(
+                        pointer,
+                        marks::speck_big(theme),
+                        Color32::from_black_alpha(160),
+                    );
+                    painter.circle_filled(pointer, marks::speck_mid(theme), Color32::WHITE);
                 }
                 _ => {
                     painter.circle_stroke(pointer, radius, dark);
                     painter.circle_stroke(pointer, radius, light);
-                    painter.circle_filled(pointer, 1.0, Color32::WHITE);
+                    painter.circle_filled(pointer, marks::speck(theme), Color32::WHITE);
                 }
             }
         }
@@ -742,8 +600,8 @@ pub(super) fn segment_distance(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
     (p[0] - a[0] - t * dx).hypot(p[1] - a[1] - t * dy)
 }
 
-/// Draws `rulers` (picture pixels, `screen` maps them) in Clip Studio
-/// Paint's violet, faint while their snapping (`[special, linear]`) is off,
+/// Draws `rulers` (picture pixels, `screen` maps them) in the theme's
+/// accent, faint while their snapping (`[special, linear]`) is off,
 /// with the first line of a vanishing point still to be drawn dashed.
 #[allow(clippy::too_many_arguments, reason = "the rulers and how they show")]
 #[allow(clippy::too_many_lines, reason = "one block per ruler")]
@@ -756,9 +614,12 @@ fn ruler_overlay(
     size: [u32; 2],
     zoom: f32,
     screen: &dyn Fn([f32; 2]) -> Pos2,
+    theme: &Theme,
 ) {
     use crate::rulers::Special;
-    let violet = Color32::from_rgb(170, 120, 255);
+    // Sue's own color for rulers, the theme's accent (rule 10 of the
+    // 0.0.8 plan: no color matched to Clip Studio Paint's).
+    let violet = theme.focus();
     let tone = |on: bool| {
         if on {
             violet
@@ -792,12 +653,16 @@ fn ruler_overlay(
             ];
             painter.add(Shape::dashed_line(
                 &ends,
-                Stroke::new(1.5, special),
+                Stroke::new(marks::firm(theme), special),
                 8.0,
                 5.0,
             ));
         }
-        painter.circle_stroke(screen(center), 5.0, Stroke::new(1.5, special));
+        painter.circle_stroke(
+            screen(center),
+            marks::ring_small(theme),
+            Stroke::new(marks::firm(theme), special),
+        );
     }
     if let Some(perspective) = &rulers.perspective {
         // Lines from every vanishing point to the canvas edge, all round.
@@ -811,14 +676,14 @@ fn ruler_overlay(
                 })
             })
             .collect();
-        let faint = Stroke::new(1.0, special.gamma_multiply(0.4));
+        let faint = Stroke::new(marks::hair(theme), special.gamma_multiply(0.4));
         for point in &perspective.points {
             for target in &rim {
                 painter.line_segment([screen(*point), screen(*target)], faint);
             }
         }
         let (origin, direction) = perspective.eye_level();
-        across(origin, direction, Stroke::new(1.5, special));
+        across(origin, direction, Stroke::new(marks::firm(theme), special));
         let upright = [-direction[1], direction[0]];
         match perspective.points.len() {
             1 => across(origin, upright, faint),
@@ -830,14 +695,18 @@ fn ruler_overlay(
             _ => {}
         }
         for point in &perspective.points {
-            painter.circle_stroke(screen(*point), 5.0, Stroke::new(1.5, special));
-            painter.circle_filled(screen(*point), 1.5, special);
+            painter.circle_stroke(
+                screen(*point),
+                marks::ring_small(theme),
+                Stroke::new(marks::firm(theme), special),
+            );
+            painter.circle_filled(screen(*point), marks::speck_mid(theme), special);
         }
         if let Some(at) = rulers.eye_handle(size) {
             painter.rect_stroke(
-                Rect::from_center_size(screen(at), vec2(8.0, 8.0)),
-                0.0,
-                Stroke::new(1.5, special),
+                Rect::from_center_size(screen(at), Vec2::splat(marks::square(theme))),
+                egui::CornerRadius::ZERO,
+                Stroke::new(marks::firm(theme), special),
                 egui::StrokeKind::Middle,
             );
         }
@@ -851,7 +720,7 @@ fn ruler_overlay(
                 across(
                     [middle[0] + normal[0] * away, middle[1] + normal[1] * away],
                     direction,
-                    Stroke::new(1.0, special),
+                    Stroke::new(marks::hair(theme), special),
                 );
             }
         }
@@ -866,17 +735,29 @@ fn ruler_overlay(
                             center[1] + theta.sin() * reach,
                         ]),
                     ],
-                    Stroke::new(1.0, special),
+                    Stroke::new(marks::hair(theme), special),
                 );
             }
-            painter.circle_stroke(screen(center), 5.0, Stroke::new(1.5, special));
+            painter.circle_stroke(
+                screen(center),
+                marks::ring_small(theme),
+                Stroke::new(marks::firm(theme), special),
+            );
         }
         Some(Special::Concentric(center)) => {
             for step in 1..=12 {
                 let radius = step as f32 * diagonal / 12.0 * zoom;
-                painter.circle_stroke(screen(center), radius, Stroke::new(1.0, special));
+                painter.circle_stroke(
+                    screen(center),
+                    radius,
+                    Stroke::new(marks::hair(theme), special),
+                );
             }
-            painter.circle_stroke(screen(center), 5.0, Stroke::new(1.5, special));
+            painter.circle_stroke(
+                screen(center),
+                marks::ring_small(theme),
+                Stroke::new(marks::firm(theme), special),
+            );
         }
         None => {}
     }
@@ -887,12 +768,15 @@ fn ruler_overlay(
         {
             points.push(first);
         }
-        painter.add(Shape::line(points, Stroke::new(1.5, linear)));
+        painter.add(Shape::line(points, Stroke::new(marks::firm(theme), linear)));
     }
     if let Some([a, b]) = rulers.linear {
-        painter.line_segment([screen(a), screen(b)], Stroke::new(2.0, linear));
+        painter.line_segment(
+            [screen(a), screen(b)],
+            Stroke::new(marks::bold(theme), linear),
+        );
         for end in [a, b] {
-            painter.circle_filled(screen(end), 3.5, linear);
+            painter.circle_filled(screen(end), marks::knob_small(theme), linear);
         }
     }
     if let Some([a, b]) = vanishing_line {
@@ -905,9 +789,110 @@ fn ruler_overlay(
         ];
         painter.add(Shape::dashed_line(
             &ends,
-            Stroke::new(1.5, violet),
+            Stroke::new(marks::firm(theme), violet),
             8.0,
             5.0,
         ));
+    }
+}
+
+/// What the camera's marks are drawn from.
+struct CameraView<'a> {
+    arena: &'a sue_core::Arena,
+    folder: sue_core::EntityId,
+    /// Where it stands at the frame shown (or as it is being dragged).
+    camera: crate::camera::Camera,
+    time: sue_core::Time,
+    size: [u32; 2],
+    /// The handle being dragged.
+    grip: Option<crate::transform_ui::FrameGrip>,
+    name: &'a str,
+}
+
+/// The camera's frame on the canvas: faint guides from the canvas's
+/// corners to the frame's, the path its middle takes through its keys and
+/// the frames at the keys before and after this one, the frame with its
+/// corner and edge handles, the turning handle on its stalk, its middle,
+/// and its name under its corner.
+fn camera_marks(
+    painter: &egui::Painter,
+    view: &CameraView<'_>,
+    screen: &dyn Fn([f32; 2]) -> Pos2,
+    theme: &Theme,
+) {
+    use super::marks;
+    use crate::transform_ui::FrameGrip;
+    let (w, h) = (view.size[0] as f32, view.size[1] as f32);
+    let quad = view.camera.frame(view.size).map(screen);
+    let canvas = [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]].map(screen);
+    for corner in 0..4 {
+        marks::faint(painter, vec![canvas[corner], quad[corner]], false, theme);
+    }
+    let keys = crate::camera::keys(view.arena, view.folder);
+    let at = |time: sue_core::Time| {
+        crate::camera::Camera::of(view.arena, view.folder, Some(time), view.size)
+    };
+    if keys.len() > 1 {
+        let path: Vec<Pos2> = keys.iter().map(|time| screen(at(*time).center)).collect();
+        marks::faint(painter, path.clone(), false, theme);
+        for point in path {
+            marks::dot(painter, point, false, theme);
+        }
+    }
+    let before = keys.iter().rev().find(|time| **time < view.time);
+    let after = keys.iter().find(|time| **time > view.time);
+    for time in [before, after].into_iter().flatten() {
+        let frame = at(*time).frame(view.size).map(screen);
+        marks::faint(painter, frame.to_vec(), true, theme);
+    }
+    marks::guide(painter, quad.to_vec(), true, theme);
+    for (corner, at) in quad.iter().enumerate() {
+        marks::handle(
+            painter,
+            *at,
+            view.grip == Some(FrameGrip::Corner(corner)),
+            theme,
+        );
+    }
+    for edge in 0..4 {
+        let (a, b) = (quad[edge], quad[(edge + 1) % 4]);
+        marks::handle(
+            painter,
+            pos2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0),
+            view.grip == Some(FrameGrip::Edge(edge)),
+            theme,
+        );
+    }
+    let (from, stalk) = crate::transform_ui::stalk_of(&quad, marks::STALK);
+    for (corner, at) in quad.iter().enumerate() {
+        crate::launchers::note_mark(painter.ctx(), &format!("camera.corner.{corner}"), *at);
+    }
+    crate::launchers::note_mark(painter.ctx(), "camera.stalk", stalk);
+    crate::launchers::note_mark(painter.ctx(), "camera.middle", screen(view.camera.center));
+    marks::stalk(
+        painter,
+        from,
+        stalk,
+        view.grip == Some(FrameGrip::Turn),
+        theme,
+    );
+    marks::pivot(
+        painter,
+        screen(view.camera.center),
+        view.grip == Some(FrameGrip::Inside),
+        theme,
+    );
+    if !view.name.is_empty() {
+        let corner = quad
+            .iter()
+            .copied()
+            .max_by(|a, b| (a.y - a.x).total_cmp(&(b.y - b.x)))
+            .unwrap_or(quad[3]);
+        marks::tag(
+            painter,
+            corner + egui::Vec2::splat(theme.space(sue_wm::ui::Space::S1)),
+            view.name,
+            theme,
+        );
     }
 }
