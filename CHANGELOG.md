@@ -174,6 +174,27 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint opens Photoshop documents with 16 bits a channel (rounded
   to 8 bits) and documents whose channels are zip compressed; before,
   both were refused.
+- Sue Paint: Edit, Pick Screen Color and Hide Windows and Pick Screen
+  Color (Windows). The next click anywhere on any screen, also outside
+  Sue, takes the color there as the drawing color; a label by the
+  pointer shows it as R, G and B, and a right click or Esc cancels. The
+  second one hides Sue's windows while it waits.
+- Sue Paint: Edit, Colorize. Paint a stroke of each color on a layer and
+  Colorize fills the areas the line art closes from them, on a new layer
+  under the line art, here on your computer.
+- Sue Paint: Gradient Map has stops: as many as 16, each with its place,
+  color (its own, or the main or sub color), opacity, and a mixing rate
+  curve; click the bar to add one and drag it to move it. Gradients come
+  in sets you can add to, duplicate and delete from, kept as files you
+  can share (docs/gradient-sets.md).
+- Sue Paint: Level Correction works on RGB, or on red, green or blue
+  alone, as a filter and as a correction layer.
+- Sue Paint: Filter, Distort, Curved Surface and Filter, Effect, Artistic
+  (lines and flat colors with Clip Studio Paint's nine settings).
+- Sue Paint: Radial Blur and Zoom Blur turn round a centre you put with a
+  click on a small picture of the layer; Perlin Noise has Scale,
+  Amplitude, Attenuation, Repetition and Offset X and Y; Smart Smoothing
+  has Weak, Medium and Strong and Remove Noise.
 
 ### Changed
 
@@ -328,6 +349,10 @@ follow [Semantic Versioning](https://semver.org/).
   what changed to a journal beside the kept copy, so keeping it after a
   stroke takes a moment instead of writing the whole picture again. A
   crash in the middle loses at most the last change kept.
+- Sue Paint: every filter dialog uses Sue's own sliders, switches and
+  buttons, each with a focus ring and a tooltip, and is as tall as its
+  settings. Filter, Blur, Smooth is called Smoothing, as in Clip Studio
+  Paint, and Mesh Transformation names its step so in History.
 
 ### Fixed
 
@@ -454,6 +479,12 @@ follow [Semantic Versioning](https://semver.org/).
 - Add Page, Insert Page and Duplicate Page on a picture that is no story
   yet are one undo step: one Ctrl+Z leaves the picture as it was,
   instead of a story of one page.
+- Sue Paint: Edit, Rotate/Flip Canvas, Flip Horizontal, Flip Vertical
+  and Rotate 180 Degrees turn layer masks and vector lines with the
+  picture; before, a mask stayed where it was and no longer covered its
+  layer.
+- Sue Paint: OK and Cancel no longer fall off the bottom of the Drop
+  Shadow, Focus Lines and Speed Lines dialogs.
 
 ### Removed
 

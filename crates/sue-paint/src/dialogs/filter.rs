@@ -2106,3 +2106,69 @@ impl SuePaint {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gradient_map::Stop;
+
+    #[test]
+    fn gradient_sets_are_files_people_add_to_and_take_from() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let data = std::env::temp_dir().join(format!("sue-gradient-sets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&data);
+        let mut library = GradientLibrary::default();
+        library.load(Some(data.clone()));
+        assert_eq!(library.sets.len(), 1, "Sue's own set only");
+        // Adding on Sue's own set makes My Gradients and writes it.
+        let map = GradientMap::of(&[
+            Stop::new(0.0, [1, 2, 3]),
+            Stop::new(0.3, [200, 10, 10]),
+            Stop::new(1.0, [250, 250, 250]),
+        ])
+        .unwrap();
+        library.add("Mine".to_owned(), map);
+        assert_eq!(library.note, None);
+        assert_eq!(library.sets.len(), 2);
+        assert_eq!((library.set, library.picked), (1, Some(0)));
+        let file = data
+            .join(SETS_FOLDER)
+            .join(format!("my_gradients.{SET_EXTENSION}"));
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("gradient = Mine = "), "{text}");
+        // Read again by a fresh library: the same set.
+        let mut again = GradientLibrary::default();
+        again.load(Some(data.clone()));
+        assert_eq!(again.sets.len(), 2);
+        assert_eq!(again.sets[1].1.gradients[0].map, map);
+        // OK on an edited gradient keeps it; Delete takes it out.
+        let mut edited = map;
+        edited.stop_mut(1).unwrap().rgb = [0, 255, 0];
+        library.keep(&edited);
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("00ff00ff"), "{text}");
+        library.delete();
+        assert!(library.sets[1].1.gradients.is_empty());
+        assert_eq!(library.picked, None);
+        // Sue's own set is never changed.
+        library.set = 0;
+        library.picked = Some(0);
+        let shipped = library.sets[0].1.clone();
+        library.delete();
+        library.keep(&map);
+        assert_eq!(library.sets[0].1, shipped);
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn every_filter_dialog_is_tall_enough_for_its_settings() {
+        // The gradient map needs its two columns; the rest one.
+        let gradient = Filter::GradientMap {
+            from: [0; 3],
+            to: [255; 3],
+        };
+        assert!(dialog_size(&gradient).x > dialog_size(&Filter::Invert).x);
+        assert!(dialog_size(&gradient).y > dialog_size(&Filter::Invert).y);
+        assert!(correction_size(&gradient).y < dialog_size(&gradient).y);
+    }
+}
