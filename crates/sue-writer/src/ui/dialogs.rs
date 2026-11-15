@@ -349,8 +349,14 @@ impl SueWriter {
                             if ui.button(tr!("insert")).clicked() {
                                 let (rows, columns, heading) = (*rows, *columns, *heading);
                                 after = Some(Box::new(move |me: &mut Self, cx| {
-                                    me.editor
-                                        .insert_table(cx, rows, columns, u32::from(heading));
+                                    // As one undo step, as Table from File
+                                    // puts a table in.
+                                    let table = sue_type::tables::new_table(
+                                        rows.max(1),
+                                        columns.max(1),
+                                        u32::from(heading),
+                                    );
+                                    me.insert_table_entity(cx, table);
                                     me.editor.focus();
                                 }));
                                 keep = false;
