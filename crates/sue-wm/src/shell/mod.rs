@@ -1106,7 +1106,23 @@ impl Shell {
             self.status_ui(root, layout.status, io, &theme);
         }
         self.views_ui(&ctx, layout.page, io, &theme, now, dt);
-        self.notice_ui(&ctx, layout.page, io, &theme);
+        // On a narrow Hub the places are a tab bar along the bottom of the
+        // page: notices sit above it, so they never cover a place.
+        let mut room = layout.page;
+        if self.hub_open()
+            && let Some(top) = self
+                .hub
+                .buttons
+                .iter()
+                .filter(|(button, rect)| {
+                    matches!(button, HubButton::Place(_)) && rect.bottom() >= room.bottom() - 1.0
+                })
+                .map(|(_, rect)| rect.top())
+                .reduce(f32::min)
+        {
+            room.max.y = top.max(room.top());
+        }
+        self.notice_ui(&ctx, room, io, &theme);
         self.palette_ui(&ctx, io, &theme, now);
         self.window_ui(&ctx, frame, io, &theme, now, dt);
         self.quit_ui(&ctx, io, &theme, now);
