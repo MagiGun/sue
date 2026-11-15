@@ -244,7 +244,13 @@ impl SuePaint {
         let Ok(info) = self.paintable(&cx.world.arena) else {
             return;
         };
-        let [r, g, b] = color::unit(self.main);
+        // Main to Sub Color runs from the main color; the others from the
+        // color brushes draw with, which X switches.
+        let [r, g, b] = color::unit(if sub.mode == 1 {
+            self.main
+        } else {
+            self.drawing_color()
+        });
         let opacity = sub.tip.opacity;
         let start = [r, g, b, opacity];
         let end = if sub.mode == 1 {

@@ -32,7 +32,7 @@ rows are at the end.
 | File: new, open and save | 11 | 1 | 3 | 77 |
 | File: export | 15 | 1 | 2 | 86 |
 | File: import, batch and scanning | 6 | 4 | 5 | 53 |
-| Edit: undo, clipboard and fills | 8 | 5 | 0 | 81 |
+| Edit: undo, clipboard and fills | 9 | 5 | 0 | 82 |
 | Edit: transform and canvas size | 8 | 6 | 0 | 79 |
 | Tonal correction and color | 11 | 1 | 0 | 96 |
 | Filters | 20 | 0 | 0 | 100 |
@@ -47,14 +47,14 @@ rows are at the end.
 | Vector | 6 | 2 | 0 | 88 |
 | 3D | 7 | 2 | 4 | 62 |
 | Colors | 9 | 0 | 1 | 90 |
-| View and navigation | 9 | 3 | 0 | 88 |
+| View and navigation | 10 | 3 | 0 | 88 |
 | Window, palettes and workspaces | 21 | 3 | 1 | 90 |
 | Materials and assets | 6 | 3 | 1 | 75 |
 | Print | 0 | 2 | 2 | 25 |
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 10 | 2 | 2 | 79 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 266 | 60 | 26 | 84 |
+| **All of Sue Paint** | 267 | 60 | 26 | 84 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -97,9 +97,10 @@ Any agent can take a row. The steps:
    never force.
 
 A row can also be wrong: Clip Studio moves features between versions
-(Ver. 5.1 renamed Sub Tool to Tool Group and Tool Property to Tool
-Settings; QUMARION support went away). When your copy differs from this
-list, follow your copy, note the version, and fix the row.
+(Ver. 5.1 may call Sub Tool Tool Group and Tool Property Tool Settings,
+while every tutorial Sue follows shows Sub Tool and Tool Property, the
+names Sue uses; QUMARION support went away). When your copy differs
+from this list, follow your copy, note the version, and fix the row.
 
 The order of work is the plan at the end.
 
@@ -159,7 +160,7 @@ The order of work is the plan at the end.
 | Import 3D data (OBJ) | File > Import > 3D Data | done | |
 | FBX import (5.1) | File > Import | missing | |
 | 3D pose from Posemaniacs | File > Import > 3D pose | missing | |
-| Pose Scanner (image to pose) | File > Import > Pose Scanner | done | Tool Settings of a 3D drawing figure; MoveNet finds the body, limbs toward the camera guessed from how short they look |
+| Pose Scanner (image to pose) | File > Import > Pose Scanner | done | Tool Property of a 3D drawing figure; MoveNet finds the body, limbs toward the camera guessed from how short they look |
 | Create file object | File > Import > Create file object | missing | Another file embedded as an object layer |
 | Batch import (EX) | File > Import > Batch import | done | Every picture in a folder, by name, one a page |
 | Scan, Continuous Scan, Select Scan Device | File > Import > Scan | missing | A scanner talks through `sue-platform` |
@@ -172,6 +173,7 @@ The order of work is the plan at the end.
 | --- | --- | --- | --- |
 | Undo, Redo | Edit | done | A history per document; exact inverse deltas, never a snapshot |
 | Cut, Copy, Paste | Edit | done | |
+| Copy vectors as SVG | Edit > Copy vectors as SVG | done | The vector layer's lines, or those the Operation tool picked, as SVG code on the clipboard |
 | Paste to shown position | Edit > Paste to shown position | done | |
 | Delete | Edit | done | |
 | Delete Outside Selection | Edit | done | Shift+Delete |
@@ -264,7 +266,7 @@ The order of work is the plan at the end.
 | Ruler/Frame: delete, show, perspective, symmetrical | Layer > Ruler/Frame | done | |
 | Concentric Circle Ruler | Layer > Ruler/Frame | partial | Command exists; verify |
 | Layer Settings: show, rename, clip to layer below, reference, draft, lock, lock transparent pixels | Layer > Layer Settings | done | |
-| Layer Property: border effect, tone, layer color, expression color | Layer > Layer Property | done | The drawing itself never changes, so effects come off again |
+| Layer Property: border effect, tone, layer color, expression color | Layer > Layer Property | done | The drawing itself never changes, so effects come off again. Ctrl+B (Switch using layer color) turns the layer color on and off |
 | Change Selected Layer, Layer Order | Layer | done | |
 | Transfer to Lower Layer | Layer | done | |
 | Merge with Layer Below, Merge Selected, Merge Visible, Merge Visible to New, Flatten | Layer | done | |
@@ -277,12 +279,13 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | Select All, Deselect, Reselect, Invert Selected Area | Select | done | |
-| Expand, Shrink Selected Area | Select | done | |
+| Expand, Shrink Selected Area | Select | partial | No expansion type (round or square corners) yet |
 | Blur Border (feather) | Select > Blur border | done | |
 | Select Color Gamut | Select > Select color gamut | done | |
-| Selection from Layer: create, add, remove | Select > Selection from Layer | done | |
+| Selection from Layer: create, add, remove, select overlapping area | Select > Selection from Layer | done | |
 | Convert to Selection Layer, and back | Select | done | |
 | Quick Mask | Select > Quick Mask | done | Paint the selection in red, then turn it back |
+| Select Overlapping Vectors, Select Vectors Within Area | Select | done | Pick the lines of a vector layer for the Object tool |
 | Selection Launcher bar | View > Selection Launcher | done | |
 | Select the layer under the pointer | Canvas | done | Ctrl+Shift+click |
 
@@ -362,7 +365,7 @@ The order of work is the plan at the end.
 | Sketch tools: Pencil, Mechanical pencil, Charcoal, Crayon, Pastel, Chalk | Tool > Sketch | done | Clip Studio's six sketch tools |
 | Brush tools with color mixing | Tools | done | Watercolor and gouache pick up and drag the color underneath |
 | Airbrush | Tools | done | A soft sub tool |
-| Decoration tool | Tool | done | Eighteen sub tools on Sue's brush: scattered shapes (stars, hearts, sparkles, snow, flowers, bubbles), shapes along the line (leaves, chain, lace, stitches, dotted and dashed lines) and ribbons bent along the stroke (rope, rickrack, film strip, checkered band, stitched ribbon, lace ribbon). Tool Settings has Lay as a ribbon, Turn along the line, Angle, Scatter, Size jitter and Turn jitter. Downloaded decorations come in with Add from downloads |
+| Decoration tool | Tool | done | Eighteen sub tools on Sue's brush: scattered shapes (stars, hearts, sparkles, snow, flowers, bubbles), shapes along the line (leaves, chain, lace, stitches, dotted and dashed lines) and ribbons bent along the stroke (rope, rickrack, film strip, checkered band, stitched ribbon, lace ribbon). Tool Property has Lay as a ribbon, Turn along the line, Angle, Scatter, Size jitter and Turn jitter. Downloaded decorations come in with Add from downloads |
 | Tool palette in Clip Studio Paint 4's order, with the main and sub colors and the transparent color beneath | Tool palette | done | Move holds hand, zoom and move layer; Comic holds frame border and balloon |
 | Eraser with Vector modes | Tool | done | Only where it touches, up to where lines cross, or whole lines |
 | Blend: Blur, Finger Tip, Liquify | Tool | done | Liquify has its own slot in Clip Studio's order; it pushes, swells, pinches and twirls |
@@ -384,19 +387,19 @@ The order of work is the plan at the end.
 | Object tool (Operation) | Tool | done | Vector lines, 3D layers and camera folders in one tool |
 | Correct Line and Control Point tools | Tool | done | Reshape, pinch, smooth, join, thicken, redraw, give pen pressure |
 | Sub tool library breadth | Tools | partial | Clip Studio's eleven pens and six sketch tools are there; breadth grows next |
-| Tool Group palette: each brush's own stroke preview, Add from downloads and the Downloads folder | Tool Group palette | done | Add from downloads imports Clip Studio sub tools (.sut), Photoshop (.abr), GIMP (.gbr, .gih) and pictures as sub tools, their tips kept in the materials location; tried on real downloaded files |
+| Sub Tool palette: each brush's own stroke preview, Add from downloads and the Downloads folder | Sub Tool palette | done | Add from downloads imports Clip Studio sub tools (.sut), Photoshop (.abr), GIMP (.gbr, .gih) and pictures as sub tools, their tips kept in the materials location; tried on real downloaded files |
 | A tap with the pen leaves a dot the size of the brush | Drawing | done | Pens no longer start thin with a mouse either |
-| Tool Settings: size, opacity, hardness, smoothing, pressure | Palette | done | Changes stick to the sub tool |
-| Dynamics by pen pressure, speed and chance, along curves | Tool Settings | done | Each with a minimum you choose |
-| Tilt dynamics: the pen's lean changes size and opacity | Tool Settings | partial | On beside pressure and speed, with a minimum and a curve; a pen without tilt (and a mouse) counts as upright, at the minimum. Tilt arrives under Linux (Wayland and X11); Windows Ink and WinTab bring none yet. Verify on a tablet |
-| Starting and Ending: pixels, share of the line, fade | Tool Settings | done | Thin the line, fade it, or both, longer when you draw fast |
-| Color jitter, per dab or per stroke | Tool Settings | done | |
-| Stabilizer with Adjust by speed | Tool Settings | done | The line never falls far behind, and finishes along the pen's way |
-| Correction, Taper and the trailing flick | Tool Settings | done | Corners stay sharp, ends thin to a point |
+| Tool Property: size, opacity, hardness, smoothing, pressure | Palette | done | Changes stick to the sub tool |
+| Dynamics by pen pressure, speed and chance, along curves | Tool Property | done | Each with a minimum you choose |
+| Tilt dynamics: the pen's lean changes size and opacity | Tool Property | partial | On beside pressure and speed, with a minimum and a curve; a pen without tilt (and a mouse) counts as upright, at the minimum. Tilt arrives under Linux (Wayland and X11); Windows Ink and WinTab bring none yet. Verify on a tablet |
+| Starting and Ending: pixels, share of the line, fade | Tool Property | done | Thin the line, fade it, or both, longer when you draw fast |
+| Color jitter, per dab or per stroke | Tool Property | done | |
+| Stabilizer with Adjust by speed | Tool Property | done | The line never falls far behind, and finishes along the pen's way |
+| Correction, Taper and the trailing flick | Tool Property | done | Corners stay sharp, ends thin to a point |
 | Brush Size: Specify by size on screen, At least 1 pixel | Tool Sliders | done | |
 | Create Brush Tip from Image | Edit > Create Brush Tip from Image | partial | Command exists; verify the dialog |
 | Brush tip settings: spray, ribbon, direction from line | Advanced Tool Settings | partial | To verify |
-| Watercolor edge, with the 5.1 Vivid style | Tool Settings, Layer Property | partial | Layer Property's Watercolor edge with width and darkness; the Vivid style is missing |
+| Watercolor edge, with the 5.1 Vivid style | Tool Property, Layer Property | partial | Layer Property's Watercolor edge with width and darkness; the Vivid style is missing |
 | Extract line effect | Layer Property | done | Edge threshold and line width; the drawing never changes |
 | Double-sided brush tips | Advanced Tool Settings | missing | |
 | Pen Pressure Settings | File > Pen Pressure Settings | done | Draw to fit your hand, Stronger and Lighter |
@@ -415,7 +418,7 @@ The order of work is the plan at the end.
 | Words sit in a balloon's middle | Text tool | done | Click inside the balloon |
 | Mixed fonts and sizes in one text layer | Text tool | partial | To verify |
 | Letter spacing, line spacing, justification | Text tool | done | Tool Property, also for words being typed; kept on the text layer |
-| Font list with previews and recent fonts | Tool Settings | partial | To verify |
+| Font list with previews and recent fonts | Tool Property | partial | To verify |
 | Text along a curve or inside a shape | Text tool | partial | Text on Curve done; text that wraps inside a shape to come |
 | Character palette (special glyphs) | Palette | missing | |
 
@@ -439,7 +442,7 @@ The order of work is the plan at the end.
 | 3D layers with primitives | Layer > New Layer > 3D Layer | done | Cube, sphere, cylinder, cone, plane |
 | OBJ import | File > Import > 3D Data | done | |
 | Camera: drag to turn, Shift to move, Ctrl to come nearer | Object tool | done | |
-| Light and shading settings | Tool Settings | done | Shaded, line art or both |
+| Light and shading settings | Tool Property | done | Shaded, line art or both |
 | Convert 3D to Lines and Tones (EX) | Layer > Convert to Lines and Tones | done | Clean line art and tone to draw over |
 | Drawing figures with poses and pose materials | Materials, 3D | done | Preset poses for the figure, hand and head; any pose kept as a pose material and used again |
 | 3D head models (5.1) | 3D | partial | A posable head (neck, skull, jaw, nose, brow, eyes, ears) with seven presets; simpler than Clip Studio's, no face shapes to edit |
@@ -460,7 +463,7 @@ The order of work is the plan at the end.
 | Color History | Palette | done | |
 | Intermediate Color | Palette | done | Four colors at its corners |
 | Approximate Color | Palette | done | The shades near your color |
-| Main and sub color, transparent color, swap | Palette, keys | done | X swaps, C takes the transparent color |
+| Main and sub color, transparent color, swap | Palette, keys | done | X switches between the main and the sub color, the arrow button swaps them, C takes the transparent color |
 | Pick from the picture (Alt, right click) | Canvas | done | |
 | Sub View reference pictures pick colors | Sub View palette | done | |
 | Lab color space (5.1) | Color Slider | missing | |
@@ -471,13 +474,14 @@ The order of work is the plan at the end.
 | --- | --- | --- | --- |
 | Zoom: in, out, 100%, 200%, Fit to Screen, Print Size | View | done | |
 | Reset Display, Fit to Navigator | View | done | |
-| Rotate and flip the view | View > Rotate/Invert | done | Tilting never changes the picture |
+| Rotate and flip the view | View > Rotate/Flip | done | Tilting never changes the picture |
 | Scroll bars, with zoom and turn controls | View > Scroll Bar | done | |
 | Ruler bar and grid, Pixel Grid | View | done | |
 | Crop marks, inner border and bleed | View | partial | Commands exist; verify they draw on the canvas |
 | Show Tone Area, Paper, Page Image | View | partial | Commands exist; verify |
 | Selection, Transform, Text and Object launchers | View | done | Small bars of buttons under what you work on |
 | Color profile preview | View > Color Profile | partial | Commands exist; verify |
+| Safety Margin, Show Vector Paths, Show Playback FPS, Toggle Special Ruler Snapping | View | done | The margin runs 5 mm inside a page's trim; the rate is what the canvas really shows; the snapping switch is kept with the picture and undoes |
 | Tabs show a dot when a picture changed | Canvas tabs | done | |
 | Next and previous canvas | Window > Canvas | done | Ctrl+Tab |
 | Touch: two fingers move, zoom and turn; two-finger tap undoes | Gestures | done | A pinch never paints and never undoes |
@@ -486,11 +490,11 @@ The order of work is the plan at the end.
 
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
-| Clip Studio's default frame | Workspace | done | Tools, Tool Group and colors at the left, Navigator and layers at the right, a strip of folded palettes at the far right |
+| Clip Studio's default frame | Workspace | done | Tools, Sub Tool and colors at the left, Navigator and layers at the right, a strip of folded palettes at the far right |
 | Palette docking, floating windows, folding into the strip | Palette menus | done | The menu also docks at the top or bottom and in a new column on either side; floats sit over the canvas |
 | Pop Out into Separate Window | Palette menus | done | A window of its own that goes anywhere, outside Sue's window too |
 | Dock at the top, beside the command bar | Palettes | done | Drop a palette on the canvas's top edge, or the menu's Dock at the Top |
-| Tear a palette's tab off into a palette of its own | Palettes | done | Tool Settings, Brush Size, Color Slider, Intermediate and Approximate Color, Color History, Material, Sub View, Layer Property, History and Animation Cels; closing one puts it back among the tabs |
+| Tear a palette's tab off into a palette of its own | Palettes | done | Tool Property, Brush Size, Color Slider, Intermediate and Approximate Color, Color History, Material, Sub View, Layer Property, History and Animation Cels; closing one puts it back among the tabs |
 | Command Bar and Tool palette move and resize like any palette | Palettes | done | The tool palette grows more columns as its column widens and lies on its side in a row |
 | Drag a palette by its title bar, tab or icon to dock it left, right or under the canvas, beside another or in a column of its own, or to float or fold it | Palettes | done | The shared dock in `sue-wm` (`sue_wm::dock`) lights up where it will go |
 | Palette groups: palettes stacked as tabs, reordered by dragging a tab | Palettes | done | Drop a palette onto another's middle or onto a tab |
@@ -500,7 +504,7 @@ The order of work is the plan at the end.
 | Register and Manage Workspaces | Window > Workspace | done | Register, switch, rename and delete; layouts saved before tabs still open |
 | Hide All Palettes, Hide Menu Bar | Window | done | Tab and Shift+Tab |
 | Command Bar | Window > Command Bar | done | |
-| Palettes: Tool, Tool Group, Tool Settings, Tool Sliders, Brush Size | Window | done | Clip Studio 5.1 renamed Sub Tool to Tool Group and Tool Property to Tool Settings; Sue's names already match |
+| Palettes: Tool, Sub Tool, Tool Property, Brush Size, Tool Sliders | Window | done | The names the tutorials show; the Window menu reads each palette's own title, in Clip Studio's order and groups, and Tool Sliders is Sue's own |
 | Palettes: Color Wheel, Color Slider, Color Set, Color History, Intermediate Color, Approximate Color | Window | done | |
 | Palettes: Navigator, Sub View, Layer, Layer Property, History | Window | done | |
 | Palettes: Timeline, Animation Cels, Material | Window | done | |
@@ -590,7 +594,7 @@ should build them from this list:
   of its site. Sue 0.0.8 removed Browse Assets and the Download button
   of the tool palette for this reason.
 - Downloading a brush or a picture from a link. Brushes and pictures
-  that are already on the device are imported instead (Tool Group
+  that are already on the device are imported instead (Sub Tool
   palette, Manage Materials).
 - Anything that needs a Clip Studio account, its cloud files among
   them, and anything for Clip Studio's own hardware: no menu item, no

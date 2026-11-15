@@ -128,7 +128,7 @@ impl Palette {
             Self::CommandBar => tr!("command-bar"),
             Self::Tools => tr!("tool"),
             Self::SubTool => tr!("sub-tool"),
-            Self::BrushSize => tr!("brush-size"),
+            Self::BrushSize => tr!("tool-sliders"),
             Self::Color => tr!("color-wheel"),
             Self::ColorSet => tr!("color-set"),
             Self::Navigator => tr!("navigator"),

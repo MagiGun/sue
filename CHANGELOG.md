@@ -13,6 +13,42 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: every tool that shares its letter with others (Pen and
+  Pencil on P, Brush, Airbrush and Decoration on B, Fill and Gradient on
+  G, Figure, Frame Border and Ruler on U, Text and Balloon on T) has a
+  command of its own, such as Pencil Tool, that the command palette
+  finds and Settings can give a key of its own.
+- Sue Paint: Manage Fonts shows Sue's font list, the one every font menu
+  of Sue offers, with a search, each family drawn in its own font, and its
+  faces and a sample line; Pose Scanner (Scan Pose from Image) runs from
+  the command palette and makes a 3D drawing figure first when none is
+  picked. Both join the File menu with the menu work of this release.
+- Sue Paint: Edit, Copy Vectors as SVG puts the lines of the vector
+  layer (only the ones the Operation tool picked, when it picked some) on
+  the clipboard as SVG code, for any program that draws vectors.
+- Sue Paint: Ctrl+B (Switch Using Layer Color) shows the current
+  layer in its layer color (blue unless Layer Property says otherwise) and
+  back in its own colors on the next press, for tinting a sketch.
+- Sue Paint: Select, Selection from Layer, Select Overlapping Area keeps
+  only the part of the selection where the current layer has something
+  drawn.
+- Sue Paint's Select menu has Select Overlapping Vectors and Select
+  Vectors Within Area: on a vector layer they pick the lines the selected
+  area touches, or holds whole, for the Object tool, which then moves or
+  deletes them.
+- Sue Paint's View menu has Safety Margin (a line inside a page's trim
+  that the art you must keep stays within), Show Vector Paths (the paths
+  of vector lines on the selected layers or on every vector layer, with
+  their end points or every control point), Show Playback FPS (the frame
+  rate the canvas really shows while the timeline plays) and, under
+  Snap, Toggle Special Ruler Snapping (Ctrl+4: the picture's special,
+  perspective and symmetrical rulers stop snapping, as one step undo
+  takes back).
+- Sue Paint: Webtoon Reading Direction, Right to Left or Left to Right,
+  from the command palette (a key can be given in Settings). The choice
+  is saved with the comic and undoes like any change; until it is made
+  it follows the binding. The Page Manager lays a webtoon's columns out
+  by it once its webtoon view arrives.
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
@@ -59,9 +95,36 @@ follow [Semantic Versioning](https://semver.org/).
   small button at the wheel's bottom right switches between a square of
   saturation and value (HSV) and a triangle between the hue, white and
   black (HLS), and the numbers under the wheel follow it.
+- Sue Paint: Edit, Tonal Correction, Grayscale turns the current layer,
+  and every other layer picked with it, into grays of the same
+  brightness in one step, transparency kept; with a selection only the
+  selected area.
+- Sue Paint's command palette offers the help pages on the web that the
+  start page's Help button linked to: Basic Tips, Using Sue Paint
+  (Online), Frequently Asked Questions, Contact, and Feedback and
+  Requests. Each opens in your browser, and each can be given a key in
+  Settings.
+- Sue Paint renames an animation folder's cels 1, 2, 3 in the order
+  the timeline shows them (Rename in Timeline Order) or in the order of
+  the layers (Rename in Layer Order), as one undo step; both are in the
+  command palette until the Animation menu lists them.
 
 ### Changed
 
+- Sue Paint's menus follow Clip Studio Paint's order and read in Title
+  Case. File puts the exports before Import, then the settings, Manage
+  Fonts and Pen Pressure Settings; Import has Pose Scanner. Animation
+  starts with New Animation Layer, lists Play/Stop and each frame move
+  once, and Edit Track has Rename in Timeline Order, Rename in Layer
+  Order and Select Previous and Next Cel. Window names each palette as
+  the palette's own title does (Sub Tool, Tool Property, Layer Property,
+  Auto Action, Information), in groups, and Window, Canvas lists the
+  open canvases with a check on the current one. Help adds the online
+  guide, Tips, the FAQ, Contact and Feedback. Layer Settings has Switch
+  Using Layer Color, Story the Webtoon Reading Direction, and View's
+  first submenu is Rotate/Flip.
+- Sue Paint: Edit, Paste to Shown Position answers to Ctrl+Shift+V, as
+  in Clip Studio Paint (it had no key).
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an
   empty or single color tile costs a byte, a tile found twice (a duplicated
@@ -115,6 +178,29 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint's History names steps as the menus do: New Animation Folder
+  and Convert to Drawing Color, and a duplicated layer or page is called
+  "<name> Copy" with a capital, as in Clip Studio Paint. The help on the
+  color palettes says that X switches between the main and sub color.
+- Sue Paint's keys match its menus and Clip Studio Paint: Shift+Delete
+  deletes outside the selection (it used to fill, while the menu showed
+  it on Delete Outside Selection), Ctrl+Shift+Alt+K opens Shortcut
+  Settings and Ctrl+Shift+Alt+Y Modifier Key Settings; the read-only key
+  list keeps F1 and Alt+I.
+- Sue Paint's History names the steps of Edit, Rotate/Flip Canvas as the
+  menu does: Flip Horizontal, Flip Vertical and Rotate 180 Degrees, where
+  it used to say "Flip Canvas" for both flips and "Rotate Canvas".
+- Sue Paint: Flip Pose, Reset Pose, the preset poses and the Pose and
+  Hand Scanners, given a key or run by an Auto Action, are off where there
+  is no 3D drawing figure (or hand) to pose, instead of only saying so,
+  and a pose number the figure does not have no longer resets its pose.
+- In Sue Paint, X switches between the main and the sub color, as in
+  Clip Studio Paint: the other color becomes the one you draw with and
+  both keep their values. It used to swap the two colors. The arrow
+  button beside the colors still swaps them.
+- Sue Paint's Drawing Color to Transparent and Radial gradients start
+  at the color you draw with. They always used the main color, even
+  while the sub color was picked.
 - Instant transitions and Animation speed (Settings, Motion) now reach
   the switches in Settings and on the start pages and everything else
   the interface toolkit animates by itself: they used to keep their own
@@ -160,6 +246,22 @@ follow [Semantic Versioning](https://semver.org/).
   you pressed on even when the hand moves quickly, instead of adding a
   second point beside it.
 - The opacity bar's handle shows on light themes too.
+- Sue Paint's Help, Sue Paint Guide and Help, Check for Updates open
+  before a canvas is, instead of staying grayed.
+- Undoing Assign Animation Cel, Add Keyframe or Delete Keyframe in Sue
+  Paint names the step after the menu item, in your language, instead
+  of "Specify Cel" or "Delete Key".
+- Reverse Layers Vertically on Sue Paint's light table turns the
+  table's layers round; it used to leave them as they were.
+- Sue Paint's Story menu grays out what cannot work on the page shown:
+  First and Previous Page on the first page, Next and Last Page on the
+  last, Delete Page on a story's only page, Combine Pages on a page that
+  faces none, Split Pages on a page that is no spread, and Change Page
+  Settings and Export All Pages on a picture that is no story. Before,
+  they looked ready and did nothing or only said why.
+- Add Page, Insert Page and Duplicate Page on a picture that is no story
+  yet are one undo step: one Ctrl+Z leaves the picture as it was,
+  instead of a story of one page.
 
 ### Removed
 

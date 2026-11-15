@@ -29,6 +29,8 @@ mod tool;
 mod view;
 mod window;
 
+pub(crate) use view::{ViewMarks, special_snaps};
+
 /// Commands the shell's own keys run (`keys.undo`, `keys.redo`,
 /// `keys.open_file`, `keys.save`, `keys.quit`): they get no row in the
 /// studio's shortcuts, so the menus show the shell's keys beside them.
@@ -84,7 +86,7 @@ impl SuePaint {
         // Words being typed are kept before anything else happens.
         self.finish_typing(cx);
         // A tool's command (from a script or Auto Actions) picks the tool.
-        if command.starts_with("tool.") && self.tool_key(command) {
+        if command.starts_with("tool.") && self.tool_key(command, cx) {
             return;
         }
         // The Window menu hides a tab torn off into a palette of its own.
@@ -106,20 +108,7 @@ impl SuePaint {
             return;
         }
         self.record_auto(command);
-        if command.starts_with("story.") && self.story_command(command, cx) {
-            return;
-        }
-        if (command.starts_with("anim.")
-            || command.starts_with("file.export.gif")
-            || command == "file.export.apng"
-            || command == "file.export.webp_animation"
-            || command == "file.export.exposure_sheet"
-            || command == "file.import.exposure_sheet"
-            || command == "file.export.sequence"
-            || command == "file.export.movie"
-            || command == "file.export.cels")
-            && self.anim_command(command, cx)
-        {
+        if command.starts_with("anim.") && self.anim_command(command, cx) {
             return;
         }
         if !self.state(command, &Facts::of(cx)).enabled {
@@ -175,7 +164,7 @@ impl SuePaint {
             ctx.input_mut(|input| bound.take(input, cx.rice(), KEYS_SECTION, shortcut_table()));
         let registry = crate::commands::registry();
         for name in taken {
-            if self.tool_key(name) {
+            if self.tool_key(name, cx) {
                 continue;
             }
             if registry.has(name) {
@@ -184,6 +173,25 @@ impl SuePaint {
                 let label = registry.label(name).unwrap_or_else(|| name.to_owned());
                 cx.notify(tr!("not-sue-paint-yet", label = label));
             }
+        }
+    }
+}
+
+impl SuePaint {
+    /// Keeps Window, Canvas listing the open canvases by the names their
+    /// tabs show; the list's keys are written again when it changed.
+    pub(crate) fn follow_canvases(&mut self, arena: &Arena) {
+        let names: Vec<String> = self
+            .docs
+            .iter()
+            .map(|doc| {
+                arena
+                    .get_by_id(doc.picture)
+                    .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned())
+            })
+            .collect();
+        if crate::menus::set_canvases(&mut self.menus, &names) {
+            self.bound.invalidate();
         }
     }
 }
@@ -236,11 +244,6 @@ pub(super) fn when(on: bool) -> ItemState {
 pub(super) fn doc_open(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
     when(paint.doc().is_some())
 }
-
-/// A command the studio runs before the registry: Story and Animation
-/// commands by their own match. Through the registry they do nothing,
-/// as they did through the one match.
-pub(super) fn nothing(_: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {}
 
 #[cfg(test)]
 mod tests;

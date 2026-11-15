@@ -781,12 +781,12 @@ mod tests {
         assert_eq!(names(&arena), ["Paper", "Layer 1", "Between", "Layer 2"]);
         let (mut copy, _) = duplicate(&arena, picture, second).unwrap();
         copy.apply(&mut arena).unwrap();
-        assert_eq!(names(&arena)[4], "Layer 2 copy");
+        assert_eq!(names(&arena)[4], "Layer 2 Copy");
         let mut down = reorder(&arena, picture, second, 1).unwrap();
         down.apply(&mut arena).unwrap();
         assert_eq!(
             names(&arena),
-            ["Paper", "Layer 2", "Layer 1", "Between", "Layer 2 copy"]
+            ["Paper", "Layer 2", "Layer 1", "Between", "Layer 2 Copy"]
         );
         down.revert(&mut arena).unwrap();
         assert_eq!(names(&arena)[3], "Layer 2");

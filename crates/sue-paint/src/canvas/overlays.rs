@@ -427,7 +427,10 @@ impl SuePaint {
                 &painter,
                 &rulers,
                 self.vanishing_line,
-                [doc.ruler_on, doc.snap_ruler],
+                [
+                    doc.ruler_on && crate::commands::special_snaps(&cx.world.arena, doc.picture),
+                    doc.snap_ruler,
+                ],
                 turns,
                 size,
                 view.zoom,

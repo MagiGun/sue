@@ -25,7 +25,7 @@ pub(crate) fn guide() -> Vec<String> {
         tr!("layers"),
         tr!("raster-layers-hold-pixels-vector-layers"),
         tr!("colors"),
-        tr!("color-wheel-color-slider-color-set"),
+        tr!("colors-set-the-main-color-x-switches"),
         tr!("selections"),
         tr!("selection-tools-make-selection-launcher-under"),
         tr!("pages-and-books"),

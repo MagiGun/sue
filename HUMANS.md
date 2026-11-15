@@ -444,7 +444,7 @@ Once a canvas is open:
   quick flick run out into a fine tail. Watercolor and gouache brushes pick up the color underneath and
   drag it along ("Color mixing"). All of it is in Tool Property.
 - **Colors:** a color wheel, sliders, color sets and the colors you recently
-  painted with. `X` swaps your main and sub color, `C` switches to the
+  painted with. `X` switches between your main and sub color, `C` takes the
   transparent color (brushes then erase); hold `Alt` and click, or
   right-click, to pick a color from the picture. The **Color Set** palette
   has several sets (Default, Grays, Skin Tones, Pastels and your own) in a
@@ -593,7 +593,7 @@ Once a canvas is open:
   type, and the words follow it, each letter turned with it; more lines
   follow it further down.
 - **Ruby** (furigana): while typing, select some words, type their
-  reading in Tool Settings' Ruby field and press Enter (or Set ruby). The
+  reading in Tool Property' Ruby field and press Enter (or Set ruby). The
   reading sits small over them, or to their right in vertical text, and
   stays with them as you type around them. Remove ruby takes it away.
 - **Smart Shape:** hold the pen still for a moment at the end of a stroke
@@ -615,6 +615,10 @@ Once a canvas is open:
   With other layers picked too (Ctrl+click in the Layer palette, or Layer,
   Change Selected Layer, Select All Layers), a tonal correction changes
   them all at once, as one step to undo.
+- **Grayscale** (Edit, Tonal Correction): one click turns the layer, and
+  every other layer picked with it, into grays of the same brightness,
+  transparency kept and, with a selection, only inside it. One step to
+  undo.
 - **Correction layers** (Layer, New Correction Layer): the same corrections
   as a layer that changes everything under it while leaving those layers
   alone. Hide it or lower its opacity to weaken it, and double-click it to
@@ -683,7 +687,7 @@ Once a canvas is open:
   Export Animation, Exposure Sheet saves it as a CSV file to send or edit,
   and File, Import, Exposure Sheet reads one back.
 - **Brushes you downloaded:** Add from downloads at the bottom of the
-  Tool Group opens a file you downloaded and makes its brushes sub tools
+  Sub Tool opens a file you downloaded and makes its brushes sub tools
   of the tool out: Clip Studio Paint sub tools (.sut), Photoshop brushes
   (.abr), GIMP brushes (.gbr, .gih) or a picture. Size, opacity, spacing,
   spray, ribbon and turn come along; colored tips keep their colors, and
@@ -692,7 +696,7 @@ Once a canvas is open:
 - **Decorations:** the Decoration tool lays shapes instead of a line.
   Stars, Hearts, Sparkles, Snow, Flowers and Bubbles scatter about the
   stroke at random sizes and turns; Leaves, Chain, Lace, Stitches, Dotted
-  line and Dashed line run along it and turn with its curve. Tool Settings
+  line and Dashed line run along it and turn with its curve. Tool Property
   sets how each shape turns, how far it scatters and how much its size
   and turn vary, for any brush with a shape. **Turn with pen tilt** turns
   each shape the way your pen leans, so a flat or chisel tip follows your
@@ -712,11 +716,11 @@ Once a canvas is open:
   to turn, tilt or open the mouth. Their presets include a fist,
   pointing, a peace sign, thumbs up and holding for the hand, and front,
   three-quarter, looking up or down, turned, tilted and an open mouth for
-  the head. **Register pose as material** in Tool Settings keeps any
+  the head. **Register pose as material** in Tool Property keeps any
   pose in the Material palette's Poses, with a picture of it; double-click
   one to pose the figure, hand or head you have picked, or to add a new
   one in that pose.
-- **Pose scanner and Hand scanner** (Tool Settings, with a 3D drawing
+- **Pose scanner and Hand scanner** (Tool Property, with a 3D drawing
   figure or a 3D hand picked): choose a photo of a person or a hand, and
   the figure or hand takes the pose it shows, turned to face you as the
   photo did, in one step you can undo. The first time, Sue downloads the
