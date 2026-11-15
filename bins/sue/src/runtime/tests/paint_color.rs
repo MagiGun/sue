@@ -441,3 +441,119 @@ fn material_is_no_tab_of_the_color_set() {
         "the Color Set palette still draws"
     );
 }
+
+/// Gaps WS-11, CT-28 and A25-26: a double click on the main or the sub
+/// color circle (in the tool strip and under the Color Wheel, where the
+/// colors are shown most) opens Color Settings on that color; its OK
+/// sets that color and leaves the other as it was.
+#[test]
+fn a_double_click_on_a_color_circle_opens_color_settings() {
+    let mut paint = PaintDriver::new("paint-color-circle");
+    paint.settle(4);
+    let sub = control(&mut paint, "Sub color");
+    double_click(&mut paint, sub.center() + vec2(5.0, 5.0));
+    look(&mut paint);
+    assert!(
+        paint.rect_of("Color Settings").is_some(),
+        "the dialog is open: {:?}",
+        paint.texts
+    );
+    let hex = control(&mut paint, "Hex");
+    click(&mut paint, hex.center(), PointerButton::Primary);
+    type_over(&mut paint, "#20a060");
+    paint.click_text("OK");
+    assert!(paint.rect_of("Color Settings").is_none(), "OK closes it");
+    // The sub color is the drawing color now (its circle was clicked).
+    assert_eq!(drawing_hex(&mut paint), "#20a060");
+    // The main circle opens it on the main color.
+    // Off its middle, which the sub circle's corner touches, and long
+    // enough after the last click (Cancel) not to make one with it.
+    paint.settle(30);
+    let main = control(&mut paint, "Main color");
+    double_click(&mut paint, main.center() - vec2(5.0, 5.0));
+    look(&mut paint);
+    assert!(
+        paint.rect_of("Color Settings").is_some(),
+        "{:?}",
+        paint.texts
+    );
+    let hex = control(&mut paint, "Hex");
+    click(&mut paint, hex.center(), PointerButton::Primary);
+    type_over(&mut paint, "#c03020");
+    paint.click_text("OK");
+    assert_eq!(drawing_hex(&mut paint), "#c03020");
+    // The sub color kept its own.
+    paint.settle(30);
+    let sub = control(&mut paint, "Sub color");
+    click(
+        &mut paint,
+        sub.center() + vec2(5.0, 5.0),
+        PointerButton::Primary,
+    );
+    assert_eq!(drawing_hex(&mut paint), "#20a060");
+}
+
+/// The drawing color's hex code, as Color Settings opened on it shows it
+/// (the dialog is closed again).
+fn drawing_hex(paint: &mut PaintDriver) -> String {
+    paint.command("color.settings");
+    paint.settle(4);
+    let hex = paint
+        .texts
+        .iter()
+        .find(|(text, _)| text.starts_with('#') && text.len() == 7)
+        .map(|(text, _)| text.clone())
+        .unwrap_or_else(|| panic!("a hex code shows: {:?}", paint.texts));
+    paint.click_text("Cancel");
+    hex
+}
+
+/// A set that holds colors is deleted only after asking, from the
+/// wrench and from Edit Color Sets: Cancel keeps it, Delete deletes it.
+#[test]
+fn deleting_a_color_set_asks_first() {
+    let mut paint = PaintDriver::new("paint-color-set-delete");
+    paint.settle(4);
+    let names = |paint: &PaintDriver| -> Vec<String> {
+        sets_file(paint)
+            .lines()
+            .skip(1)
+            .filter_map(|line| line.split('\t').next().map(str::to_owned))
+            .collect()
+    };
+    let wrench = control(&mut paint, "Color set settings");
+    click(&mut paint, wrench.center(), PointerButton::Primary);
+    paint.click_text("Delete This Set");
+    assert!(
+        paint.rect_of("Delete Color Set").is_some(),
+        "it asks: {:?}",
+        paint.texts
+    );
+    paint.click_text("Cancel");
+    assert!(paint.rect_of("Delete Color Set").is_none());
+    let wrench = control(&mut paint, "Color set settings");
+    click(&mut paint, wrench.center(), PointerButton::Primary);
+    paint.click_text("Delete This Set");
+    paint.click_text("Delete");
+    // One set went: Cancel deleted none.
+    assert_eq!(names(&paint), ["Grays", "Skin Tones", "Pastels"]);
+    // From Edit Color Sets: it asks, and Edit Color Sets comes back.
+    let wrench = control(&mut paint, "Color set settings");
+    click(&mut paint, wrench.center(), PointerButton::Primary);
+    paint.click_text("Edit Color Sets...");
+    let pastels = control(&mut paint, "Pastels");
+    click(&mut paint, pastels.center(), PointerButton::Primary);
+    paint.click_text("Delete This Set");
+    assert!(
+        paint.rect_of("Delete Color Set").is_some(),
+        "{:?}",
+        paint.texts
+    );
+    paint.click_text("Cancel");
+    assert!(paint.rect_of("Edit Color Sets").is_some(), "back again");
+    paint.click_text("Delete This Set");
+    paint.click_text("Delete");
+    assert!(paint.rect_of("Edit Color Sets").is_some(), "back again");
+    paint.click_text("Close");
+    assert_eq!(names(&paint), ["Grays", "Skin Tones"]);
+}
