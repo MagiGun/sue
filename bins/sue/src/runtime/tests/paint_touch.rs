@@ -429,6 +429,46 @@ fn the_edge_key_bar_swipes_in_see_through_then_pins_from_either_side() {
     );
 }
 
+/// How many layers the open picture has.
+fn layer_count(runtime: &Runtime) -> usize {
+    let arena = &runtime.engine.world.arena;
+    let picture = arena
+        .iter()
+        .find(|(_, entity)| sue_model::picture::is_picture(entity))
+        .map(|(_, entity)| entity.id())
+        .unwrap();
+    sue_paint::doc::layers(arena, picture).len()
+}
+
+// FG-36 (01:05:29): T1 to T7 run the commands chosen for them.
+#[test]
+fn a_t_key_runs_the_command_chosen_for_it_and_undo_takes_it_back() {
+    let mut tablet = TouchDriver::new("touch-t-keys", "tablet", "studio", vec2(1180.0, 820.0));
+    tablet
+        .runtime
+        .engine
+        .world
+        .rice
+        .set(
+            &sue_paint::studio_mode::custom_key(0),
+            sue_rice::RiceValue::Text("layer.new".to_owned()),
+        )
+        .unwrap();
+    tablet.tap(&sue_lang::text("paint", "edge-key-bar"));
+    tablet.tap(&sue_lang::text("paint", "edge-key-bar-pin"));
+    let before = layer_count(&tablet.runtime);
+    tablet.tap("T1");
+    assert_eq!(
+        layer_count(&tablet.runtime),
+        before + 1,
+        "T1 made a new layer"
+    );
+    tablet.tap(&sue_lang::text("paint", "undo"));
+    assert_eq!(layer_count(&tablet.runtime), before, "Undo took it back");
+    tablet.tap(&sue_lang::text("paint", "redo"));
+    assert_eq!(layer_count(&tablet.runtime), before + 1, "Redo made it again");
+}
+
 // FG-36 (01:04:28, 01:06:57): the finger button and the timelapse on
 // Studio Mode's command bar.
 #[test]
