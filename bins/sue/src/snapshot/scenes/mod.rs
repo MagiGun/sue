@@ -29,6 +29,7 @@ mod ui_export;
 mod ui_inputs;
 mod writer_compile;
 mod writer_corkboard;
+mod writer_dialogs;
 mod writer_document;
 mod writer_outliner;
 mod writer_start;
@@ -80,6 +81,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     writer_document::composition(tour)?;
     writer_compile::dialog(tour)?;
     writer_compile::export_and_tables(tour)?;
+    writer_dialogs::dialogs(tour)?;
     writer_document::format_menu(tour)?;
     writer_start::desktop(tour)?;
     writer_document::comments(tour)?;

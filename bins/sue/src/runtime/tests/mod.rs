@@ -40,6 +40,7 @@ mod settings;
 mod shell;
 mod windows;
 mod writer;
+mod writer_dialogs;
 
 pub(crate) fn runtime(tag: &str) -> (Runtime, PathBuf) {
     let (host, root) = temp_host(tag);
