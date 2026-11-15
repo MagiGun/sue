@@ -17,26 +17,12 @@ use crate::tools::SubTool;
 
 type Edit = sue_core::txn::Batch<sue_core::Arena>;
 
-/// The Balloon tool's sub tools by mode, the Frame Border tool's polyline
-/// frame and the Figure tool's effect lines (the constants live with the
+/// The Balloon tool's sub tools by mode (the constants live with the
 /// tools in the picture engine).
 pub(crate) use crate::tools::{
-    BALLOON_PEN, CLOUD_BALLOON, CURVE_BALLOON, ELLIPSE_BALLOON, FLASH_BALLOON, POLYLINE_BALLOON,
-    POLYLINE_FRAME, ROUNDED_BALLOON, SATURATED_LINES, SPEED_LINES, THOUGHT_TAIL,
+    BALLOON_PEN, CLOUD_BALLOON, CURVE_BALLOON, ELLIPSE_BALLOON, FLASH_BALLOON, ROUNDED_BALLOON,
+    THOUGHT_TAIL,
 };
-
-/// Whether `tool` in `mode` lays corners one click at a time (closed by
-/// clicking the first or last corner again, or Enter).
-pub(crate) fn clicks_corners(tool: crate::tools::Tool, mode: u8) -> bool {
-    use crate::tools::Tool;
-    match tool {
-        Tool::Balloon => matches!(mode, CURVE_BALLOON | POLYLINE_BALLOON),
-        Tool::Frame => mode == POLYLINE_FRAME,
-        Tool::Select => mode == 3,
-        Tool::Figure => matches!(mode, crate::tools::POLYLINE | crate::tools::CURVE),
-        _ => false,
-    }
-}
 
 /// An Object tool drag on a frame border or effect line layer.
 #[derive(Clone, Debug)]
@@ -158,7 +144,7 @@ impl Default for FrameSpec {
 
 impl SuePaint {
     /// The current picture, its size and its paper's color.
-    fn page(&self, arena: &sue_core::Arena) -> Option<(EntityId, [u32; 2], [u8; 3])> {
+    pub(crate) fn page(&self, arena: &sue_core::Arena) -> Option<(EntityId, [u32; 2], [u8; 3])> {
         let picture = self.picture()?;
         let size = picture::size(arena.get_by_id(picture).ok()?)?;
         let paper = doc::layers(arena, picture)
@@ -501,88 +487,25 @@ impl SuePaint {
         }
     }
 
-    /// The Figure tool's Saturated line (lines from all round stopping at
-    /// the ellipse dragged) or Speed line (lines along the drag), as in
-    /// Clip Studio Paint each on a new layer of its own.
-    pub(crate) fn effect_lines(
+    /// A polyline or curve balloon closed with the corners `points`.
+    pub(crate) fn balloon_corners(
         &mut self,
-        from: Pos2,
-        to: Pos2,
-        sub: &SubTool,
+        points: Vec<[f32; 2]>,
+        mode: u8,
+        sub: SubTool,
         cx: &mut AppletContext<'_>,
     ) {
-        let Some((_, [width, height], _)) = self.page(&cx.world.arena) else {
-            return;
-        };
-        let (a, b) = ([from.x, from.y], [to.x, to.y]);
-        if (b[0] - a[0]).hypot(b[1] - a[1]) < 4.0 {
-            return;
-        }
-        let speed = sub.mode == SPEED_LINES;
-        let lines = manga::EffectLines {
-            speed,
-            a,
-            b,
-            count: if speed { 90 } else { 120 },
-            line: sub.tip.size.max(0.5),
-            seed: (a[0].to_bits() ^ b[1].to_bits().rotate_left(7)) | 1,
-            rgb: self.drawing_color(),
-        };
-        let name = if speed {
-            tr!("speed-lines")
+        let outline = if mode == CURVE_BALLOON {
+            manga::smooth_closed(&points, 10)
         } else {
-            tr!("focus-lines")
+            points
         };
-        // An effect line layer: the Object tool moves its ends later, and
-        // Tool Property changes its lines.
-        self.spawn_drawn_layer(
-            cx,
-            &name,
-            manga::EFFECT,
-            lines.draw(width, height),
-            vec![(manga::EFFECT_SPEC, Value::from(lines.encode()))],
-        );
+        self.add_balloon_shapes(cx, vec![Shape::Drawn(outline)], &sub, &tr!("balloon"));
     }
 
-    /// Closes the corners clicked out with a corner-laying sub tool: a
-    /// polyline or curve balloon, a polyline frame, or a polyline
-    /// selection (combined as `op`).
-    pub(crate) fn finish_corners(&mut self, op: crate::select::Op, cx: &mut AppletContext<'_>) {
-        let points = std::mem::take(&mut self.polyline);
-        let owner = self.polyline_for.take();
-        let sub = self.toolbox.current().clone();
-        // The Figure tool's Polyline and Curve: lines, open or closed.
-        if let Some((crate::tools::Tool::Figure, mode)) = owner {
-            if points.len() >= 2 {
-                let line = if mode == crate::tools::CURVE {
-                    manga::smooth_open(&points, 12)
-                } else {
-                    points
-                };
-                self.stroke_line(line, &sub, cx);
-            }
-            return;
-        }
-        if points.len() < 3 {
-            return;
-        }
-        match owner {
-            Some((crate::tools::Tool::Balloon, mode)) => {
-                let outline = if mode == CURVE_BALLOON {
-                    manga::smooth_closed(&points, 10)
-                } else {
-                    points
-                };
-                self.add_balloon_shapes(cx, vec![Shape::Drawn(outline)], &sub, &tr!("balloon"));
-            }
-            Some((crate::tools::Tool::Frame, _)) => {
-                self.add_panel(cx, points, &tr!("polyline-frame"));
-            }
-            _ => {
-                self.polyline = points;
-                self.finish_polyline(op);
-            }
-        }
+    /// A polyline frame closed with the corners `points`.
+    pub(crate) fn frame_corners(&mut self, points: Vec<[f32; 2]>, cx: &mut AppletContext<'_>) {
+        self.add_panel(cx, points, &tr!("polyline-frame"));
     }
 
     /// Adds `panel` to the frame border layer (a new one when there is
