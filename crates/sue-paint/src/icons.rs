@@ -69,7 +69,6 @@ pub enum Icon {
     Prev,
     Next,
     Loop,
-    Up,
     /// Three lines: a palette's menu.
     Menu,
     /// A ring of hues: the color wheel.
@@ -730,7 +729,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             filled(&[(0.2, 0.36), (0.12, 0.56), (0.32, 0.54)]);
             filled(&[(0.8, 0.64), (0.88, 0.44), (0.68, 0.46)]);
         }
-        Icon::Up => line(&[(0.22, 0.64), (0.5, 0.34), (0.78, 0.64)]),
         Icon::Menu => {
             for y in [0.3, 0.5, 0.7] {
                 line(&[(0.22, y), (0.78, y)]);
