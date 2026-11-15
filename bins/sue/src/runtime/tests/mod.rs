@@ -21,6 +21,7 @@ mod paint_files;
 mod paint_layers;
 mod paint_palettes;
 mod paint_rulers;
+mod paint_select;
 mod paint_vector_3d;
 mod settings;
 mod shell;

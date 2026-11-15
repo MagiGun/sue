@@ -2373,3 +2373,8 @@ copied-vector-lines-as-svg = { $count ->
 cannot-copy-to-clipboard = Cannot copy to the clipboard: { $error }
 switch-using-layer-color = Switch Using Layer Color
 select-overlapping-area = Select Overlapping Area
+## commands/select.rs: the Select menu's commands
+
+select-overlapping-vectors = Select Overlapping Vectors
+select-vectors-within-area = Select Vectors Within Area
+no-vector-line-in-the-selected-area = No vector line of this layer is in the selected area
