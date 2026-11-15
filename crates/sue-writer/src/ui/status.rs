@@ -16,6 +16,8 @@ use super::widgets::tool;
 
 /// The find field's width, in control heights.
 const FIND_FIELD: f32 = 8.0;
+/// At most this share of a narrow find bar goes to the find field.
+const NARROW_FIELD: f32 = 0.4;
 
 /// The replace field's width, in control heights.
 const REPLACE_FIELD: f32 = 7.0;
@@ -251,9 +253,11 @@ impl SueWriter {
         let mut action = None;
         let line = Density::of(ui).control_height();
         let hint = tr!("find");
+        // On a phone the field leaves room for the arrows and Replace...
+        let room = ui.available_width() * NARROW_FIELD;
         let query = search_field("writer-find", &mut find.query)
             .hint(&hint)
-            .width(line * FIND_FIELD)
+            .width((line * FIND_FIELD).min(room))
             .show(ui, theme);
         if find.focus {
             query.request_focus();
