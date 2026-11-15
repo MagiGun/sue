@@ -11,6 +11,7 @@ mod hub;
 mod icons;
 mod menus;
 mod paint_canvas;
+mod paint_canvas_chrome;
 mod paint_color;
 mod paint_dialogs;
 mod paint_dock;
@@ -66,6 +67,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_dialogs::pages(tour)?;
     paint_timeline::timeline(tour)?;
     paint_view::marks(tour)?;
+    paint_canvas_chrome::window(tour)?;
     paint_layers::property(tour)?;
     paint_color::scenes(tour);
     paint_dock::scenes(tour)?;
