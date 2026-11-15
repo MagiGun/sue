@@ -157,7 +157,7 @@ const AREAS: [Area; 6] = [
     },
     Area {
         folder: "crates/sue-writer/src/ui",
-        baseline: Counts::new([16, 13, 29, 29, 60, 27, 6]),
+        baseline: Counts::new([9, 10, 14, 26, 34, 6, 2]),
     },
     Area {
         folder: "crates/sue-wm/src/shell",
@@ -235,7 +235,7 @@ const INTERFACE: [&str; 5] = [
 /// Settings, the anchor dots of Change Canvas Size, the emoji of the two
 /// studios' manifests and Settings' gear, and in Sue Writer the label
 /// dots, the outliner's tick and the find bar's arrows and cross.
-const GLYPH_BASELINE: [u32; 5] = [1, 2, 6, 0, 1];
+const GLYPH_BASELINE: [u32; 5] = [1, 2, 3, 0, 1];
 
 /// Characters that are text where they stand, not icons: a file or a
 /// folder from the repository root, the character (`None` for every

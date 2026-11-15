@@ -177,6 +177,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Writer's toolbar, status bar and find bar use Sue's own icons
+  and controls: Bold, Italic, Underline, the alignments, the lists and
+  the indents are icon buttons that light up while they are on, the
+  paragraph style and the size are dropdowns, and Highlight opens a
+  small list of colors. Every button names itself and its keys in its
+  tooltip, keys you change in Settings included, and Tab reaches each
+  one with a focus ring. The edges of the binder and the inspector can
+  be moved with the arrow keys too, and a double click puts them back.
+  Composition mode writes on your theme's page.
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait

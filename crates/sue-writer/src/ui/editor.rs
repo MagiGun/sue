@@ -1,13 +1,15 @@
 //! The center of the studio: the text, a figure's table and composition
 //! mode.
 
-use egui::{Align2, Color32, Rect, RichText, Ui, UiBuilder, Vec2, vec2};
+use egui::{Align2, CornerRadius, Rect, Ui, UiBuilder, Vec2, vec2};
 use std::collections::HashMap;
 use sue_core::{Entity, EntityId, Value};
 use sue_model::manuscript;
 use sue_model::{mark_kind as kind, picture};
 use sue_type::{EditorView, Ink, ViewMode};
-use sue_wm::{AppletContext, ShellRequest, Theme, widgets};
+use sue_wm::icons::Icon;
+use sue_wm::ui::{Space, TextRole, button, empty_state};
+use sue_wm::{AppletContext, ShellRequest, Theme};
 
 use crate::project;
 use crate::studio::{Figure, SueWriter, View};
@@ -126,20 +128,21 @@ impl SueWriter {
     ) {
         let docs = self.shown_docs(cx);
         if docs.is_empty() {
-            ui.scope_builder(UiBuilder::new().max_rect(rect.shrink(40.0)), |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(60.0);
-                    ui.label(
-                        RichText::new(tr!("nothing-write-here-yet"))
-                            .size(theme.heading_size)
-                            .color(theme.muted),
-                    );
-                    ui.add_space(8.0);
-                    if widgets::pill_button(ui, &tr!("new-document"), false, theme).clicked() {
-                        self.add_item(cx, false);
-                    }
-                });
+            let room = rect.shrink(theme.space(Space::S9));
+            let mut add = false;
+            ui.scope_builder(UiBuilder::new().max_rect(room), |ui| {
+                empty_state("writer-empty", &tr!("nothing-write-here-yet"))
+                    .icon(Icon::PageEmpty)
+                    .show_actions(ui, theme, |ui| {
+                        add = button("writer-empty-new", &tr!("new-document"))
+                            .primary()
+                            .show(ui, theme)
+                            .clicked();
+                    });
             });
+            if add {
+                self.add_item(cx, false);
+            }
             return;
         }
         let sheet = self.sheet(cx);
@@ -155,21 +158,19 @@ impl SueWriter {
         let figures = self.figure_table(&docs, cx);
         let lookup = |id: EntityId| figures.get(&id).copied();
         let dark = cx.rice().get_bool("sue_writer.dark_paper").unwrap_or(false) || composing;
+        // Composition mode writes on the theme's own page, the paper a
+        // step above the backdrop; dark paper takes the pill color.
         let ink = if dark {
             Ink {
                 paper: if composing {
-                    Color32::from_gray(0x1c)
+                    theme.surface(1)
                 } else {
                     theme.pill
                 },
-                text: if composing {
-                    Color32::from_gray(0xd8)
-                } else {
-                    theme.text
-                },
-                soft: theme.muted,
-                link: Color32::from_rgb(0x7a, 0xb0, 0xff),
-                shade: theme.hover,
+                text: theme.text,
+                soft: theme.text_muted(),
+                link: theme.link(),
+                shade: theme.fill_hover(),
                 colors: false,
             }
         } else {
@@ -229,9 +230,7 @@ impl SueWriter {
             zoom,
             sheet: &sheet,
             ink,
-            desk: if composing {
-                Color32::from_gray(0x12)
-            } else if dark {
+            desk: if composing || dark {
                 theme.void
             } else {
                 desk(theme)
@@ -277,7 +276,7 @@ impl SueWriter {
         theme: &Theme,
     ) {
         ui.painter()
-            .rect_filled(rect, 0.0, Color32::from_gray(0x12));
+            .rect_filled(rect, CornerRadius::ZERO, theme.void);
         self.text_ui(ui, rect, cx, theme, true);
         let (_, session) = self.counts(cx);
         let words = self
@@ -290,11 +289,11 @@ impl SueWriter {
             session = format!("{:+}", session)
         );
         ui.painter().text(
-            rect.center_bottom() - vec2(0.0, 14.0),
+            rect.center_bottom() - Vec2::Y * theme.space(Space::S6),
             Align2::CENTER_BOTTOM,
             hint,
-            theme.font(theme.small_size),
-            Color32::from_gray(0x60),
+            theme.text_font(TextRole::Caption),
+            theme.text_muted(),
         );
     }
 
