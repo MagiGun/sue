@@ -497,16 +497,17 @@ impl SuePaint {
             return false;
         };
         let arena = &cx.world.arena;
-        if crate::vector::is_vector(arena, info.id) {
-            return false;
-        }
         // Editing the mask: the pen shows the layer, the eraser hides it,
-        // in the mask's own pixels where the mask sits.
+        // in the mask's own pixels where the mask sits (a vector layer's
+        // mask too: it is gray pixels like any other).
         let mask = doc
             .mask_edit
             .then(|| doc::mask_of(arena, info.id))
             .flatten()
             .zip(doc::mask_offset(arena, info.id));
+        if mask.is_none() && crate::vector::is_vector(arena, info.id) {
+            return false;
+        }
         let Some(preset) = preset_of(sub, self.transparent, mask.is_some()) else {
             return false;
         };

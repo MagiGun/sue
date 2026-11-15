@@ -89,6 +89,13 @@ impl SuePaint {
             Some(mask) => (mask, [1.0; 3], false),
             None => (info.id, rgb, info.alpha_locked && !tip.eraser && !vector),
         };
+        // The legacy engine paints four bytes a pixel: a gray mask is the
+        // brush engine's (above), never its.
+        if doc::raster(&cx.world.arena, target)
+            .is_some_and(|raster| raster.format() == sue_core::PixelFormat::Gray8)
+        {
+            return;
+        }
         let mut stroke = BrushStroke::new(target, tip, rgb, locked);
         let other = if self.sub_active { self.main } else { self.sub };
         stroke.set_sub_color(color::unit(other));

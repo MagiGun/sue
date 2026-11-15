@@ -1815,3 +1815,39 @@ fn sue_paint_the_blend_tool_softens_a_mask() {
     }
     assert_eq!(paint.mask().unwrap().1, hard, "each drag was one undo step");
 }
+
+/// A vector layer brought in with a mask (a `.clip` file may hold one):
+/// with Edit Mask on, the Eraser hides it in the mask's gray pixels, and
+/// no line is added to the layer.
+#[test]
+fn sue_paint_a_vector_layers_mask_takes_strokes() {
+    let mut paint = new_engine("paint-engine-vector-mask");
+    paint.command("layer.new.vector");
+    let layer = paint.top();
+    assert!(
+        sue_paint::vector::is_vector(&paint.runtime.engine.world.arena, layer),
+        "a vector layer"
+    );
+    let (mut edit, _) =
+        sue_paint::doc::new_mask(&paint.runtime.engine.world.arena, layer, |_, _| 1.0).unwrap();
+    sue_core::ReversibleTransaction::apply(&mut edit, &mut paint.runtime.engine.world.arena)
+        .unwrap();
+    paint.settle(2);
+    paint.command("layer.mask.edit");
+    paint.command("tool.eraser");
+    let middle = paint.middle();
+    paint.slow(
+        middle - vec2(120.0, 0.0),
+        middle + vec2(120.0, 0.0),
+        egui::Modifiers::NONE,
+    );
+    let (format, values) = paint.mask().unwrap();
+    assert_eq!(format, sue_core::PixelFormat::Gray8);
+    let hidden = values.iter().filter(|&&v| v < 128).count();
+    assert!(hidden > 500, "the eraser hid a line of it: {hidden} px");
+    paint.command("edit.undo");
+    assert!(
+        paint.mask().unwrap().1.iter().all(|&v| v == 255),
+        "one undo step takes it back"
+    );
+}
