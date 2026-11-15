@@ -352,6 +352,12 @@ impl Runtime {
         &self.work
     }
 
+    /// Sue's updates, for the snapshot tour to show a release without
+    /// the network.
+    pub(crate) fn updater_mut(&mut self) -> &mut Updater {
+        &mut self.updater
+    }
+
     /// The current theme.
     pub fn theme(&self) -> &Theme {
         self.shell.theme()
