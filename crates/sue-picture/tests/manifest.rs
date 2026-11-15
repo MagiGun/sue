@@ -38,6 +38,7 @@ fn the_engine_depends_on_no_studio_and_no_interface_crate() {
     assert_eq!(
         names(manifest, "[dependencies]"),
         [
+            "sue-brush",
             "sue-core",
             "sue-io",
             "sue-lang",
