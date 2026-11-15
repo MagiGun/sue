@@ -7,7 +7,7 @@ use crate::extras::{sections, write_sections};
 use crate::studio::SuePaint;
 
 /// A named list of menu commands.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct AutoAction {
     pub name: String,
     pub steps: Vec<String>,
