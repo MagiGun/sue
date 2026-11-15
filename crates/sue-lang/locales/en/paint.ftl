@@ -2546,3 +2546,4 @@ no-lines-updated-kept = Nothing was updated: the { $kept } lines left have a fli
 no-legacy-lines-to-update = Every line of this layer already uses the new brush engine.
 fill-up-to-vector-path = Fill up to vector path
 fill-up-to-vector-path-hint = Where the fill looks at vector layers, it stops at the middle of their lines, so no gap shows under them
+fill-up-to-vector-path-off-hint = Works when the fill refers to other layers: turn on Refer multiple above

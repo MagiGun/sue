@@ -237,21 +237,31 @@ impl SuePaint {
 
     /// Fill up to vector path, for the Fill tool: a fill that looks at
     /// vector layers stops at their lines' middles, under the lines.
+    /// It only matters when the fill looks at other layers, so it is
+    /// greyed out while the sub tool refers to the editing layer alone.
     pub(super) fn vector_path_row(&mut self, ui: &mut Ui, theme: &Theme) {
-        let response = checkbox(
-            "sue-paint-fill-vector-path",
-            &tr!("fill-up-to-vector-path"),
-            self.fill_vector_path,
-        )
-        .show(ui, theme);
-        if response.clicked() {
-            self.fill_vector_path = !self.fill_vector_path;
-        }
-        tooltip(
-            response,
-            &Tip::new(&tr!("fill-up-to-vector-path")).help(&tr!("fill-up-to-vector-path-hint")),
-            theme,
-        );
+        let others = self.toolbox.current().referred() != crate::fill::Refer::Editing;
+        ui.add_enabled_ui(others, |ui| {
+            let response = checkbox(
+                "sue-paint-fill-vector-path",
+                &tr!("fill-up-to-vector-path"),
+                self.fill_vector_path,
+            )
+            .show(ui, theme);
+            if response.clicked() {
+                self.fill_vector_path = !self.fill_vector_path;
+            }
+            let hint = if others {
+                tr!("fill-up-to-vector-path-hint")
+            } else {
+                tr!("fill-up-to-vector-path-off-hint")
+            };
+            tooltip(
+                response,
+                &Tip::new(&tr!("fill-up-to-vector-path")).help(&hint),
+                theme,
+            );
+        });
     }
 
     /// Vector magnet, for the pen, pencil, brush and Figure tools: a line
