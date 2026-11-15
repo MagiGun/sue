@@ -121,10 +121,7 @@ impl Screen {
     #[must_use]
     pub fn size(&self) -> [f32; 2] {
         let scale = if self.scale > 0.0 { self.scale } else { 1.0 };
-        [
-            self.pixels[0] as f32 / scale,
-            self.pixels[1] as f32 / scale,
-        ]
+        [self.pixels[0] as f32 / scale, self.pixels[1] as f32 / scale]
     }
 
     /// Where a window's top left corner goes to sit `inset` points in
@@ -705,7 +702,10 @@ mod tests {
         let spec = spec("a").at(at);
         assert_eq!(spec.at, Some([3880, 40]));
         // A screen that reports no scale is read at one pixel a point.
-        let odd = Screen { scale: 0.0, ..second };
+        let odd = Screen {
+            scale: 0.0,
+            ..second
+        };
         assert_eq!(odd.size(), [1920.0, 1080.0]);
     }
 

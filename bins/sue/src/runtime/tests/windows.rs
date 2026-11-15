@@ -254,7 +254,11 @@ fn an_open_views_window_sleeps_while_nothing_changes() {
         host.main_frame(revision, &specs, |ui| {
             runtime.ui(ui, &mut NoTextures, now);
         });
-        assert_eq!(runtime.revision(), revision, "an idle frame changed nothing");
+        assert_eq!(
+            runtime.revision(),
+            revision,
+            "an idle frame changed nothing"
+        );
     }
     let key = runtime.windows()[0].key.clone();
     let surface = host.surface_of(&key).unwrap();
