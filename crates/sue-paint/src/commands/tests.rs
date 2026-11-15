@@ -347,6 +347,8 @@ fn the_palette_offers_what_it_offered() {
             "file.export.png",
             "file.fonts",
             "file.import.pose_scanner",
+            "story.webtoon.right_to_left",
+            "story.webtoon.left_to_right",
             "anim.cel.rename_timeline",
             "anim.cel.rename_layer",
             "help.shortcuts",

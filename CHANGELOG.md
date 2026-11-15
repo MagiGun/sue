@@ -49,6 +49,11 @@ follow [Semantic Versioning](https://semver.org/).
   Snap, Toggle Special Ruler Snapping (Ctrl+4: the picture's special,
   perspective and symmetrical rulers stop snapping, as one step undo
   takes back).
+- Sue Paint: Webtoon Reading Direction, Right to Left or Left to Right,
+  from the command palette (a key can be given in Settings). The choice
+  is saved with the comic and undoes like any change; until it is made
+  it follows the binding. The Page Manager lays a webtoon's columns out
+  by it once its webtoon view arrives.
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
@@ -252,6 +257,15 @@ follow [Semantic Versioning](https://semver.org/).
   of "Specify Cel" or "Delete Key".
 - Reverse Layers Vertically on Sue Paint's light table turns the
   table's layers round; it used to leave them as they were.
+- Sue Paint's Story menu grays out what cannot work on the page shown:
+  First and Previous Page on the first page, Next and Last Page on the
+  last, Delete Page on a story's only page, Combine Pages on a page that
+  faces none, Split Pages on a page that is no spread, and Change Page
+  Settings and Export All Pages on a picture that is no story. Before,
+  they looked ready and did nothing or only said why.
+- Add Page, Insert Page and Duplicate Page on a picture that is no story
+  yet are one undo step: one Ctrl+Z leaves the picture as it was,
+  instead of a story of one page.
 
 ### Removed
 
