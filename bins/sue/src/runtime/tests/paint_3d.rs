@@ -86,11 +86,20 @@ fn band(paint: &PaintDriver) -> (f32, f32, f32) {
         .iter()
         .filter(|(text, rect)| text == "Color Wheel" && rect.top() > tab.bottom())
         .map(|(_, rect)| rect.top())
+        // A folded tab shows only its icon: its place, then.
+        .chain(
+            sue_wm::dock::tab_place_named(&paint.ctx, "Color Wheel")
+                .filter(|rect| rect.top() > tab.bottom())
+                .map(|rect| rect.top()),
+        )
         .fold(f32::INFINITY, f32::min);
     // Under the tab, the sub tool's name and its stroke preview come
     // before the rows.
     (tab.center().x, tab.bottom() + 80.0, below - 24.0)
 }
+
+/// How far from Tool Property's tab its own controls lie, across.
+const COLUMN: f32 = 200.0;
 
 /// Where the control named `name` is, scrolled into Tool Property's view
 /// with the wheel when it is above or below it.
@@ -110,6 +119,12 @@ fn control(paint: &mut PaintDriver, name: &str) -> egui::Rect {
             far(a).total_cmp(&far(b))
         });
         same.sort_by_key(|(_, role, _)| *role != egui::accesskit::Role::Slider);
+        // Only Tool Property's own column: the Zoom tool's tab and the
+        // status strip's zoom lie elsewhere.
+        let column = |rect: &egui::Rect| (rect.center().x - tab.center().x).abs() < COLUMN;
+        if same.iter().any(|(_, _, rect)| column(rect)) {
+            same.retain(|(_, _, rect)| column(rect));
+        }
         let found = same.first().map(|(_, _, rect)| *rect).unwrap_or_else(|| {
             panic!(
                 "{name:?} is named: {:?}",

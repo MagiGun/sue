@@ -83,15 +83,25 @@ fn told(driver: &mut PaintDriver, events: Vec<egui::Event>) -> Vec<(String, egui
     found
 }
 
+/// Where Sue Paint's menu bar ends, in points.
+const MENU_BAR: f32 = 30.0;
+
 /// A click in the middle of the control named `name` (found by what it
 /// tells assistive technology), then a few frames.
 fn click_named(driver: &mut PaintDriver, name: &str) {
     let controls = told(driver, Vec::new());
-    let at = controls
+    let named: Vec<egui::Rect> = controls
         .iter()
         .filter(|(label, _)| label == name)
-        .map(|(_, rect)| rect.center())
-        .next()
+        .map(|(_, rect)| *rect)
+        .collect();
+    // Below the menu bar first: Sue Paint's menus have an Animation of
+    // their own, as New's kinds of work do.
+    let at = named
+        .iter()
+        .find(|rect| rect.top() > MENU_BAR)
+        .or_else(|| named.first())
+        .map(egui::Rect::center)
         .unwrap_or_else(|| {
             let names: Vec<&String> = controls.iter().map(|(label, _)| label).collect();
             panic!("{name:?} is on screen: {names:?}")

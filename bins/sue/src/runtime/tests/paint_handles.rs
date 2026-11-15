@@ -696,7 +696,7 @@ fn sue_paint_puppet_warp_pins_pick_together_turn_and_go() {
 /// Operation tool out.
 fn camera_canvas(tag: &str) -> (PaintDriver, sue_core::EntityId) {
     let mut driver = PaintDriver::new(tag);
-    driver.command("anim.timeline.new");
+    driver.new_timeline();
     driver.settle(2);
     driver.command("anim.layer.camera");
     driver.settle(2);
@@ -858,7 +858,7 @@ fn sue_paint_light_table_box_scales_turns_and_flips_its_layers() {
     );
     driver.command("select.none");
     let reference = top(&driver);
-    driver.command("anim.timeline.new");
+    driver.new_timeline();
     driver.command("anim.cel.new");
     driver.settle(2);
     driver.command("layer.select_below");

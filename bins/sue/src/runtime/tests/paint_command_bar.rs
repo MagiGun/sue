@@ -287,7 +287,7 @@ impl Bar {
         self.step(vec![egui::Event::Text(entry.to_owned())]);
         self.settle(3);
         let column = Rect::from_min_max(
-            Pos2::new(search.left() - 40.0, search.bottom()),
+            Pos2::new(search.left() - 240.0, search.top()),
             Pos2::new(search.left() + 240.0, 900.0),
         );
         let at = self

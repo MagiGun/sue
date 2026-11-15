@@ -339,7 +339,7 @@ fn a_timeline_with_one_sound_exports_a_24_bit_flac_at_48000_hz() {
     let mut paint = PaintDriver::new("paint-export-audio");
     // ABV-15: without sound the command is grayed: it does nothing.
     grayed(&mut paint, "file.export.audio");
-    paint.command("anim.timeline.new");
+    paint.new_timeline();
     paint.settle(6);
     let samples: Vec<f32> = (0..16_000)
         .map(|at| (at as f32 * 0.05).sin() * 0.5)

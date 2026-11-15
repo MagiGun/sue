@@ -1811,7 +1811,7 @@ fn sue_paint_timeline_menus_insert_frames_and_timelapse_ask_first() {
     // ABV-7: Change Settings is its own dialog, apart from the frame rate.
     paint.command("anim.timeline.settings");
     let texts = paint.settle(3);
-    for name in ["Timeline name", "Division line every", "Scene", "Shot"] {
+    for name in ["Timeline name", "Division line every", "Scene number", "Shot number"] {
         assert!(
             texts.iter().any(|(text, _)| text == name),
             "{name}: {texts:?}"

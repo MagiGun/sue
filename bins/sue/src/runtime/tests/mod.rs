@@ -322,6 +322,8 @@ impl PaintDriver {
 
     /// Where the last frame drew `text`: the topmost, then the leftmost
     /// when it is drawn more than once.
+    /// A palette's name that its folded tab in a dock header shows only
+    /// as an icon is found at that tab.
     pub(crate) fn rect_of(&self, text: &str) -> Option<egui::Rect> {
         self.texts
             .iter()
@@ -332,6 +334,7 @@ impl PaintDriver {
                     .total_cmp(&b.top())
                     .then(a.left().total_cmp(&b.left()))
             })
+            .or_else(|| sue_wm::dock::tab_place_named(&self.ctx, text))
     }
 
     /// A click in the middle of `text`, found where the last frame drew
@@ -372,6 +375,15 @@ impl PaintDriver {
             &mut NoTextures,
             self.now,
         );
+    }
+
+    /// Animation, New Timeline with the settings it offers: since P4-7 the
+    /// command asks first, and Enter takes what the dialog shows.
+    pub(crate) fn new_timeline(&mut self) {
+        self.command("anim.timeline.new");
+        self.settle(2);
+        self.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+        self.settle(2);
     }
 
     /// Presses `button` at `from`, moves to `to` in 20 steps and lets

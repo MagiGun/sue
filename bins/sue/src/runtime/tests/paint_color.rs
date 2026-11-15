@@ -57,6 +57,22 @@ fn control(paint: &mut PaintDriver, name: &str) -> Rect {
         })
 }
 
+/// The control named `name` nearest the middle of the window, where a
+/// dialog stands, when a palette behind it has one named alike.
+fn nearest_middle(paint: &mut PaintDriver, name: &str) -> Rect {
+    let middle = Pos2::new(720.0, 450.0);
+    look(paint)
+        .into_iter()
+        .filter(|(label, _)| label == name)
+        .map(|(_, rect)| rect)
+        .min_by(|a, b| {
+            a.center()
+                .distance(middle)
+                .total_cmp(&b.center().distance(middle))
+        })
+        .unwrap_or_else(|| panic!("nothing is named {name:?}"))
+}
+
 /// Where the widget `id` was drawn last.
 fn widget(paint: &PaintDriver, id: egui::Id) -> Rect {
     paint
@@ -394,13 +410,16 @@ fn the_color_wheel_switches_between_square_and_triangle() {
     paint.settle(4);
     paint.command("color.settings");
     paint.settle(4);
-    let button = control(&mut paint, "Show the HLS triangle");
+    // Color Settings' own button, over the palette's that the dialog
+    // keeps out of reach: the one nearest the middle of the window.
+    let button = nearest_middle(&mut paint, "Show the HLS triangle");
     click(&mut paint, button.center(), PointerButton::Primary);
     let named = look(&mut paint);
     assert!(
         named
             .iter()
-            .any(|(label, _)| label == "Show the HSV square")
+            .any(|(label, _)| label == "Show the HSV square"),
+        "{named:?}"
     );
     assert!(
         !named

@@ -42,14 +42,22 @@ impl Canvas {
             .unwrap_or_default()
     }
 
+    /// How much each pixel of `id` covers: its alpha, or a gray mask's
+    /// value (masks are Gray8 since P4-1a).
+    fn cover(&self, id: EntityId) -> Vec<u8> {
+        let gray = sue_paint::doc::raster(self.arena(), id)
+            .is_some_and(|raster| raster.format() == sue_core::PixelFormat::Gray8);
+        let bytes = self.bytes(id);
+        if gray {
+            bytes
+        } else {
+            bytes.as_chunks::<4>().0.iter().map(|pixel| pixel[3]).collect()
+        }
+    }
+
     /// How many pixels of `id` are not clear.
     fn painted(&self, id: EntityId) -> usize {
-        self.bytes(id)
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .filter(|pixel| pixel[3] > 0)
-            .count()
+        self.cover(id).into_iter().filter(|cover| *cover > 0).count()
     }
 
     /// The picture's pixel count.
@@ -221,13 +229,7 @@ fn sue_paint_fill_edit_fill_and_gradient_write_to_the_mask_being_edited() {
     let depth = canvas.depth();
     canvas.trace(&[middle - vec2(100.0, 0.0), middle, middle + vec2(100.0, 0.0)]);
     assert_eq!(canvas.depth(), depth + 1, "a gradient is one step");
-    let cover = canvas.bytes(mask);
-    let alphas: Vec<u8> = cover
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|pixel| pixel[3])
-        .collect();
+    let alphas = canvas.cover(mask);
     assert!(alphas.contains(&0), "the gradient's start hides");
     assert!(alphas.contains(&255), "past its end the layer shows");
     assert_eq!(canvas.bytes(layer), pixels, "the layer is untouched");

@@ -548,7 +548,10 @@ fn a_click_on_the_gradient_bar_adds_a_stop_and_delete_takes_it_away() {
     driver.settle(4);
     let position = driver.rect_of("Position (%)").expect("the stop's place");
     // The stop being edited is the first, at 0.
+    // Found again each time: the dialog is as tall as what it holds, so
+    // a row it adds or takes away moves the rest.
     let field = |driver: &PaintDriver| -> Vec<String> {
+        let position = driver.rect_of("Position (%)").expect("the stop's place");
         driver
             .texts
             .iter()

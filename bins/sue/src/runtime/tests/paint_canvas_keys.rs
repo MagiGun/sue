@@ -815,7 +815,7 @@ fn edit_timeline_steps_the_frames_and_light_table_drags_its_layers() {
     driver.command("layer.new");
     driver.settle(2);
     let reference = top(&driver);
-    driver.command("anim.timeline.new");
+    driver.new_timeline();
     let ids = |driver: &PaintDriver| -> Vec<sue_core::EntityId> {
         layers(driver).into_iter().map(|info| info.id).collect()
     };

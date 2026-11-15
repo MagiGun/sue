@@ -1066,7 +1066,14 @@ fn ctrl_click_on_a_thumbnail_selects_what_the_layer_holds() {
     let layer = *driver.stack().last().unwrap();
     // Nothing is selected yet, so Deselect is grayed.
     let grayed = driver.look_with(Vec::new(), egui::Modifiers::NONE);
-    assert!(!grayed.iter().any(|told| told.name == "Deselect (Ctrl+D)"));
+    // (The command bar names its buttons alone since P4-3, their keys in
+    // the tooltip.)
+    assert!(
+        grayed
+            .iter()
+            .filter(|told| told.name == "Deselect")
+            .all(|told| told.disabled)
+    );
     let row = driver.row(&driver.name_of(layer));
     // The thumbnail sits just left of the name.
     let thumb = row.left_center() - vec2(24.0, 0.0);
@@ -1077,7 +1084,7 @@ fn ctrl_click_on_a_thumbnail_selects_what_the_layer_holds() {
     );
     // The layer's pixels became the selection: Deselect works now.
     assert!(
-        !driver.control("Deselect (Ctrl+D)").disabled,
+        !driver.control("Deselect").disabled,
         "there is a selection"
     );
     // A plain click on a thumbnail picks its row, as anywhere on the row:
@@ -1282,7 +1289,7 @@ fn the_ruler_button_lists_where_rulers_show() {
 #[test]
 fn an_animation_folder_names_its_cel_and_a_cel_click_moves_the_playhead() {
     let mut driver = PaintDriver::new("paint-layer-cels");
-    driver.command("anim.timeline.new");
+    driver.new_timeline();
     driver.command("anim.cel.new");
     for _ in 0..3 {
         driver.command("anim.next");

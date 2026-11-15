@@ -1202,6 +1202,26 @@ fn sue_paint_fill_up_to_vector_path_reaches_under_the_line() {
     d.settle(2);
     assert_eq!(inked(&d, paint_layer), 0);
     d.click_text("Tool Property");
+    // Under P4-2's rows it sits low in Tool Property: the wheel brings it
+    // into view.
+    let tab = d.rect_of("Tool Property").expect("the Tool Property tab");
+    for _ in 0..40 {
+        if d.rect_of("Fill up to vector path").is_some() {
+            break;
+        }
+        let over = tab.center() + vec2(0.0, 120.0);
+        d.step(vec![
+            egui::Event::PointerMoved(over),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -40.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Wheel,
+            },
+        ]);
+        d.settle(2);
+    }
     d.click_text("Fill up to vector path");
     let under = fill(&mut d);
     assert!(
