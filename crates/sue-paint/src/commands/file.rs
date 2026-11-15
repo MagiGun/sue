@@ -27,7 +27,13 @@ pub(crate) const RECORDABLE: &[&str] = &[];
 
 /// The commands of this group that close the canvas, print, or leave Sue
 /// Paint, so a test that runs every command on a canvas skips them.
-pub(crate) const LEAVES_CANVAS: &[&str] = &["file.close", "file.print", "file.leave", "app.quit"];
+pub(crate) const LEAVES_CANVAS: &[&str] = &[
+    "file.start_page",
+    "file.close",
+    "file.print",
+    "file.leave",
+    "app.quit",
+];
 
 // ----- How the items look ------------------------------------------------------
 
@@ -78,9 +84,12 @@ fn picture_types() -> Vec<FileType> {
         .collect()
 }
 
-fn start_page(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.start.forced = true;
+/// The launcher's Start Page is gone: the command, under the name
+/// shortcuts saved, goes back to the Hub as File, Back to the Hub
+/// (`file.leave`) does, and offers it in the palette.
+fn start_page(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.dialog = None;
+    cx.request(ShellRequest::Hub);
 }
 
 fn new(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
@@ -545,7 +554,7 @@ const fn c(
 }
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[
-    c("file.start_page", "start-page", "app-paint", start_page).with(Flags::PALETTE),
+    on("file.start_page", "back-to-the-hub", "home", start_page).with(Flags::PALETTE),
     on("file.new", "new-ellipsis", "file-new", new)
         .keys("Ctrl+N")
         .with(Flags::PALETTE),

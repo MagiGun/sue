@@ -125,6 +125,24 @@ follow [Semantic Versioning](https://semver.org/).
   first submenu is Rotate/Flip.
 - Sue Paint: Edit, Paste to Shown Position answers to Ctrl+Shift+V, as
   in Clip Studio Paint (it had no key).
+- The Hub is a workspace of places: a rail (a tab bar on a phone) with
+  Home and Files. Home has New and Open, a rounded card per studio with a
+  round pin, Jump Back In with pictures of your newest work, and Your
+  Work buttons (Recent, Projects, Unsaved Work, Favorites, Folder) that
+  open Files already sorted. Files shows every studio's work as cards with
+  Recover and Discard on kept work, and its menu rebuilds thumbnails and
+  forgets files that are gone. Over the Hub the top bar has a search
+  field for commands and buttons for Transfers and Settings; the arrow
+  keys walk the Hub.
+- Sue Paint opens on its canvas. With no canvas open it keeps its menus
+  and palettes and shows New and Open where the canvas goes; on a phone
+  or tablet New opens the New canvas page. Its materials are the Hub's
+  **Materials** place, whose menu finds them again, draws their pictures
+  again and shows or moves their folder. File, Back to the Hub (and the
+  back arrow on a phone) goes to the Hub, where your work is in Files.
+  The Help menu now also links to the basic tips, this guide online,
+  frequently asked questions, contact and feedback.
+- The start pages draw Sue's icons and have rounded corners.
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an
   empty or single color tile costs a byte, a tile found twice (a duplicated
@@ -201,6 +219,8 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint's Drawing Color to Transparent and Radial gradients start
   at the color you draw with. They always used the main color, even
   while the sub color was picked.
+- The second line of a file's card no longer runs under its heart and
+  details button.
 - Instant transitions and Animation speed (Settings, Motion) now reach
   the switches in Settings and on the start pages and everything else
   the interface toolkit animates by itself: they used to keep their own
@@ -265,6 +285,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+- Sue Paint's own start page (Draw, Projects, Manage Materials, Data
+  Transfers, Help and Settings, and its phone and tablet tabs), and File,
+  Start Page. Everything on it lives on: your work in the Hub's Files,
+  the materials in its Materials place, Transfers in the Hub's top bar,
+  Help in Sue Paint's Help menu, and its settings in Settings, Sue Paint.
 - **Browse Assets** is gone from Sue Paint's start page, on computers,
   phones and tablets, with everything that read another company's
   material site. Sue Paint no longer goes online for materials at all,

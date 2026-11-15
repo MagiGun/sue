@@ -597,8 +597,11 @@ pub struct SuePaint {
     pub(crate) scans: crate::scan::Scans,
     /// The kinds of material, registered at start.
     pub(crate) material_kinds: crate::materials::MaterialKinds,
-    /// The start page, shown while no canvas is open.
-    pub(crate) start: crate::start::StartPage,
+    /// The Hub's Materials place (drawn by `hub_ui`), and the old cache
+    /// it clears once.
+    pub(crate) hub: crate::hub::MaterialsPlace,
+    /// The New canvas page of phones and tablets.
+    pub(crate) new_canvas: crate::mobile::NewCanvas,
     /// The drawing tool Simple Mode's swap button goes back to from the
     /// eraser.
     pub(crate) drawing_tool: crate::tools::Tool,
@@ -798,7 +801,8 @@ impl Default for SuePaint {
             material_thumbs: HashMap::new(),
             scans: crate::scan::Scans::default(),
             material_kinds: crate::materials::MaterialKinds::builtin(),
-            start: crate::start::StartPage::default(),
+            hub: crate::hub::MaterialsPlace::default(),
+            new_canvas: crate::mobile::NewCanvas::default(),
             canvas_templates: crate::templates::CanvasTemplates::builtin(),
             drawing_tool: crate::tools::Tool::Pen,
             bare: false,

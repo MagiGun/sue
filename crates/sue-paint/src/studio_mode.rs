@@ -197,7 +197,7 @@ impl SuePaint {
         }
         let back = slot(commands, 0);
         if page::icon_button(ui, back, Glyph::Back, &tr!("start-back"), false, theme).clicked() {
-            self.start.forced = true;
+            cx.request(sue_wm::ShellRequest::Hub);
             self.sheet = None;
         }
         let history = (cx.history.can_undo(), cx.history.can_redo());
@@ -542,7 +542,7 @@ impl SuePaint {
         ];
         match page::group(ui, &rows, theme) {
             Some(0) => {
-                self.start.forced = true;
+                cx.request(sue_wm::ShellRequest::Hub);
                 self.sheet = None;
             }
             Some(1) => {

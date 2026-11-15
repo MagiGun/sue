@@ -1009,7 +1009,7 @@ confirmation, and `exit` lets it save before the loop ends.
 | --- | --- | --- |
 | `Desktop` | Mouse + keyboard, keybinds from rice | The top bar is `layout.bar_height` (28 points) tall |
 | `Tablet` | Stylus pressure curves ($p' = p^{\gamma}$), larger targets | The top bar is at least 36 points tall; Sue Paint docks its tool strip and layers and iconizes the rest |
-| `Mobile` | Touch | The top bar is at least 52 points tall, for 44 point buttons; the Hub shows two columns of boxes; Sue Paint moves its palettes into bottom sheets |
+| `Mobile` | Touch | The top bar is at least 52 points tall, for 44 point buttons; the Hub's rail becomes a tab bar and its studio cards rows; Sue Paint moves its palettes into bottom sheets |
 
 Classification follows Android's resource-qualifier convention: on a mobile OS, a
 smallest screen side of **at least 600 dp** is a tablet (`FormFactor::classify`).
@@ -1406,35 +1406,58 @@ the returned `Event`s ask. `Thumbs` makes the cards' pictures on a
 background job, kept until the file changes: a `.sue` file's own
 preview (its `THMB` part, read without decoding the document) first,
 else the `Thumbnailer` of the studio whose work it is
-(`Thumbs::set_maker`), else the picture formats `sue-io` reads. Sue
-Paint's start page draws its Projects page and popups from it until
-the Hub's Files place replaces that page.
+(`Thumbs::set_maker`), else the picture formats `sue-io` reads. The
+Hub's Files place draws it for every studio. `browse` takes a `Browse`:
+`compact` (labels as chips over the cards, a toolbar of sort and view)
+and `drawn`, where each card (`Spot::Card`) and kept work's Recover and
+Discard were drawn; cards are `ui::ThumbnailCard`s and rows
+`ui::ListRow`s, so their text ends before their buttons.
 
-**The Hub** is the page Sue opens on, a full page and not an overlay: a
-heading **Studios** with a box for every `Studio` manifest, then **Tools** with
-a box for every `Tool`, in manifest order. Each box has sharp corners and
-shows the applet's icon, name and summary; a click opens it
-(`ShellRequest::Open`). At each box's bottom right is a **pin**. Pinning makes
-that studio or tool the one Sue opens straight into at launch, already in
-place; there is one pin at a time, so pinning another moves it, and a click
-on the pinned one takes it away (`ShellRequest::Pin`). The pin is the rice
-key `launchpad.pinned` (empty for the Hub), set as one undoable `RiceEdit`,
-so `Ctrl+Z` takes it back, and it shows in Settings, General, Startup as a
-drop-down of the Hub and every studio and tool. A narrow window or a phone
-gets two columns of boxes and 44 point pins.
+**The Hub** is the page Sue opens on, a full page and not an overlay
+(`shell/hub.rs`, with `hub/home.rs`, `hub/files.rs` and the pieces in
+`hub/kit.rs`): a workspace of **places**. A rail at the left lists them
+(`HubButton::Place`): Home (`HUB_HOME`), Files (`HUB_FILES`) and every
+`HubPlace` an applet adds, whose pane its `hub_ui` draws. Under 560 points
+of room (`hub::NARROW`, on any device) the rail is a tab bar along the
+bottom and the cards become rows; a touch layout makes every target 44
+points. `ShellRequest::HubPlace(id)` goes to a place, `ShellRequest::Hub`
+to Home; an unknown place shows Home.
 
-Under the boxes the Hub lists the **work Sue remembers** (`WorkList`, below):
-**Recent** (the files and projects opened or saved lately, newest first, as
-many as `launchpad.recent_count`), **Saved Projects** (every `.sue` project
-the list knows, by name, with the studio it was saved from) and **Unsaved
-Work** (autosaves of other runs). Three columns side by side when the page
-is wide enough, one under the other when not, each row a sharp box with the
-title, what it is, when and the folder, the full path on hover, 56 points
-tall on touch. A recent file or project opens with `ShellRequest::OpenFile`;
-kept work has **Recover** (also a click on the row, `ShellRequest::Recover`)
-and **Discard** (`ShellRequest::Discard`), which arms on a first click
-(Really Discard) and acts on a second. `Shell::hub_rows` reports where each
-row and button was drawn, for scripted runs and tests.
+Home has **New** (a menu of every applet's `templates`, by category;
+`ShellRequest::Create`) and **Open** (`file.open`), a card per `Studio`
+manifest, then per `Tool`, in manifest order (the manifest's `Icon` on a
+badge, its name and summary; a click is `ShellRequest::Open`), **Jump Back
+In** (the newest work of `files::items`, as many as fit one row and at most
+`launchpad.recent_count`, as `ui::ThumbnailCard`s with their thumbnails,
+and All Files), and **Your Work** (`WorkShelf`: Recent, Projects, Unsaved
+Work, Favorites, each with its count, and Folder, `reveal:<home>`, only
+where `sue_platform::file_manager()` is some). Each shelf opens Files on
+it. At each studio card's top right is a round **pin**, shown on hover,
+on touch and while pinned. Pinning makes that studio or tool the one Sue
+opens straight into at launch, already in place; there is one pin at a
+time, so pinning another moves it, and a click on the pinned one takes it
+away (`ShellRequest::Pin`). The pin is the rice key `launchpad.pinned`
+(empty for the Hub), set as one undoable `RiceEdit`, so `Ctrl+Z` takes it
+back, and it shows in Settings, General, Startup as a drop-down of the Hub
+and every studio and tool.
+
+Files is the shared browser (`files::browse`, below) over the work of
+every page applet, compact on a narrow page. A file opens with
+`ShellRequest::OpenFile` (a file that is gone is forgotten with a word);
+kept work's card recovers it (`ShellRequest::Recover`) and its Discard
+arms on a first click and acts on a second (`ShellRequest::Discard`). Its
+menu rebuilds the thumbnails, forgets the files that are gone and clears
+the finished transfers (`Shell::hub_files_menu_pick` runs it by name).
+
+Every card and button fades its hover on the riced motion
+(`ui::motion::hover_t`) and snaps when transitions are instant, so an idle
+Hub asks for no frame. Tab is the command palette's, so the arrow keys walk
+the Hub's controls in reading order (`ui::FocusScope`, roving both ways),
+starting on the place shown, and `Enter` uses the one in focus.
+`Shell::hub_boxes` (studio cards and pins), `Shell::hub_rows` (the cards
+and buttons of Files, as `HubRow`) and `Shell::hub_buttons` (everything
+else, as `HubButton`) report where the last frame drew them, for scripted
+runs and tests.
 
 **The top bar** runs across the window (§3.3). The **Sue button** sits once,
 in its top left corner, with Sue's silhouette; no studio or tool draws one of
@@ -1511,8 +1534,8 @@ format line: `label`, `mark` and `favorite` lines, each path last): a
 first run has Work, people add, rename and remove their own, and any file
 can be a favorite. Applets change them with `ShellRequest::Labels`
 (`LabelEdit::{Add, Rename, Remove, Mark, Favorite}`); the runtime writes
-them; `WorkList::{labels, has_label, is_favorite}` read them. Sue Paint's
-start page sorts its projects with them.
+them; `WorkList::{labels, has_label, is_favorite}` read them. The Hub's
+Files place sorts the work with them.
 
 **Data transfers.** `sue_wm::Transfers` lists what this run brought in,
 wrote out and copied
@@ -1521,8 +1544,7 @@ first: the runtime notes every file it opens and every project it saves,
 the shell every `ShellRequest::Saved`, and an applet runs a long transfer
 with `AppletContext::transfers.spawn`, a `JobPool` job reporting progress
 that the runtime polls every 100 ms while one runs. `clear_completed`
-forgets the finished ones. A start page shows it in its Data Transfers
-popup.
+forgets the finished ones. The Hub shows it in its Transfers popup.
 
 **Start pages** (`sue_wm::start`). Shared widgets for the page a studio
 opens on: a rail of large buttons with labels (`rail`, the first round),
@@ -2160,8 +2182,8 @@ a PNG in the materials location's `materials/` so every project has it)
 and the brush tips made from pictures (`tips/`). The kinds are not a fixed
 list: each registers in `sue_paint::materials::MaterialKinds` with an id
 under `sue_paint.`, a name, a glyph, a placement (`Cover` or `Fit`) and a
-scan that finds its materials, and the palette's tabs and the start page's
-tree come from the registry. The materials location is
+scan that finds its materials, and the palette's tabs and the Hub's
+Materials place's tree come from the registry. The materials location is
 `sue_paint.materials_dir`, or Sue Paint's folder when empty. Double-clicking
 one, or Paste to Canvas, puts it on a new layer above the current one:
 tones and patterns cover the canvas in the drawing color, pictures sit in
@@ -2175,33 +2197,37 @@ arena is kept in the materials location as `library.sue` (the `.sue`
 container), so ids and favorites survive a restart and a material that
 comes back keeps its entity.
 
-**Start page** (`start.rs`). On the desktop, while no canvas is open or
-after File, Start Page (`file.start_page`), the page is a start page built
-from `sue_wm::start`: the rail (Draw, Projects, Manage Materials), Data
-Transfers, Help and Settings at the top right, and the main area. Draw
-opens the newest picture or Sue Paint project in the `WorkList` (pictures
-through Sue Paint's own open, projects with `ShellRequest::OpenFile`), or
-the New dialog. Projects are the `WorkList`'s pictures, `.sue` files last
-worked on in Sue Paint and its kept work, filtered by shelf (All,
-Favorite, a label), type chips and search, sorted by date or name; their
-thumbnails are made on a `JobPool` thread (a picture decoded, or a
-project's first picture flattened), at most 256 pixels, and uploaded once.
-Manage Materials reads the `Library`. Help opens the Sue site and GitHub
-pages through `open-url:`; Settings writes `sue_paint.theme` (dark mode:
-Gray or Paper) and `sue_paint.materials_dir`, so Sue's Settings shows the
-same values. Popups and pages open by name for scripts and snapshots
-(`navigate("start/materials")`, `start/help` and so on).
+**No canvas, and the Hub** (`hub.rs`, `mobile.rs`). Sue Paint has no
+launcher of its own (removed in 0.0.8, owner note 11). With no canvas
+open it draws its workspace as with one: the menu bar, the dock and, in
+the canvas area, `sue_wm::ui::empty_state` with New and Open (New is the
+New dialog on the desktop, the New canvas page on a touch screen). File,
+Back to the Hub is `file.leave`; `file.start_page`, the name shortcuts
+saved for the old Start Page, now does the same and is the palette's
+entry. Through `SueApplet::hub_places` Sue Paint adds one place to the
+Hub, `materials` (`hub::PLACE`), which `hub_ui` draws: the `Library`'s
+tree (chips under 560 points), search, origin chips, the toolbar, the
+cards, a popup per material and the place's menu (find again, redraw the
+pictures, show, choose or reset `sue_paint.materials_dir`). A click on a
+material while a canvas is open stores it in `MaterialsPlace::paste` and
+asks for `ShellRequest::Open`; Sue Paint pastes it on its next frame, so
+the paste lands on the canvas's own `UndoStack`, not on the history the
+Hub was drawn with. `SueApplet::thumbnail` gives the Hub Sue Paint's
+`Thumbnailer` (a project's first picture flattened, a `.clip` or `.psd`
+composite) for files without a `THMB` preview. What the launcher's popups
+held: Help is the Help menu's `help.tips`, `help.online_guide`,
+`help.faq`, `help.contact` and `help.feedback` (each an `open-url:`);
+its Settings are the rice keys `sue_paint.theme`,
+`sue_paint.materials_dir` and `sue_paint.pen_pressure` in Settings, Sue
+Paint; its Maintenance is the Files place's menu and the Materials
+place's. The place opens by name for scripts and snapshots
+(`navigate("materials/menu")`, `materials/close`).
 
-On phones and tablets (`FormFactor::Mobile`, `Tablet`) the start page is
-`mobile.rs`: `mobile_header` draws Sue Paint, Help and Settings in Sue's
-top bar (`bar_ui`), the page is Projects (Create new file, New from device
-storage, Open file, then the cards by shelf) or Manage Materials (kinds as
-chips), over `sue_wm::start::tab_bar` with the round Draw in the middle,
-and the popups become `sue_wm::start::sheet`s over the whole screen. Draw
-opens the newest project or the New canvas page: the categories as
-`start::tabs`, their templates as `start::tile`s in a row that scrolls
-sideways, Continue drawing (the newest projects) with Import, and See list
-of projects. Advanced Settings opens the New dialog on the category's work.
+`mobile.rs` is the New canvas page of phones and tablets: the categories
+as `start::tabs`, their templates as `start::tile`s in a row that scrolls
+sideways, Import and Advanced Settings (the New dialog on the category's
+work). It opens by name too (`new-canvas`, `new-canvas/<category>`,
+`new-canvas/close`).
 
 **Canvas templates** (`templates.rs`). `CanvasTemplates` registers
 categories (`sue_paint.illustration`, `webtoon`, `comic`, `animation`) and
@@ -3362,7 +3388,7 @@ separators are measured against, and it exercises the full zero-copy path.
 | §3.7 Sue Paint: Polyline, Selection pen and Erase selection; expand, shrink and blur selections; Select Color Gamut; selection layers; Quick Mask; the Selection Launcher | **Implemented**; a unit test for growing, shrinking, blurring, painting and picking colors, and an end-to-end run that shrinks a full selection, keeps it as a layer and turns Quick Mask on and off | `sue-paint/src/select.rs`, `canvas.rs`, `studio.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: 3D layers (shapes and OBJ models), their camera and look, and lines and tones from them | **Implemented**; unit tests for the renderer's coverage, outlines and folds (a sphere smooth inside), each look, and a layer turned and undone; an end-to-end run makes a cube, turns it with the Object tool, undoes, converts it to lines and tones and imports an OBJ model | `sue-paint/src/three.rs`, `canvas.rs`, `panels.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: audio tracks on the animation timeline, played in step | **Implemented**; a unit test for a sound imported, mixed from its frame, moved, removed and undone; the animation end-to-end run imports a WAV and plays and stops it with the animation | `sue-paint/src/anim.rs`, `anim_ui.rs`, `bins/sue/src/runtime.rs` |
-| §3.7 Sue Paint: the start page (Draw, Projects with labels and thumbnails, Manage Materials, Data Transfers, Help, Settings) | **Implemented**; unit tests for projects read from the shared work list, sorted and filtered, thumbnails made in the background, pages and popups by name, labels kept, transfers run and cleared, the material library's ids and favorites kept and undone, and every start page widget drawn; the snapshot run shoots the start page and its popups | `sue-paint/src/start.rs`, `materials.rs`, `sue-wm/src/start.rs`, `work.rs`, `transfers.rs`, `bins/sue/src/runtime.rs` |
+| §3.7 Sue Paint: no launcher (0.0.8); with no canvas the workspace with New and Open; the Hub's Materials place; Back to the Hub; the launcher's Help in the Help menu | **Implemented**; runtime tests for the empty workspace and the Window menu (tutorial step B1), Back to the Hub, the phone's New canvas page and back to the Hub, the Materials place's menu, a material added, pasted (one undo step) and deleted, and the Help menu's pages; unit tests for the place, its filters, the thumbnails and the routes; the snapshot run shoots no canvas, the Help menu and the Materials place | `sue-paint/src/hub.rs`, `mobile.rs`, `materials.rs`, `sue-wm/src/start.rs`, `work.rs`, `transfers.rs`, `bins/sue/src/runtime.rs` |
 | §3.7 Sue Paint: brush tip materials | Partly; brush tips made from pictures list as materials and can be added from PNG files; the Edit menu item is grayed out | `sue-paint/src/materials.rs` |
 | §3.6 Embedded web view | Planned (a Browser drawer of earlier builds was retired) | n/a |
 | §3.6 A bold typeface for documents | Planned; the bundled fonts have no bold weight, so bold spans show in full white with wider spacing | `bins/sue/src/document.rs` |

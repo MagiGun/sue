@@ -48,9 +48,15 @@ fn has(texts: &[(String, egui::Rect)], text: &str) -> bool {
 
 /// Where `text` shows to the right of `of`: in a menu nested beside it.
 fn beside(texts: &[(String, egui::Rect)], text: &str, of: egui::Rect) -> Option<egui::Rect> {
+    // On its line: the page under the menu may say the same (the Hub's
+    // studio cards name the studios too).
     texts
         .iter()
-        .find(|(found, rect)| found == text && rect.left() > of.right())
+        .find(|(found, rect)| {
+            found == text
+                && rect.left() > of.right()
+                && (rect.top() - of.top()).abs() < of.height() * 2.0
+        })
         .map(|(_, rect)| *rect)
 }
 
@@ -153,19 +159,22 @@ fn sue_paint_menus_answer_the_keyboard() {
     paint.step(vec![plain(egui::Key::Escape)]);
     paint.settle(3);
     assert!(paint.rect_of("Save As...").is_none(), "Escape closed File");
-    assert!(paint.rect_of("Draw").is_none(), "the canvas is still open");
+    assert!(
+        paint.rect_of("No canvas is open").is_none(),
+        "the canvas is still open"
+    );
 
     // Enter runs the row the typing found.
     paint.click_text("File");
-    for letter in ["s", "t", "a", "r", "t"] {
+    for letter in ["b", "a", "c", "k"] {
         paint.step(vec![typed(letter)]);
     }
     paint.step(vec![plain(egui::Key::Enter)]);
     paint.settle(6);
     assert!(paint.rect_of("Save As...").is_none(), "Enter closed File");
     assert!(
-        paint.rect_of("Draw").is_some(),
-        "Enter ran Start Page: {:?}",
+        paint.runtime.shell.page().is_none(),
+        "Enter ran Back to the Hub: {:?}",
         paint.texts
     );
 }

@@ -576,8 +576,8 @@ The order of work is the plan at the end.
 
 | Feature | Sue | Notes |
 | --- | --- | --- |
-| Start page with Projects, labels, search and favorites | done | The same lists the Hub shows |
-| Manage Materials on the start page | done | Phones and tablets have Manage Materials and Data Transfers as tabs too |
+| Projects with labels, search and favorites | done | In the Hub's Files, for every studio's work; Sue Paint has no start page of its own since 0.0.8 |
+| Materials as a place of the Hub | done | Phones and tablets have it in the Hub's tab bar; with no canvas Sue Paint shows its workspace with New and Open |
 | Simple Mode for phones and tablets | done | Studio Mode for the desktop layout |
 | Studio Mode and touch layouts, modifier keys on a slide-out | done | |
 | One project holds Paint with every studio | done | Entities by EntityId in the `.sue` file |
@@ -595,7 +595,7 @@ should build them from this list:
   of the tool palette for this reason.
 - Downloading a brush or a picture from a link. Brushes and pictures
   that are already on the device are imported instead (Sub Tool
-  palette, Manage Materials).
+  palette, the Hub's Materials place).
 - Anything that needs a Clip Studio account, its cloud files among
   them, and anything for Clip Studio's own hardware: no menu item, no
   settings page.

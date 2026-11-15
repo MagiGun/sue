@@ -120,8 +120,9 @@ pub struct AppletManifest {
     pub summary: String,
     /// Where it lives.
     pub role: AppletRole,
-    /// A one-character icon from the bundled fonts.
-    pub icon: String,
+    /// Its icon, from Sue's icon set (an icon pack can replace it by
+    /// the icon's name).
+    pub icon: Icon,
     /// Sort key among applets of the same role (lower first).
     pub order: i32,
     /// The namespace of the language database its text lives in, e.g.
@@ -138,13 +139,13 @@ impl AppletManifest {
     /// # Panics
     /// If `id` is not a valid applet id (a programming error).
     #[must_use]
-    pub fn new(id: &str, name: &str, role: AppletRole, icon: &str) -> Self {
+    pub fn new(id: &str, name: &str, role: AppletRole, icon: Icon) -> Self {
         Self {
             id: AppletId::new(id).expect("built-in applet ids are valid"),
             name: name.to_owned(),
             summary: String::new(),
             role,
-            icon: icon.to_owned(),
+            icon,
             order: 0,
             namespace: None,
         }
@@ -985,7 +986,7 @@ mod tests {
 
     impl SueApplet for Bare {
         fn manifest(&self) -> AppletManifest {
-            AppletManifest::new("bare", "Bare", AppletRole::Studio, "*")
+            AppletManifest::new("bare", "Bare", AppletRole::Studio, Icon::AppGeneric)
         }
     }
 

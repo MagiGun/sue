@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use egui::{Rect, Ui, vec2};
+use egui::{Rect, Ui};
 use sue_core::txn::{Batch, SetProperty};
 use sue_core::{Arena, EntityId};
 use sue_model::picture::{self, LayerKind};
@@ -189,8 +189,12 @@ impl SuePaint {
             self.shown = true;
         }
         self.sync_docs(&cx.world.arena);
-        self.start
+        self.hub
             .forget_old_cache(cx.catalog.folders.get("cache").map(PathBuf::as_path));
+        if present {
+            // A material the Hub's Materials place put on the canvas.
+            self.paste_from_hub(cx);
+        }
         self.poll_scans(cx);
         self.animate(cx, &ui.ctx().clone());
         self.record_timelapse(cx, &ui.ctx().clone());
@@ -212,45 +216,25 @@ impl SuePaint {
         if self.laid_for != Some(form) {
             self.lay_out_for(form);
         }
-        // Phones and tablets have their own start page.
-        if form != sue_platform::FormFactor::Desktop && self.start.shows(self.docs.is_empty()) {
-            self.mobile_start_ui(ui, full, cx, &theme);
-            if self.ready {
-                self.dialog_ui(&ctx, cx, &theme);
-            }
-            return;
-        }
-        self.start.full = false;
         // Simple Mode, unless Studio Mode was chosen.
         self.bare = form != sue_platform::FormFactor::Desktop && !crate::simple::studio_mode(cx);
-        if self.bare {
-            self.simple_frame(ui, full, cx, &theme);
-            if self.ready {
-                self.dialog_ui(&ctx, cx, &theme);
-            }
-            return;
-        }
-        // Studio Mode on phones and tablets.
         if form != sue_platform::FormFactor::Desktop {
-            self.studio_frame(ui, full, cx, &theme);
+            if self.bare {
+                self.simple_frame(ui, full, cx, &theme);
+            } else {
+                // Studio Mode on phones and tablets.
+                self.studio_frame(ui, full, cx, &theme);
+            }
+            // New on a touch screen: the New canvas page over it all.
+            self.new_canvas_ui(ui, full, cx, &theme);
             if self.ready {
                 self.dialog_ui(&ctx, cx, &theme);
             }
             return;
         }
-        // On the desktop the start page shows while no canvas is open.
-        if form == sue_platform::FormFactor::Desktop && self.start.shows(self.docs.is_empty()) {
-            self.start_ui(ui, full, cx, &theme);
-            if self.ready {
-                self.dialog_ui(&ctx, cx, &theme);
-            }
-            return;
-        }
-        if form == sue_platform::FormFactor::Tablet {
-            // Bigger targets for fingers and pens.
-            ui.spacing_mut().interact_size.y = 32.0;
-            ui.spacing_mut().button_padding = vec2(8.0, 6.0);
-        }
+        // The New canvas page is a touch screen's; the desktop has the
+        // New dialog.
+        self.new_canvas.category = None;
 
         // The menus are in Sue's top bar (`bar_ui`); the command bar is a
         // palette, in the dock's top row until people move it. While the

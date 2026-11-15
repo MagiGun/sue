@@ -69,44 +69,65 @@ see (you can color it yourself in Settings).
 
 ### The Hub
 
-Sue opens on the **Hub**, a page of boxes: the **Studios** (Sue Paint, Sue
-Writer). Each box says what it is for. Click one to go there: it comes in
-over the Hub, and a studio slides its panels in from the edges. New studios
-and tools appear in the Hub by themselves as they are added.
+Sue opens on the **Hub**, your workspace. Down its left side runs a rail
+of places: **Home**, **Files**, and any place a studio adds (Sue Paint's
+materials). On a phone, or whenever the window is narrow, the rail becomes a
+tab bar along the bottom.
 
-At the bottom right of every box is a **pin**. Pin the studio or tool you
-use most and Sue opens straight into it from then on, with no stop at the
-Hub. Only one can be pinned: pinning another moves the pin, and clicking the
-pinned one again takes it away. `Ctrl+Z` undoes a pin like any other change,
-and you can also choose it under Settings, General, Startup.
+**Home** greets you with **New** (a menu of everything every studio can
+make, by kind) and **Open** (your computer's open dialog), then:
 
-Under the boxes are three lists, side by side when the window is wide and
-one under the other when it is not:
+- **Studios**: a card for each studio (Sue Paint, Sue Writer) with its icon
+  and what it is for. Click one to go there: it comes in over the Hub, and a
+  studio slides its panels in from the edges. New studios and tools appear
+  here by themselves as they are added.
+- **Jump Back In**: your newest work as cards with pictures, one click from
+  open, and **All Files** to see everything. It shows only once there is
+  work, so a first run is not a page of empty boxes.
+- **Your Work**: buttons that open Files already sorted: **Recent**,
+  **Projects**, **Unsaved Work**, **Favorites**, each with how many it
+  holds, and **Folder**, which opens Sue's own folder in your file manager
+  where your system has one. Unsaved Work is outlined while there is work
+  to recover, so you notice it.
 
-- **Recent**: the files and projects you opened or saved lately, newest
-  first, each with when, the folder it is in, and what it is (a project, a
-  PNG). Settings, General, Startup says how many it shows.
-- **Saved Projects**: every Sue project (`.sue`) you saved or opened, by
-  name, with the studio it was saved from.
-- **Unsaved Work**: work Sue kept for you by itself. Sue keeps whatever you
-  have not saved a minute after you change it, and again when you quit, so
-  a crash or a quick Quit loses nothing. Each piece says when it was kept
-  and whether it was never saved or is newer than its project file.
-  **Recover** (or a click on it) brings it back in the studio it was made
-  in; save it to keep it. **Discard** asks once more (Really Discard) and
-  then throws it away.
+At the top right of every studio card is a round **pin** (it shows when you
+point at the card). Pin the studio or tool you use most and Sue opens
+straight into it from then on, with no stop at the Hub. Only one can be
+pinned: pinning another moves the pin, and clicking the pinned one again
+takes it away. `Ctrl+Z` undoes a pin like any other change, and you can
+also choose it under Settings, General, Startup.
 
-Click a recent file or a saved project to open it where it belongs: a
-project opens in the studio it was saved from. Opening a project while you
-have unsaved work does not lose that work: it goes to Unsaved Work. Files
-that are gone drop off the lists by themselves.
+**Files** shows the work of every studio as cards with pictures (or as a
+list): the files and projects you opened or saved lately, and the work Sue
+kept for you. Search it, narrow it by studio and by type, sort it by date or
+name, mark favorites and sort work under labels of your own. A card's
+`>` says what it is, where it is, and offers Show in Folder and Remove from
+List (the file itself stays). Sue keeps whatever you have not saved a
+minute after you change it, and again when you quit, so a crash or a quick
+Quit loses nothing; that kept work has **Recover** on its card (or click
+the card), which brings it back in the studio it was made in, and
+**Discard**, which asks once more and then throws it away. The `...` menu
+of Files rebuilds the thumbnails, forgets files that are gone, and clears
+the transfers that are done.
+
+Click a file or project to open it where it belongs: a project opens in the
+studio it was saved from. Opening a project while you have unsaved work
+does not lose that work: it goes to Unsaved Work. Files that are gone drop
+off the list by themselves.
+
+Over the Hub the top bar holds a **search field** (click it, or press
+`Tab`, to find any command, setting or studio) and, at its right,
+**Transfers** (what Sue opened, saved and copied in this run) and
+**Settings**. The arrow keys walk the Hub's places, buttons and cards, and
+`Enter` uses the one in focus.
 
 ### The Sue button and its menu
 
 At the very top left of the window, always in the same place, is the **Sue**
 button (Sue's silhouette). Right after it come the menus of whatever is open:
 Sue Paint's File, Edit, Story and the rest, or Sue Writer's, or a tool's. On
-the Hub the bar just says Hub.
+the Hub the bar holds the search field and the Transfers and Settings
+buttons.
 
 The Sue button opens the **Sue menu**, for Sue as a whole:
 
@@ -307,35 +328,31 @@ How close it is to Clip Studio Paint EX is tracked in
 [`docs/paint-parity.md`](docs/paint-parity.md), a row for every feature,
 with percentages and how to check and update it.
 
-**The start page.** On a computer, Sue Paint opens on its start page
-while no canvas is open (and File, **Start Page** brings it back). Down
-the left side:
+**With no canvas open** Sue Paint shows its workspace as it is: the menu
+bar, the palettes and, where the canvas goes, **New...** and **Open...**.
+Close the last canvas and nothing else moves; the Window menu still opens
+any palette. Your pictures and projects are in the Hub's **Files**, and
+File, **Back to the Hub** goes there (the command palette finds it too).
 
-- **Draw** (the round button) opens the picture or project you worked on
-  last, or, when there is none, the New dialog to make a canvas.
-- **Projects** shows your pictures, Sue Paint projects and unsaved work as
-  cards with pictures, newest first, or by name, as large cards or a
-  list. **All**, **Favorite** and **Work** sort them, and the buttons over
-  that list add, delete and rename labels of your own. Search by name,
-  choose a type (Picture, Project, Unsaved work), tick several cards (or
-  **Select All**) to **Move to** a label or **Remove from list** (the
-  files stay where they are). The heart makes a card a favorite and `>`
-  shows its details. Click a card to open it. These are the same lists
-  the Hub shows.
-- **Manage Materials** shows every material: Sue Paint's own tones and
-  patterns, your pictures and your brush tips, under All materials, by
-  kind, Favorite and Recently used, as large or small cards or a list.
-  With a canvas open, a click puts a material on it; `+` copies a PNG
-  picture in as a material.
+**Materials in the Hub.** Sue Paint adds a **Materials** place to the
+Hub's rail, beside Home and Files. It shows every material: Sue Paint's
+own tones and patterns, your pictures and your brush tips, under All
+materials, by kind, Favorite and Recently used, as large or small cards
+or a list. Search by name, choose Sue Paint's own or Added by you, tick
+several to make them favorites or delete the ones you added. **Add a
+material** copies a PNG picture in. With a canvas open, a click on a
+material goes back to Sue Paint and puts it on the canvas (Edit, Undo
+takes it off again); right-click and **Details** shows what it is, where
+its file is, and deletes one you added (click twice). The place's menu
+(the three dots) has **Find Materials Again**, **Rebuild Thumbnails**,
+**Show Materials Folder**, **Choose Location of Materials...** and **Use
+Sue Paint's Own Folder**. Nothing here goes online.
 
-At the top right: **Data Transfers** (two arrows) lists the files Sue
-opened, saved, exported and copied in this run, with **Clear
-Completed Transfers**; **Help** links to tips, this guide, questions, contact and
-feedback on the Sue site and GitHub; **Settings** turns dark mode on or off,
-shows or changes where your materials are kept, has a Maintenance Menu
-(draw thumbnails again, look for materials again, forget projects that are
-gone) and shows Sue Paint's version. Nothing on the start page goes
-online.
+**Help** in Sue Paint's menu bar links to the basic tips, this guide
+online, frequently asked questions, contact and feedback on the Sue
+site and GitHub. Sue Paint's colors, where its materials are kept and the pen
+pressure curve are rows of Settings, Sue Paint; Transfers is the
+Hub's two arrows in the top bar.
 
 **Saving is Clip Studio's format.** File, Save keeps a picture as a Clip
 Studio Paint `.clip` file, and saves to the same file from then on. Clip
@@ -351,24 +368,18 @@ pixel, text and vector layers come in as the pixels Clip Studio last drew
 for them, and correction, gradient and fill layers as empty layers in their
 places, since Sue cannot redo those effects yet.
 
-**On a phone or tablet** the start page is laid out for fingers. The top
-bar shows Sue Paint with Help and Settings; Projects starts with three big
-buttons, **Create new file**, **New from device storage** (a picture
-becomes a new canvas) and **Open file**, then your projects, sorted by
-label. Along the bottom: Projects, the round **Draw** button and Manage
-Materials. Help, Settings and the rest come up over the whole screen.
-
-Draw opens your last project, or the **New canvas** page when there is
-none: Illustration, Webtoon, Comic and Animation tabs, each with a row of
+**On a phone or tablet** Sue Paint with no canvas shows its canvas area
+with **New...** and **Open...**. New opens the **New canvas** page:
+Illustration, Webtoon, Comic and Animation tabs, each with a row of
 templates to swipe through (Create from image, Custom size, your screen's
 size; 690 x 20000, 1380 x 20000 and 800 x 10000 px webtoons; A4, A5 and A6
 color comics; an animation from a movie, 1:1 or 9:16). Tap one and draw.
-**Advanced Settings** opens every setting. Under the templates,
-**Continue drawing** lists your recent work, **Import** brings in a
-picture, and **See list of projects** goes back to Projects.
+**Advanced Settings** opens every setting and **Import** brings in a
+picture. Your work and the materials are in the Hub, whose tab bar along
+the bottom has Home, Files and Materials.
 
 **Simple Mode** is how Sue Paint draws on a phone or tablet at first: the
-canvas alone, with the back arrow (to the start page), Undo, Redo, your
+canvas alone, with the back arrow (to the Hub), Undo, Redo, your
 reference pictures and **...** along the top. Near the bottom are the brush
 size and opacity sliders with their numbers; the bar under them swaps
 brush and eraser, picks a pen, picks a brush and its settings, opens the
@@ -791,7 +802,7 @@ Once a canvas is open:
   screentones and patterns ready to use, your own pictures and your brush
   tips. Double-click one to put it on a new layer (tones and patterns in
   your drawing color). Edit, Register Material, Image keeps the current
-  layer there for every project. Settings (or the start page's Settings)
+  layer there for every project. Settings (or the Hub's Materials menu)
   can keep them in a folder of your choice.
 - **Camera folder** (Animation, New Animation Layer, Camera Folder): the
   layers in it are filmed by a camera that can move, zoom and turn over the

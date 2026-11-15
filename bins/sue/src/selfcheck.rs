@@ -908,6 +908,44 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         runtime.shell.hub_boxes().len() == studios + tools,
         "the Hub does not show a box for every studio and tool",
     )?;
+    // Its rail holds Home, Files and Sue Paint's Materials, and Files and
+    // Materials are one request away.
+    let has = |runtime: &Runtime, button: &sue_wm::HubButton| {
+        runtime
+            .shell
+            .hub_buttons()
+            .iter()
+            .any(|(drawn, _)| drawn == button)
+    };
+    for place in [sue_wm::HUB_HOME, sue_wm::HUB_FILES, sue_paint::hub::PLACE] {
+        ensure(
+            has(runtime, &sue_wm::HubButton::Place(place.to_owned())),
+            "the Hub's rail misses Home, Files or Materials",
+        )?;
+    }
+    runtime.request(
+        ShellRequest::HubPlace(sue_paint::hub::PLACE.to_owned()),
+        &mut tex,
+        clock,
+    );
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(
+        runtime.shell.hub_place() == Some(sue_paint::hub::PLACE),
+        "the Hub's Materials place did not open",
+    )?;
+    runtime.request(
+        ShellRequest::HubPlace(sue_wm::HUB_FILES.to_owned()),
+        &mut tex,
+        clock,
+    );
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
+    ensure(
+        runtime.shell.hub_place() == Some(sue_wm::HUB_FILES)
+            && has(runtime, &sue_wm::HubButton::Upkeep),
+        "the Hub's Files place did not open",
+    )?;
+    runtime.request(ShellRequest::Hub, &mut tex, clock);
+    run_frames(runtime, &ctx, &mut clock, Vec::new());
     let sue = runtime.shell.sue_button();
     ensure(
         sue.min == egui::Pos2::ZERO,
@@ -1048,7 +1086,17 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
     ensure(runtime.shell.hub_open(), "the Hub did not come back")?;
 
     // Then the shell sleeps, and egui asks for no frame either (its own hover
-    // fades finish first, a second or so of headless time).
+    // fades finish first, a second or so of headless time). The cards'
+    // pictures are made on background threads in real time, so they are
+    // waited for first (on a busy machine they take a while).
+    let begun = std::time::Instant::now();
+    while runtime.shell.hub_working() {
+        ensure(
+            begun.elapsed() < Duration::from_secs(60),
+            "the Hub's thumbnails never finished",
+        )?;
+        std::thread::sleep(Duration::from_millis(5));
+    }
     run_frames(runtime, &ctx, &mut clock, Vec::new());
     clock += Duration::from_secs(2);
     for _ in 0..2 {
@@ -1083,7 +1131,7 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         "the idle shell keeps drawing",
     )?;
     let mut detail = format!(
-        "{opened} ({}, {}); pinned with a click, one pin at a time, Ctrl+Z and Ctrl+Y; a box opened Sue Paint, gliding in {glide} frames ({}) vs {snap} (legacy snap); the Sue button's menu; a PNG opened in Sue Paint and saved as JPEG XL; palette, Settings, back to the Hub; then 0 FPS",
+        "{opened} ({}, {}); Home, Files and Materials in its rail; pinned with a click, one pin at a time, Ctrl+Z and Ctrl+Y; a box opened Sue Paint, gliding in {glide} frames ({}) vs {snap} (legacy snap); the Sue button's menu; a PNG opened in Sue Paint and saved as JPEG XL; palette, Settings, back to the Hub; then 0 FPS",
         count(studios, "studio", "studios"),
         count(windows, "window", "windows"),
         sue_wm::profile_label(profile)

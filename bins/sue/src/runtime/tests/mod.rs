@@ -25,6 +25,7 @@ mod paint_comic;
 mod paint_edit;
 mod paint_files;
 mod paint_filter;
+mod paint_hub;
 mod paint_layers;
 mod paint_menus;
 mod paint_palettes;

@@ -131,12 +131,17 @@ pub fn items(work: &WorkList, studios: &[Studio<'_>]) -> Vec<Item> {
         .recent()
         .filter_map(|file| {
             let (kind, studio) = if file.is_project() {
-                (Type::Project, ours(file.page.as_ref())?)
+                // A project saved where no studio was open (the Sue
+                // menu over the Hub) is everyone's.
+                match file.page.as_ref() {
+                    None => (Type::Project, None),
+                    Some(page) => (Type::Project, Some(ours(Some(page))?)),
+                }
             } else {
                 let studio = studios
                     .iter()
                     .find(|studio| studio.takes(&file.path, file.page.as_ref()))?;
-                (Type::Picture, studio)
+                (Type::Picture, Some(studio))
             };
             Some(Item {
                 key: ProjectKey::File(file.path.clone()),
@@ -145,7 +150,7 @@ pub fn items(work: &WorkList, studios: &[Studio<'_>]) -> Vec<Item> {
                 when: file.last(),
                 kind,
                 favorite: work.is_favorite(&file.path),
-                studio: Some(studio.id.clone()),
+                studio: studio.map(|studio| studio.id.clone()),
             })
         })
         .collect();

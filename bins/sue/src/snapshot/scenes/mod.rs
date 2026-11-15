@@ -47,7 +47,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 04 and 05. Settings in a computer's window.
     settings::desktop(tour)?;
 
-    // 08a to 08z. Sue Paint with no canvas open: its start page.
+    // 08a to 08z. Sue Paint with no canvas open, and its Materials place.
     paint_start::desktop(tour)?;
 
     // 08 to 11. Sue Paint with a sample illustration.
@@ -81,7 +81,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     writer_start::desktop(tour)?;
     writer_document::comments(tour)?;
 
-    // 19b to 19k. The Hub's lists, languages and the Layout menu.
+    // 19b to 19k. The Hub with work in it (and 31a to 31f: Home and
+    // Files in the other presets), languages and the Layout menu.
     hub::lists(tour)?;
     shell::languages(tour)?;
     shell::layouts(tour)?;
