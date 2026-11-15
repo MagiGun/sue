@@ -1,16 +1,24 @@
 //! A phone's and a tablet's bars: the top bar, the quick tools and the
 //! formatting bar above the keyboard.
+//!
+//! Every button is one of Sue's icon buttons with an icon from
+//! `sue_wm::icons` by its stable name, so an icon pack replaces them, and
+//! each names what it does and its keys when it is pressed and held (or
+//! when the pointer rests on it).
 
-use egui::{Color32, Painter, Rect, Ui, UiBuilder, pos2, vec2};
+use egui::{Rect, Ui, UiBuilder, pos2, vec2};
+use sue_wm::icons::Icon;
+use sue_wm::ui::{self, Space};
 use sue_wm::{AppletContext, Theme};
 
 use crate::studio::SueWriter;
 
 use super::THUMB;
-use super::widgets::{
-    book_icon, comment_icon, export_icon, find_icon, menu_icon, page_icon, picture_icon,
-    table_icon, thumb, undo_icon,
-};
+
+/// Room between two buttons of a bar, and around the bar's ends.
+const GAP: Space = Space::S1;
+/// Room around the formatting bar's row.
+const EDGE: Space = Space::S2;
 
 impl SueWriter {
     /// Sue Writer's row in Sue's top bar on a phone: the menus under one
@@ -22,20 +30,23 @@ impl SueWriter {
         cx: &AppletContext<'_>,
         theme: &Theme,
     ) -> Option<String> {
+        let edge = theme.space(EDGE);
+        let step = THUMB + theme.space(GAP);
         let slot = |index: usize, from_right: bool| {
             let x = if from_right {
-                bar.right() - 4.0 - (index as f32 + 1.0) * (THUMB + 2.0)
+                bar.right() - edge - (index as f32 + 1.0) * step
             } else {
-                bar.left() + 4.0 + index as f32 * (THUMB + 2.0)
+                bar.left() + edge + index as f32 * step
             };
             Rect::from_min_size(pos2(x, bar.center().y - THUMB / 2.0), vec2(THUMB, THUMB))
         };
         let mut run = None;
         let menu = slot(0, false);
         let open = self.menubar.is_open();
-        let toggle = thumb(ui, menu, open, true, theme, menu_icon)
-            .on_hover_text(tr!("menus"))
-            .clicked();
+        let menus = tr!("menus");
+        let toggle = BarButton::new(menu, Icon::Menu, &menus, "")
+            .on(open)
+            .show(ui, theme, cx);
         let items = crate::menus::phone_menu(&self.menus);
         let picked = {
             let mut menubar = std::mem::take(&mut self.menubar);
@@ -47,37 +58,23 @@ impl SueWriter {
         if picked.is_some() {
             run = picked;
         }
-        let history = (cx.history.can_undo(), cx.history.can_redo());
-        let undo = thumb(
-            ui,
-            slot(1, false),
-            false,
-            history.0,
-            theme,
-            |painter, rect, color| {
-                undo_icon(painter, rect, color, false);
-            },
-        );
-        if undo.on_hover_text(tr!("undo")).clicked() {
-            run = Some("edit.undo".to_owned());
-        }
-        let redo = thumb(
-            ui,
-            slot(2, false),
-            false,
-            history.1,
-            theme,
-            |painter, rect, color| {
-                undo_icon(painter, rect, color, true);
-            },
-        );
-        if redo.on_hover_text(tr!("redo")).clicked() {
-            run = Some("edit.redo".to_owned());
+        let (can_undo, can_redo) = (cx.history.can_undo(), cx.history.can_redo());
+        for (index, icon, name, command, enabled) in [
+            (1, Icon::Undo, tr!("undo"), "edit.undo", can_undo),
+            (2, Icon::Redo, tr!("redo"), "edit.redo", can_redo),
+        ] {
+            if BarButton::new(slot(index, false), icon, &name, command)
+                .enabled(enabled)
+                .show(ui, theme, cx)
+            {
+                run = Some(command.to_owned());
+            }
         }
         let finding = self.find.is_some();
-        if thumb(ui, slot(0, true), finding, true, theme, find_icon)
-            .on_hover_text(tr!("find"))
-            .clicked()
+        let find = tr!("find");
+        if BarButton::new(slot(0, true), Icon::Search, &find, "edit.find")
+            .on(finding)
+            .show(ui, theme, cx)
         {
             if finding {
                 self.find = None;
@@ -86,34 +83,32 @@ impl SueWriter {
             }
         }
         let mut right = 1;
-        if self.project.is_some()
-            && !self.simple(cx)
-            && thumb(ui, slot(1, true), self.phone_binder, true, theme, book_icon)
-                .on_hover_text(tr!("binder"))
-                .clicked()
-        {
-            run = Some("view.binder".to_owned());
-        }
         if self.project.is_some() && !self.simple(cx) {
+            let binder = tr!("binder");
+            if BarButton::new(slot(1, true), Icon::Binder, &binder, "view.binder")
+                .on(self.phone_binder)
+                .show(ui, theme, cx)
+            {
+                run = Some("view.binder".to_owned());
+            }
             right += 1;
         }
         // The room between: pages or flowing text, a picture, the
         // comments and a PDF, as many as fit.
         if self.project.is_some() {
-            let room = slot(2, false).right() + 4.0;
+            let room = slot(2, false).right() + edge;
             for (tool, hint) in self.quick_tools() {
                 let place = slot(right, true);
                 if place.left() < room {
                     break;
                 }
                 right += 1;
-                if thumb(ui, place, tool.on(self), true, theme, |p, r, c| {
-                    tool.draw(p, r, c)
-                })
-                .on_hover_text(hint)
-                .clicked()
+                let command = tool.command(self);
+                if BarButton::new(place, tool.icon(), &hint, command)
+                    .on(tool.on(self))
+                    .show(ui, theme, cx)
                 {
-                    run = Some(tool.command(self).to_owned());
+                    run = Some(command.to_owned());
                 }
             }
         }
@@ -151,8 +146,9 @@ impl SueWriter {
         if self.project.is_none() {
             return;
         }
-        let size = rect.height().min(THUMB) - 4.0;
-        let mut x = rect.right() - 4.0;
+        let gap = theme.space(GAP);
+        let size = rect.height().min(THUMB) - theme.space(EDGE);
+        let mut x = rect.right() - theme.space(EDGE);
         let mut run = None;
         let mut tools: Vec<(QuickTool, String)> = vec![(QuickTool::Find, tr!("find"))];
         tools.extend(self.quick_tools());
@@ -164,17 +160,15 @@ impl SueWriter {
             if place.left() < rect.left() {
                 break;
             }
-            x -= size + 2.0;
-            if thumb(ui, place, tool.on(self), true, theme, |p, r, c| {
-                tool.draw(p, r, c)
-            })
-            .on_hover_text(hint)
-            .clicked()
+            x -= size + gap;
+            let command = tool.command(self);
+            if BarButton::new(place, tool.icon(), &hint, command)
+                .on(tool.on(self))
+                .show(ui, theme, cx)
             {
-                run = Some(tool.command(self).to_owned());
+                run = Some(command.to_owned());
             }
         }
-        let _ = cx;
         if let Some(command) = run {
             self.pending_command = Some(command);
         }
@@ -190,13 +184,15 @@ impl SueWriter {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        ui.painter().rect_filled(rect, 0.0, theme.panel);
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::ZERO, theme.panel);
         ui.painter()
             .hline(rect.x_range(), rect.top(), theme.hairline());
         let mut run: Option<String> = None;
+        let edge = theme.space(EDGE);
         let mut row = ui.new_child(
             UiBuilder::new()
-                .max_rect(rect.shrink2(vec2(4.0, 4.0)))
+                .max_rect(rect.shrink(edge))
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         row.set_clip_rect(rect.intersect(ui.clip_rect()));
@@ -210,7 +206,7 @@ impl SueWriter {
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(&mut row, |ui| {
                 ui.horizontal_centered(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(2.0, 0.0);
+                    ui.spacing_mut().item_spacing.x = theme.space(GAP);
                     self.format_controls(ui, cx, theme, THUMB, &mut run);
                 });
             });
@@ -218,6 +214,78 @@ impl SueWriter {
             self.run_typing(&command, cx);
         }
     }
+}
+
+/// One button of a phone's or a tablet's bar.
+struct BarButton<'a> {
+    /// Where it is drawn.
+    rect: Rect,
+    icon: Icon,
+    /// What it does, shown in its tip and read out.
+    name: &'a str,
+    /// The command whose keys its tip shows.
+    command: &'a str,
+    /// Lit, for what is on now.
+    on: bool,
+    /// Whether it can be pressed now.
+    enabled: bool,
+}
+
+impl<'a> BarButton<'a> {
+    fn new(rect: Rect, icon: Icon, name: &'a str, command: &'a str) -> Self {
+        Self {
+            rect,
+            icon,
+            name,
+            command,
+            on: false,
+            enabled: true,
+        }
+    }
+
+    const fn on(mut self, on: bool) -> Self {
+        self.on = on;
+        self
+    }
+
+    const fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// Draws it; `true` when it was pressed.
+    fn show(self, ui: &Ui, theme: &Theme, cx: &AppletContext<'_>) -> bool {
+        // The keys are looked up only while the button may show its tip.
+        let keys = if ui.rect_contains_pointer(self.rect) {
+            keys_of(self.command, cx)
+        } else {
+            String::new()
+        };
+        ui::icon_button(("writer-bar", self.icon.name()), self.icon, self.name)
+            .selected(self.on)
+            .enabled(self.enabled)
+            .shortcut(&keys)
+            .show_at(ui, self.rect, theme)
+            .clicked()
+    }
+}
+
+/// The keys that run `command` as set now, such as `Ctrl+F`; empty for
+/// none.
+fn keys_of(command: &str, cx: &AppletContext<'_>) -> String {
+    let Some(shortcut) = crate::commands::registry()
+        .shortcuts()
+        .into_iter()
+        .find(|shortcut| shortcut.command == command)
+    else {
+        return String::new();
+    };
+    sue_wm::shortcuts::chords(cx.rice(), crate::studio::KEYS_SECTION, &shortcut)
+        .chords()
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// A tool in a phone's or a tablet's top bar.
@@ -253,14 +321,15 @@ impl QuickTool {
         }
     }
 
-    fn draw(self, painter: &Painter, rect: Rect, color: Color32) {
+    /// Its icon, by the stable name an icon pack replaces.
+    const fn icon(self) -> Icon {
         match self {
-            Self::Find => find_icon(painter, rect, color),
-            Self::Pages => page_icon(painter, rect, color, false),
-            Self::Picture => picture_icon(painter, rect, color),
-            Self::Comments => comment_icon(painter, rect, color),
-            Self::Pdf => export_icon(painter, rect, color),
-            Self::Table => table_icon(painter, rect, color),
+            Self::Find => Icon::Search,
+            Self::Pages => Icon::Page,
+            Self::Picture => Icon::Picture,
+            Self::Comments => Icon::Comment,
+            Self::Pdf => Icon::ExportPdf,
+            Self::Table => Icon::Table,
         }
     }
 }
