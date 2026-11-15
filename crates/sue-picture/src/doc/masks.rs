@@ -228,7 +228,12 @@ pub fn migrate_masks(arena: &mut Arena) -> usize {
 /// The `Gray8` raster whose values are `tile`'s alpha (an `Rgba8` mask).
 fn gray_of(tile: &RasterTile2D) -> Option<RasterTile2D> {
     let bytes = tile.bytes()?;
-    let values = bytes.chunks_exact(4).map(|pixel| pixel[3]).collect();
+    let values = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| pixel[3])
+        .collect();
     RasterTile2D::from_bytes(tile.width(), tile.height(), PixelFormat::Gray8, values).ok()
 }
 
@@ -312,7 +317,8 @@ mod tests {
     #[test]
     fn a_new_mask_is_gray() {
         let (mut arena, mut history, picture, layer) = white_picture();
-        let (edit, mask) = new_mask(&arena, layer, |x, _| [1.0, 0.5, 0.0, 1.0][x as usize]).unwrap();
+        let (edit, mask) =
+            new_mask(&arena, layer, |x, _| [1.0, 0.5, 0.0, 1.0][x as usize]).unwrap();
         history.apply(&mut arena, edit).unwrap();
         let tile = raster(&arena, mask).unwrap();
         assert_eq!(tile.format(), PixelFormat::Gray8);
