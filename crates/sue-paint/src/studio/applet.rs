@@ -7,7 +7,6 @@ use sue_core::txn::{Batch, SpawnEntity};
 use sue_core::{CHILD, ComponentKind, Entity, EntityId, PixelFormat, Relation, Value};
 use sue_model::class;
 use sue_model::picture;
-use sue_platform::write_atomic;
 use sue_rice::{RiceDeclaration, RiceParameter};
 use sue_wm::{
     AppletContext, AppletId, AppletManifest, AppletRole, Choice, Facts, FilePick, PaletteEntry,
@@ -540,37 +539,8 @@ impl SueApplet for SuePaint {
             "subview" => self.add_reference(path, cx),
             "model3d" => self.import_3d(cx, path),
             "anim-audio" => self.import_audio(cx, path),
-            "colorset-import" => match sue_platform::fs::read_to_string(path) {
-                Ok(text) => {
-                    let colors = crate::colorsets::import(&text);
-                    if colors.is_empty() {
-                        cx.fail(tr!("no-colors-in-that-file"));
-                    } else {
-                        let name = path.file_stem().map_or_else(
-                            || tr!("imported"),
-                            |stem| stem.to_string_lossy().into_owned(),
-                        );
-                        self.color_sets.add_set(&name, colors);
-                        self.save_color_sets(cx);
-                    }
-                }
-                Err(error) => cx.fail(tr!("cannot-read-it", error = error)),
-            },
-            "colorset-export" => {
-                let (name, colors) = self
-                    .color_sets
-                    .sets
-                    .get(self.color_sets.current)
-                    .cloned()
-                    .unwrap_or_default();
-                match write_atomic(
-                    path,
-                    crate::colorsets::export_gpl(&name, &colors).as_bytes(),
-                ) {
-                    Ok(()) => cx.saved(path, tr!("gimp-palette")),
-                    Err(error) => cx.fail(tr!("cannot-write-it", error = error)),
-                }
-            }
+            "colorset-import" => self.import_color_set(cx, path),
+            "colorset-export" => self.export_color_set(cx, path),
             _ => {}
         }
     }
