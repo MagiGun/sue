@@ -289,7 +289,7 @@ impl TimelapseDialog {
     fn controls(&mut self, ui: &mut Ui, seconds: f64, theme: &Theme) {
         ui.horizontal(|ui| {
             let (icon, name) = if self.playing {
-                (Icon::Stop, tr!("timelapse-pause"))
+                (Icon::Pause, tr!("timelapse-pause"))
             } else {
                 (Icon::Play, tr!("timelapse-play"))
             };
