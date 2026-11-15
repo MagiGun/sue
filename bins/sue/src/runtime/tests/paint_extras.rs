@@ -351,7 +351,11 @@ fn the_sub_view_flips_and_its_menu_hides_its_rows() {
     let filled: Vec<[u8; 4]> = sue_paint::doc::layers(arena, kept.picture())
         .iter()
         .filter_map(|layer| sue_paint::doc::raster(arena, layer.id))
-        .filter_map(|raster| raster.bytes().map(|bytes| [bytes[0], bytes[1], bytes[2], bytes[3]]))
+        .filter_map(|raster| {
+            raster
+                .bytes()
+                .map(|bytes| [bytes[0], bytes[1], bytes[2], bytes[3]])
+        })
         .collect();
     assert!(
         filled.contains(&[0, 0, 255, 255]),
