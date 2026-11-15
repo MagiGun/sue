@@ -14,12 +14,17 @@
 //! the lines it is kept as) is Sue's shared dock, [`sue_wm::dock`]; this
 //! module says what Sue Paint's palettes are and draws them.
 
-use egui::{Id, Order, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
-use sue_wm::dock::{COLUMN_BAR, Column, DockPanel, Group, Holder, LaidGroup, LayoutStyle, Target};
-use sue_wm::{AppletContext, Theme};
+use egui::{Id, Order, Pos2, Rect, Sense, Ui, Vec2, pos2, vec2};
+use sue_wm::dock::{
+    COLUMN_BAR, Column, DockPanel, Group, Holder, LaidGroup, LayoutStyle, STRIP, TAB_STRIP,
+    TabFace, Target,
+};
+use sue_wm::icons::Icon as WmIcon;
+use sue_wm::ui::{Density, MenuEvent, MenuRequest, MenuState, Space};
+use sue_wm::{AppletContext, ItemState, MenuItem, Theme};
 
 use crate::icons::Icon;
-use crate::panels::icon_button;
+
 use crate::studio::{Panels, SuePaint};
 
 use sue_wm::dock::Row;
@@ -196,6 +201,35 @@ const PALETTES: [Palette; 25] = [
     Palette::SubToolDetail,
 ];
 
+/// The Window menu's commands that show each palette.
+const WINDOW_COMMANDS: [(&str, Palette); 25] = [
+    ("window.command_bar", Palette::CommandBar),
+    ("window.quick_access", Palette::QuickAccess),
+    ("window.tool", Palette::Tools),
+    ("window.sub_tool", Palette::SubTool),
+    ("window.tool_property", Palette::ToolProperty),
+    ("window.brush_size", Palette::BrushSize),
+    ("window.color_wheel", Palette::Color),
+    ("window.color_set", Palette::ColorSet),
+    ("window.navigator", Palette::Navigator),
+    ("window.layer", Palette::Layer),
+    ("window.timeline", Palette::Timeline),
+    ("window.brush_grid", Palette::BrushGrid),
+    ("window.color_slider", Palette::ColorSlider),
+    ("window.intermediate", Palette::Intermediate),
+    ("window.approximate", Palette::Approximate),
+    ("window.color_history", Palette::ColorHistory),
+    ("window.sub_tool_detail", Palette::SubToolDetail),
+    ("window.material", Palette::Material),
+    ("window.sub_view", Palette::SubView),
+    ("window.layer_property", Palette::LayerProperty),
+    ("window.history", Palette::History),
+    ("window.cels", Palette::Cels),
+    ("window.auto_actions", Palette::AutoAction),
+    ("window.item_bank", Palette::ItemBank),
+    ("window.info", Palette::Info),
+];
+
 impl Palette {
     /// What its window and icon are called.
     pub fn title(self) -> String {
@@ -293,34 +327,27 @@ impl Palette {
     /// The palette a Window menu command shows, or hides when it shows:
     /// every palette is one of its own, opened as itself.
     pub fn of_window_command(command: &str) -> Option<Self> {
-        Some(match command {
-            "window.command_bar" => Self::CommandBar,
-            "window.quick_access" => Self::QuickAccess,
-            "window.tool" => Self::Tools,
-            "window.sub_tool" => Self::SubTool,
-            "window.tool_property" => Self::ToolProperty,
-            "window.brush_size" => Self::BrushSize,
-            "window.color_wheel" => Self::Color,
-            "window.color_set" => Self::ColorSet,
-            "window.navigator" => Self::Navigator,
-            "window.layer" => Self::Layer,
-            "window.timeline" => Self::Timeline,
-            "window.brush_grid" => Self::BrushGrid,
-            "window.color_slider" => Self::ColorSlider,
-            "window.intermediate" => Self::Intermediate,
-            "window.approximate" => Self::Approximate,
-            "window.color_history" => Self::ColorHistory,
-            "window.sub_tool_detail" => Self::SubToolDetail,
-            "window.material" => Self::Material,
-            "window.sub_view" => Self::SubView,
-            "window.layer_property" => Self::LayerProperty,
-            "window.history" => Self::History,
-            "window.cels" => Self::Cels,
-            "window.auto_actions" => Self::AutoAction,
-            "window.item_bank" => Self::ItemBank,
-            "window.info" => Self::Info,
-            _ => return None,
-        })
+        WINDOW_COMMANDS
+            .iter()
+            .find(|(found, _)| *found == command)
+            .map(|(_, palette)| *palette)
+    }
+
+    /// Its icon from Sue's icon set (so an icon pack replaces it): the
+    /// icon of the Window menu command that shows it.
+    pub fn symbol(self) -> WmIcon {
+        self.window_command()
+            .and_then(|command| crate::commands::registry().find(command))
+            .and_then(|(command, _)| WmIcon::from_name(command.icon))
+            .unwrap_or(WmIcon::Info)
+    }
+
+    /// The Window menu command that shows it.
+    pub fn window_command(self) -> Option<&'static str> {
+        WINDOW_COMMANDS
+            .iter()
+            .find(|(_, palette)| *palette == self)
+            .map(|(command, _)| *command)
     }
 
     /// The palette's own commands, at the top of its menu (the menu at the
@@ -461,6 +488,22 @@ impl DockPanel for Palette {
         }
     }
 
+    /// Every palette but the command bar and the tool palette, which
+    /// have a grip, has the dock's header: its one title.
+    fn headed(self) -> bool {
+        !matches!(self, Self::CommandBar | Self::Tools)
+    }
+
+    /// The menu button's room, at the header's left; a palette as narrow
+    /// as Tool Sliders has its menu button under it instead.
+    fn header_inset(self) -> f32 {
+        if self.fixed_width().is_some() {
+            0.0
+        } else {
+            TAB_STRIP
+        }
+    }
+
     fn anchored(self) -> bool {
         self == Self::Tools
     }
@@ -471,102 +514,98 @@ impl DockPanel for Palette {
     }
 }
 
-/// One or two small arrows in `rect` pointing right (`point` 1) or left
-/// (-1), as Clip Studio Paint's palette arrows. `true` when clicked.
-fn arrows(
+/// A small button of the dock's chrome at `rect` (the bars that hide,
+/// fold and open a side or a row): the shared icon button, with its
+/// focus ring and its name on hover. `name` says which one it is, such
+/// as `close-side-left`: where it was drawn is kept with the frame's
+/// pass under [`chrome_id`], for what points at it (a test, a tour).
+/// `true` when clicked.
+fn chrome_button(
     ui: &mut Ui,
     rect: Rect,
-    count: usize,
-    point: f32,
-    id: impl std::hash::Hash + std::fmt::Debug,
+    icon: WmIcon,
+    name: &str,
     tip: &str,
     theme: &Theme,
 ) -> bool {
-    let response = ui
-        .interact(rect, Id::unique(id), Sense::click())
-        .on_hover_text(tip);
-    if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, theme.hover);
-    }
-    let color = if response.hovered() {
-        theme.text
-    } else {
-        theme.muted
-    };
-    let c = rect.center();
-    let offsets: &[f32] = if count == 2 { &[-2.0, 2.0] } else { &[0.0] };
-    for offset in offsets {
-        let x = c.x + offset;
-        ui.painter().add(egui::Shape::line(
-            vec![
-                pos2(x - 1.5 * point, c.y - 3.0),
-                pos2(x + 1.5 * point, c.y),
-                pos2(x - 1.5 * point, c.y + 3.0),
-            ],
-            Stroke::new(1.0, color),
-        ));
-    }
-    response.clicked()
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.data_mut(|data| data.insert_temp(chrome_id(name), (pass, rect)));
+    Density::Compact.scope(ui, |ui| {
+        sue_wm::ui::icon_button(("sue-paint-chrome", name), icon, tip)
+            .quiet()
+            .show_at(ui, rect, theme)
+            .clicked()
+    })
 }
 
-/// One or two small arrows in `rect` pointing down (`down`) or up, as
-/// Clip Studio Paint's arrows of a row. `true` when clicked.
-fn vertical_arrows(
-    ui: &mut Ui,
-    rect: Rect,
-    count: usize,
-    down: bool,
-    id: impl std::hash::Hash + std::fmt::Debug,
-    tip: &str,
-    theme: &Theme,
-) -> bool {
-    let response = ui
-        .interact(rect, Id::unique(id), Sense::click())
-        .on_hover_text(tip);
-    if response.hovered() {
-        ui.painter().rect_filled(rect, 0.0, theme.hover);
+/// Where [`chrome_button`] keeps where it drew the button `name`.
+fn chrome_id(name: &str) -> Id {
+    Id::unique(("sue-paint-chrome-place", name))
+}
+
+/// A side's word in the names of [`chrome_button`]s.
+fn side_word(side: Side) -> &'static str {
+    match side {
+        Side::Left => "left",
+        Side::Right => "right",
     }
-    let color = if response.hovered() {
-        theme.text
-    } else {
-        theme.muted
-    };
-    let point = if down { 1.0 } else { -1.0 };
-    let c = rect.center();
-    let offsets: &[f32] = if count == 2 { &[-2.0, 2.0] } else { &[0.0] };
-    for offset in offsets {
-        let y = c.y + offset;
-        ui.painter().add(egui::Shape::line(
-            vec![
-                pos2(c.x - 3.0, y - 1.5 * point),
-                pos2(c.x, y + 1.5 * point),
-                pos2(c.x + 3.0, y - 1.5 * point),
-            ],
-            Stroke::new(1.0, color),
-        ));
-    }
-    response.clicked()
+}
+
+/// What a floating palette's header buttons asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FloatAction {
+    /// Nothing.
+    None,
+    /// Roll it up to its header, or down again.
+    Roll,
+    /// Dock it again.
+    Dock,
+    /// Hide it.
+    Close,
 }
 
 /// Where the strip's right-click menu is open (the clicked icon's corner).
 const STRIP_MENU: &str = "sue-paint-strip-menu";
 
-/// Where people grab a palette drawn in `body` to drag it: its title bar,
-/// clear of its menu button at the left. The command bar, and the tool palette along a
-/// row, have a grip at their left end instead; a tool palette in a column
-/// is grabbed by the bar above it (`above`, its column's), or its top.
-fn title_bar(palette: Palette, body: Rect, above: Option<Rect>) -> Rect {
-    if palette.sideways(body) {
-        Rect::from_min_size(body.min, vec2(GRIP, body.height()))
-    } else if palette.fixed_width().is_some() {
-        above.unwrap_or_else(|| Rect::from_min_size(body.min, vec2(body.width(), 8.0)))
-    } else {
-        Rect::from_min_size(
-            body.min + vec2(26.0, 0.0),
-            vec2((body.width() - 26.0).max(0.0), 28.0),
+/// Where people grab a palette laid in `rect` to drag it: its header,
+/// clear of its menu button at the left. The command bar, and the tool
+/// palette along a row, have a grip at their left end instead; a tool
+/// palette in a column is grabbed by the bar above it (`above`, its
+/// column's), or its top.
+fn title_bar(palette: Palette, rect: Rect, above: Option<Rect>) -> Rect {
+    if palette.sideways(rect) {
+        Rect::from_min_size(rect.min, vec2(GRIP, rect.height()))
+    } else if palette.headed() {
+        Rect::from_min_max(
+            pos2(rect.left() + palette.header_inset(), rect.top()),
+            pos2(rect.right(), rect.top() + TAB_STRIP),
         )
+    } else {
+        above.unwrap_or_else(|| Rect::from_min_size(rect.min, vec2(rect.width(), COLUMN_BAR)))
     }
 }
+
+/// Where a palette laid in `rect` has its menu button: at the left end of
+/// its header, at the right end of a palette along a row, under a palette
+/// as narrow as the tool palette.
+fn menu_button(palette: Palette, rect: Rect) -> Rect {
+    let side = Density::Compact.icon_button();
+    let at = if palette.sideways(rect) {
+        pos2(
+            rect.right() - side,
+            rect.top() + (rect.height().min(STRIP) - side) / 2.0,
+        )
+    } else if palette.fixed_width().is_some() {
+        pos2(rect.center().x - side / 2.0, rect.bottom() - side)
+    } else {
+        rect.min + Vec2::splat((TAB_STRIP - side) / 2.0)
+    };
+    Rect::from_min_size(at, Vec2::splat(side))
+}
+
+/// What a palette's menu runs to move it: this and a word (`left`,
+/// `float`, `close`), apart from the palette's own commands.
+const PLACE: &str = "sue-paint-palette-place:";
 
 /// The width of the grip at the left of a palette laid along a row.
 const GRIP: f32 = 14.0;
@@ -586,6 +625,42 @@ fn grip_dots(ui: &Ui, palette: Palette, body: Rect, theme: &Theme) {
     }
 }
 
+/// Where a group's chrome (its grip and menu button) is laid: its whole
+/// rect when it has a header, the palette's own rect without one.
+fn chrome_rect(group: &LaidGroup<Palette>) -> Rect {
+    if group.tab_rects.is_empty() {
+        group.body
+    } else {
+        group.rect
+    }
+}
+
+/// A lone palette in `rect` as a group of its own, for a window or a
+/// pop-up: the header [`DockLayout::tabs_ui`](sue_wm::dock::DockLayout)
+/// draws is `header` wide (room for buttons at its right).
+fn lone_group(palette: Palette, rect: Rect, header: f32) -> LaidGroup<Palette> {
+    let headed = palette.headed();
+    let strip = if headed { TAB_STRIP } else { 0.0 };
+    let tab = Rect::from_min_size(
+        pos2(rect.left() + palette.header_inset(), rect.top()),
+        vec2((header - palette.header_inset()).max(0.0), strip),
+    );
+    LaidGroup {
+        holder: Holder::Top,
+        // Apart from every docked group, and from each other.
+        index: usize::MAX - palette as usize,
+        rect: Rect::from_min_size(rect.min, vec2(header, rect.height())),
+        tabs: vec![palette],
+        active: palette,
+        body: Rect::from_min_max(pos2(rect.left(), rect.top() + strip), rect.max),
+        tab_rects: if headed {
+            vec![(palette, tab)]
+        } else {
+            Vec::new()
+        },
+    }
+}
+
 /// The column bar right above `group`, when it is the first in a column.
 fn bar_above(laid: &Laid, group: &LaidGroup<Palette>) -> Option<Rect> {
     let Holder::Column(side, column) = group.holder else {
@@ -602,19 +677,58 @@ fn bar_above(laid: &Laid, group: &LaidGroup<Palette>) -> Option<Rect> {
 }
 
 impl SuePaint {
-    /// Draws one palette into `rect`.
+    /// A group of palettes laid in the dock or in a window: the grip it is
+    /// dragged by, the palette showing, and its header (its tabs). Returns
+    /// where the header laid each tab. `above` is the bar of its column
+    /// right over it, which a tool palette is dragged by.
+    fn group_ui(
+        &mut self,
+        ui: &mut Ui,
+        group: &LaidGroup<Palette>,
+        above: Option<Rect>,
+        salt: &str,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) -> Vec<(Palette, Rect)> {
+        // The grip first, so what is drawn over it (tabs, buttons) stays
+        // on top and keeps its clicks.
+        if self.ready {
+            let grab = title_bar(group.active, chrome_rect(group), above);
+            self.dock.grip(ui, grab, group.active, salt);
+        }
+        let headed = !group.tab_rects.is_empty();
+        self.draw_palette(ui, group.active, group.body, headed, cx, theme);
+        grip_dots(ui, group.active, group.body, theme);
+        let faces: Vec<(Palette, TabFace)> = group
+            .tabs
+            .iter()
+            .map(|palette| (*palette, self.tab_face(*palette)))
+            .collect();
+        let face = |palette: Palette| {
+            faces
+                .iter()
+                .find(|(found, _)| *found == palette)
+                .map(|(_, face)| face.clone())
+                .unwrap_or_default()
+        };
+        self.dock.tabs_ui(ui, group, &face, theme)
+    }
+
+    /// Draws one palette into `rect`. `headed`: the dock drew its title
+    /// already (its header, or a window's title bar), so the palette
+    /// draws none of its own.
     pub(crate) fn draw_palette(
         &mut self,
         ui: &mut Ui,
         palette: Palette,
         rect: Rect,
+        headed: bool,
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
         ui.painter().rect_filled(rect, 0.0, theme.panel);
-        // Its header leaves room at the left for its menu button.
-        let inset = Id::unique(crate::panels::MENU_INSET);
-        ui.ctx().data_mut(|data| data.insert_temp(inset, 26.0_f32));
+        let flag = Id::unique(crate::panels::HEADED);
+        ui.ctx().data_mut(|data| data.insert_temp(flag, headed));
         match palette {
             Palette::CommandBar => self.command_bar(ui, rect, cx, theme),
             Palette::QuickAccess => self.quick_access_panel(ui, rect, cx, theme),
@@ -628,13 +742,13 @@ impl SuePaint {
             Palette::Timeline => self.timeline_panel(ui, rect, cx, theme),
             other => self.single_palette(ui, other, rect, cx, theme),
         }
-        ui.ctx().data_mut(|data| data.remove::<f32>(inset));
+        ui.ctx().data_mut(|data| data.remove::<bool>(flag));
     }
 
     /// A palette's menu button, at the top left of its header as in Clip
-    /// Studio Paint, and its menu: the palette's own commands
-    /// ([`Palette::menu_commands`]), where it docks and floats, and
-    /// "Hide X Palette" last.
+    /// Studio Paint, and its menu (the shared menu, [`MenuState`]): the
+    /// palette's own commands ([`Palette::menu_commands`]) with their
+    /// keys, where it docks and floats, and "Hide X Palette" last.
     fn palette_menu(
         &mut self,
         ui: &mut Ui,
@@ -643,36 +757,96 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let button = if palette.sideways(rect) {
-            Rect::from_min_size(
-                pos2(
-                    rect.right() - 22.0,
-                    rect.top() + (rect.height().min(38.0) - 18.0) / 2.0,
-                ),
-                vec2(18.0, 18.0),
-            )
-        } else if palette.fixed_width().is_some() {
-            Rect::from_min_size(
-                pos2(rect.center().x - 9.0, rect.bottom() - 22.0),
-                vec2(18.0, 18.0),
-            )
-        } else {
-            Rect::from_min_size(pos2(rect.left() + 4.0, rect.top() + 5.0), vec2(18.0, 18.0))
-        };
+        let button = menu_button(palette, rect);
         let open = self.dock.menu == Some(palette);
-        if icon_button(
-            ui,
-            button,
-            Icon::Menu,
-            true,
-            open,
-            &tr!("palette-menu-of", title = palette.title()),
-            theme,
-        ) {
-            self.dock.menu = if open { None } else { Some(palette) };
+        let name = tr!("palette-menu-of", title = palette.title());
+        let clicked = Density::Compact.scope(ui, |ui| {
+            sue_wm::ui::icon_button(
+                ("sue-paint-palette-menu", palette.key()),
+                WmIcon::Menu,
+                &name,
+            )
+            .selected(open)
+            .quiet()
+            .show_at(ui, button, theme)
+            .clicked()
+        });
+        let id = Id::unique(("sue-paint-dock-menu", palette.key()));
+        let mut state: MenuState = ui.data(|data| data.get_temp(id)).unwrap_or_default();
+        if clicked {
+            if open {
+                self.dock.menu = None;
+                state.close();
+            } else {
+                self.dock.menu = Some(palette);
+                state.open();
+            }
+        }
+        // Opened another way too (a script going to `dock/menu/<key>`).
+        if self.dock.menu == Some(palette) && !state.is_open() {
+            state.open();
         }
         if self.dock.menu != Some(palette) {
+            if state.is_open() {
+                state.close();
+            }
+            ui.data_mut(|data| data.insert_temp(id, state));
             return;
+        }
+        let items = self.palette_menu_items(palette, ui.ctx().embed_viewports());
+        let facts = sue_wm::Facts::of(cx);
+        let event = {
+            let item_state = |command: &str| {
+                if command.starts_with(PLACE) {
+                    ItemState::on()
+                } else {
+                    self.state(command, &facts)
+                }
+            };
+            state.show(
+                ui.ctx(),
+                &MenuRequest {
+                    id,
+                    anchor: pos2(button.left(), button.bottom() + theme.space(Space::S1)),
+                    owner: button,
+                    items: &items,
+                    state: &item_state,
+                    density: Density::Compact,
+                },
+                theme,
+            )
+        };
+        ui.data_mut(|data| data.insert_temp(id, state));
+        match event {
+            MenuEvent::Picked(command) => {
+                self.dock.menu = None;
+                match command.strip_prefix(PLACE) {
+                    Some(word) => self.place_palette(palette, word, rect),
+                    None => self.run(&command, cx),
+                }
+            }
+            MenuEvent::Closed => self.dock.menu = None,
+            _ => {}
+        }
+    }
+
+    /// What a palette's menu holds: its own commands with their keys,
+    /// then where it can go (where it is now left out), then "Hide X
+    /// Palette". Where it goes runs as [`PLACE`] and a word.
+    fn palette_menu_items(&self, palette: Palette, embedded: bool) -> Vec<MenuItem> {
+        let registry = crate::commands::registry();
+        let mut items: Vec<MenuItem> = palette
+            .menu_commands()
+            .iter()
+            .map(|command| {
+                let label = registry
+                    .label(command)
+                    .unwrap_or_else(|| (*command).to_owned());
+                MenuItem::action(label, *command).key(self.keys_of(command))
+            })
+            .collect();
+        if !items.is_empty() {
+            items.push(MenuItem::Separator);
         }
         let place = self.dock.find(palette).map(|(holder, _)| holder);
         let side = self.dock.side_of(palette);
@@ -682,118 +856,105 @@ impl SuePaint {
             .iter()
             .any(|(found, _)| *found == palette);
         // A window of its own needs Sue's own windows (not on a phone).
-        let can_pop_out = !ui.ctx().embed_viewports();
         let popped_out = self.dock.windows.iter().any(|(found, _)| *found == palette);
-        let registry = crate::commands::registry();
-        let facts = sue_wm::Facts::of(cx);
-        let own: Vec<(String, &'static str, sue_wm::ItemState)> = palette
-            .menu_commands()
-            .iter()
-            .map(|command| {
-                let label = registry
-                    .label(command)
-                    .unwrap_or_else(|| (*command).to_owned());
-                (label, *command, self.state(command, &facts))
-            })
-            .collect();
-        let mut chosen: Option<&str> = None;
-        let mut run: Option<&'static str> = None;
-        let at = if button.left() < rect.center().x {
-            pos2(button.left(), button.bottom() + 2.0)
-        } else {
-            pos2(button.right() - 190.0, button.bottom() + 2.0)
-        };
-        let shown = egui::Area::new(Id::unique(("sue-paint-dock-menu", palette.key())))
-            .order(Order::Tooltip)
-            .fade_in(false)
-            .fixed_pos(at.max(pos2(4.0, 4.0)))
-            .show(ui.ctx(), |ui| {
-                sue_wm::widgets::window_frame(theme)
-                    .inner_margin(egui::Margin::same(6))
-                    .show(ui, |ui| {
-                        ui.set_min_width(178.0);
-                        for (label, command, state) in &own {
-                            let entry = egui::Button::new(label.as_str())
-                                .selected(state.checked == Some(true))
-                                .frame(false);
-                            if ui.add_enabled(state.enabled, entry).clicked() {
-                                run = Some(command);
-                            }
-                        }
-                        if !own.is_empty() {
-                            ui.separator();
-                        }
-                        ui.label(
-                            egui::RichText::new(tr!("palette-docking"))
-                                .size(theme.small_size)
-                                .color(theme.muted),
-                        );
-                        let mut item = |ui: &mut Ui, label: &str, key: &'static str| {
-                            if ui.add(egui::Button::new(label).frame(false)).clicked() {
-                                chosen = Some(key);
-                            }
-                        };
-                        if side != Some(Side::Left) {
-                            item(ui, &tr!("dock-on-the-left"), "left");
-                        }
-                        item(ui, &tr!("new-column-on-the-left"), "new_left");
-                        if side != Some(Side::Right) {
-                            item(ui, &tr!("dock-on-the-right"), "right");
-                        }
-                        item(ui, &tr!("new-column-on-the-right"), "new_right");
-                        if place != Some(Holder::Top) {
-                            item(ui, &tr!("dock-at-the-top"), "top");
-                        }
-                        if place != Some(Holder::Bottom) {
-                            item(ui, &tr!("dock-at-the-bottom"), "bottom");
-                        }
-                        if !floating {
-                            item(ui, &tr!("float-in-a-window"), "float");
-                        }
-                        if can_pop_out && !popped_out {
-                            item(ui, &tr!("pop-out-into-a-window"), "window");
-                        }
-                        if !self.dock.iconized.contains(&palette) {
-                            item(ui, &tr!("collapse-to-an-icon"), "icon");
-                        }
-                        ui.separator();
-                        item(ui, &tr!("hide-palette", title = palette.title()), "close");
-                    });
-            });
-        let inside = shown.response.rect;
-        let outside = ui.input(|input| {
-            input.pointer.any_pressed()
-                && input
-                    .pointer
-                    .interact_pos()
-                    .is_some_and(|point| !inside.contains(point) && !button.contains(point))
-        });
-        let column = |side| Target::Column { side, beside: None };
-        match chosen {
-            Some("left") => self.dock.dock(palette, Side::Left),
-            Some("right") => self.dock.dock(palette, Side::Right),
-            Some("new_left") => self.dock.put(palette, column(Side::Left)),
-            Some("new_right") => self.dock.put(palette, column(Side::Right)),
-            Some("top") => self.dock.put(palette, Target::Top),
-            Some("bottom") => self.dock.put(palette, Target::Bottom),
-            Some("float") => {
-                let at = rect.min + vec2(-40.0, 30.0);
-                self.dock.float(palette, at.max(pos2(8.0, 40.0)));
+        let iconized = self.dock.iconized.contains(&palette);
+        for (shown, label, word) in [
+            (side != Some(Side::Left), tr!("dock-on-the-left"), "left"),
+            (true, tr!("new-column-on-the-left"), "new_left"),
+            (side != Some(Side::Right), tr!("dock-on-the-right"), "right"),
+            (true, tr!("new-column-on-the-right"), "new_right"),
+            (place != Some(Holder::Top), tr!("dock-at-the-top"), "top"),
+            (
+                place != Some(Holder::Bottom),
+                tr!("dock-at-the-bottom"),
+                "bottom",
+            ),
+            (!floating, tr!("float-in-a-window"), "float"),
+            (
+                !embedded && !popped_out,
+                tr!("pop-out-into-a-window"),
+                "window",
+            ),
+            (!iconized, tr!("collapse-to-an-icon"), "icon"),
+        ] {
+            if shown {
+                items.push(MenuItem::action(label, format!("{PLACE}{word}")));
             }
-            Some("window") => {
-                let at = (rect.min + vec2(32.0, 32.0)).max(pos2(24.0, 48.0));
+        }
+        items.push(MenuItem::Separator);
+        // With the keys of its Window menu item, which hide it too.
+        let keys = palette
+            .window_command()
+            .map(|command| self.keys_of(command))
+            .unwrap_or_default();
+        items.push(
+            MenuItem::action(
+                tr!("hide-palette", title = palette.title()),
+                format!("{PLACE}close"),
+            )
+            .key(keys),
+        );
+        items
+    }
+
+    /// Moves `palette`, drawn in `rect`, where its menu's `word` says.
+    fn place_palette(&mut self, palette: Palette, word: &str, rect: Rect) {
+        let column = |side| Target::Column { side, beside: None };
+        // Where a palette floats: down and in from where it was, clear of
+        // the window's edge.
+        let step = Density::Compact.icon_button();
+        match word {
+            "left" => self.dock.dock(palette, Side::Left),
+            "right" => self.dock.dock(palette, Side::Right),
+            "new_left" => self.dock.put(palette, column(Side::Left)),
+            "new_right" => self.dock.put(palette, column(Side::Right)),
+            "top" => self.dock.put(palette, Target::Top),
+            "bottom" => self.dock.put(palette, Target::Bottom),
+            "float" => {
+                let at = rect.min + vec2(-step, step);
+                self.dock.float(palette, at.max(pos2(step, step)));
+            }
+            "window" => {
+                let at = (rect.min + Vec2::splat(step)).max(pos2(step, step));
                 self.dock
                     .pop_out(palette, Rect::from_min_size(at, palette.float_size()));
             }
-            Some("icon") => self.dock.iconize(palette),
-            Some("close") => self.close_palette(palette),
+            "icon" => self.dock.iconize(palette),
+            "close" => self.close_palette(palette),
             _ => {}
         }
-        if chosen.is_some() || run.is_some() || outside {
-            self.dock.menu = None;
+    }
+
+    /// The keys a command runs by, as the menus show them (empty for
+    /// none).
+    pub(crate) fn keys_of(&self, command: &str) -> String {
+        fn find(items: &[MenuItem], command: &str) -> Option<String> {
+            items.iter().find_map(|item| match item {
+                MenuItem::Action {
+                    command: found,
+                    shortcut,
+                    ..
+                } if found == command => Some(shortcut.clone()),
+                MenuItem::Sub { items, .. } => find(items, command),
+                _ => None,
+            })
         }
-        if let Some(command) = run {
-            self.run(command, cx);
+        self.menus
+            .iter()
+            .find_map(|menu| find(&menu.items, command))
+            .unwrap_or_default()
+    }
+
+    /// How `palette`'s tab looks in a dock header: its name, its icon and
+    /// the keys of the Window menu item that shows it.
+    pub(crate) fn tab_face(&self, palette: Palette) -> TabFace {
+        TabFace {
+            name: palette.title(),
+            icon: Some(palette.symbol()),
+            keys: palette
+                .window_command()
+                .map(|command| self.keys_of(command))
+                .unwrap_or_default(),
         }
     }
 
@@ -1052,21 +1213,16 @@ impl SuePaint {
         let shown = move |palette: Palette| {
             palette.shown(&panels) && !(palette == Palette::CommandBar && menus_hidden)
         };
-        let laid = self.dock.layout(body, &shown, self.hide);
+        let mut laid = self.dock.layout(body, &shown, self.hide);
         for (_, _, rect) in &laid.columns {
             ui.painter().rect_filled(*rect, 0.0, theme.panel);
             let bar = Rect::from_min_size(rect.min, vec2(rect.width(), COLUMN_BAR));
             ui.painter().rect_filled(bar, 0.0, theme.void);
         }
+        let mut placed = Vec::with_capacity(laid.groups.len());
         for group in &laid.groups {
-            // The grip first, so what the palette draws over it (tabs,
-            // buttons) stays on top and keeps its clicks.
-            if self.ready {
-                let grab = title_bar(group.active, group.body, bar_above(&laid, group));
-                self.dock.grip(ui, grab, group.active, "docked");
-            }
-            self.draw_palette(ui, group.active, group.body, cx, theme);
-            grip_dots(ui, group.active, group.body, theme);
+            let above = bar_above(&laid, group);
+            placed.push(self.group_ui(ui, group, above, "docked", cx, theme));
             if group.holder.is_row() {
                 ui.painter()
                     .vline(group.rect.right(), group.rect.y_range(), theme.hairline());
@@ -1075,8 +1231,12 @@ impl SuePaint {
                 ui.painter()
                     .hline(group.rect.x_range(), group.rect.bottom(), theme.hairline());
             }
-            self.dock
-                .tabs_ui(ui, group, &|palette: Palette| palette.title(), theme);
+        }
+        // Drops between tabs go where the tabs were drawn.
+        for (group, places) in laid.groups.iter_mut().zip(placed) {
+            if !places.is_empty() {
+                group.tab_rects = places;
+            }
         }
         for (side, _, rect) in &laid.columns {
             let x = match side {
@@ -1087,7 +1247,7 @@ impl SuePaint {
         }
         if self.ready {
             for group in &laid.groups {
-                self.palette_menu(ui, group.active, group.body, cx, theme);
+                self.palette_menu(ui, group.active, chrome_rect(group), cx, theme);
             }
             self.dock.splitters(ui, &laid, theme);
         }
@@ -1100,14 +1260,17 @@ impl SuePaint {
         self.side_arrows(ui, &laid, theme);
         self.row_strips(ui, &laid, theme);
         if self.ready {
-            self.floating_ui(ui, body, &shown, cx, theme);
+            // A palette drawn docked this frame (floated by its menu just
+            // now) floats from the next: one widget is never on two layers.
+            let docked: Vec<Palette> = laid.groups.iter().map(|group| group.active).collect();
+            self.floating_ui(ui, body, &shown, &docked, cx, theme);
             self.dock
                 .drop_ui(ui, &laid, &|palette: Palette| palette.title(), theme);
         }
         laid.center
     }
 
-    /// Clip Studio Paint's arrows at the top of each side: one folds the
+    /// The chevrons at the top of each side: one folds the
     /// side's palette columns into icons and opens them again, two close
     /// the whole side; a closed side leaves a thin bar whose arrows open it.
     fn side_arrows(&mut self, ui: &mut Ui, laid: &Laid, theme: &Theme) {
@@ -1120,9 +1283,13 @@ impl SuePaint {
             ui.painter().vline(edge, handle.y_range(), theme.hairline());
             let top = Rect::from_min_size(handle.min, vec2(handle.width(), COLUMN_BAR + 4.0));
             // Pointing in: the side comes back.
-            let point = if *side == Side::Left { 1.0 } else { -1.0 };
-            let id = ("sue-paint-open-side", *side == Side::Left);
-            if arrows(ui, top, 2, point, id, &tr!("show-palettes"), theme) {
+            let icon = if *side == Side::Left {
+                WmIcon::ChevronsRight
+            } else {
+                WmIcon::ChevronsLeft
+            };
+            let name = format!("open-side-{}", side_word(*side));
+            if chrome_button(ui, top, icon, &name, &tr!("show-palettes"), theme) {
                 self.dock.hidden[side.index()] = false;
             }
         }
@@ -1150,14 +1317,18 @@ impl SuePaint {
                 continue;
             };
             let bar = Rect::from_min_size(host.min, vec2(host.width(), COLUMN_BAR));
-            let out = if side == Side::Left { -1.0 } else { 1.0 };
             let (close_at, fold_at) = match side {
                 Side::Left => (bar.left(), bar.left() + 16.0),
                 Side::Right => (bar.right() - 16.0, bar.right() - 32.0),
             };
             let close = Rect::from_min_size(pos2(close_at, bar.top()), vec2(16.0, COLUMN_BAR));
-            let close_id = ("sue-paint-close-side", side == Side::Left);
-            if arrows(ui, close, 2, out, close_id, &tr!("hide-palettes"), theme) {
+            let close_id = format!("close-side-{}", side_word(side));
+            let away = if side == Side::Left {
+                WmIcon::ChevronsLeft
+            } else {
+                WmIcon::ChevronsRight
+            };
+            if chrome_button(ui, close, away, &close_id, &tr!("hide-palettes"), theme) {
                 self.dock.hidden[side.index()] = true;
                 self.dock.popped = None;
             }
@@ -1176,13 +1347,19 @@ impl SuePaint {
             }
             let folded = self.dock.folded[side.index()];
             let fold = Rect::from_min_size(pos2(fold_at, bar.top()), vec2(16.0, COLUMN_BAR));
-            let (point, tip) = if folded {
-                (-out, tr!("open-palettes"))
+            // Pointing away folds the side in; pointing in opens it.
+            let (outward, tip) = if folded {
+                (false, tr!("open-palettes"))
             } else {
-                (out, tr!("fold-column-into-icons"))
+                (true, tr!("fold-column-into-icons"))
             };
-            let fold_id = ("sue-paint-fold-side", side == Side::Left);
-            if arrows(ui, fold, 1, point, fold_id, &tip, theme) {
+            let icon = if outward == (side == Side::Left) {
+                WmIcon::ChevronLeft
+            } else {
+                WmIcon::ChevronRight
+            };
+            let fold_id = format!("fold-side-{}", side_word(side));
+            if chrome_button(ui, fold, icon, &fold_id, &tip, theme) {
                 self.dock.folded[side.index()] = !folded;
                 self.dock.popped = None;
             }
@@ -1227,15 +1404,18 @@ impl SuePaint {
             if self.ready {
                 self.dock.grip(ui, rect, *palette, "icon");
             }
-            if icon_button(
-                ui,
-                rect,
-                palette.icon(),
-                true,
-                open,
-                &palette.title(),
-                theme,
-            ) {
+            let clicked = Density::Compact.scope(ui, |ui| {
+                sue_wm::ui::icon_button(
+                    ("sue-paint-strip-icon", palette.key()),
+                    palette.symbol(),
+                    &palette.title(),
+                )
+                .selected(open)
+                .quiet()
+                .show_at(ui, rect, theme)
+                .clicked()
+            });
+            if clicked {
                 self.dock.popped = if open { None } else { Some(*palette) };
             }
             // Right-click: Display palette as tab, or as pop-up.
@@ -1278,11 +1458,9 @@ impl SuePaint {
                 let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
                 ui.painter()
                     .rect_filled(rect.expand(1.0), 0.0, theme.border);
-                self.dock
-                    .grip(ui, title_bar(palette, rect, None), palette, "popped");
-                self.draw_palette(ui, palette, rect, cx, theme);
-                grip_dots(ui, palette, rect, theme);
-                self.palette_menu(ui, palette, rect, cx, theme);
+                let group = lone_group(palette, rect, rect.width());
+                self.group_ui(ui, &group, None, "popped", cx, theme);
+                self.palette_menu(ui, palette, chrome_rect(&group), cx, theme);
                 rect
             });
         let inside = area.inner;
@@ -1379,15 +1557,17 @@ impl SuePaint {
                     if self.ready {
                         self.dock.grip(ui, icon, *palette, "row-icon");
                     }
-                    if icon_button(
-                        ui,
-                        icon,
-                        palette.icon(),
-                        true,
-                        false,
-                        &palette.title(),
-                        theme,
-                    ) {
+                    let clicked = Density::Compact.scope(ui, |ui| {
+                        sue_wm::ui::icon_button(
+                            ("sue-paint-row-icon", palette.key()),
+                            palette.symbol(),
+                            &palette.title(),
+                        )
+                        .quiet()
+                        .show_at(ui, icon, theme)
+                        .clicked()
+                    });
+                    if clicked {
                         // The row opens on that palette.
                         self.dock.row_folded[row.index()] = false;
                         self.dock.choose(*palette);
@@ -1399,9 +1579,14 @@ impl SuePaint {
         for (row, bar) in &laid.row_handles {
             ui.painter().rect_filled(*bar, 0.0, theme.panel);
             let at = Rect::from_center_size(bar.center(), vec2(24.0, bar.height()));
-            let id = ("sue-paint-open-row", row.index());
-            let down = *row == Row::Top;
-            if vertical_arrows(ui, at, 2, down, id, &tr!("show-palettes"), theme) {
+            let name = format!("open-row-{}", row.index());
+            // Pointing in: the row comes back.
+            let icon = if *row == Row::Top {
+                WmIcon::ChevronDown
+            } else {
+                WmIcon::ChevronUp
+            };
+            if chrome_button(ui, at, icon, &name, &tr!("show-palettes"), theme) {
                 self.dock.row_hidden[row.index()] = false;
             }
         }
@@ -1412,11 +1597,11 @@ impl SuePaint {
                 Rect::from_min_size(pos2(row.right() - 40.0, row.top() + 6.0), vec2(16.0, 16.0));
             let close = fold.translate(vec2(18.0, 0.0));
             let tip = tr!("fold-column-into-icons");
-            if vertical_arrows(ui, fold, 1, true, "sue-paint-fold-bottom", &tip, theme) {
+            if chrome_button(ui, fold, WmIcon::ChevronDown, "fold-bottom", &tip, theme) {
                 self.dock.row_folded[Row::Bottom.index()] = true;
             }
             let tip = tr!("hide-palettes");
-            if vertical_arrows(ui, close, 2, true, "sue-paint-close-bottom", &tip, theme) {
+            if chrome_button(ui, close, WmIcon::Close, "close-bottom", &tip, theme) {
                 self.dock.row_hidden[Row::Bottom.index()] = true;
             }
         }
@@ -1432,6 +1617,7 @@ impl SuePaint {
         ui: &mut Ui,
         body: Rect,
         shown: &dyn Fn(Palette) -> bool,
+        docked: &[Palette],
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
@@ -1446,75 +1632,208 @@ impl SuePaint {
             .iter()
             .map(|(palette, rect)| (*palette, *rect, true));
         let all: Vec<(Palette, Rect, bool)> = floating.chain(windows).collect();
+        // Docked or hidden again, a palette opens whole next time.
+        let still = &self.dock.floating;
+        self.dock
+            .rolled
+            .retain(|palette| still.iter().any(|(found, _)| found == palette));
         for (palette, rect, own) in all {
-            if !shown(palette) {
+            if !shown(palette) || docked.contains(&palette) {
                 continue;
             }
             if own && !ui.ctx().embed_viewports() {
                 self.palette_window(ui, palette, rect, body, cx, theme);
                 continue;
             }
-            let mut open = true;
-            let window = egui::Window::new(palette.title())
-                .id(Id::unique(("sue-paint-float", palette.key())))
+            // Its header is its title bar: the name once, its menu at the
+            // left, roll up, dock again and close at the right. Dragging
+            // the header moves the window and, over the dock, docks it.
+            let rolled = self.dock.rolled.contains(&palette);
+            let start_id = Id::unique(("sue-paint-float-from", palette.key()));
+            let moved = match self.dock.panel_drag() {
+                Some((dragged, by)) if dragged == palette => {
+                    let from = ui
+                        .data_mut(|data| *data.get_temp_mut_or_insert_with(start_id, || rect.min));
+                    Some(from + by)
+                }
+                _ => {
+                    ui.data_mut(|data| data.remove::<Pos2>(start_id));
+                    None
+                }
+            };
+            // The frame it is rolled up or down, its other window opens
+            // where it is.
+            let seen_id = Id::unique(("sue-paint-rolled-seen", palette.key()));
+            let toggled = ui.data_mut(|data| {
+                let seen = data.get_temp::<bool>(seen_id);
+                data.insert_temp(seen_id, rolled);
+                seen.is_some_and(|seen| seen != rolled)
+            });
+            // Rolled up and unrolled are two windows to egui, so each keeps
+            // its own size; both stand where the palette is.
+            let mut window = egui::Window::new(palette.title())
+                .id(Id::unique(("sue-paint-float", palette.key(), rolled)))
                 .default_rect(rect)
                 .constrain_to(body)
-                .resizable(true)
-                // Rolled up by a double-click on its title, or its arrow
-                // (Clip Studio Paint's Minimize).
-                .collapsible(true)
-                .title_bar(true)
-                .min_size(vec2(
+                .title_bar(false)
+                .collapsible(false);
+            window = if rolled {
+                // As wide as it was, and as tall as its header and the
+                // window's margins: egui's sizes are the window's outer
+                // ones.
+                let margins = ui.ctx().global_style().spacing.window_margin.sum().y;
+                window.fixed_size(vec2(rect.width(), TAB_STRIP + margins))
+            } else {
+                window.resizable(true).min_size(vec2(
                     palette.min_width().min(180.0),
                     palette.min_height().min(120.0),
                 ))
-                .open(&mut open)
-                .show(ui.ctx(), |ui| {
-                    let area = ui.available_rect_before_wrap();
-                    let area = Rect::from_min_size(area.min, area.size().max(vec2(40.0, 34.0)));
-                    ui.allocate_rect(area, Sense::hover());
-                    self.dock
-                        .grip(ui, title_bar(palette, area, None), palette, "floating");
-                    self.draw_palette(ui, palette, area, cx, theme);
-                    grip_dots(ui, palette, area, theme);
-                    // A floating palette has its menu too.
-                    self.palette_menu(ui, palette, area, cx, theme);
-                    // Back into a column, from inside its window.
-                    let back = Rect::from_min_size(
-                        pos2(area.right() - 22.0, area.top() + 3.0),
-                        vec2(18.0, 18.0),
-                    );
-                    if icon_button(
-                        ui,
-                        back,
-                        Icon::Up,
-                        true,
-                        false,
-                        &tr!("dock-it-again"),
-                        theme,
-                    ) {
-                        Some(true)
-                    } else {
-                        None
-                    }
-                });
-            // Kept while unrolled: a rolled-up window keeps its size.
-            if let Some(inner) = &window
-                && inner.inner.is_some()
-            {
-                self.keep_window(palette, inner.response.rect);
+            };
+            if let Some(at) = moved {
+                window = window.current_pos(at);
+            } else if toggled {
+                window = window.current_pos(rect.min);
             }
-            let redock = window
+            let shown_window = window.show(ui.ctx(), |ui| {
+                let area = ui.available_rect_before_wrap();
+                let area = if rolled {
+                    Rect::from_min_size(area.min, vec2(area.width(), TAB_STRIP))
+                } else {
+                    Rect::from_min_size(area.min, area.size().max(vec2(40.0, STRIP)))
+                };
+                // No spacing after it: the margin under a rolled up
+                // header is the window's own, as above it.
+                let spacing = ui.spacing().item_spacing;
+                if rolled {
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+                }
+                ui.allocate_rect(area, Sense::hover());
+                ui.spacing_mut().item_spacing = spacing;
+                self.floating_palette(ui, palette, area, rolled, cx, theme)
+            });
+            let action = shown_window
                 .as_ref()
-                .and_then(|inner| inner.inner.flatten())
-                .is_some();
-            // Its X hides it for good, as Clip Studio Paint's does; the
-            // arrow docks it again.
-            if !open {
-                self.close_palette(palette);
-            } else if redock {
-                self.redock(palette, rect, body);
+                .and_then(|inner| inner.inner)
+                .unwrap_or(FloatAction::None);
+            if let Some(inner) = &shown_window {
+                let at = inner.response.rect;
+                if rolled {
+                    // Rolled up, it keeps its size: only where it is.
+                    self.keep_window(palette, Rect::from_min_size(at.min, rect.size()));
+                } else {
+                    self.keep_window(palette, at);
+                }
             }
+            match action {
+                FloatAction::Close => self.close_palette(palette),
+                FloatAction::Dock => self.redock(palette, rect, body),
+                FloatAction::Roll => self.roll(palette, !rolled),
+                FloatAction::None => {}
+            }
+        }
+    }
+
+    /// A floating palette inside its window's `area`: its header (with
+    /// roll up, dock again and close at the right) and, unless `rolled`
+    /// up, the palette. Returns what its buttons asked for.
+    fn floating_palette(
+        &mut self,
+        ui: &mut Ui,
+        palette: Palette,
+        area: Rect,
+        rolled: bool,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) -> FloatAction {
+        let side = Density::Compact.icon_button();
+        let buttons = [
+            (
+                FloatAction::Roll,
+                if rolled {
+                    WmIcon::ChevronDown
+                } else {
+                    WmIcon::ChevronUp
+                },
+                if rolled {
+                    tr!("palette-unroll")
+                } else {
+                    tr!("palette-roll-up")
+                },
+            ),
+            (FloatAction::Dock, WmIcon::ArrowUp, tr!("dock-it-again")),
+            (
+                FloatAction::Close,
+                WmIcon::Close,
+                tr!("hide-palette", title = palette.title()),
+            ),
+        ];
+        let header = (area.width() - side * buttons.len() as f32).max(0.0);
+        let shown = if rolled {
+            Rect::from_min_size(area.min, vec2(area.width(), TAB_STRIP))
+        } else {
+            area
+        };
+        let group = lone_group(palette, shown, header);
+        // The header's room for the buttons, as the header itself.
+        ui.painter().rect_filled(
+            Rect::from_min_max(
+                pos2(area.left() + header, area.top()),
+                pos2(area.right(), area.top() + TAB_STRIP),
+            ),
+            0.0,
+            theme.pill,
+        );
+        if rolled {
+            if self.ready {
+                let grab = title_bar(palette, chrome_rect(&group), None);
+                self.dock.grip(ui, grab, palette, "floating");
+            }
+            let faces = [(palette, self.tab_face(palette))];
+            self.dock
+                .tabs_ui(ui, &group, &|_: Palette| faces[0].1.clone(), theme);
+        } else {
+            self.group_ui(ui, &group, None, "floating", cx, theme);
+        }
+        ui.painter().hline(
+            area.x_range(),
+            area.top() + TAB_STRIP - theme.border_width / 2.0,
+            theme.hairline(),
+        );
+        self.palette_menu(ui, palette, chrome_rect(&group), cx, theme);
+        let mut action = FloatAction::None;
+        Density::Compact.scope(ui, |ui| {
+            for (index, (what, icon, name)) in buttons.iter().enumerate() {
+                let at = Rect::from_min_size(
+                    pos2(
+                        area.left() + header + side * index as f32,
+                        area.top() + (TAB_STRIP - side) / 2.0,
+                    ),
+                    Vec2::splat(side),
+                );
+                // Where it is, for what points at it (a test, a tour).
+                let place = Id::unique(("sue-paint-float-button", palette.key(), index));
+                ui.data_mut(|data| data.insert_temp(place, at));
+                let clicked = sue_wm::ui::icon_button(
+                    ("sue-paint-float-button", palette.key(), index),
+                    *icon,
+                    name,
+                )
+                .quiet()
+                .show_at(ui, at, theme)
+                .clicked();
+                if clicked {
+                    action = *what;
+                }
+            }
+        });
+        action
+    }
+
+    /// Rolls a floating `palette` up to its header, or down again.
+    pub(crate) fn roll(&mut self, palette: Palette, up: bool) {
+        self.dock.rolled.retain(|found| *found != palette);
+        if up {
+            self.dock.rolled.push(palette);
         }
     }
 
@@ -1588,21 +1907,22 @@ impl SuePaint {
                     shut = sue_wm::widgets::title_bar(ui, top, &palette.title(), false, theme);
                     area.min.y = top.bottom();
                 }
-                self.draw_palette(ui, palette, area, cx, theme);
+                // The window's title bar names it: the palette draws no
+                // title of its own.
+                self.draw_palette(ui, palette, area, true, cx, theme);
                 // Back into a column, from inside its window.
-                let back = Rect::from_min_size(
-                    pos2(area.right() - 22.0, area.bottom() - 22.0),
-                    vec2(18.0, 18.0),
-                );
-                let redock = icon_button(
-                    ui,
-                    back,
-                    Icon::Up,
-                    true,
-                    false,
-                    &tr!("dock-it-again"),
-                    theme,
-                );
+                let side = Density::Compact.icon_button();
+                let back = Rect::from_min_size(area.max - Vec2::splat(side), Vec2::splat(side));
+                let redock = Density::Compact.scope(ui, |ui| {
+                    sue_wm::ui::icon_button(
+                        ("sue-paint-window-dock", palette.key()),
+                        WmIcon::ArrowUp,
+                        &tr!("dock-it-again"),
+                    )
+                    .quiet()
+                    .show_at(ui, back, theme)
+                    .clicked()
+                });
                 if own_frame {
                     sue_wm::widgets::resize_edges(ui, whole);
                 }
@@ -1672,7 +1992,8 @@ mod tests {
                 .unwrap()
                 .1
         };
-        assert_eq!(place(Palette::SubTool).top(), 38.0 + COLUMN_BAR);
+        // Its body, under the column bar and its header.
+        assert_eq!(place(Palette::SubTool).top(), 38.0 + COLUMN_BAR + TAB_STRIP);
         assert!(place(Palette::ToolProperty).top() > place(Palette::SubTool).top());
         assert!(place(Palette::BrushGrid).top() > place(Palette::ToolProperty).top());
         assert!((place(Palette::Color).bottom() - 900.0).abs() < 0.5);

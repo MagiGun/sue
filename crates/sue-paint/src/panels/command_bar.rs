@@ -572,7 +572,8 @@ impl SuePaint {
                 sue_wm::ui::popover(&ctx, id, rect, &mut open, theme, |ui| {
                     let size = sue_wm::dock::DockPanel::float_size(palette);
                     let (body, _) = ui.allocate_exact_size(size, Sense::hover());
-                    self.draw_palette(ui, palette, body, cx, theme);
+                    // A popup has no dock header: the palette names itself.
+                    self.draw_palette(ui, palette, body, false, cx, theme);
                 });
             }
             (Popover::Group, Item::Group(members)) => {

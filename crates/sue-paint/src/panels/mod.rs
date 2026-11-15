@@ -120,16 +120,16 @@ fn header(
     (body, clicked)
 }
 
-/// Where the dock keeps how much room a palette's header leaves at its
-/// left for the palette's menu button.
-pub(crate) const MENU_INSET: &str = "sue-paint-menu-inset";
+/// Where the dock says it draws the header of the palette being drawn:
+/// its name (or its group's tabs), its menu button, its grip. The palette
+/// then draws no title of its own, so its name shows once.
+pub(crate) const HEADED: &str = "sue-paint-headed";
 
-/// The room a header leaves at its left for the palette's menu button:
-/// none outside the dock (a phone's sheet).
-fn menu_inset(ui: &Ui) -> f32 {
+/// Whether the dock draws the header of the palette being drawn in `ui`.
+fn headed(ui: &Ui) -> bool {
     ui.ctx()
-        .data(|data| data.get_temp::<f32>(Id::unique(MENU_INSET)))
-        .unwrap_or(0.0)
+        .data(|data| data.get_temp::<bool>(Id::unique(HEADED)))
+        .unwrap_or(false)
 }
 
 /// [`header`], whose tabs flagged in `tearing` also drag: the tab dragged
@@ -142,6 +142,11 @@ fn header_tearing(
     selected: u8,
     theme: &Theme,
 ) -> (Rect, Option<u8>, Option<(u8, Pos2)>) {
+    // In the dock, a palette's lone title is the dock's header; only
+    // tabs of its own (a phone's sheet) still show here.
+    if tabs.len() < 2 && headed(ui) {
+        return (rect, None, None);
+    }
     let strip = Rect::from_min_size(rect.min, vec2(rect.width(), 28.0));
     let painter = ui.painter().clone();
     painter.rect_filled(strip, 0.0, theme.pill);
@@ -165,10 +170,8 @@ fn header_tearing(
     let labelled = |galley: &std::sync::Arc<egui::Galley>| icon_side + 6.0 + galley.size().x + 14.0;
     let bare = icon_side + 14.0;
     let all: f32 = galleys.iter().map(labelled).sum::<f32>() + 2.0 * tabs.len() as f32;
-    // Room at the left for the palette's menu button, in the dock.
-    let inset = menu_inset(ui);
-    let names = all <= strip.width() - 8.0 - inset;
-    let mut x = strip.left() + 4.0 + inset;
+    let names = all <= strip.width() - 8.0;
+    let mut x = strip.left() + 4.0;
     let mut clicked = None;
     let mut dragged = None;
     let painter = painter.with_clip_rect(strip);

@@ -33,16 +33,9 @@ impl SuePaint {
         ui.painter()
             .rect_filled(rect, egui::CornerRadius::ZERO, theme.panel);
         let density = Density::of(ui);
-        // The palette's menu button sits at the top left, drawn by the
-        // dock: the tabs start after it.
-        let inset = ui
-            .ctx()
-            .data(|data| data.get_temp::<f32>(Id::unique(super::MENU_INSET)))
-            .unwrap_or_default();
-        let strip = Rect::from_min_size(
-            rect.min + egui::Vec2::X * inset,
-            vec2(rect.width() - inset, density.tab_strip()),
-        );
+        // The dock's header above holds the palette's name and menu: the
+        // sets' tabs take the whole width.
+        let strip = Rect::from_min_size(rect.min, vec2(rect.width(), density.tab_strip()));
         let names: Vec<String> = self
             .quick_access
             .sets

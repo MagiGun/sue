@@ -3238,3 +3238,6 @@ grid-origin = Origin
 grid-origin-top-left = Top left
 grid-origin-center = Middle
 grid-hint = The grid belongs to the picture: it is saved with it, and Snap to Grid follows its finest lines.
+# Sue Paint: a floating palette's header (P4-9)
+palette-roll-up = Roll Up
+palette-unroll = Unroll
