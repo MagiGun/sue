@@ -198,6 +198,9 @@ fn parse_hex(text: &str) -> Option<[u8; 3]> {
 /// How near, in screen points, a frame's corner snaps to the default
 /// border.
 const FRAME_SNAP: f32 = 12.0;
+/// How strongly a picked panel is tinted with the selection color, 0 to 1:
+/// enough to see which panel is picked, little enough to see the drawing.
+const SELECTION_TINT: f32 = 0.3;
 
 /// Divide Frame Border Equally: panel `panel` of frame layer `layer` cut
 /// into `across` by `down` panels, `gap_x` and `gap_y` apart (pixels).
@@ -1117,7 +1120,7 @@ impl SuePaint {
                 if is_convex(panel) {
                     painter.add(egui::Shape::convex_polygon(
                         points.clone(),
-                        theme.selection,
+                        theme.selection.gamma_multiply(SELECTION_TINT),
                         egui::Stroke::NONE,
                     ));
                 }
