@@ -1086,3 +1086,43 @@ fn a_light_table_entry_keeps_its_own_eye_opacity_and_mode_on_its_link() {
         assert_eq!(EntryMode::from_name(mode.name()), mode);
     }
 }
+
+#[test]
+fn reversing_a_light_table_keeps_each_entrys_eye_opacity_and_mode() {
+    let (mut arena, mut history, picture, folder) = animated(8, 6);
+    let (edit, cel) = new_cel(&arena, picture, folder, 0).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let (edit, first) = new_cel(&arena, picture, folder, 2).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let (edit, second) = new_cel(&arena, picture, folder, 4).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    history.apply(&mut arena, register(cel, first)).unwrap();
+    history.apply(&mut arena, register(cel, second)).unwrap();
+    let faint = LightEntry {
+        shown: false,
+        opacity: 0.3,
+        mode: EntryMode::Own,
+    };
+    let edit = set_entry(&arena, cel, LIGHT_TABLE, first, faint).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let before = light_table(&arena, cel);
+    let edit = reversed(&arena, cel);
+    undo_pair(&mut arena, &mut history, edit);
+    let mut turned = before.clone();
+    turned.reverse();
+    assert_eq!(light_table(&arena, cel), turned, "turned round");
+    assert_eq!(
+        entry(&arena, cel, LIGHT_TABLE, first),
+        faint,
+        "settings kept"
+    );
+    assert_eq!(
+        entry(&arena, cel, LIGHT_TABLE, second),
+        LightEntry::default()
+    );
+    // Twice is the table as it was.
+    let edit = reversed(&arena, cel);
+    history.apply(&mut arena, edit).unwrap();
+    assert_eq!(light_table(&arena, cel), before);
+    assert_eq!(entry(&arena, cel, LIGHT_TABLE, first), faint);
+}

@@ -6,8 +6,8 @@
 //! Timeline palette's buttons call [`SuePaint::anim_command`]), so the
 //! entries are found by name here as well as through the registry.
 
-use sue_core::txn::{Relate, SetProperty, Unrelate};
-use sue_core::{Arena, EntityId, OrderKey, Relation};
+use sue_core::txn::{Relate, SetProperty};
+use sue_core::{Arena, EntityId, Relation};
 use sue_model::Sequence;
 use sue_wm::{AppletContext, Call, Command, Facts, FilePick, Flags, ItemState, ShellRequest};
 
@@ -435,28 +435,6 @@ fn light_register(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
     }
 }
 
-/// The edit that puts `cel`'s light table in the reverse order. Each
-/// layer gets an order key of its own: the table is sorted by its keys,
-/// and layers that share one (as each registered with the default key
-/// does) sort by their ids, which no relinking turns round.
-fn reversed_light_table(arena: &Arena, cel: EntityId) -> Edit {
-    let layers = anim::light_table(arena, cel);
-    let off = layers.iter().fold(
-        Edit::new(tr!("reverse-layers-vertically-light-table")),
-        |edit, layer| edit.then(Unrelate::new(cel, anim::LIGHT_TABLE, *layer)),
-    );
-    let keys = OrderKey::sequence(None, layers.len());
-    layers
-        .iter()
-        .rev()
-        .zip(keys)
-        .fold(off, |edit, (layer, order)| {
-            edit.then(Relate::new(
-                Relation::new(cel, anim::LIGHT_TABLE, *layer).ordered(order),
-            ))
-        })
-}
-
 /// The light table's layers in the reverse order.
 fn light_reverse(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     if paint.here(&cx.world.arena).is_none() {
@@ -465,7 +443,7 @@ fn light_reverse(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) 
     if let Some(cel) = paint.editing_cel(&cx.world.arena)
         && anim::light_table(&cx.world.arena, cel).len() > 1
     {
-        SuePaint::apply(cx, reversed_light_table(&cx.world.arena, cel));
+        SuePaint::apply(cx, anim::reversed(&cx.world.arena, cel));
     }
 }
 

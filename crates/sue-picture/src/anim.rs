@@ -640,21 +640,28 @@ pub fn register(cel: EntityId, layer: EntityId) -> Edit {
 }
 
 /// The edit that turns `cel`'s light table upside down: its layers in
-/// the reverse order.
+/// the reverse order. Each link gets an order key of its own (the table
+/// is sorted by its keys, and links that share one, as each registered
+/// with the default key does, sort by their ids, which no relinking
+/// turns round) and keeps its entry's eye, opacity and color mode
+/// ([`LightEntry`]): only its place on the table changes.
 #[must_use]
 pub fn reversed(arena: &Arena, cel: EntityId) -> Edit {
+    let relations = arena.relations();
     let layers = light_table(arena, cel);
-    let off = layers.iter().fold(
+    let keys = sue_core::OrderKey::sequence(None, layers.len());
+    layers.iter().rev().zip(keys).fold(
         Edit::new(tr!("reverse-layers-vertically-light-table")),
-        |edit, layer| edit.then(sue_core::txn::Unrelate::new(cel, LIGHT_TABLE, *layer)),
-    );
-    layers.iter().rev().fold(off, |edit, layer| {
-        edit.then(sue_core::txn::Relate::new(sue_core::Relation::new(
-            cel,
-            LIGHT_TABLE,
-            *layer,
-        )))
-    })
+        |edit, (layer, order)| {
+            let link = relations
+                .get(cel, LIGHT_TABLE, *layer)
+                .unwrap_or_else(|| sue_core::Relation::new(cel, LIGHT_TABLE, *layer));
+            edit.then(sue_core::txn::Relate::new(sue_core::Relation {
+                order,
+                ..link
+            }))
+        },
+    )
 }
 
 /// The edit that takes `layers` off `cel`'s light table.
