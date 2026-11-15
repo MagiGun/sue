@@ -7,7 +7,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use egui::text::{ByteIndex, LayoutJob, LayoutSection, TextFormat};
-use egui::{Color32, FontFamily, FontId, Galley, Shadow, Stroke, Vec2, vec2};
+use egui::{Color32, FontFamily, FontId, Galley, Rect, Shadow, Stroke, Vec2, pos2, vec2};
 use sue_core::{EntityId, Value};
 use sue_model::contents::Contents;
 use sue_model::{Mark, PageFields, Running, TextMarks, mark_kind as kind};
@@ -408,6 +408,138 @@ fn color(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
+/// Where an underline sits below the baseline, as a share of the font's
+/// descent.
+const UNDERLINE_DROP: f32 = 0.45;
+/// Where a strike sits above the baseline, as a share of the font's
+/// ascent: through the middle of the small letters.
+const STRIKE_RISE: f32 = 0.28;
+
+/// Lays `job` out with its underlines and strikes on the text itself.
+///
+/// egui draws them from the line box: an underline at its bottom and a
+/// strike through its middle. With line spacing above single, the box
+/// reaches well below the letters, so an underline floats toward the next
+/// line and a strike runs along the baseline, where it reads as an
+/// underline. Here the lines are left out of the layout and put in after,
+/// from each glyph's baseline and font. Where the glyphs cannot be matched
+/// to the text (which egui's layout does not do today), egui's own lines
+/// are kept.
+pub(crate) fn lay_out(ctx: &egui::Context, job: LayoutJob) -> Arc<Galley> {
+    let lines: Vec<(Stroke, Stroke)> = job
+        .sections
+        .iter()
+        .map(|section| (section.format.underline, section.format.strikethrough))
+        .collect();
+    let spaced = job
+        .sections
+        .iter()
+        .any(|section| section.format.line_height.is_some());
+    if !spaced
+        || lines
+            .iter()
+            .all(|(under, strike)| under.is_empty() && strike.is_empty())
+    {
+        return ctx.fonts_mut(|fonts| fonts.layout_job(job));
+    }
+    let mut bare = job.clone();
+    for section in &mut bare.sections {
+        section.format.underline = Stroke::NONE;
+        section.format.strikethrough = Stroke::NONE;
+    }
+    let galley = ctx.fonts_mut(|fonts| fonts.layout_job(bare));
+    match place_lines(&galley, &job, &lines) {
+        Some(placed) => Arc::new(placed),
+        None => ctx.fonts_mut(|fonts| fonts.layout_job(job)),
+    }
+}
+
+/// A line being drawn along a row: its stroke, its height and where it
+/// runs across.
+type Run = (Stroke, f32, f32, f32);
+
+/// `galley` (laid out from `job` without lines) with `lines`, the
+/// underline and strike of each section of `job`, drawn on its text.
+/// `None` when a glyph does not match the text.
+fn place_lines(galley: &Galley, job: &LayoutJob, lines: &[(Stroke, Stroke)]) -> Option<Galley> {
+    let section_of = |byte: usize| {
+        job.sections.iter().position(|section| {
+            section.byte_range.start.0 <= byte && byte < section.byte_range.end.0
+        })
+    };
+    let pixels = galley.pixels_per_point.max(0.1);
+    let snap = |y: f32| (y * pixels).round() / pixels;
+    let mut out = galley.clone();
+    let mut chars = job.text.char_indices();
+    let (mut vertices, mut indices) = (0, 0);
+    for placed in &mut out.rows {
+        let mut rects: Vec<(Rect, Color32)> = Vec::new();
+        let mut finish = |run: &mut Option<Run>| {
+            if let Some((stroke, y, left, right)) = run.take() {
+                let width = stroke.width.max(1.0 / pixels);
+                let top = snap(y - width / 2.0);
+                rects.push((
+                    Rect::from_min_max(pos2(left, top), pos2(right, top + width)),
+                    stroke.color,
+                ));
+            }
+        };
+        let (mut under_run, mut strike_run): (Option<Run>, Option<Run>) = (None, None);
+        for glyph in &placed.row.glyphs {
+            let (byte, ch) = chars.next()?;
+            if ch != glyph.chr {
+                return None;
+            }
+            let (under, strike) = lines[section_of(byte)?];
+            let base = glyph.pos.y;
+            let descent = (glyph.font_height - glyph.font_ascent).max(0.0);
+            for (stroke, y, run) in [
+                (under, base + descent * UNDERLINE_DROP, &mut under_run),
+                (
+                    strike,
+                    base - glyph.font_ascent * STRIKE_RISE,
+                    &mut strike_run,
+                ),
+            ] {
+                match run {
+                    Some((same, at, _, right))
+                        if !stroke.is_empty() && *same == stroke && (*at - y).abs() < 0.01 =>
+                    {
+                        *right = glyph.max_x();
+                    }
+                    _ => {
+                        finish(run);
+                        if !stroke.is_empty() {
+                            *run = Some((stroke, y, glyph.pos.x, glyph.max_x()));
+                        }
+                    }
+                }
+            }
+        }
+        finish(&mut under_run);
+        finish(&mut strike_run);
+        if placed.ends_with_newline && chars.next()?.1 != '\n' {
+            return None;
+        }
+        if rects.is_empty() {
+            continue;
+        }
+        let row = Arc::make_mut(&mut placed.row);
+        let mesh = &mut row.visuals.mesh;
+        let (before_vertices, before_indices) = (mesh.vertices.len(), mesh.indices.len());
+        for (rect, color) in rects {
+            mesh.add_colored_rect(rect, color);
+            row.visuals.mesh_bounds = row.visuals.mesh_bounds.union(rect);
+            out.mesh_bounds = out.mesh_bounds.union(rect.translate(placed.pos.to_vec2()));
+        }
+        vertices += mesh.vertices.len() - before_vertices;
+        indices += mesh.indices.len() - before_indices;
+    }
+    out.num_vertices += vertices;
+    out.num_indices += indices;
+    Some(out)
+}
+
 /// The bullet of list level `level`.
 fn bullet(level: usize) -> &'static str {
     ["\u{2022}", "\u{25E6}", "\u{25AA}"][level % 3]
@@ -605,7 +737,7 @@ pub fn lay_document(
                 });
             }
         }
-        let galley = ctx.fonts_mut(|fonts| fonts.layout_job(job));
+        let galley = lay_out(ctx, job);
         let mut rows: Vec<(f32, f32)> = galley
             .rows
             .iter()
@@ -925,6 +1057,73 @@ mod tests {
         let pale = PageMarks::resolve(&theme, &ink);
         assert!(contrast(pale.handle, ink.paper) >= EDGE_CONTRAST);
         assert_ne!(pale.handle, ink.text);
+    }
+
+    #[test]
+    fn underlines_and_strikes_sit_on_the_text_with_wide_line_spacing() {
+        let ctx = egui::Context::default();
+        let under = Color32::from_rgb(1, 200, 3);
+        let strike = Color32::from_rgb(200, 5, 6);
+        let font = FontId::proportional(20.0);
+        let mut job = LayoutJob::default();
+        job.wrap.max_width = 120.0;
+        for (text, underline, strikethrough) in [
+            ("kept words that wrap ", Stroke::NONE, Stroke::NONE),
+            ("added words ", Stroke::new(1.0, under), Stroke::NONE),
+            ("gone words", Stroke::NONE, Stroke::new(1.0, strike)),
+        ] {
+            let start = job.text.len();
+            job.text.push_str(text);
+            job.sections.push(LayoutSection {
+                leading_space: 0.0,
+                byte_range: ByteIndex(start)..ByteIndex(job.text.len()),
+                format: TextFormat {
+                    font_id: font.clone(),
+                    line_height: Some(60.0),
+                    underline,
+                    strikethrough,
+                    ..TextFormat::default()
+                },
+            });
+        }
+        let mut galley = None;
+        let mut full = ctx.run_ui(egui::RawInput::default(), |ui| {
+            galley = Some(lay_out(ui.ctx(), job.clone()));
+        });
+        full.textures_delta.clear();
+        let galley = galley.unwrap();
+        assert!(galley.rows.len() > 2, "the text wraps");
+        let mut seen = [false, false];
+        for placed in &galley.rows {
+            let Some(glyph) = placed.row.glyphs.first() else {
+                continue;
+            };
+            let (base, ascent) = (glyph.pos.y, glyph.font_ascent);
+            let descent = glyph.font_height - ascent;
+            for vertex in &placed.row.visuals.mesh.vertices {
+                if vertex.color == under {
+                    seen[0] = true;
+                    // Below the baseline, within the letters' descent:
+                    // not down in the line spacing.
+                    assert!(vertex.pos.y > base - 1.0, "{} under {base}", vertex.pos.y);
+                    assert!(vertex.pos.y < base + descent + 1.0);
+                }
+                if vertex.color == strike {
+                    seen[1] = true;
+                    // Through the small letters, above the baseline.
+                    assert!(vertex.pos.y < base - 2.0, "{} over {base}", vertex.pos.y);
+                    assert!(vertex.pos.y > base - ascent * 0.6);
+                }
+            }
+        }
+        assert_eq!(seen, [true, true], "both lines are drawn");
+        // The lines are counted, so the painter makes room for them.
+        let counted: usize = galley
+            .rows
+            .iter()
+            .map(|placed| placed.row.visuals.mesh.vertices.len())
+            .sum();
+        assert_eq!(counted, galley.num_vertices);
     }
 
     #[test]
