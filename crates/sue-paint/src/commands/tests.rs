@@ -377,6 +377,7 @@ fn the_palette_offers_what_it_offered() {
             "tool.pick.ruler",
             "tool.pick.text",
             "tool.pick.balloon",
+            "color.settings",
         ]
     );
     let new = &palette[1];

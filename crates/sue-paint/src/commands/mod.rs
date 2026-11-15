@@ -17,6 +17,7 @@ use crate::studio::{KEYS_SECTION, SuePaint};
 
 mod anim;
 mod canvas;
+mod color;
 mod edit;
 mod figure;
 mod file;
@@ -60,6 +61,7 @@ pub fn registry() -> &'static CommandRegistry<SuePaint> {
         registry.add(canvas::COMMANDS);
         registry.add(figure::COMMANDS);
         registry.add(tool::COMMANDS);
+        registry.add(color::COMMANDS);
         registry
     })
 }
