@@ -17,8 +17,8 @@ use crate::studio::{Doc, Panels, SuePaint};
 
 /// The commands of this group that Auto Actions may record: none. They
 /// change how the studio looks, not the picture, so a recorded action
-/// that replays them would only move palettes about (`extras::recordable`
-/// has always left every `window.` command out).
+/// that replays them would only move palettes about (no `window.`
+/// command was ever recorded).
 pub(super) const RECORDABLE: [&str; 0] = [];
 
 /// The commands of this group that go outside the canvas, so a test that
@@ -918,13 +918,6 @@ mod tests {
             assert_eq!(
                 command.flags.has(Flags::LEAVES_CANVAS),
                 LEAVES_CANVAS.contains(&name),
-                "{name}"
-            );
-            // The flag says what the old check said, until P3-14 takes
-            // the old check away.
-            assert_eq!(
-                command.flags.has(Flags::RECORDABLE),
-                crate::extras::recordable(&runnable(command)),
                 "{name}"
             );
             assert!(!command.flags.has(Flags::PALETTE), "{name}");

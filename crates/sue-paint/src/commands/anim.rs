@@ -970,15 +970,9 @@ mod tests {
 
     #[test]
     fn auto_actions_record_what_they_recorded() {
-        // The flags stand for `extras::recordable`, which goes once every
-        // group has them; until then the two must agree.
+        // Every Animation command is recorded, as before the flags.
         for command in COMMANDS {
-            assert_eq!(
-                command.flags.has(Flags::RECORDABLE),
-                crate::extras::recordable(command.name),
-                "{}",
-                command.name
-            );
+            assert!(command.flags.has(Flags::RECORDABLE), "{}", command.name);
             assert!(!command.flags.has(Flags::LEAVES_CANVAS), "{}", command.name);
         }
     }

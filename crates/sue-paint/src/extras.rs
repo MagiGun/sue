@@ -69,15 +69,6 @@ pub(crate) struct AutoActions {
     pub loaded: bool,
 }
 
-/// `true` for commands an auto action keeps: what changes the picture or
-/// the view, not files, windows or the actions themselves.
-#[must_use]
-pub(crate) fn recordable(command: &str) -> bool {
-    !["auto.", "file.", "window.", "help.", "story.editor"]
-        .iter()
-        .any(|prefix| command.starts_with(prefix))
-}
-
 /// Named sections of lines: `[name]` then its lines.
 fn sections(text: &str) -> Vec<(String, Vec<String>)> {
     let mut out: Vec<(String, Vec<String>)> = Vec::new();
@@ -505,7 +496,9 @@ impl SuePaint {
     /// Keeps `command` in the auto action being recorded.
     pub(crate) fn record_auto(&mut self, command: &str) {
         if let Some(index) = self.auto.recording
-            && recordable(command)
+            && crate::commands::registry()
+                .flags(command)
+                .has(sue_wm::Flags::RECORDABLE)
             && let Some(set) = self.auto.sets.get_mut(index)
         {
             set.steps.push(command.to_owned());
@@ -761,9 +754,11 @@ mod tests {
     fn auto_actions_items_and_panels_round_trip_as_text() {
         let sets = AutoActions::builtin();
         assert_eq!(AutoActions::parse(&AutoActions::write(&sets)), sets);
-        assert!(
-            recordable("canvas.flip_h") && !recordable("file.open") && !recordable("auto.play")
-        );
+        // Auto Actions keep what the registry flags as recordable.
+        let flags = |name| crate::commands::registry().flags(name);
+        assert!(flags("canvas.flip_h").has(sue_wm::Flags::RECORDABLE));
+        assert!(!flags("file.open").has(sue_wm::Flags::RECORDABLE));
+        assert!(!flags("auto.play").has(sue_wm::Flags::RECORDABLE));
         let item = Item::of(&Tool::Pen.sub_tools()[0]);
         assert_eq!(
             Item::from_line(&item.to_line()).map(|back| back.name),

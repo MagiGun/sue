@@ -14,13 +14,11 @@ use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
 use crate::studio::SuePaint;
 
-/// The group's commands that Auto Actions may record: all of them, as
-/// `extras::recordable` has it today. A pose, Flip and Reset pose the
+/// The group's commands that Auto Actions may record: all of them. A pose, Flip and Reset pose the
 /// figure the same way every time they are replayed, Register pose keeps
 /// the pose again under the next free name, and a scanner asks again for
-/// its photo. Auto Actions
-/// read it once `extras::recordable` goes (P3-14); a test holds it to the
-/// flags of the table.
+/// its photo. A test holds it to the flags of the table, which Auto
+/// Actions read.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) const RECORDABLE: [&str; 6] = [
     "figure.register_pose",
@@ -214,13 +212,6 @@ mod tests {
             assert_eq!(
                 command.flags.has(Flags::LEAVES_CANVAS),
                 LEAVES_CANVAS.contains(&name),
-                "{name}"
-            );
-            // Auto Actions record what they recorded before the flag
-            // (P3-14 drops this line with `recordable`).
-            assert_eq!(
-                crate::extras::recordable(name),
-                RECORDABLE.contains(&name),
                 "{name}"
             );
         }
