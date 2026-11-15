@@ -130,7 +130,7 @@ fn nothing_reaches_or_names_another_companys_material_site() {
         scanned.push(path);
     }
     for reached in [
-        "crates/sue-paint/src/start.rs",
+        "crates/sue-paint/src/hub.rs",
         "crates/sue-lang/locales/ja/paint.ftl",
         "bins/sue/src/legal.rs",
     ] {

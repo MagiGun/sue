@@ -20,7 +20,7 @@ fn sue_paint_strip_icons_open_their_palettes() {
         start,
     );
     frames(&mut runtime, &ctx, size, start, |_| Vec::new());
-    // A picture so the studio shows its palettes, not the start page.
+    // A picture so the studio has a canvas between its palettes.
     runtime.with_context(&mut NoTextures, start, |cx| {
         sue_paint::sample_picture(cx, 320, 240)
     });

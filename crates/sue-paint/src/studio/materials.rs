@@ -27,7 +27,7 @@ impl SuePaint {
                     .iter()
                     .position(|kind| kind.id == crate::materials::IMAGE)
                     .map_or(0, |index| index as u8 + 1);
-                self.start.materials_changed();
+                self.hub.materials_changed();
                 self.material_pick = Some(name.to_owned());
             }
             Err(error) => cx.fail(error),

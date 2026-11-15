@@ -2378,6 +2378,16 @@ switch-special-ruler-snap = Switch Special Ruler Snap
 playback-fps-shown = { $fps } fps
 grayscale = Grayscale
 go-to-canvas = Go to Canvas
+# Sue Paint without its launcher (0.0.8, P3-13): the Hub's Materials
+# place, and the Help menu's web pages.
+materials-place = Materials
+materials-menu = Materials Menu
+materials-find-again = Find Materials Again
+materials-rebuild-thumbnails = Rebuild Thumbnails
+materials-thumbnails-redrawn = The pictures of the materials are drawn again
+materials-show-folder = Show Materials Folder
+materials-choose-location = Choose Location of Materials...
+materials-use-own-folder = Use Sue Paint's Own Folder
 help-basic-tips = Basic Tips
 help-using-sue-paint-online = Using Sue Paint (Online)
 help-faq = Frequently Asked Questions

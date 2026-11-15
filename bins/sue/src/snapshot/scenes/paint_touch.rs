@@ -1,32 +1,29 @@
 //! Scenes of Sue Paint on a phone and on a tablet.
 
 use sue_rice::RiceValue;
+use sue_wm::ShellRequest;
 
 use super::super::Tour;
 use super::open_paint;
 
-/// Sue Paint on a touch screen: its start page, Simple Mode and Studio
+/// Sue Paint on a touch screen: with no canvas, Simple Mode and Studio
 /// Mode. `prefix` starts every picture's name (`20-phone`, `22-tablet`).
 pub(super) fn touch(tour: &mut Tour<'_>, prefix: &str) -> Result<(), String> {
     open_paint(tour);
     tour.shoot(&format!("{prefix}-sue-paint"))?;
-    // The start page: Projects, the New canvas page (Illustration and
-    // Comic), the materials, and Settings and Help as sheets.
+    // The New canvas page (Illustration and Comic), then the Hub's
+    // Materials place.
     for (targets, name) in [
-        (&["start/show"][..], "paint-start"),
-        (&["start/new"], "paint-new-canvas"),
-        (&["start/new/2"], "paint-new-comic"),
-        (
-            &["start/hide", "start/show", "start/materials"],
-            "paint-materials",
-        ),
-        (&["start/projects", "start/settings"], "paint-settings"),
-        (&["start/close", "start/help"], "paint-help"),
+        (&["new-canvas"][..], "paint-new-canvas"),
+        (&["new-canvas/2"], "paint-new-comic"),
     ] {
         tour.paint_go(targets);
         tour.shoot(&format!("{prefix}-{name}"))?;
     }
-    tour.paint_go(&["start/hide"]);
+    tour.paint_go(&["new-canvas/close"]);
+    tour.request(ShellRequest::HubPlace("materials".to_owned()));
+    tour.shoot(&format!("{prefix}-hub-materials"))?;
+    open_paint(tour);
     // Simple Mode: the canvas, then its "..." menu.
     tour.shoot(&format!("{prefix}-paint-simple"))?;
     tour.paint_go(&["sheet/more"]);

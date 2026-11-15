@@ -331,35 +331,31 @@ How close it is to Clip Studio Paint EX is tracked in
 [`docs/paint-parity.md`](docs/paint-parity.md), a row for every feature,
 with percentages and how to check and update it.
 
-**The start page.** On a computer, Sue Paint opens on its start page
-while no canvas is open (and File, **Start Page** brings it back). Down
-the left side:
+**With no canvas open** Sue Paint shows its workspace as it is: the menu
+bar, the palettes and, where the canvas goes, **New...** and **Open...**.
+Close the last canvas and nothing else moves; the Window menu still opens
+any palette. Your pictures and projects are in the Hub's **Files**, and
+File, **Back to the Hub** goes there (the command palette finds it too).
 
-- **Draw** (the round button) opens the picture or project you worked on
-  last, or, when there is none, the New dialog to make a canvas.
-- **Projects** shows your pictures, Sue Paint projects and unsaved work as
-  cards with pictures, newest first, or by name, as large cards or a
-  list. **All**, **Favorite** and **Work** sort them, and the buttons over
-  that list add, delete and rename labels of your own. Search by name,
-  choose a type (Picture, Project, Unsaved work), tick several cards (or
-  **Select All**) to **Move to** a label or **Remove from list** (the
-  files stay where they are). The heart makes a card a favorite and `>`
-  shows its details. Click a card to open it. These are the same lists
-  the Hub shows.
-- **Manage Materials** shows every material: Sue Paint's own tones and
-  patterns, your pictures and your brush tips, under All materials, by
-  kind, Favorite and Recently used, as large or small cards or a list.
-  With a canvas open, a click puts a material on it; `+` copies a PNG
-  picture in as a material.
+**Materials in the Hub.** Sue Paint adds a **Materials** place to the
+Hub's rail, beside Home and Files. It shows every material: Sue Paint's
+own tones and patterns, your pictures and your brush tips, under All
+materials, by kind, Favorite and Recently used, as large or small cards
+or a list. Search by name, choose Sue Paint's own or Added by you, tick
+several to make them favorites or delete the ones you added. **Add a
+material** copies a PNG picture in. With a canvas open, a click on a
+material goes back to Sue Paint and puts it on the canvas (Edit, Undo
+takes it off again); right-click and **Details** shows what it is, where
+its file is, and deletes one you added (click twice). The place's menu
+(the three dots) has **Find Materials Again**, **Rebuild Thumbnails**,
+**Show Materials Folder**, **Choose Location of Materials...** and **Use
+Sue Paint's Own Folder**. Nothing here goes online.
 
-At the top right: **Data Transfers** (two arrows) lists the files Sue
-opened, saved, exported and copied in this run, with **Clear
-Completed Transfers**; **Help** links to tips, this guide, questions, contact and
-feedback on the Sue site and GitHub; **Settings** turns dark mode on or off,
-shows or changes where your materials are kept, has a Maintenance Menu
-(draw thumbnails again, look for materials again, forget projects that are
-gone) and shows Sue Paint's version. Nothing on the start page goes
-online.
+**Help** in Sue Paint's menu bar links to the basic tips, this guide
+online, frequently asked questions, contact and feedback on the Sue
+site and GitHub. Sue Paint's colors, where its materials are kept and the pen
+pressure curve are rows of Settings, Sue Paint; Transfers is the
+Hub's two arrows in the top bar.
 
 **Saving is Clip Studio's format.** File, Save keeps a picture as a Clip
 Studio Paint `.clip` file, and saves to the same file from then on. Clip
@@ -375,24 +371,18 @@ pixel, text and vector layers come in as the pixels Clip Studio last drew
 for them, and correction, gradient and fill layers as empty layers in their
 places, since Sue cannot redo those effects yet.
 
-**On a phone or tablet** the start page is laid out for fingers. The top
-bar shows Sue Paint with Help and Settings; Projects starts with three big
-buttons, **Create new file**, **New from device storage** (a picture
-becomes a new canvas) and **Open file**, then your projects, sorted by
-label. Along the bottom: Projects, the round **Draw** button and Manage
-Materials. Help, Settings and the rest come up over the whole screen.
-
-Draw opens your last project, or the **New canvas** page when there is
-none: Illustration, Webtoon, Comic and Animation tabs, each with a row of
+**On a phone or tablet** Sue Paint with no canvas shows its canvas area
+with **New...** and **Open...**. New opens the **New canvas** page:
+Illustration, Webtoon, Comic and Animation tabs, each with a row of
 templates to swipe through (Create from image, Custom size, your screen's
 size; 690 x 20000, 1380 x 20000 and 800 x 10000 px webtoons; A4, A5 and A6
 color comics; an animation from a movie, 1:1 or 9:16). Tap one and draw.
-**Advanced Settings** opens every setting. Under the templates,
-**Continue drawing** lists your recent work, **Import** brings in a
-picture, and **See list of projects** goes back to Projects.
+**Advanced Settings** opens every setting and **Import** brings in a
+picture. Your work and the materials are in the Hub, whose tab bar along
+the bottom has Home, Files and Materials.
 
 **Simple Mode** is how Sue Paint draws on a phone or tablet at first: the
-canvas alone, with the back arrow (to the start page), Undo, Redo, your
+canvas alone, with the back arrow (to the Hub), Undo, Redo, your
 reference pictures and **...** along the top. Near the bottom are the brush
 size and opacity sliders with their numbers; the bar under them swaps
 brush and eraser, picks a pen, picks a brush and its settings, opens the
@@ -815,7 +805,7 @@ Once a canvas is open:
   screentones and patterns ready to use, your own pictures and your brush
   tips. Double-click one to put it on a new layer (tones and patterns in
   your drawing color). Edit, Register Material, Image keeps the current
-  layer there for every project. Settings (or the start page's Settings)
+  layer there for every project. Settings (or the Hub's Materials menu)
   can keep them in a folder of your choice.
 - **Camera folder** (Animation, New Animation Layer, Camera Folder): the
   layers in it are filmed by a camera that can move, zoom and turn over the

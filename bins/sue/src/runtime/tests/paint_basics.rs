@@ -1,4 +1,4 @@
-//! Sue Paint: pictures, undo, saving, the start page, every command.
+//! Sue Paint: pictures, undo, saving, every command.
 
 use super::*;
 
@@ -420,7 +420,7 @@ fn a_clip_file_opens_in_sue_paint_from_anywhere() {
             .filter(|(_, entity)| sue_model::picture::is_picture(entity))
             .count()
     };
-    // The Sue menu's Open File (and the start page's Open), Sue
+    // The Sue menu's Open File (and the empty canvas's Open), Sue
     // Paint's own Open, and a file dropped on the window.
     for (index, how) in ["open-file", "paint-open", "dropped"].iter().enumerate() {
         let path = root.join(format!("Made in Clip Studio {index}.clip"));
@@ -683,98 +683,6 @@ fn sue_paint_saves_as_a_project_or_any_picture_type() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[test]
-fn sue_paint_opens_on_its_start_page_where_draw_opens_the_last_picture_or_a_new_one() {
-    let (mut runtime, root) = runtime("paint-start");
-    let ctx = egui::Context::default();
-    let size = vec2(1440.0, 900.0);
-    let start = Instant::now();
-    let paint = AppletId::new(sue_paint::ID).unwrap();
-    let pictures = |runtime: &Runtime| {
-        runtime
-            .engine
-            .world
-            .arena
-            .iter()
-            .filter(|(_, entity)| sue_model::picture::is_picture(entity))
-            .count()
-    };
-    let click = |at: Pos2| {
-        move |frame: usize| {
-            let button = |pressed| egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: egui::Modifiers::NONE,
-            };
-            match frame {
-                0 => vec![egui::Event::PointerMoved(at)],
-                1 => vec![button(true)],
-                2 => vec![button(false)],
-                _ => Vec::new(),
-            }
-        }
-    };
-    runtime.request(ShellRequest::Open(paint.clone()), &mut NoTextures, start);
-    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
-    // The round Draw button at the top of the start page's rail.
-    let draw = runtime.shell.page_rect().min + vec2(42.0, 40.0);
-
-    // No canvas and no picture worked on lately: Draw asks for a new one.
-    frames(&mut runtime, &ctx, size, start, click(draw));
-    assert!(runtime.applets.captures_keys(), "Draw shows the New dialog");
-    assert_eq!(pictures(&runtime), 0);
-    if let Some(applet) = runtime.applets.get_mut(&paint) {
-        applet.navigate("dialog/close");
-    }
-    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
-
-    // With a picture opened lately, Draw opens it as a canvas.
-    std::fs::create_dir_all(&root).unwrap();
-    let photo = root.join("photo.png");
-    let pixels = vec![120_u8; 8 * 6 * 4];
-    std::fs::write(&photo, sue_io::encode_png_rgba(8, 6, &pixels).unwrap()).unwrap();
-    runtime.request(
-        ShellRequest::Remember {
-            path: photo.clone(),
-            saved: false,
-        },
-        &mut NoTextures,
-        start,
-    );
-    frames(&mut runtime, &ctx, size, start, click(draw));
-    assert_eq!(pictures(&runtime), 1, "Draw opened the last picture");
-    assert!(!runtime.applets.captures_keys());
-    assert_eq!(
-        runtime.shell.page().map(AppletId::as_str),
-        Some(sue_paint::ID)
-    );
-    // Opening it is a transfer the start page lists.
-    assert!(
-        runtime
-            .transfers
-            .list()
-            .iter()
-            .any(|transfer| transfer.label == "photo.png")
-    );
-    // The pages and popups open by name, File, Start Page included.
-    let applet = runtime.applets.get_mut(&paint).unwrap();
-    for target in ["start/materials", "start/help", "start/close"] {
-        assert!(applet.navigate(target), "{target}");
-    }
-    // File, Start Page is a command Sue Paint has.
-    runtime.request(
-        ShellRequest::AppletCommand {
-            applet: paint,
-            command: "file.start_page".to_owned(),
-        },
-        &mut NoTextures,
-        start,
-    );
-    assert!(runtime.shell.message().is_none_or(|(_, error)| !error));
-    let _ = std::fs::remove_dir_all(&root);
-}
-
 /// The menu bar answers a click on a title, and a menu a click on an
 /// item, each found by its text: the click helper of [`PaintDriver`].
 #[test]
@@ -783,15 +691,18 @@ fn sue_paint_opens_a_menu_by_a_click_on_its_title() {
     paint.settle(1);
     assert!(paint.rect_of("File").is_some(), "{:?}", paint.texts);
     assert!(paint.rect_of("Save As...").is_none(), "no menu is open yet");
-    assert!(paint.rect_of("Draw").is_none(), "the canvas is showing");
+    assert!(
+        paint.rect_of("No canvas is open").is_none(),
+        "the canvas is showing"
+    );
     paint.click_text("File");
     let item = paint.rect_of("Save As...").expect("the File menu is open");
     let title = paint.rect_of("File").unwrap();
     assert!(item.top() > title.bottom(), "{item:?} under {title:?}");
     // A click on one of its items runs it and closes the menu.
-    paint.click_text("Start Page");
+    paint.click_text("Back to the Hub");
     assert!(paint.rect_of("Save As...").is_none(), "the menu closed");
-    assert!(paint.rect_of("Draw").is_some(), "{:?}", paint.texts);
+    assert!(paint.runtime.shell.page().is_none(), "{:?}", paint.texts);
 }
 
 #[test]

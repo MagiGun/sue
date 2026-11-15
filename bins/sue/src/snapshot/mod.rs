@@ -342,7 +342,7 @@ impl Tour<'_> {
     }
 
     /// Sends Sue Paint to each of `targets` in turn (a tab, a dialog, a
-    /// page of its start page).
+    /// page or the Materials place).
     fn paint_go(&mut self, targets: &[&str]) {
         if let Some(applet) = self.runtime.applets.get_mut(&self.paint) {
             for target in targets {

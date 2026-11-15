@@ -7,7 +7,7 @@
 //! with it (from touch events that carry force).
 
 use egui::epaint::Vertex;
-use egui::{Color32, Id, Key, Mesh, Rect, RichText, Sense, Shape, Stroke, Ui, pos2, vec2};
+use egui::{Color32, Id, Key, Mesh, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use sue_model::picture;
 use sue_wm::{AppletContext, Theme};
 
@@ -393,6 +393,10 @@ impl SuePaint {
         }
     }
 
+    /// What the canvas area shows while no canvas is open: the empty
+    /// state of Sue's design system, with New and Open. On a touch
+    /// screen New opens the New canvas page; on the desktop the New
+    /// dialog.
     fn empty_canvas(
         &mut self,
         ui: &mut Ui,
@@ -400,27 +404,43 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let card = Rect::from_center_size(viewport.center(), vec2(320.0, 150.0));
-        let mut inner = child(ui, card, "empty-canvas");
+        let mut inner = child(ui, viewport, "empty-canvas");
         inner.multiply_opacity(self.cover);
-        inner.vertical_centered(|ui| {
-            ui.label(
-                RichText::new(tr!("no-canvas-is-open"))
-                    .size(theme.heading_size)
-                    .color(theme.text),
-            );
-            ui.label(RichText::new(tr!("pictures-you-make-here-are-saved")).color(theme.muted));
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                ui.add_space(70.0);
-                if ui.button(tr!("new-ellipsis")).clicked() {
-                    self.run("file.new", cx);
+        if !self.ready {
+            inner.disable();
+        }
+        let title = tr!("no-canvas-is-open");
+        let detail = tr!("pictures-you-make-here-are-saved");
+        let (new, open) = (tr!("new-ellipsis"), tr!("open-ellipsis"));
+        let mut run = None;
+        sue_wm::ui::empty_state("sue-paint-no-canvas", &title)
+            .icon(sue_wm::icons::Icon::Picture)
+            .detail(&detail)
+            .show_actions(&mut inner, theme, |ui| {
+                if sue_wm::ui::button("sue-paint-empty-new", &new)
+                    .primary()
+                    .icon(sue_wm::icons::Icon::FileNew)
+                    .show(ui, theme)
+                    .clicked()
+                {
+                    run = Some("new");
                 }
-                if ui.button(tr!("open-ellipsis")).clicked() {
-                    self.run("file.open", cx);
+                if sue_wm::ui::button("sue-paint-empty-open", &open)
+                    .icon(sue_wm::icons::Icon::FileOpen)
+                    .show(ui, theme)
+                    .clicked()
+                {
+                    run = Some("file.open");
                 }
             });
-        });
+        match run {
+            Some("new") if cx.view.form_factor != sue_platform::FormFactor::Desktop => {
+                self.new_canvas.category = Some(0);
+            }
+            Some("new") => self.run("file.new", cx),
+            Some(command) => self.run(command, cx),
+            None => {}
+        }
     }
 }
 
