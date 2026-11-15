@@ -1,19 +1,19 @@
 //! Simple Mode, Sue Paint's touch layout for drawing and little else: the
 //! canvas fills the page; Sue's top bar holds a back arrow, Undo and Redo,
-//! the reference pictures and a "..." menu; brush size and opacity sliders
-//! with their numbers sit near the bottom; and a bottom bar swaps brush and
-//! eraser, picks a pen, a brush, the color and the layers. Studio Mode
-//! ([`crate::studio_mode`]) is the fuller layout; the choice is
-//! `sue_paint.touch_mode` in the rice.
+//! Draw with Fingers, the reference pictures and a "..." menu; brush size
+//! and opacity sliders with their numbers sit near the bottom; and a
+//! bottom bar swaps brush and eraser, picks a pen, a brush, the color and
+//! the layers. Studio Mode ([`crate::studio_mode`]) is the fuller layout;
+//! the choice is `sue_paint.touch_mode` in the rice.
 
-use egui::{Color32, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
-use sue_wm::start::{self as page, Glyph};
-use sue_wm::{AppletContext, Theme};
+use egui::{CornerRadius, Rect, Ui, UiBuilder, Vec2, pos2};
+use sue_wm::icons::Icon;
+use sue_wm::ui::{self, Density, Space};
+use sue_wm::{AppletContext, Facts, Theme};
 
-use crate::icons::Icon;
-use crate::panels::{icon_button, tool_icon};
 use crate::phone::Sheet;
 use crate::studio::SuePaint;
+use crate::studio_mode::tool_glyph;
 use crate::tools::Tool;
 
 /// The rice key of the touch layout: `simple` or `studio`.
@@ -32,10 +32,9 @@ pub(crate) const PENS: [Tool; 9] = [
     Tool::Gradient,
 ];
 
-/// The bottom bar's height.
-const BAR: f32 = 64.0;
-/// A thumb-sized button.
-const BUTTON: f32 = 44.0;
+/// The commands at the right of Simple Mode's top bar, from the right
+/// edge in, after "..." and the reference pictures.
+const TOP_BAR: [&str; 3] = ["edit.redo", "edit.undo", "touch.finger_draws"];
 
 /// `true` when the touch layout is Studio Mode.
 pub(crate) fn studio_mode(cx: &AppletContext<'_>) -> bool {
@@ -54,9 +53,14 @@ pub(crate) fn set_mode(cx: &mut AppletContext<'_>, studio: bool) {
     }
 }
 
+/// A row of Simple Mode's "..." menu: its icon, its name, and what it
+/// does (a command, or one of the rows' own words below).
+type MoreRow = (Icon, String, &'static str);
+
 impl SuePaint {
     /// Simple Mode's row in Sue's top bar: back to the Hub at the
-    /// left; Undo, Redo, the reference pictures and "..." at the right.
+    /// left; Draw with Fingers, Undo, Redo, the reference pictures and
+    /// "..." at the right.
     pub(crate) fn simple_bar(
         &mut self,
         ui: &mut Ui,
@@ -65,67 +69,41 @@ impl SuePaint {
         theme: &Theme,
     ) -> Option<String> {
         let mut run = None;
-        let side = BUTTON.min(bar.height());
+        let side = Density::Touch.icon_button().min(bar.height());
+        let gap = theme.space(Space::S1);
         let at =
             |x: f32| Rect::from_min_size(pos2(x, bar.center().y - side / 2.0), Vec2::splat(side));
-        if page::icon_button(
-            ui,
-            at(bar.left() + 2.0),
-            Glyph::Back,
-            &tr!("start-back"),
-            false,
-            theme,
-        )
-        .clicked()
+        if ui::icon_button("sue-paint-simple-back", Icon::ArrowLeft, &tr!("start-back"))
+            .show_at(ui, at(bar.left() + gap), theme)
+            .clicked()
         {
             run = Some("file.start_page".to_owned());
             self.sheet = None;
         }
-        let right = |index: usize| bar.right() - 2.0 - (index as f32 + 1.0) * (side + 2.0);
-        if page::icon_button(
-            ui,
-            at(right(0)),
-            Glyph::More,
-            &tr!("simple-more"),
-            self.sheet == Some(Sheet::More),
-            theme,
-        )
-        .clicked()
+        let right = |index: usize| bar.right() - (index as f32 + 1.0) * (side + gap);
+        if ui::icon_button("sue-paint-simple-more", Icon::More, &tr!("simple-more"))
+            .selected(self.sheet == Some(Sheet::More))
+            .show_at(ui, at(right(0)), theme)
+            .clicked()
         {
             self.toggle_sheet(Sheet::More);
         }
-        if icon_button(
-            ui,
-            at(right(1)),
-            Icon::Reference,
-            true,
-            self.sheet == Some(Sheet::Reference),
+        if ui::icon_button(
+            "sue-paint-simple-reference",
+            Icon::PaletteSubView,
             &tr!("simple-reference"),
-            theme,
-        ) {
+        )
+        .selected(self.sheet == Some(Sheet::Reference))
+        .show_at(ui, at(right(1)), theme)
+        .clicked()
+        {
             self.toggle_sheet(Sheet::Reference);
         }
-        if icon_button(
-            ui,
-            at(right(2)),
-            Icon::Redo,
-            cx.history.can_redo(),
-            false,
-            &tr!("redo-three-finger-tap"),
-            theme,
-        ) {
-            run = Some("edit.redo".to_owned());
-        }
-        if icon_button(
-            ui,
-            at(right(3)),
-            Icon::Undo,
-            cx.history.can_undo(),
-            false,
-            &tr!("undo-two-finger-tap"),
-            theme,
-        ) {
-            run = Some("edit.undo".to_owned());
+        let facts = Facts::of(cx);
+        for (index, command) in TOP_BAR.iter().enumerate() {
+            if self.command_button(ui, at(right(index + 2)), command, &facts, theme) {
+                run = Some((*command).to_owned());
+            }
         }
         run
     }
@@ -139,65 +117,22 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let bar = Rect::from_min_max(pos2(full.left(), full.bottom() - BAR), full.max);
+        let button = Density::Touch.icon_button();
+        let pad = theme.space(Space::S5);
+        let bar = Rect::from_min_max(pos2(full.left(), full.bottom() - button - pad), full.max);
         let middle = Rect::from_min_max(full.min, pos2(full.right(), bar.top()));
         self.canvas_area(ui, middle, cx, theme);
         let mut run: Option<String> = None;
 
         // The sliders, over the bottom of the canvas.
         if self.sheet.is_none() {
-            // At most 560 points wide, in the middle on a tablet.
-            let width = (middle.width() - 24.0).min(560.0);
-            let sliders = Rect::from_center_size(
-                pos2(middle.center().x, middle.bottom() - 46.0),
-                vec2(width, 76.0),
-            );
-            ui.painter()
-                .rect_filled(sliders, 0.0, theme.panel.gamma_multiply(0.85));
-            sue_wm::cover::cover(ui.ctx(), ui.layer_id(), sliders);
-            let mut inner = ui.new_child(
-                UiBuilder::new()
-                    .max_rect(sliders.shrink2(vec2(10.0, 6.0)))
-                    .layout(egui::Layout::top_down(egui::Align::Min)),
-            );
-            let width = sliders.width() - 20.0;
-            inner.spacing_mut().slider_width = (width - 90.0).max(60.0);
-            inner.spacing_mut().interact_size.y = 30.0;
-            let tip = &mut self.toolbox.current_mut().tip;
-            inner.horizontal(|ui| {
-                ui.add(
-                    egui::Slider::new(&mut tip.size, 0.5..=1000.0)
-                        .logarithmic(true)
-                        .show_value(false),
-                )
-                .on_hover_text(tr!("size-2"));
-                ui.add(
-                    egui::DragValue::new(&mut tip.size)
-                        .range(0.5..=1000.0)
-                        .speed(0.5)
-                        .max_decimals(1),
-                );
-            });
-            let mut opacity = tip.opacity * 100.0;
-            inner.horizontal(|ui| {
-                let changed = ui
-                    .add(egui::Slider::new(&mut opacity, 0.0..=100.0).show_value(false))
-                    .changed()
-                    | ui.add(
-                        egui::DragValue::new(&mut opacity)
-                            .range(0.0..=100.0)
-                            .max_decimals(0),
-                    )
-                    .changed();
-                if changed {
-                    tip.opacity = opacity / 100.0;
-                }
-            });
+            self.simple_sliders(ui, middle, theme);
         }
 
         // The bottom bar: swap brush and eraser, pens, brushes, the color
         // and the layers.
-        ui.painter().rect_filled(bar, 0.0, theme.panel);
+        ui.painter()
+            .rect_filled(bar, CornerRadius::ZERO, theme.panel);
         sue_wm::cover::cover(ui.ctx(), ui.layer_id(), bar);
         ui.painter()
             .hline(bar.x_range(), bar.top(), theme.hairline());
@@ -205,74 +140,44 @@ impl SuePaint {
         let slot = |index: usize| {
             Rect::from_center_size(
                 pos2(bar.left() + cell * (index as f32 + 0.5), bar.center().y),
-                Vec2::splat(BUTTON),
+                Vec2::splat(button),
             )
         };
         let tool = self.toolbox.tool();
-        if icon_button(
-            ui,
-            slot(0),
-            Icon::Swap,
-            true,
-            false,
-            &tr!("simple-swap"),
-            theme,
-        ) {
-            if tool == Tool::Eraser {
-                self.toolbox.pick(self.drawing_tool);
-            } else {
-                self.drawing_tool = tool;
-                self.toolbox.pick(Tool::Eraser);
-            }
-        }
-        if icon_button(
-            ui,
-            slot(1),
-            tool_icon(tool),
-            true,
-            self.sheet == Some(Sheet::Pens),
-            &tr!("simple-pens"),
-            theme,
-        ) {
-            self.toggle_sheet(Sheet::Pens);
-        }
-        if icon_button(
-            ui,
-            slot(2),
-            Icon::Brush,
-            true,
-            self.sheet == Some(Sheet::ToolSettings),
-            &tr!("simple-brushes"),
-            theme,
-        ) {
-            self.toggle_sheet(Sheet::ToolSettings);
-        }
-        let color = slot(3);
-        let [r, g, b] = self.main;
-        ui.painter()
-            .circle_filled(color.center(), 16.0, Color32::from_rgb(r, g, b));
-        ui.painter()
-            .circle_stroke(color.center(), 17.0, theme.hairline_active());
-        if ui
-            .interact(
-                color,
-                ui.scope_id().with("sue-paint-simple-color"),
-                Sense::click(),
-            )
-            .on_hover_text(tr!("color-2"))
+        if ui::icon_button("sue-paint-simple-swap", Icon::Swap, &tr!("simple-swap"))
+            .show_at(ui, slot(0), theme)
             .clicked()
         {
-            self.toggle_sheet(Sheet::Color);
+            self.swap_eraser();
         }
-        if icon_button(
-            ui,
-            slot(4),
-            Icon::Layers,
-            true,
-            self.sheet == Some(Sheet::Layers),
-            &tr!("layers-3"),
-            theme,
-        ) {
+        if ui::icon_button(
+            "sue-paint-simple-pens",
+            tool_glyph(tool),
+            &tr!("simple-pens"),
+        )
+        .selected(self.sheet == Some(Sheet::Pens))
+        .show_at(ui, slot(1), theme)
+        .clicked()
+        {
+            self.toggle_sheet(Sheet::Pens);
+        }
+        if ui::icon_button(
+            "sue-paint-simple-brushes",
+            Icon::PaletteSubTools,
+            &tr!("simple-brushes"),
+        )
+        .selected(self.sheet == Some(Sheet::ToolSettings))
+        .show_at(ui, slot(2), theme)
+        .clicked()
+        {
+            self.toggle_sheet(Sheet::ToolSettings);
+        }
+        self.color_swatch(ui, slot(3), theme);
+        if ui::icon_button("sue-paint-simple-layers", Icon::Layers, &tr!("layers-3"))
+            .selected(self.sheet == Some(Sheet::Layers))
+            .show_at(ui, slot(4), theme)
+            .clicked()
+        {
             self.toggle_sheet(Sheet::Layers);
         }
 
@@ -284,6 +189,55 @@ impl SuePaint {
         }
     }
 
+    /// Brush size and opacity, each a slider with its number, on a card
+    /// over the bottom of `middle`: at most a phone wide, in the middle
+    /// on a tablet.
+    fn simple_sliders(&mut self, ui: &mut Ui, middle: Rect, theme: &Theme) {
+        let density = Density::Touch;
+        let pad = theme.space(Space::S5);
+        let (gap, inset) = (theme.space(Space::S2), theme.space(Space::S4));
+        let width = (middle.width() - pad * 2.0).min(ui::Tile::default_size(density).x * 3.0);
+        let height = density.control_height() * 2.0 + gap + inset * 2.0;
+        let card = Rect::from_center_size(
+            pos2(middle.center().x, middle.bottom() - pad - height / 2.0),
+            Vec2::new(width, height),
+        );
+        ui.painter()
+            .rect_filled(card, theme.corner(ui::Radius::Lg), theme.surface(1));
+        ui.painter().rect_stroke(
+            card,
+            theme.corner(ui::Radius::Lg),
+            theme.hairline(),
+            egui::StrokeKind::Inside,
+        );
+        sue_wm::cover::cover(ui.ctx(), ui.layer_id(), card);
+        let mut inner = ui.new_child(
+            UiBuilder::new()
+                .max_rect(card.shrink(inset))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        inner.spacing_mut().item_spacing.y = gap;
+        let tip = &mut self.toolbox.current_mut().tip;
+        let mut size = f64::from(tip.size);
+        let mut opacity = f64::from(tip.opacity) * 100.0;
+        let (size_name, opacity_name) = (tr!("size-2"), tr!("opacity"));
+        let px = tr!("px");
+        ui::slider("sue-paint-simple-size", &mut size, 0.5..=1000.0)
+            .label(&size_name)
+            .logarithmic()
+            .decimals(1)
+            .field(true)
+            .suffix(&px)
+            .show(&mut inner, theme);
+        ui::slider("sue-paint-simple-opacity", &mut opacity, 0.0..=100.0)
+            .label(&opacity_name)
+            .field(true)
+            .suffix("%")
+            .show(&mut inner, theme);
+        tip.size = size as f32;
+        tip.opacity = (opacity / 100.0) as f32;
+    }
+
     /// The "..." menu of Simple Mode, as rows. Returns the command a row
     /// runs.
     pub(crate) fn simple_more(
@@ -292,76 +246,71 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) -> Option<String> {
-        use sue_wm::start::{Row, Trailing};
-        let rows = [
+        let facts = Facts::of(cx);
+        let recording = self
+            .state("file.timelapse.record", &facts)
+            .checked
+            .unwrap_or(false);
+        let rows: [MoreRow; 11] = [
+            (Icon::Export, tr!("simple-export-image"), "file.export.png"),
             (
-                Row::new(
-                    Some(Glyph::External),
-                    tr!("simple-export-image"),
-                    Trailing::None,
-                ),
-                "file.export.png",
-            ),
-            (
-                Row::new(
-                    Some(Glyph::Film),
-                    tr!("export-timelapse-ellipsis"),
-                    Trailing::None,
-                ),
+                Icon::Film,
+                tr!("export-timelapse-ellipsis"),
                 "file.timelapse.export",
             ),
             (
-                Row::new(
-                    Some(Glyph::Transfers),
-                    tr!("simple-flip-view"),
-                    Trailing::None,
-                ),
-                "view.flip_h",
+                Icon::History,
+                crate::commands::registry()
+                    .label("file.timelapse.record")
+                    .unwrap_or_default(),
+                "file.timelapse.record",
             ),
+            (Icon::FlipHorizontal, tr!("simple-flip-view"), "view.flip_h"),
             (
-                Row::new(
-                    Some(Glyph::Picture),
-                    tr!("simple-see-references"),
-                    Trailing::More,
-                ),
+                Icon::PaletteSubView,
+                tr!("simple-see-references"),
                 "sheet.reference",
             ),
             (
-                Row::new(
-                    Some(Glyph::Film),
-                    tr!("simple-create-animation"),
-                    Trailing::None,
-                ),
+                Icon::TimelineNew,
+                tr!("simple-create-animation"),
                 "anim.timeline.new",
             ),
             (
-                Row::new(
-                    Some(Glyph::Settings),
-                    tr!("simple-canvas-setting"),
-                    Trailing::None,
-                ),
+                Icon::Info,
+                tr!("simple-canvas-setting"),
                 "edit.canvas_properties",
             ),
             (
-                Row::new(
-                    Some(Glyph::Wrench),
-                    tr!("preferences-ellipsis"),
-                    Trailing::None,
-                ),
+                Icon::Settings,
+                tr!("preferences-ellipsis"),
                 "file.preferences",
             ),
-            (
-                Row::new(Some(Glyph::Grid), tr!("simple-to-studio"), Trailing::None),
-                "mode.studio",
-            ),
-            (
-                Row::new(Some(Glyph::Help), tr!("start-help"), Trailing::External),
-                "help.guide",
-            ),
+            (Icon::Finger, tr!("draw-with-fingers"), "touch.finger_draws"),
+            (Icon::LayoutStyle, tr!("simple-to-studio"), "mode.studio"),
+            (Icon::Help, tr!("start-help"), "help.guide"),
         ];
-        let shown: Vec<Row> = rows.iter().map(|(row, _)| row.clone()).collect();
-        let chosen = page::group(ui, &shown, theme)?;
-        match rows[chosen].1 {
+        let mut chosen = None;
+        for (icon, title, what) in &rows {
+            let checked = match *what {
+                "file.timelapse.record" => Some(recording),
+                "touch.finger_draws" => self.state(what, &facts).checked,
+                _ => None,
+            };
+            // A switch says whether it is on; a command, its keys.
+            let note = match checked {
+                Some(true) => tr!("on"),
+                Some(false) => tr!("off"),
+                None => self.keys_of(what),
+            };
+            let row = ui::list_row(("sue-paint-simple-more", *what), title)
+                .icon(*icon)
+                .note(&note);
+            if row.show(ui, theme).response.clicked() {
+                chosen = Some(*what);
+            }
+        }
+        match chosen? {
             "sheet.reference" => {
                 self.sheet = Some(Sheet::Reference);
                 None

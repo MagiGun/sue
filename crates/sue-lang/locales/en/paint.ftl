@@ -2519,3 +2519,10 @@ ruler-show-in-same-folder = Show in same folder
 ruler-show-when-editing-target = Show only when editing target
 moves-picture-across-stroke = Moves the picture sideways across the stroke
 copies-picture-from-source = Copies the picture from where Alt and click set, as you paint
+
+## Touch modes (0.0.8, P4-10): Draw with Fingers and the edge key bar
+draw-with-fingers = Draw with Fingers
+edge-key-bar = Edge Key Bar
+edge-key-bar-pin = Pin the key bar beside the canvas
+edge-key-bar-hide = Put the key bar away
+edge-key-bar-choose = Choose what T1 to T7 do

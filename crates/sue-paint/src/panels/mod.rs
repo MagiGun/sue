@@ -32,7 +32,7 @@ use crate::studio::SuePaint;
 
 pub(crate) use command_bar::BAR_GROUPS;
 pub(crate) use material::material_thumb;
-pub(crate) use tool::{slot_icon, tool_icon};
+pub(crate) use tool::{slot_icon, slot_is_liquify};
 
 /// A child `Ui` confined to `rect`.
 pub(crate) fn child(ui: &mut Ui, rect: Rect, salt: &str) -> Ui {

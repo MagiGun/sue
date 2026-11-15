@@ -57,10 +57,8 @@ pub enum Icon {
     NewLayer,
     NewVector,
     NewFolder,
-    Duplicate,
     MergeDown,
     Delete,
-    Paper,
     Swap,
     Play,
     Stop,
@@ -545,13 +543,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             }
         }
         Icon::New | Icon::NewLayer => page(true),
-        Icon::Paper => {
-            painter.rect_filled(
-                Rect::from_min_max(p(0.22, 0.14), p(0.78, 0.86)),
-                side * 0.03,
-                color,
-            );
-        }
         Icon::NewVector => {
             page(false);
             curve(0.5, 0.75, 0.16, 200.0, 340.0);
@@ -682,10 +673,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Mask => {
             boxed(Rect::from_min_max(p(0.16, 0.16), p(0.84, 0.84)), 0.0);
             dot(0.5, 0.5, 0.2);
-        }
-        Icon::Duplicate => {
-            boxed(Rect::from_min_max(p(0.14, 0.14), p(0.62, 0.62)), 0.0);
-            boxed(Rect::from_min_max(p(0.38, 0.38), p(0.86, 0.86)), 0.0);
         }
         Icon::MergeDown => {
             line(&[(0.5, 0.12), (0.5, 0.6)]);

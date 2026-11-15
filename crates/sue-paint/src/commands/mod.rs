@@ -26,6 +26,7 @@ mod layer;
 mod select;
 mod story;
 mod tool;
+mod touch;
 mod view;
 mod window;
 
@@ -60,6 +61,7 @@ pub fn registry() -> &'static CommandRegistry<SuePaint> {
         registry.add(canvas::COMMANDS);
         registry.add(figure::COMMANDS);
         registry.add(tool::COMMANDS);
+        registry.add(touch::COMMANDS);
         registry
     })
 }

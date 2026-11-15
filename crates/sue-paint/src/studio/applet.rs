@@ -224,6 +224,7 @@ impl SueApplet for SuePaint {
                 )
             },
         ));
+        declarations.extend(crate::studio_mode::declarations());
         declarations.extend(Self::custom_colors());
         declarations.extend(sue_wm::shortcuts::declarations(
             KEYS_SECTION,
@@ -758,7 +759,7 @@ impl SueApplet for SuePaint {
             }
             "sheet/close" => {
                 self.sheet = None;
-                self.touch.keys = false;
+                self.touch.bar = crate::studio_mode::KeyBar::Hidden;
                 true
             }
             "sheet/menu" => {
@@ -766,7 +767,27 @@ impl SueApplet for SuePaint {
                 true
             }
             "keys/open" => {
-                self.touch.keys = true;
+                self.touch.bar = crate::studio_mode::KeyBar::Pinned;
+                true
+            }
+            "keys/peek" => {
+                self.touch.bar = crate::studio_mode::KeyBar::Peek;
+                true
+            }
+            "keys/left" => {
+                self.touch.edge = crate::studio_mode::Edge::Left;
+                true
+            }
+            "keys/right" => {
+                self.touch.edge = crate::studio_mode::Edge::Right;
+                true
+            }
+            "sheet/tools" => {
+                self.sheet = Some(crate::phone::Sheet::Tools);
+                true
+            }
+            "sheet/layers" => {
+                self.sheet = Some(crate::phone::Sheet::Layers);
                 true
             }
             "dialog/close" => {

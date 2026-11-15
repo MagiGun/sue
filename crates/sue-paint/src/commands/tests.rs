@@ -377,6 +377,8 @@ fn the_palette_offers_what_it_offered() {
             "tool.pick.ruler",
             "tool.pick.text",
             "tool.pick.balloon",
+            "touch.finger_draws",
+            "touch.key_bar",
         ]
     );
     let new = &palette[1];
