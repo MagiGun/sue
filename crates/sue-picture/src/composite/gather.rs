@@ -398,6 +398,7 @@ fn isolated(arena: &Arena, folder: EntityId) -> bool {
 fn passed_through<'a>(
     arena: &'a Arena,
     id: EntityId,
+    view: Option<&FrameView>,
     style: &mut LayerStyle,
     outer: &mut Vec<(&'a RasterTile2D, [i64; 2])>,
 ) {
@@ -406,7 +407,10 @@ fn passed_through<'a>(
         let Ok(entity) = arena.get_by_id(folder) else {
             continue;
         };
-        let around = LayerStyle::of(entity);
+        let mut around = LayerStyle::of(entity);
+        if let Some(opacity) = view.and_then(|view| view.opacity_of(folder)) {
+            around.opacity = opacity;
+        }
         style.visible &= around.visible;
         if !through {
             continue;
@@ -451,8 +455,11 @@ fn gather_layer<'a>(
     how: &Gathering<'_>,
 ) -> Option<Layer<'a>> {
     let mut style = LayerStyle::of(entity);
+    if let Some(opacity) = how.view.and_then(|view| view.opacity_of(entity.id())) {
+        style.opacity = opacity;
+    }
     let mut outer = Vec::new();
-    passed_through(arena, entity.id(), &mut style, &mut outer);
+    passed_through(arena, entity.id(), how.view, &mut style, &mut outer);
     let mut tint = None;
     let mut placed = None;
     if let Some(view) = how.view
@@ -515,18 +522,9 @@ fn gather_layer<'a>(
         Some((mask, at)) => (Some(mask), at),
         None => (None, style.offset),
     };
-    // Seen through the innermost camera folder around it.
-    let warp = placed.or_else(|| {
-        let view = how.view?;
-        crate::doc::folders_around(arena, entity.id())
-            .into_iter()
-            .find_map(|folder| {
-                view.cameras
-                    .iter()
-                    .find(|(id, _)| *id == folder)
-                    .map(|(_, map)| *map)
-            })
-    });
+    // Seen through the camera and keyed folders around it and its own
+    // keyframes.
+    let warp = placed.or_else(|| how.view?.warp(arena, entity.id()));
     let effects = if matches!(source, Source::Raster { .. }) {
         let mut effects = crate::effects::Effects::of(entity, how.dpi);
         if effects.color.is_none() {
@@ -562,8 +560,11 @@ fn gather_group<'a>(
     let mut style = LayerStyle::of(entity);
     style.blend = crate::doc::folder_blend(arena, folder);
     style.offset = [0, 0];
+    if let Some(opacity) = how.view.and_then(|view| view.opacity_of(folder)) {
+        style.opacity = opacity;
+    }
     let mut outer = Vec::new();
-    passed_through(arena, folder, &mut style, &mut outer);
+    passed_through(arena, folder, how.view, &mut style, &mut outer);
     if let Some(view) = how.view
         && view.hidden.contains(&folder)
     {

@@ -21,6 +21,88 @@ pub struct FrameView {
     /// Camera folders and what each canvas point sees through them (an
     /// affine map, `camera::Camera::map`).
     pub cameras: Vec<(EntityId, [f32; 6])>,
+    /// Layers and folders moved, turned or scaled by their keyframes at
+    /// this frame: what each canvas point sees on them (an affine map, as
+    /// for cameras).
+    pub moves: Vec<(EntityId, [f32; 6])>,
+    /// Layers and folders whose opacity their keyframes set at this frame
+    /// (0 to 1), in place of their own.
+    pub opacities: Vec<(EntityId, f32)>,
+}
+
+/// `outer` followed by `inner`: the map that sees through `outer` first,
+/// then through `inner` (each `[a, b, c, d, tx, ty]`, a point `(x, y)`
+/// seeing `(a x + b y + tx, c x + d y + ty)`).
+#[must_use]
+pub fn compose(outer: [f32; 6], inner: [f32; 6]) -> [f32; 6] {
+    let [a0, a1, a2, a3, a4, a5] = inner;
+    let [b0, b1, b2, b3, b4, b5] = outer;
+    [
+        a0 * b0 + a1 * b2,
+        a0 * b1 + a1 * b3,
+        a2 * b0 + a3 * b2,
+        a2 * b1 + a3 * b3,
+        a0 * b4 + a1 * b5 + a4,
+        a2 * b4 + a3 * b5 + a5,
+    ]
+}
+
+impl FrameView {
+    /// The opacity the keyframes give `id` at this frame, if they set one.
+    #[must_use]
+    pub fn opacity_of(&self, id: EntityId) -> Option<f32> {
+        self.opacities
+            .iter()
+            .find(|(layer, _)| *layer == id)
+            .map(|(_, opacity)| *opacity)
+    }
+
+    /// What each canvas point sees on layer `id`: through every camera
+    /// folder and keyed folder around it, outermost first, then through
+    /// its own keyframes. `None` when nothing moves it.
+    #[must_use]
+    pub fn warp(&self, arena: &Arena, id: EntityId) -> Option<[f32; 6]> {
+        if self.cameras.is_empty() && self.moves.is_empty() {
+            return None;
+        }
+        let of = |layer: EntityId| {
+            let camera = self
+                .cameras
+                .iter()
+                .find(|(folder, _)| *folder == layer)
+                .map(|(_, map)| *map);
+            let moved = self
+                .moves
+                .iter()
+                .find(|(moved, _)| *moved == layer)
+                .map(|(_, map)| *map);
+            match (camera, moved) {
+                (Some(camera), Some(moved)) => Some(compose(camera, moved)),
+                (camera, moved) => camera.or(moved),
+            }
+        };
+        let mut out: Option<[f32; 6]> = None;
+        let mut around = crate::doc::folders_around(arena, id);
+        around.reverse();
+        around.push(id);
+        for layer in around {
+            if let Some(map) = of(layer) {
+                out = Some(match out {
+                    Some(outer) => compose(outer, map),
+                    None => map,
+                });
+            }
+        }
+        out
+    }
+
+    /// The same with every layer in `ids` hidden as well (a tool's own
+    /// exclusions, as Fill and Auto Select take them).
+    #[must_use]
+    pub fn hiding(mut self, ids: impl IntoIterator<Item = EntityId>) -> Self {
+        self.hidden.extend(ids);
+        self
+    }
 }
 
 /// A hidden cel shown anyway: in a color, faintly.
@@ -83,6 +165,12 @@ pub fn flatten_view(
 }
 
 impl Compositor {
+    /// How the layers show now: the animation frame's view, if one is set.
+    #[must_use]
+    pub fn view(&self) -> Option<&FrameView> {
+        self.view.as_ref()
+    }
+
     /// Shows the layers as animation frame `view` has them (`None`: all
     /// of them); a change is composited on the next [`Self::sync`].
     pub fn set_view(&mut self, view: Option<FrameView>) {

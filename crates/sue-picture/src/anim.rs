@@ -12,6 +12,23 @@
 //! cels before (blue) and after (green) faintly, as its settings say
 //! ([`Onion`]), and the light table shows the layers registered to the cel
 //! being drawn ([`LIGHT_TABLE`]).
+//!
+//! The parts: [`cels`] (folder cels, new cels, names in order),
+//! [`motion`] (layer keyframes), [`editing`] (selection, clipboard,
+//! clips, insert and delete frames, track labels) and [`setup`] (a track
+//! for every layer, named timelines, settings, labels, playback and the
+//! output frame). `docs/animation-data.md` describes the data.
+
+pub mod cels;
+pub mod editing;
+pub mod motion;
+pub mod setup;
+
+#[cfg(test)]
+mod model_tests;
+
+pub use cels::{new_cel, rename_in_layer_order, rename_in_timeline_order};
+pub use setup::frame_view;
 
 use std::collections::HashSet;
 
@@ -466,7 +483,7 @@ pub fn view(sequence: &Sequence, frame: u32, onion: Option<&Onion>) -> FrameView
     FrameView {
         hidden: cels.difference(&shown).copied().collect(),
         onion: faint,
-        cameras: Vec::new(),
+        ..FrameView::default()
     }
 }
 
@@ -549,31 +566,12 @@ pub fn unassign(sequence: &Sequence, track: usize, frame: u32, length: u32) -> S
     out
 }
 
-/// Every folder's keys after `frame` moved `by` frames (Insert Frame and
+/// Every track's keys after `frame` moved `by` frames (Insert Frame and
 /// Delete Frame); a key moved onto or before `frame` by a deletion goes.
+/// [`editing::shift_tracks`] moves the picked tracks only.
 #[must_use]
 pub fn shift(sequence: &Sequence, frame: u32, by: i64, length: u32) -> Sequence {
-    let mut out = sequence.clone();
-    let rate = out.rate;
-    for index in folders(sequence) {
-        let old = &sequence.tracks[index];
-        let mut moved = Track::new(old.name.clone(), old.kind.clone());
-        moved.properties = old.properties.clone();
-        for clip in old.clips() {
-            let at = clip.start.frame(rate);
-            let mut clip = clip.clone();
-            if at > i64::from(frame) {
-                let to = at + by;
-                if to <= i64::from(frame) {
-                    continue;
-                }
-                clip.start = Time::from_frames(to, rate);
-            }
-            moved.insert(clip);
-        }
-        out.tracks[index] = tidy(&moved, rate, length);
-    }
-    out
+    editing::shift_tracks(sequence, frame, by, length, None)
 }
 
 /// `sequence` at `rate` instead, every key on the frame it was on and
@@ -690,6 +688,19 @@ pub fn without_track(sequence: &Sequence, track: usize) -> Sequence {
 /// `None` when there is nothing to hear.
 #[must_use]
 pub fn mix(arena: &Arena, sequence: &Sequence) -> Option<sue_core::PCMFloat1D> {
+    let out = mixed(arena, sequence, 0, None)?;
+    sue_core::PCMFloat1D::new(MIX_RATE, 2, out).ok()
+}
+
+/// The stereo samples of [`mix`] from sample frame `from` on, `count` of
+/// them (`None`: to the end), mixed for that stretch only; `None` when
+/// the timeline has no sound.
+fn mixed(
+    arena: &Arena,
+    sequence: &Sequence,
+    from: usize,
+    count: Option<usize>,
+) -> Option<Vec<f32>> {
     let mut placed = Vec::new();
     for index in audio_tracks(sequence) {
         let track = &sequence.tracks[index];
@@ -706,26 +717,27 @@ pub fn mix(arena: &Arena, sequence: &Sequence) -> Option<sue_core::PCMFloat1D> {
                 continue;
             };
             let start = clip.start.seconds().max(0.0);
-            placed.push((pcm, start));
+            placed.push((pcm, start, volume_of(clip)));
         }
     }
     let frames = placed
         .iter()
-        .map(|(pcm, start)| {
+        .map(|(pcm, start, _)| {
             (start * f64::from(MIX_RATE)) as usize
                 + (pcm.frames() as f64 * f64::from(MIX_RATE) / f64::from(pcm.sample_rate().max(1)))
                     as usize
         })
         .max()?;
-    let mut out = vec![0.0_f32; frames * 2];
-    for (pcm, start) in placed {
+    let end = count.map_or(frames, |count| from.saturating_add(count).min(frames));
+    let mut out = vec![0.0_f32; end.saturating_sub(from) * 2];
+    for (pcm, start, volume) in placed {
         let ratio = f64::from(pcm.sample_rate().max(1)) / f64::from(MIX_RATE);
         let offset = (start * f64::from(MIX_RATE)) as usize;
         let channels = usize::from(pcm.channels().max(1));
         let samples = pcm.samples();
         let last = pcm.frames().saturating_sub(1);
-        for frame in 0..frames.saturating_sub(offset) {
-            let t = frame as f64 * ratio;
+        for at_frame in offset.max(from)..end {
+            let t = (at_frame - offset) as f64 * ratio;
             if t >= last as f64 {
                 break;
             }
@@ -733,14 +745,83 @@ pub fn mix(arena: &Arena, sequence: &Sequence) -> Option<sue_core::PCMFloat1D> {
             let at = |i: usize, channel: usize| samples[i * channels + channel.min(channels - 1)];
             for channel in 0..2 {
                 let value = at(i0, channel) + (at(i0 + 1, channel) - at(i0, channel)) * mixing;
-                out[(offset + frame) * 2 + channel] += value;
+                out[(at_frame - from) * 2 + channel] += value * volume;
             }
         }
     }
     for value in &mut out {
         *value = value.clamp(-1.0, 1.0);
     }
-    sue_core::PCMFloat1D::new(MIX_RATE, 2, out).ok()
+    Some(out)
+}
+
+/// How loud an audio clip plays (a clip property, 0 to 2, 1 as it is).
+pub const VOLUME: &str = "audio.volume";
+
+/// How loud `clip` plays.
+#[must_use]
+pub fn volume_of(clip: &Clip) -> f32 {
+    clip.properties
+        .get(VOLUME)
+        .and_then(Value::as_f64)
+        .map_or(1.0, |volume| volume.clamp(0.0, 2.0) as f32)
+}
+
+/// `sequence` with the clips of audio track `track` playing at `volume`
+/// (Audio clip settings, Volume).
+#[must_use]
+pub fn with_volume(sequence: &Sequence, track: usize, volume: f32) -> Sequence {
+    let mut out = sequence.clone();
+    if let Some(old) = sequence
+        .tracks
+        .get(track)
+        .filter(|track| track.kind == AUDIO)
+    {
+        let mut changed = old.clone();
+        while changed.remove(0).is_some() {}
+        for clip in old.clips() {
+            let mut clip = clip.clone();
+            if (volume - 1.0).abs() < 1e-6 {
+                clip.properties.remove(VOLUME);
+            } else {
+                clip.properties
+                    .set(VOLUME, f64::from(volume.clamp(0.0, 2.0)));
+            }
+            changed.insert(clip);
+        }
+        out.tracks[track] = changed;
+    }
+    out
+}
+
+/// One frame of the timeline's sound from `frame` on (stereo at
+/// [`MIX_RATE`]), heard while the playhead is dragged (Audio scrubbing);
+/// `None` when nothing sounds there.
+#[must_use]
+pub fn scrub(arena: &Arena, sequence: &Sequence, frame: u32) -> Option<sue_core::PCMFloat1D> {
+    let per_frame = (f64::from(MIX_RATE) / fps(sequence).max(1.0)).round() as usize;
+    let from = (Time::from_frames(i64::from(frame), sequence.rate)
+        .seconds()
+        .max(0.0)
+        * f64::from(MIX_RATE)) as usize;
+    // Only this frame's stretch is mixed: a drag asks for many.
+    let slice = mixed(arena, sequence, from, Some(per_frame))?;
+    if slice.iter().all(|sample| *sample == 0.0) {
+        return None;
+    }
+    sue_core::PCMFloat1D::new(MIX_RATE, 2, slice).ok()
+}
+
+/// The name a new animation folder of `picture` takes: `Folder` and the
+/// next number, counting every layer folder, as Clip Studio Paint names
+/// it.
+#[must_use]
+pub fn folder_name(arena: &Arena, picture: EntityId) -> String {
+    let count = crate::doc::layers(arena, picture)
+        .iter()
+        .filter(|info| crate::doc::is_folder(arena, info.id))
+        .count();
+    tr!("folder", value = count + 1)
 }
 
 /// `sequence` with a new animation folder named `name`.
@@ -755,7 +836,7 @@ pub fn with_folder(sequence: &Sequence, name: &str) -> Sequence {
 /// with one animation folder, a layer folder on top of its layers.
 #[must_use]
 pub fn new_timeline(arena: &Arena, picture: EntityId, fps: u32, length: u32) -> Edit {
-    let name = tr!("animation-folder-1");
+    let name = folder_name(arena, picture);
     let (spawn, folder) = spawn_folder(&name, crate::doc::key_above(arena, picture, None), picture);
     let sequence = with_linked_folder(
         &Sequence::new(Rate::new(fps.max(1), 1), MIX_RATE),
@@ -1024,15 +1105,13 @@ pub fn cel_folder(arena: &Arena, layer: EntityId) -> Option<EntityId> {
 }
 
 /// The cels of the animation folder `folder`: the layers right in it,
-/// bottom first.
+/// folders too (a folder cel), bottom first.
 #[must_use]
 pub fn cels(arena: &Arena, picture: EntityId, folder: EntityId) -> Vec<EntityId> {
     crate::doc::layers(arena, picture)
         .into_iter()
         .map(|info| info.id)
-        .filter(|id| {
-            crate::doc::folder_of(arena, *id) == Some(folder) && !crate::doc::is_folder(arena, *id)
-        })
+        .filter(|id| crate::doc::folder_of(arena, *id) == Some(folder))
         .collect()
 }
 
@@ -1131,7 +1210,7 @@ pub fn add_folder(
         Some(sequence) => (sequence.clone(), false),
         None => (Sequence::new(Rate::new(24, 1), MIX_RATE), true),
     };
-    let name = tr!("animation-folder", value = folders(&sequence).len() + 1);
+    let name = folder_name(arena, picture);
     let order = crate::doc::key_above(arena, picture, outside_animation(arena, near));
     let (spawn, folder) = spawn_folder(&name, order, picture);
     let sequence = with_linked_folder(&sequence, &name, folder);
@@ -1143,50 +1222,6 @@ pub fn add_folder(
         edit = edit.then(SetProperty::new(picture, LENGTH, 24_i64));
     }
     (edit, folder, track)
-}
-
-/// The edit that makes a new cel in the animation folder `folder`, as its
-/// top layer, and shows it from `frame` on the folder's track (New
-/// Animation Cel). Returns the cel.
-///
-/// # Errors
-/// If the picture has no timeline, `folder` has no track, or the picture
-/// has no size.
-pub fn new_cel(
-    arena: &Arena,
-    picture: EntityId,
-    folder: EntityId,
-    frame: u32,
-) -> Result<(Edit, EntityId), String> {
-    let sequence = timeline(arena, picture)
-        .ok_or_else(|| tr!("make-timeline-first-animation-timeline-new"))?;
-    let track = track_of(sequence, folder).ok_or_else(|| tr!("not-an-animation-folder"))?;
-    let existing = cels(arena, picture, folder);
-    let number = existing
-        .iter()
-        .filter_map(|cel| {
-            arena
-                .get_by_id(*cel)
-                .ok()?
-                .name()
-                .trim()
-                .parse::<u32>()
-                .ok()
-        })
-        .max()
-        .unwrap_or(0)
-        .max(existing.len() as u32)
-        + 1;
-    let order = crate::doc::key_below(arena, picture, folder);
-    let (spawn, cel) =
-        crate::doc::add_raster_layer_at(arena, picture, order, number.to_string(), None)?;
-    let length = length(arena, picture);
-    let sequence = assign(sequence, track, frame, Some(cel), picture, length);
-    let edit = Edit::new(tr!("new-animation-cel"))
-        .then(spawn)
-        .then(Relate::new(Relation::new(folder, MEMBER, cel)))
-        .then(SetExtension::set(picture, sequence));
-    Ok((edit, cel))
 }
 
 /// The edit that puts `layer` in `folder` (`None`: in no folder), as
@@ -1273,10 +1308,23 @@ pub fn drop_layer(
 #[must_use]
 pub fn delete_folder(arena: &Arena, picture: EntityId, folder: EntityId) -> Edit {
     let mut edit = crate::doc::delete_folder(arena, picture, folder);
-    if let Some(sequence) = timeline(arena, picture)
-        && let Some(track) = track_of(sequence, folder)
-    {
-        edit = edit.then(SetExtension::set(picture, without_track(sequence, track)));
+    if let Some(sequence) = timeline(arena, picture) {
+        // Every track standing for the folder or a layer in it goes too
+        // (a cel track, a camera track, a layer track).
+        let mut gone = crate::doc::members(arena, picture, folder);
+        gone.push(folder);
+        let mut out = sequence.clone();
+        out.tracks.retain(|track| {
+            let stands_for = setup::track_layer(track).or_else(|| {
+                (track.kind == CELS || track.kind == setup::CAMERA)
+                    .then(|| track_folder(track))
+                    .flatten()
+            });
+            stands_for.is_none_or(|id| !gone.contains(&id))
+        });
+        if out != *sequence {
+            edit = edit.then(SetExtension::set(picture, out));
+        }
     }
     edit
 }
@@ -1371,7 +1419,7 @@ pub fn view_in(
                 .filter(|cel| Some(*cel) != now),
         );
     }
-    out
+    cels::whole_folders(arena, picture, out)
 }
 
 #[cfg(test)]
