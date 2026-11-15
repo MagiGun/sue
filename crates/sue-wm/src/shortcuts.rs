@@ -679,6 +679,29 @@ impl Bound {
         }
     }
 
+    /// The first chord that runs `command` of `table` now, as people read
+    /// it (its default until the first refresh), for a tooltip; empty when
+    /// it has none.
+    #[must_use]
+    pub fn first_chord(&self, table: &[Shortcut], command: &str) -> String {
+        let Some(at) = table
+            .iter()
+            .position(|shortcut| shortcut.command == command)
+        else {
+            return String::new();
+        };
+        let chords = if self.revision.is_some() && self.rows.len() == table.len() {
+            &self.rows[at]
+        } else {
+            &table[at].chords
+        };
+        chords
+            .chords()
+            .first()
+            .map(ToString::to_string)
+            .unwrap_or_default()
+    }
+
     /// As [`take`], reading the settings only when they changed since the
     /// last [`Self::refresh`]: what a studio with a row for every command
     /// calls each frame.
@@ -1319,9 +1342,17 @@ mod tests {
             bound.take(&mut input, &rice, "demo_keys", &table),
             ["view.grid"]
         );
+        assert_eq!(
+            bound.first_chord(&table, "view.grid"),
+            "",
+            "not refreshed yet"
+        );
         bound.refresh(&mut menus, &rice, "demo_keys", &table);
         assert_eq!(shown(&menus, "view.grid"), "F7");
         assert_eq!(bound.chords(&table).len(), 3);
+        // A tooltip reads the key as set now.
+        assert_eq!(bound.first_chord(&table, "view.grid"), "F7");
+        assert_eq!(bound.first_chord(&table, "no.such.command"), "");
         input
             .events
             .push(press(egui::Key::F7, egui::Modifiers::NONE));
