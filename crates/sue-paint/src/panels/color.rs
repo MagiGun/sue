@@ -60,6 +60,34 @@ fn slider_row(
 }
 
 impl SuePaint {
+    /// Opens Color Settings on the main or the sub color when its circle,
+    /// drawn by `color_circles` with the main one at `main_at` (in the
+    /// tool strip and under the Color Wheel), was double clicked. The
+    /// circles are found by the ids `color_circles` gives them.
+    pub(super) fn color_circles_double_click(&mut self, ui: &Ui, main_at: egui::Pos2) {
+        for (sub, tip) in [(false, tr!("main-color")), (true, tr!("sub-color"))] {
+            let id = Id::unique((
+                "sue-paint-color-circle",
+                tip.as_str(),
+                main_at.x as i32,
+                main_at.y as i32,
+            ));
+            let Some(response) = ui.ctx().read_response(id) else {
+                continue;
+            };
+            // Named, so assistive technology (and a test) finds it.
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &tip));
+            if response.double_clicked() {
+                self.open_color_settings(if sub {
+                    crate::dialogs::ColorTarget::Sub
+                } else {
+                    crate::dialogs::ColorTarget::Main
+                });
+                return;
+            }
+        }
+    }
+
     pub(crate) fn color_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
         use crate::dock::Palette;
         let tabs = [
