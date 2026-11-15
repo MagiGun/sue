@@ -30,9 +30,13 @@ pub fn whole_folders(arena: &Arena, picture: EntityId, mut view: FrameView) -> F
         match view.onion.iter().find(|skin| skin.cel == folder).copied() {
             Some(skin) => {
                 // Shown faintly: its layers each take the skin, and the
-                // folder itself stays so a folder of its own still shows.
+                // folder itself and the folders in it stay, so a folder
+                // that is not Through still lays its faint layers on.
                 view.hidden.remove(&folder);
                 for member in members {
+                    if crate::doc::is_folder(arena, member) {
+                        continue;
+                    }
                     view.hidden.insert(member);
                     if !view.onion.iter().any(|known| known.cel == member) {
                         view.onion.push(Skin {

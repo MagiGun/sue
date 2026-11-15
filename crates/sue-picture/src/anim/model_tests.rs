@@ -194,6 +194,75 @@ fn a_folder_cel_shows_on_its_frames_only_and_as_a_whole() {
 }
 
 #[test]
+fn onion_skin_shows_a_folder_inside_a_folder_cel() {
+    let (mut arena, mut history, picture, folder) = animated(8, 6);
+    // An empty cel on frame 0; on frame 3 a folder cel holding a Normal
+    // folder that holds a blue layer.
+    let (edit, plain) = new_cel(&arena, picture, folder, 0).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let (made, cel) = crate::doc::new_folder(&arena, picture, Some(plain), false);
+    history.apply(&mut arena, made).unwrap();
+    let (spawn, inside) =
+        crate::doc::add_raster_layer(&arena, picture, Some(cel), "Inner".into(), None).unwrap();
+    history
+        .apply(&mut arena, Edit::new("Inner").then(spawn))
+        .unwrap();
+    let (made, inner) = crate::doc::new_folder(&arena, picture, Some(inside), true);
+    history.apply(&mut arena, made).unwrap();
+    history
+        .apply(
+            &mut arena,
+            Edit::new("Normal").then(sue_core::txn::SetProperty::new(
+                inner,
+                sue_model::picture::BLEND,
+                "normal",
+            )),
+        )
+        .unwrap();
+    assert_eq!(crate::doc::folder_of(&arena, inside), Some(inner));
+    assert_eq!(crate::doc::folder_of(&arena, inner), Some(cel));
+    fill(&mut arena, inside, [0, 0, 255, 255]);
+    let sequence = super::timeline(&arena, picture).unwrap().clone();
+    let shown = assign(&sequence, 0, 3, Some(cel), picture, 6);
+    history
+        .apply(&mut arena, set(picture, shown, "Specify cels"))
+        .unwrap();
+    assert_eq!(seen(&arena, picture, 0, [1, 1]), [255, 255, 255]);
+    assert_eq!(seen(&arena, picture, 3, [1, 1]), [0, 0, 255]);
+    let onion = Onion {
+        before: 0,
+        after: 3,
+        mode: 0,
+        opacity: Some((0.5, 0.0)),
+        ..Onion::default()
+    };
+    // The frame view, and the cels' own view as the canvas takes it.
+    let sequence = super::timeline(&arena, picture).unwrap().clone();
+    for view in [
+        frame_view(&arena, picture, 0, Some(&onion), None).unwrap(),
+        view_in(&arena, picture, &sequence, 0, Some(&onion)),
+    ] {
+        assert!(!view.hidden.contains(&inner), "the inner folder stays");
+        let flat = flatten_view(
+            &arena,
+            picture,
+            RenderOptions {
+                paper: true,
+                drafts: false,
+            },
+            Some(&view),
+        )
+        .unwrap();
+        let pixel = &flat.bytes().unwrap()[(8 + 1) * 4..(8 + 1) * 4 + 3];
+        assert_ne!(
+            pixel,
+            [255, 255, 255],
+            "the folder cel's inner folder shows faintly"
+        );
+    }
+}
+
+#[test]
 fn a_new_cel_after_a_folder_cel_copies_its_folders_and_layers_empty() {
     let (mut arena, mut history, picture, folder) = animated(8, 6);
     let (edit, first) = new_cel(&arena, picture, folder, 0).unwrap();
