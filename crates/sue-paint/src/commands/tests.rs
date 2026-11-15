@@ -230,9 +230,9 @@ fn every_command_can_be_reached() {
             "figure.flip",
             "figure.reset",
             "figure.preset.",
+            "figure.object.angle.",
             "auto.run.",
             "subtool.",
-            "figure.object.angle.",
         ]
     );
 }
@@ -462,6 +462,7 @@ fn the_palette_offers_what_it_offered() {
             "anim.audio.settings",
             "anim.audio.mute",
             "anim.audio.delete",
+            "anim.export.audio",
             "window.interface.auto",
             "window.interface.desktop",
             "window.interface.tablet",
