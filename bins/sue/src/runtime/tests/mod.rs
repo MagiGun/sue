@@ -48,6 +48,7 @@ mod paint_touch;
 mod paint_vector_3d;
 mod paint_view;
 mod paint_window;
+mod rich_text;
 mod save;
 mod settings;
 mod settings_screens;

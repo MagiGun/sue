@@ -584,6 +584,15 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Writer on a phone or a tablet: the buttons of the top bar draw
   Sue's icons, so an icon pack changes them too, and pressing and
   holding one shows its name and its keys.
+- The rich text editor (Sue Writer and every studio that writes) marks
+  its pages in the theme's colors: the selection and its handles, the
+  wave under a misspelled word, tracked insertions and deletions, the
+  words a comment or a note is on, and the shadow under a page. Each is
+  made to read on the paper shown, light or dark. In Sue's monochrome
+  themes a tracked insertion is underlined in the text color and a
+  deletion struck through in the softer one. The spelling menu is Sue's
+  own menu, and the Cut, Copy, Paste and Select All bar over a finger's
+  selection has touch-sized buttons whose tips name their keys.
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait
@@ -799,6 +808,13 @@ follow [Semantic Versioning](https://semver.org/).
   work like Sue's other boxes; Escape closes their list first.
 - Sue Writer: Undo after Insert Table takes the whole table away at
   once (it took three steps, and the first left the table behind).
+- With line spacing above single, the highlight on words a comment or
+  a note is on reached far below them, toward the next line. It now
+  sits on the letters.
+- Inserting a table, a table of contents or a picture into rich text,
+  and Text to Table, is one step to undo. Undo used to take the table's
+  place in the text away first and leave an empty table behind for a
+  second undo.
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
   the update. It now takes the theme as it ships; colors you picked

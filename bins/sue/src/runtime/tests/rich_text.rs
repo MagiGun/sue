@@ -1,0 +1,663 @@
+//! The rich text editor's chrome, as Sue Writer shows it: the colors of
+//! what it marks on the page (spelling, tracked changes, comments, the
+//! selection and its handles) come from the theme, the spelling menu is
+//! Sue's own context menu, and the bar over a finger's selection is made
+//! of Sue's buttons with their tips.
+
+use super::*;
+use egui::epaint::ColorMode;
+use egui::text::{CCursor, CharIndex};
+use sue_type::Ink;
+use sue_type::layout::PageMarks;
+
+/// The colors Sue's rich text editor drew its marks in before they came
+/// from the theme: a blue selection and handles, a red spelling wave,
+/// blue and red tracked changes, a yellow comment. None may come back.
+const OLD_COLORS: [[u8; 3]; 5] = [
+    [0x3a, 0x7b, 0xd5],
+    [0xd0, 0x30, 0x30],
+    [0x1f, 0x6f, 0xc4],
+    [0xc0, 0x39, 0x2b],
+    [0xf2, 0xc0, 0x3a],
+];
+
+/// Every shape of `output`, groups opened.
+fn shapes(output: &egui::FullOutput) -> Vec<egui::Shape> {
+    fn open(shape: &egui::Shape, into: &mut Vec<egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| open(shape, into)),
+            shape => into.push(shape.clone()),
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        open(&clipped.shape, &mut found);
+    }
+    found
+}
+
+/// Every color the shapes of `output` are drawn in, text sections
+/// included.
+fn colors(shapes: &[egui::Shape]) -> Vec<egui::Color32> {
+    let mut found = Vec::new();
+    for shape in shapes {
+        match shape {
+            egui::Shape::Text(text) => {
+                for section in &text.galley.job.sections {
+                    found.push(section.format.color);
+                    found.push(section.format.background);
+                }
+            }
+            egui::Shape::Path(path) => {
+                if let ColorMode::Solid(color) = path.stroke.color {
+                    found.push(color);
+                }
+                found.push(path.fill);
+            }
+            egui::Shape::LineSegment { stroke, .. } => found.push(stroke.color),
+            egui::Shape::Rect(rect) => {
+                found.push(rect.fill);
+                found.push(rect.stroke.color);
+            }
+            egui::Shape::Circle(circle) => found.push(circle.fill),
+            _ => {}
+        }
+    }
+    found
+}
+
+/// The document's galley: the text shape whose text starts with `start`.
+fn doc_text(shapes: &[egui::Shape], start: &str) -> Option<egui::epaint::TextShape> {
+    shapes.iter().find_map(|shape| match shape {
+        egui::Shape::Text(text) if text.galley.text().starts_with(start) => Some(text.clone()),
+        _ => None,
+    })
+}
+
+/// Where the character `index` of `text` sits on screen, at the middle
+/// of its line.
+fn char_at(text: &egui::epaint::TextShape, index: usize) -> Pos2 {
+    let place = text.galley.pos_from_cursor(CCursor {
+        index: CharIndex(index),
+        prefer_next_row: false,
+    });
+    text.pos + vec2(place.min.x + 2.0, place.center().y)
+}
+
+/// The text section of `text` that holds `words`: its format.
+fn section_of(text: &egui::epaint::TextShape, words: &str) -> egui::TextFormat {
+    let job = &text.galley.job;
+    job.sections
+        .iter()
+        .find(|section| {
+            job.text[section.byte_range.start.0..section.byte_range.end.0].contains(words)
+        })
+        .map(|section| section.format.clone())
+        .unwrap_or_else(|| panic!("a section holds {words:?}"))
+}
+
+/// Which line a tracked change draws through its words.
+#[derive(Clone, Copy, Debug)]
+enum Line {
+    /// Below the baseline.
+    Under,
+    /// Above it, through the small letters.
+    Strike,
+}
+
+/// `true` when `text` draws `line` in `color` through the row that holds
+/// `words`: either as a solid rect the layout put into the row's mesh on
+/// the letters (wide line spacing), or as egui's own line, which its
+/// section then names.
+fn drawn_line(
+    text: &egui::epaint::TextShape,
+    words: &str,
+    line: Line,
+    color: egui::Color32,
+) -> bool {
+    let format = section_of(text, words);
+    let named = match line {
+        Line::Under => format.underline,
+        Line::Strike => format.strikethrough,
+    };
+    if named.width > 0.0 {
+        return true;
+    }
+    let galley = &text.galley;
+    let Some(start) = galley.job.text.find(words) else {
+        return false;
+    };
+    let char_index = galley.job.text[..start].chars().count();
+    let place = galley.layout_from_cursor(CCursor {
+        index: CharIndex(char_index),
+        prefer_next_row: true,
+    });
+    let Some(placed) = galley.rows.get(place.row) else {
+        return false;
+    };
+    let Some(glyph) = placed.row.glyphs.get(place.column.0) else {
+        return false;
+    };
+    let base = glyph.pos.y;
+    placed.row.visuals.mesh.vertices.iter().any(|vertex| {
+        vertex.color == color
+            && vertex.uv == egui::epaint::WHITE_UV
+            && match line {
+                Line::Under => vertex.pos.y > base - 1.0,
+                Line::Strike => vertex.pos.y < base - 1.0,
+            }
+    })
+}
+
+/// The first document of the arena: its text and marks.
+fn document(runtime: &Runtime) -> (String, sue_model::TextMarks) {
+    runtime
+        .engine
+        .world
+        .arena
+        .iter()
+        .find_map(|(_, entity)| {
+            let text = entity.string_buffer()?.as_str().to_owned();
+            text.starts_with("The").then(|| {
+                (
+                    text,
+                    entity
+                        .ext::<sue_model::TextMarks>()
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            })
+        })
+        .expect("the document")
+}
+
+/// A press and release of `button` at `at`, over three frames.
+fn press(at: Pos2, button: egui::PointerButton) -> impl FnMut(usize) -> Vec<egui::Event> {
+    move |frame: usize| match frame {
+        0 => vec![egui::Event::PointerMoved(at)],
+        1 => vec![egui::Event::PointerButton {
+            pos: at,
+            button,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        2 => vec![egui::Event::PointerButton {
+            pos: at,
+            button,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        _ => Vec::new(),
+    }
+}
+
+/// One frame of `size` with `events`, its shapes.
+fn step(
+    runtime: &mut Runtime,
+    ctx: &egui::Context,
+    size: egui::Vec2,
+    now: Instant,
+    events: Vec<egui::Event>,
+) -> Vec<egui::Shape> {
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, size)),
+        events,
+        time: Some(ctx.input(|input| input.time) + 0.016),
+        ..egui::RawInput::default()
+    };
+    let output = ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+    let found = shapes(&output);
+    output.drop_without_applying_deltas();
+    found
+}
+
+#[test]
+fn rich_text_marks_come_from_the_theme_and_the_spelling_menu_picks_with_undo() {
+    let (mut runtime, root) = runtime("rich-text-marks");
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
+    let start = Instant::now();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    let writer = AppletId::new(sue_writer::ID).unwrap();
+    runtime.request(
+        ShellRequest::Create {
+            applet: writer.clone(),
+            key: "blank".to_owned(),
+        },
+        &mut NoTextures,
+        start,
+    );
+    frames(&mut runtime, &ctx, size, start, |frame| {
+        if frame == 1 {
+            vec![egui::Event::Text("The mornnig sat".to_owned())]
+        } else {
+            Vec::new()
+        }
+    });
+    runtime.typing.flush(&mut runtime.engine.history);
+    let marks = PageMarks::resolve(runtime.shell.theme(), &Ink::paper());
+    let drawn = step(&mut runtime, &ctx, size, start, Vec::new());
+    // The wave under "mornnig" is drawn in the theme's color for it.
+    let text = doc_text(&drawn, "The mornnig").expect("the text is drawn");
+    let under = char_at(&text, 4).x - 3.0..char_at(&text, 11).x;
+    let wave = drawn.iter().any(|shape| match shape {
+        egui::Shape::Path(path) => {
+            path.stroke.color == ColorMode::Solid(marks.misspelt)
+                && path.points.len() > 2
+                && path.points.iter().all(|point| under.contains(&point.x))
+        }
+        _ => false,
+    });
+    assert!(
+        wave,
+        "a wave in {:?} under the misspelled word",
+        marks.misspelt
+    );
+    // A secondary press on it opens Sue's menu with what it may have
+    // meant; picking "morning" mends it.
+    let before = document(&runtime);
+    let on = char_at(&text, 7);
+    frames(
+        &mut runtime,
+        &ctx,
+        size,
+        start,
+        press(on, egui::PointerButton::Secondary),
+    );
+    let mut row = None;
+    let mut menu = Vec::new();
+    for _ in 0..40 {
+        menu = step(&mut runtime, &ctx, size, start, Vec::new());
+        row = menu.iter().find_map(|shape| match shape {
+            egui::Shape::Text(text) if text.galley.text() == "morning" => {
+                Some(text.visual_bounding_rect().center())
+            }
+            _ => None,
+        });
+        if row.is_some() {
+            break;
+        }
+    }
+    let row = row.expect("the spelling menu offers \"morning\"");
+    let words: Vec<String> = menu
+        .iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect();
+    for wanted in ["Ignore All", "Add to Dictionary"] {
+        assert!(
+            words.iter().any(|word| word == wanted),
+            "{wanted} in the menu"
+        );
+    }
+    frames(
+        &mut runtime,
+        &ctx,
+        size,
+        start,
+        press(row, egui::PointerButton::Primary),
+    );
+    runtime.typing.flush(&mut runtime.engine.history);
+    let after = document(&runtime);
+    assert_eq!(after.0, "The morning sat\n");
+    // Undo puts the word and its marks back; redo mends it again.
+    frames(&mut runtime, &ctx, size, start, |frame| {
+        if frame == 1 {
+            vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]
+        } else {
+            Vec::new()
+        }
+    });
+    assert_eq!(document(&runtime), before);
+    frames(&mut runtime, &ctx, size, start, |frame| {
+        if frame == 1 {
+            vec![key(egui::Key::Y, egui::Modifiers::COMMAND)]
+        } else {
+            Vec::new()
+        }
+    });
+    assert_eq!(document(&runtime), after);
+    // Tracked changes and a comment, in the marks' colors.
+    let command = |runtime: &mut Runtime, command: &str| {
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: writer.clone(),
+                command: command.to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+    };
+    command(&mut runtime, "review.track");
+    frames(&mut runtime, &ctx, size, start, |frame| match frame {
+        1 => vec![egui::Event::Text(" down".to_owned())],
+        2 => vec![key(egui::Key::Home, egui::Modifiers::NONE)],
+        3 => vec![key(egui::Key::Delete, egui::Modifiers::NONE)],
+        _ => Vec::new(),
+    });
+    runtime.typing.flush(&mut runtime.engine.history);
+    command(&mut runtime, "review.comment");
+    frames(&mut runtime, &ctx, size, start, |frame| match frame {
+        1 => vec![egui::Event::Text("Short?".to_owned())],
+        2 => vec![key(egui::Key::Enter, egui::Modifiers::COMMAND)],
+        _ => Vec::new(),
+    });
+    let drawn = step(&mut runtime, &ctx, size, start, Vec::new());
+    let text = doc_text(&drawn, "The morning").expect("the text is drawn");
+    let inserted = section_of(&text, "down");
+    assert_eq!(inserted.color, marks.inserted, "inserted text");
+    assert!(
+        drawn_line(&text, "down", Line::Under, marks.inserted),
+        "inserted text is underlined"
+    );
+    let deleted = section_of(&text, "T");
+    assert_eq!(deleted.color, marks.deleted, "deleted text");
+    assert!(
+        drawn_line(&text, "T", Line::Strike, marks.deleted),
+        "deleted text is struck through"
+    );
+    // The wash lies on the letters (in the row's mesh, under the glyphs),
+    // see-through, so a selection, painted behind the text, still shows
+    // through it.
+    let commented = text.galley.rows.iter().any(|placed| {
+        let visuals = &placed.row.visuals;
+        visuals
+            .mesh
+            .vertices
+            .iter()
+            .take(visuals.glyph_vertex_range.start)
+            .any(|vertex| vertex.color == marks.comment)
+    }) || section_of(&text, "morning").background == marks.comment;
+    assert!(commented, "the commented word lies on the comment's wash");
+    assert!(marks.comment.a() < 255, "a comment's wash is see-through");
+    // In Sue's monochrome themes the marks are told apart by shape, and
+    // none of the old fixed colors is drawn anywhere.
+    for color in colors(&drawn) {
+        let rgb = [color.r(), color.g(), color.b()];
+        assert!(
+            !(color.a() > 0 && OLD_COLORS.contains(&rgb)),
+            "{color:?} is one of the old fixed colors"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn rich_text_touch_bar_buttons_name_their_keys_and_keep_the_keyboard() {
+    let (mut runtime, root) = runtime("rich-text-touch-bar");
+    let _ = runtime.engine.world.rice.set(
+        "display.interface",
+        sue_rice::RiceValue::Text("phone".to_owned()),
+    );
+    let ctx = egui::Context::default();
+    let size = vec2(430.0, 932.0);
+    let start = Instant::now();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    runtime.request(
+        ShellRequest::Create {
+            applet: AppletId::new(sue_writer::ID).unwrap(),
+            key: "blank".to_owned(),
+        },
+        &mut NoTextures,
+        start,
+    );
+    frames(&mut runtime, &ctx, size, start, |frame| {
+        if frame == 1 {
+            vec![egui::Event::Text("The cat sat down".to_owned())]
+        } else {
+            Vec::new()
+        }
+    });
+    runtime.typing.flush(&mut runtime.engine.history);
+    let mut drawn = Vec::new();
+    for _ in 0..30 {
+        drawn = step(&mut runtime, &ctx, size, start, Vec::new());
+    }
+    let text = doc_text(&drawn, "The cat").expect("the text is drawn");
+    let marks = PageMarks::resolve(runtime.shell.theme(), &Ink::paper());
+    // A long press on "cat" selects it, and the handles and the bar show.
+    let on = char_at(&text, 5);
+    let touch = |phase, pos| egui::Event::Touch {
+        device_id: egui::TouchDeviceId(1),
+        id: egui::TouchId(1),
+        phase,
+        pos,
+        force: None,
+    };
+    let mut down = vec![
+        touch(egui::TouchPhase::Start, on),
+        egui::Event::PointerMoved(on),
+        egui::Event::PointerButton {
+            pos: on,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        },
+    ];
+    for _ in 0..70 {
+        step(&mut runtime, &ctx, size, start, std::mem::take(&mut down));
+    }
+    step(
+        &mut runtime,
+        &ctx,
+        size,
+        start,
+        vec![
+            touch(egui::TouchPhase::End, on),
+            egui::Event::PointerButton {
+                pos: on,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+            egui::Event::PointerGone,
+        ],
+    );
+    let mut copy = None;
+    let mut cut = None;
+    let mut handles = false;
+    for _ in 0..10 {
+        let drawn = step(&mut runtime, &ctx, size, start, Vec::new());
+        handles |= drawn.iter().any(
+            |shape| matches!(shape, egui::Shape::Circle(circle) if circle.fill == marks.handle),
+        );
+        copy = drawn
+            .iter()
+            .find_map(|shape| match shape {
+                egui::Shape::Text(text) if text.galley.text() == "Copy" => {
+                    Some(text.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .or(copy);
+        cut = drawn
+            .iter()
+            .find_map(|shape| match shape {
+                egui::Shape::Text(text) if text.galley.text() == "Cut" => {
+                    Some(text.visual_bounding_rect().center())
+                }
+                _ => None,
+            })
+            .or(cut);
+    }
+    assert!(handles, "the handles are drawn in {:?}", marks.handle);
+    let copy = copy.expect("the bar shows Copy");
+    // Resting on Copy shows its tip with its keys.
+    let mut tip = false;
+    step(
+        &mut runtime,
+        &ctx,
+        size,
+        start,
+        vec![egui::Event::PointerMoved(copy)],
+    );
+    for _ in 0..80 {
+        let drawn = step(&mut runtime, &ctx, size, start, Vec::new());
+        tip |= drawn.iter().any(|shape| {
+            matches!(shape, egui::Shape::Text(text) if text.galley.text().contains("Ctrl+C"))
+        });
+        if tip {
+            break;
+        }
+    }
+    assert!(tip, "Copy's tip names Ctrl+C");
+    // A tap on Cut takes the word out, and the keyboard stays with the
+    // text: what is typed next goes in where the word was.
+    let cut = cut.expect("the bar shows Cut");
+    let tap = |phase, pressed| {
+        vec![
+            touch(phase, cut),
+            egui::Event::PointerMoved(cut),
+            egui::Event::PointerButton {
+                pos: cut,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    };
+    step(
+        &mut runtime,
+        &ctx,
+        size,
+        start,
+        tap(egui::TouchPhase::Start, true),
+    );
+    let mut lift = tap(egui::TouchPhase::End, false);
+    lift.push(egui::Event::PointerGone);
+    step(&mut runtime, &ctx, size, start, lift);
+    for _ in 0..5 {
+        step(&mut runtime, &ctx, size, start, Vec::new());
+    }
+    runtime.typing.flush(&mut runtime.engine.history);
+    assert_eq!(
+        document(&runtime).0,
+        "The  sat down
+",
+        "Cut took the word"
+    );
+    step(
+        &mut runtime,
+        &ctx,
+        size,
+        start,
+        vec![egui::Event::Text("dog".to_owned())],
+    );
+    for _ in 0..3 {
+        step(&mut runtime, &ctx, size, start, Vec::new());
+    }
+    runtime.typing.flush(&mut runtime.engine.history);
+    assert_eq!(
+        document(&runtime).0,
+        "The dog sat down
+",
+        "the keyboard stayed with the text"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The arena as bytes (every entity, id and relation, never revisions),
+/// to compare before and after.
+fn arena_bytes(runtime: &Runtime) -> Vec<u8> {
+    let mut out = sue_core::codec::Writer::new();
+    runtime.engine.world.arena.encode(&mut out);
+    out.into_bytes()
+}
+
+#[test]
+fn rich_text_tables_go_in_and_come_out_as_one_undo_step() {
+    let (mut runtime, root) = runtime("rich-text-embeds");
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
+    let start = Instant::now();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    let writer = AppletId::new(sue_writer::ID).unwrap();
+    runtime.request(
+        ShellRequest::Create {
+            applet: writer.clone(),
+            key: "blank".to_owned(),
+        },
+        &mut NoTextures,
+        start,
+    );
+    frames(&mut runtime, &ctx, size, start, |frame| {
+        if frame == 1 {
+            vec![egui::Event::Text("The start\nNight, Oil".to_owned())]
+        } else {
+            Vec::new()
+        }
+    });
+    let command = |runtime: &mut Runtime, command: &str| {
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: writer.clone(),
+                command: command.to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+    };
+    let undo = |runtime: &mut Runtime, redo: bool| {
+        let pressed = if redo {
+            key(egui::Key::Y, egui::Modifiers::COMMAND)
+        } else {
+            key(egui::Key::Z, egui::Modifiers::COMMAND)
+        };
+        let mut pressed = Some(pressed);
+        frames(runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                pressed.take().into_iter().collect()
+            } else {
+                Vec::new()
+            }
+        });
+    };
+    let tables = |runtime: &Runtime| {
+        runtime
+            .engine
+            .world
+            .arena
+            .iter()
+            .filter(|(_, entity)| entity.ext::<sue_model::Table>().is_some())
+            .count()
+    };
+    // Text to Table and a new table, each one step: one undo takes the
+    // table, its place in the text and its mark away together, ids
+    // included; one redo brings all of it back.
+    for (name, how) in [
+        ("text to table", "table.from_text"),
+        ("insert table", "table.insert.3x2"),
+    ] {
+        runtime.typing.flush(&mut runtime.engine.history);
+        let before = arena_bytes(&runtime);
+        let had = tables(&runtime);
+        command(&mut runtime, how);
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.typing.flush(&mut runtime.engine.history);
+        let after = arena_bytes(&runtime);
+        assert_eq!(tables(&runtime), had + 1, "{name} made a table");
+        assert!(
+            document(&runtime).0.contains(sue_model::OBJECT),
+            "{name} put the table in the text"
+        );
+        undo(&mut runtime, false);
+        assert!(
+            arena_bytes(&runtime) == before,
+            "one undo takes back {name}"
+        );
+        undo(&mut runtime, true);
+        assert!(
+            arena_bytes(&runtime) == after,
+            "one redo brings back {name}"
+        );
+        // Out of the table, at the end of the text, for the next one.
+        frames(&mut runtime, &ctx, size, start, |frame| match frame {
+            1 => vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+            2 => vec![key(egui::Key::End, egui::Modifiers::COMMAND)],
+            _ => Vec::new(),
+        });
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

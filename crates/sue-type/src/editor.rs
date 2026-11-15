@@ -17,13 +17,14 @@ use egui::text::{CCursor, CharIndex, LayoutJob, TextFormat};
 use egui::{Color32, Event, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use sue_core::{EntityId, Value};
 use sue_model::{TextMarks, mark_kind as kind};
-use sue_wm::{AppletContext, ArenaEdit};
+use sue_wm::ui::{Density, Elevation, Layer, Radius, Space, Tip, tooltip};
+use sue_wm::{AppletContext, ArenaEdit, ItemState, MenuItem};
 
 use crate::caret::{self, CaretGlide, CaretMotion};
 use crate::edit;
 use crate::layout::{
-    Block, Ink, Laid, PX_PER_PT, PageSetup, Setting, Source, ViewMode, byte_of_char, char_of_byte,
-    lay_document, paginate,
+    Block, Ink, Laid, PX_PER_PT, PageMarks, PageSetup, Setting, Source, ViewMode, byte_of_char,
+    char_of_byte, lay_document, paginate,
 };
 use crate::style::{CharFormat, ParagraphLook, StyleSheet, char_format, paragraph_look};
 pub use crate::tables::TableEdit;
@@ -41,8 +42,34 @@ fn take_focus(ctx: &egui::Context, id: Id) {
 
 /// The radius of a finger selection's handle knob.
 const HANDLE: f32 = 9.0;
-/// The color of the handles, the selection's own blue.
-const HANDLE_COLOR: Color32 = Color32::from_rgb(0x3a, 0x7b, 0xd5);
+
+/// The commands of the spelling menu: a suggestion (with its index after
+/// the prefix), the grayed row that says there is none, Ignore All and
+/// Add to Dictionary.
+const SPELL_PICK: &str = "sue-type.spell.pick:";
+/// See [`SPELL_PICK`].
+const SPELL_NONE: &str = "sue-type.spell.none";
+/// See [`SPELL_PICK`].
+const SPELL_IGNORE: &str = "sue-type.spell.ignore-all";
+/// See [`SPELL_PICK`].
+const SPELL_LEARN: &str = "sue-type.spell.add-to-dictionary";
+
+/// The rows of the spelling menu for a word that may have meant
+/// `suggestions`.
+fn spelling_items(suggestions: &[String]) -> Vec<MenuItem> {
+    let mut items: Vec<MenuItem> = suggestions
+        .iter()
+        .enumerate()
+        .map(|(index, word)| MenuItem::action(word.clone(), format!("{SPELL_PICK}{index}")))
+        .collect();
+    if items.is_empty() {
+        items.push(MenuItem::action(tr!("no-suggestions"), SPELL_NONE));
+    }
+    items.push(MenuItem::Separator);
+    items.push(MenuItem::action(tr!("ignore-all"), SPELL_IGNORE));
+    items.push(MenuItem::action(tr!("add-to-dictionary"), SPELL_LEARN));
+    items
+}
 
 /// What the bar over a finger's selection does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +78,31 @@ enum TouchAction {
     Copy,
     Paste,
     SelectAll,
+}
+
+impl TouchAction {
+    /// Names its button among the bar's.
+    const fn salt(self) -> &'static str {
+        match self {
+            Self::Cut => "cut",
+            Self::Copy => "copy",
+            Self::Paste => "paste",
+            Self::SelectAll => "select-all",
+        }
+    }
+}
+
+/// The buttons of the bar over a finger's selection, in order: whether
+/// each shows (Cut and Copy need a selection), what it does, its name and
+/// the keys that do the same.
+fn touch_actions(selected: bool) -> [(bool, TouchAction, String, String); 4] {
+    let key = |key: Key| sue_wm::shortcuts::chord_text(Modifiers::COMMAND, key);
+    [
+        (selected, TouchAction::Cut, tr!("cut"), key(Key::X)),
+        (selected, TouchAction::Copy, tr!("copy"), key(Key::C)),
+        (true, TouchAction::Paste, tr!("paste"), key(Key::V)),
+        (true, TouchAction::SelectAll, tr!("select-all"), key(Key::A)),
+    ]
 }
 
 /// A place in the shown documents: which one, and a byte offset in it.
@@ -136,6 +188,8 @@ struct DocKey {
     scale: u32,
     fonts: usize,
     ink: [u8; 4],
+    /// The colors of the marks set into the text.
+    marks: [[u8; 4]; 4],
     /// The revisions of the tables it shows.
     embeds: u64,
 }
@@ -231,6 +285,9 @@ pub struct Editor {
     delete_forward: bool,
     /// A cell the caret left this frame, its typing still to record.
     left_cell: Option<CellCaret>,
+    /// The colors of the marks on the page, from the theme for the ink
+    /// shown.
+    page_marks: PageMarks,
 }
 
 impl std::fmt::Debug for Editor {
@@ -288,6 +345,7 @@ impl Editor {
             delete_forward: false,
             spell_menu: None,
             ignored: std::collections::HashSet::new(),
+            page_marks: PageMarks::plain(&Ink::paper()),
         }
     }
 
@@ -609,7 +667,20 @@ impl Editor {
     /// Puts an embedded entity (a picture) in a paragraph of its own at the
     /// caret.
     pub fn insert_embed(&mut self, cx: &mut AppletContext<'_>, entity: EntityId) {
-        self.embed(cx, entity, &tr!("insert-picture"));
+        self.embed(cx, None, entity, &tr!("insert-picture"));
+    }
+
+    /// Puts `entity`, a picture not yet in the arena, in a paragraph of
+    /// its own at the caret: the picture and its place in the text are
+    /// one undo step. Returns its id, or `None` when nothing was put in.
+    pub fn insert_new_embed(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        entity: sue_core::Entity,
+    ) -> Option<EntityId> {
+        let id = entity.id();
+        self.embed(cx, Some(entity), id, &tr!("insert-picture"))
+            .then_some(id)
     }
 
     /// Puts a new table of `rows` by `columns` in a paragraph of its own at
@@ -741,10 +812,8 @@ impl Editor {
         self.current()?;
         let entity = contents.entity();
         let id = entity.id();
-        cx.apply(ArenaEdit(sue_core::txn::SpawnEntity::new(entity)))
-            .ok()?;
-        self.embed(cx, id, &tr!("insert-table-of-contents"));
-        Some(id)
+        self.embed(cx, Some(entity), id, &tr!("insert-table-of-contents"))
+            .then_some(id)
     }
 
     /// Spawns table `entity` and sets it over `range` of the current
@@ -758,8 +827,6 @@ impl Editor {
         self.commit(cx);
         self.current()?;
         let id = entity.id();
-        cx.apply(ArenaEdit(sue_core::txn::SpawnEntity::new(entity)))
-            .ok()?;
         self.anchor = Caret {
             doc: self.caret.doc,
             offset: range.start,
@@ -768,7 +835,9 @@ impl Editor {
             doc: self.caret.doc,
             offset: range.end,
         };
-        self.embed(cx, id, &tr!("insert-table"));
+        if !self.embed(cx, Some(entity), id, &tr!("insert-table")) {
+            return None;
+        }
         self.enter_cell(id, 0, 0);
         Some(id)
     }
@@ -965,15 +1034,35 @@ impl Editor {
     }
 
     /// Puts `entity` in a paragraph of its own over the selection, as one
-    /// edit labeled `label`.
-    fn embed(&mut self, cx: &mut AppletContext<'_>, entity: EntityId, label: &str) {
+    /// undo step labeled `label`: the text, the mark that embeds it and,
+    /// when `spawn` holds it, the entity itself, which is not yet in the
+    /// arena. Returns `false` when nothing was put in.
+    fn embed(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        spawn: Option<sue_core::Entity>,
+        entity: EntityId,
+        label: &str,
+    ) -> bool {
+        use sue_core::txn::{Batch, DeleteText, InsertText, SetExtension, SpawnEntity};
+        self.commit(cx);
         let Some(doc) = self.current() else {
-            return;
+            return false;
         };
-        let at = self.selection().start;
-        let text = self.text().to_owned();
+        let Some(handle) = cx.arena().handle_of(doc) else {
+            return false;
+        };
+        let Some(text) = edit::text_of(cx.arena(), doc).map(str::to_owned) else {
+            return false;
+        };
+        let selection = self.selection();
+        let range = selection.start.min(text.len())..selection.end.min(text.len());
+        if !text.is_char_boundary(range.start) || !text.is_char_boundary(range.end) {
+            return false;
+        }
+        let at = range.start;
         let starts_line = at == 0 || text.as_bytes().get(at - 1) == Some(&b'\n');
-        let ends_line = text.as_bytes().get(self.selection().end) == Some(&b'\n');
+        let ends_line = text.as_bytes().get(range.end) == Some(&b'\n');
         let mut insert = String::new();
         if !starts_line {
             insert.push('\n');
@@ -983,13 +1072,31 @@ impl Editor {
         if !ends_line {
             insert.push('\n');
         }
-        let Some(end) = edit::replace(cx, doc, self.selection(), &insert, None, &[]) else {
-            return;
-        };
+        let mut marks = edit::marks_of(cx.arena(), doc);
+        let mut kept = text;
+        if !range.is_empty() {
+            marks.delete_text(&kept, range.clone());
+            kept.replace_range(range.clone(), "");
+        }
+        marks.insert_text(&kept, at, &insert, None);
         let object = object_at..object_at + sue_model::OBJECT.len_utf8();
-        edit::reformat(cx, doc, label, |_, marks| {
-            marks.set(object, kind::EMBED, Some(Value::Entity(entity)));
-        });
+        marks.set(object, kind::EMBED, Some(Value::Entity(entity)));
+        let end = at + insert.len();
+        let mut batch = Batch::new(label);
+        if let Some(spawn) = spawn {
+            batch = batch.then(SpawnEntity::new(spawn));
+        }
+        if !range.is_empty() {
+            batch = batch.then(DeleteText::new(handle, range));
+        }
+        let batch = batch
+            .then(InsertText::new(handle, at, insert))
+            .then(SetExtension::set(doc, marks));
+        if let Err(error) = cx.apply(ArenaEdit(batch)) {
+            cx.fail(error.to_string());
+            return false;
+        }
+        self.sync_text(cx);
         self.set_caret(
             Caret {
                 doc: self.caret.doc,
@@ -997,6 +1104,7 @@ impl Editor {
             },
             false,
         );
+        true
     }
 
     // ----- The frame ---------------------------------------------------------
@@ -1091,6 +1199,8 @@ impl Editor {
         let fonts = ctx.fonts(|fonts| fonts.definitions().font_data.len());
         let sheet = view.sheet.fingerprint();
         let ink = view.ink.text.to_array();
+        self.page_marks = PageMarks::resolve(cx.theme, &view.ink);
+        let page_marks = self.page_marks;
         let mut blocks = Vec::new();
         let mut starts = Vec::with_capacity(docs.len());
         let figure_size = |id: EntityId| (view.figures)(id).map(|(_, size)| size);
@@ -1123,6 +1233,7 @@ impl Editor {
                 scale: scale.to_bits(),
                 fonts,
                 ink,
+                marks: page_marks.text_key(),
                 embeds,
             };
             let fresh = self.cache.get(id).is_some_and(|cached| cached.key == key);
@@ -1132,6 +1243,7 @@ impl Editor {
                     scale,
                     width,
                     ink: view.ink,
+                    marks: page_marks,
                 };
                 let source = Source {
                     text: &self.texts[index],
@@ -1173,6 +1285,7 @@ impl Editor {
                 scale,
                 width,
                 ink: view.ink,
+                marks: page_marks,
             };
             for pass in 0..2 {
                 let pages = (pass > 0).then(|| {
@@ -1324,29 +1437,26 @@ impl Editor {
             .get(range.clone())
             .unwrap_or("")
             .to_owned();
+        let items = spelling_items(&suggestions);
+        let state = |command: &str| ItemState {
+            enabled: command != SPELL_NONE,
+            checked: None,
+        };
+        let picked = sue_wm::ui::menu::context_menu(ui, response, &items, &state, cx.theme);
         let mut pick: Option<String> = None;
         let mut learn = false;
         let mut ignore = false;
-        response.context_menu(|ui| {
-            if suggestions.is_empty() {
-                ui.label(tr!("no-suggestions"));
+        match picked.as_deref() {
+            Some(SPELL_IGNORE) => ignore = true,
+            Some(SPELL_LEARN) => learn = true,
+            Some(command) => {
+                pick = command
+                    .strip_prefix(SPELL_PICK)
+                    .and_then(|index| index.parse::<usize>().ok())
+                    .and_then(|index| suggestions.get(index).cloned());
             }
-            for suggestion in &suggestions {
-                if ui.button(suggestion).clicked() {
-                    pick = Some(suggestion.clone());
-                    ui.close();
-                }
-            }
-            ui.separator();
-            if ui.button(tr!("ignore-all")).clicked() {
-                ignore = true;
-                ui.close();
-            }
-            if ui.button(tr!("add-to-dictionary")).clicked() {
-                learn = true;
-                ui.close();
-            }
-        });
+            None => {}
+        }
         let lower = word.to_lowercase().replace('\u{2019}', "'");
         if ignore {
             self.ignored.insert(lower.clone());
@@ -1357,7 +1467,6 @@ impl Editor {
             self.spell_menu = None;
         }
         let Some(pick) = pick else {
-            let _ = ui;
             return false;
         };
         self.spell_menu = None;
@@ -2153,11 +2262,12 @@ impl Editor {
         let painter = ui.painter();
         for (line, knob) in places {
             let base = pos2(line.left(), line.bottom());
-            painter.line_segment([line.left_top(), base], Stroke::new(2.0, HANDLE_COLOR));
+            let color = self.page_marks.handle;
+            painter.line_segment([line.left_top(), base], Stroke::new(2.0, color));
             // A round knob with a square corner pointing at the line: a
             // teardrop.
-            painter.rect_filled(Rect::from_two_pos(base, knob), 0.0, HANDLE_COLOR);
-            painter.circle_filled(knob, HANDLE, HANDLE_COLOR);
+            painter.rect_filled(Rect::from_two_pos(base, knob), 0.0, color);
+            painter.circle_filled(knob, HANDLE, color);
         }
     }
 
@@ -2193,7 +2303,9 @@ impl Editor {
         if last.bottom() < view.top() || first.top() > view.bottom() {
             return false;
         }
-        let height = 44.0;
+        let theme = cx.theme;
+        let pad = theme.space(Space::S1);
+        let height = Density::Touch.control_height() + pad * 2.0;
         let mut y = first.top() - height - 12.0;
         if y < view.top() + 4.0 {
             y = last.bottom() + HANDLE * 2.0 + 12.0;
@@ -2208,29 +2320,38 @@ impl Editor {
         if !shown {
             ui.ctx().request_repaint();
         }
-        self.bar_rect = egui::Area::new(self.id.with("touch-bar"))
-            .order(egui::Order::Foreground)
+        let id = self.id.with("touch-bar");
+        let frame = egui::Frame::new()
+            .fill(theme.surface(3))
+            .stroke(theme.hairline())
+            .corner_radius(theme.corner(Radius::Xl))
+            .shadow(theme.elevation(Elevation::Floating))
+            .inner_margin(egui::Margin::same(pad.round() as i8));
+        self.bar_rect = egui::Area::new(id)
+            .order(Layer::Popover.order())
             .movable(false)
             .fixed_pos(pos2(x, y))
             .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().button_padding = vec2(10.0, 8.0);
-                        let actions = [
-                            (selected, TouchAction::Cut, tr!("cut")),
-                            (selected, TouchAction::Copy, tr!("copy")),
-                            (true, TouchAction::Paste, tr!("paste")),
-                            (true, TouchAction::SelectAll, tr!("select-all")),
-                        ];
-                        for (shown, action, label) in actions {
-                            // Not focusable: the text keeps the keyboard.
-                            let button = egui::Button::new(label)
-                                .frame(false)
-                                .sense(Sense::CLICK | Sense::HOVER);
-                            if shown && ui.add(button).clicked() {
-                                chosen = Some(action);
+                frame.show(ui, |ui| {
+                    Density::Touch.scope(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = theme.space(Space::S1);
+                            for (shown, action, label, key) in touch_actions(selected) {
+                                if !shown {
+                                    continue;
+                                }
+                                // A click on a button leaves the keyboard
+                                // with the text (egui moves it only to
+                                // fields).
+                                let response = sue_wm::ui::button(action.salt(), &label)
+                                    .ghost()
+                                    .show(ui, theme);
+                                let tip = Tip::new(&label).shortcut(&key);
+                                if tooltip(response, &tip, theme).clicked() {
+                                    chosen = Some(action);
+                                }
                             }
-                        }
+                        });
                     });
                 });
             })
@@ -3030,12 +3151,18 @@ impl Editor {
                 if !rect.expand(12.0).intersects(self.viewport) {
                     continue;
                 }
-                painter.rect_filled(
-                    rect.translate(vec2(0.0, 2.0)).expand(1.5),
-                    2.0,
-                    Color32::from_black_alpha(60),
+                painter.add(
+                    self.page_marks
+                        .page_shadow
+                        .as_shape(rect, egui::CornerRadius::ZERO),
                 );
                 painter.rect_filled(rect, 0.0, view.ink.paper);
+                painter.rect_stroke(
+                    rect,
+                    0.0,
+                    self.page_marks.page_edge,
+                    egui::StrokeKind::Outside,
+                );
                 let small =
                     egui::FontId::new((9.0 * scale).max(6.0), egui::FontFamily::Proportional);
                 let [margin_top, margin_right, margin_bottom, margin_left] =
@@ -3077,9 +3204,9 @@ impl Editor {
         let selection = self.selection();
         let selecting = !selection.is_empty();
         let select_color = if focused {
-            Color32::from_rgba_unmultiplied(0x3a, 0x7b, 0xd5, 0x55)
+            self.page_marks.selection
         } else {
-            Color32::from_rgba_unmultiplied(0x80, 0x80, 0x80, 0x45)
+            self.page_marks.selection_idle
         };
         let mut last_doc = None;
         for index in 0..self.laid.pieces.len() {
@@ -3237,7 +3364,7 @@ impl Editor {
         }
     }
 
-    /// Red waves under the misspelled words of `block`, but not under the
+    /// Waves under the misspelled words of `block`, but not under the
     /// word being typed.
     fn paint_spelling(
         &self,
@@ -3252,7 +3379,6 @@ impl Editor {
         };
         let body = &text[block.range.clone()];
         let typing = (focused && self.caret.doc == block.doc).then_some(self.caret.offset);
-        let wave = Stroke::new(1.0, Color32::from_rgb(0xd0, 0x30, 0x30));
         for range in crate::spell::words(body) {
             let word = &body[range.clone()];
             let at = block.range.start + range.start..block.range.start + range.end;
@@ -3270,14 +3396,39 @@ impl Editor {
             if (from.min.y - to.min.y).abs() > 0.5 {
                 continue;
             }
-            let y = galley_at.y + from.max.y - 1.0;
+            // Under the letters, just below where an underline sits
+            // (`layout::lay_out`), so a misspelled word that is also
+            // underlined (a tracked insertion, say) shows both apart;
+            // sized to the letters, so it grows as the page is zoomed. Not
+            // at the bottom of a line box, which wide line spacing
+            // stretches toward the next line.
+            let place = block.galley.layout_from_cursor(cursor(start));
+            let descent = block.galley.rows.get(place.row).and_then(|placed| {
+                let glyph = placed.row.glyphs.get(place.column.0)?;
+                let descent = (glyph.font_height - glyph.font_ascent).max(2.0);
+                Some((placed.pos.y + glyph.pos.y, descent))
+            });
+            let (top, height, width) = match descent {
+                Some((base, descent)) => {
+                    let underline = base + descent * crate::layout::UNDERLINE_DROP;
+                    let gap = (descent * 0.25).max(1.5);
+                    (
+                        galley_at.y + underline + gap,
+                        (descent * 0.35).max(1.5),
+                        (descent * 0.2).max(1.0),
+                    )
+                }
+                None => (galley_at.y + from.max.y - 2.5, 1.5, 1.0),
+            };
+            let wave = Stroke::new(width, self.page_marks.misspelt);
+            let step = height * 1.4;
             let mut points = Vec::new();
             let mut x = galley_at.x + from.min.x;
             let right = galley_at.x + to.min.x;
             let mut up = false;
             while x < right {
-                points.push(pos2(x, if up { y - 1.5 } else { y }));
-                x += 2.0;
+                points.push(pos2(x, if up { top } else { top + height }));
+                x += step;
                 up = !up;
             }
             if points.len() > 1 {
