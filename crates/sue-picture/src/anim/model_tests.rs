@@ -796,6 +796,59 @@ fn the_animation_of_0_0_75_plays_the_same_cels_and_camera_path_with_a_camera_tra
             })
             .collect::<Vec<_>>()
     };
+    // What 0.0.75 played, written down (not read back from this tree):
+    // cels 1, 2, 3 on frames 0, 3, 6, cel 1 again on 8, nothing from 10;
+    // the camera keyed at frame 0 and frame 11, a straight line between.
+    let folder = crate::doc::layers(&arena, picture)
+        .into_iter()
+        .find(|info| is_animation_folder(&arena, info.id))
+        .unwrap()
+        .id;
+    assert_eq!(crate::doc::folder_of(&arena, folder), Some(camera));
+    let names: Vec<String> = (0..length)
+        .map(|frame| {
+            let view = frame_view(&arena, picture, frame, None, None).unwrap();
+            cels(&arena, picture, folder)
+                .into_iter()
+                .filter(|cel| !view.hidden.contains(cel))
+                .map(|cel| arena.get_by_id(cel).unwrap().name().to_owned())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect();
+    assert_eq!(
+        names,
+        ["1", "1", "1", "2", "2", "2", "3", "3", "1", "1", "", ""]
+    );
+    let rate = super::timeline(&arena, picture).unwrap().rate;
+    let stands = |frame: u32| {
+        crate::camera::Camera::of(
+            &arena,
+            camera,
+            Some(crate::camera::time_of(frame, rate)),
+            size,
+        )
+    };
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    for (frame, center, scale, angle) in [
+        (0, [16.0, 16.0], 1.0, 0.0),
+        (11, [20.0, 12.0], 1.5, 0.25),
+        (
+            4,
+            [16.0 + 16.0 / 11.0, 16.0 - 16.0 / 11.0],
+            1.0 + 2.0 / 11.0,
+            1.0 / 11.0,
+        ),
+    ] {
+        let camera = stands(frame);
+        assert!(
+            close(camera.center[0], center[0])
+                && close(camera.center[1], center[1])
+                && close(camera.scale, scale)
+                && close(camera.angle, angle),
+            "frame {frame}: {camera:?}"
+        );
+    }
     let before = played(&arena);
     for (frame, (hidden, cameras, path)) in before.iter().enumerate() {
         let sequence = super::timeline(&arena, picture).unwrap();
