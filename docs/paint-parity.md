@@ -44,7 +44,7 @@ rows are at the end.
 | Animation | 15 | 1 | 0 | 97 |
 | Tools and drawing | 36 | 8 | 1 | 89 |
 | Text | 6 | 3 | 1 | 75 |
-| Vector | 6 | 2 | 0 | 88 |
+| Vector | 11 | 2 | 0 | 92 |
 | 3D | 7 | 2 | 4 | 62 |
 | Colors | 9 | 0 | 1 | 90 |
 | View and navigation | 10 | 3 | 0 | 88 |
@@ -54,7 +54,7 @@ rows are at the end.
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 9 | 3 | 2 | 75 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 271 | 62 | 26 | 84 |
+| **All of Sue Paint** | 276 | 62 | 26 | 84 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -434,6 +434,11 @@ The order of work is the plan at the end.
 | Thicken or thin lines | Tool | done | |
 | Simplify lines | Tool | partial | To verify |
 | Batch edit lines by width or pressure | Tool | partial | To verify |
+| Object tool: loop pick, box with eight handles, Scale and Free transform | Tool | done | Adjust line thickness when scaling; Shift keeps a corner in proportion |
+| Recolor, resize and reshape picked lines | Object tool, Tool Property | done | Color wheel or a typed hex code; brush size; a sub tool's brush shape |
+| Figures on vector layers, Vector magnet | Figure tool | done | Lines, rectangles, ellipses, polylines and curves become vector lines with the sub tool's brush |
+| Vector eraser on several layers | Tool | done | Every picked vector layer at once, one undo step |
+| Fill up to vector path | Fill tool | done | Fills in under vector lines to their middle |
 
 ## 3D
 

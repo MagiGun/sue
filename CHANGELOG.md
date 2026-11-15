@@ -13,6 +13,26 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, vector layers: with the Object tool, draw a loop round
+  lines to pick several (Shift adds), then drag the box round them by
+  its eight handles to stretch them (Mode: Scale, Shift keeps the
+  corner in proportion) or bend them corner by corner (Mode: Free
+  transform), with Adjust line thickness when scaling. Tool Property
+  recolors the picked lines from the color wheel or a typed hex code,
+  and changes their brush size and brush shape; each change is one
+  undo step.
+- Sue Paint, vector layers: the Figure tool's straight lines,
+  rectangles, ellipses, polylines and curves become vector lines drawn
+  with the sub tool's brush, and Vector magnet joins a figure's ends to
+  the ends of lines near it. A line's open end dragged with Correct
+  Line onto its other end closes the shape.
+- Sue Paint: the Vector eraser erases on every picked vector layer at
+  once when several are picked, and Fill has Fill up to vector path,
+  which fills in under vector lines to their middle so no gap shows.
+- Sue Paint: Layer, Update Lines to New Brush Engine moves a vector
+  layer's lines to the new brush engine in one undoable step. Lines
+  with a flick or post correction stay as they are, since the new
+  engine cannot draw those yet, and the notice says how many.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own

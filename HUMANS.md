@@ -636,6 +636,25 @@ Once a canvas is open:
 - **Object** (O): click a vector line to pick it (Shift picks more), drag
   to move it, Delete to remove it. **Select layer** picks the layer under
   the pointer.
+- **Picked lines** (Object on a vector layer): draw a loop round several
+  lines to pick them all (Shift adds). One box goes round what is picked:
+  drag its eight handles to stretch the lines (Mode: Scale, Shift keeps
+  a corner in proportion) or to move each corner on its own (Mode: Free
+  transform), and inside it to move them; Adjust line thickness when
+  scaling widens the lines with the box. Tool Property recolors them
+  from the color wheel or a hex code you type (they change as soon as
+  the code is whole), and changes their brush size and brush shape (a
+  pen, pencil, brush or airbrush sub tool's brush; each line keeps its
+  size). The Figure tool's lines, rectangles, ellipses, polylines and
+  curves become vector lines on a vector layer, with the sub tool's
+  brush, and **Vector magnet** joins their ends to the ends of lines
+  near them. Correct Line closes a shape when you drag a line's open end
+  onto its other end. With several layers picked, the Vector eraser
+  erases on every picked vector layer at once. Fill's **Fill up to
+  vector path** fills in under vector lines to their middle. Layer,
+  **Update Lines to New Brush Engine** moves a layer's lines to the new
+  brush engine in one step; lines with a flick or post correction stay as
+  they were until the new engine draws those.
 - **Correct Line** (Y), on vector layers: drag a line's control points to
   reshape it, or add, delete, corner, widen, fade them and split the line
   there; pinch a stretch of line into shape; brush over lines to smooth
