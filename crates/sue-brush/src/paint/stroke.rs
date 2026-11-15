@@ -390,19 +390,22 @@ impl<'a> PaintStroke<'a> {
     }
 
     /// The pen has lifted and every point is committed: lays what still
-    /// waits and folds the tail in.
+    /// waits and drops the tail. After the lift every point is
+    /// committed, so a tail drawn before it is out of date: kept, it
+    /// would leave the provisional end (and, building up, paint twice)
+    /// where the final one lies.
     pub fn finish(&mut self, backdrop: Option<&dyn Backdrop>) {
         let end = self.waiting.len();
         self.flush(end, backdrop);
         self.waiting.clear();
         self.context = 0;
         match &mut self.target {
-            Target::Coverage(buffer) => buffer.settle(),
-            Target::Color(buffer) => buffer.settle(),
+            Target::Coverage(buffer) => buffer.clear_tail(),
+            Target::Color(buffer) => buffer.clear_tail(),
             Target::Wet(_) => {}
         }
         if let Some(dual) = &mut self.dual {
-            dual.buffer.settle();
+            dual.buffer.clear_tail();
         }
     }
 

@@ -22,10 +22,16 @@
 //!   dual brush, the watercolor edge, tone scraping, blend modes, the
 //!   erasers) and the stroke that brings them together.
 //! - [`texture`]: paper textures, Sue's own and a person's pictures.
+//! - [`math`]: the engine's own `sin`, `cos`, `exp`, `ln`, `pow` and
+//!   chance, the same bits on every platform.
+//! - [`replay`]: the stored stroke, and painting it again to the same
+//!   bytes.
 
 pub mod buffer;
 pub mod input;
+pub mod math;
 pub mod paint;
 pub mod raster;
 pub mod worker;
+pub mod replay;
 pub mod texture;

@@ -227,6 +227,9 @@ pub struct Planner {
     /// and the dabs it has sprayed since.
     held_from: f64,
     held: u64,
+    /// Where the last dab was laid and its size: a pen pressing harder
+    /// where it (all but) stands lays a larger one there.
+    last_dab: Option<([f32; 2], f32)>,
 }
 
 impl Planner {
@@ -254,6 +257,7 @@ impl Planner {
             picks: 0,
             held_from: f64::NEG_INFINITY,
             held: 0,
+            last_dab: None,
         }
     }
 
@@ -348,7 +352,24 @@ impl Planner {
             },
         );
         self.walker = walker;
+        // Dabs follow the distance the pen goes, so a pen that presses
+        // harder where it stands (a tap that lands lightly) would keep
+        // the first, smaller dab. A pen held still never holds exactly
+        // still, so within a small reach of the last dab (the automatic
+        // gap, as for the roundest brush) one grown by as much is laid
+        // again there. A pen on its way lays by distance alone, so a
+        // brush spaced wide gains no dabs when pressure rises.
+        if stamped.is_empty()
+            && let Some((at, size)) = self.last_dab
+        {
+            let reach = (AUTO_GAP * b.size).max(DabWalker::SMALLEST_GAP);
+            let off = hypot(b.pos[0] - at[0], b.pos[1] - at[1]);
+            if off <= reach && b.size - size >= reach {
+                stamped.push(b);
+            }
+        }
         for p in stamped {
+            self.last_dab = Some((p.pos, p.size));
             self.place(&p, out);
         }
         self.last = Some(b);
@@ -565,6 +586,52 @@ mod tests {
             p.push(&point(x, 10.0), &mut out);
         }
         out
+    }
+
+    #[test]
+    fn a_tap_that_presses_harder_where_it_stands_grows() {
+        // A pen lands lightly and presses on without moving: the dot is
+        // as large as the hardest press, not the first.
+        let mut p = planner(PlanSettings::default());
+        let mut out = Vec::new();
+        for size in [4.0, 7.0, 6.0, 9.0, 9.0] {
+            p.push(&point(0.0, size), &mut out);
+        }
+        let sizes: Vec<f32> = out.iter().map(|d| d.disc.radius * 2.0).collect();
+        assert_eq!(sizes, [4.0, 7.0, 9.0], "a dab each time it grew");
+        // A pen never stands exactly still: a hand's tremble of a tenth
+        // of a pixel grows the dot all the same.
+        let mut p = planner(PlanSettings::default());
+        let mut out = Vec::new();
+        for (x, size) in [(0.0, 4.0), (0.1, 7.0), (0.0, 6.0), (-0.1, 9.0), (0.05, 9.0)] {
+            p.push(&point(x, size), &mut out);
+        }
+        // (The tremble adds up to a gap once, so one dab falls by
+        // distance on the way.)
+        let sizes: Vec<f32> = out.iter().map(|d| d.disc.radius * 2.0).collect();
+        assert_eq!(sizes.first(), Some(&4.0));
+        assert_eq!(
+            sizes.last(),
+            Some(&9.0),
+            "a trembling tap grows too: {sizes:?}"
+        );
+        assert!(sizes.len() <= 4, "{sizes:?}");
+        // A brush spaced wide (stars a size and a half apart) gains no
+        // dab when pressure rises on the way: dabs follow the distance.
+        let wide = PlanSettings {
+            spacing: Spacing::Ratio,
+            ..PlanSettings::default()
+        };
+        let mut p = planner(wide);
+        let mut out = Vec::new();
+        for k in 0..=20 {
+            let x = k as f32;
+            let mut q = point(x, 10.0 + x);
+            q.spacing = 1.5;
+            p.push(&q, &mut out);
+        }
+        let xs: Vec<f32> = out.iter().map(|d| d.disc.at[0]).collect();
+        assert_eq!(xs.len(), 2, "one at the landing, one a gap on: {xs:?}");
     }
 
     #[test]

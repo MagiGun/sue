@@ -14,6 +14,7 @@ license-file.workspace = true
 # a picture without Sue Paint. Because of sue-type, sue-wm cannot depend
 # on the engine: the shell reaches pictures through the studios' hooks.
 [dependencies]
+sha2.workspace = true
 sue-brush.workspace = true
 sue-core.workspace = true
 sue-io.workspace = true

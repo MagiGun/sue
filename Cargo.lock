@@ -3818,6 +3818,7 @@ dependencies = [
 name = "sue-picture"
 version = "0.0.75"
 dependencies = [
+ "sha2",
  "sue-brush",
  "sue-core",
  "sue-io",
