@@ -746,8 +746,8 @@ pub struct SuePaint {
     pub(crate) line_free: bool,
     /// Adjust line thickness when scaling picked vector lines.
     pub(crate) line_thicken: bool,
-    /// Figures on a vector layer join their ends to the ends of lines
-    /// near them (Vector magnet).
+    /// Lines drawn or laid on a vector layer join their ends to the ends
+    /// of lines near them (Vector magnet).
     pub(crate) vector_magnet: bool,
     /// What Tool Property asked of the picked lines this frame.
     pub(crate) pending_lines: Option<crate::canvas::lines::LineChange>,

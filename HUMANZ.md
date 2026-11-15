@@ -2261,6 +2261,10 @@ the count is reported. On the canvas, `sue_paint::canvas::lines` runs the
 loop, the box's handles and the eraser over several layers as
 `Gesture::Lines`, and Tool Property's changes as a preview kept on
 release (`line_changes`, called once a frame by the Sub Tool palette).
+A pen stroke on a vector layer is painted in place; with Vector magnet
+on, `magnet_stroke` snaps its ends, takes the stroke's pixel edit back
+and paints the layer again from the lines, so the step holds the joined
+line and its pixels.
 
 **Correct Line.** Every brush sample carries a width and an opacity share
 (`Sample::width`, `Sample::alpha`, 1 as drawn) that scale its dab, so a

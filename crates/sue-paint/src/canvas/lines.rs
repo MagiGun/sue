@@ -662,7 +662,7 @@ impl SuePaint {
         let mut lines = vector::lines(&geometry);
         let mut line = vector::figure_line(&local, tip, colors, corners);
         if self.vector_magnet {
-            let reach = (tip.size * 0.5).max(MAGNET_REACH);
+            let reach = self.magnet_reach(tip.size);
             vector::snap_ends(&mut line, &lines, reach);
         }
         lines.push(line);
@@ -672,6 +672,66 @@ impl SuePaint {
                 .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
         }
         true
+    }
+
+    /// A pen, pencil or brush stroke `kept` just laid on the vector
+    /// `layer` beside its `lines`, painted in place as `pixels`: with
+    /// Vector magnet on, an end that lands near the end of another line
+    /// (or near its own start) goes onto it, and the layer is painted
+    /// again from the lines so the joined ends show. The lines to keep
+    /// and their pixel edit, for one step.
+    pub(crate) fn magnet_stroke(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        layer: EntityId,
+        kept: Line,
+        mut lines: Vec<Line>,
+        pixels: sue_core::txn::RasterEdit,
+    ) -> (Vec<Line>, Option<sue_core::txn::RasterEdit>) {
+        let mut snapped = kept.clone();
+        let reach = self.magnet_reach(kept.tip.size);
+        if !self.vector_magnet || kept.tip.eraser || !vector::snap_ends(&mut snapped, &lines, reach)
+        {
+            lines.push(kept);
+            return (lines, Some(pixels));
+        }
+        // The layer as it was before the stroke, to paint it again from.
+        let label = sue_core::ReversibleTransaction::label(&pixels);
+        let mut pixels = pixels;
+        if sue_core::ReversibleTransaction::revert(&mut pixels, &mut cx.world.arena).is_err() {
+            lines.push(kept);
+            return (lines, Some(pixels));
+        }
+        let Some(before) = doc::raster(&cx.world.arena, layer)
+            .and_then(|raster| raster.bytes())
+            .map(<[u8]>::to_vec)
+        else {
+            lines.push(kept);
+            return (lines, None);
+        };
+        lines.push(snapped);
+        Self::paint_lines(cx, layer, &lines);
+        let patch = doc::raster(&cx.world.arena, layer).and_then(|raster| {
+            doc::diff_patch(&before, raster.bytes()?, raster.width(), raster.height())
+        });
+        if let Some(doc) = self.docs.get_mut(self.active) {
+            doc.compositor
+                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+        let edit = patch.map(|patch| sue_core::txn::RasterEdit::new(layer, label, vec![patch]));
+        (lines, edit)
+    }
+
+    /// How far, in layer pixels, the Vector magnet reaches for a line
+    /// with a brush `size` across: half the brush, and never less than
+    /// [`MAGNET_REACH`] screen points at the current zoom.
+    fn magnet_reach(&self, size: f32) -> f32 {
+        let zoom = self
+            .docs
+            .get(self.active)
+            .map_or(1.0, |doc| doc.view.zoom)
+            .max(0.01);
+        (size * 0.5).max(MAGNET_REACH / zoom)
     }
 
     /// The Vector eraser pressed at `p` (picture pixels) while other
@@ -850,8 +910,9 @@ pub(crate) fn join_dragged_end(lines: &mut [Line], line: usize, index: usize, re
     vector::snap_end(&mut lines[line], index != 0, &others, reach, true)
 }
 
-/// The least distance, in layer pixels, the Vector magnet reaches.
-const MAGNET_REACH: f32 = 6.0;
+/// The least distance, in screen points, the Vector magnet reaches: as
+/// far on screen at every zoom, as a pointer is.
+const MAGNET_REACH: f32 = 10.0;
 
 /// Layer, Update Lines to New Brush Engine: the legacy lines of the
 /// current vector layer become lines of the brush engine, as one step;

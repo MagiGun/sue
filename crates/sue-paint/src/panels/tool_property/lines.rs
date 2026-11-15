@@ -254,8 +254,9 @@ impl SuePaint {
         );
     }
 
-    /// Vector magnet, for the Figure tool: a figure laid on a vector
-    /// layer joins its ends to the ends of lines near them.
+    /// Vector magnet, for the pen, pencil, brush and Figure tools: a line
+    /// laid on a vector layer joins its ends to the ends of lines near
+    /// them.
     pub(super) fn magnet_row(&mut self, ui: &mut Ui, theme: &Theme) {
         let response = checkbox(
             "sue-paint-vector-magnet",

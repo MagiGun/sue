@@ -436,7 +436,7 @@ The order of work is the plan at the end.
 | Batch edit lines by width or pressure | Tool | partial | To verify |
 | Object tool: loop pick, box with eight handles, Scale and Free transform | Tool | done | Adjust line thickness when scaling; Shift keeps a corner in proportion |
 | Recolor, resize and reshape picked lines | Object tool, Tool Property | done | Color wheel or a typed hex code; brush size; a sub tool's brush shape |
-| Figures on vector layers, Vector magnet | Figure tool | done | Lines, rectangles, ellipses, polylines and curves become vector lines with the sub tool's brush |
+| Figures on vector layers, Vector magnet | Figure, pen, pencil, brush | done | Lines, rectangles, ellipses, polylines and curves become vector lines with the sub tool's brush; Vector magnet joins drawn ends to nearby ends |
 | Vector eraser on several layers | Tool | done | Every picked vector layer at once, one undo step |
 | Fill up to vector path | Fill tool | done | Fills in under vector lines to their middle |
 
