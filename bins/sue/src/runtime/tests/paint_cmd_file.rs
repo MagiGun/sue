@@ -78,12 +78,16 @@ fn every_file_command_runs_on_a_canvas() {
     assert!(commands.len() >= 50, "{}", commands.len());
     // Open Recent and Clear Recent Files have no file to work on in a
     // fresh test home, and Export Back to the Same .clip is grayed on a
-    // canvas no .clip opened (paint_saving.rs runs it on one); every
-    // other command must show that it ran.
+    // canvas no .clip opened (paint_saving.rs runs it on one), Export
+    // Animation, Audio is grayed on a timeline with no sound and Show in
+    // Folder on a canvas with no file (paint_export.rs runs both where
+    // they work); every other command must show that it ran.
     let quiet_here = [
         "file.recent.clear",
         "file.recent.open.0",
         "file.export.clip_back",
+        "file.export.audio",
+        "file.show_in_folder",
     ];
     let mut silent = Vec::new();
     for command in &commands {

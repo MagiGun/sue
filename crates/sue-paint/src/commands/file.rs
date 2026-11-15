@@ -196,6 +196,33 @@ fn export_flat(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>)
     paint.export(cx, extension);
 }
 
+/// File, Export Animation, Audio: the timeline's sound mixed, through
+/// the sound page of the export settings dialog.
+fn export_audio(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.export_audio(cx);
+}
+
+/// Works while the timeline of the canvas in front has sound to hear.
+fn sound_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(paint.has_sound(facts.arena))
+}
+
+/// File, Batch Convert Pictures: picture files to other picture files,
+/// in the background.
+fn batch_convert(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.batch_convert(cx);
+}
+
+/// File, Show in Folder: the canvas's file in the file manager.
+fn show_in_folder(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.show_in_folder(cx);
+}
+
+/// Works while the canvas in front has a file.
+fn file_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(paint.file_of_canvas().is_some())
+}
+
 fn export_psd(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.export_psd(cx, false);
 }
@@ -821,6 +848,47 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         import_pose_scanner,
     )
     .with(Flags::PALETTE),
+    // Files in Sue Paint (P4-13): the formats Save Duplicate gained, the
+    // timeline's sound out, Batch Convert Pictures and Show in Folder.
+    c(
+        "file.duplicate.gif",
+        "gif-gif-ellipsis",
+        "duplicate",
+        export_flat,
+    ),
+    c(
+        "file.duplicate.qoi",
+        "qoi-qoi-ellipsis",
+        "duplicate",
+        export_flat,
+    ),
+    c(
+        "file.duplicate.ico",
+        "ico-icon-ellipsis",
+        "duplicate",
+        export_flat,
+    ),
+    c(
+        "file.duplicate.ppm",
+        "ppm-portable-pixmap-ellipsis",
+        "duplicate",
+        export_flat,
+    ),
+    c("file.export.audio", "audio-ellipsis", "audio", export_audio).state(sound_state),
+    on(
+        "file.batch_convert",
+        "batch-convert-pictures-ellipsis",
+        "files",
+        batch_convert,
+    )
+    .with(Flags::PALETTE),
+    c(
+        "file.show_in_folder",
+        "show-in-folder",
+        "folder-reveal",
+        show_in_folder,
+    )
+    .state(file_state),
 ];
 
 #[cfg(test)]
@@ -935,6 +1003,65 @@ mod tests {
     }
 
     #[test]
+    fn the_commands_of_files_in_sue_paint_are_in_the_file_menu() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let menus = crate::menus::menus();
+        for (name, label) in [
+            ("file.duplicate.gif", ".gif (GIF)..."),
+            ("file.duplicate.qoi", ".qoi (QOI)..."),
+            ("file.duplicate.ico", ".ico (Icon)..."),
+            ("file.duplicate.ppm", ".ppm (Portable Pixmap)..."),
+            ("file.export.audio", "Audio..."),
+            ("file.batch_convert", "Batch Convert Pictures..."),
+            ("file.show_in_folder", "Show in Folder"),
+        ] {
+            assert_eq!(
+                crate::menus::label_of(&menus, name),
+                Some(label),
+                "{name} is in the File menu"
+            );
+        }
+    }
+
+    #[test]
+    fn save_duplicate_and_export_single_layer_offer_the_same_formats() {
+        // Both write the canvas flattened through the export settings
+        // dialog, so GIF, QOI, ICO and PPM are under both.
+        use sue_wm::MenuItem;
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let menus = crate::menus::menus();
+        let commands_of = |label: &str| -> Vec<String> {
+            let found = menus[0].items.iter().find_map(|item| match item {
+                MenuItem::Sub {
+                    label: found,
+                    items,
+                    ..
+                } if found == label => Some(items),
+                _ => None,
+            });
+            found
+                .unwrap_or_else(|| panic!("{label} is in the File menu"))
+                .iter()
+                .filter_map(|item| match item {
+                    MenuItem::Action { command, .. } => Some(command.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let duplicate = commands_of(&tr!("save-duplicate"));
+        let single = commands_of(&tr!("export-single-layer"));
+        for name in [
+            "file.duplicate.gif",
+            "file.duplicate.qoi",
+            "file.duplicate.ico",
+            "file.duplicate.ppm",
+        ] {
+            assert!(duplicate.iter().any(|found| found == name), "{name}");
+            assert!(single.iter().any(|found| found == name), "{name}");
+        }
+    }
+
+    #[test]
     fn the_flat_exports_write_the_format_their_name_ends_in() {
         for name in [
             "file.export.bmp",
@@ -944,6 +1071,10 @@ mod tests {
             "file.export.tga",
             "file.export.webp",
             "file.export.jxl",
+            "file.duplicate.gif",
+            "file.duplicate.qoi",
+            "file.duplicate.ico",
+            "file.duplicate.ppm",
         ] {
             let extension = name.rsplit('.').next().unwrap_or_default();
             assert!(

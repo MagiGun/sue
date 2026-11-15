@@ -205,7 +205,7 @@ impl SuePaint {
 
     /// Writes the timeline's sound to `path` with the sound page's
     /// settings.
-    pub(crate) fn export_audio(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+    pub(crate) fn write_audio(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
         let Some((_, sequence, _)) = self.timeline_here(&cx.world.arena) else {
             return;
         };

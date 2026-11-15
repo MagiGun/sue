@@ -17,6 +17,7 @@ mod paint_comic;
 mod paint_command_bar;
 mod paint_dialogs;
 mod paint_dock;
+mod paint_export;
 mod paint_extras;
 mod paint_figure;
 mod paint_fill;
@@ -149,6 +150,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 35a and 35b. Save's question on a canvas from a .clip and from a
     // PNG.
     paint_saving::questions(tour)?;
+    // 36a to 36d. Sue Paint's export settings, Batch Convert Pictures
+    // and Export Animation, Audio.
+    paint_export::scenes(tour)?;
     // 28n to 28r. The export settings dialog and the batch list.
     ui_export::scenes(tour)?;
     // 36a and 36b. Picked vector lines and Vector magnet, last, since

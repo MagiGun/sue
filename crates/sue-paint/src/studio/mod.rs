@@ -863,6 +863,9 @@ pub struct SuePaint {
     /// What the Layer palette keeps between frames: two panes, the
     /// search, the palette color menu, where its buttons are.
     pub(crate) layer_palette: crate::panels::LayerPalette,
+    /// File's export settings dialog, Batch Convert Pictures, and the
+    /// file each canvas was last written to (see `studio/files.rs`).
+    pub(crate) files: files::Files,
 }
 
 impl Default for SuePaint {
@@ -1064,6 +1067,7 @@ impl Default for SuePaint {
             comic_picked: None,
             tool_palettes: crate::panels::ToolPalettes::default(),
             layer_palette: crate::panels::LayerPalette::default(),
+            files: files::Files::default(),
         }
     }
 }

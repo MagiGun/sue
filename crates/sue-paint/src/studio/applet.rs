@@ -521,6 +521,10 @@ impl SueApplet for SuePaint {
         {
             return;
         }
+        // Batch Convert Pictures' files and output folder.
+        if self.batch_picked(cx, &pick.purpose, path) {
+            return;
+        }
         match pick.purpose.as_str() {
             "new-from-movie" => self.new_from_movie(path, cx),
             "open" => self.open_picked(cx, path, false),
@@ -564,7 +568,7 @@ impl SueApplet for SuePaint {
             "subview" => self.add_reference(path, cx),
             "model3d" => self.import_3d(cx, path),
             "anim-audio" => self.import_audio(cx, path),
-            "anim-sound" => self.export_audio(cx, path),
+            "anim-sound" => self.write_audio(cx, path),
             "colorset-import" => self.import_color_set(cx, path),
             "colorset-export" => self.export_color_set(cx, path),
             _ => {}
@@ -627,14 +631,28 @@ impl SueApplet for SuePaint {
                 .collect();
             self.palette_keys = (Some(revision), keys);
         }
-        sue_wm::Tick::default()
+        // Batch Convert Pictures goes on while its dialog is closed and
+        // Sue Paint is not shown.
+        self.poll_batch(cx);
+        sue_wm::Tick {
+            wake: self
+                .files
+                .batch
+                .as_ref()
+                .is_some_and(sue_wm::job_list::JobList::busy)
+                .then(|| cx.view.now + std::time::Duration::from_millis(100)),
+            ..sue_wm::Tick::default()
+        }
     }
 
     fn captures_keys(&self) -> bool {
         // A dialog, a stroke or words being typed own the keys, so the
         // global undo cannot pull pixels from under a preview, a pen or a
         // caret.
-        self.dialog.is_some() || self.gesture.is_some() || self.typing.is_some()
+        self.dialog.is_some()
+            || self.gesture.is_some()
+            || self.typing.is_some()
+            || self.files.dialog_open()
     }
 
     fn commands(&self) -> Vec<PaletteEntry> {
@@ -817,6 +835,7 @@ impl SueApplet for SuePaint {
                 self.save_ask = None;
                 self.page_view = None;
                 self.tool_palettes.naming = None;
+                self.files.close();
                 self.menubar.close();
                 true
             }

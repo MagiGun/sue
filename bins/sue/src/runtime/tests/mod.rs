@@ -28,6 +28,7 @@ mod paint_comic;
 mod paint_command_bar;
 mod paint_dialogs;
 mod paint_edit;
+mod paint_export;
 mod paint_extras;
 mod paint_figure;
 mod paint_files;

@@ -262,6 +262,20 @@ follow [Semantic Versioning](https://semver.org/).
   the canvas on a second swipe, and its command bar records a timelapse.
   Settings, Sue Paint, Phones and Tablets sets what the two-finger swipe,
   pinch and rotation do.
+- Sue Paint, File: every flat picture export (Export (Single Layer) and
+  Save Duplicate) shows the export settings first: format, output size,
+  resampling, color or grays, background, quality and effort. The next
+  export starts where the last one left them.
+- Sue Paint, File, Save Duplicate and Export (Single Layer) also write
+  GIF, QOI, ICO and PPM, and Save As offers Photoshop Big Document and Photoshop Document with their
+  layers.
+- Sue Paint, File, Batch Convert Pictures: turn a folder of pictures into
+  another type in the background, with a status per file, an output
+  folder, a name pattern, and turn, mirror, brightness, contrast and
+  saturation for every picture.
+- Sue Paint, File, Export Animation, Audio writes the timeline's sound as
+  WAV, FLAC or AIFF, with bits, sample rate, channels and normalizing.
+- Sue Paint, File, Show in Folder shows the canvas's file in Explorer.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
@@ -481,6 +495,9 @@ follow [Semantic Versioning](https://semver.org/).
   them, and the palette menus, palette tabs and the buttons that hide or
   fold a side use Sue's shared menus, icons and focus rings.
 
+- Sue Paint, Edit, Change Image Resolution resamples with the same
+  bicubic resampler as every export, so a picture made larger keeps
+  crisper edges and one made smaller stays clean at its transparent edges.
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait

@@ -253,7 +253,10 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
     ) {
         let ctx = ui.ctx().clone();
-        let blocked = self.dialog.is_some() || self.menubar.is_open() || !self.ready;
+        let blocked = self.dialog.is_some()
+            || self.files.dialog_open()
+            || self.menubar.is_open()
+            || !self.ready;
         let (events, space, time, dt, held, gone) = ctx.input(|input| {
             (
                 input.events.clone(),
