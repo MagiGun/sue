@@ -37,6 +37,7 @@ mod paint_view;
 mod paint_window;
 mod save;
 mod settings;
+mod settings_screens;
 mod shell;
 mod windows;
 mod writer;
