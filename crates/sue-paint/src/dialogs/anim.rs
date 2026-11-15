@@ -19,21 +19,24 @@ pub(super) fn onion_ui(ui: &mut Ui, onion: &mut crate::anim::Onion, theme: &Them
         .map(|name| crate::localize(name))
         .collect();
     wm_ui::form_grid(ui, "anim-onion-form", theme, |grid| {
-        grid.section(&tr!("number-of-skins"));
-        let cels = tr!("cels");
+        // No section titles: the labels say it, and the form fits the
+        // dialog with room for the opacity rows.
         for (salt, name, count) in [
             (
                 "anim-onion-before",
-                tr!("previous-frame-2"),
+                tr!("onion-cels-before"),
                 &mut onion.before,
             ),
-            ("anim-onion-after", tr!("next-frame-2"), &mut onion.after),
+            (
+                "anim-onion-after",
+                tr!("onion-cels-after"),
+                &mut onion.after,
+            ),
         ] {
             grid.row(&name, |ui| {
-                whole(ui, salt, count, 0..=10, &cels, theme);
+                whole(ui, salt, count, 0..=10, "", theme);
             });
         }
-        grid.section(&tr!("view-settings"));
         grid.row(&tr!("color-mode"), |ui| {
             let mut chosen = usize::from(onion.mode.min(2));
             if wm_ui::dropdown("anim-onion-mode", &mut chosen, &modes)
@@ -44,8 +47,8 @@ pub(super) fn onion_ui(ui: &mut Ui, onion: &mut crate::anim::Onion, theme: &Them
             }
         });
         for (name, color) in [
-            (tr!("previous-frame-2"), &mut onion.before_color),
-            (tr!("next-frame-2"), &mut onion.after_color),
+            (tr!("onion-color-before"), &mut onion.before_color),
+            (tr!("onion-color-after"), &mut onion.after_color),
         ] {
             grid.row(&name, |ui| {
                 let mut rgba = [color[0], color[1], color[2], 255];
@@ -248,14 +251,14 @@ impl AnimDialog {
     /// a regular row and its gap.
     pub(super) fn size(&self) -> egui::Vec2 {
         let rows: f32 = match self {
-            Self::Timeline(_) => 13.0,
-            Self::Movie(_) => 15.0,
-            Self::Sequence(_) => 13.0,
-            Self::Animated(_) => 11.0,
-            Self::Cels(_) => 6.0,
-            Self::AudioClip(_) => 12.0,
-            Self::Label(_) | Self::StopTimelapse(..) => 5.0,
-            Self::Insert(_) => 7.0,
+            Self::Timeline(_) => 11.5,
+            Self::Movie(_) => 10.5,
+            Self::Sequence(_) => 11.0,
+            Self::Animated(_) => 9.0,
+            Self::Cels(_) => 5.0,
+            Self::AudioClip(_) => 10.0,
+            Self::Label(_) | Self::StopTimelapse(..) => 4.0,
+            Self::Insert(_) => 4.5,
         };
         let row = wm_ui::Density::Regular.row();
         egui::Vec2::new(row * 15.0, row * (rows + 2.0) * 1.2)
@@ -665,7 +668,11 @@ fn animated_ui(ui: &mut Ui, form: &mut AnimatedForm, theme: &Theme) -> Outcome {
             }
         });
         grid.row(&tr!("form-height"), |ui| {
-            help(ui, &format!("{} px", form.size[1]), theme);
+            help(
+                ui,
+                &format!("{} px", sue_lang::number(f64::from(form.size[1]), 0)),
+                theme,
+            );
         });
         if form.kind == Animated::Gif {
             grid.row(&tr!("loop-count"), |ui| {
@@ -836,7 +843,7 @@ fn insert_ui(ui: &mut Ui, form: &mut InsertForm, theme: &Theme) -> Outcome {
                 "anim-insert-count",
                 &mut form.count,
                 1..=10_000,
-                &tr!("frames"),
+                "",
                 theme,
             );
         });
@@ -853,7 +860,7 @@ fn insert_ui(ui: &mut Ui, form: &mut InsertForm, theme: &Theme) -> Outcome {
             tick(
                 ui,
                 "anim-insert-split",
-                &tr!("split-clip"),
+                &tr!("split-clip-option"),
                 &mut form.split,
                 theme,
             );

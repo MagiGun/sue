@@ -1617,7 +1617,7 @@ fn sue_paint_timeline_menus_insert_frames_and_timelapse_ask_first() {
         "{texts:?}"
     );
     fill(&mut paint, "Number of frames", "3");
-    paint.click_text("Split Clip");
+    paint.click_text("Split clip");
     paint.click_text("OK");
     let arena = &paint.runtime.engine.world.arena;
     assert_eq!(sue_paint::anim::length(arena, picture), length + 3);

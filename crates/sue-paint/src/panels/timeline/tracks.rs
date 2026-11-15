@@ -543,8 +543,11 @@ impl SuePaint {
                 },
             );
             if at % every == 0 || every == 1 {
+                // Clear of the playback range's first handle (as wide as
+                // `pad`), which sits on the same frame.
+                let clear = if at == play_start { pad } else { 0.0 };
                 painter.text(
-                    pos2(x + pad / 2.0, half_ruler + ruler / 4.0),
+                    pos2(x + pad / 2.0 + clear, half_ruler + ruler / 4.0),
                     Align2::LEFT_CENTER,
                     self.anim_ui.unit.show(at, fps),
                     micro.clone(),
@@ -1281,12 +1284,21 @@ impl SuePaint {
             CornerRadius::same(theme.radius(wm_ui::Radius::Xs) as u8),
             theme.border_active,
         );
+        // Its number in whichever of the text and the panel colors reads
+        // best on the head's fill.
+        let ink = if wm_ui::contrast(theme.text, theme.border_active)
+            >= wm_ui::contrast(theme.panel, theme.border_active)
+        {
+            theme.text
+        } else {
+            theme.panel
+        };
         painter.text(
             head.center(),
             Align2::CENTER_CENTER,
             self.anim_ui.unit.show(frame, fps),
             micro,
-            theme.selection_text,
+            ink,
         );
 
         timeline_scrollbars(

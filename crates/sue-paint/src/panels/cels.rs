@@ -31,9 +31,15 @@ impl SuePaint {
         let registered = cel.zip(self.layer()).is_some_and(|(cel, layer)| {
             crate::anim::light_table(&cx.world.arena, cel).contains(&layer)
         });
-        let side = Density::of(ui).row();
         let gap = theme.space(Space::S1);
         let edge = theme.space(Space::S3);
+        // Nine buttons on the second row: they shrink to fit a narrow
+        // palette rather than run off its edge.
+        let columns = 9.0;
+        let side = Density::of(ui)
+            .row()
+            .min((body.width() - edge * 2.0 - gap * (columns - 1.0)) / columns)
+            .max(gap);
         let at = |row: usize, column: usize| {
             Rect::from_min_size(
                 pos2(
