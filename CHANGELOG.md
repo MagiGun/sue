@@ -13,6 +13,23 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: the Page Manager is part of the canvas area, no longer a
+  dialog over the page. It shows the story's spreads, read from the
+  bound side, or its pages in webtoon columns; double-click a page to
+  open it and the pages stay in a column beside it. Drag a page to move
+  it, and right-click one for the Page Manager's menu: open, step, add,
+  duplicate, delete, combine, split, settings, Page Reordering, View,
+  Webtoon Reading Direction, Batch Process, Edit Text and 3D Preview for
+  Binding.
+- Sue Paint: 3D Preview for Binding (Page Manager, or File, Export
+  Multiple Pages) shows the story as a bound book with the bleed cut
+  off; zoom, and turn the pages with the arrows.
+- Sue Paint: Layer, Ruler/Frame, Divide Frame Border Equally and Combine
+  Frames work on the panels the Object tool picks (Shift picks more). A
+  Rectangle frame drawn on a story's page snaps to its default border.
+- Sue Paint: balloons are lined in the color you draw with and filled
+  with the other color; a line width of 0 draws them with no edge.
+
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own

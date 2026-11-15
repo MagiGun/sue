@@ -39,8 +39,8 @@ rows are at the end.
 | Layers | 17 | 5 | 0 | 89 |
 | Selection | 9 | 0 | 0 | 100 |
 | Rulers and symmetry | 7 | 1 | 0 | 94 |
-| Comics: frames, balloons and webtoons | 11 | 0 | 0 | 100 |
-| Story: multi-page works (EX) | 6 | 5 | 2 | 65 |
+| Comics: frames, balloons and webtoons | 14 | 1 | 0 | 97 |
+| Story: multi-page works (EX) | 8 | 5 | 2 | 70 |
 | Animation | 15 | 1 | 0 | 97 |
 | Tools and drawing | 36 | 8 | 1 | 89 |
 | Text | 6 | 3 | 1 | 75 |
@@ -317,12 +317,16 @@ The order of work is the plan at the end.
 | Webtoon canvas and Export Webtoon | File > New, Special Export | done | |
 | Manga binding on the right or left | File > New > Comic | done | |
 | Facing pages in the Page Manager | Page Manager | done | |
+| Divide Frame Border Equally | Layer > Ruler/Frame | done | On the panel the Object tool picked: panels across and down, the gutters between |
+| Combine Frames | Layer > Ruler/Frame | done | The panels picked (Shift adds) become one |
+| Frames snap to the default border | Frame Border tool | done | A Rectangle frame's corners snap onto a story page's default border |
+| Balloon line and fill color, no edge | Balloon tool | partial | The line takes the drawing color and the inside the other color; line width 0 draws no edge. Tool Property has no color, toning or tail rows yet |
 
 ## Story: multi-page works (EX)
 
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
-| Page Manager | Story > Page Manager | done | Pages side by side as spreads; click to choose, double-click to open, move earlier or later |
+| Page Manager | Story > Page Manager | done | A view of the canvas area: spreads read from the bound side, or webtoon columns; double-click opens a page and docks the pages beside it; drag a page to move it; the right-click menu in Clip Studio's order |
 | Add, Insert (advanced), Duplicate and Delete pages | Story | done | |
 | First, Previous, Next and Last page | Story | done | |
 | Page Reordering | Story > Page Reordering | partial | Command exists; the Page Manager also reorders |
@@ -333,6 +337,8 @@ The order of work is the plan at the end.
 | Open, Duplicate, Export Page, Export All Pages | Story > Page Management | done | |
 | Change binding point and start page | Page Manager | done | The first page alone or facing page 2, also in Change Story Information |
 | Folio and page numbers | Change Story Information | done | Size, outer corner or center, from the first page number; on the canvas and in every export |
+| 3D Preview for Binding (EX) | Page Manager, File > Export Multiple Pages | done | The book a spread at a time, bleed cut off; zoom and turn the pages |
+| Webtoon reading direction | Page Manager, Story | done | Right to left or left to right; the Page Manager stands the pages in columns |
 | Sort page file names | Page Manager | missing | |
 | Group work and Teamwork (EX) | Story, Page Manager | missing | |
 
