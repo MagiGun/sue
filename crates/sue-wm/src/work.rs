@@ -7,8 +7,17 @@
 //! about it in `<id>.txt`. Both start with a format line, so a later Sue
 //! reads them. A list without a folder (tests, the self-check) remembers
 //! nothing on disk.
+//!
+//! Work kept again after a small change costs only that change: the
+//! change goes as a record onto `<id>.journal` beside the whole `<id>.sue`
+//! ([`sue_core::journal`], described in `docs/autosave-journal.md`), and
+//! once the journal outgrows the whole file the work is written whole
+//! again and the journal starts over ([`Autosave::write`]). Sue 0.0.75
+//! wrote no journal; its kept work is the `.sue` file alone.
 
 use std::path::{Path, PathBuf};
+use sue_core::SueFile;
+use sue_core::file::Chunk;
 use sue_platform::time::{SystemTime, UNIX_EPOCH};
 
 use crate::AppletId;
@@ -17,6 +26,11 @@ use crate::AppletId;
 const RECENT_HEADER: &str = "# Sue recent files, format 1";
 /// The first line of an autosave's note.
 const NOTE_HEADER: &str = "# Sue autosave, format 1";
+/// A journal is compacted once it holds more bytes than this, or than
+/// the whole kept file if that is larger.
+const COMPACT_BYTES: u64 = 4 << 20;
+/// A journal is compacted once it holds this many records.
+const COMPACT_RECORDS: usize = 256;
 /// How many files the list remembers at most.
 const KEEP: usize = 100;
 /// The first line of `labels.txt`.
@@ -123,7 +137,152 @@ pub struct Autosave {
     pub page: Option<AppletId>,
 }
 
+/// The work as an [`Autosave`]'s files last kept it, so the next keep can
+/// add only what changed.
+#[derive(Debug)]
+pub struct Kept {
+    /// The work as kept. Saving into it again is incremental.
+    pub file: SueFile,
+    /// The whole kept file it belongs to.
+    base: PathBuf,
+    /// Bytes of the whole kept file.
+    base_len: u64,
+    /// Bytes of the journal (0: none yet).
+    journal_len: u64,
+    records: usize,
+}
+
+impl Kept {
+    /// The work that becomes the first kept copy: `file`, with whatever
+    /// it holds (chunks this build does not know included), not yet
+    /// written anywhere.
+    #[must_use]
+    pub fn starting_from(file: SueFile) -> Self {
+        Self {
+            file,
+            base: PathBuf::new(),
+            base_len: 0,
+            journal_len: 0,
+            records: 0,
+        }
+    }
+
+    /// How many records the journal holds (0 after a whole write).
+    #[must_use]
+    pub fn records(&self) -> usize {
+        self.records
+    }
+}
+
 impl Autosave {
+    /// The journal of changes beside the kept file.
+    #[must_use]
+    pub fn journal(&self) -> PathBuf {
+        self.file.with_extension("journal")
+    }
+
+    /// The work as kept: the whole file, with the records of its journal
+    /// that are whole (a journal cut short by a crash loses at most its
+    /// last record).
+    ///
+    /// # Errors
+    /// If the kept file cannot be read.
+    pub fn load(&self) -> Result<SueFile, String> {
+        let base = sue_platform::fs::read(&self.file).map_err(|error| error.to_string())?;
+        let journal = sue_platform::fs::read(self.journal()).unwrap_or_default();
+        sue_core::journal::replay(&base, &journal)
+            .map(|replay| replay.file)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Keeps `next` (the work now, saved into `kept.file` or a clone of
+    /// it, so its pixels went incrementally) in this autosave's files,
+    /// and its note. When `kept` is what these files hold and the journal
+    /// is still small, only a record of the change is appended; otherwise
+    /// the work is written whole, with the picture `preview` makes as its
+    /// `THMB`, and the journal starts over. Runs on any thread.
+    ///
+    /// # Errors
+    /// If a file cannot be written. The kept files then still hold the
+    /// work as last kept, or a whole older record of it; the next keep
+    /// writes it whole.
+    pub fn write(
+        &self,
+        kept: Option<Kept>,
+        next: SueFile,
+        preview: impl FnOnce() -> Option<Chunk>,
+    ) -> std::io::Result<Kept> {
+        if let Some(dir) = self.file.parent() {
+            sue_platform::fs::create_dir_all(dir)?;
+        }
+        let journal = self.journal();
+        let appended = kept
+            .filter(|kept| {
+                kept.base == self.file
+                    && kept.base_len > 0
+                    && kept.journal_len <= COMPACT_BYTES.max(kept.base_len)
+                    && kept.records < COMPACT_RECORDS
+                    && sue_platform::fs::exists(&self.file)
+            })
+            .and_then(|kept| {
+                let record = sue_core::journal::record(&kept.file, &next)?;
+                Some((kept, record))
+            });
+        let state = if let Some((kept, record)) = appended {
+            if kept.journal_len == 0 {
+                let base = sue_platform::fs::read(&self.file)?;
+                let mut whole = sue_core::journal::header(&base);
+                whole.extend_from_slice(&record);
+                sue_platform::write_atomic(&journal, &whole)?;
+                Kept {
+                    journal_len: whole.len() as u64,
+                    records: 1,
+                    file: next,
+                    ..kept
+                }
+            } else {
+                sue_platform::fs::append(&journal, &record)?;
+                Kept {
+                    journal_len: kept.journal_len + record.len() as u64,
+                    records: kept.records + 1,
+                    file: next,
+                    ..kept
+                }
+            }
+        } else {
+            let mut whole = next;
+            match preview() {
+                Some(chunk) => whole.set(chunk),
+                None => {
+                    whole.remove(sue_core::file::THUMBNAIL);
+                }
+            }
+            let mut written = 0_u64;
+            sue_platform::write_atomic_with(&self.file, |out| {
+                let mut counting = Counting {
+                    out,
+                    count: &mut written,
+                };
+                whole.write_to(&mut counting)
+            })?;
+            // The old journal no longer names this file; it goes.
+            match sue_platform::fs::remove_file(&journal) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+                _ => {}
+            }
+            Kept {
+                file: whole,
+                base: self.file.clone(),
+                base_len: written,
+                journal_len: 0,
+                records: 0,
+            }
+        };
+        let note = self.file.with_extension("txt");
+        sue_platform::write_atomic(&note, self.note().as_bytes())?;
+        Ok(state)
+    }
+
     /// Its title: the project's file name, or what it holds.
     #[must_use]
     pub fn title(&self) -> String {
@@ -173,6 +332,24 @@ impl Autosave {
             }
         }
         Some(autosave)
+    }
+}
+
+/// A writer that counts the bytes it passes on.
+struct Counting<'a> {
+    out: &'a mut dyn std::io::Write,
+    count: &'a mut u64,
+}
+
+impl std::io::Write for Counting<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let written = self.out.write(bytes)?;
+        *self.count += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.out.flush()
     }
 }
 
@@ -663,11 +840,43 @@ impl WorkList {
             page,
         };
         sue_platform::write_atomic(&autosave.file, bytes)?;
+        match sue_platform::fs::remove_file(autosave.journal()) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
         sue_platform::write_atomic(&dir.join(format!("{id}.txt")), autosave.note().as_bytes())?;
-        self.autosaves.retain(|kept| kept.id != id);
+        self.kept(autosave);
+        Ok(())
+    }
+
+    /// The autosave this run's work is kept as next: its id, files and
+    /// note, with nothing written yet ([`Autosave::write`] writes it, on
+    /// any thread, and [`Self::kept`] lists it). `None` for a list without
+    /// a folder.
+    pub fn next_keep(
+        &mut self,
+        project: Option<&Path>,
+        name: &str,
+        page: Option<AppletId>,
+        now: u64,
+    ) -> Option<Autosave> {
+        let id = self.own_id(now);
+        let dir = self.autosave_dir()?;
+        Some(Autosave {
+            file: dir.join(format!("{id}.sue")),
+            id,
+            project: project.map(Path::to_path_buf),
+            at: now,
+            name: name.to_owned(),
+            page,
+        })
+    }
+
+    /// Lists `autosave`, just written, as this run's kept work.
+    pub fn kept(&mut self, autosave: Autosave) {
+        self.autosaves.retain(|kept| kept.id != autosave.id);
         self.autosaves.insert(0, autosave);
         self.revision += 1;
-        Ok(())
     }
 
     /// Lets go of this run's kept work (it was saved, or there is none).
@@ -691,7 +900,11 @@ impl WorkList {
         };
         let autosave = self.autosaves.remove(index);
         self.revision += 1;
-        for file in [autosave.file.clone(), autosave.file.with_extension("txt")] {
+        for file in [
+            autosave.file.clone(),
+            autosave.journal(),
+            autosave.file.with_extension("txt"),
+        ] {
             match sue_platform::fs::remove_file(&file) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -908,6 +1121,94 @@ mod tests {
         let again = WorkList::open(root.join("work"));
         assert_eq!(again.labels(), ["Manga".to_owned()]);
         assert!(!again.has_label(&picture, &work) && !again.is_favorite(&picture));
+        let _ = sue_platform::fs::remove_dir_all(&root);
+    }
+
+    /// An arena of one 16 by 16 layer whose first pixel is `shade`.
+    fn work_of(shade: u8) -> sue_core::Arena {
+        let mut pixels = vec![9_u8; 16 * 16 * 4];
+        pixels[0] = shade;
+        let raster =
+            sue_core::RasterTile2D::from_bytes(16, 16, sue_core::PixelFormat::Rgba8, pixels)
+                .unwrap();
+        let mut arena = sue_core::Arena::new();
+        arena.spawn("Layer", raster);
+        arena
+    }
+
+    /// The first pixel of the kept work.
+    fn shade_of(file: &SueFile) -> u8 {
+        let arena = file.arena(&sue_core::ComponentRegistry::new()).unwrap();
+        let (_, entity) = arena.iter().next().unwrap();
+        entity
+            .component(sue_core::ComponentKind::RasterTile2D)
+            .and_then(sue_core::ComponentData::as_raster)
+            .and_then(sue_core::RasterTile2D::bytes)
+            .unwrap()[0]
+    }
+
+    #[test]
+    fn kept_work_grows_a_journal_survives_a_cut_and_is_compacted() {
+        let root = temp("journal");
+        let mut list = WorkList::open(root.join("work"));
+        let autosave = list.next_keep(None, "Picture", None, 1_000).unwrap();
+        let keep = |kept: Option<Kept>, shade: u8| {
+            let mut next = kept
+                .as_ref()
+                .map_or_else(SueFile::new, |kept| kept.file.clone());
+            next.set_arena(&work_of(shade));
+            autosave
+                .write(kept, next, || {
+                    Some(Chunk {
+                        tag: sue_core::file::THUMBNAIL,
+                        version: 1,
+                        payload: vec![shade],
+                    })
+                })
+                .unwrap()
+        };
+        // The first keep is whole, with its preview; no journal yet.
+        let kept = keep(Some(Kept::starting_from(SueFile::new())), 1);
+        list.kept(autosave.clone());
+        assert!(!autosave.journal().exists());
+        assert_eq!(kept.records(), 0);
+        let whole = sue_platform::fs::read(&autosave.file).unwrap();
+        assert_eq!(shade_of(&autosave.load().unwrap()), 1);
+        // The next ones go onto the journal; the whole file stays.
+        let kept = keep(Some(kept), 2);
+        let kept = keep(Some(kept), 3);
+        assert_eq!(kept.records(), 2);
+        assert_eq!(sue_platform::fs::read(&autosave.file).unwrap(), whole);
+        let loaded = autosave.load().unwrap();
+        assert_eq!(shade_of(&loaded), 3);
+        assert_eq!(
+            loaded.chunk(sue_core::file::THUMBNAIL).unwrap().payload,
+            [1],
+            "the preview of the whole file stands"
+        );
+        // A crash in the middle of the last record: the one before stands.
+        let journal = sue_platform::fs::read(autosave.journal()).unwrap();
+        sue_platform::fs::write(autosave.journal(), &journal[..journal.len() - 3]).unwrap();
+        assert_eq!(shade_of(&autosave.load().unwrap()), 2);
+        // Another run lists it with its journal, and drops both with it.
+        let other = WorkList::open(root.join("work"));
+        assert_eq!(other.unsaved().count(), 1);
+        // Without the kept state (a failed write), the next keep is whole.
+        let kept = keep(None, 4);
+        assert!(!autosave.journal().exists());
+        assert_eq!(shade_of(&autosave.load().unwrap()), 4);
+        // Records pile up to the limit, then the work is written whole.
+        let mut kept = keep(Some(kept), 5);
+        for shade in 6..(6 + COMPACT_RECORDS as u8) {
+            kept = keep(Some(kept), shade);
+        }
+        assert!(kept.records() < 5, "compacted ({} records)", kept.records());
+        assert_eq!(
+            shade_of(&autosave.load().unwrap()),
+            5 + COMPACT_RECORDS as u8
+        );
+        list.discard(&autosave.id).unwrap();
+        assert!(!autosave.file.exists() && !autosave.journal().exists());
         let _ = sue_platform::fs::remove_dir_all(&root);
     }
 }

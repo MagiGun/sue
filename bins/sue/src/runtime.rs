@@ -11,12 +11,14 @@
 //! The work Sue remembers ([`WorkList`]): every file opened or saved goes
 //! first in the recent list, and work nobody saved is kept by itself
 //! (`general.autosave_seconds` after a change, and at quit) for the Hub to
-//! recover or discard. Opening another project keeps the unsaved work it
+//! recover or discard. Saving and keeping run on background jobs from a
+//! snapshot of the arena, listed in the transfers ([`save`]); whether the
+//! work changed is told by the arena's revision. Opening another project keeps the unsaved work it
 //! replaces the same way.
 
 use std::collections::VecDeque;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use egui::{Align2, Id, Order, RichText, Sense};
@@ -29,12 +31,15 @@ use sue_platform::{
 };
 use sue_rice::{RiceSchema, SetRiceValues};
 use sue_wm::{
-    AppletId, AppletRole, Applets, FilePick, RiceEdit, Shell, ShellIo, ShellRequest, Theme,
-    TransferKind, Transfers, Transport, Typing, WorkList, unix_now, widgets,
+    AppletId, AppletRole, Applets, Autosave, FilePick, Kept, RiceEdit, Shell, ShellIo,
+    ShellRequest, Theme, TransferKind, Transfers, Transport, Typing, WorkList, unix_now, widgets,
 };
 
 use crate::engine::Engine;
 use crate::update::{self, Updater};
+use save::{Running, SaveInput};
+
+mod save;
 use crate::util::{file_name, human_bytes};
 
 /// How often the audio queue is topped up while something plays.
@@ -176,7 +181,9 @@ pub struct Runtime {
     /// Where the open project lives, once saved or opened.
     project: Option<PathBuf>,
     /// The open project file, so chunks this build does not know survive.
-    project_file: SueFile,
+    /// Shared, so a keep's job can start from it without a copy on the
+    /// interface thread.
+    project_file: Arc<SueFile>,
     /// The files of late and the work Sue kept (the Hub's lists).
     work: WorkList,
     /// The files brought in, written out and copied in this run.
@@ -187,11 +194,30 @@ pub struct Runtime {
     autosave_seen: u64,
     /// When to keep the work next, while a change waits for it.
     next_autosave: Option<Instant>,
-    /// What the project was when saved or opened (`None`: unknown, as
-    /// after a recovery), so unchanged work is not kept.
-    saved_digest: Option<u64>,
-    /// What the work kept by this run holds.
-    kept_digest: Option<u64>,
+    /// The arena's revision when the project was last saved or opened
+    /// (`None`: unknown, as after a recovery), so unchanged work is not
+    /// kept.
+    saved_at: Option<u64>,
+    /// The arena's revision the work kept by this run holds.
+    kept_at: Option<u64>,
+    /// The kept work as its files hold it, so the next keep adds only
+    /// what changed (`None`: the next keep writes it whole).
+    kept: Option<Kept>,
+    /// The project save running on a job: its result, where it goes.
+    saving: Option<(Running<SavedFile>, PathBuf)>,
+    /// Where to save once the running save is done, asked for meanwhile.
+    save_next: Option<PathBuf>,
+    /// The unsaved work being kept on a job, and where.
+    keeping: Option<(Running<KeptWork>, Autosave)>,
+    /// Holds a project save's job until it is let go (tests).
+    #[cfg(test)]
+    pub(crate) save_gate: Option<std::sync::mpsc::Receiver<()>>,
+    /// Holds a keep's job until it is let go (tests).
+    #[cfg(test)]
+    pub(crate) keep_gate: Option<std::sync::mpsc::Receiver<()>>,
+    /// Makes a project save fail after this many bytes (tests).
+    #[cfg(test)]
+    pub(crate) fail_save_after: Option<u64>,
     /// The Hub was open in the last frame; its lists are read again each
     /// time it opens.
     hub_was_open: bool,
@@ -204,12 +230,11 @@ pub struct Runtime {
 /// Said after opening something over unsaved work, which was kept.
 const REPLACED: &str = "; the unsaved work before it is on the Hub, under Unsaved Work";
 
-/// A digest of a project's bytes, to tell whether two are the same.
-fn digest(bytes: &[u8]) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    hasher.finish()
-}
+/// What a project save's job hands back: the project's file, for the
+/// next save, and how the write went.
+type SavedFile = (SueFile, Result<(), String>);
+/// What a keep's job hands back: the kept work's new state.
+type KeptWork = Result<Kept, String>;
 
 impl Runtime {
     /// Wraps a booted engine.
@@ -252,14 +277,24 @@ impl Runtime {
             waiting_pick: None,
             next_pick_poll: None,
             project: None,
-            project_file: SueFile::new(),
+            project_file: Arc::default(),
             work: WorkList::default(),
             transfers: Transfers::default(),
             next_transfer_poll: None,
             autosave_seen: 0,
             next_autosave: None,
-            saved_digest: None,
-            kept_digest: None,
+            saved_at: None,
+            kept_at: None,
+            kept: None,
+            saving: None,
+            save_next: None,
+            keeping: None,
+            #[cfg(test)]
+            save_gate: None,
+            #[cfg(test)]
+            keep_gate: None,
+            #[cfg(test)]
+            fail_save_after: None,
             hub_was_open: false,
             updater,
             next_update_poll: None,
@@ -655,6 +690,7 @@ impl Runtime {
         if self.next_transfer_poll.is_none_or(|due| due <= now) {
             let seen = self.transfers.revision();
             self.next_transfer_poll = self.transfers.poll().then_some(now + TRANSFER_POLL);
+            redraw |= self.finish_jobs();
             if self.transfers.revision() != seen {
                 // The start pages show the progress.
                 self.shell.touch();
@@ -711,7 +747,10 @@ impl Runtime {
         if let Some(Err(error)) = self.persist() {
             eprintln!("sue: could not save the rice: {error}");
         }
+        // A save that runs is let finish, then the work is kept.
+        self.wait_jobs();
         self.autosave();
+        self.wait_jobs();
     }
 
     /// How often unsaved work is kept, or `None` when it is not (no folder
@@ -740,17 +779,13 @@ impl Runtime {
         }
     }
 
-    /// The project as it would be saved now.
-    fn project_bytes(&mut self) -> Vec<u8> {
-        self.engine.world.write_into(&mut self.project_file);
-        self.project_file.to_bytes()
-    }
-
     /// Keeps the work if it changed and nobody saved it, for the Hub to
-    /// offer under Unsaved Work; lets the kept copy go once the work is
-    /// saved (or empty) again.
+    /// offer under Unsaved Work, on a job from a snapshot of the arena
+    /// (only what changed since the last keep is written); lets the kept
+    /// copy go once the work is saved (or empty) again. While a save or a
+    /// keep runs it waits for the next turn.
     fn autosave(&mut self) {
-        if self.autosave_interval().is_none() {
+        if self.autosave_interval().is_none() || self.saving.is_some() || self.keeping.is_some() {
             return;
         }
         let revision = self.engine.world.arena.revision();
@@ -758,30 +793,155 @@ impl Runtime {
             return;
         }
         self.autosave_seen = revision;
-        if self.engine.world.arena.is_empty() && self.project.is_none() {
-            self.kept_digest = None;
-            let _ = self.work.release();
+        if (self.engine.world.arena.is_empty() && self.project.is_none())
+            || Some(revision) == self.saved_at
+        {
+            self.release_kept();
             return;
         }
-        let bytes = self.project_bytes();
-        let kept = digest(&bytes);
-        if Some(kept) == self.saved_digest {
-            self.kept_digest = None;
-            let _ = self.work.release();
-            return;
-        }
-        if Some(kept) == self.kept_digest {
+        if Some(revision) == self.kept_at {
             return;
         }
         let (name, page) = self.what_is_open();
-        match self
+        let Some(autosave) = self
             .work
-            .keep(&bytes, self.project.as_deref(), &name, page, unix_now())
+            .next_keep(self.project.as_deref(), &name, page, unix_now())
+        else {
+            return;
+        };
+        // The first keep starts from the open project's file, so chunks
+        // this build does not know are kept too. The job copies it, not
+        // the interface thread.
+        let kept = self.kept.take();
+        let project_file = kept.is_none().then(|| Arc::clone(&self.project_file));
+        let snapshot = self.engine.world.arena.clone();
+        let target = autosave.clone();
+        #[cfg(test)]
+        let gate = self.keep_gate.take();
+        let running = Running::spawn(
+            &mut self.transfers,
+            TransferKind::Export,
+            &tr!("unsaved-work-transfer", title = autosave.title()),
+            None,
+            revision,
+            move |job| {
+                #[cfg(test)]
+                if let Some(gate) = gate {
+                    let _ = gate.recv();
+                }
+                let kept = kept.unwrap_or_else(|| {
+                    Kept::starting_from(project_file.map(Arc::unwrap_or_clone).unwrap_or_default())
+                });
+                let mut next = kept.file.clone();
+                next.set_arena_with(
+                    &snapshot,
+                    &|_| true,
+                    &sue_core::pixels::PixelOptions::AUTOSAVE,
+                );
+                job.set_progress(0.5);
+                let written = target
+                    .write(Some(kept), next, || save::preview(&snapshot))
+                    .map_err(|error| error.to_string());
+                job.set_progress(1.0);
+                let result = written.as_ref().map(|_| ()).map_err(Clone::clone);
+                (written, result)
+            },
+        );
+        self.keeping = Some((running, autosave));
+        self.next_transfer_poll = Some(Instant::now());
+    }
+
+    /// Lets go of the work this run kept: it is saved, or there is none.
+    fn release_kept(&mut self) {
+        self.kept_at = None;
+        self.kept = None;
+        let _ = self.work.release();
+    }
+
+    /// Takes in the saves and keeps that finished. Returns `true` if one
+    /// did.
+    fn finish_jobs(&mut self) -> bool {
+        let mut done = false;
+        if let Some((running, path)) = &self.saving {
+            if let Some((file, result)) = running.take() {
+                let (revision, path) = (running.revision, path.clone());
+                self.saving = None;
+                self.project_file = Arc::new(file);
+                self.saved(&path, revision, result);
+                done = true;
+            } else if running.lost(&self.transfers) {
+                // The job crashed with the file. The project's file on
+                // disk was not replaced, so it is read again for the
+                // chunks this build does not know (Rule 3).
+                let path = path.clone();
+                self.saving = None;
+                self.project_file = Arc::new(
+                    self.project
+                        .as_deref()
+                        .and_then(|project| sue_platform::fs::read(project).ok())
+                        .and_then(|bytes| SueFile::from_bytes(&bytes).ok())
+                        .unwrap_or_default(),
+                );
+                self.shell.notify(
+                    tr!(
+                        "cannot-save",
+                        value = file_name(&path),
+                        error = tr!("the-save-stopped")
+                    ),
+                    true,
+                );
+                done = true;
+            }
+        }
+        if let Some((running, autosave)) = &self.keeping {
+            let finished = running.take();
+            if finished.is_some() || running.lost(&self.transfers) {
+                let (revision, autosave) = (running.revision, autosave.clone());
+                self.keeping = None;
+                match finished {
+                    Some(Ok(kept)) => {
+                        self.kept = Some(kept);
+                        self.kept_at = Some(revision);
+                        self.work.kept(autosave);
+                        // A save that ended while this keep ran holds this
+                        // work or newer: what was just kept goes.
+                        if self.saved_at.is_some_and(|saved| saved >= revision) {
+                            self.release_kept();
+                        }
+                    }
+                    Some(Err(error)) => {
+                        // Written whole next time.
+                        self.kept = None;
+                        self.shell
+                            .notify(tr!("could-not-keep-unsaved-work", error = error), true);
+                    }
+                    None => self.kept = None,
+                }
+                done = true;
+            }
+        }
+        if done
+            && self.saving.is_none()
+            && let Some(path) = self.save_next.take()
         {
-            Ok(()) => self.kept_digest = Some(kept),
-            Err(error) => self
-                .shell
-                .notify(tr!("could-not-keep-unsaved-work", error = error), true),
+            self.start_save(&path);
+        }
+        done
+    }
+
+    /// Waits for the running save and keep to finish, and takes them in
+    /// (the self-check, which reads the file next).
+    pub fn finish_jobs_now(&mut self) {
+        self.wait_jobs();
+    }
+
+    /// Waits for the running save and keep to finish, and takes them in.
+    fn wait_jobs(&mut self) {
+        while self.saving.is_some() || self.keeping.is_some() || self.save_next.is_some() {
+            self.transfers.poll();
+            if !self.finish_jobs() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
     }
 
@@ -790,14 +950,18 @@ impl Runtime {
     /// when something was kept.
     fn set_aside(&mut self) -> bool {
         if self.autosave_interval().is_none() {
+            self.wait_jobs();
             return false;
         }
+        self.wait_jobs();
         // Look again, whether or not the timer came.
         self.autosave_seen = self.engine.world.arena.revision().wrapping_add(1);
         self.autosave();
-        let kept = self.kept_digest.is_some();
+        self.wait_jobs();
+        let kept = self.kept_at.is_some();
         self.work.start_over();
-        self.kept_digest = None;
+        self.kept_at = None;
+        self.kept = None;
         self.next_autosave = None;
         kept
     }
@@ -884,10 +1048,7 @@ impl Runtime {
             self.shell.notify(tr!("that-unsaved-work-is-gone"), true);
             return;
         };
-        let file = sue_platform::fs::read(&kept.file)
-            .map_err(|error| error.to_string())
-            .and_then(|bytes| SueFile::from_bytes(&bytes).map_err(|error| error.to_string()));
-        let file = match file {
+        let file = match kept.load() {
             Ok(file) => file,
             Err(error) => {
                 self.shell.notify(
@@ -911,12 +1072,13 @@ impl Runtime {
         self.engine.forget_histories();
         self.typing = Typing::default();
         self.project.clone_from(&kept.project);
-        self.project_file = file;
-        // This run keeps it from now on, until it is saved.
+        self.project_file = Arc::new(file);
+        // This run keeps it from now on, until it is saved; its next keep
+        // writes it whole.
         self.work.adopt(&kept.id);
-        self.saved_digest = None;
-        let bytes = self.project_bytes();
-        self.kept_digest = Some(digest(&bytes));
+        self.saved_at = None;
+        self.kept_at = Some(self.engine.world.arena.revision());
+        self.kept = None;
         self.autosave_seen = self.engine.world.arena.revision();
         self.shell.notify(
             tr!(
@@ -1135,14 +1297,7 @@ impl Runtime {
     ) {
         match pick.purpose.as_str() {
             "open" => self.open_path(path, textures, now),
-            "save-project" => {
-                if let Err(error) = self.save_project_to(path) {
-                    self.shell.notify(
-                        tr!("cannot-save", value = file_name(path), error = error),
-                        true,
-                    );
-                }
-            }
+            "save-project" => self.save_to(path),
             "export-rice" => {
                 let text = self.engine.world.rice.to_suerice();
                 match write_atomic(path, text.as_bytes()) {
@@ -1281,38 +1436,125 @@ impl Runtime {
                 return;
             }
         };
-        if let Err(error) = self.save_project_to(&path) {
-            self.shell.notify(
-                tr!("cannot-save", value = file_name(&path), error = error),
-                true,
-            );
+        self.save_to(&path);
+    }
+
+    /// Saves the project to `path`: on a job when people work in Sue's
+    /// window ([`Self::start_save`]), before it returns in a scripted run
+    /// (tests, the self-check, snapshots), whose next step reads the file.
+    fn save_to(&mut self, path: &Path) {
+        if self.interactive {
+            self.start_save(path);
+        } else {
+            // A failure is said by `saved`.
+            let _ = self.save_project_to(path);
         }
     }
 
-    /// Writes the project to `path` (atomically) and remembers the path.
+    /// Starts writing the project to `path` on a job, from a snapshot of
+    /// the document; people go on working meanwhile, and the transfers
+    /// list shows how far it got. A save asked for while one runs follows
+    /// it.
+    pub fn start_save(&mut self, path: &Path) {
+        if self.saving.is_some() {
+            self.save_next = Some(path.to_path_buf());
+            return;
+        }
+        self.typing.flush(&mut self.engine.history);
+        let input = self.save_input(path);
+        #[cfg(test)]
+        let gate = self.save_gate.take();
+        let running = Running::spawn(
+            &mut self.transfers,
+            TransferKind::Export,
+            &file_name(path),
+            Some(path.to_path_buf()),
+            self.engine.world.arena.revision(),
+            move |job| {
+                #[cfg(test)]
+                if let Some(gate) = gate {
+                    let _ = gate.recv();
+                }
+                let (file, result) = save::save(input, Some(job));
+                ((file, result.clone()), result)
+            },
+        );
+        self.saving = Some((running, path.to_path_buf()));
+        self.next_transfer_poll = Some(Instant::now());
+        self.shell.touch();
+    }
+
+    /// `true` while a project save runs (tests).
+    #[cfg(test)]
+    #[must_use]
+    pub fn is_saving(&self) -> bool {
+        self.saving.is_some() || self.save_next.is_some()
+    }
+
+    /// What a save of the document now to `path` takes to its job: the
+    /// project's file (lent, it comes back) and a snapshot of the arena,
+    /// which shares every raster's pixels.
+    fn save_input(&mut self, path: &Path) -> SaveInput {
+        SaveInput {
+            file: std::mem::take(&mut self.project_file),
+            arena: self.engine.world.arena.clone(),
+            path: path.to_path_buf(),
+            #[cfg(test)]
+            fail_after: self.fail_save_after,
+            #[cfg(not(test))]
+            fail_after: None,
+        }
+    }
+
+    /// Writes the project to `path` (atomically) and remembers the path,
+    /// before it returns: the same work as [`Self::start_save`], here.
     ///
     /// # Errors
     /// The file system's message.
     pub fn save_project_to(&mut self, path: &Path) -> Result<(), String> {
+        self.wait_jobs();
         self.typing.flush(&mut self.engine.history);
-        let bytes = self.project_bytes();
-        write_atomic(path, &bytes).map_err(|error| error.to_string())?;
+        let revision = self.engine.world.arena.revision();
+        let (file, result) = save::save(self.save_input(path), None);
+        self.project_file = Arc::new(file);
+        match &result {
+            Ok(()) => self.transfers.done(
+                TransferKind::Export,
+                &file_name(path),
+                Some(path.to_path_buf()),
+            ),
+            Err(error) => self.transfers.failed(
+                TransferKind::Export,
+                &file_name(path),
+                Some(path.to_path_buf()),
+                error,
+            ),
+        };
+        self.saved(path, revision, result.clone());
+        result
+    }
+
+    /// A save of the arena at `revision` to `path` ended with `result`.
+    fn saved(&mut self, path: &Path, revision: u64, result: Result<(), String>) {
+        if let Err(error) = result {
+            self.shell.notify(
+                tr!("cannot-save", value = file_name(path), error = error),
+                true,
+            );
+            return;
+        }
         self.project = Some(path.to_path_buf());
-        // Saved: nothing is kept for it any more.
-        self.saved_digest = Some(digest(&bytes));
-        self.kept_digest = None;
-        self.autosave_seen = self.engine.world.arena.revision();
-        self.next_autosave = None;
-        let _ = self.work.release();
+        self.saved_at = Some(revision);
+        // Saved: nothing is kept for it any more, unless it changed while
+        // the save ran.
+        if self.engine.world.arena.revision() == revision {
+            self.release_kept();
+            self.autosave_seen = revision;
+            self.next_autosave = None;
+        }
         let page = self.shell.page().cloned();
         self.remember(path, true, page);
-        self.transfers.done(
-            TransferKind::Export,
-            &file_name(path),
-            Some(path.to_path_buf()),
-        );
         self.shell.notify_saved(path, "project");
-        Ok(())
     }
 
     /// Replaces the open document with the project in `bytes`.
@@ -1333,12 +1575,10 @@ impl Runtime {
         self.engine.forget_histories();
         self.typing = Typing::default();
         self.project = Some(path.to_path_buf());
-        self.project_file = file;
-        if self.work.dir().is_some() {
-            let bytes = self.project_bytes();
-            self.saved_digest = Some(digest(&bytes));
-        }
-        self.kept_digest = None;
+        self.project_file = Arc::new(file);
+        self.saved_at = Some(self.engine.world.arena.revision());
+        self.kept_at = None;
+        self.kept = None;
         self.autosave_seen = self.engine.world.arena.revision();
         self.shell.notify(
             tr!(

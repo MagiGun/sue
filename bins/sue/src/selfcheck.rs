@@ -1349,8 +1349,17 @@ fn check_paint_studio(subject: &mut Subject) -> Result<String, String> {
     let dir = runtime.engine.paths.cache_dir.join("self-check-paint");
     std::fs::create_dir_all(&dir).map_err(text)?;
     let path = dir.join("paint.sue");
-    runtime.save_project_to(&path)?;
+    // Saved on a background job, as Save does, with the preview the
+    // Hub's card shows.
+    runtime.start_save(&path);
+    runtime.finish_jobs_now();
     let bytes = std::fs::read(&path).map_err(text)?;
+    let card = sue_wm::files::thumbs::preview(&bytes, sue_wm::files::thumbs::SIDE)
+        .ok_or("the saved project has no preview")?;
+    ensure(
+        card.size[0] > card.size[1],
+        "the preview is not the illustration's shape",
+    )?;
     runtime.open_project(&path, &bytes)?;
     let _ = std::fs::remove_dir_all(&dir);
     let reopened = flatten(
@@ -1383,7 +1392,7 @@ fn check_paint_studio(subject: &mut Subject) -> Result<String, String> {
         "Sue Paint did not go back to the Hub",
     )?;
     Ok(format!(
-        "illustration of {} painted in {} undo steps, composited, undone, redone, saved in the project and exported as PNG ({} KiB)",
+        "illustration of {} painted in {} undo steps, composited, undone, redone, saved in the project in the background with its preview and exported as PNG ({} KiB)",
         count(layers.len(), "layer", "layers"),
         steps,
         png.len().div_ceil(1024),

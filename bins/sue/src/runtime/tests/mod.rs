@@ -35,6 +35,7 @@ mod paint_vector_3d;
 mod paint_view;
 mod paint_window;
 mod settings;
+mod save;
 mod shell;
 mod windows;
 mod writer;

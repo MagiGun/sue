@@ -115,8 +115,25 @@ fn listing(dir: &Path, show_hidden: bool) -> io::Result<Vec<DirEntryInfo>> {
 /// # Errors
 /// Any I/O error, or [`io::ErrorKind::InvalidInput`] if `path` has no file name.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic_with(path, |out| out.write_all(bytes))
+}
+
+/// Writes a file to `path` atomically, as [`write_atomic`] does, its bytes
+/// streamed by `fill` into the temporary file, so a large file needs no
+/// second copy in memory. When `fill` fails, the old file stays as it was
+/// and the temporary file is removed.
+///
+/// # Errors
+/// What `fill` returns, any I/O error, or [`io::ErrorKind::InvalidInput`]
+/// if `path` has no file name.
+pub fn write_atomic_with(
+    path: &Path,
+    fill: impl FnOnce(&mut dyn Write) -> io::Result<()>,
+) -> io::Result<()> {
     if cfg!(target_arch = "wasm32") {
         // The page's files are written whole or not at all.
+        let mut bytes = Vec::new();
+        fill(&mut bytes)?;
         return write(path, bytes);
     }
     let file_name = path
@@ -134,8 +151,10 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         std::process::id()
     ));
     let result = (|| {
-        let mut file = fs::File::create(&temporary)?;
-        file.write_all(bytes)?;
+        let file = fs::File::create(&temporary)?;
+        let mut out = io::BufWriter::new(file);
+        fill(&mut out)?;
+        let file = out.into_inner().map_err(io::IntoInnerError::into_error)?;
         file.sync_all()?;
         fs::rename(&temporary, path)
     })();
@@ -144,6 +163,81 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+/// A file opened for reading, that can seek: a few small reads take one
+/// part of a large file without reading the rest. In the browser the
+/// whole file is read at once.
+#[derive(Debug)]
+pub struct FileReader(Reader);
+
+#[derive(Debug)]
+enum Reader {
+    #[cfg(not(target_arch = "wasm32"))]
+    File(io::BufReader<fs::File>),
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    Memory(io::Cursor<Vec<u8>>),
+}
+
+impl io::Read for FileReader {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        match &mut self.0 {
+            #[cfg(not(target_arch = "wasm32"))]
+            Reader::File(file) => file.read(buffer),
+            Reader::Memory(bytes) => bytes.read(buffer),
+        }
+    }
+}
+
+impl io::Seek for FileReader {
+    fn seek(&mut self, to: io::SeekFrom) -> io::Result<u64> {
+        match &mut self.0 {
+            #[cfg(not(target_arch = "wasm32"))]
+            Reader::File(file) => file.seek(to),
+            Reader::Memory(bytes) => bytes.seek(to),
+        }
+    }
+}
+
+/// Opens the file at `path` for reading.
+///
+/// # Errors
+/// If it is missing or cannot be opened.
+pub fn open(path: impl AsRef<Path>) -> io::Result<FileReader> {
+    let path = path.as_ref();
+    #[cfg(target_arch = "wasm32")]
+    {
+        read(path).map(|bytes| FileReader(Reader::Memory(io::Cursor::new(bytes))))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        fs::File::open(path).map(|file| FileReader(Reader::File(io::BufReader::new(file))))
+    }
+}
+
+/// Adds `bytes` to the end of the file at `path` (made if missing) and
+/// waits until they are on disk. A crash may leave part of them; readers
+/// of an appended file check what they read (the autosave journal does).
+///
+/// # Errors
+/// Any I/O error.
+pub fn append(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
+    let (path, bytes) = (path.as_ref(), bytes.as_ref());
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut whole = read(path).unwrap_or_default();
+        whole.extend_from_slice(bytes);
+        write(path, whole)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)?;
+        file.write_all(bytes)?;
+        file.sync_data()
+    }
 }
 
 /// What [`metadata`] says about a path.
@@ -392,6 +486,33 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
         assert_eq!(entries, 1, "no temporary files are left behind");
         assert!(write_atomic(Path::new(""), b"").is_err());
+    }
+
+    #[test]
+    fn a_failed_streamed_write_leaves_the_old_file_and_appends_add() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos());
+        let dir = std::env::temp_dir().join(format!("sue-fs-with-{}-{unique}", std::process::id()));
+        let file = dir.join("work.sue");
+        write_atomic_with(&file, |out| out.write_all(b"old")).unwrap();
+        let failed = write_atomic_with(&file, |out| {
+            out.write_all(b"half")?;
+            Err(io::Error::other("the disk is full"))
+        });
+        assert!(failed.is_err());
+        assert_eq!(fs::read(&file).unwrap(), b"old");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "no temporary file");
+        let journal = dir.join("work.journal");
+        append(&journal, b"ab").unwrap();
+        append(&journal, b"cd").unwrap();
+        assert_eq!(fs::read(&journal).unwrap(), b"abcd");
+        let mut reader = open(&journal).unwrap();
+        io::Seek::seek(&mut reader, io::SeekFrom::Start(2)).unwrap();
+        let mut rest = String::new();
+        io::Read::read_to_string(&mut reader, &mut rest).unwrap();
+        assert_eq!(rest, "cd");
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

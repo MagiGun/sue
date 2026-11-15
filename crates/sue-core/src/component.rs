@@ -390,12 +390,46 @@ pub enum PixelStorage {
 /// buffer once, and only if the snapshot is still alive; a raster nobody
 /// else holds is written in place. [`crate::shared_copies`] counts the
 /// copies.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// Every 256 px tile ([`crate::pixels::TILE_SIZE`]) carries a revision
+/// ([`Self::tile_revisions`]): a number no other write anywhere was
+/// given, set whenever the tile may have changed. Each way to write the
+/// pixels sets it ([`Self::bytes_mut`] and [`Self::f32_samples_mut`] for
+/// every tile, [`Self::bytes_mut_in`] for the tiles a rectangle touches),
+/// and a clone keeps the revisions of what it shares, so two tiles with
+/// one revision hold the same pixels. Saving uses it to skip tiles that
+/// did not change. Revisions are not part of the file and play no part in
+/// `==`.
+#[derive(Clone, Debug)]
 pub struct RasterTile2D {
     width: u32,
     height: u32,
     format: PixelFormat,
     pixels: PixelStorage,
+    revisions: Vec<u64>,
+}
+
+impl PartialEq for RasterTile2D {
+    /// Same size, format and pixels; tile revisions do not count.
+    fn eq(&self, other: &Self) -> bool {
+        self.width == other.width
+            && self.height == other.height
+            && self.format == other.format
+            && self.pixels == other.pixels
+    }
+}
+
+/// A revision no tile was given before, in this run.
+fn fresh_revision() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The revisions of a new `width` by `height` raster: one fresh number.
+fn new_revisions(width: u32, height: u32) -> Vec<u64> {
+    let size = crate::pixels::TILE_SIZE;
+    let count = width.div_ceil(size) as usize * height.div_ceil(size) as usize;
+    vec![fresh_revision(); count]
 }
 
 impl RasterTile2D {
@@ -414,6 +448,7 @@ impl RasterTile2D {
             height,
             format,
             pixels,
+            revisions: new_revisions(width, height),
         })
     }
 
@@ -440,6 +475,7 @@ impl RasterTile2D {
             height,
             format,
             pixels: PixelStorage::U8(Shared::new(bytes)),
+            revisions: new_revisions(width, height),
         })
     }
 
@@ -456,6 +492,7 @@ impl RasterTile2D {
             height,
             format: PixelFormat::RgbaF32,
             pixels: PixelStorage::F32(Shared::new(samples)),
+            revisions: new_revisions(width, height),
         })
     }
 
@@ -507,11 +544,41 @@ impl RasterTile2D {
     /// Copies the buffer first if a snapshot of it is alive (see the type);
     /// the snapshot keeps the bytes it had. Asking is what copies, not
     /// writing, so ask only when about to write.
+    /// Every tile counts as changed ([`Self::tile_revisions`]); a caller
+    /// that writes only part of the raster says which with
+    /// [`Self::bytes_mut_in`].
     pub fn bytes_mut(&mut self) -> Option<&mut [u8]> {
         match &mut self.pixels {
-            PixelStorage::U8(bytes) => Some(bytes.make_mut().as_mut_slice()),
+            PixelStorage::U8(bytes) => {
+                self.revisions.fill(fresh_revision());
+                Some(bytes.make_mut().as_mut_slice())
+            }
             PixelStorage::F32(_) => None,
         }
+    }
+
+    /// 8-bit channel data, mutably, for a write that stays inside the
+    /// rectangle `[x, y, width, height]`: only the tiles it touches count
+    /// as changed. Writing outside it is a bug that a save would miss, so
+    /// a caller that cannot name its rectangle uses [`Self::bytes_mut`].
+    /// The rectangle is clipped to the raster.
+    pub fn bytes_mut_in(&mut self, rect: [u32; 4]) -> Option<&mut [u8]> {
+        match &mut self.pixels {
+            PixelStorage::U8(bytes) => {
+                mark_tiles(&mut self.revisions, self.width, self.height, rect);
+                Some(bytes.make_mut().as_mut_slice())
+            }
+            PixelStorage::F32(_) => None,
+        }
+    }
+
+    /// The revision of each 256 px tile ([`crate::pixels::TILE_SIZE`]), in
+    /// rows from the top left. Two tiles of the same place with the same
+    /// revision hold the same pixels; a write gives the tiles it may
+    /// change a revision never used before.
+    #[must_use]
+    pub fn tile_revisions(&self) -> &[u64] {
+        &self.revisions
     }
 
     /// Float channel data, if the tile is `RgbaF32`.
@@ -527,7 +594,10 @@ impl RasterTile2D {
     /// first if a snapshot of it is alive, as [`Self::bytes_mut`] does.
     pub fn f32_samples_mut(&mut self) -> Option<&mut [f32]> {
         match &mut self.pixels {
-            PixelStorage::F32(samples) => Some(samples.make_mut().as_mut_slice()),
+            PixelStorage::F32(samples) => {
+                self.revisions.fill(fresh_revision());
+                Some(samples.make_mut().as_mut_slice())
+            }
             PixelStorage::U8(_) => None,
         }
     }
@@ -561,6 +631,26 @@ impl RasterTile2D {
             (PixelStorage::U8(a), PixelStorage::U8(b)) => Shared::ptr_eq(a, b),
             (PixelStorage::F32(a), PixelStorage::F32(b)) => Shared::ptr_eq(a, b),
             _ => false,
+        }
+    }
+}
+
+/// Gives the tiles of a `width` by `height` raster that `[x, y, w, h]`
+/// touches one fresh revision.
+fn mark_tiles(revisions: &mut [u64], width: u32, height: u32, [x, y, w, h]: [u32; 4]) {
+    let size = crate::pixels::TILE_SIZE;
+    let right = x.saturating_add(w).min(width);
+    let bottom = y.saturating_add(h).min(height);
+    if x >= right || y >= bottom {
+        return;
+    }
+    let columns = width.div_ceil(size) as usize;
+    let revision = fresh_revision();
+    for row in (y / size)..=((bottom - 1) / size) {
+        for column in (x / size)..=((right - 1) / size) {
+            if let Some(slot) = revisions.get_mut(row as usize * columns + column as usize) {
+                *slot = revision;
+            }
         }
     }
 }
