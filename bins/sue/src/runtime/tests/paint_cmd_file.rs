@@ -152,8 +152,19 @@ fn drawn(texts: &[(String, egui::Rect)]) -> std::collections::BTreeSet<String> {
 fn record_timelapse_undoes_and_redoes() {
     let mut paint = PaintDriver::new("paint-cmd-file-timelapse");
     undo_pair(&mut paint, "file.timelapse.record");
-    // Turned off again, it is a step of its own too.
-    undo_pair(&mut paint, "file.timelapse.record");
+    // Turned off again, it is a step of its own too. With frames kept it
+    // asks first (Keep or Delete); Keep stops it.
+    let before = arena(&paint);
+    run(&mut paint, "file.timelapse.record");
+    if paint.rect_of("Keep").is_some() {
+        paint.click_text("Keep");
+    }
+    let after = arena(&paint);
+    assert_ne!(before, after, "stopping changed nothing");
+    run(&mut paint, "edit.undo");
+    assert!(arena(&paint) == before, "stopping: undo");
+    run(&mut paint, "edit.redo");
+    assert!(arena(&paint) == after, "stopping: redo");
 }
 
 #[test]
