@@ -568,10 +568,14 @@ impl SuePaint {
         .or_else(|| {
             self.snap_grid
                 .then(|| {
+                    // The finest lines of the picture's grid, through its
+                    // origin.
+                    let grid = crate::grid::Grid::of(arena, doc.picture);
+                    let origin = grid.origin_in(size);
                     Snap::grid(
                         local,
-                        [offset[0] as f32, offset[1] as f32],
-                        64.0,
+                        [offset[0] as f32 - origin[0], offset[1] as f32 - origin[1]],
+                        grid.step(),
                         12.0 / zoom.max(0.01),
                     )
                 })

@@ -85,10 +85,9 @@ fn canvas(tag: &str) -> (PaintDriver, EntityId) {
 
 /// The commands of the group that run at once; the others open a
 /// dialog.
-const AT_ONCE: [&str; 9] = [
+const AT_ONCE: [&str; 8] = [
     "filter.invert",
     "filter.grayscale",
-    "filter.lines_tones",
     "filter.blur",
     "filter.blur_strong",
     "filter.smooth",
@@ -188,18 +187,9 @@ fn every_filter_command_runs_undoes_and_redoes() {
         );
         walk_to(&mut driver, base);
     }
-    // A known defect, not of this group: these dialogs are taller than
-    // the 250 points `dialogs/mod.rs` gives every filter dialog, so OK
-    // and Cancel fall below its edge (Enter still keeps the result).
-    // When the dialog grows to fit, empty this list.
-    assert_eq!(
-        cut_off,
-        [
-            "filter.drop_shadow",
-            "filter.focus_lines",
-            "filter.speed_lines"
-        ]
-    );
+    // Every dialog shows its OK and Cancel: the dialog host is as tall
+    // as what a dialog holds (P4-8).
+    assert!(cut_off.is_empty(), "OK and Cancel cut off: {cut_off:?}");
 }
 
 #[test]

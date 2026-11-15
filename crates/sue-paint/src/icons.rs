@@ -35,7 +35,6 @@ pub enum Icon {
     Clear,
     Reference,
     Duplicate,
-    Delete,
     Paper,
     Swap,
     Play,
@@ -90,20 +89,6 @@ pub enum Icon {
     LayerProperty,
     /// A strip of film: the timeline.
     Timeline,
-    /// A sheet with a flower: an illustration.
-    ProjectIllustration,
-    /// Two tall strips: a webtoon.
-    ProjectWebtoon,
-    /// A page cut into panels: a comic.
-    ProjectComic,
-    /// An open booklet: a fanzine to print.
-    ProjectFanzine,
-    /// A page of panels with a gear: every comic setting.
-    ProjectComicAll,
-    /// A strip of film with a play mark: an animation.
-    ProjectAnimation,
-    /// A small arrow down: a list opens.
-    Down,
 }
 
 /// Triangles filling the simple polygon `points` (ear clipping), for the
@@ -471,13 +456,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             boxed(Rect::from_min_max(p(0.14, 0.14), p(0.62, 0.62)), 0.0);
             boxed(Rect::from_min_max(p(0.38, 0.38), p(0.86, 0.86)), 0.0);
         }
-        Icon::Delete => {
-            line(&[(0.18, 0.26), (0.82, 0.26)]);
-            line(&[(0.4, 0.26), (0.4, 0.16), (0.6, 0.16), (0.6, 0.26)]);
-            closed(&[(0.26, 0.26), (0.74, 0.26), (0.68, 0.88), (0.32, 0.88)]);
-            line(&[(0.44, 0.4), (0.44, 0.76)]);
-            line(&[(0.56, 0.4), (0.56, 0.76)]);
-        }
         Icon::Swap => {
             curve(0.24, 0.76, 0.52, -90.0, 0.0);
             filled(&[(0.24, 0.12), (0.36, 0.24), (0.24, 0.36)]);
@@ -679,55 +657,5 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 );
             }
         }
-        Icon::ProjectIllustration => {
-            closed(&[(0.2, 0.1), (0.68, 0.1), (0.8, 0.22), (0.8, 0.9), (0.2, 0.9)]);
-            for angle in [0.0_f32, 72.0, 144.0, 216.0, 288.0] {
-                let (sin, cos) = angle.to_radians().sin_cos();
-                circle(0.5 + 0.12 * cos, 0.42 + 0.12 * sin, 0.08);
-            }
-            dot(0.5, 0.42, 0.05);
-            line(&[(0.5, 0.56), (0.5, 0.8)]);
-        }
-        Icon::ProjectWebtoon => {
-            closed(&[(0.16, 0.14), (0.46, 0.08), (0.46, 0.86), (0.16, 0.92)]);
-            closed(&[(0.54, 0.14), (0.84, 0.08), (0.84, 0.86), (0.54, 0.92)]);
-            line(&[(0.16, 0.5), (0.46, 0.44)]);
-            line(&[(0.54, 0.5), (0.84, 0.44)]);
-        }
-        Icon::ProjectComic => {
-            boxed(Rect::from_min_max(p(0.18, 0.1), p(0.82, 0.9)), side * 0.02);
-            line(&[(0.18, 0.42), (0.82, 0.42)]);
-            line(&[(0.5, 0.1), (0.5, 0.42)]);
-            line(&[(0.18, 0.66), (0.82, 0.62)]);
-        }
-        Icon::ProjectFanzine => {
-            closed(&[(0.5, 0.22), (0.12, 0.12), (0.12, 0.8), (0.5, 0.9)]);
-            closed(&[(0.5, 0.22), (0.88, 0.12), (0.88, 0.8), (0.5, 0.9)]);
-            line(&[(0.24, 0.36), (0.24, 0.7)]);
-            line(&[(0.76, 0.36), (0.76, 0.7)]);
-        }
-        Icon::ProjectComicAll => {
-            boxed(Rect::from_min_max(p(0.14, 0.08), p(0.74, 0.8)), side * 0.02);
-            line(&[(0.14, 0.38), (0.74, 0.38)]);
-            line(&[(0.44, 0.08), (0.44, 0.38)]);
-            circle(0.74, 0.76, 0.14);
-            for angle in (0..6).map(|step| step as f32 * 60.0) {
-                let (sin, cos) = angle.to_radians().sin_cos();
-                line(&[
-                    (0.74 + 0.14 * cos, 0.76 + 0.14 * sin),
-                    (0.74 + 0.21 * cos, 0.76 + 0.21 * sin),
-                ]);
-            }
-            dot(0.74, 0.76, 0.05);
-        }
-        Icon::ProjectAnimation => {
-            boxed(Rect::from_min_max(p(0.08, 0.2), p(0.92, 0.8)), side * 0.03);
-            for x in [0.16, 0.3, 0.44, 0.58, 0.72, 0.86] {
-                dot(x, 0.27, 0.025);
-                dot(x, 0.73, 0.025);
-            }
-            filled(&[(0.42, 0.38), (0.62, 0.5), (0.42, 0.62)]);
-        }
-        Icon::Down => filled(&[(0.2, 0.35), (0.8, 0.35), (0.5, 0.7)]),
     }
 }

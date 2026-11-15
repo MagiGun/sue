@@ -1,52 +1,65 @@
 //! New Frame Border Folder.
 
-use egui::{Align, Layout, RichText, Ui, vec2};
+use egui::Ui;
 use sue_wm::Theme;
+use sue_wm::ui::{dropdown, form_grid, slider};
 
-use super::{Outcome, label};
+use super::{Outcome, bare, note, tip};
 
 /// New Frame Border Folder: a layout, the border and the gaps.
 pub(super) fn frame_ui(ui: &mut Ui, frame: &mut crate::comic::FrameSpec, theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
-    egui::Grid::new("sue-paint-frame")
-        .num_columns(2)
-        .spacing(vec2(12.0, 8.0))
-        .show(ui, |ui| {
-            label(ui, &tr!("layout"), theme);
-            egui::ComboBox::from_id_salt("sue-paint-frame-layout")
-                .selected_text(crate::localize(crate::manga::LAYOUTS[frame.layout].0))
-                .width(220.0)
-                .show_ui(ui, |ui| {
-                    for (index, (name, _)) in crate::manga::LAYOUTS.iter().enumerate() {
-                        ui.selectable_value(&mut frame.layout, index, crate::localize(name));
-                    }
-                });
-            ui.end_row();
-            label(ui, &tr!("border-width"), theme);
-            ui.add(egui::Slider::new(&mut frame.border, 0.0..=40.0).suffix(tr!("px")));
-            ui.end_row();
-            label(ui, &tr!("margin"), theme);
-            ui.add(egui::Slider::new(&mut frame.margin, 0.0..=400.0).suffix(tr!("px")));
-            ui.end_row();
-            label(ui, &tr!("gap-across"), theme);
-            ui.add(egui::Slider::new(&mut frame.gap, 0.0..=200.0).suffix(tr!("px")));
-            ui.end_row();
-            label(ui, &tr!("gap-down"), theme);
-            ui.add(egui::Slider::new(&mut frame.gap_y, 0.0..=200.0).suffix(tr!("px")));
-            ui.end_row();
+    let layouts: Vec<String> = crate::manga::LAYOUTS
+        .iter()
+        .map(|(name, _)| crate::localize(name))
+        .collect();
+    let px = tr!("px");
+    form_grid(ui, "sue-paint-frame", theme, |form| {
+        let name = bare(tr!("layout"));
+        form.row(&name, |ui| {
+            let response = dropdown("sue-paint-frame-layout", &mut frame.layout, &layouts)
+                .label(&name)
+                .show(ui, theme);
+            tip(response, &name, "", theme);
         });
-    ui.label(
-        RichText::new(tr!("layers-under-frame-show-only-inside"))
-            .size(theme.small_size)
-            .color(theme.muted),
-    );
-    ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-        if ui.button("OK").clicked() {
-            outcome = Outcome::Ok;
-        }
-        if ui.button(tr!("cancel")).clicked() {
-            outcome = Outcome::Cancel;
+        for (salt, name, value, most) in [
+            (
+                "sue-paint-frame-border",
+                bare(tr!("border-width")),
+                &mut frame.border,
+                40.0,
+            ),
+            (
+                "sue-paint-frame-margin",
+                bare(tr!("margin")),
+                &mut frame.margin,
+                400.0,
+            ),
+            (
+                "sue-paint-frame-gap",
+                bare(tr!("gap-across")),
+                &mut frame.gap,
+                200.0,
+            ),
+            (
+                "sue-paint-frame-gap-down",
+                bare(tr!("gap-down")),
+                &mut frame.gap_y,
+                200.0,
+            ),
+        ] {
+            form.row(&name, |ui| {
+                let mut points = f64::from(*value);
+                let response = slider(salt, &mut points, 0.0..=most)
+                    .name(&name)
+                    .suffix(&px)
+                    .show(ui, theme);
+                if response.changed() {
+                    *value = points as f32;
+                }
+                tip(response, &name, "", theme);
+            });
         }
     });
-    outcome
+    note(ui, &tr!("layers-under-frame-show-only-inside"), theme);
+    Outcome::Open
 }

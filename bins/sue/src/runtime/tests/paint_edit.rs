@@ -563,6 +563,9 @@ fn sue_paint_selections_shrink_become_layers_and_quick_masks() {
     // Convert to Lines and Tones: a lines layer over a tone layer.
     command(&mut runtime, "layer.select_below");
     command(&mut runtime, "filter.lines_tones");
+    // Its dialog opens first; OK (Enter) converts.
+    step(&mut runtime, Vec::new());
+    step(&mut runtime, vec![key(egui::Key::Enter, plain)]);
     let tones = named(&runtime, "Tones").expect("a tone layer");
     assert!(named(&runtime, "Lines").is_some(), "and a lines layer");
     assert!(

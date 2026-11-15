@@ -515,6 +515,14 @@ fn fit(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.with_view(cx, |view, rect, size| view.fit(rect, size));
 }
 
+/// View, Grid Settings: the picture's grid, in a dialog.
+fn grid_settings(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    if let Some(picture) = paint.picture() {
+        let grid = crate::grid::Grid::of(&cx.world.arena, picture);
+        paint.dialog = Some(Dialog::Grid(picture, grid));
+    }
+}
+
 fn profile_settings(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
     paint.dialog = Some(Dialog::Proof(paint.proof_profile));
 }
@@ -800,6 +808,14 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     )
     .keys("Ctrl+4")
     .state(special_snap_on),
+    // New in 0.0.8 (gap FG-38 of the tutorial ledger).
+    c(
+        "view.grid_settings",
+        "grid-settings-ellipsis",
+        "view-grid",
+        grid_settings,
+    )
+    .state(super::doc_open),
 ];
 
 #[cfg(test)]

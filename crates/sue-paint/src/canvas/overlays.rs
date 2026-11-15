@@ -61,12 +61,13 @@ impl SuePaint {
                 .min(size[1] as f32);
             [min_x, min_y, max_x, max_y]
         };
-        let lines = |step: f32, color: Color32| {
+        // Lines `step` apart through `origin`, in picture pixels.
+        let lines = |step: f32, origin: [f32; 2], color: Color32| {
             let count = ((visible[2] - visible[0]) / step) + ((visible[3] - visible[1]) / step);
             if count > 600.0 || step <= 0.0 {
                 return;
             }
-            let mut x = (visible[0] / step).floor() * step;
+            let mut x = origin[0] + ((visible[0] - origin[0]) / step).floor() * step;
             while x <= visible[2] {
                 painter.line_segment(
                     [screen([x, visible[1]]), screen([x, visible[3]])],
@@ -74,7 +75,7 @@ impl SuePaint {
                 );
                 x += step;
             }
-            let mut y = (visible[1] / step).floor() * step;
+            let mut y = origin[1] + ((visible[1] - origin[1]) / step).floor() * step;
             while y <= visible[3] {
                 painter.line_segment(
                     [screen([visible[0], y]), screen([visible[2], y])],
@@ -84,10 +85,25 @@ impl SuePaint {
             }
         };
         if self.pixel_grid && view.zoom >= 12.0 {
-            lines(1.0, Color32::from_black_alpha(40));
+            lines(1.0, [0.0, 0.0], Color32::from_black_alpha(40));
         }
         if self.grid {
-            lines(64.0, Color32::from_rgba_unmultiplied(0, 120, 255, 70));
+            // The picture's grid (View, Grid Settings): its divisions
+            // fainter than its main lines.
+            let grid = crate::grid::Grid::of(&cx.world.arena, doc.picture);
+            let origin = grid.origin_in(size);
+            if grid.divisions > 1 {
+                lines(
+                    grid.step(),
+                    origin,
+                    Color32::from_rgba_unmultiplied(0, 120, 255, 30),
+                );
+            }
+            lines(
+                grid.gap,
+                origin,
+                Color32::from_rgba_unmultiplied(0, 120, 255, 70),
+            );
         }
         // The selection.
         if self.show_selection

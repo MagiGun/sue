@@ -245,7 +245,7 @@ The order of work is the plan at the end.
 | Screentone | Filter > Render > Screentone | done | |
 | Perlin Noise, Clouds | Filter > Render | done | |
 | Sharpen, Sharpen (Strong), Unsharp Mask | Filter > Sharpen | done | |
-| Convert to Lines and Tones (EX) | Filter, and Layer | done | Line art and tone on layers of their own, from a picture or a 3D render |
+| Convert to Lines and Tones (EX) | Filter, and Layer | done | Line art and tone on layers of their own, from a picture or a 3D render; a dialog with line and tone settings and a live preview |
 
 ## Layers
 
@@ -271,7 +271,7 @@ The order of work is the plan at the end.
 | Transfer to Lower Layer | Layer | done | |
 | Merge with Layer Below, Merge Selected, Merge Visible, Merge Visible to New, Flatten | Layer | done | |
 | Rasterize | Layer > Rasterize | done | |
-| Convert Layer (kind, expression color) | Layer > Convert Layer | partial | Command exists; verify the dialog |
+| Convert Layer (kind, expression color) | Layer > Convert Layer | done | Name, raster or vector, expression color, blending mode, Keep original layer |
 | Blend modes and opacity | Layer palette | done | Clip Studio's 28 in its order, Glow Dodge and Add (Glow) included, Brightness as it names it; a folder composites by its own mode or Through (the default), and the palette offers a folder Through first. The wheel over the list steps the mode, shown at once |
 | Picking several layers, palette colors, row marks | Layer palette | done | A box in each row (the pen on the edited layer), Ctrl+click and Shift+click; lock, show, delete and palette color take every picked layer; locks, draft bars and effect badges in the rows |
 | Search Layer, Split Layer List | Window > Search Layer; Layer palette | done | In the Layer palette itself (its search button) with Clip Studio's filter list, not a palette of its own |
@@ -284,7 +284,7 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | Select All, Deselect, Reselect, Invert Selected Area | Select | done | |
-| Expand, Shrink Selected Area | Select | partial | No expansion type (round or square corners) yet |
+| Expand, Shrink Selected Area | Select | done | Expansion type: round or square corners |
 | Blur Border (feather) | Select > Blur border | done | |
 | Select Color Gamut | Select > Select color gamut | done | |
 | Selection from Layer: create, add, remove, select overlapping area | Select > Selection from Layer | done | |
@@ -500,6 +500,7 @@ The order of work is the plan at the end.
 | Rotate and flip the view | View > Rotate/Flip | done | Tilting never changes the picture |
 | Scroll bars, with zoom and turn controls | View > Scroll Bar | done | |
 | Ruler bar and grid, Pixel Grid | View | done | |
+| Grid Settings (gap, divisions, origin) | View > Grid Settings | done | Saved with the picture; Snap to Grid follows the finest lines |
 | Crop marks, inner border and bleed | View | partial | Commands exist; verify they draw on the canvas |
 | Show Tone Area, Paper, Page Image | View | partial | Commands exist; verify |
 | Selection, Transform, Text and Object launchers | View | done | Small bars of buttons under what you work on |

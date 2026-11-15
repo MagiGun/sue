@@ -2,15 +2,23 @@
 //! units), the filter dialogs with a live preview, and the shortcut list.
 //! One file per family; this one holds the open dialog, what it ends
 //! with, the host that draws it, and the pieces the families share.
+//!
+//! The host is Sue's one dialog host (`sue_wm::ui::Dialog`): a title,
+//! the body, and a footer whose buttons stand in Sue's one order. A
+//! dialog is as tall as what it holds, up to the screen (it scrolls past
+//! that), and as wide as its [`Width`] says, never wider than the screen.
+//! Each dialog says what it needs in [`Dialog::look`]; there is no table
+//! of fixed sizes.
 
 mod anim;
 mod canvas;
-mod command_bar;
 mod color;
+mod command_bar;
 mod comps;
 mod fill;
 mod filter;
 mod frame;
+mod lines_tones;
 mod modifiers;
 mod new;
 mod pressure;
@@ -18,9 +26,10 @@ mod settings;
 mod story;
 mod text;
 
-use egui::{Align, Id, Layout, Order, Rect, RichText, Sense, Ui, vec2};
+use egui::{Response, Ui, vec2};
 use sue_core::EntityId;
-use sue_wm::{AppletContext, Theme, widgets};
+use sue_wm::ui::{Answer, Density, DialogHost, Space, TextRole, Tip, tooltip};
+use sue_wm::{AppletContext, Theme};
 
 use crate::filters::Filter;
 use crate::studio::SuePaint;
@@ -28,24 +37,28 @@ use crate::studio::SuePaint;
 pub(crate) use anim::AnimDialog;
 use anim::{onion_ui, timelapse_ui, timeline_ui};
 use canvas::{
-    canvas_properties_ui, canvas_ui, convert_ui, material_ui, perspective_ui, print_ui, proof_ui,
-    resolution_ui, shape_3d_ui,
+    canvas_properties_ui, canvas_ui, convert_ui, grid_ui, material_ui, perspective_ui, print_ui,
+    proof_ui, resolution_ui, shape_3d_ui,
 };
 use fill::{gamut_ui, select_by_ui};
 use filter::{correction_ui, filter_ui};
 use frame::frame_ui;
+use lines_tones::lines_tones_ui;
 use modifiers::modifiers_ui;
 use pressure::pressure_ui;
 use settings::{shortcuts_ui, workspace_ui};
 use story::{page_settings_ui, story_editor_ui, story_info_ui, webtoon_ui};
 use text::text_ui;
 
-pub(crate) use canvas::{CanvasDialog, CanvasProperties, ResolutionDialog};
-pub(crate) use command_bar::{BarDialog, BarTarget};
+pub(crate) use canvas::{
+    CanvasDialog, CanvasProperties, ConvertDialog, PerspectiveDialog, ResolutionDialog,
+};
 pub(crate) use color::{ColorDialog, ColorTarget, cmyk_of, rgb_of_cmyk};
+pub(crate) use command_bar::{BarDialog, BarTarget};
 pub(crate) use comps::CompsDialog;
 pub(crate) use fill::AdvancedFill;
 pub(crate) use filter::FilterDialog;
+pub(crate) use lines_tones::LinesTonesDialog;
 pub(crate) use modifiers::ModifiersDialog;
 #[cfg(test)]
 pub(crate) use new::SIZES;
@@ -80,15 +93,17 @@ pub(crate) enum Dialog {
     /// correction, its setting when the dialog opened, and whether the
     /// layer was just made (Cancel takes it away again).
     Correction(EntityId, Filter, String, bool),
-    /// Create Perspective Ruler: how many vanishing points, 1 to 3.
-    Perspective(u32),
+    /// Create Perspective Ruler: how many vanishing points, and whether
+    /// the ruler gets a new layer of its own.
+    Perspective(PerspectiveDialog),
     /// Onion Skin Settings.
     Onion(crate::anim::Onion),
     /// Export Timelapse: the video's size and length.
     Timelapse(crate::timelapse::Export),
     /// Register Material, Image: its name.
     Material(String),
-    /// Expand (0), Shrink (1) or Blur the border of (2) the selection, by
+    /// Expand with round corners (0), Shrink (1), Blur the border of (2),
+    /// Outline (3) or Expand with square corners (4) the selection, by
     /// pixels.
     SelectBy(u8, f32),
     /// Select Color Gamut: the tolerance and whether it looks at every
@@ -125,10 +140,14 @@ pub(crate) enum Dialog {
     /// The Story Editor: each text layer's page number, page, layer and
     /// words.
     StoryEditor(Vec<(usize, sue_core::EntityId, sue_core::EntityId, String)>),
-    /// Convert Layer: the layer, to raster (0) or vector (1), and its name.
-    Convert(sue_core::EntityId, u8, String),
+    /// Convert Layer: the layer and what it becomes.
+    Convert(ConvertDialog),
     /// File, Manage Fonts: Sue's shared font list.
     Fonts(sue_wm::fonts::FontManager),
+    /// Convert to Lines and Tones: its settings and live preview.
+    LinesTones(LinesTonesDialog),
+    /// View, Grid Settings: the picture and its grid as set so far.
+    Grid(EntityId, crate::grid::Grid),
     /// Layer, Ruler/Frame, Divide Frame Border Equally.
     DivideFrame(crate::comic::DivideSpec),
     /// Color Settings, Edit Color Sets, and the names of sets and colors.
@@ -150,98 +169,272 @@ pub(crate) enum Outcome {
     Ok,
 }
 
-impl Dialog {
-    /// The dialog's title and its size before the screen clamps it.
-    fn title_and_size(&self) -> (String, egui::Vec2) {
+/// How wide a dialog is. Its height follows what it holds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Width {
+    /// A question with a field or two.
+    Narrow,
+    /// A form of a few rows.
+    Form,
+    /// A form with a picture, a list or two columns.
+    Wide,
+    /// Two columns of settings side by side.
+    Double,
+    /// As wide as a shared component asks.
+    Points(f32),
+}
+
+impl Width {
+    /// The width in points, from the spacing scale so a denser or looser
+    /// theme scales every dialog alike.
+    fn points(self, theme: &Theme) -> f32 {
+        let unit = theme.space(Space::S9);
         match self {
-            Dialog::New(_) => (tr!("new-2"), vec2(500.0, 690.0)),
+            Self::Narrow => unit * 8.0,
+            Self::Form => unit * 10.0,
+            Self::Wide => unit * 13.0,
+            Self::Double => unit * 18.0,
+            Self::Points(points) => points,
+        }
+    }
+}
+
+/// The dialogs whose bodies fill the room they are given, before the
+/// screen clamps them: 3D Preview for Binding's book, Modifier Key
+/// Settings' rows, and Command Bar Settings' columns (its width, and the
+/// room for its lists in units of the largest spacing step).
+const BINDING_SIZE: egui::Vec2 = vec2(820.0, 560.0);
+const MODIFIERS_SIZE: egui::Vec2 = vec2(600.0, 540.0);
+const COMMAND_BAR_SIZE: egui::Vec2 = vec2(780.0, 540.0);
+const COMMAND_BAR_ROOM: f32 = 13.0;
+
+/// The buttons in a dialog's footer.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Footer {
+    accept: Option<String>,
+    cancel: Option<String>,
+    extra: Option<String>,
+}
+
+impl Footer {
+    /// OK and Cancel.
+    fn ok_cancel() -> Self {
+        Self {
+            accept: Some(tr!("ok")),
+            cancel: Some(tr!("cancel")),
+            extra: None,
+        }
+    }
+
+    /// Close alone, for a dialog whose changes are made as they happen.
+    fn close() -> Self {
+        Self {
+            cancel: Some(tr!("close")),
+            ..Self::default()
+        }
+    }
+
+    /// None: the body has its own buttons.
+    fn none() -> Self {
+        Self::default()
+    }
+
+    /// The same footer with an extra action at the leading edge.
+    fn with_extra(mut self, label: String) -> Self {
+        self.extra = Some(label);
+        self
+    }
+
+    fn is_empty(&self) -> bool {
+        self.accept.is_none() && self.cancel.is_none() && self.extra.is_none()
+    }
+}
+
+/// What the host needs to know of a dialog before it draws the body.
+struct Look {
+    title: String,
+    width: Width,
+    footer: Footer,
+    /// Enter belongs to the body (a text box of several lines, a pad).
+    enter_is_the_bodys: bool,
+    /// For a body that lays out a list in the room it has: how tall the
+    /// room is meant to be. The dialog still follows what it draws.
+    room: Option<f32>,
+    /// For a body that fills whatever height it is given (a list over a
+    /// sample): the height it gets, in points.
+    fixed: Option<f32>,
+}
+
+impl Look {
+    fn new(title: String, width: Width, footer: Footer) -> Self {
+        Self {
+            title,
+            width,
+            footer,
+            enter_is_the_bodys: false,
+            room: None,
+            fixed: None,
+        }
+    }
+
+    /// Gives the body exactly `points` of height.
+    fn fixed(mut self, points: f32) -> Self {
+        self.fixed = Some(points);
+        self
+    }
+
+    fn enter_is_the_bodys(mut self) -> Self {
+        self.enter_is_the_bodys = true;
+        self
+    }
+
+    /// `units` of the spacing scale's largest step.
+    fn room(mut self, units: f32) -> Self {
+        self.room = Some(units);
+        self
+    }
+}
+
+impl Dialog {
+    /// The dialog's title, width and footer.
+    #[allow(clippy::too_many_lines, reason = "one arm per dialog")]
+    fn look(&self) -> Look {
+        use Width::{Double, Form, Narrow, Wide};
+        let ok = Footer::ok_cancel;
+        match self {
+            Dialog::New(new) => Look::new(
+                tr!("new-2"),
+                if new.project == Project::Animation {
+                    Double
+                } else {
+                    Wide
+                },
+                ok().with_extra(tr!("register-preset")),
+            ),
             // The gallery keeps one title (and so one window) whatever look
             // is picked.
             Dialog::Filter(FilterDialog {
                 filter: Filter::Quick { effect, .. },
                 ..
-            }) => (
+            }) => Look::new(
                 if *effect {
                     tr!("quick-effects")
                 } else {
                     tr!("quick-filters")
                 },
-                vec2(500.0, 400.0),
+                Wide,
+                Footer::none(),
             ),
-            Dialog::Filter(filter) => (
-                filter.filter.label(),
-                vec2(
-                    400.0,
-                    match filter.filter {
-                        Filter::ToneCurve { .. } => 360.0,
-                        Filter::Levels { .. } => 330.0,
-                        _ => 250.0,
-                    },
-                ),
-            ),
-            Dialog::Shortcuts => (tr!("keyboard-shortcuts"), vec2(470.0, 560.0)),
-            Dialog::Pages(_) => (tr!("binding-preview-3d"), vec2(820.0, 620.0)),
-            Dialog::Comps(_) => (tr!("layer-comps"), vec2(420.0, 300.0)),
-            Dialog::Exposure => (tr!("exposure-sheet"), vec2(520.0, 560.0)),
-            Dialog::Frame(_) => (tr!("new-frame-border-folder"), vec2(420.0, 330.0)),
-            Dialog::Canvas(_) => (tr!("change-canvas-size"), vec2(380.0, 300.0)),
-            Dialog::Resolution(_) => (tr!("change-image-resolution"), vec2(380.0, 250.0)),
-            Dialog::Text(..) => (tr!("text"), vec2(440.0, 380.0)),
-            Dialog::Perspective(_) => (tr!("create-perspective-ruler"), vec2(320.0, 190.0)),
-            Dialog::Onion(_) => (tr!("onion-skin-settings"), vec2(360.0, 440.0)),
-            Dialog::Timelapse(_) => (tr!("export-timelapse"), vec2(360.0, 230.0)),
-            Dialog::Material(_) => (tr!("register-material"), vec2(360.0, 160.0)),
-            Dialog::SelectBy(kind, _) => (
+            Dialog::Filter(filter) => Look::new(filter.filter.label(), Form, Footer::none()),
+            Dialog::Shortcuts => Look::new(tr!("keyboard-shortcuts"), Wide, Footer::none())
+                .room(14.0)
+                .enter_is_the_bodys(),
+            // 3D Preview for Binding: the book fills what it is given and
+            // has its own Close.
+            Dialog::Pages(_) => Look::new(
+                tr!("binding-preview-3d"),
+                Width::Points(BINDING_SIZE.x),
+                Footer::none(),
+            )
+            .fixed(BINDING_SIZE.y)
+            .enter_is_the_bodys(),
+            Dialog::Comps(_) => Look::new(tr!("layer-comps"), Form, Footer::close()),
+            Dialog::Exposure => Look::new(tr!("exposure-sheet"), Wide, Footer::none())
+                .room(14.0)
+                .enter_is_the_bodys(),
+            Dialog::Frame(_) => Look::new(tr!("new-frame-border-folder"), Form, ok()),
+            Dialog::Canvas(_) => Look::new(tr!("change-canvas-size"), Narrow, ok()),
+            Dialog::Resolution(_) => Look::new(tr!("change-image-resolution"), Narrow, ok()),
+            Dialog::Text(..) => Look::new(tr!("text"), Wide, ok()).enter_is_the_bodys(),
+            Dialog::Perspective(_) => Look::new(tr!("create-perspective-ruler"), Narrow, ok()),
+            Dialog::Onion(_) => Look::new(tr!("onion-skin-settings"), Form, ok()),
+            Dialog::Timelapse(_) => Look::new(tr!("export-timelapse"), Form, ok()),
+            Dialog::Material(_) => Look::new(tr!("register-material"), Form, ok()),
+            Dialog::SelectBy(kind, _) => Look::new(
                 match kind {
-                    0 => tr!("expand-selected-area-2"),
+                    0 | 4 => tr!("expand-selected-area-2"),
                     1 => tr!("shrink-selected-area-2"),
                     3 => tr!("outline-selection"),
                     _ => tr!("blur-border"),
                 },
-                vec2(320.0, 140.0),
+                Narrow,
+                ok(),
             ),
-            Dialog::Gamut(..) => (tr!("select-color-gamut"), vec2(340.0, 170.0)),
-            Dialog::Webtoon(..) => (tr!("export-webtoon"), vec2(360.0, 240.0)),
-            Dialog::DivideFrame(_) => (tr!("divide-frame-border-equally"), vec2(360.0, 290.0)),
-            Dialog::Timeline(..) => (tr!("edit-timeline"), vec2(320.0, 150.0)),
-            Dialog::Shape3D(_) => (tr!("new-3d-layer"), vec2(300.0, 230.0)),
-            Dialog::Workspace(_) => (tr!("register-workspace"), vec2(340.0, 140.0)),
-            Dialog::Workspaces => (tr!("manage-workspaces"), vec2(380.0, 320.0)),
-            Dialog::Message(title, _) => (title.clone(), vec2(520.0, 460.0)),
-            Dialog::Print(_, true) => (tr!("print"), vec2(380.0, 330.0)),
-            Dialog::Print(_, false) => (tr!("print-settings"), vec2(380.0, 330.0)),
-            Dialog::Modifiers(_) => (tr!("modifier-key-settings"), vec2(600.0, 620.0)),
-            Dialog::AdvancedFill => (tr!("advanced-fill"), vec2(520.0, 470.0)),
-            Dialog::CommandBar(bar) => (bar.title(), vec2(780.0, 600.0)),
-            Dialog::CanvasProperties(_) => (tr!("canvas-properties"), vec2(380.0, 230.0)),
-            Dialog::Proof(_) => (tr!("color-profile-preview-settings"), vec2(400.0, 230.0)),
-            Dialog::PageSettings(_) => (tr!("change-page-settings"), vec2(400.0, 370.0)),
-            Dialog::StoryInfo(_) => (tr!("change-story-information"), vec2(460.0, 500.0)),
-            Dialog::StoryEditor(_) => (tr!("story-editor"), vec2(520.0, 520.0)),
-            Dialog::Convert(..) => (tr!("convert-layer"), vec2(360.0, 190.0)),
-            Dialog::Fonts(_) => (tr!("manage-fonts"), sue_wm::fonts::MANAGE_SIZE),
-            Dialog::Color(color) => color.title_and_size(),
-            Dialog::DeleteFolders(_) => (
+            Dialog::Gamut(..) => Look::new(tr!("select-color-gamut"), Form, ok()),
+            Dialog::Webtoon(..) => Look::new(tr!("export-webtoon"), Form, ok()),
+            Dialog::Timeline(..) => Look::new(tr!("edit-timeline"), Narrow, ok()),
+            Dialog::Shape3D(_) => Look::new(tr!("new-3d-layer"), Narrow, ok()),
+            Dialog::Workspace(_) => Look::new(tr!("register-workspace"), Form, ok()),
+            Dialog::Workspaces => Look::new(tr!("manage-workspaces"), Form, Footer::none()),
+            Dialog::Message(title, _) => Look::new(title.clone(), Wide, Footer::close()).room(11.5),
+            Dialog::Print(_, true) => Look::new(tr!("print"), Form, ok()),
+            Dialog::Print(_, false) => Look::new(tr!("print-settings"), Form, ok()),
+            // Its rows fill the dialog down to Reset and the note.
+            Dialog::Modifiers(_) => Look::new(
+                tr!("modifier-key-settings"),
+                Width::Points(MODIFIERS_SIZE.x),
+                ok(),
+            )
+            .fixed(MODIFIERS_SIZE.y),
+            Dialog::AdvancedFill => Look::new(tr!("advanced-fill"), Wide, ok()),
+            Dialog::CommandBar(bar) => Look::new(
+                bar.title(),
+                Width::Points(COMMAND_BAR_SIZE.x),
+                Footer::none(),
+            )
+            .room(COMMAND_BAR_ROOM)
+            .enter_is_the_bodys(),
+            Dialog::CanvasProperties(_) => Look::new(tr!("canvas-properties"), Form, ok()),
+            Dialog::Proof(_) => Look::new(tr!("color-profile-preview-settings"), Form, ok()),
+            Dialog::PageSettings(_) => Look::new(tr!("change-page-settings"), Form, ok()),
+            Dialog::StoryInfo(_) => Look::new(tr!("change-story-information"), Form, ok()),
+            Dialog::StoryEditor(_) => Look::new(tr!("story-editor"), Wide, ok())
+                .room(13.0)
+                .enter_is_the_bodys(),
+            Dialog::Convert(_) => Look::new(tr!("convert-layer"), Form, ok()),
+            Dialog::LinesTones(_) => Look::new(tr!("convert-to-lines-and-tones"), Wide, ok()),
+            Dialog::Grid(..) => Look::new(tr!("grid-settings"), Narrow, ok()),
+            // These draw their own buttons.
+            Dialog::DivideFrame(_) => {
+                Look::new(tr!("divide-frame-border-equally"), Form, Footer::none())
+            }
+            Dialog::Color(color) => {
+                let (title, size) = color.title_and_size();
+                Look::new(title, Width::Points(size.x), Footer::none())
+            }
+            Dialog::DeleteFolders(_) => Look::new(
                 tr!("delete-layer-folders"),
-                crate::panels::DELETE_FOLDERS_SIZE,
+                Width::Points(crate::panels::DELETE_FOLDERS_SIZE.x),
+                Footer::none(),
             ),
-            Dialog::SimpleTone(_) => (tr!("simple-tone-settings"), crate::panels::SIMPLE_TONE_SIZE),
-            Dialog::Anim(dialog) => (dialog.title(), dialog.size()),
-            Dialog::Correction(_, filter, ..) => (
-                filter.label(),
-                vec2(
-                    400.0,
-                    match filter {
-                        Filter::ToneCurve { .. } => 340.0,
-                        Filter::Levels { .. } => 310.0,
-                        _ => 230.0,
-                    },
-                ),
+            Dialog::SimpleTone(_) => Look::new(
+                tr!("simple-tone-settings"),
+                Width::Points(crate::panels::SIMPLE_TONE_SIZE.x),
+                Footer::none(),
             ),
-            Dialog::Pressure(pressure) => (
+            Dialog::Anim(dialog) => Look::new(
+                dialog.title(),
+                Width::Points(dialog.size().x),
+                if matches!(**dialog, AnimDialog::StopTimelapse(..)) {
+                    Footer::none()
+                } else {
+                    ok()
+                },
+            ),
+            Dialog::Fonts(_) => Look::new(
+                tr!("manage-fonts"),
+                Width::Points(sue_wm::fonts::MANAGE_SIZE.x),
+                Footer::none(),
+            )
+            .fixed(sue_wm::fonts::MANAGE_SIZE.y)
+            .enter_is_the_bodys(),
+            Dialog::Correction(_, filter, ..) => Look::new(filter.label(), Form, ok()),
+            Dialog::Pressure(_) => Look::new(
                 tr!("adjust-pen-pressure"),
-                vec2(560.0, if pressure.show_graph { 520.0 } else { 330.0 }),
-            ),
+                Wide,
+                ok().with_extra(tr!("reset-to-default")),
+            )
+            .enter_is_the_bodys(),
         }
     }
 }
@@ -258,134 +451,75 @@ impl SuePaint {
         let Some(mut dialog) = self.dialog.take() else {
             return;
         };
-        let screen = ctx.content_rect();
-        egui::Area::new(Id::unique("sue-paint-scrim"))
-            .fade_in(false)
-            .order(Order::Middle)
-            .fixed_pos(screen.min)
-            .show(ctx, |ui| {
-                ui.allocate_rect(screen, Sense::click());
-                ui.painter()
-                    .rect_filled(screen, 0.0, theme.shadow.gamma_multiply(0.45));
-            });
-        let (title, size) = dialog.title_and_size();
-        let size = size.min(screen.size() - vec2(16.0, 16.0));
-        let at = screen.center() - size / 2.0;
-        let mut outcome = Outcome::Open;
+        let look = dialog.look();
+        let width = look.width.points(theme);
+        let room = vec2(
+            width,
+            look.room
+                .map_or(f32::INFINITY, |units| units * theme.space(Space::S9)),
+        );
         let mut change_keys = false;
-        // The dialog's body, in its own window or (in the browser and on
-        // phones) over the studio.
-        let own_window = !ctx.embed_viewports();
-        let mut body = |ui: &mut Ui, inner: egui::Vec2| {
-            ui.set_min_size(inner);
-            ui.set_max_size(inner);
-            if !own_window {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(title.as_str())
-                            .size(theme.ui_size + 1.0)
-                            .color(theme.text),
-                    );
-                });
-                ui.separator();
-            }
-            // A dialog larger than the screen (a phone) scrolls inside
-            // its frame, so its buttons stay in reach.
-            egui::ScrollArea::both()
-                .id_salt("sue-paint-dialog-body")
-                .auto_shrink([false, true])
-                .show(ui, |ui| {
-                    outcome = self.dialog_body(ui, &mut dialog, cx, theme, size, &mut change_keys);
-                });
-        };
-        let mut closed = false;
-        let mut keys_here = (false, false);
-        if own_window {
-            // A window of its own, as Clip Studio Paint's dialogs: it can
-            // be moved anywhere, outside Sue's window too, and resized.
-            let main = ctx
-                .input(|input| input.viewport().outer_rect)
-                .unwrap_or(screen);
-            let own_frame = widgets::own_frames(ctx);
-            let bar = if own_frame { widgets::TITLE_BAR } else { 0.0 };
-            let builder = egui::ViewportBuilder::default()
-                .with_title(title.clone())
-                .with_inner_size(size + vec2(0.0, bar))
-                .with_min_inner_size(vec2(240.0, 120.0 + bar))
-                .with_position(main.center() - size / 2.0)
-                .with_resizable(true)
-                .with_decorations(!own_frame);
-            ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of(("sue-paint-dialog", title.as_str())),
-                builder,
-                |ui, _| {
-                    let rect = ui.max_rect();
-                    ui.painter().rect_filled(rect, 0.0, theme.panel);
-                    let mut shut = false;
-                    if own_frame {
-                        // Sue's own title bar, as Clip Studio Paint's.
-                        let top = Rect::from_min_size(rect.min, vec2(rect.width(), bar));
-                        shut = widgets::title_bar(ui, top, &title, false, theme);
-                        ui.add_space(bar);
-                    }
-                    egui::Frame::new()
-                        .inner_margin(egui::Margin::same(16))
-                        .show(ui, |ui| {
-                            let inner = ui.available_size();
-                            body(ui, inner);
-                        });
-                    if own_frame {
-                        widgets::resize_edges(ui, rect);
-                    }
-                    closed = shut || ui.input(|input| input.viewport().close_requested());
-                    keys_here = ui.input(|input| {
-                        (
-                            input.key_pressed(egui::Key::Escape),
-                            input.key_pressed(egui::Key::Enter),
-                        )
-                    });
-                },
-            );
-        } else {
-            egui::Area::new(Id::unique("sue-paint-dialog"))
-                .fade_in(false)
-                .order(Order::Foreground)
-                .fixed_pos(at)
-                .show(ctx, |ui| {
-                    widgets::window_frame(theme)
-                        .inner_margin(egui::Margin::same(16))
-                        .show(ui, |ui| body(ui, size - vec2(32.0, 32.0)));
-                });
+        // A window of its own where the system gives Sue more than one,
+        // as Clip Studio Paint's dialogs: it can be moved anywhere,
+        // outside Sue's window too.
+        let mut host = sue_wm::ui::Dialog::new(
+            ("sue-paint-dialog", look.title.as_str()),
+            &look.title,
+            theme,
+        )
+        .host(DialogHost::Window)
+        .width(width);
+        if let Some(label) = &look.footer.accept {
+            host = host.accept(label.clone());
         }
-        if closed {
-            outcome = Outcome::Cancel;
+        if let Some(label) = &look.footer.extra {
+            host = host.extra(label.clone());
         }
-        let (escape, enter) = ctx.input(|input| {
-            (
-                input.key_pressed(egui::Key::Escape) || keys_here.0,
-                input.key_pressed(egui::Key::Enter) || keys_here.1,
-            )
+        if let Some(label) = &look.footer.cancel {
+            host = host.cancel_as(label.clone());
+        }
+        if let Some(points) = look.fixed {
+            // Never taller than the window less the dialog's own frame.
+            let room = ctx.content_rect().height() - theme.space(Space::S9) * 4.0;
+            host = host.height(points.min(room).max(theme.space(Space::S9)));
+        }
+        if look.enter_is_the_bodys {
+            host = host.enter_is_the_bodys();
+        }
+        if look.footer.is_empty() {
+            // The body's own buttons are the way out (Escape and the
+            // window's close box still cancel).
+            host = host.no_close_button();
+        }
+        let shown = host.show(ctx, |ui| {
+            self.dialog_body(ui, &mut dialog, cx, theme, room, &mut change_keys)
         });
+        let mut outcome = shown.inner;
+        match shown.answer {
+            Some(Answer::Accept) => outcome = Outcome::Ok,
+            Some(Answer::Cancel) => outcome = Outcome::Cancel,
+            Some(Answer::Extra) => {
+                self.dialog_extra(cx, &mut dialog);
+                outcome = Outcome::Open;
+            }
+            Some(Answer::Alternate) | None => {}
+        }
+        // A dialog whose body has its own buttons still takes Enter as
+        // OK when nothing holds the keys.
+        if outcome == Outcome::Open
+            && shown.answer.is_none()
+            && look.footer.is_empty()
+            && !look.enter_is_the_bodys
+            && !ctx.text_edit_focused()
+            && ctx.memory(|memory| memory.focused().is_none())
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+        {
+            outcome = Outcome::Ok;
+        }
         if change_keys {
             cx.request(sue_wm::ShellRequest::OpenSettings(Some(
                 "keymaps".to_owned(),
             )));
-        }
-        if escape {
-            outcome = Outcome::Cancel;
-        } else if enter
-            && !ctx.text_edit_focused()
-            && !matches!(
-                dialog,
-                Dialog::Shortcuts
-                    | Dialog::Pressure(_)
-                    | Dialog::Pages(_)
-                    | Dialog::Comps(_)
-                    | Dialog::Exposure
-                    | Dialog::Text(..)
-            )
-        {
-            outcome = Outcome::Ok;
         }
         match outcome {
             Outcome::Open => self.keep_open(ctx, cx, dialog),
@@ -396,13 +530,15 @@ impl SuePaint {
 
     /// The open dialog's body: one function per kind of dialog, each
     /// answering whether the dialog stays open, is kept or is cancelled.
+    /// `room` is the width the body has and, for a body that lays out a
+    /// list, the height meant for it.
     fn dialog_body(
         &mut self,
         ui: &mut Ui,
         dialog: &mut Dialog,
         cx: &mut AppletContext<'_>,
         theme: &Theme,
-        size: egui::Vec2,
+        room: egui::Vec2,
         change_keys: &mut bool,
     ) -> Outcome {
         match dialog {
@@ -414,21 +550,23 @@ impl SuePaint {
             Dialog::Comps(comps) => self.comps_ui(ui, comps, cx, theme),
             Dialog::Exposure => self.exposure_ui(ui, cx, theme),
             Dialog::Frame(frame) => frame_ui(ui, frame, theme),
-            Dialog::Text(_, lettering) => text_ui(ui, lettering, theme),
+            Dialog::Text(_, lettering) => text_ui(ui, lettering, self.main, self.sub, theme),
             Dialog::Onion(onion) => onion_ui(ui, onion, theme),
             Dialog::SelectBy(kind, amount) => select_by_ui(ui, kind, amount, theme),
             Dialog::Workspace(name) => workspace_ui(ui, name, theme),
             Dialog::Workspaces => self.workspaces_ui(ui, theme),
             Dialog::Print(settings, printing) => print_ui(ui, settings, *printing, theme),
             Dialog::Modifiers(chosen) => modifiers_ui(ui, chosen, theme),
-            Dialog::CommandBar(bar) => self.command_bar_ui(ui, bar, cx, size, theme),
+            Dialog::CommandBar(bar) => self.command_bar_ui(ui, bar, cx, room, theme),
             Dialog::PageSettings(settings) => page_settings_ui(ui, settings, theme),
             Dialog::StoryInfo(info) => story_info_ui(ui, info, theme),
-            Dialog::StoryEditor(texts) => story_editor_ui(ui, texts, size, theme),
+            Dialog::StoryEditor(texts) => story_editor_ui(ui, texts, room, theme),
             Dialog::Proof(profile) => proof_ui(ui, profile, theme),
             Dialog::CanvasProperties(props) => canvas_properties_ui(ui, props, theme),
-            Dialog::Convert(_, kind, name) => convert_ui(ui, kind, name, theme),
-            Dialog::Message(_, paragraphs) => message_ui(ui, paragraphs, size, theme),
+            Dialog::Convert(convert) => convert_ui(ui, convert, theme),
+            Dialog::LinesTones(lines) => lines_tones_ui(ui, lines, theme),
+            Dialog::Grid(_, grid) => grid_ui(ui, grid, theme),
+            Dialog::Message(_, paragraphs) => message_ui(ui, paragraphs, room, theme),
             Dialog::Gamut(tolerance, all) => gamut_ui(ui, tolerance, all, theme),
             Dialog::Webtoon(height, width) => webtoon_ui(ui, height, width, theme),
             Dialog::DivideFrame(spec) => crate::comic::divide_frame_ui(ui, spec, theme),
@@ -436,14 +574,15 @@ impl SuePaint {
             Dialog::Shape3D(kind) => shape_3d_ui(ui, kind, theme),
             Dialog::Material(name) => material_ui(ui, name, theme),
             Dialog::Timelapse(export) => timelapse_ui(ui, export, theme),
-            Dialog::Perspective(count) => perspective_ui(ui, count, theme),
+            Dialog::Perspective(perspective) => perspective_ui(ui, perspective, theme),
             Dialog::Correction(_, filter, ..) => correction_ui(ui, filter, theme),
             Dialog::Canvas(canvas) => canvas_ui(ui, canvas, theme),
             Dialog::Resolution(resolution) => resolution_ui(ui, resolution, theme),
-            Dialog::Shortcuts => shortcuts_ui(ui, cx, size, change_keys, theme),
+            Dialog::Shortcuts => shortcuts_ui(ui, cx, room, change_keys, theme),
             Dialog::DeleteFolders(quiet) => Self::delete_folders_ui(ui, quiet, theme),
             Dialog::SimpleTone(tone) => Self::simple_tone_ui(ui, tone, theme),
             Dialog::Anim(dialog) => dialog.ui(ui, theme),
+            Dialog::Color(color) => self.color_dialog_ui(ui, color, theme),
             Dialog::Fonts(manager) => {
                 if sue_wm::fonts::manage_ui(ui, manager, theme) {
                     Outcome::Ok
@@ -451,7 +590,16 @@ impl SuePaint {
                     Outcome::Open
                 }
             }
-            Dialog::Color(color) => self.color_dialog_ui(ui, color, theme),
+        }
+    }
+
+    /// What the extra button at the footer's leading edge does: it
+    /// changes the dialog and leaves it open.
+    fn dialog_extra(&mut self, cx: &mut AppletContext<'_>, dialog: &mut Dialog) {
+        match dialog {
+            Dialog::New(new) => self.canvas_preset(cx, new, true),
+            Dialog::Pressure(pressure) => pressure.reset(),
+            _ => {}
         }
     }
 
@@ -480,7 +628,7 @@ impl SuePaint {
             Dialog::Pressure(pressure) => Self::pressure_ok(cx, &pressure),
             Dialog::Frame(frame) => self.add_frame_layer(cx, frame),
             Dialog::Text(layer, lettering) => self.put_text(cx, layer, &lettering),
-            Dialog::Perspective(count) => self.make_perspective(cx, count),
+            Dialog::Perspective(perspective) => self.perspective_ok(cx, perspective),
             Dialog::Timelapse(export) => self.ask_export_timelapse(cx, export),
             Dialog::Material(name) => self.register_material(cx, &name),
             Dialog::SelectBy(3, width) => self.outline_selection(cx, width),
@@ -495,7 +643,9 @@ impl SuePaint {
             Dialog::StoryEditor(texts) => Self::story_editor_ok(cx, texts),
             Dialog::Proof(profile) => self.proof_ok(profile),
             Dialog::CanvasProperties(props) => Self::canvas_properties_ok(cx, &props),
-            Dialog::Convert(layer, kind, name) => self.convert_ok(cx, layer, kind, &name),
+            Dialog::Convert(convert) => self.convert_ok(cx, &convert),
+            Dialog::LinesTones(lines) => self.lines_tones_ok(cx, &lines),
+            Dialog::Grid(picture, grid) => Self::grid_ok(cx, picture, grid),
             Dialog::Webtoon(height, width) => self.ask_export_webtoon(cx, height, width),
             Dialog::DivideFrame(spec) => self.divide_frame_ok(cx, &spec),
             Dialog::Shape3D(kind) => self.shape_3d_ok(cx, kind),
@@ -509,13 +659,13 @@ impl SuePaint {
             Dialog::DeleteFolders(quiet) => self.delete_folders_ok(cx, quiet),
             Dialog::SimpleTone(tone) => self.simple_tone_ok(cx, &tone),
             Dialog::Anim(dialog) => self.anim_dialog_ok(cx, *dialog),
+            Dialog::Color(color) => self.color_dialog_ok(cx, color),
             Dialog::Message(..)
             | Dialog::Shortcuts
             | Dialog::Pages(_)
             | Dialog::Comps(_)
             | Dialog::Exposure
             | Dialog::Fonts(_) => {}
-            Dialog::Color(color) => self.color_dialog_ok(cx, color),
         }
     }
 
@@ -545,7 +695,6 @@ impl SuePaint {
             | Dialog::SelectBy(..)
             | Dialog::Gamut(..)
             | Dialog::Webtoon(..)
-            | Dialog::DivideFrame(_)
             | Dialog::Timeline(..)
             | Dialog::Shape3D(_)
             | Dialog::Workspace(_)
@@ -557,9 +706,12 @@ impl SuePaint {
             | Dialog::PageSettings(_)
             | Dialog::StoryInfo(_)
             | Dialog::StoryEditor(_)
-            | Dialog::Convert(..)
+            | Dialog::Convert(_)
+            | Dialog::LinesTones(_)
+            | Dialog::Grid(..)
             | Dialog::Shortcuts
             | Dialog::Fonts(_)
+            | Dialog::DivideFrame(_)
             | Dialog::DeleteFolders(_)
             | Dialog::SimpleTone(_)
             | Dialog::Anim(_) => {}
@@ -568,79 +720,88 @@ impl SuePaint {
     }
 }
 
-/// OK and Cancel at the bottom right.
-fn ok_cancel(ui: &mut Ui, outcome: &mut Outcome) {
-    ui.with_layout(Layout::right_to_left(Align::Max), |ui| {
-        if ui.button("OK").clicked() {
-            *outcome = Outcome::Ok;
-        }
-        if ui.button(tr!("cancel")).clicked() {
-            *outcome = Outcome::Cancel;
-        }
-    });
+/// Where a body's OK and Cancel stood. The host now draws them in the
+/// dialog's footer, in Sue's one order, for every dialog whose
+/// [`Dialog::look`] gives it OK and Cancel; a body that still calls this
+/// draws nothing more. The call goes when the body's own file is next
+/// edited.
+fn ok_cancel(_ui: &mut Ui, _outcome: &mut Outcome) {}
+
+/// A label as a form row, a tooltip or a field's name shows it: without
+/// the colon some of the older labels end with.
+fn bare(text: String) -> String {
+    let kept = text.trim_end_matches([':', '\u{FF1A}', ' ']);
+    if kept.len() == text.len() {
+        text
+    } else {
+        kept.to_owned()
+    }
 }
 
+/// A muted label before a control.
 fn label(ui: &mut Ui, text: &str, theme: &Theme) {
-    ui.label(RichText::new(text).color(theme.muted));
-}
-
-/// A label right-aligned in a cell `width` wide, as Clip Studio Paint
-/// sets its dialogs' labels.
-fn right_label(ui: &mut Ui, text: &str, width: f32, theme: &Theme) {
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
-    ui.painter().text(
-        rect.right_center(),
-        egui::Align2::RIGHT_CENTER,
-        format!("{}:", text.trim_end_matches(':')),
-        theme.font(theme.ui_size),
-        theme.text,
+    ui.label(
+        egui::RichText::new(text)
+            .font(theme.text_font(TextRole::Body))
+            .color(theme.text_muted()),
     );
 }
 
-/// A section's name with a line running to the right of it.
-fn section(ui: &mut Ui, text: &str, theme: &Theme) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(text).color(theme.text));
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
-        ui.painter()
-            .hline(rect.x_range(), rect.center().y, theme.hairline());
-    });
+/// A line of help under a group of controls, in the caption size.
+fn note(ui: &mut Ui, text: &str, theme: &Theme) {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .font(theme.text_font(TextRole::Caption))
+                .color(theme.text_muted()),
+        )
+        .wrap(),
+    );
+}
+
+/// Gives `response` a tooltip with `name`, and with `keys` when a key
+/// runs it.
+fn tip(response: Response, name: &str, keys: &str, theme: &Theme) -> Response {
+    tooltip(response, &Tip::new(name).shortcut(keys), theme)
+}
+
+/// The height of one row of controls.
+fn row_height(ui: &Ui) -> f32 {
+    Density::of(ui).control_height()
 }
 
 /// A page to read: its paragraphs, headings and links.
 pub(super) fn message_ui(
     ui: &mut Ui,
     paragraphs: &[String],
-    size: egui::Vec2,
+    room: egui::Vec2,
     theme: &Theme,
 ) -> Outcome {
-    let mut outcome = Outcome::Open;
     egui::ScrollArea::vertical()
-        .max_height(size.y - 110.0)
+        .max_height(room.y)
         .show(ui, |ui| {
-            for paragraph in paragraphs.iter() {
+            for paragraph in paragraphs {
                 if paragraph.starts_with("https://") {
                     ui.hyperlink(paragraph.as_str());
                 } else if let Some(heading) = paragraph.strip_prefix("# ") {
-                    ui.add_space(6.0);
+                    ui.add_space(theme.space(Space::S3));
                     ui.label(
-                        RichText::new(heading)
-                            .size(theme.ui_size)
+                        egui::RichText::new(heading)
+                            .font(theme.text_font(TextRole::Body))
                             .color(theme.text)
                             .strong(),
                     );
                 } else {
-                    ui.label(
-                        RichText::new(paragraph.as_str())
-                            .size(theme.small_size + 0.5)
-                            .color(theme.text),
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(paragraph.as_str())
+                                .font(theme.text_font(TextRole::Body))
+                                .color(theme.text),
+                        )
+                        .wrap(),
                     );
                 }
             }
         });
-    ui.add_space(8.0);
-    if ui.button(tr!("close")).clicked() {
-        outcome = Outcome::Ok;
-    }
-    outcome
+    Outcome::Open
 }
