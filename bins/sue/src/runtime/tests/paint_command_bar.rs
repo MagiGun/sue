@@ -155,7 +155,8 @@ impl Bar {
         self.step(vec![egui::Event::PointerMoved(at)]);
         self.step(vec![down]);
         self.step(vec![up]);
-        self.settle(4);
+        // P4-8's dialogs take a few frames to find how tall they are.
+        self.settle(8);
     }
 
     /// A click on the control `name` in `area`.
@@ -287,7 +288,7 @@ impl Bar {
         self.step(vec![egui::Event::Text(entry.to_owned())]);
         self.settle(3);
         let column = Rect::from_min_max(
-            Pos2::new(search.left() - 240.0, search.top()),
+            Pos2::new(search.left() - 40.0, search.bottom()),
             Pos2::new(search.left() + 240.0, 900.0),
         );
         let at = self
@@ -318,7 +319,7 @@ impl Bar {
 fn command_bar_settings_put_tools_sub_tools_colors_and_palettes_on_the_bar() {
     let mut bar = Bar::new("paint-bar-settings");
     bar.driver.command("file.command_bar");
-    bar.settle(6);
+    bar.settle(12);
     assert!(
         bar.driver.rect_of("On the Command Bar").is_some(),
         "the dialog shows the bar's buttons"
@@ -522,8 +523,11 @@ fn quick_access_has_sets_of_named_buttons() {
             "{name} in Quick Access"
         );
     }
-    // Its own button opens its settings.
-    bar.click_text("Quick Access Settings");
+    // Its own button opens its settings. Set 1 is taller than the
+    // palette that pops out of the strip (P4-9), so the button sits past
+    // the scrolled end: its command is what it runs.
+    bar.driver.command("window.quick_access.settings");
+    bar.settle(12);
     assert!(bar.driver.rect_of("In This Set").is_some());
     bar.close_dialog();
     bar.settle(4);
@@ -597,7 +601,7 @@ fn icon_settings_give_a_button_another_icon() {
 fn command_bar_settings_hold_auto_actions_and_groups_and_restore_the_default() {
     let mut bar = Bar::new("paint-bar-restore");
     bar.driver.command("file.command_bar");
-    bar.settle(6);
+    bar.settle(12);
     bar.add_from("Auto Action", "Rotate Canvas Right");
     assert!(
         bar.file("command_bar.txt")
@@ -614,7 +618,7 @@ fn command_bar_settings_hold_auto_actions_and_groups_and_restore_the_default() {
     assert!(bar.enabled("Redo", area), "the Auto Action made a step");
     assert!(bar.enabled("Fit to Screen", area), "the canvas is open");
     bar.driver.command("file.command_bar");
-    bar.settle(6);
+    bar.settle(12);
     // Undo, picked at the right, takes Redo into a group.
     let heading = bar
         .driver

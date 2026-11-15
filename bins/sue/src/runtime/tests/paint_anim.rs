@@ -1070,7 +1070,9 @@ fn sue_paint_exports_sequences_cels_animated_pictures_and_sound_with_their_setti
     paint.command("file.export.gif");
     paint.settle(3);
     fill(&mut paint, "Loop count", "3");
-    press(&mut paint, egui::Key::Enter);
+    // Tab left the keys on the next control, which Enter would press:
+    // OK is clicked.
+    paint.click_text("OK");
     picked(&mut paint, "anim-gif", &root.join("Walk.gif"));
     let gif = std::fs::read(root.join("Walk.gif")).unwrap();
     let at = gif
@@ -1111,7 +1113,11 @@ fn sue_paint_timeline_picks_moves_copies_and_pastes_frames_by_drag() {
     };
     let row = texts
         .iter()
-        .find(|(text, _)| text.starts_with("Folder") && text.contains(':'))
+        // The timeline's track, not the Layer palette's row (P4-5 names
+        // the cel a folder shows there too).
+        .find(|(text, rect)| {
+            text.starts_with("Folder") && text.contains(':') && rect.top() > 700.0 && rect.left() < 1100.0
+        })
         .map(|(_, rect)| *rect)
         .unwrap_or_else(|| panic!("the track's name: {texts:?}"));
     // The ruler numbers every division line, six frames apart.

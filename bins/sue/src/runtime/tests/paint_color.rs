@@ -286,8 +286,9 @@ fn edit_color_sets_adds_a_standard_set_and_reorders() {
     let grays = control(&mut paint, "Grays");
     click(&mut paint, grays.center(), PointerButton::Primary);
     look(&mut paint);
-    let added = control(&mut paint, "Grays 2");
-    let top = control(&mut paint, "Default");
+    // The dialog's rows, not the palette's set tabs behind it.
+    let added = nearest_middle(&mut paint, "Grays 2");
+    let top = nearest_middle(&mut paint, "Default");
     // Its grip is at the start of its row.
     let grip = Pos2::new(added.left() + 8.0, added.center().y);
     paint.drag(
@@ -311,7 +312,9 @@ fn edit_color_sets_adds_a_standard_set_and_reorders() {
     let wrench = control(&mut paint, "Color set settings");
     click(&mut paint, wrench.center(), PointerButton::Primary);
     paint.click_text("Edit Color Sets...");
-    let first = control(&mut paint, "Grays 2");
+    paint.settle(8);
+    // The dialog's row, not the palette's tab behind it.
+    let first = nearest_middle(&mut paint, "Grays 2");
     click(&mut paint, first.center(), PointerButton::Primary);
     paint.step(vec![key(egui::Key::ArrowDown, Modifiers::ALT)]);
     paint.settle(2);

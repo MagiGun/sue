@@ -100,7 +100,8 @@ const AT_ONCE: [&str; 8] = [
 /// opens. Answers whether the dialog showed its OK button.
 fn run_and_ok(driver: &mut PaintDriver, command: &str) -> bool {
     driver.command(command);
-    driver.settle(4);
+    // A tall dialog takes a few frames to find how tall it is.
+    driver.settle(10);
     if AT_ONCE.contains(&command) {
         return true;
     }
