@@ -505,6 +505,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint wears the theme you pick in Settings, Appearance, as the Hub
+  and Sue Writer do: in Paper its menus, command bar, palettes, Tool
+  Property, dialogs, canvas surround, timeline and status are light, in
+  Void and Graphite dark. It used to keep its own Gray in every theme.
+  Gray is still there for Sue Paint alone (Settings, Sue Paint, Theme).
+  The opacity and blend line of a chosen layer row is easier to read.
 - Sue Paint paints with its new brush engine. Every brush whose tip is
   round (the pens, the pencils, the hard eraser and more) draws through
   it, on a layer, on a layer's mask, inside a selection, with Lock
