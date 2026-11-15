@@ -15,6 +15,8 @@ egui-wgpu.workspace = true
 egui-winit.workspace = true
 pollster.workspace = true
 semver.workspace = true
+sue-core.workspace = true
+sue-io.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sys-locale.workspace = true
@@ -60,6 +62,9 @@ windows.workspace = true
 # A Windows Ink pen's packet history (each packet's own pressure), read
 # by the one audited call in crates/sue-platform/winpen.
 sue-winpen = { path = "winpen" }
+# MP4 movies through Media Foundation, in the audited crate
+# crates/sue-platform/windows (src/movie.rs).
+sue-windows = { path = "windows" }
 
 # Pen pressure, tilt and the eraser from X11's XInput2 (a pen tablet
 # under X11, or under Wayland through XWayland), on a connection of its

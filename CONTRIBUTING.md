@@ -60,9 +60,12 @@ backbone; section 8 maps every feature area onto it).
    test. A new version reads every older file.
 5. **No hidden copies.** Large buffers move by handle or as `Shared`.
 6. **OS code only in `sue-platform`.** No `cfg(target_os)`, `windows-sys`,
-   `libc` or `objc` anywhere else. `unsafe` is forbidden everywhere but
-   in audited, maintainer-approved items of `crates/sue-platform/android`,
-   `crates/sue-platform/ios` and `crates/sue-platform/wayland`.
+   `libc` or `objc` anywhere else. Safe Rust is the default and `unsafe`
+   is forbidden everywhere but in small audited sub-crates of
+   `crates/sue-platform` (such as `android`, `ios`, `wayland` and
+   `windows`), where it gives a real benefit (an operating system API,
+   or measured speed), with a `// SAFETY:` comment on every block and
+   tests. The maintainer approved this ahead on 2026-11-13.
 7. **Studios share features.** Use the shared color picker, file dialogs,
    fonts, text editor, exporters and models; give a shared feature a new mode
    instead of copying it.
@@ -172,8 +175,10 @@ Sue starts there as a native activity from `crates/sue-platform/android`,
 the one place that exports a symbol for the system to call; its one Java
 class, `packaging/android/java/com/magigun/sue/SueActivity.java`, adds the
 system's file pickers. On iOS the Objective-C calls for the picker and
-the on-screen keyboard live in `crates/sue-platform/ios`. Those two crates are the only ones where
-`unsafe` is relaxed, item by item, with the maintainer's approval.
+the on-screen keyboard live in `crates/sue-platform/ios`. These, like the
+other audited sub-crates of `crates/sue-platform`, relax `unsafe` item by
+item, each with a `// SAFETY:` comment, under the maintainer's standing
+approval of 2026-11-13.
 
 ## Branches and commits
 

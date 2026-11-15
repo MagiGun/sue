@@ -67,3 +67,20 @@ ppm-picture = PPM picture
 wav-sound = WAV sound
 flac-sound = FLAC sound
 aiff-sound = AIFF sound
+## Movie export (video.rs, and sue_platform::movie)
+
+movie-format-mp4-h264 = MP4 (H.264)
+movie-format-avi-mjpeg = AVI (Motion JPEG)
+movie-quality-small = Small file
+movie-quality-normal = Normal
+movie-quality-high = High quality
+movie-padded-note = MP4 needs an even width and height: one pixel is added
+movie-no-encoder = this system has no MP4 (H.264) encoder
+movie-no-sound-track = this movie format carries no sound
+movie-wrong-size = every frame must be the movie's size
+movie-bad-size = the movie size is outside what the format allows
+movie-bad-rate = the frame rate is not usable
+movie-bad-sound = the sound's rate or channel count does not fit the format
+movie-no-pixels = the frame has no 8-bit RGBA pixels
+movie-no-frames = the movie has no frames
+movie-encoder-failed = the system encoder failed

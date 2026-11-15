@@ -88,8 +88,12 @@ code.
 - OS-specific code (`windows-sys`, `winapi`, `libc`, `nix`, `jni`, `ndk`,
   `objc`, `cocoa`, `#[cfg(target_os = ...)]`) lives only in
   `crates/sue-platform`.
-- `unsafe` is forbidden workspace-wide. Only `sue-platform` may relax this, for
-  audited FFI, and only with a human's approval.
+- Safe Rust is the default: `unsafe` is forbidden workspace-wide. A small
+  audited sub-crate may relax this where it gives a real benefit (an
+  operating system API, or speed that was measured), with a `// SAFETY:`
+  comment on every block and tests. The maintainer approved this ahead on
+  2026-11-13, so no case needs its own approval. OS-specific code, `unsafe`
+  or not, still lives only in `crates/sue-platform`.
 
 ## Rule 7: A tested backbone
 
@@ -149,7 +153,8 @@ Do not:
   snapshot a whole document for undo.
 - Hardcode a list of features, formats, operators or node types in the
   backbone.
-- Put OS-specific code outside `crates/sue-platform`, or write `unsafe`.
+- Put OS-specific code outside `crates/sue-platform`, or write `unsafe`
+  outside an audited sub-crate.
 - Add a dependency that duplicates one the workspace already has.
 - Commit build output (`target/`), editor folders, secrets or files you were
   not asked to change.
