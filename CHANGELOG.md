@@ -104,6 +104,10 @@ follow [Semantic Versioning](https://semver.org/).
   (Online), Frequently Asked Questions, Contact, and Feedback and
   Requests. Each opens in your browser, and each can be given a key in
   Settings.
+- Sue Paint renames an animation folder's cels 1, 2, 3 in the order
+  the timeline shows them (Rename in Timeline Order) or in the order of
+  the layers (Rename in Layer Order), as one undo step; both are in the
+  command palette until the Animation menu lists them.
 
 ### Changed
 
@@ -243,6 +247,11 @@ follow [Semantic Versioning](https://semver.org/).
 - The opacity bar's handle shows on light themes too.
 - Sue Paint's Help, Sue Paint Guide and Help, Check for Updates open
   before a canvas is, instead of staying grayed.
+- Undoing Assign Animation Cel, Add Keyframe or Delete Keyframe in Sue
+  Paint names the step after the menu item, in your language, instead
+  of "Specify Cel" or "Delete Key".
+- Reverse Layers Vertically on Sue Paint's light table turns the
+  table's layers round; it used to leave them as they were.
 
 ### Removed
 
