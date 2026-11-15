@@ -13,6 +13,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint can draw with its new brush engine: write
+  `brush_engine = "new"` under `[sue_paint]` in your settings file and
+  the Pen and Pencil sub tools with a round tip draw through it. The
+  stroke is laid on its own threads while the pen moves, shown as it
+  grows, ends as thin as the pen ended it, and goes into the layer as
+  one undo step; every packet of the pen keeps its own pressure. Until
+  the rest of the tools move over, strokes it cannot draw yet (with a
+  selection, on a locked, masked or vector layer, along rulers, with
+  Shift) use the brush engine as before, and it draws no paper grain.
 - Sue Paint has the Glow Dodge and Add (Glow) blend modes: soft paint
   in them glows brighter than in Color Dodge and Add, as a rim light
   wants. The blend mode list follows Clip Studio Paint's order, and
@@ -127,6 +136,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A Windows Ink pen whose packets reached Sue several at a time (while
+  a frame was drawn) gave them all the newest packet's pressure and the
+  same time; each now keeps its own, for the strokes of the new brush
+  engine.
 - Change Canvas Size, Crop and Change Image Resolution in Sue Paint left
   layer masks at their old size and place.
 - A tone effect in Sue Paint drew a faint dot in every white cell, and
