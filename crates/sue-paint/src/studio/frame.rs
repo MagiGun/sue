@@ -122,13 +122,17 @@ impl SuePaint {
                     }
                 }
             }
-            Some(Gesture::Move { layer, old, .. }) => {
+            Some(Gesture::Move { layers, .. }) => {
                 let mut steps = Batch::new(tr!("move-layer"));
-                for (key, before) in [(picture::X, old[0].clone()), (picture::Y, old[1].clone())] {
-                    steps = steps.then(match before {
-                        Some(value) => SetProperty::new(layer, key, value),
-                        None => SetProperty::remove(layer, key),
-                    });
+                for (layer, _, old) in layers {
+                    for (key, before) in
+                        [(picture::X, old[0].clone()), (picture::Y, old[1].clone())]
+                    {
+                        steps = steps.then(match before {
+                            Some(value) => SetProperty::new(layer, key, value),
+                            None => SetProperty::remove(layer, key),
+                        });
+                    }
                 }
                 cx.record(ArenaEdit(steps));
             }

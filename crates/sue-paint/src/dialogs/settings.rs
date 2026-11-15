@@ -1,15 +1,16 @@
-//! The settings dialogs: Modifier Key Settings, Keyboard Shortcuts (with
+//! The settings dialogs: Keyboard Shortcuts (with
 //! what the pen and the mouse do), Preferences, Command Bar Settings and
 //! the workspaces.
 
 use egui::{Align, Layout, RichText, Ui};
-use sue_rice::{RiceValue, SetRiceValue};
 use sue_wm::{AppletContext, Theme};
 
 use super::{Outcome, label, ok_cancel};
 use crate::studio::SuePaint;
 
-/// What each modifier can do: its rice key, label and choices.
+/// The three modifier settings that came before Modifier Key Settings
+/// kept its rows in a file (`crate::modifier_keys`): their rice keys,
+/// labels and choices, still shown in Settings.
 pub(crate) const MODIFIERS: [(&str, &str, &[&str]); 3] = [
     (
         "sue_paint.alt_tool",
@@ -53,38 +54,6 @@ pub(super) fn workspace_ui(ui: &mut Ui, name: &mut String, theme: &Theme) -> Out
         label(ui, &tr!("name"), theme);
         ui.text_edit_singleline(name);
     });
-    ok_cancel(ui, &mut outcome);
-    outcome
-}
-
-/// Modifier Key Settings: what Alt, Space and Ctrl+Shift do on the canvas.
-pub(super) fn modifiers_ui(ui: &mut Ui, chosen: &mut [usize; 3], theme: &Theme) -> Outcome {
-    let mut outcome = Outcome::Open;
-    for ((key, name, choices), pick) in MODIFIERS.iter().zip(chosen.iter_mut()) {
-        // Each choice reads as Settings names it.
-        let choice_text = |choice: &str| {
-            sue_lang::text_or(
-                "rice",
-                &format!("{}.{choice}", key.replace('.', "-")),
-                &choice.replace('_', " "),
-            )
-        };
-        ui.horizontal(|ui| {
-            label(ui, &crate::localize(name), theme);
-            egui::ComboBox::from_id_salt(("sue-paint-modifier", *name))
-                .selected_text(choice_text(choices[(*pick).min(choices.len() - 1)]))
-                .show_ui(ui, |ui| {
-                    for (index, choice) in choices.iter().enumerate() {
-                        ui.selectable_value(pick, index, choice_text(choice));
-                    }
-                });
-        });
-    }
-    ui.label(
-        RichText::new(tr!("space-shift-turns-view-ctrl-alt"))
-            .size(theme.small_size)
-            .color(theme.muted),
-    );
     ok_cancel(ui, &mut outcome);
     outcome
 }
@@ -262,15 +231,5 @@ impl SuePaint {
             None => self.workspaces.push(space),
         }
         self.save_extras(cx);
-    }
-
-    /// Keeps what each modifier does.
-    pub(super) fn modifiers_ok(cx: &mut AppletContext<'_>, chosen: [usize; 3]) {
-        for ((key, _, choices), pick) in MODIFIERS.iter().zip(chosen) {
-            let value = choices[pick.min(choices.len() - 1)].to_owned();
-            if let Err(error) = cx.edit_rice(SetRiceValue::new(*key, RiceValue::Text(value))) {
-                cx.fail(tr!("cannot-keep-the-modifier-keys", error = error));
-            }
-        }
     }
 }

@@ -6,6 +6,7 @@ use sue_wm::AppletContext;
 
 use super::view::{on_screen, shift_rects};
 use crate::doc;
+use crate::modifier_keys::{Input, Keys};
 use crate::studio::{Gesture, SuePaint};
 use crate::tools::Tool;
 use sue_platform::stylus::SampleKind;
@@ -364,11 +365,14 @@ impl SuePaint {
                         PointerButton::Primary => {
                             self.press(pos, modifiers, space, viewport, size, cx)
                         }
-                        PointerButton::Middle => self.gesture = Some(Gesture::Pan { last: pos }),
-                        // A right-click picks a color, as in Clip Studio Paint.
+                        // The middle button scrolls and a right-click picks
+                        // a color, as in Clip Studio Paint, unless the
+                        // Modifier Key Settings give them other tools.
+                        PointerButton::Middle => {
+                            self.press_button(Input::Middle, pos, viewport, size, cx);
+                        }
                         PointerButton::Secondary => {
-                            self.pick(pos, 0, viewport, size, cx);
-                            self.gesture = Some(Gesture::Pick { mode: 0 });
+                            self.press_button(Input::Right, pos, viewport, size, cx);
                         }
                         _ => {}
                     }
@@ -432,36 +436,31 @@ impl SuePaint {
             }
         }
         if response.hovered() && !blocked && pinch.is_none() {
-            let (scroll, zoom, shift) = ctx.input(|input| {
-                (
-                    input.smooth_scroll_delta,
-                    input.zoom_delta(),
-                    input.modifiers.shift,
-                )
-            });
-            if let (Some(pointer), Some(doc)) = (
-                response.hover_pos().filter(|pos| !covered(*pos)),
-                self.docs.get_mut(self.active),
-            ) {
-                if shift && (scroll.x != 0.0 || scroll.y != 0.0) {
-                    // Shift and the wheel turn the view.
-                    doc.view
-                        .rotate_by(viewport, size, (scroll.x + scroll.y) * 0.15);
+            let (scroll, zoom) = ctx.input(|input| (input.smooth_scroll_delta, input.zoom_delta()));
+            let keys = Keys::of(held, space);
+            if let Some(pointer) = response.hover_pos().filter(|pos| !covered(*pos)) {
+                if (zoom - 1.0).abs() > 1e-4 && !keys.ctrl {
+                    // Two fingers pinching on a touchpad always zoom.
+                    if let Some(doc) = self.docs.get_mut(self.active) {
+                        doc.view.zoom_at(viewport, size, pointer, zoom);
+                    }
                 } else if (zoom - 1.0).abs() > 1e-4 {
-                    doc.view.zoom_at(viewport, size, pointer, zoom);
-                } else if scroll.y != 0.0 {
-                    doc.view
-                        .zoom_at(viewport, size, pointer, (scroll.y * 0.0025).exp());
-                }
-                if scroll.x != 0.0 {
-                    doc.view.pan.x += scroll.x;
+                    // Ctrl and the wheel come as a zoom: back to a turn of
+                    // the wheel, for the row of Ctrl.
+                    self.wheel(keys, zoom.ln() / 0.0025, 0.0, pointer, viewport, size, cx);
+                } else if scroll.x != 0.0 || scroll.y != 0.0 {
+                    // Shift and the wheel can come sideways.
+                    let (amount, across) = if keys.shift {
+                        (scroll.y + scroll.x, 0.0)
+                    } else {
+                        (scroll.y, scroll.x)
+                    };
+                    self.wheel(keys, amount, across, pointer, viewport, size, cx);
                 }
             }
-            let tool = if space {
-                Tool::Hand
-            } else {
-                self.toolbox.tool()
-            };
+            // The cursor of the tool a press would go to: the one a held
+            // key borrows.
+            let tool = self.tool_under_keys(keys, cx);
             let icon = match (tool, &self.gesture) {
                 (_, Some(Gesture::Pan { .. })) => egui::CursorIcon::Grabbing,
                 (Tool::Hand, _) => egui::CursorIcon::Grab,

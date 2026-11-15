@@ -31,7 +31,7 @@ use sue_wm::AppletContext;
 
 use crate::select::Op;
 use crate::studio::{Gesture, SuePaint};
-use crate::tools::Tool;
+use crate::tools::{SubTool, Tool};
 
 mod blend;
 mod brush;
@@ -87,6 +87,13 @@ impl SuePaint {
         else {
             return;
         };
+        self.press_as(tool, sub, &press, cx);
+    }
+
+    /// A press handed to `tool` with its sub tool `sub`: the tool the
+    /// keys left, or one a key or a mouse button borrows.
+    fn press_as(&mut self, tool: Tool, sub: SubTool, press: &Press, cx: &mut AppletContext<'_>) {
+        let press = *press;
         match tool {
             Tool::Hand => self.hand_press(&press, &sub),
             Tool::Zoom => self.zoom_press(&press, &sub),
@@ -107,7 +114,7 @@ impl SuePaint {
             Tool::Gradient => self.gradient_press(&press, sub, cx),
             Tool::Select => self.select_press(&press, sub, cx),
             Tool::AutoSelect => self.auto_select(press.p, &sub, press.op, press.size, cx),
-            Tool::MoveLayer => self.move_press(&press, cx),
+            Tool::MoveLayer => self.move_press(&press, &sub, cx),
             Tool::Operation => self.operation_press(&press, &sub, cx),
             Tool::CorrectLine => self.correct_press(&press, sub, cx),
         }
@@ -149,6 +156,7 @@ impl SuePaint {
                 self.trace_drag(pos, viewport, size);
             }
             Some(Gesture::Move { .. }) => self.move_drag(pos, viewport, size, cx),
+            Some(Gesture::Scrub { .. }) => self.scrub_drag(pos, viewport, size, cx),
         }
     }
 
@@ -196,7 +204,6 @@ impl SuePaint {
         size: [u32; 2],
         cx: &mut AppletContext<'_>,
     ) {
-        let _ = viewport;
         let Some(gesture) = self.gesture.take() else {
             return;
         };
@@ -216,6 +223,8 @@ impl SuePaint {
                 Tool::Ruler => self.ruler_drag(from, to, &sub, cx),
                 Tool::Balloon => self.balloon_drag(from, to, &sub, cx),
                 Tool::CorrectLine => self.remove_dust(from, to, &sub, cx),
+                Tool::Operation => self.select_layers_in(from, to, &sub, cx),
+                Tool::Zoom => self.zoom_area(from, to, &sub, viewport, size),
                 _ => {}
             },
             gesture @ Gesture::VectorErase { .. } => self.vector_erase_release(gesture, cx),
@@ -248,6 +257,9 @@ impl SuePaint {
             }
             gesture @ Gesture::Lasso { .. } => self.lasso_release(gesture, size),
             gesture @ Gesture::Move { .. } => self.move_release(gesture, cx),
+            gesture @ Gesture::Scrub { .. } => self.scrub_release(gesture, viewport, size, cx),
+            // Move layer's drag of the selected pixels ends with it.
+            Gesture::Transform { .. } if self.move_lift => self.move_lift_release(cx),
             Gesture::Pan { .. }
             | Gesture::Rotate { .. }
             | Gesture::Pick { .. }

@@ -9,6 +9,7 @@ mod comps;
 mod fill;
 mod filter;
 mod frame;
+mod modifiers;
 mod new;
 mod pressure;
 mod settings;
@@ -30,8 +31,9 @@ use canvas::{
 use fill::{gamut_ui, select_by_ui};
 use filter::{correction_ui, filter_ui};
 use frame::frame_ui;
+use modifiers::modifiers_ui;
 use pressure::pressure_ui;
-use settings::{modifiers_ui, shortcuts_ui, workspace_ui};
+use settings::{shortcuts_ui, workspace_ui};
 use story::{page_settings_ui, story_editor_ui, story_info_ui, webtoon_ui};
 use text::text_ui;
 
@@ -39,6 +41,7 @@ pub(crate) use canvas::{CanvasDialog, CanvasProperties, ResolutionDialog};
 pub(crate) use comps::CompsDialog;
 pub(crate) use fill::AdvancedFill;
 pub(crate) use filter::FilterDialog;
+pub(crate) use modifiers::ModifiersDialog;
 #[cfg(test)]
 pub(crate) use new::SIZES;
 pub(crate) use new::{CanvasPreset, NEW_PRESET_TARGET, NewDialog, Project, new_presets};
@@ -101,9 +104,9 @@ pub(crate) enum Dialog {
     Message(String, Vec<String>),
     /// Print Settings, or Print when set.
     Print(crate::print::PrintSettings, bool),
-    /// Modifier Key Settings: what Alt, Space and Ctrl+Shift do on the
-    /// canvas (indexes into their choices).
-    Modifiers([usize; 3]),
+    /// Modifier Key Settings: what the keys, the wheel and the buttons do
+    /// on the canvas.
+    Modifiers(Box<ModifiersDialog>),
     /// Command Bar Settings.
     CommandBar(String),
     /// Canvas Properties.
@@ -189,7 +192,7 @@ impl Dialog {
             Dialog::Message(title, _) => (title.clone(), vec2(520.0, 460.0)),
             Dialog::Print(_, true) => (tr!("print"), vec2(380.0, 330.0)),
             Dialog::Print(_, false) => (tr!("print-settings"), vec2(380.0, 330.0)),
-            Dialog::Modifiers(_) => (tr!("modifier-key-settings"), vec2(400.0, 230.0)),
+            Dialog::Modifiers(_) => (tr!("modifier-key-settings"), vec2(600.0, 620.0)),
             Dialog::AdvancedFill => (tr!("advanced-fill"), vec2(520.0, 470.0)),
             Dialog::CommandBar(_) => (tr!("command-bar-settings"), vec2(420.0, 460.0)),
             Dialog::CanvasProperties(_) => (tr!("canvas-properties"), vec2(380.0, 230.0)),
@@ -456,7 +459,7 @@ impl SuePaint {
             Dialog::Workspace(name) => self.workspace_ok(cx, &name),
             Dialog::Workspaces | Dialog::CommandBar(_) => self.save_extras(cx),
             Dialog::Print(settings, printing) => self.print_ok(cx, settings, printing),
-            Dialog::Modifiers(chosen) => Self::modifiers_ok(cx, chosen),
+            Dialog::Modifiers(chosen) => self.keep_modifier_map(chosen.map, cx),
             Dialog::PageSettings(settings) => self.page_settings_ok(cx, &settings),
             Dialog::StoryInfo(info) => Self::story_info_ok(cx, &info),
             Dialog::StoryEditor(texts) => Self::story_editor_ok(cx, texts),

@@ -3,51 +3,96 @@
 //! picture for the fills that look at it.
 
 use egui::{Pos2, Rect};
+use sue_core::EntityId;
 use sue_wm::AppletContext;
 
 use super::overlays::segment_distance;
 use crate::doc;
+use crate::fill::{Exclude, Refer};
 use crate::studio::SuePaint;
+use crate::tools::Tool;
 
 impl SuePaint {
-    /// Makes the topmost visible layer with paint under picture point `p`
-    /// the current layer (Ctrl, Shift and click).
-    pub(super) fn pick_layer_at(&mut self, arena: &sue_core::Arena, p: Pos2) {
-        let Some(doc) = self.docs.get_mut(self.active) else {
-            return;
+    /// The topmost shown layer with paint under picture point `p`, less
+    /// what `exclude` leaves out (Select layer's Exclude row).
+    pub(crate) fn layer_painted_at(
+        &self,
+        arena: &sue_core::Arena,
+        p: Pos2,
+        exclude: Exclude,
+    ) -> Option<EntityId> {
+        let p = [p.x.floor() as i64, p.y.floor() as i64];
+        self.layers_painted_in(arena, [p, p], exclude)
+            .first()
+            .copied()
+    }
+
+    /// Every shown layer with paint in the picture box between the two
+    /// pixels of `area` (both in it), topmost first, less what `exclude`
+    /// leaves out.
+    pub(crate) fn layers_painted_in(
+        &self,
+        arena: &sue_core::Arena,
+        area: [[i64; 2]; 2],
+        exclude: Exclude,
+    ) -> Vec<EntityId> {
+        let Some(doc) = self.docs.get(self.active) else {
+            return Vec::new();
         };
-        let hit = doc::layers(arena, doc.picture)
+        let (left, right) = (area[0][0].min(area[1][0]), area[0][0].max(area[1][0]));
+        let (top, bottom) = (area[0][1].min(area[1][1]), area[0][1].max(area[1][1]));
+        doc::layers(arena, doc.picture)
             .into_iter()
             .rev()
-            .find(|info| {
-                if !info.style.visible {
-                    return false;
-                }
+            .filter(|info| {
+                info.style.visible
+                    && !(exclude.drafts && info.style.draft)
+                    && !(exclude.locked && info.locked)
+                    && !(exclude.paper && info.kind == sue_model::picture::LayerKind::Paper)
+                    && !(exclude.text
+                        && arena
+                            .get_by_id(info.id)
+                            .is_ok_and(|entity| entity.class() == doc::TEXT))
+            })
+            .filter(|info| {
                 let Some(raster) = doc::raster(arena, info.id) else {
                     return false;
                 };
-                let (x, y) = (
-                    p.x as i64 - info.style.offset[0],
-                    p.y as i64 - info.style.offset[1],
-                );
-                if x < 0
-                    || y < 0
-                    || x >= i64::from(raster.width())
-                    || y >= i64::from(raster.height())
-                {
+                let Some(bytes) = raster.bytes() else {
                     return false;
-                }
-                raster.bytes().is_some_and(|bytes| {
-                    let at = ((y as usize * raster.width() as usize) + x as usize) * 4 + 3;
-                    bytes.get(at).is_some_and(|alpha| *alpha > 0)
+                };
+                let (w, h) = (i64::from(raster.width()), i64::from(raster.height()));
+                let [ox, oy] = info.style.offset;
+                let (x0, x1) = ((left - ox).max(0), (right - ox).min(w - 1));
+                let (y0, y1) = ((top - oy).max(0), (bottom - oy).min(h - 1));
+                (y0..=y1).any(|y| {
+                    (x0..=x1).any(|x| {
+                        bytes
+                            .get(((y * w + x) * 4 + 3) as usize)
+                            .is_some_and(|alpha| *alpha > 0)
+                    })
                 })
-            });
-        if let Some(info) = hit {
-            doc.layer = Some(info.id);
+            })
+            .map(|info| info.id)
+            .collect()
+    }
+
+    /// Makes the topmost shown layer with paint under picture point `p`
+    /// the current layer (Ctrl, Shift and click; Select layer), less what
+    /// `exclude` leaves out.
+    pub(super) fn pick_layer_at(&mut self, arena: &sue_core::Arena, p: Pos2, exclude: Exclude) {
+        if let Some(hit) = self.layer_painted_at(arena, p, exclude)
+            && let Some(doc) = self.docs.get_mut(self.active)
+        {
+            doc.layer = Some(hit);
+            doc.picked.clear();
         }
     }
 
-    /// Picks the color under `pos`: as shown, or from the current layer.
+    /// Picks the color under `pos`: as shown (`mode` 0), or from the
+    /// layers (1) the Eyedropper's Reference names, the editing one unless
+    /// it says more, less what its Exclude row leaves out. Picking from
+    /// layers where none has paint picks the transparent color.
     pub(super) fn pick(
         &mut self,
         pos: Pos2,
@@ -64,29 +109,69 @@ impl SuePaint {
             return;
         }
         let (x, y) = (p.x as u32, p.y as u32);
-        let rgb = if mode == 0 {
-            doc.compositor.pixel(x, y).map(|[r, g, b, _]| [r, g, b])
+        let rgba = if mode == 0 {
+            doc.compositor.pixel(x, y)
         } else {
-            self.layer_info(&cx.world.arena).and_then(|info| {
-                let raster = doc::raster(&cx.world.arena, info.id)?;
-                let (lx, ly) = (
-                    i64::from(x) - info.style.offset[0],
-                    i64::from(y) - info.style.offset[1],
-                );
-                if lx < 0
-                    || ly < 0
-                    || lx >= i64::from(raster.width())
-                    || ly >= i64::from(raster.height())
-                {
-                    return None;
+            let sub = self.toolbox.of(Tool::Eyedropper);
+            let arena = &cx.world.arena;
+            match sub.referred() {
+                Refer::Editing => self.layer_info(arena).map(|info| {
+                    doc::raster(arena, info.id)
+                        .and_then(|raster| {
+                            let (lx, ly) = (
+                                i64::from(x) - info.style.offset[0],
+                                i64::from(y) - info.style.offset[1],
+                            );
+                            if lx < 0
+                                || ly < 0
+                                || lx >= i64::from(raster.width())
+                                || ly >= i64::from(raster.height())
+                            {
+                                return None;
+                            }
+                            let at = ((ly as u32 * raster.width() + lx as u32) * 4) as usize;
+                            let pixel = raster.bytes()?.get(at..at + 4)?;
+                            Some([pixel[0], pixel[1], pixel[2], pixel[3]])
+                        })
+                        .unwrap_or([0; 4])
+                }),
+                refer => {
+                    let layers = crate::fill::ReferLayer::of_picture(arena, doc.picture);
+                    let keep =
+                        crate::fill::referred(&layers, doc.layer, &doc.picked, refer, sub.exclude);
+                    let view = crate::composite::FrameView {
+                        hidden: layers
+                            .iter()
+                            .filter(|layer| !layer.folder && !keep.contains(&layer.id))
+                            .map(|layer| layer.id)
+                            .collect(),
+                        ..crate::composite::FrameView::default()
+                    };
+                    let pixel = crate::composite::render_view(
+                        arena,
+                        doc.picture,
+                        [x, y, x + 1, y + 1],
+                        crate::composite::RenderOptions {
+                            paper: !sub.exclude.paper,
+                            drafts: !sub.exclude.drafts,
+                        },
+                        Some(&view),
+                    );
+                    pixel
+                        .get(..4)
+                        .map(|pixel| [pixel[0], pixel[1], pixel[2], pixel[3]])
                 }
-                let at = ((ly as u32 * raster.width() + lx as u32) * 4) as usize;
-                let pixel = raster.bytes()?.get(at..at + 4)?;
-                (pixel[3] > 0).then(|| [pixel[0], pixel[1], pixel[2]])
-            })
+            }
         };
-        if let Some(rgb) = rgb {
-            self.set_drawing_color(rgb);
+        match rgba {
+            // Nothing painted there on the layers looked at: the
+            // transparent color (Obtain layer color on an empty spot).
+            Some([_, _, _, 0]) if mode != 0 => self.transparent = true,
+            Some([r, g, b, _]) => {
+                self.transparent = false;
+                self.set_drawing_color([r, g, b]);
+            }
+            None => {}
         }
     }
 
