@@ -199,7 +199,14 @@ fn a_save_that_fails_at_any_byte_leaves_the_old_file_whole() {
             "a write that failed at byte {offset} changed the old file"
         );
     }
-    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+    // Beside the project only the test home's data folder (where the
+    // runtime harness keeps Sue Paint's 0.0.75 layout).
+    let beside: Vec<_> = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .filter(|name| name != "data")
+        .collect();
+    assert_eq!(beside, ["safe.sue"]);
     // Through the runtime: the failure is said, the project stays as it
     // was, and the next save (that works) writes the new file.
     runtime.fail_save_after = Some(100);

@@ -226,7 +226,7 @@ fn on_a_phone_new_opens_the_new_canvas_page_and_back_opens_the_hub() {
     runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
     assert!(
         runtime.with_shell(&mut NoTextures, start, |shell, io, now| {
-            shell.sue_menu_pick(&["Layout", "Phone"], io, now)
+            shell.sue_menu_pick(&["Interface", "Phone"], io, now)
         })
     );
     frames(&mut runtime, &ctx, size, start, |_| Vec::new());
@@ -528,14 +528,14 @@ fn the_launchers_settings_are_rows_of_sue_paints_settings() {
     let _english = sue_lang::scope(sue_lang::ENGLISH);
     let rice = &runtime.engine.world.rice;
     let pages = crate::settings::all_pages(&runtime.engine.catalog, rice);
-    // Each key is a setting Sue knows, and Settings shows it in the
-    // group named Sue Paint (by the key itself or by its section).
+    // Each key is a setting Sue knows, and Settings shows it on Sue
+    // Paint's own page (by the key itself or by its section).
     let groups: Vec<&sue_wm::SettingsGroup> = pages
         .iter()
+        .filter(|page| page.id == sue_paint::ID)
         .flat_map(|page| &page.groups)
-        .filter(|group| group.title == "Sue Paint")
         .collect();
-    assert!(!groups.is_empty(), "Settings has a Sue Paint group");
+    assert!(!groups.is_empty(), "Settings has a Sue Paint page");
     for key in [
         "sue_paint.theme",
         "sue_paint.materials_dir",

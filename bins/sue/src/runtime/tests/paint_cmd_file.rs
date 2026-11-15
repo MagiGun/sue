@@ -77,8 +77,14 @@ fn every_file_command_runs_on_a_canvas() {
         .collect();
     assert!(commands.len() >= 50, "{}", commands.len());
     // Open Recent and Clear Recent Files have no file to work on in a
-    // fresh test home; every other command must show that it ran.
-    let quiet_here = ["file.recent.clear", "file.recent.open.0"];
+    // fresh test home, and Export Back to the Same .clip is grayed on a
+    // canvas no .clip opened (paint_saving.rs runs it on one); every
+    // other command must show that it ran.
+    let quiet_here = [
+        "file.recent.clear",
+        "file.recent.open.0",
+        "file.export.clip_back",
+    ];
     let mut silent = Vec::new();
     for command in &commands {
         // Something copied, so New from Clipboard works.

@@ -432,7 +432,7 @@ fn sue_paint_starts_in_the_clip_studio_style() {
     );
     // Picking a sub tool leaves the list where it is: Tool Property shows
     // beside it, no tab switches.
-    paint.click_text("Real G-Pen");
+    paint.click_text("Grainy G-pen");
     assert!(paint.rect_of("Mapping pen").is_some(), "the list stays");
     assert!(paint.rect_of("Tool Property").is_some());
     // Window, Layout Style, directly above Workspace; the style not built

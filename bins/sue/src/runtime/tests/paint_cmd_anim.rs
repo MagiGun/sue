@@ -169,7 +169,7 @@ fn cels_are_renamed_in_timeline_and_layer_order_and_select_next_cel_takes_a_key(
     };
 
     // Cels 1, 2 and 3 on frames 1, 3 and 5, then an in-between on frame
-    // 2: it is named 4, after the highest.
+    // 2: it is named 1a, after the cel before it (P3-4).
     command(&mut runtime, "anim.layer.folder");
     for frame in 0..3 {
         if frame > 0 {
@@ -188,7 +188,7 @@ fn cels_are_renamed_in_timeline_and_layer_order_and_select_next_cel_takes_a_key(
             .map(|(frame, name)| (frame, name.to_owned()))
             .collect()
     };
-    assert_eq!(shown(&runtime, picture), made(["1", "4", "2", "3"]));
+    assert_eq!(shown(&runtime, picture), made(["1", "1a", "2", "3"]));
 
     // Rename in Timeline Order: 1, 2, 3, 4 along the track, one step.
     let depth = runtime.engine.history.depth();
@@ -200,7 +200,7 @@ fn cels_are_renamed_in_timeline_and_layer_order_and_select_next_cel_takes_a_key(
         .history
         .undo(&mut runtime.engine.world)
         .expect("undo");
-    assert_eq!(shown(&runtime, picture), made(["1", "4", "2", "3"]));
+    assert_eq!(shown(&runtime, picture), made(["1", "1a", "2", "3"]));
     runtime
         .engine
         .history
@@ -211,11 +211,12 @@ fn cels_are_renamed_in_timeline_and_layer_order_and_select_next_cel_takes_a_key(
     command(&mut runtime, "anim.cel.rename_timeline");
     assert_eq!(runtime.engine.history.depth(), depth + 1);
 
-    // Rename in Layer Order: the bottom cel (made first) is 1, the
-    // in-between (made last, on top) is 4.
+    // Rename in Layer Order: an in-between sits above the cel before it
+    // (P3-4), so the layer order is the timeline's here and nothing is
+    // left to rename: no step.
     command(&mut runtime, "anim.cel.rename_layer");
-    assert_eq!(shown(&runtime, picture), made(["1", "4", "2", "3"]));
-    assert_eq!(runtime.engine.history.depth(), depth + 2);
+    assert_eq!(shown(&runtime, picture), made(["1", "2", "3", "4"]));
+    assert_eq!(runtime.engine.history.depth(), depth + 1);
 
     // Select Next Cel ships with no key; given 2 in Settings, 2 runs it
     // (A25-5): from frame 1 it goes to the next key, frame 2, where

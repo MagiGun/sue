@@ -192,7 +192,7 @@ fn a_folder_duplicates_with_what_it_holds_masks_and_track() {
     let (mask, copied_mask) = (mask_of(&arena, first), mask_of(&arena, copied_layer));
     assert!(copied_mask.is_some() && copied_mask != mask, "its own mask");
     assert_eq!(folder_blend(&arena, copy), sue_model::BlendMode::Multiply);
-    assert_eq!(arena.get_by_id(copy).unwrap().name(), "Folder 2 copy");
+    assert_eq!(arena.get_by_id(copy).unwrap().name(), "Folder 2 Copy");
     // The original is as it was, and the picture looks the same twice.
     assert_eq!(members(&arena, picture, outer), vec![first, inner]);
     // The copy multiplies over the original where the mask shows it; the
@@ -329,7 +329,7 @@ fn merging_a_folder_bakes_it_into_one_layer() {
     undo_pair(&mut arena, &mut history, edit);
     assert!(arena.get_by_id(copy).is_err());
     assert!(!is_folder(&arena, merged));
-    assert_eq!(arena.get_by_id(merged).unwrap().name(), "Folder 1 copy");
+    assert_eq!(arena.get_by_id(merged).unwrap().name(), "Folder 1 Copy");
     assert_eq!(mask_of(&arena, merged), None, "the mask is in the pixels");
     let alpha: Vec<u8> = raster(&arena, merged)
         .unwrap()

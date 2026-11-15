@@ -159,10 +159,11 @@ fn advanced_groups_start_closed_and_open_on_a_click() {
     assert!(!paint.shows("Border thickness"), "{:?}", paint.texts);
     paint.click_text("Sizes and Spacing");
     assert!(paint.shows("Border thickness"), "{:?}", paint.texts);
-    // Sue Paint's custom colors wait for its Custom theme.
+    // Sue Paint's custom colors wait for its Custom theme (scrolled to the
+    // bottom of the page, their last row shows).
     paint.settings(sue_paint::ID);
     paint.scroll_settings(3000.0);
-    assert!(!paint.shows("Palettes and menus"), "{:?}", paint.texts);
+    assert!(!paint.shows("Shadow under floating surfaces"), "{:?}", paint.texts);
     paint
         .runtime
         .engine
@@ -175,6 +176,6 @@ fn advanced_groups_start_closed_and_open_on_a_click() {
         .unwrap();
     paint.settle(4);
     paint.scroll_settings(3000.0);
-    assert!(paint.shows("Palettes and menus"), "{:?}", paint.texts);
+    assert!(paint.shows("Shadow under floating surfaces"), "{:?}", paint.texts);
     paint.runtime.shell.close_window();
 }

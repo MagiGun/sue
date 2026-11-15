@@ -29,7 +29,16 @@ fn every_brush_sub_tool_paints_as_in_0_0_75() {
             })
             .collect();
         let names: Vec<&str> = subs.iter().map(|sub| sub.name.as_str()).collect();
-        let old_names: Vec<&str> = old.iter().map(|(name, _)| *name).collect();
+        // P3-5 renamed two pens after Clip Studio Paint Ver. 4; their
+        // brushes are the same.
+        let old_names: Vec<&str> = old
+            .iter()
+            .map(|(name, _)| match *name {
+                "Real G-Pen" => "Grainy G-pen",
+                "Milli pen" => "Fineliner",
+                other => other,
+            })
+            .collect();
         assert_eq!(names, old_names, "{tool:?}: the same sub tools in order");
         for (sub, (name, text)) in subs.iter().zip(&old) {
             assert_eq!(sub.tip.to_text(), *text, "{name}");
