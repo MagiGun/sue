@@ -351,7 +351,12 @@ pub fn rewrite(
             .flat_map(|value| [u8::MAX, u8::MAX, u8::MAX, *value])
             .collect();
         change(&mut work, width, height);
-        let after: Vec<u8> = work.chunks_exact(4).map(|pixel| pixel[3]).collect();
+        let after: Vec<u8> = work
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|pixel| pixel[3])
+            .collect();
         return Ok(changed_rect(before, &after, width, height, 1)
             .map(|patch| RasterEdit::new(layer, label, vec![patch])));
     }

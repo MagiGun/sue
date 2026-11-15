@@ -1116,7 +1116,10 @@ fn sue_paint_timeline_picks_moves_copies_and_pastes_frames_by_drag() {
         // The timeline's track, not the Layer palette's row (P4-5 names
         // the cel a folder shows there too).
         .find(|(text, rect)| {
-            text.starts_with("Folder") && text.contains(':') && rect.top() > 700.0 && rect.left() < 1100.0
+            text.starts_with("Folder")
+                && text.contains(':')
+                && rect.top() > 700.0
+                && rect.left() < 1100.0
         })
         .map(|(_, rect)| *rect)
         .unwrap_or_else(|| panic!("the track's name: {texts:?}"));
@@ -1817,7 +1820,12 @@ fn sue_paint_timeline_menus_insert_frames_and_timelapse_ask_first() {
     // ABV-7: Change Settings is its own dialog, apart from the frame rate.
     paint.command("anim.timeline.settings");
     let texts = paint.settle(3);
-    for name in ["Timeline name", "Division line every", "Scene number", "Shot number"] {
+    for name in [
+        "Timeline name",
+        "Division line every",
+        "Scene number",
+        "Shot number",
+    ] {
         assert!(
             texts.iter().any(|(text, _)| text == name),
             "{name}: {texts:?}"

@@ -1083,10 +1083,7 @@ fn ctrl_click_on_a_thumbnail_selects_what_the_layer_holds() {
         egui::Modifiers::COMMAND,
     );
     // The layer's pixels became the selection: Deselect works now.
-    assert!(
-        !driver.control("Deselect").disabled,
-        "there is a selection"
-    );
+    assert!(!driver.control("Deselect").disabled, "there is a selection");
     // A plain click on a thumbnail picks its row, as anywhere on the row:
     // the paper's box gives way to the pen.
     let paper = driver.stack()[0];

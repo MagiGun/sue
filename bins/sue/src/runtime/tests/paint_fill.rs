@@ -51,13 +51,21 @@ impl Canvas {
         if gray {
             bytes
         } else {
-            bytes.as_chunks::<4>().0.iter().map(|pixel| pixel[3]).collect()
+            bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|pixel| pixel[3])
+                .collect()
         }
     }
 
     /// How many pixels of `id` are not clear.
     fn painted(&self, id: EntityId) -> usize {
-        self.cover(id).into_iter().filter(|cover| *cover > 0).count()
+        self.cover(id)
+            .into_iter()
+            .filter(|cover| *cover > 0)
+            .count()
     }
 
     /// The picture's pixel count.
