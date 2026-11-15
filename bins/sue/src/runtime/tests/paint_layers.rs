@@ -1542,3 +1542,23 @@ fn a_right_click_on_a_picked_layer_keeps_every_one_picked() {
     assert!(stack.contains(&second), "the unpicked one stays");
     assert!(!stack.contains(&third) || !stack.contains(&first));
 }
+
+#[test]
+fn a_search_that_finds_nothing_says_so_and_rows_are_read_by_name() {
+    let mut driver = PaintDriver::new("paint-layer-search-none");
+    let layer = *driver.stack().last().unwrap();
+    let name = driver.name_of(layer);
+    // Each row is a control of its own, read by the layer's name.
+    assert!(!driver.control(&name).disabled, "the row is told");
+    driver.click_control("Search Layer");
+    let field = driver.control("Layer name").rect.center();
+    driver.press(field, egui::PointerButton::Primary, egui::Modifiers::NONE);
+    driver.step(vec![egui::Event::Text("no such layer".to_owned())]);
+    driver.settle(3);
+    assert!(driver.rect_of(&name).is_none(), "{:?}", said(&driver));
+    assert!(
+        said(&driver).iter().any(|text| text == "No layer matches"),
+        "{:?}",
+        said(&driver)
+    );
+}

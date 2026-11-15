@@ -368,6 +368,9 @@ follow [Semantic Versioning](https://semver.org/).
   of a row (lock, draft, effects, keyframes, layer colors) say what they
   are when the pointer rests on them. Layer, Layer Property brings the
   Layer Property palette forward.
+- Sue Paint, Layer palette: a search that finds no layer says so; a
+  right click on one of several picked layers keeps them all picked for
+  its list; rows and mask thumbnails show a focus ring under Tab.
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
   the update. It now takes the theme as it ships; colors you picked

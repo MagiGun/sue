@@ -735,6 +735,7 @@ impl SuePaint {
             &mut list_ui,
             theme,
             |ui| {
+                let mut shown = 0_usize;
                 for info in stack.iter().rev() {
                     let arena = &cx.world.arena;
                     let around = doc::folders_around(arena, info.id);
@@ -747,6 +748,7 @@ impl SuePaint {
                     } else if around.iter().any(|folder| !doc::is_open(arena, *folder)) {
                         continue;
                     }
+                    shown += 1;
                     let depth = if search.is_some() { 0 } else { around.len() };
                     let is_folder = doc::is_folder(arena, info.id);
                     // On touch screens a drag scrolls the list instead.
@@ -1283,6 +1285,17 @@ impl SuePaint {
                             events.menu = Some(command);
                         }
                     });
+                }
+                // A search that finds nothing says so, instead of an
+                // empty list that looks like a picture with no layers.
+                if shown == 0 && search.is_some() {
+                    sue_wm::ui::empty_state(
+                        ("sue-paint-search-none", salt),
+                        &tr!("search-layer-none"),
+                    )
+                    .icon(WmIcon::Search)
+                    .detail(&tr!("search-layer-none-detail"))
+                    .show(ui, theme);
                 }
             },
         );
