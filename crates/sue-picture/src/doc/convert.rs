@@ -237,6 +237,15 @@ fn shapes_moved(
     edit
 }
 
+/// RGBA8 pixels resampled to `to` for Change Image Resolution, through
+/// the shared resampler that exports use: bicubic, in premultiplied
+/// alpha, wide enough when shrinking that every source pixel counts.
+fn resampled(pixels: &[u8], from: [u32; 2], to: [u32; 2]) -> Vec<u8> {
+    let from = (from[0].max(1), from[1].max(1));
+    let to = (to[0].max(1), to[1].max(1));
+    sue_io::picture_ops::resize(pixels, from, to, sue_io::picture_ops::Filter::Bicubic)
+}
+
 /// The edit that resamples `picture` and every layer to `size`, at
 /// `dpi`: Change Image Resolution.
 ///
@@ -293,7 +302,7 @@ pub fn resample(
                 .iter()
                 .flat_map(|cover| [255, 255, 255, *cover])
                 .collect();
-            let small = resize_rgba(&rgba, from.1, into.1);
+            let small = resampled(&rgba, from.1, into.1);
             Some((small.iter().skip(3).step_by(4).copied().collect(), into.1))
         })?;
         let Some(raster) = raster(arena, info.id) else {
@@ -306,7 +315,7 @@ pub fn resample(
             ((raster.width() as f32 * scale[0]).round() as u32).max(1),
             ((raster.height() as f32 * scale[1]).round() as u32).max(1),
         ];
-        let pixels = resize_rgba(bytes, [raster.width(), raster.height()], to);
+        let pixels = resampled(bytes, [raster.width(), raster.height()], to);
         let tile = RasterTile2D::from_bytes(to[0], to[1], PixelFormat::Rgba8, pixels)
             .map_err(|error| error.to_string())?;
         edit = edit.then(sue_core::txn::ReplaceComponent::new(

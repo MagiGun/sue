@@ -701,3 +701,35 @@ fn a_3d_layer_lands_in_the_picked_folder() {
     assert_eq!(folder_of(&arena, layer), Some(folder));
     assert_eq!(&ids(&arena, picture)[1..], &[first, layer, folder]);
 }
+
+#[test]
+fn change_image_resolution_resamples_through_the_shared_resampler() {
+    // Change Image Resolution and every export resample alike: the
+    // layer's pixels come out as `sue_io::picture_ops::resize` makes
+    // them, bicubic, and undo and redo are exact.
+    let (mut arena, picture, mut history, first) = picture_of(6, 4);
+    for (index, pixel) in raster_mut(&mut arena, first)
+        .unwrap()
+        .bytes_mut()
+        .unwrap()
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .enumerate()
+    {
+        let shade = (index * 40 % 256) as u8;
+        *pixel = [shade, 255 - shade, 90, 255];
+    }
+    let before = raster(&arena, first).unwrap().bytes().unwrap().to_vec();
+    let expected = sue_io::picture_ops::resize(
+        &before,
+        (6, 4),
+        (15, 10),
+        sue_io::picture_ops::Filter::Bicubic,
+    );
+    let edit = resample(&arena, picture, [15, 10], 180.0).unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    let after = raster(&arena, first).unwrap();
+    assert_eq!((after.width(), after.height()), (15, 10));
+    assert_eq!(after.bytes().unwrap(), expected.as_slice());
+}
