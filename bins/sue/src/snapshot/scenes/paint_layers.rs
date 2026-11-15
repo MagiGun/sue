@@ -51,6 +51,15 @@ pub(super) fn rows(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.paint_command("window.layer");
     tour.shoot("11d4-sue-paint-layer-rows")?;
     tour.paint_command("layer.select_none");
+    // 11d5. New Layer, Tone asks Simple Tone Settings first.
+    tour.paint_command("layer.new.tone");
+    tour.shoot("11d5-sue-paint-simple-tone")?;
+    tour.paint_go(&["dialog/close"]);
+    // 11d6. Deleting a folder asks first.
+    tour.paint_command("layer.new.folder");
+    tour.paint_command("layer.delete");
+    tour.shoot("11d6-sue-paint-delete-folders")?;
+    tour.paint_go(&["dialog/close"]);
     while tour.runtime.engine.history.depth() > depth {
         tour.paint_command("edit.undo");
     }
