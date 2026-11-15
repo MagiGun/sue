@@ -390,6 +390,51 @@ mod tests {
         );
     }
 
+    /// A layer's gray mask goes out in the layer's alpha, read where the
+    /// mask sits (here two pixels right of its layer).
+    #[test]
+    fn a_gray_mask_goes_out_in_its_layers_alpha() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = doc::create(&doc::NewPicture {
+            name: "Page".to_owned(),
+            width: 8,
+            height: 2,
+            paper: None,
+            ..doc::NewPicture::default()
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let top = doc::layers(&arena, picture).last().map(|layer| layer.id);
+        let raster =
+            RasterTile2D::from_bytes(8, 2, PixelFormat::Rgba8, [0, 0, 0, 255].repeat(16)).unwrap();
+        let (spawn, ink) =
+            doc::add_layer_pixels(&arena, picture, top, "Ink".to_owned(), raster).unwrap();
+        let mut edit = Edit::new("Ink").then(spawn);
+        edit.apply(&mut arena).unwrap();
+        let (mut edit, mask) =
+            doc::new_mask(&arena, ink, |x, _| if x < 4 { 1.0 } else { 0.0 }).unwrap();
+        edit.apply(&mut arena).unwrap();
+        assert_eq!(doc::raster(&arena, mask).unwrap().format(), PixelFormat::Gray8);
+        let alpha = |arena: &Arena| -> Vec<u8> {
+            let psd = to_psd(arena, picture).unwrap();
+            let layer = psd.layers.iter().find(|layer| layer.name == "Ink").unwrap();
+            let mut row = vec![0_u8; 8];
+            for x in 0..layer.width as usize {
+                let at = x * 4 + 3;
+                row[layer.left as usize + x] = layer.pixels[at];
+            }
+            row
+        };
+        assert_eq!(alpha(&arena), [255, 255, 255, 255, 0, 0, 0, 0]);
+        let mut moved = Edit::new("Move").then(SetProperty::new(mask, picture::X, 2_i64));
+        moved.apply(&mut arena).unwrap();
+        assert_eq!(
+            alpha(&arena),
+            [0, 0, 255, 255, 255, 255, 0, 0],
+            "read where the mask sits"
+        );
+    }
+
     #[test]
     fn blend_names_go_both_ways() {
         for mode in [
