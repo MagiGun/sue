@@ -12,7 +12,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use egui::{Color32, Id, Modifiers, Pos2, Rect, Sense, StrokeKind, Ui, pos2, vec2};
+use egui::{Id, Modifiers, Pos2, Rect, Sense, StrokeKind, Ui, pos2, vec2};
 use sue_wm::icons::{Icon, IconStyle};
 use sue_wm::ui::{Density, ListRow, Space, TextRole, Tip, TreeRow};
 use sue_wm::{AppletContext, Theme};
@@ -437,7 +437,7 @@ impl SuePaint {
                                                     texture,
                                                     rect,
                                                     Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
-                                                    Color32::WHITE,
+                                                    crate::panels::run_button::UNTINTED,
                                                 );
                                             }
                                             let corner = theme.corner(sue_wm::ui::Radius::Sm);

@@ -21,7 +21,7 @@ mod layer_property;
 mod material;
 mod navigator;
 mod quick_access;
-mod run_button;
+pub(crate) mod run_button;
 mod sub_tool;
 mod sub_view;
 mod timeline;

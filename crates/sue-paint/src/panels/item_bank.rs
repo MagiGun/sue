@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use egui::{Color32, Id, Pos2, Rect, Sense, StrokeKind, Ui, pos2, vec2};
+use egui::{Id, Pos2, Rect, Sense, StrokeKind, Ui, pos2, vec2};
 use sue_core::{PixelFormat, RasterTile2D};
 use sue_wm::icons::Icon;
 use sue_wm::ui::{Density, ListRow, RowAction, Space, TextRole, Tip};
@@ -394,7 +394,7 @@ impl SuePaint {
                                             texture,
                                             rect,
                                             Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
-                                            Color32::WHITE,
+                                            crate::panels::run_button::UNTINTED,
                                         );
                                     }
                                     ui.painter().rect_stroke(

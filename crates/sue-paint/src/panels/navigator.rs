@@ -3,7 +3,7 @@
 //! rows, zoom and rotation, each a number, a wedge to drag and the View
 //! commands' buttons.
 
-use egui::{Color32, Id, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use egui::{Id, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use sue_wm::icons::Icon;
 use sue_wm::ui::{Density, Space, Tip};
 use sue_wm::{AppletContext, Theme};
@@ -105,7 +105,7 @@ impl SuePaint {
                         texture,
                         thumb,
                         Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
-                        Color32::WHITE,
+                        crate::panels::run_button::UNTINTED,
                     );
                 }
                 // The part the canvas shows: the theme's own frame, a

@@ -12,6 +12,11 @@ use sue_wm::{AppletContext, Theme};
 use crate::bar_items::Item;
 use crate::studio::SuePaint;
 
+/// The tint that draws a picture's texture as it is: the one white the
+/// palettes that show pictures (Navigator, Sub View, Item Bank, Material)
+/// share, so it is written once.
+pub(crate) const UNTINTED: egui::Color32 = egui::Color32::WHITE;
+
 /// What a command button shows now.
 pub(crate) struct Shown {
     /// The command's icon in the shared set.

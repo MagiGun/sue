@@ -8,7 +8,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use egui::{Color32, Id, Mesh, Rect, Sense, Shape, Ui, pos2, vec2};
+use egui::{Id, Mesh, Rect, Sense, Shape, Ui, pos2, vec2};
 use sue_wm::icons::Icon;
 use sue_wm::ui::{Density, ListRow, Space, TextRole, Tip};
 use sue_wm::{AppletContext, Theme};
@@ -133,7 +133,7 @@ impl SuePaint {
                     mesh.vertices.push(egui::epaint::Vertex {
                         pos: *corner,
                         uv,
-                        color: Color32::WHITE,
+                        color: crate::panels::run_button::UNTINTED,
                     });
                 }
                 mesh.add_triangle(0, 1, 2);
