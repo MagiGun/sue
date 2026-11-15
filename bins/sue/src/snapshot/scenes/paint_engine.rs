@@ -47,3 +47,64 @@ pub(super) fn pen_stroke(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.camera.size = size;
     Ok(())
 }
+
+/// The sub tools 08x draws one wavy line each with: pens, pencils,
+/// paint brushes, airbrushes and Decoration brushes, so one picture
+/// shows how each family of the brush engine lays its strokes.
+const SHEET: [&str; 12] = [
+    "subtool.pen.G-pen",
+    "subtool.pencil.Mechanical_pencil",
+    "subtool.pencil.Crayon",
+    "subtool.brush.Round_watercolor_brush",
+    "subtool.brush.Gouache",
+    "subtool.brush.Brush_pen",
+    "subtool.airbrush.Soft",
+    "subtool.airbrush.Spray",
+    "subtool.decoration.Stars",
+    "subtool.decoration.Rope",
+    "subtool.decoration.Film_strip",
+    "subtool.decoration.Dotted_line",
+];
+
+/// 08x. One line of each sub tool in [`SHEET`] on a new raster layer,
+/// in two columns over the canvas, drawn by the pointer through the
+/// canvas so the brush engine paints every one. After 08s, for the
+/// same reason: its steps stay in Sue Paint's history.
+pub(super) fn brush_strokes(tour: &mut Tour<'_>) -> Result<(), String> {
+    let size = tour.camera.size;
+    tour.camera.size = tour.desktop;
+    super::paint_at_rest(tour);
+    tour.paint_command("layer.new");
+    let button = |at: Pos2, pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    for (index, command) in SHEET.iter().enumerate() {
+        tour.paint_command(command);
+        let column = (index / 6) as f32;
+        let row = (index % 6) as f32;
+        let start = Pos2::new(380.0 + 330.0 * column, 230.0 + 70.0 * row);
+        let path: Vec<Pos2> = (0..=60)
+            .map(|step| {
+                let s = step as f32 / 60.0;
+                start + vec2(260.0 * s, 14.0 * (s * std::f32::consts::TAU).sin())
+            })
+            .collect();
+        let input = &mut tour.camera.input;
+        input.push(vec![egui::Event::PointerMoved(path[0])]);
+        input.push(vec![button(path[0], true)]);
+        for at in &path[1..] {
+            input.push(vec![egui::Event::PointerMoved(*at)]);
+        }
+        let last = path[path.len() - 1];
+        input.push(vec![button(last, false)]);
+        tour.settle();
+    }
+    let input = &mut tour.camera.input;
+    input.push(vec![egui::Event::PointerMoved(Pos2::new(1000.0, 860.0))]);
+    tour.shoot("08x-sue-paint-brush-strokes")?;
+    tour.camera.size = size;
+    Ok(())
+}

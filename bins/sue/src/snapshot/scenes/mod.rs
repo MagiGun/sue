@@ -193,6 +193,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_vector::scenes(tour)?;
     // 08s. A pen line painted by the brush engine, after everything.
     paint_engine::pen_stroke(tour)?;
+    // 08x. A line of each family of brushes, after 08s.
+    paint_engine::brush_strokes(tour)?;
     Ok(())
 }
 
