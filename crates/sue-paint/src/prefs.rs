@@ -96,6 +96,7 @@ pub(crate) fn page(title: &str) -> SettingsPage {
         "sue_paint.shift_line",
         "sue_paint.brush_cursor",
         "sue_paint.rotate_step",
+        crate::panels::TOOL_COLOR_ICON,
     ]);
     pen.extend(
         crate::dialogs::MODIFIERS
@@ -112,11 +113,7 @@ pub(crate) fn page(title: &str) -> SettingsPage {
         vec![
             group(
                 tr!("settings-group-layout"),
-                params(&[
-                    crate::layout_style::KEY,
-                    crate::extras::REMEMBER_LAYOUT,
-                    crate::panels::TOOL_COLOR_ICON,
-                ]),
+                params(&[crate::layout_style::KEY, crate::extras::REMEMBER_LAYOUT]),
             ),
             group(
                 tr!("settings-group-new-canvas"),
