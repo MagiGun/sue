@@ -285,7 +285,7 @@ of work is by how much people miss each one (the plan at the end).
 | Scripting | L | missing | |
 | Command palette | W | done | Sue's palette lists Writer's commands |
 | Repeat last command | WL | missing | |
-| Customize keyboard | WL | done | Every command can take a key: Settings, Keymaps, Sue Writer; Help, Keyboard Shortcuts lists them |
+| Customize keyboard | WL | done | Every command can take a key: Settings, Keyboard Shortcuts, Sue Writer, grouped by menu; Help, Keyboard Shortcuts lists them |
 | Customize menus and toolbars | WL | missing | |
 
 ## Math

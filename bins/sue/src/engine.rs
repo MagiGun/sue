@@ -405,6 +405,38 @@ impl Engine {
             presets: builtin_presets(),
             ..Catalog::default()
         };
+        // Sue's own pages, then each studio's and tool's in the Hub's
+        // order (they register theirs), then Keyboard Shortcuts,
+        // Extensions and Advanced. A setting has one row in one place.
+        let mut applet_pages = Vec::new();
+        for (_, applet) in self.launchpad.instantiate().iter() {
+            if let Some(mut page) = applet.settings_page() {
+                if let Some(keys) = page.keys.take() {
+                    catalog.keymaps.push(keys);
+                }
+                applet_pages.push(page);
+            }
+            for (path, choices) in applet.setting_choices() {
+                catalog.choices.insert(path, choices);
+            }
+        }
+        // Sue's own keys first: they run before any studio's.
+        catalog
+            .keymaps
+            .insert(0, crate::settings::sue_keymap(&self.world.rice));
+        let mut shortcuts = vec![group(
+            tr!("sue"),
+            vec![
+                SettingsItem::Note(tr!("every-action-can-have-as-many").to_owned()),
+                SettingsItem::Keys(crate::settings::SUE_KEYMAP.to_owned()),
+            ],
+        )];
+        shortcuts.extend(catalog.keymaps.iter().skip(1).map(|keys| {
+            group(
+                keys.title.clone(),
+                vec![SettingsItem::Keys(keys.id.clone())],
+            )
+        }));
         catalog.pages = vec![
             SettingsPage::new(
                 "general",
@@ -428,6 +460,19 @@ impl Engine {
                         ],
                     ),
                     group(tr!("quitting"), vec![param("general.confirm_on_exit")]),
+                    group(
+                        tr!("updates"),
+                        vec![
+                            fact("updates.version"),
+                            param("updates.check_automatically"),
+                            SettingsItem::Actions(vec![CommandButton::new(
+                                tr!("check-for-updates"),
+                                "app.check_updates",
+                            )]),
+                            fact("packages.generation"),
+                            fact("packages.health"),
+                        ],
+                    ),
                 ],
             ),
             SettingsPage::new("language", tr!("language"), {
@@ -455,32 +500,88 @@ impl Engine {
             }),
             SettingsPage::new(
                 "appearance",
-                tr!("appearance-and-rice"),
+                tr!("appearance"),
                 vec![
                     group(tr!("theme"), vec![SettingsItem::Presets]),
-                    group(tr!("colors"), vec![section("colors")]),
-                    group(tr!("geometry"), vec![section("layout")]),
-                    group(tr!("typography"), vec![section("typography")]),
                     group(
-                        tr!("rice-file"),
-                        vec![
-                            fact("rice.path"),
-                            SettingsItem::Actions(vec![
-                                CommandButton::new(tr!("reload-from-disk"), "rice.reload"),
-                                CommandButton::new(tr!("export-ellipsis"), "rice.export"),
-                                CommandButton::new(tr!("open-folder"), "rice.reveal"),
-                            ]),
-                        ],
+                        tr!("text-and-size"),
+                        params(&[
+                            "typography.ui_font",
+                            "typography.ui_size",
+                            "display.ui_scale",
+                        ]),
                     ),
+                    group(
+                        tr!("rounded-corners"),
+                        params(&[
+                            "layout.control_radius",
+                            "layout.card_radius",
+                            "layout.pill_radius",
+                        ]),
+                    ),
+                    group(
+                        tr!("motion"),
+                        params(&[
+                            "motion.instant_transitions",
+                            "motion.animation_speed",
+                            "motion.smooth_caret",
+                        ]),
+                    ),
+                    group(tr!("icons"), vec![SettingsItem::Icons]),
+                    group(tr!("colors"), vec![section("colors")]).advanced(),
+                    group(
+                        tr!("sizes-and-spacing"),
+                        params(&[
+                            "layout.padding",
+                            "layout.border_width",
+                            "layout.pill_height",
+                            "layout.bar_height",
+                            "layout.status_bar",
+                            "layout.status_bar_height",
+                            "layout.settings_sidebar_width",
+                            "layout.shadow_blur",
+                        ]),
+                    )
+                    .advanced(),
+                    group(
+                        tr!("more-text-sizes"),
+                        params(&[
+                            "typography.small_size",
+                            "typography.title_size",
+                            "typography.heading_size",
+                            "typography.mono_size",
+                        ]),
+                    )
+                    .advanced(),
+                    group(
+                        tr!("animation-details"),
+                        params(&[
+                            "motion.spring_stiffness",
+                            "motion.spring_damping",
+                            "motion.settle_grace_ms",
+                            "motion.caret_blink_ms",
+                            "motion.caret_glide_ms",
+                            "motion.message_seconds",
+                        ]),
+                    )
+                    .advanced(),
                 ],
             ),
             SettingsPage::new(
                 "display",
-                tr!("display-and-graphics"),
+                tr!("display-and-performance"),
                 vec![
                     group(
+                        tr!("interface"),
+                        params(&["display.interface", "display.phone_frame"]),
+                    ),
+                    group(
                         tr!("performance"),
-                        vec![param("profile.hardware"), fact("display.profile")],
+                        vec![
+                            param("profile.hardware"),
+                            fact("display.profile"),
+                            param("display.frame_rate_cap"),
+                        ],
                     ),
                     group(
                         tr!("graphics-card"),
@@ -494,34 +595,21 @@ impl Engine {
                             )]),
                         ],
                     ),
-                    group(
-                        tr!("frame-pacing"),
-                        params(&["display.frame_rate_cap", "motion.settle_grace_ms"]),
-                    ),
-                    group(
-                        tr!("interface-and-scale"),
-                        params(&[
-                            "display.interface",
-                            "display.phone_frame",
-                            "display.ui_scale",
-                            "input.wheel_line_px",
-                        ]),
-                    ),
-                    group(tr!("motion"), vec![section("motion")]),
+                    group(tr!("scrolling"), params(&["input.wheel_line_px"])),
                 ],
             ),
             SettingsPage::new(
                 "audio",
-                tr!("audio-and-dsp"),
+                tr!("sound"),
                 vec![
                     group(
                         tr!("output"),
                         params(&[
                             "audio.output_device",
+                            "audio.volume",
                             "audio.sample_rate",
                             "audio.buffer_frames",
                             "audio.realtime_priority",
-                            "audio.volume",
                         ]),
                     ),
                     group(
@@ -532,52 +620,33 @@ impl Engine {
             ),
             SettingsPage::new(
                 "files",
-                tr!("files-and-codecs"),
+                tr!("files"),
                 vec![
+                    group(tr!("opening-files"), params(&["io.max_ingest_mib"])),
                     group(
-                        tr!("jpeg-xl"),
-                        params(&["io.jxl_effort", "io.jpeg_lossless_transcode"]),
+                        tr!("saving-and-export"),
+                        params(&[
+                            "io.convert_dir",
+                            "io.jpeg_quality",
+                            "io.jxl_effort",
+                            "io.jpeg_lossless_transcode",
+                        ]),
                     ),
-                    group(
-                        tr!("conversion"),
-                        params(&["io.convert_dir", "io.jpeg_quality"]),
-                    ),
-                    group(
-                        tr!("opening-files"),
-                        params(&["io.max_ingest_mib", "io.byte_map_width"]),
-                    ),
-                    group(tr!("built-in-codecs"), vec![table("codecs")]),
+                    group(tr!("built-in-formats"), vec![table("codecs")]),
+                    group(tr!("unknown-files"), params(&["io.byte_map_width"])).advanced(),
                 ],
             ),
-            SettingsPage::new(
-                "studios",
-                tr!("studios"),
-                vec![
-                    group(
-                        tr!("sue-paint"),
-                        vec![
-                            SettingsItem::Note(tr!("each-studio-can-wear-own-theme").to_owned()),
-                            section("sue_paint"),
-                        ],
-                    ),
-                    group(
-                        tr!("sue-paint-custom-colors"),
-                        vec![section("sue_paint_colors")],
-                    ),
-                    group(
-                        tr!("sue-writer"),
-                        vec![
-                            SettingsItem::Note(
-                                tr!("sue-writer-follows-sues-theme-unless").to_owned(),
-                            ),
-                            section("sue_writer"),
-                        ],
-                    ),
-                ],
-            ),
-            SettingsPage::new(
+        ];
+        catalog.pages.extend(applet_pages);
+        catalog.pages.push(SettingsPage::new(
+            "keymaps",
+            tr!("keyboard-shortcuts"),
+            shortcuts,
+        ));
+        catalog.pages.push({
+            let mut page = SettingsPage::new(
                 "packages",
-                tr!("packages-and-updates"),
+                tr!("extensions"),
                 vec![
                     group(
                         tr!("trust"),
@@ -586,49 +655,28 @@ impl Engine {
                             fact("packages.policy"),
                         ],
                     ),
-                    group(tr!("installed-applets"), vec![table("applets")]),
+                    group(tr!("studios-and-tools"), vec![table("applets")]),
                     group(tr!("packages"), vec![table("packages")]),
-                    group(
-                        tr!("sue-updates"),
-                        vec![
-                            fact("updates.version"),
-                            param("updates.check_automatically"),
-                            SettingsItem::Actions(vec![CommandButton::new(
-                                tr!("check-for-updates"),
-                                "app.check_updates",
-                            )]),
-                        ],
-                    ),
-                    group(
-                        tr!("updates"),
-                        vec![fact("packages.generation"), fact("packages.health")],
-                    ),
                 ],
-            ),
-            SettingsPage::new(
-                "keymaps",
-                tr!("keymaps"),
+            );
+            page.aliases.push("extensions".to_owned());
+            page
+        });
+        catalog.pages.push(SettingsPage::new(
+            crate::settings::ADVANCED_PAGE,
+            tr!("advanced"),
+            vec![group(
+                tr!("settings-file"),
                 vec![
-                    group(
-                        tr!("shortcuts"),
-                        vec![
-                            SettingsItem::Note(tr!("every-action-can-have-as-many").to_owned()),
-                            section("keys"),
-                        ],
-                    ),
-                    group(tr!("sue-paint"), vec![section("sue_paint_keys")]),
-                    group(tr!("sue-writer"), vec![section("sue_writer_keys")]),
+                    fact("rice.path"),
+                    SettingsItem::Actions(vec![
+                        CommandButton::new(tr!("reload-from-disk"), "rice.reload"),
+                        CommandButton::new(tr!("export-ellipsis"), "rice.export"),
+                        CommandButton::new(tr!("open-folder"), "rice.reveal"),
+                    ]),
                 ],
-            ),
-            SettingsPage::new(
-                "mcp",
-                "MCP",
-                vec![group(
-                    tr!("model-context-protocol"),
-                    vec![SettingsItem::Note(tr!("not-yet-available"))],
-                )],
-            ),
-        ];
+            )],
+        ));
 
         // Live choices: the Hub, or any studio or tool to open straight into.
         let mut pins = vec![Choice::new("", tr!("the-hub"))];
@@ -669,6 +717,12 @@ impl Engine {
             ("paint", self.paths.data_dir.join("paint")),
             ("cache", self.paths.cache_dir.clone()),
             ("models", self.paths.models_dir()),
+            (
+                "icons",
+                sue_wm::icons::pack::IconHome::of(&self.paths)
+                    .root()
+                    .to_path_buf(),
+            ),
         ] {
             catalog.folders.insert(name.to_owned(), folder);
         }
@@ -694,7 +748,7 @@ impl Engine {
         catalog.tables.insert(
             "applets".to_owned(),
             InfoTable {
-                columns: vec![tr!("applet"), tr!("lives-in"), tr!("what-it-does")],
+                columns: vec![tr!("studio-or-tool"), tr!("lives-in"), tr!("what-it-does")],
                 rows: self
                     .launchpad
                     .manifests()
@@ -1059,32 +1113,39 @@ pub(crate) mod tests {
             .iter()
             .map(|page| page.title.as_str())
             .collect();
+        // The studios register their own pages: the engine names none.
         assert_eq!(
             titles,
             [
                 "General",
                 "Language",
-                "Appearance & Rice",
-                "Display & Graphics",
-                "Audio & DSP",
-                "Files & Codecs",
-                "Studios",
-                "Packages & Updates",
-                "Keymaps",
-                "MCP"
+                "Appearance",
+                "Display and Performance",
+                "Sound",
+                "Files",
+                "Sue Paint",
+                "Sue Writer",
+                "Keyboard Shortcuts",
+                "Extensions",
+                "Advanced"
             ]
         );
         let claimed = |path: &str| {
             engine
                 .catalog
-                .pages
+                .keymaps
                 .iter()
-                .flat_map(|page| page.claims())
-                .any(|item| match item {
-                    SettingsItem::Param(param) => param == path,
-                    SettingsItem::Section(section) => path.starts_with(&format!("{section}.")),
-                    _ => false,
-                })
+                .any(|map| path.starts_with(&format!("{}.", map.section)))
+                || engine
+                    .catalog
+                    .pages
+                    .iter()
+                    .flat_map(|page| page.claims())
+                    .any(|item| match item {
+                        SettingsItem::Param(param) => param == path,
+                        SettingsItem::Section(section) => path.starts_with(&format!("{section}.")),
+                        _ => false,
+                    })
         };
         for entry in engine.world.rice.entries() {
             assert!(

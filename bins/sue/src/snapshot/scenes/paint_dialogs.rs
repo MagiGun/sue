@@ -17,13 +17,14 @@ pub(super) fn galleries(tour: &mut Tour<'_>) -> Result<(), String> {
     Ok(())
 }
 
-/// Scene 10. The Layer menu; 11. New, 11b. Pen Pressure and 11e. Preferences.
+/// Scene 10. The Layer menu; 11. New and 11b. Pen Pressure. (11e, the
+/// old Preferences dialog, is gone: File, Preferences opens Settings,
+/// scene 04d.)
 pub(super) fn menu_and_dialogs(tour: &mut Tour<'_>) -> Result<(), String> {
     for (target, name) in [
         ("menu/Layer", "10-sue-paint-menu"),
         ("dialog/new", "11-sue-paint-new"),
         ("dialog/pressure", "11b-sue-paint-pressure"),
-        ("dialog/preferences", "11e-sue-paint-preferences"),
     ] {
         tour.paint_go(&["dialog/close", target]);
         tour.shoot(name)?;

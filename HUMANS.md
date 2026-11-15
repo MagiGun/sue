@@ -247,9 +247,13 @@ history, History forgets the steps of the canvas in front.
 
 The Sue menu's **Settings** (or `Ctrl+,`) opens Settings as a floating
 window. A list of categories runs down the left (General, Language,
-Appearance & Rice, Display & Graphics, Audio & DSP, Files & Codecs, Studios, Packages & Updates,
-Keymaps, MCP), and the right side shows only that category. Type in "Filter
-settings..." to search all of them. A setting you changed shows **Reset**
+Appearance, Display and Performance, Sound, Files, a page for each studio,
+Keyboard Shortcuts, Extensions and Advanced), and the right side shows only
+that category. Rows most people never need wait under closed titles (the
+colors, sizes and spacing, animation details); a click opens one. Type in
+"Filter settings..." to search all of them; Clip Studio Paint's names for
+an option find Sue Paint's setting too ("Brush-type cursor" finds Brush
+cursor). A setting you changed shows **Reset**
 beside it to go back to how Sue comes; **Reset This Page** and **Reset All
 Settings** (click it twice) do the same for a page or for everything, and
 each reset undoes with `Ctrl+Z`.
@@ -288,8 +292,7 @@ once; nothing needs a restart.
 A studio or tool can also keep a language of its own: say Sue in English
 and Sue Paint in Japanese. Settings, **Language** lists Sue and every studio
 and tool; each one is **Follow Sue** unless you choose a language for it.
-The same choice sits in each studio's own settings (Settings, Studios, and
-Sue Paint's File, Preferences takes you there).
+Sue Paint's File, Preferences opens Settings on Sue Paint's own page.
 
 Sue ships in English, with drafts in Spanish and Japanese so far, written
 without a native speaker and waiting for one to review them. Anything a
@@ -856,7 +859,7 @@ and `Ctrl+H` to replace. Enter after a heading goes on in body text, Enter on
 an empty list item ends the list, and Tab moves a list item in. In a
 screenplay, Enter and Tab move between scene headings, action, characters,
 parentheticals and dialogue, each at its proper indent, typed in capitals
-where it should be. Quotes turn curly as you type (Settings, Studios).
+where it should be. Quotes turn curly as you type (Settings, Sue Writer).
 
 Typing feels smooth: the caret glides to its new place instead of jumping,
 whether you type, delete, move with the arrow keys, Home and End, click
@@ -919,7 +922,7 @@ underline (not the word you are still typing). Right-click it for what you
 may have meant, **Ignore All** for this sitting, or **Add to Dictionary**,
 which keeps the word in the project's own dictionary. Review, Next
 Misspelling (`F7`) goes to the next one, and Review, Check Spelling While
-Typing (or Settings, Studios, Sue Writer) turns the underlines off. English
+Typing (or Settings, Sue Writer) turns the underlines off. English
 ships with Sue; words in other alphabets are left alone for now.
 
 **Comments** are in the Review menu. Select some words and choose New
@@ -1179,16 +1182,21 @@ controls for it in **Settings**:
   press the new keys, `×` takes one away and `+` adds another, as many as
   you like. Sue's own shortcuts and every studio's (Sue Paint's, tools and
   brush keys included, and Sue Writer's) are all under
-  Keymaps, and the menus show what you chose.
+  Keyboard Shortcuts, grouped as each studio's menus are, and the menus
+  show what you chose. Every command can get a key, not only those that
+  ship with one, and the search finds a command by its name or its key.
+  A key that two commands hold is marked on both rows with a button that
+  takes it from the other one.
 
-**Appearance & Rice** also offers ready-made themes (Void, Graphite, Paper and
+**Appearance** also offers ready-made themes (Void, Graphite, Paper and
 Gray) that change every color at once, and one `Ctrl+Z` brings yours back.
 
-Each studio can wear its own theme (Settings, Studios). Sue Paint starts in
+Each studio can wear its own theme (Settings, the studio's page). Sue Paint starts in
 **Gray**, the mid grays painting apps use so your colors read true. Set it to
 **Sue theme** and it follows Sue's own colors, so changing them changes every
 studio that uses the Sue theme at once; pick another preset; or choose
-**Custom** and color Sue Paint with its own color wheels. The side panels
+**Custom** and color Sue Paint with its own color wheels, which appear
+below once Custom is chosen. The side panels
 always keep Sue's theme. They are
 all black, white and gray: Sue's look stays out of the way of your work. A
 color you pick yourself stays; only the tinted colors that very old releases

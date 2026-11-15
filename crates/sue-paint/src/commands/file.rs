@@ -209,9 +209,10 @@ impl SuePaint {
             "file.export.png" => self.export(cx, "png"),
             "file.export.jpg" => self.export(cx, "jpg"),
             "file.export.jxl" => self.export(cx, "jxl"),
+            // Sue Paint's preferences are its page of Settings.
             "file.preferences" => {
-                self.dialog = Some(Dialog::Preferences(crate::prefs::Preferences::read(
-                    cx.rice(),
+                cx.request(ShellRequest::OpenSettings(Some(
+                    crate::studio::ID.to_owned(),
                 )));
             }
             "file.shortcuts" => cx.request(ShellRequest::OpenSettings(Some("keymaps".to_owned()))),

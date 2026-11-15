@@ -143,19 +143,6 @@ pub(super) fn shortcuts_ui(
     outcome
 }
 
-/// File, Preferences: Sue Paint's own, page by page.
-pub(super) fn preferences_ui(
-    ui: &mut Ui,
-    prefs: &mut crate::prefs::Preferences,
-    theme: &Theme,
-) -> Outcome {
-    match prefs.ui(ui, theme) {
-        Some(true) => Outcome::Ok,
-        Some(false) => Outcome::Cancel,
-        None => Outcome::Open,
-    }
-}
-
 impl SuePaint {
     /// Manage Workspaces: rename, use or delete each.
     pub(super) fn workspaces_ui(&mut self, ui: &mut Ui, theme: &Theme) -> Outcome {
@@ -283,18 +270,6 @@ impl SuePaint {
             let value = choices[pick.min(choices.len() - 1)].to_owned();
             if let Err(error) = cx.edit_rice(SetRiceValue::new(*key, RiceValue::Text(value))) {
                 cx.fail(tr!("cannot-keep-the-modifier-keys", error = error));
-            }
-        }
-    }
-
-    /// Keeps the preferences that changed.
-    pub(super) fn preferences_ok(cx: &mut AppletContext<'_>, prefs: &crate::prefs::Preferences) {
-        for (key, value) in prefs.changes() {
-            if cx.rice().get(key).as_ref() == Some(&value) {
-                continue;
-            }
-            if let Err(error) = cx.edit_rice(SetRiceValue::new(key, value)) {
-                cx.fail(tr!("cannot-keep-the-preferences", error = error));
             }
         }
     }

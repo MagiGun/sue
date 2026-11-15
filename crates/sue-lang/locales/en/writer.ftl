@@ -608,3 +608,11 @@ insert-columns-after = Insert Columns After
 delete-rows = Delete Rows
 delete-columns = Delete Columns
 delete-table = Delete Table
+
+## settings_page.rs: Sue Writer's page of Settings
+
+settings-group-writing = Writing
+settings-group-page = Page
+settings-group-colors = Colors
+settings-page-note = The page stays white paper, as it prints, unless you turn on dark paper. Sue Writer follows Sue's theme unless you choose a preset under Colors.
+keys-group-other = Other Commands

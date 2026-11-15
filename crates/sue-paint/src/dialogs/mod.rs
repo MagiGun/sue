@@ -31,7 +31,7 @@ use fill::{gamut_ui, select_by_ui};
 use filter::{correction_ui, filter_ui};
 use frame::frame_ui;
 use pressure::pressure_ui;
-use settings::{modifiers_ui, preferences_ui, shortcuts_ui, workspace_ui};
+use settings::{modifiers_ui, shortcuts_ui, workspace_ui};
 use story::{page_settings_ui, story_editor_ui, story_info_ui, webtoon_ui};
 use text::text_ui;
 
@@ -106,8 +106,6 @@ pub(crate) enum Dialog {
     Modifiers([usize; 3]),
     /// Command Bar Settings.
     CommandBar(String),
-    /// File, Preferences: Sue Paint's own, page by page.
-    Preferences(crate::prefs::Preferences),
     /// Canvas Properties.
     CanvasProperties(CanvasProperties),
     /// Color Profile Preview Settings: which profile.
@@ -190,7 +188,6 @@ impl Dialog {
             Dialog::Print(_, true) => (tr!("print"), vec2(380.0, 330.0)),
             Dialog::Print(_, false) => (tr!("print-settings"), vec2(380.0, 330.0)),
             Dialog::Modifiers(_) => (tr!("modifier-key-settings"), vec2(400.0, 230.0)),
-            Dialog::Preferences(_) => (tr!("preferences"), vec2(780.0, 540.0)),
             Dialog::AdvancedFill => (tr!("advanced-fill"), vec2(520.0, 470.0)),
             Dialog::CommandBar(_) => (tr!("command-bar-settings"), vec2(420.0, 460.0)),
             Dialog::CanvasProperties(_) => (tr!("canvas-properties"), vec2(380.0, 230.0)),
@@ -391,7 +388,6 @@ impl SuePaint {
             Dialog::Workspace(name) => workspace_ui(ui, name, theme),
             Dialog::Workspaces => self.workspaces_ui(ui, theme),
             Dialog::Print(settings, printing) => print_ui(ui, settings, *printing, theme),
-            Dialog::Preferences(prefs) => preferences_ui(ui, prefs, theme),
             Dialog::Modifiers(chosen) => modifiers_ui(ui, chosen, theme),
             Dialog::CommandBar(adding) => self.command_bar_ui(ui, adding, size, theme),
             Dialog::PageSettings(settings) => page_settings_ui(ui, settings, theme),
@@ -450,7 +446,6 @@ impl SuePaint {
             Dialog::Workspaces | Dialog::CommandBar(_) => self.save_extras(cx),
             Dialog::Print(settings, printing) => self.print_ok(cx, settings, printing),
             Dialog::Modifiers(chosen) => Self::modifiers_ok(cx, chosen),
-            Dialog::Preferences(prefs) => Self::preferences_ok(cx, &prefs),
             Dialog::PageSettings(settings) => self.page_settings_ok(cx, &settings),
             Dialog::StoryInfo(info) => Self::story_info_ok(cx, &info),
             Dialog::StoryEditor(texts) => Self::story_editor_ok(cx, texts),
@@ -506,7 +501,6 @@ impl SuePaint {
             | Dialog::Message(..)
             | Dialog::Print(..)
             | Dialog::Modifiers(_)
-            | Dialog::Preferences(_)
             | Dialog::CanvasProperties(_)
             | Dialog::Proof(_)
             | Dialog::PageSettings(_)

@@ -13,6 +13,16 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Settings, Appearance, Icons: choose an icon pack, see every icon it
+  draws on a sheet, install one from a folder or a .zip, remove one,
+  replace single icons with your own SVG files, and export Sue's own
+  icons as a template to start a pack from. Changes show at once, and the
+  chosen pack is back when Sue starts.
+- Settings, Keyboard Shortcuts lists every command of Sue Paint and Sue
+  Writer grouped as their menus are, plus Sue Paint's tools, and any of
+  them can get a key, not only those that ship with one. Search finds a
+  command by its name or its key. A key that two commands hold is marked
+  on both rows, with a button to take it from the other one.
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
@@ -62,6 +72,19 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Settings is regrouped: General (with updates), Language, Appearance,
+  Display and Performance, Sound, Files, a page for each studio, Keyboard
+  Shortcuts, Extensions and Advanced. Rows most people never need wait
+  under closed titles, Sue Paint's custom colors show only while its theme
+  is Custom, and settings say what they do in plain words ("Performance",
+  "Button and field corners", "Largest file to open") instead of the
+  settings file's names. The MCP page that only said "not yet available"
+  is gone.
+- Sue Paint's File, Preferences opens Settings on the Sue Paint page
+  instead of a copy of Clip Studio Paint's dialog with 125 options that did
+  nothing. Typing a Clip Studio option's name in the Settings filter finds
+  Sue's setting. Studio Mode's keys T1 to T7 are picked from a list of
+  commands instead of typed as command names.
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an
   empty or single color tile costs a byte, a tile found twice (a duplicated
@@ -115,6 +138,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- A settings file from before 0.0.8 that wore the Graphite, Paper or
+  Gray theme kept that theme's old, harder to read secondary text after
+  the update. It now takes the theme as it ships; colors you picked
+  yourself stay. Sue Paint's Custom colors also start from today's Gray,
+  with its readable secondary text.
+- Recording a shortcut in Settings over Sue Paint no longer also runs the
+  key in Sue Paint (recording R picked the Rotate tool).
 - Instant transitions and Animation speed (Settings, Motion) now reach
   the switches in Settings and on the start pages and everything else
   the interface toolkit animates by itself: they used to keep their own

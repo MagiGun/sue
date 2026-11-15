@@ -3,7 +3,7 @@
 
 ## runtime.rs
 
-could-not-save-the-rice = Could not save the rice: { $error }
+could-not-save-the-rice = Could not save the settings: { $error }
 quit-sue = Quit Sue?
 your-settings-are-saved-first = Your settings are saved first.
 quit = Quit
@@ -27,18 +27,18 @@ untitled-sue = Untitled.sue
 sue-project = Sue project
 opened = Opened { $value }
 it-is-a-folder = it is a folder
-over-mib-limit-io-max-ingest = it is { $value }, over the { $limit_mib } MiB limit (io.max_ingest_mib)
+over-mib-limit-io-max-ingest = it is { $value }, over the { $limit_mib } MiB limit (raise it in Settings, Files)
 cannot-open = Cannot open { $name }: { $reason }
 no-studio-tool-opens-yet = No studio or tool opens { $name } yet
 there-no-audio-device-mode = there is no audio device in this mode
 audio = Audio: { $error }
 cannot-read = Cannot read { $path }: { $error }
-rice-file-has-error = The rice file has an error: { $error }
-rice-file-matches-what-sue-shows = The rice file matches what Sue shows
+rice-file-has-error = The settings file has an error: { $error }
+rice-file-matches-what-sue-shows = The settings file matches what Sue shows
 reload-default-suerice = Reload default.suerice
 reloaded-values-from-disk = Reloaded { $count } values from disk
 reload-failed = Reload failed: { $error }
-export-rice = Export Rice
+export-rice = Export Settings
 
 ## runtime.rs
 

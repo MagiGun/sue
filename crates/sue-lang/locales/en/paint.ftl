@@ -2343,3 +2343,20 @@ zoom-100-percent = 100%
 zoom-200-percent = 200%
 paste-material = Paste Material
 cancel-transform = Cancel Transform
+
+## prefs.rs: Sue Paint's page of Settings
+
+settings-group-layout = Layout
+settings-group-new-canvas = New Canvas
+settings-group-saving = Saving
+settings-group-pen-and-tools = Pen and Tools
+settings-group-touch = Phones and Tablets
+settings-group-layers = Layers
+settings-group-colors = Colors
+settings-group-custom-colors = Custom Colors
+settings-group-advanced = Advanced
+settings-theme-note = Sue Paint starts in Gray, like other painting apps. Choose Sue theme to have it follow Sue's colors everywhere, or Custom to color it with the wheels that appear below.
+settings-no-command = No command
+keys-group-tools = Tools
+keys-group-colors = Colors
+keys-group-other = Other Commands
