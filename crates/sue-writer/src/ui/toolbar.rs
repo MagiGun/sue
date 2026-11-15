@@ -415,16 +415,3 @@ impl SueWriter {
 
     // ----- Binder ----------------------------------------------------------------
 }
-
-pub(super) fn font_picker(ui: &mut Ui, salt: &str, font: &mut String, filter: &mut String) {
-    egui::ComboBox::from_id_salt(salt.to_owned())
-        .selected_text(font.clone())
-        .height(360.0)
-        .width(180.0)
-        .show_ui(ui, |ui| {
-            ui.add(egui::TextEdit::singleline(filter).hint_text(tr!("search-fonts")));
-            if let Some(family) = sue_wm::fonts::list_ui(ui, font, filter) {
-                *font = family;
-            }
-        });
-}
