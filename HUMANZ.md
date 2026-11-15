@@ -2598,8 +2598,9 @@ layer tree by first child and next index, mipmap, offscreen) and `Foot`.
 `psd_io`; `encode_clip` writes the tables Clip Studio needs (checked by
 opening the files in Clip Studio Paint 5) plus a `SueProject` table holding
 the picture's own `.sue` bytes, which `clip_io::embedded` spawns back with
-the same entity ids. `.clip` is how Sue Paint saves (`sue_paint.save_format`,
-`clip` or `sue`). Sue Paint maps them onto layers (`psd_io`), vector lines
+the same entity ids. Sue Paint saves `.sue` (`sue_paint.save_format`
+picks the type Save As offers first) and converts `.clip` through
+`ClipDocument` (below). Sue Paint maps them onto layers (`psd_io`), vector lines
 (`vector::from_svg`) and animation cels (`anim::import_frames`). Convert Layer
 traces raster pixels to vector center lines (`vector::trace`: Zhang and Suen
 thinning, chains walked between ends and joins, widths from a chamfer distance,
@@ -2650,6 +2651,30 @@ document, so two pictures never share them.
 it opens and saves today, through the same model (`write::document_of`).
 `clip::testkit` builds the documents the tests run over, with foreign
 data under names no code knows.
+
+Sue Paint converts a `.clip` to and from its picture model without the
+`Psd` records (`crates/sue-paint/src/clip_io/`): `to_sue` makes a picture
+of the canvas and an entity of each layer and folder (masks as masks,
+paper as paper, folder blend and clipping, draft and reference, pixels
+off the canvas), `to_clip` writes a picture back. On every entity it
+makes, `to_sue` puts a `clip.foreign` component (`sue_model::Foreign`,
+`docs/clip-foreign.md`): the layer's row, bitmaps and unknown columns as
+read (`keep`), or, on the picture, the canvas row, the `Head` chunk and
+`ClipForeign`, each with a SHA-256 fingerprint of the entity as made
+(`print`: name, class, properties, pixels and mask; not its place in the
+stack). `to_clip` writes the kept layer back whenever the fingerprint
+still matches, so a layer not changed in Sue round-trips exactly, across
+a save and reopen of the `.sue` too (revisions are not saved, a hash
+is); a changed layer is written from the model and loses only its own
+kept data. Both directions fill a `Report` (exact, approximated, kept,
+flattened, left out) that the status bar says in one line. The hidden
+`SueProject` copy is no longer written; one written by Sue 0.0.75 opens
+only while `psd_io::to_psd` of it draws the same layers as the file (that
+copy left masks out, so a masked picture opens from its layers). Save in
+Sue Paint (`studio/saving.rs`) writes the project unless the canvas was
+opened from a `.clip` (asks once: export back or a project beside it) or
+from a flat picture Sue writes (writes it back, asks once before merging
+layers).
 
 ---
 

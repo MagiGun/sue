@@ -337,19 +337,32 @@ shows or changes where your materials are kept, has a Maintenance Menu
 gone) and shows Sue Paint's version. Nothing on the start page goes
 online.
 
-**Saving is Clip Studio's format.** File, Save keeps a picture as a Clip
-Studio Paint `.clip` file, and saves to the same file from then on. Clip
-Studio Paint opens it with its layers, folders, blend modes, opacity and
-clipping, and Sue opens it again with everything, vector lines and tones
-included, because the file also carries Sue's own copy of the picture.
-File, Save As can make a Sue project, a Photoshop document or a flat
-picture instead, and Settings (Sue Paint, Save format) makes a Sue project
-what Save writes. Sue Paint also opens `.clip` files from Clip Studio,
+**Saving keeps a Sue project.** File, Save keeps a picture in a Sue
+project (`.sue`), with everything Sue Paint knows about it. Clip Studio
+Paint's `.clip` is a conversion both ways. Sue Paint opens `.clip` files
 however they are opened (its own Open, the Sue menu's Open File, a drop on
-the window, the Hub's recent files):
-pixel, text and vector layers come in as the pixels Clip Studio last drew
-for them, and correction, gradient and fill layers as empty layers in their
-places, since Sue cannot redo those effects yet.
+the window, the Hub's recent files), with folders and their blend modes,
+clipping, masks, paper, gray layers and pixels past the canvas's edges;
+text and vector layers come in as the pixels Clip Studio last drew for
+them, and correction, gradient and fill layers as empty layers in their
+places, since Sue cannot redo those effects yet. What Sue cannot show is
+kept with each layer: a layer you leave alone goes back into the file
+exactly as it came, and a layer you change is written as Sue has it. The
+status bar says which layers did not convert exactly. On a canvas opened
+from a `.clip`, the first Save asks once: export back to that file, or
+keep working in a Sue project beside it. Sue never writes a file you did
+not choose, and the window title names the file Save writes. File, Export
+Back to the Same .clip writes the canvas into its `.clip` in one step, and
+File, Save Duplicate, .clip makes a new one. A canvas opened from a PNG,
+JPEG or another picture Sue writes saves back in its format, as in Clip
+Studio Paint; once it has more than one layer, Save says the layers will
+be merged into the picture (the canvas keeps them) and asks first. File,
+Save As can make a Sue project, a `.clip`, a Photoshop document or a flat
+picture; with Settings (Sue Paint, Save format) on Clip Studio Paint, Save
+on a new canvas asks where to write a `.clip` instead of a project. A `.clip` that an older Sue saved opens from the copy
+of the project it carries, as long as its layers still match that copy;
+when they were changed in Clip Studio since, it opens from its layers and
+says so.
 
 **On a phone or tablet** the start page is laid out for fingers. The top
 bar shows Sue Paint with Help and Settings; Projects starts with three big

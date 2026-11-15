@@ -66,6 +66,17 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint saves a picture in a Sue project (`.sue`) by default;
+  Clip Studio Paint's `.clip` is opened and exported. A canvas opened
+  from a `.clip` asks on its first Save whether to export back to that
+  file or keep working in a Sue project beside it, and File, Export Back
+  to the Same .clip writes it there in one step. A canvas opened from a
+  PNG, JPEG or other picture saves back in its format, and asks first
+  when its layers would be merged. The window title names the file Save
+  writes. A `.clip` opens with masks, paper, gray layers, folder blend
+  modes and pixels off the canvas kept, and a layer you did not change
+  goes back into the file exactly as it was, with everything Sue does
+  not show yet; the status bar says what did not convert exactly.
 - In Sue Paint a new layer made (or pasted) with a folder picked goes in
   that folder, on top of what it holds, and one made with a layer in a
   folder picked stays in that folder; Duplicate Layer on a folder copies
