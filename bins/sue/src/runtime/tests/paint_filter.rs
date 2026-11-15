@@ -390,8 +390,17 @@ fn level_correction_changes_one_channel_alone() {
         .map(|(_, rect)| *rect)
         .max_by(|a, b| a.top().total_cmp(&b.top()))
         .expect("the output highlight");
-    // Its track starts after the label's room (Space::S9 twice).
-    let at = lowest.left_center() + vec2(100.0, 0.0);
+    // Its track lies between its name and its number field ("1.00",
+    // on the same row): a click a third of the way along it.
+    let field = driver
+        .texts
+        .iter()
+        .filter(|(text, rect)| text == "1.00" && (rect.center().y - lowest.center().y).abs() < 4.0)
+        .map(|(_, rect)| *rect)
+        .next()
+        .expect("the output highlight's field");
+    let span = field.left() - lowest.left();
+    let at = lowest.left_center() + vec2(span * 0.7, 0.0);
     let press = |pressed| egui::Event::PointerButton {
         pos: at,
         button: egui::PointerButton::Primary,
