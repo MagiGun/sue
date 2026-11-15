@@ -23,23 +23,24 @@ use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, W
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CLR_INVALID, CreateFontW, CreateSolidBrush,
     DEFAULT_CHARSET, DEFAULT_GUI_FONT, DT_LEFT, DT_NOPREFIX, DeleteObject, DrawTextW, EndPaint,
-    FW_NORMAL, FillRect, GetDC, GetPixel, GetStockObject, InvalidateRect, MONITOR_DEFAULTTONULL,
-    MonitorFromPoint, OUT_DEFAULT_PRECIS, PAINTSTRUCT, ReleaseDC, SelectObject, SetBkMode,
-    SetTextColor, TRANSPARENT,
+    FW_NORMAL, FillRect, GetDC, GetPixel, GetStockObject, HBRUSH, HDC, InvalidateRect,
+    MONITOR_DEFAULTTONULL, MonitorFromPoint, OUT_DEFAULT_PRECIS, PAINTSTRUCT, ReleaseDC,
+    SelectObject, SetBkMode, SetTextColor, TRANSPARENT, UpdateWindow,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-    EnumWindows, GetMessageW, GetSystemMetrics, GetWindowThreadProcessId, HWND_TOPMOST, IDC_CROSS,
-    IsWindowVisible, LWA_ALPHA, LoadCursorW, MSG, PostMessageW, PostQuitMessage, RegisterClassExW,
-    SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_HIDE, SW_SHOW,
-    SW_SHOWNA, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetForegroundWindow, SetLayeredWindowAttributes,
-    SetWindowDisplayAffinity, SetWindowPos, ShowWindow, TranslateMessage, UnregisterClassW,
-    WDA_EXCLUDEFROMCAPTURE, WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEMOVE,
-    WM_PAINT, WM_RBUTTONDOWN, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    EnumWindows, GetClientRect, GetMessageW, GetSystemMetrics, GetWindowThreadProcessId,
+    HWND_TOPMOST, IDC_CROSS, IsWindowVisible, LWA_ALPHA, LoadCursorW, MSG, PM_REMOVE, PeekMessageW,
+    PostMessageW, PostQuitMessage, RegisterClassExW, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN,
+    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_HIDE, SW_SHOW, SW_SHOWNA,
+    SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetForegroundWindow,
+    SetLayeredWindowAttributes, SetWindowDisplayAffinity, SetWindowPos, ShowWindow,
+    TranslateMessage, UnregisterClassW, WDA_EXCLUDEFROMCAPTURE, WM_APP, WM_CLOSE, WM_DESTROY,
+    WM_ERASEBKGND, WM_KEYDOWN, WM_LBUTTONDOWN, WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONDOWN, WNDCLASSEXW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -130,6 +131,11 @@ struct Shared {
     window: AtomicIsize,
     /// Set by [`Pick::cancel`], also before the window is up.
     ended: std::sync::atomic::AtomicBool,
+    /// Set once a test drives the pick ([`Pick::click_at`],
+    /// [`Pick::move_to`], [`click_latest`]): from then on the real
+    /// pointer's moves and clicks are left alone, so a person using the
+    /// mouse meanwhile never changes what the test reads.
+    scripted: std::sync::atomic::AtomicBool,
     /// The first line of the label by the pointer (the command's name).
     title: String,
     /// Called after each change of state, so the interface draws again.
@@ -165,6 +171,7 @@ impl Pick {
             state: Mutex::new(PickState::Waiting(None)),
             window: AtomicIsize::new(0),
             ended: std::sync::atomic::AtomicBool::new(false),
+            scripted: std::sync::atomic::AtomicBool::new(false),
             title,
             wake,
         });
@@ -200,13 +207,15 @@ impl Pick {
     /// reads that point as it reads a real click.
     #[doc(hidden)]
     pub fn click_at(&self, x: i32, y: i32) {
-        self.post(WM_LBUTTONDOWN, 0, client_point(x, y));
+        self.shared.scripted.store(true, Ordering::Release);
+        self.post(SCRIPTED_CLICK, 0, client_point(x, y));
     }
 
     /// Acts as the pointer moved to screen point `x`, `y`, for tests.
     #[doc(hidden)]
     pub fn move_to(&self, x: i32, y: i32) {
-        self.post(WM_MOUSEMOVE, 0, client_point(x, y));
+        self.shared.scripted.store(true, Ordering::Release);
+        self.post(SCRIPTED_MOVE, 0, client_point(x, y));
     }
 
     /// Acts as Esc pressed over the picker, for tests.
@@ -247,9 +256,29 @@ pub fn click_latest(x: i32, y: i32) -> bool {
     if shared.window.load(Ordering::Acquire) == 0 {
         return false;
     }
-    post(&shared, WM_LBUTTONDOWN, 0, client_point(x, y));
+    shared.scripted.store(true, Ordering::Release);
+    post(&shared, SCRIPTED_CLICK, 0, client_point(x, y));
     true
 }
+
+/// Whether the latest pick started in this process is still waiting for
+/// its click, for tests that drive Sue's own command; `false` once it
+/// ended (or when none was started).
+#[doc(hidden)]
+#[must_use]
+pub fn latest_waiting() -> bool {
+    LATEST
+        .lock()
+        .ok()
+        .and_then(|latest| latest.as_ref().and_then(std::sync::Weak::upgrade))
+        .and_then(|shared| shared.state.lock().ok().map(|state| state.clone()))
+        .is_some_and(|state| matches!(state, PickState::Waiting(_)))
+}
+
+/// A test's pointer move and click, posted in place of the pointer's own
+/// messages (which a driven pick leaves alone).
+const SCRIPTED_MOVE: u32 = WM_APP + 1;
+const SCRIPTED_CLICK: u32 = WM_APP + 2;
 
 /// Screen point `x`, `y` as the picker window's packed client point.
 fn client_point(x: i32, y: i32) -> isize {
@@ -317,6 +346,8 @@ thread_local! {
     /// The label's two lines and its swatch.
     static LABEL_TEXT: RefCell<(Vec<u16>, Vec<u16>, COLORREF)> =
         const { RefCell::new((Vec::new(), Vec::new(), COLORREF(0))) };
+    /// The brush a patch's window is filled with, on its own thread.
+    static PATCH_BRUSH: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
     /// The windows of this process found while hiding them.
     static FOUND: RefCell<Vec<isize>> = const { RefCell::new(Vec::new()) };
 }
@@ -636,8 +667,13 @@ unsafe extern "system" fn procedure(
         // on its own thread; WM_DESTROY then ends the loop.
         let _ = unsafe { DestroyWindow(window) };
     };
+    // Once a test drives the pick, the real pointer is left alone.
+    let real = |shared: &Shared| !shared.scripted.load(Ordering::Acquire);
     match (message, serving) {
-        (WM_MOUSEMOVE, Some(shared)) => {
+        (WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_RBUTTONDOWN, Some(shared)) if !real(&shared) => {
+            LRESULT(0)
+        }
+        (WM_MOUSEMOVE | SCRIPTED_MOVE, Some(shared)) => {
             let [x, y] = point();
             if let Ok(color) = pixel_at(x, y) {
                 follow(x, y, color);
@@ -645,7 +681,7 @@ unsafe extern "system" fn procedure(
             }
             LRESULT(0)
         }
-        (WM_LBUTTONDOWN, Some(shared)) => {
+        (WM_LBUTTONDOWN | SCRIPTED_CLICK, Some(shared)) => {
             let [x, y] = point();
             // Read with the picker out of the way, so the colour is the
             // screen's own to the last level.
@@ -744,98 +780,261 @@ fn show_again(windows: &[isize]) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    //! These read the real screen of this machine's desktop session.
-    use super::*;
-    use std::time::Instant;
-    use windows::Win32::Graphics::Gdi::{HBRUSH, UpdateWindow};
-    use windows::Win32::UI::WindowsAndMessaging::{PM_REMOVE, PeekMessageW};
+/// A solid square of one known colour that Sue shows in a window of its
+/// own, in the middle of the main screen and above other windows, for
+/// tests that read the screen: what they read is then what Sue drew,
+/// never what another program shows. Dropping it takes the window away.
+#[doc(hidden)]
+pub struct Patch {
+    color: [u8; 3],
+    /// The square on the screen: left, top, side.
+    area: [i32; 3],
+    done: Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    window: isize,
+}
 
-    /// Windows' own handling for the swatch.
-    #[allow(
-        unsafe_code,
-        reason = "a window procedure hands its messages on through a window call (standing approval, rule 13)"
-    )]
-    unsafe extern "system" fn plain(
-        window: HWND,
-        message: u32,
-        wparam: WPARAM,
-        lparam: LPARAM,
-    ) -> LRESULT {
-        // SAFETY: the arguments Windows passed in, handed on unchanged.
-        unsafe { DefWindowProcW(window, message, wparam, lparam) }
+impl Patch {
+    /// Shows a square of `color`, `side` screen pixels wide, and waits
+    /// until Windows has made the window.
+    ///
+    /// # Errors
+    /// [`ScreenError::Window`] when the window cannot be made.
+    pub fn show(color: [u8; 3], side: i32) -> Result<Self, ScreenError> {
+        let side = side.clamp(16, 2048);
+        let [width, height] = main_screen();
+        let area = [(width - side) / 2, (height - side) / 2, side];
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (ready, wait) = std::sync::mpsc::channel();
+        let ended = Arc::clone(&done);
+        let thread = std::thread::Builder::new()
+            .name("sue-screen-patch".to_owned())
+            .spawn(move || patch_thread(area, color, &ended, &ready))
+            .map_err(|error| ScreenError::Window(error.to_string()))?;
+        let window = match wait.recv_timeout(Duration::from_secs(10)) {
+            Ok(Ok(window)) => window,
+            Ok(Err(error)) => {
+                let _ = thread.join();
+                return Err(error);
+            }
+            Err(_) => {
+                done.store(true, Ordering::Release);
+                return Err(ScreenError::Window("the patch did not come up".to_owned()));
+            }
+        };
+        Ok(Self {
+            color,
+            area,
+            done,
+            thread: Some(thread),
+            window,
+        })
     }
 
-    /// A small window of one known colour at `at`, made and pumped on
-    /// its own thread until `done` is set; answers once it is drawn.
-    #[allow(
-        unsafe_code,
-        reason = "the test paints a window of its own through window calls (standing approval, rule 13)"
-    )]
-    fn swatch(
-        at: [i32; 2],
-        color: [u8; 3],
-        done: Arc<std::sync::atomic::AtomicBool>,
-    ) -> (std::thread::JoinHandle<()>, isize) {
-        let (ready, wait) = std::sync::mpsc::channel();
-        let thread = std::thread::spawn(move || {
-            let reference = COLORREF(
-                u32::from(color[0]) | (u32::from(color[1]) << 8) | (u32::from(color[2]) << 16),
+    /// The colour of the square.
+    #[must_use]
+    pub fn color(&self) -> [u8; 3] {
+        self.color
+    }
+
+    /// The square on the screen: left, top and its side.
+    #[must_use]
+    pub fn area(&self) -> [i32; 3] {
+        self.area
+    }
+
+    /// The window's handle, for tests that ask Windows about it.
+    #[must_use]
+    pub fn window(&self) -> isize {
+        self.window
+    }
+
+    /// A point inside the square where the screen shows its colour: the
+    /// middle first, then a grid nearer the edges (another program's
+    /// window may lie over a part of it). Waits up to `wait` for the
+    /// square to be drawn; `None` when no point shows the colour.
+    #[must_use]
+    pub fn spot(&self, wait: Duration) -> Option<[i32; 2]> {
+        let [left, top, side] = self.area;
+        let step = (side / 8).max(1);
+        let mut points = vec![[left + side / 2, top + side / 2]];
+        for row in 1..8 {
+            for column in 1..8 {
+                points.push([left + column * step, top + row * step]);
+            }
+        }
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(point) = points
+                .iter()
+                .find(|[x, y]| pixel_at(*x, *y) == Ok(self.color))
+            {
+                return Some(*point);
+            }
+            if start.elapsed() > wait {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+impl Drop for Patch {
+    fn drop(&mut self) {
+        self.done.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The main screen's size in pixels.
+#[allow(
+    unsafe_code,
+    reason = "GetSystemMetrics has no safe route in the windows crate (standing approval, rule 13)"
+)]
+fn main_screen() -> [i32; 2] {
+    // SAFETY: GetSystemMetrics takes a number and answers a number.
+    unsafe { [GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)] }
+}
+
+/// The patch's own procedure: fills the window with its thread's brush
+/// ([`PATCH_BRUSH`]), else Windows' own handling.
+#[allow(
+    unsafe_code,
+    reason = "a window procedure paints and hands its messages on through window calls (standing approval, rule 13)"
+)]
+unsafe extern "system" fn patch_procedure(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    let brush = PATCH_BRUSH.with(std::cell::Cell::get);
+    if message == WM_ERASEBKGND && brush != 0 {
+        let mut rect = RECT::default();
+        // SAFETY: `window` is this procedure's live window; `wparam` is
+        // the device context Windows hands WM_ERASEBKGND; the brush is
+        // this thread's, alive until its window is gone.
+        unsafe {
+            let _ = GetClientRect(window, &raw mut rect);
+            FillRect(
+                HDC(wparam.0 as *mut _),
+                &raw const rect,
+                HBRUSH(brush as *mut _),
             );
-            // SAFETY: a brush handed to the class and freed after the
-            // window is gone; the class and window are this thread's.
+        }
+        return LRESULT(1);
+    }
+    // SAFETY: the arguments Windows passed in, handed on unchanged.
+    unsafe { DefWindowProcW(window, message, wparam, lparam) }
+}
+
+const PATCH_CLASS: PCWSTR = w!("SueScreenPatch");
+
+/// The patch's thread: makes the window, says so on `ready`, pumps its
+/// messages until `done`, then takes it away.
+#[allow(
+    unsafe_code,
+    reason = "making, pumping and destroying a window has no safe route (standing approval, rule 13)"
+)]
+fn patch_thread(
+    area: [i32; 3],
+    color: [u8; 3],
+    done: &std::sync::atomic::AtomicBool,
+    ready: &std::sync::mpsc::Sender<Result<isize, ScreenError>>,
+) {
+    let [left, top, side] = area;
+    let reference =
+        COLORREF(u32::from(color[0]) | (u32::from(color[1]) << 8) | (u32::from(color[2]) << 16));
+    // SAFETY: the brush is this thread's (each patch has its own colour,
+    // so the class shared by every patch holds none); it is deleted at
+    // the end, after the window is gone.
+    let brush = unsafe { CreateSolidBrush(reference) };
+    PATCH_BRUSH.with(|cell| cell.set(brush.0 as isize));
+    // SAFETY: None asks for this program's own module, which lives as
+    // long as the process.
+    let module = match unsafe { GetModuleHandleW(None) } {
+        Ok(module) => module,
+        Err(error) => {
+            let _ = ready.send(Err(ScreenError::Window(error.to_string())));
+            // SAFETY: the brush made above, used by nothing.
+            let _ = unsafe { DeleteObject(brush.into()) };
+            return;
+        }
+    };
+    let class = WNDCLASSEXW {
+        cbSize: size_of::<WNDCLASSEXW>() as u32,
+        lpfnWndProc: Some(patch_procedure),
+        hInstance: module.into(),
+        lpszClassName: PATCH_CLASS,
+        ..WNDCLASSEXW::default()
+    };
+    // SAFETY: `class` is a filled WNDCLASSEXW that lives across the
+    // call; a 0 answer (registered by an earlier patch) is fine.
+    let _ = unsafe { RegisterClassExW(&raw const class) };
+    // SAFETY: the class was registered above; static names; no parent,
+    // menu or creation data. It never takes the focus from a person.
+    let window = unsafe {
+        CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            PATCH_CLASS,
+            w!("Sue screen patch"),
+            WS_POPUP,
+            left,
+            top,
+            side,
+            side,
+            None,
+            None,
+            Some(module.into()),
+            None,
+        )
+    };
+    match window {
+        Ok(window) => {
+            // SAFETY: the window just made on this thread.
             unsafe {
-                let brush: HBRUSH = CreateSolidBrush(reference);
-                let module = GetModuleHandleW(None).unwrap();
-                let class = WNDCLASSEXW {
-                    cbSize: size_of::<WNDCLASSEXW>() as u32,
-                    lpfnWndProc: Some(plain),
-                    hInstance: module.into(),
-                    hbrBackground: brush,
-                    lpszClassName: w!("SueScreenSwatch"),
-                    ..WNDCLASSEXW::default()
-                };
-                let _ = RegisterClassExW(&raw const class);
-                let window = CreateWindowExW(
-                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
-                    w!("SueScreenSwatch"),
-                    w!("Sue test swatch"),
-                    WS_POPUP,
-                    at[0],
-                    at[1],
-                    80,
-                    80,
-                    None,
-                    None,
-                    Some(module.into()),
-                    None,
-                )
-                .unwrap();
-                let _ = ShowWindow(window, SW_SHOW);
+                let _ = ShowWindow(window, SW_SHOWNOACTIVATE);
                 let _ = UpdateWindow(window);
-                let mut message = MSG::default();
-                let start = Instant::now();
-                let mut told = false;
-                while !done.load(Ordering::Acquire) {
+            }
+            let _ = ready.send(Ok(window.0 as isize));
+            let mut message = MSG::default();
+            while !done.load(Ordering::Acquire) {
+                // SAFETY: `message` is a MSG this loop owns, filled and
+                // handed on on its own thread.
+                unsafe {
                     while PeekMessageW(&raw mut message, None, 0, 0, PM_REMOVE).as_bool() {
                         let _ = TranslateMessage(&raw const message);
                         DispatchMessageW(&raw const message);
                     }
-                    if !told && start.elapsed() > Duration::from_millis(400) {
-                        let _ = ready.send(window.0 as isize);
-                        told = true;
-                    }
-                    std::thread::sleep(Duration::from_millis(5));
                 }
-                let _ = DestroyWindow(window);
-                let _ = UnregisterClassW(w!("SueScreenSwatch"), Some(module.into()));
-                let _ = DeleteObject(brush.into());
+                std::thread::sleep(Duration::from_millis(5));
             }
-        });
-        let window = wait.recv_timeout(Duration::from_secs(10)).unwrap();
-        (thread, window)
+            // SAFETY: the window this thread made, destroyed on it.
+            let _ = unsafe { DestroyWindow(window) };
+        }
+        Err(error) => {
+            let _ = ready.send(Err(ScreenError::Window(error.to_string())));
+        }
     }
+    PATCH_BRUSH.with(|cell| cell.set(0));
+    // SAFETY: the class this module registered, its window gone (another
+    // patch's window still up makes this fail harmlessly); the brush is
+    // no longer used by a window of this thread.
+    unsafe {
+        let _ = UnregisterClassW(PATCH_CLASS, Some(module.into()));
+        let _ = DeleteObject(brush.into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! These read the real screen of this machine's desktop session, but
+    //! only where Sue's own patch lies, and drive the picker with
+    //! scripted messages, never the real pointer.
+    use super::*;
+    use std::time::Instant;
 
     fn wait_for(pick: &Pick, done: impl Fn(&PickState) -> bool) -> PickState {
         let start = Instant::now();
@@ -848,7 +1047,15 @@ mod tests {
         }
     }
 
-    // One test, so the swatch and the picker never race another test's
+    fn wait_up(pick: &Pick) {
+        let start = Instant::now();
+        while !pick.window_up() && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(pick.window_up(), "the picker's window came up");
+    }
+
+    // One test, so the patch and the picker never race another test's
     // windows on the same screen.
     #[test]
     #[allow(
@@ -856,15 +1063,19 @@ mod tests {
         reason = "the test reads whether its own window is shown through a window call (standing approval, rule 13)"
     )]
     fn reads_the_known_color_of_a_window_sue_painted_and_picks_it() {
-        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let color = [12, 200, 99];
-        let at = [120, 140];
-        let (thread, swatch_window) = swatch(at, color, Arc::clone(&done));
-        let middle = [at[0] + 40, at[1] + 40];
-        assert_eq!(pixel_at(middle[0], middle[1]), Ok(color), "read directly");
+        let patch = Patch::show(color, 240).expect("Sue's patch window");
+        assert_eq!(patch.color(), color);
+        let at = patch
+            .spot(Duration::from_secs(5))
+            .expect("a point of the patch shows its colour");
+        let [left, top, side] = patch.area();
+        assert!((left..left + side).contains(&at[0]) && (top..top + side).contains(&at[1]));
+        assert_eq!(pixel_at(at[0], at[1]), Ok(color), "read directly");
 
-        // A pick, clicked over the swatch: the click is the picker's,
-        // the colour the swatch's to the last level.
+        // A pick, clicked over the patch: the click is the picker's, the
+        // colour the patch's to the last level. Moves of the real pointer
+        // meanwhile change nothing.
         let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let count = Arc::clone(&woken);
         let pick = Pick::start(
@@ -874,25 +1085,36 @@ mod tests {
                 count.fetch_add(1, Ordering::Relaxed);
             }),
         );
-        let start = Instant::now();
-        while !pick.window_up() && start.elapsed() < Duration::from_secs(10) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        wait_up(&pick);
         // Moving over it shows its colour while the pick waits.
-        pick.move_to(middle[0], middle[1]);
-        let state = wait_for(&pick, |state| matches!(state, PickState::Waiting(Some(_))));
-        assert_eq!(state, PickState::Waiting(Some((middle, color))), "hover");
-        pick.click_at(middle[0], middle[1]);
+        pick.move_to(at[0], at[1]);
+        let state = wait_for(
+            &pick,
+            |state| matches!(state, PickState::Waiting(Some((point, _))) if *point == at),
+        );
+        assert_eq!(state, PickState::Waiting(Some((at, color))), "hover");
+        pick.click_at(at[0], at[1]);
         let state = wait_for(&pick, |state| !matches!(state, PickState::Waiting(_)));
         assert_eq!(state, PickState::Picked(color), "picked");
         assert!(woken.load(Ordering::Relaxed) > 0, "the interface was woken");
 
+        // A point of another colour picks that colour, not the patch's:
+        // the reader can tell them apart.
+        let other = [230, 40, 160];
+        let second = Patch::show(other, 120).expect("a second patch");
+        let inner = second
+            .spot(Duration::from_secs(5))
+            .expect("the second patch shows");
+        let pick = Pick::start(false, String::new(), Box::new(|| {}));
+        wait_up(&pick);
+        pick.click_at(inner[0], inner[1]);
+        let state = wait_for(&pick, |state| !matches!(state, PickState::Waiting(_)));
+        assert_eq!(state, PickState::Picked(other), "the second patch");
+        drop(second);
+
         // Esc, and a cancel from Sue, end a pick without a colour.
         let pick = Pick::start(false, String::new(), Box::new(|| {}));
-        let start = Instant::now();
-        while !pick.window_up() && start.elapsed() < Duration::from_secs(10) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        wait_up(&pick);
         pick.press_escape();
         let state = wait_for(&pick, |state| !matches!(state, PickState::Waiting(_)));
         assert_eq!(state, PickState::Cancelled, "Esc");
@@ -901,16 +1123,14 @@ mod tests {
         let state = wait_for(&pick, |state| !matches!(state, PickState::Waiting(_)));
         assert_eq!(state, PickState::Cancelled, "cancel");
 
-        // Hide windows and pick: Sue's own windows (the swatch is one)
-        // go while it waits and come back after.
-        // SAFETY: reads a fact of the swatch window, alive until `done`.
-        let shown = || unsafe { IsWindowVisible(HWND(swatch_window as *mut _)) }.as_bool();
+        // Hide windows and pick: Sue's own windows (the patch is one) go
+        // while it waits and come back after.
+        // SAFETY: reads a fact of the patch's window, alive until the
+        // patch is dropped at the end of the test.
+        let shown = || unsafe { IsWindowVisible(HWND(patch.window() as *mut _)) }.as_bool();
         assert!(shown());
         let pick = Pick::start(true, String::new(), Box::new(|| {}));
-        let start = Instant::now();
-        while !pick.window_up() && start.elapsed() < Duration::from_secs(10) {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        wait_up(&pick);
         assert!(!shown(), "hidden while the pick waits");
         pick.press_escape();
         let state = wait_for(&pick, |state| !matches!(state, PickState::Waiting(_)));
@@ -920,9 +1140,16 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(shown(), "shown again after");
+    }
 
-        done.store(true, Ordering::Release);
-        thread.join().unwrap();
+    #[test]
+    fn a_patch_sits_in_the_middle_of_the_main_screen_at_a_size_it_can_hold() {
+        // The side is kept to what a screen can hold.
+        let [width, height] = main_screen();
+        let patch = Patch::show([1, 2, 3], 1).expect("a patch");
+        let [left, top, side] = patch.area();
+        assert_eq!(side, 16);
+        assert_eq!([left, top], [(width - 16) / 2, (height - 16) / 2]);
     }
 
     #[test]

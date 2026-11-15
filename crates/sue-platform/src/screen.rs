@@ -167,6 +167,67 @@ pub fn click_latest(x: i32, y: i32) -> bool {
     }
 }
 
+/// Whether the latest pick (one Sue's own command started) still waits
+/// for its click, for tests; `false` once it ended or where there is none.
+#[doc(hidden)]
+#[must_use]
+pub fn latest_waiting() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        sue_windows::screen::latest_waiting()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
+/// A solid square of one known colour that Sue shows in a window of its
+/// own, in the middle of the main screen, for tests that read the screen
+/// (so what they read is what Sue drew, on any desktop). Dropping it takes
+/// the window away. Where no route exists it cannot be shown.
+#[doc(hidden)]
+pub struct ScreenPatch {
+    #[cfg(target_os = "windows")]
+    patch: sue_windows::screen::Patch,
+}
+
+impl ScreenPatch {
+    /// Shows a square of `color`, `side` screen pixels wide.
+    ///
+    /// # Errors
+    /// [`ScreenError::Unsupported`] where there is no route, else
+    /// [`ScreenError::Failed`] when the window cannot be made.
+    pub fn show(color: [u8; 3], side: i32) -> Result<Self, ScreenError> {
+        #[cfg(target_os = "windows")]
+        {
+            sue_windows::screen::Patch::show(color, side)
+                .map(|patch| Self { patch })
+                .map_err(from_windows)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (color, side);
+            Err(ScreenError::Unsupported)
+        }
+    }
+
+    /// A point inside the square where the screen shows its colour,
+    /// waiting up to `wait` for it to be drawn; `None` when none does.
+    #[must_use]
+    pub fn spot(&self, wait: std::time::Duration) -> Option<[i32; 2]> {
+        #[cfg(target_os = "windows")]
+        {
+            self.patch.spot(wait)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = wait;
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

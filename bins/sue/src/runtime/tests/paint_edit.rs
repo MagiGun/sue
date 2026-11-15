@@ -876,28 +876,23 @@ fn sue_paint_pick_screen_color_sets_the_drawing_color() {
     };
     assert!(state("edit.screen_color").is_some());
     assert!(state("edit.screen_color_hidden").is_some());
-    // A place on the screen whose color is neither the drawing color a
-    // fresh studio has (black) nor its sub color, so the pick shows.
-    let at = [[12, 12], [300, 200], [700, 12], [40, 600], [900, 500]]
-        .into_iter()
-        .find(|[x, y]| {
-            sue_platform::screen::pixel_at(*x, *y)
-                .is_ok_and(|color| color != [0, 0, 0] && color != [255, 255, 255])
-        })
-        .unwrap_or([12, 12]);
+    // Sue shows a large square of a known color in a window of its own
+    // and the click lands inside it, so the test reads what Sue drew,
+    // never the desktop around it, and no real pointer takes part. The
+    // color is neither the drawing color a fresh studio has (black) nor
+    // its sub color (white), so a pick that went wrong shows.
+    let want = [37_u8, 142, 211];
+    let patch = sue_platform::screen::ScreenPatch::show(want, 240).expect("Sue's color patch");
+    let at = patch
+        .spot(Duration::from_secs(5))
+        .expect("a point of the patch shows its color");
     driver.command("edit.screen_color");
     let mut clicked = false;
-    let mut want = [0_u8; 3];
     for _ in 0..400 {
         driver.step(Vec::new());
-        // The picker keeps itself out of what it reads, so the screen's
-        // own color there is what it will pick.
-        if let Ok(color) = sue_platform::screen::pixel_at(at[0], at[1]) {
-            want = color;
-            if sue_platform::screen::click_latest(at[0], at[1]) {
-                clicked = true;
-                break;
-            }
+        if sue_platform::screen::click_latest(at[0], at[1]) {
+            clicked = true;
+            break;
         }
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -913,10 +908,15 @@ fn sue_paint_pick_screen_color_sets_the_drawing_color() {
         .last()
         .unwrap()
         .id;
-    for _ in 0..60 {
+    // The pick reads the patch and ends; the next frames take its color.
+    let start = std::time::Instant::now();
+    while sue_platform::screen::latest_waiting() && start.elapsed() < Duration::from_secs(10) {
         driver.step(Vec::new());
         std::thread::sleep(Duration::from_millis(5));
     }
+    assert!(!sue_platform::screen::latest_waiting(), "the pick ended");
+    driver.settle(4);
+    drop(patch);
     // Fill puts the drawing color on the layer as it is, to the last
     // level.
     driver.command("edit.fill");
