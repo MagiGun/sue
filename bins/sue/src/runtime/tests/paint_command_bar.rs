@@ -14,6 +14,8 @@ struct Bar {
     driver: PaintDriver,
     /// The controls of the last frame: name, rect, on.
     nodes: Vec<(String, Rect, Option<bool>)>,
+    /// The controls of the last frame that cannot be pressed now.
+    disabled: Vec<(String, Rect)>,
     /// The keys held.
     held: Modifiers,
 }
@@ -25,6 +27,7 @@ impl Bar {
         let mut bar = Self {
             driver,
             nodes: Vec::new(),
+            disabled: Vec::new(),
             held: Modifiers::NONE,
         };
         bar.settle(4);
@@ -49,6 +52,21 @@ impl Bar {
             .ctx
             .run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
         driver.texts = text_rects(&output);
+        self.disabled = output
+            .platform_output
+            .accesskit_update
+            .iter()
+            .flat_map(|update| update.nodes.iter())
+            .filter(|(_, node)| node.is_disabled())
+            .filter_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                let rect = Rect::from_min_max(
+                    Pos2::new(bounds.x0 as f32, bounds.y0 as f32),
+                    Pos2::new(bounds.x1 as f32, bounds.y1 as f32),
+                );
+                Some((node.label()?.to_owned(), rect))
+            })
+            .collect();
         self.nodes = output
             .platform_output
             .accesskit_update
@@ -115,6 +133,15 @@ impl Bar {
             .iter()
             .find(|(label, rect, _)| label == name && area.contains(rect.center()))
             .and_then(|(_, _, on)| *on)
+    }
+
+    /// Whether the control `name` in `area` can be pressed now.
+    fn enabled(&self, name: &str, area: Rect) -> bool {
+        self.node_in(name, area).is_some()
+            && !self
+                .disabled
+                .iter()
+                .any(|(label, rect)| label == name && area.contains(rect.center()))
     }
 
     fn press(&mut self, at: Pos2, button: PointerButton) {
@@ -308,8 +335,7 @@ fn command_bar_settings_put_tools_sub_tools_colors_and_palettes_on_the_bar() {
         "tool eraser",
         "sub-tool pen G-pen",
         "popup color_slider",
-        "popup color
-",
+        "popup color\n",
         "color #000000",
     ] {
         assert!(kept.contains(line), "{line:?} in {kept}");
@@ -327,6 +353,15 @@ fn command_bar_settings_put_tools_sub_tools_colors_and_palettes_on_the_bar() {
             "{name} on {names:?}"
         );
     }
+    // The tool's button says its key in its tooltip, as menus write it.
+    let eraser = bar.node_in("Eraser", bar.bar_area()).unwrap().center();
+    assert!(!bar.driver.texts.iter().any(|(text, _)| text == "E"));
+    bar.step(vec![egui::Event::PointerMoved(eraser)]);
+    bar.settle(40);
+    assert!(
+        bar.driver.texts.iter().any(|(text, _)| text == "E"),
+        "the Eraser's tip shows E"
+    );
     // The tool's button picks it and lights up.
     let area = bar.bar_area();
     assert_eq!(bar.on("Eraser", area), Some(false));
@@ -375,7 +410,10 @@ fn the_right_click_menu_of_the_command_bar() {
     }
     bar.click_text("Delete");
     assert!(!bar.bar_names().iter().any(|name| name == "Delete"));
-    assert!(!bar.file("command_bar.txt").contains("command edit.clear\n"));
+    let kept = bar.file("command_bar.txt");
+    assert!(kept.starts_with("sue-command-bar 1\n"), "kept: {kept}");
+    assert!(kept.contains("command edit.undo\n"), "{kept}");
+    assert!(!kept.contains("command edit.clear\n"), "{kept}");
     // A drawing color after Undo.
     bar.right_click("Undo", area);
     bar.click_text("Add Drawing Color");
@@ -427,6 +465,17 @@ fn command_bar_buttons_move_by_ctrl_drag() {
         kept.find("command edit.redo").unwrap() < kept.find("command edit.undo").unwrap(),
         "{kept}"
     );
+    // Change Order, Drag: now a plain drag moves Undo back before Redo.
+    bar.right_click("Redo", area);
+    bar.hover_text("Change Order");
+    bar.click_text("Drag");
+    let from = bar.node_in("Undo", area).unwrap().center();
+    let to = bar.node_in("Redo", area).unwrap().left_center() + vec2(2.0, 0.0);
+    bar.drag(from, to);
+    let names = bar.bar_names();
+    let undo = names.iter().position(|name| name == "Undo").unwrap();
+    assert_eq!(names[undo + 1], "Redo", "{names:?}");
+    assert!(bar.file("command_bar.txt").contains("reorder drag\n"));
 }
 
 /// The timelapse button sits at the end of the command bar, as in Clip
@@ -549,11 +598,23 @@ fn command_bar_settings_hold_auto_actions_and_groups_and_restore_the_default() {
     let mut bar = Bar::new("paint-bar-restore");
     bar.driver.command("file.command_bar");
     bar.settle(6);
-    bar.add_from("Auto Action", "Flip Canvas and Fit");
+    bar.add_from("Auto Action", "Rotate Canvas Right");
     assert!(
         bar.file("command_bar.txt")
-            .contains("auto-action Flip Canvas and Fit\n")
+            .contains("auto-action Rotate Canvas Right\n")
     );
+    // Its button plays it: the canvas turns, a step that Undo takes back
+    // while the canvas stays open (an Undo with nothing played would
+    // undo the new canvas and close it).
+    bar.close_dialog();
+    let area = bar.bar_area();
+    assert!(!bar.enabled("Redo", area), "nothing to redo yet");
+    bar.click("Rotate Canvas Right", area);
+    bar.click("Undo", area);
+    assert!(bar.enabled("Redo", area), "the Auto Action made a step");
+    assert!(bar.enabled("Fit to Screen", area), "the canvas is open");
+    bar.driver.command("file.command_bar");
+    bar.settle(6);
     // Undo, picked at the right, takes Redo into a group.
     let heading = bar
         .driver
@@ -588,6 +649,6 @@ fn command_bar_settings_hold_auto_actions_and_groups_and_restore_the_default() {
     );
     bar.close_dialog();
     let names = bar.bar_names();
-    assert!(!names.iter().any(|name| name == "Flip Canvas and Fit"));
+    assert!(!names.iter().any(|name| name == "Rotate Canvas Right"));
     assert!(names.iter().any(|name| name == "Undo"));
 }
