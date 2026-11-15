@@ -3438,3 +3438,25 @@ and-more-files = { $count ->
 export-cancelled = Stopped exporting { $name }; nothing was written
 export-was-cancelled = The export was cancelled
 timelapse-mp4 = { $name } timelapse.mp4
+
+## The Animation Cels palette's entries (p4f-anim)
+light-table-entry-settings = Light Table Entry Settings
+show-or-hide-on-light-table = Show or Hide on the Light Table
+light-table-mode-table = As the light table
+light-table-mode-own = Own colors
+light-table-mode-tinted = Light table color
+color-mode-of-entry = Colors
+drop-to-register-cel = Let go to trace it on this cel
+drop-to-register-general = Let go to trace it on every cel
+the-cel-being-drawn = The cel being drawn: the layers under it are traced while you draw it
+already-on-this-light-table = That layer is already on this light table
+audio-scrubbing = Audio Scrubbing
+go-to-previous-timeline = Go to Previous Timeline
+go-to-next-timeline = Go to Next Timeline
+timeline-menu-label = Label
+thumbnail-size = Thumbnail Size
+time-unit = Time Unit
+fold-or-unfold-folder = Fold or Unfold the Folder
+keyframe-at-frame = Keyframe at frame { $frame }: { $ease }
+preview-on-the-timeline = Preview on the timeline
+drag-layer-here-to-trace-it = Drag a layer here from the Layer palette to trace it while you draw this cel, or pick it and use the register button above

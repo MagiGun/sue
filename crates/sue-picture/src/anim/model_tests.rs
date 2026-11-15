@@ -1009,3 +1009,80 @@ fn animation_sheet() {
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(std::path::Path::new(&folder).join("animation.png"), png).unwrap();
 }
+
+#[test]
+fn a_light_table_entry_keeps_its_own_eye_opacity_and_mode_on_its_link() {
+    let (mut arena, mut history, picture, folder) = animated(8, 6);
+    let (edit, cel) = new_cel(&arena, picture, folder, 0).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let (edit, other) = new_cel(&arena, picture, folder, 3).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    history.apply(&mut arena, register(cel, other)).unwrap();
+    history
+        .apply(&mut arena, register_general(picture, other))
+        .unwrap();
+    // A new entry shows whole, in the table's mode.
+    assert_eq!(
+        entry(&arena, cel, LIGHT_TABLE, other),
+        LightEntry::default()
+    );
+    let order = |arena: &Arena| {
+        arena
+            .relations()
+            .get(cel, LIGHT_TABLE, other)
+            .map(|link| link.order)
+    };
+    let placed = order(&arena);
+    let changed = LightEntry {
+        shown: false,
+        opacity: 0.25,
+        mode: EntryMode::Tinted,
+    };
+    let edit = set_entry(&arena, cel, LIGHT_TABLE, other, changed).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    assert_eq!(entry(&arena, cel, LIGHT_TABLE, other), changed);
+    assert_eq!(order(&arena), placed, "it keeps its place on the table");
+    // The general table's entry of the same layer is its own.
+    assert_eq!(
+        entry(&arena, picture, GENERAL_LIGHT_TABLE, other),
+        LightEntry::default()
+    );
+    // Hidden, it is left out of what the table shows.
+    assert!(traced_on(&arena, cel, LIGHT_TABLE, [8, 8]).is_empty());
+    assert_eq!(
+        traced_on(&arena, picture, GENERAL_LIGHT_TABLE, [8, 8]).len(),
+        1
+    );
+    // Undo and redo are exact.
+    history.undo(&mut arena).unwrap();
+    assert_eq!(
+        entry(&arena, cel, LIGHT_TABLE, other),
+        LightEntry::default()
+    );
+    assert_eq!(order(&arena), placed);
+    history.redo(&mut arena).unwrap();
+    assert_eq!(entry(&arena, cel, LIGHT_TABLE, other), changed);
+    // The same settings again change nothing; a layer not on the table
+    // has none to change.
+    assert!(set_entry(&arena, cel, LIGHT_TABLE, other, changed).is_none());
+    assert!(set_entry(&arena, other, LIGHT_TABLE, cel, changed).is_none());
+    // Shown at a quarter and tinted, the skin says so.
+    let shown = LightEntry {
+        shown: true,
+        ..changed
+    };
+    let edit = set_entry(&arena, cel, LIGHT_TABLE, other, shown).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let traced = traced_on(&arena, cel, LIGHT_TABLE, [8, 8]);
+    let view = FrameView::default().with_light_table(&traced, 0.5, None);
+    let skin = view.onion.iter().find(|skin| skin.cel == other).unwrap();
+    assert!((skin.opacity - 0.125).abs() < 1e-6);
+    assert_eq!(skin.color, LIGHT_TABLE_TINT);
+    assert!((skin.tint - 1.0).abs() < 1e-6);
+    // In its own colors it is never tinted, whatever the table says.
+    assert_eq!(EntryMode::Own.tint(Some([1.0, 0.0, 0.0])), None);
+    assert_eq!(EntryMode::Table.tint(None), None);
+    for mode in EntryMode::ALL {
+        assert_eq!(EntryMode::from_name(mode.name()), mode);
+    }
+}
