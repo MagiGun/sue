@@ -33,7 +33,7 @@ const GHOST: f32 = 0.7;
 
 /// The size of the question asked before folders are deleted (until the
 /// dialog host sizes dialogs by their content).
-pub(crate) const DELETE_FOLDERS_SIZE: egui::Vec2 = egui::Vec2::new(380.0, 170.0);
+pub(crate) const DELETE_FOLDERS_SIZE: egui::Vec2 = egui::Vec2::new(400.0, 220.0);
 
 /// What the Layer palette keeps between frames.
 #[derive(Clone, Debug, Default)]

@@ -56,6 +56,20 @@ fn caption(ui: &mut Ui, text: &str, theme: &Theme) {
     );
 }
 
+/// A caption as wide as the label column of the shared slider, so the
+/// rows of a dialog that mixes both line up.
+fn column_caption(ui: &mut Ui, text: &str, theme: &Theme) {
+    let room = theme.space(Space::S9) * 2.0;
+    ui.allocate_ui_with_layout(
+        egui::Vec2::new(room, ui.spacing().interact_size.y),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(room);
+            caption(ui, text, theme);
+        },
+    );
+}
+
 /// The names of `effects::TONE_SHAPES`, as people read them.
 fn shape_names() -> Vec<String> {
     effects::TONE_SHAPES
@@ -715,7 +729,7 @@ impl SuePaint {
             .unwrap_or(TONE_FREQUENCIES.len());
         let lpi = tr!("lpi");
         ui.horizontal(|ui| {
-            caption(ui, &tr!("frequency"), theme);
+            column_caption(ui, &tr!("frequency"), theme);
             sue_wm::ui::number_field("sue-paint-simple-tone-lines", &mut tone.lines)
                 .range(5.0..=300.0)
                 .decimals(1)
@@ -743,7 +757,7 @@ impl SuePaint {
         .show(ui, theme);
         let shapes = shape_names();
         ui.horizontal(|ui| {
-            caption(ui, &tr!("tone-dot-shape"), theme);
+            column_caption(ui, &tr!("tone-dot-shape"), theme);
             sue_wm::ui::dropdown("sue-paint-simple-tone-shape", &mut tone.shape, &shapes)
                 .label(&tr!("tone-dot-shape"))
                 .show(ui, theme);
