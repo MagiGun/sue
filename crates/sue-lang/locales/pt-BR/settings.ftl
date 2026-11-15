@@ -56,6 +56,7 @@ filter-settings-ellipsis = Filtrar configurações...
 results-for = Resultados para "{ $filter }"
 all-settings = Todas as Configurações
 applet-name = Configurações
+applet-summary = Todas as configurações e parâmetros de estilo.
 sue-keeps-work-you-have-not = O Sue salva automaticamente o trabalho não salvo no Hub para recuperação ou descarte.
 unsaved-work = Trabalho Não Salvo
 check-for-updates = Verificar Atualizações

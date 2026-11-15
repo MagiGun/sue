@@ -1,5 +1,6 @@
 ## Sue itself (bins/sue).
 
+could-not-save-the-rice = 无法保存设置: { $error }
 quit-sue = 退出 Sue 吗？
 your-settings-are-saved-first = 您的设置将先行保存。
 quit = 退出
@@ -23,14 +24,18 @@ untitled-sue = 无标题.sue
 sue-project = Sue 项目
 opened = 已打开 { $value }
 it-is-a-folder = 这是一个文件夹
+over-mib-limit-io-max-ingest = 大小为 { $value }，超过了 { $limit_mib } MiB 的上限 (io.max_ingest_mib)
 cannot-open = 无法打开 { $name }: { $reason }
 no-studio-tool-opens-yet = 尚无工作室或工具支持打开 { $name }
 there-no-audio-device-mode = 在此模式下无音频设备
 audio = 音频: { $error }
 cannot-read = 无法读取 { $path }: { $error }
+rice-file-has-error = 设置文件包含错误: { $error }
+rice-file-matches-what-sue-shows = 设置文件与 Sue 当前显示一致
 reload-default-suerice = 重新加载 default.suerice
 reloaded-values-from-disk = 已从磁盘重新加载 { $count } 个值
 reload-failed = 重新加载失败: { $error }
+export-rice = 导出设置
 could-not-keep-unsaved-work = 无法保留未保存的工作: { $error }
 that-unsaved-work-is-gone = 未保存的工作已丢失
 cannot-recover = 无法恢复 { $title }: { $error }

@@ -56,6 +56,7 @@ filter-settings-ellipsis = 过滤设置...
 results-for = "{ $filter }" 的结果
 all-settings = 所有设置
 applet-name = 设置
+applet-summary = 所有系统设置与外观选项。
 sue-keeps-work-you-have-not = Sue 会自动在 Hub 中暂存未保存的工作，供您恢复或放弃。
 unsaved-work = 未保存的工作
 check-for-updates = 检查更新

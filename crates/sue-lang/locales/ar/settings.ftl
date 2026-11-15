@@ -56,6 +56,7 @@ filter-settings-ellipsis = تصفية الإعدادات...
 results-for = نتائج البحث عن "{ $filter }"
 all-settings = كافة الإعدادات
 applet-name = الإعدادات
+applet-summary = كافة الإعدادات ومحددات المظهر.
 sue-keeps-work-you-have-not = يحتفظ Sue تلقائيا بالعمل غير المحفوظ في المركز لاستعادته أو تجاهله.
 unsaved-work = العمل غير المحفوظ
 check-for-updates = التحقق من وجود تحديثات

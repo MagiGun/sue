@@ -48,6 +48,7 @@ settings-reset-all = Alle Einstellungen zurücksetzen
 settings-reset-all-confirm = Erneut klicken, um alle Einstellungen zurückzusetzen
 all-settings = Alle Einstellungen
 applet-name = Einstellungen
+applet-summary = Alle Einstellungen und Rice-Parameter.
 unsaved-work = Ungespeicherte Arbeit
 
 active-generation = Aktive Generation

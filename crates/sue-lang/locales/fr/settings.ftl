@@ -48,6 +48,7 @@ settings-reset-all = Réinitialiser tous les paramètres
 settings-reset-all-confirm = Cliquez à nouveau pour tout réinitialiser
 all-settings = Tous les paramètres
 applet-name = Paramètres
+applet-summary = Tous les paramètres et paramètres Rice.
 unsaved-work = Travail non enregistré
 
 active-generation = Génération active
