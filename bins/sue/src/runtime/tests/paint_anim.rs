@@ -1296,3 +1296,469 @@ fn sue_paint_timeline_plays_its_range_reads_in_seconds_and_keeps_labels_and_keys
     paint.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
     assert!(arena_bytes(&paint) == before, "keying undoes");
 }
+
+/// Hovers along the line `y` from `from` to `to` (in steps of 6 points)
+/// and notes each tooltip that comes up with where it came up first: how
+/// buttons drawn as icons alone are found by name, never by a fixed
+/// place.
+fn tips_along(paint: &mut PaintDriver, y: f32, from: f32, to: f32) -> Vec<(String, Pos2)> {
+    paint.step(vec![egui::Event::PointerMoved(Pos2::new(from, y - 300.0))]);
+    let quiet: std::collections::HashSet<String> =
+        paint.settle(3).into_iter().map(|(text, _)| text).collect();
+    let mut found: Vec<(String, Pos2)> = Vec::new();
+    let mut x = from;
+    let mut first = true;
+    while x < to {
+        let at = Pos2::new(x, y);
+        paint.step(vec![egui::Event::PointerMoved(at)]);
+        let texts = paint.settle(if first { 45 } else { 8 });
+        for (text, _) in texts {
+            if !quiet.contains(&text) && !found.iter().any(|(known, _)| *known == text) {
+                found.push((text, at));
+                first = false;
+            }
+        }
+        x += 6.0;
+    }
+    found
+}
+
+/// Where the tooltip holding `name` came up.
+fn tip(found: &[(String, Pos2)], name: &str) -> Pos2 {
+    found
+        .iter()
+        .find(|(text, _)| text.contains(name))
+        .map(|(_, at)| *at + vec2(3.0, 0.0))
+        .unwrap_or_else(|| panic!("a button named {name:?}: {found:?}"))
+}
+
+/// A press and a release of the primary button at `at`.
+fn click_at(paint: &mut PaintDriver, at: Pos2) -> Vec<(String, egui::Rect)> {
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    paint.step(vec![egui::Event::PointerMoved(at)]);
+    paint.step(vec![button(true)]);
+    paint.step(vec![button(false)]);
+    paint.settle(4)
+}
+
+/// Every file under `dir`.
+fn walk_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(walk_files(&path));
+        } else {
+            out.push(path);
+        }
+    }
+    out
+}
+
+/// The Timeline palette's header tab, under the canvas.
+fn timeline_header(texts: &[(String, egui::Rect)]) -> egui::Rect {
+    texts
+        .iter()
+        .find(|(text, rect)| text == "Timeline" && rect.top() > 600.0)
+        .map(|(_, rect)| *rect)
+        .unwrap_or_else(|| panic!("the Timeline palette under the canvas: {texts:?}"))
+}
+
+#[test]
+fn sue_paint_timeline_bar_ruler_and_names_read_as_they_should() {
+    // X-5, AB-25, AB-14, TR-17, ABV-5, TRV-2, ABV-3, TRV-6, TRV-5,
+    // A25V-19, ABV-23.
+    let mut paint = PaintDriver::new("paint-timeline-bar");
+    let texts = paint.settle(2);
+    let header = timeline_header(&texts);
+    // The bar's buttons, found by their tooltips: each has its name.
+    let bar_y = header.bottom() + 24.0;
+    let found = tips_along(&mut paint, bar_y, header.left() - 60.0, 1000.0);
+    // X-5: New Animation Folder works before any timeline exists.
+    let folder = tip(&found, "Animation Folder");
+    click_at(&mut paint, folder);
+    let made = paint
+        .runtime
+        .engine
+        .world
+        .arena
+        .iter()
+        .filter(|(_, entity)| {
+            entity
+                .property("folder.animation")
+                .and_then(sue_core::Value::as_bool)
+                == Some(true)
+        })
+        .count();
+    assert_eq!(made, 1, "the button made an animation folder: {found:?}");
+    let picture = open_picture(&paint);
+    assert!(sue_paint::anim::timeline(&paint.runtime.engine.world.arena, picture).is_some());
+    // AB-25: New Animation Cel is never grayed on a folder's track; it
+    // makes cel 1, and a second cel at frame 4.
+    let found = tips_along(&mut paint, bar_y, header.left() - 60.0, 1000.0);
+    let new_cel = tip(&found, "New Animation Cel");
+    click_at(&mut paint, new_cel);
+    for _ in 0..3 {
+        paint.command("anim.next");
+    }
+    click_at(&mut paint, new_cel);
+    let sequence = timeline_of(&paint);
+    assert_eq!(
+        sue_paint::anim::keys(&sequence.tracks[0], sequence.rate).len(),
+        2,
+        "two cels keyed"
+    );
+    // The minus button deletes the key on the frame shown, and says so.
+    assert!(
+        found
+            .iter()
+            .any(|(text, _)| text.contains("Delete Keyframe")),
+        "{found:?}"
+    );
+    // ABV-5, TRV-2: the track's header names the folder and the cel
+    // showing: "Folder 1 : 2" at frame 4.
+    let texts = paint.settle(3);
+    assert!(
+        texts.iter().any(|(text, _)| text == "Folder 1 : 2"),
+        "{texts:?}"
+    );
+    // AB-14, TR-17: Specify Cels opens the list of the folder's cels.
+    let specify = tip(&found, "Specify cels");
+    let before_list = paint.settle(2);
+    let texts = click_at(&mut paint, specify);
+    assert!(
+        texts.iter().any(|(text, _)| text == "Blank from here"),
+        "the cel list: {texts:?}"
+    );
+    // Picking cel 1 there (the "1" the list drew) shows it from frame 4.
+    let one = texts
+        .iter()
+        .filter(|(text, rect)| text == "1" && !before_list.iter().any(|(_, was)| was == rect))
+        .map(|(_, rect)| rect.center())
+        .next()
+        .unwrap_or_else(|| panic!("cel 1 in the list: {texts:?}"));
+    click_at(&mut paint, one);
+    let sequence = timeline_of(&paint);
+    let cel_one = sue_paint::anim::keys(&sequence.tracks[0], sequence.rate)[0].1;
+    assert_eq!(
+        sue_paint::anim::cel_at(&sequence.tracks[0], sequence.rate, 3),
+        cel_one,
+        "cel 1 shows from frame 4"
+    );
+    paint.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    paint.settle(2);
+
+    // ABV-3, TRV-6: seconds over the frames, numbers past the end in a
+    // fainter ink, and the frame shown in the playhead (frame 4).
+    let texts = paint.settle(3);
+    let ruler: Vec<&String> = texts
+        .iter()
+        .filter(|(_, rect)| rect.top() > header.bottom() && rect.left() > 560.0)
+        .map(|(text, _)| text)
+        .collect();
+    for name in ["0s", "1s", "25", "4"] {
+        assert!(ruler.iter().any(|text| *text == name), "{name}: {ruler:?}");
+    }
+    // Zoomed in, every frame is numbered.
+    for _ in 0..4 {
+        paint.command("anim.zoom_in");
+    }
+    paint.command("anim.first");
+    let texts = paint.settle(4);
+    let numbered = |texts: &[(String, egui::Rect)], name: &str| {
+        texts
+            .iter()
+            .find(|(text, rect)| {
+                text == name && rect.top() > header.bottom() + 30.0 && rect.left() > 560.0
+            })
+            .map(|(_, rect)| *rect)
+    };
+    for name in ["2", "3", "5"] {
+        assert!(
+            numbered(&texts, name).is_some(),
+            "frame {name} numbered when zoomed in: {texts:?}"
+        );
+    }
+    // TRV-5: the frame under the pointer, over the ruler.
+    let three = numbered(&texts, "3").unwrap().center();
+    paint.step(vec![egui::Event::PointerMoved(three)]);
+    let texts = paint.settle(45);
+    assert!(texts.iter().any(|(text, _)| text == "Frame 3"), "{texts:?}");
+    // A25V-19: while it plays, the bar reads the frames a second.
+    paint.command("anim.play");
+    let mut fps = false;
+    for _ in 0..90 {
+        let texts = paint.step(Vec::new());
+        fps |= texts
+            .iter()
+            .any(|(text, _)| text.ends_with(" fps") && text.contains(" to "));
+    }
+    paint.command("anim.play");
+    assert!(fps, "a frame rate on the bar while playing");
+    // ABV-23: a sound's track and clip carry its file's name.
+    std::fs::create_dir_all(&paint.root).unwrap();
+    let tone: Vec<f32> = (0..48_000)
+        .map(|index| (index as f32 * 0.05).sin() * 0.5)
+        .collect();
+    let tone = sue_core::PCMFloat1D::new(48_000, 1, tone).unwrap();
+    let path = paint.root.join("Tone.wav");
+    std::fs::write(&path, sue_io::encode_wav(&tone)).unwrap();
+    let applet = AppletId::new(sue_paint::ID).unwrap();
+    paint.runtime.request(
+        ShellRequest::Picked {
+            pick: FilePick::open(Some(applet), "anim-audio", "Import Audio"),
+            path,
+        },
+        &mut NoTextures,
+        paint.now,
+    );
+    // The rows one line tall, scrolled down (Alt and the wheel) to the
+    // sound's, the last.
+    paint.command("anim.thumbnails.none");
+    paint.settle(2);
+    let over = Pos2::new(header.left() + 300.0, header.bottom() + 100.0);
+    paint.step(vec![egui::Event::PointerMoved(over)]);
+    for _ in 0..4 {
+        paint.step(vec![
+            egui::Event::ModifiersChanged(egui::Modifiers::ALT),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -60.0),
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Unknown,
+                modifiers: egui::Modifiers::ALT,
+            },
+        ]);
+    }
+    paint.step(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+    let texts = paint.settle(6);
+    assert!(
+        texts
+            .iter()
+            .filter(|(text, rect)| text.starts_with("Tone") && rect.top() > header.bottom())
+            .count()
+            >= 2,
+        "the track and its clip: {texts:?}"
+    );
+}
+
+#[test]
+fn sue_paint_timeline_menus_insert_frames_and_timelapse_ask_first() {
+    // AB-11, TR-8, ABV-6, ABV-7, TRV-1, FG-37, AB-4, TR-18, ABV-19,
+    // ABV-14, A25V-12.
+    let mut paint = PaintDriver::new("paint-timeline-menus");
+    // New Timeline (every layer gets a track), then a folder.
+    paint.command("anim.timeline.new");
+    paint.settle(2);
+    press(&mut paint, egui::Key::Enter);
+    paint.command("anim.layer.folder");
+    paint.command("anim.cel.new");
+    let texts = paint.settle(4);
+    let header = timeline_header(&texts);
+    // The palette's menu, at the left of its header: its own commands.
+    let found = tips_along(
+        &mut paint,
+        header.center().y,
+        header.left() - 70.0,
+        header.left(),
+    );
+    let menu = tip(&found, "Timeline");
+    let texts = click_at(&mut paint, menu);
+    for name in [
+        "New Timeline...",
+        "Change Settings...",
+        "Thumbnails: None",
+        "Show Time in Seconds and Frames",
+        "Timeline Label...",
+        "Playback Starts Here",
+        "Audio Clip Settings...",
+    ] {
+        assert!(
+            texts.iter().any(|(text, _)| text == name),
+            "{name} in the palette's menu: {texts:?}"
+        );
+    }
+    press(&mut paint, egui::Key::Escape);
+    // ABV-7: Change Settings is its own dialog, apart from the frame rate.
+    paint.command("anim.timeline.settings");
+    let texts = paint.settle(3);
+    for name in ["Timeline name", "Division line every", "Scene", "Shot"] {
+        assert!(
+            texts.iter().any(|(text, _)| text == name),
+            "{name}: {texts:?}"
+        );
+    }
+    press(&mut paint, egui::Key::Escape);
+    paint.command("anim.timeline.edit");
+    let texts = paint.settle(3);
+    assert!(
+        texts.iter().any(|(text, _)| text == "Frame rate"),
+        "{texts:?}"
+    );
+    assert!(!texts.iter().any(|(text, _)| text == "Division line every"));
+    press(&mut paint, egui::Key::Escape);
+
+    // TRV-1: Insert Frame asks how many; 3 frames after frame 1, split.
+    let picture = open_picture(&paint);
+    let length = sue_paint::anim::length(&paint.runtime.engine.world.arena, picture);
+    let before = arena_bytes(&paint);
+    paint.command("anim.frame.insert");
+    let texts = paint.settle(3);
+    assert!(
+        texts.iter().any(|(text, _)| text == "Number of frames"),
+        "{texts:?}"
+    );
+    fill(&mut paint, "Number of frames", "3");
+    paint.click_text("Split Clip");
+    paint.click_text("OK");
+    let arena = &paint.runtime.engine.world.arena;
+    assert_eq!(sue_paint::anim::length(arena, picture), length + 3);
+    let sequence = timeline_of(&paint);
+    let track = &sequence.tracks[sue_paint::anim::folders(&sequence)[0]];
+    let cel = sue_paint::anim::cel_at(track, sequence.rate, 0);
+    assert!(cel.is_some());
+    assert_eq!(
+        sue_paint::anim::cel_at(track, sequence.rate, 1),
+        None,
+        "split: the new frames are blank"
+    );
+    assert_eq!(
+        sue_paint::anim::cel_at(track, sequence.rate, 4),
+        cel,
+        "then the cel again"
+    );
+    paint.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    paint.settle(2);
+    assert!(arena_bytes(&paint) == before, "Insert Frame undoes");
+
+    // A25V-12, ABV-14: the right click on a frame, and on a layer's row
+    // its keyframe commands (the rows one line tall, so all show).
+    paint.command("anim.thumbnails.none");
+    let texts = paint.settle(4);
+    let layer_row = texts
+        .iter()
+        .find(|(text, rect)| {
+            text.starts_with("Layer 1") && rect.top() > header.bottom() && rect.left() < 560.0
+        })
+        .map(|(_, rect)| *rect)
+        .unwrap_or_else(|| panic!("Layer 1's track: {texts:?}"));
+    let one = texts
+        .iter()
+        .find(|(text, rect)| text == "1" && rect.top() > header.bottom() && rect.left() > 560.0)
+        .map(|(_, rect)| *rect)
+        .expect("frame 1 on the ruler");
+    let at = Pos2::new(one.center().x, layer_row.center().y);
+    let right = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    paint.step(vec![egui::Event::PointerMoved(at)]);
+    paint.step(vec![right(true)]);
+    paint.step(vec![right(false)]);
+    let texts = paint.settle(3);
+    for name in [
+        "Add Keyframe to Layer",
+        "Keyframe Interpolation",
+        "Cut Frames",
+        "Copy Frames",
+        "Paste Frames",
+        "Delete Frames",
+        "Split Clip",
+        "Merge Clips",
+        "Set as First Displayed Frame",
+        "Set as Last Displayed Frame",
+    ] {
+        assert!(
+            texts.iter().any(|(text, _)| text == name),
+            "{name}: {texts:?}"
+        );
+    }
+    press(&mut paint, egui::Key::Escape);
+
+    // AB-4, TR-18, ABV-19: the menu reads "2D Camera Folder"; the folder
+    // is "Camera 1", empty, and its track is the top row.
+    assert_eq!(
+        sue_paint::registry().label("anim.layer.camera").as_deref(),
+        Some("2D Camera Folder")
+    );
+    assert!(
+        sue_paint::menus()
+            .iter()
+            .flat_map(|menu| &menu.items)
+            .flat_map(sue_wm::MenuItem::commands)
+            .any(|command| command == "anim.layer.camera"),
+        "in the Animation menu"
+    );
+    paint.command("anim.layer.camera");
+    let texts = paint.settle(4);
+    let row = |name: &str| {
+        texts
+            .iter()
+            .filter(|(text, rect)| {
+                text.starts_with(name) && rect.top() > header.bottom() + 20.0 && rect.left() < 560.0
+            })
+            .map(|(_, rect)| rect.top())
+            .next()
+            .unwrap_or_else(|| panic!("{name}'s track: {texts:?}"))
+    };
+    assert!(
+        row("Camera 1") < row("Folder 1"),
+        "the camera's track first"
+    );
+    let arena = &paint.runtime.engine.world.arena;
+    let camera = arena
+        .iter()
+        .find(|(_, entity)| entity.name() == "Camera 1")
+        .map(|(_, entity)| entity.id())
+        .expect("Camera 1");
+    assert!(arena.relations().children(camera).is_empty(), "made empty");
+
+    // FG-37: stopping the timelapse asks first; Delete takes the frames.
+    paint.command("file.timelapse.record");
+    paint.settle(2);
+    paint.command("layer.new");
+    line_on_canvas(&mut paint, 0.0);
+    paint.settle(20);
+    line_on_canvas(&mut paint, 30.0);
+    paint.settle(20);
+    let root = paint.root.clone();
+    let kept = || {
+        walk_files(&root)
+            .into_iter()
+            .filter(|path| {
+                path.to_string_lossy().contains("timelapse")
+                    && path.extension().is_some_and(|ext| ext == "jpg")
+            })
+            .count()
+    };
+    assert!(kept() > 0, "frames recorded");
+    paint.command("file.timelapse.record");
+    let texts = paint.settle(3);
+    assert!(texts.iter().any(|(text, _)| text == "Keep"), "{texts:?}");
+    let recording = |paint: &PaintDriver| {
+        paint
+            .runtime
+            .engine
+            .world
+            .arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(|entity| entity.property("timelapse.record"))
+            .and_then(sue_core::Value::as_bool)
+            .unwrap_or(false)
+    };
+    assert!(recording(&paint), "still recording while it asks");
+    paint.click_text("Delete");
+    assert!(!recording(&paint), "stopped");
+    assert_eq!(kept(), 0, "the recording was deleted");
+}
