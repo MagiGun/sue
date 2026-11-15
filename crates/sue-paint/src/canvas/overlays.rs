@@ -305,6 +305,7 @@ impl SuePaint {
         };
         if let Some(bend) = &self.figure_draft.bend
             && self.toolbox.tool() == Tool::Figure
+            && bend.picture == doc.picture
         {
             figure.bend(bend);
         }

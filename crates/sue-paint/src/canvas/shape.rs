@@ -51,6 +51,9 @@ pub(crate) struct FigureDraft {
 /// A Curve's ends, laid by a drag, before the click that bends it.
 #[derive(Clone, Debug)]
 pub(crate) struct Bend {
+    /// The picture the ends were laid on; the Curve is dropped when
+    /// another one comes to the front.
+    pub picture: sue_core::EntityId,
     pub from: [f32; 2],
     pub to: [f32; 2],
     pub sub: SubTool,

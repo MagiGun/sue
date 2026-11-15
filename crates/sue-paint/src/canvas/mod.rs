@@ -120,12 +120,13 @@ impl SuePaint {
                 self.polyline_for = None;
             }
         }
-        if self.figure_draft.bend.is_some() {
-            // A Curve waiting for its bend: Esc, or another sub tool,
-            // drops it.
+        if let Some(bend) = &self.figure_draft.bend {
+            // A Curve waiting for its bend: Esc, another sub tool, or
+            // another picture drops it.
             let escape = ui.input(|input| input.key_pressed(Key::Escape));
             let now = (self.toolbox.tool(), self.toolbox.current().mode);
-            if escape || now != (Tool::Figure, crate::tools::CURVE) {
+            let elsewhere = self.picture() != Some(bend.picture);
+            if escape || elsewhere || now != (Tool::Figure, crate::tools::CURVE) {
                 self.figure_draft.bend = None;
             }
         }

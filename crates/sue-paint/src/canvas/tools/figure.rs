@@ -40,6 +40,7 @@ impl SuePaint {
         }
         if sub.mode == CURVE
             && let Some(bend) = self.figure_draft.bend.take()
+            && self.picture() == Some(bend.picture)
         {
             // The click that sets a Curve's bend: the line passes
             // through it.
@@ -164,8 +165,11 @@ impl SuePaint {
                     &guides,
                 );
                 let (a, b) = (line.points[0], line.points[line.points.len() - 1]);
-                if (b[0] - a[0]).hypot(b[1] - a[1]) >= 4.0 {
+                if let Some(picture) = self.picture()
+                    && (b[0] - a[0]).hypot(b[1] - a[1]) >= 4.0
+                {
                     self.figure_draft.bend = Some(Bend {
+                        picture,
                         from: a,
                         to: b,
                         sub: sub.clone(),
