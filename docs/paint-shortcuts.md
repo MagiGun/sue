@@ -186,15 +186,16 @@ default key, and neither does its opposite number in Sue.
 | Eyedropper while drawing | Alt and click | Alt and click | yes |
 | Change brush size | Ctrl+Alt and drag | Ctrl+Alt and drag | yes |
 | Draw a straight line | Shift and drag | Shift and drag | yes |
-| Object (move a 3D or vector object while drawing) | Ctrl and drag | not documented | missing in Sue, to verify |
-| Add to a selection | Shift and drag | not documented | missing in Sue, to verify |
-| Delete from a selection | Alt and drag | not documented | missing in Sue, to verify |
-| Select from a selection | Shift+Alt and drag | not documented | missing in Sue, to verify |
+| Object (move a raster layer, a vector line, a 3D object while drawing) | Ctrl and drag | Ctrl and drag | yes (0.0.8) |
+| Add to a selection | Shift and drag | Shift and drag | yes |
+| Delete from a selection | Alt and drag | Alt and drag | yes |
+| Select from a selection | Shift+Alt and drag | Shift+Alt and drag | yes |
 | Move layer, keep the original | Alt and drag | not documented | missing in Sue, to verify |
 | Move layer, fix the direction | Shift and drag | not documented | missing in Sue, to verify |
 | Fill, toggle referring to several layers | Shift and click | not documented | missing in Sue, to verify |
 | Control point: delete, add, switch corner | Alt and click, Shift and click, Shift+Alt and click | not documented | missing in Sue, to verify |
-| Modifier Key Settings (per key, per tool) | a dialog over Ctrl, Alt, Shift, Space, the wheel, right-click and touch | no dialog | missing in Sue |
+| Modifier Key Settings (per key, per tool) | a dialog over Ctrl, Alt, Shift, Space, the wheel, right-click and touch | General or one tool's rows for each key on the canvas, the wheel, the right and middle buttons (0.0.8; touch not) | yes, but touch |
+| A tool key held down borrows its tool | hold the key | hold the key | yes (0.0.8) |
 
 ## The differences, most used first
 
@@ -212,9 +213,10 @@ default key, and neither does its opposite number in Sue.
 7. Paste to shown position, Ctrl+Shift+V: settled, Sue has it too.
 8. Reset display (Ctrl+@) and Toggle special ruler snapping (Ctrl+4)
    are missing.
-9. Modifier Key Settings has Clip Studio's Ctrl+Shift+Alt+Y since
-   0.0.8, but Sue has no modifier key settings dialog yet to rebind any
-   of the modifier rows.
+9. Modifier Key Settings has Clip Studio's Ctrl+Shift+Alt+Y and,
+   since 0.0.8, rows for every key, the wheel and the buttons, in
+   general and per tool (docs/paint-modifier-keys.md). Touch rows are
+   missing.
 10. Rotate right: Clip Studio uses ^, Sue =. Every menu shows the key
     that really runs its item since 0.0.8.
 11. Preferences: Ctrl+K in both, and the menu shows it.
