@@ -1148,7 +1148,8 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "settings",
         timeline_settings,
     )
-    .state(on_timeline),
+    .state(on_timeline)
+    .with(Flags::PALETTE),
     c(
         "anim.timeline.switch.",
         "switch-timeline",
@@ -1156,177 +1157,227 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         timeline_switch,
     )
     .state(on_timeline)
-    .with(Flags::FAMILY),
-    c("anim.zoom_in", "zoom-in", "zoom-in", zoom).state(on_timeline),
-    c("anim.zoom_out", "zoom-out", "zoom-out", zoom).state(on_timeline),
-    c("anim.edit.cut", "cut-frames", "cut", edit_frames).state(on_timeline),
-    c("anim.edit.copy", "copy-frames", "copy", edit_frames).state(on_timeline),
-    c("anim.edit.paste", "paste-frames", "paste", edit_frames).state(can_paste),
-    c("anim.edit.delete", "delete-frames", "delete", edit_frames).state(on_timeline),
-    c("anim.clip.split", "split-clip", "cut", clip).state(on_timeline),
-    c("anim.clip.merge", "merge-clips", "layer-merge-down", clip).state(on_timeline),
+    .with(Flags::FAMILY)
+    .with(Flags::PALETTE),
+    c("anim.zoom_in", "zoom-in", "zoom-in", zoom)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
+    c("anim.zoom_out", "zoom-out", "zoom-out", zoom)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
+    c("anim.edit.cut", "cut-frames", "cut", edit_frames)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
+    c("anim.edit.copy", "copy-frames", "copy", edit_frames)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
+    c("anim.edit.paste", "paste-frames", "paste", edit_frames)
+        .state(can_paste)
+        .with(Flags::PALETTE),
+    c("anim.edit.delete", "delete-frames", "delete", edit_frames)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
+    c("anim.clip.split", "split-clip", "cut", clip)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
+    c("anim.clip.merge", "merge-clips", "layer-merge-down", clip)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
     c(
         "anim.clip.first",
         "set-as-first-displayed-frame",
         "frame-first",
         clip,
     )
-    .state(on_timeline),
+    .state(on_timeline)
+    .with(Flags::PALETTE),
     c(
         "anim.clip.last",
         "set-as-last-displayed-frame",
         "frame-last",
         clip,
     )
-    .state(on_timeline),
-    c("anim.label", "timeline-label-ellipsis", "tag", label).state(on_timeline),
+    .state(on_timeline)
+    .with(Flags::PALETTE),
+    c("anim.label", "timeline-label-ellipsis", "tag", label)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
     c(
         "anim.track_label.inbetween",
         "track-label-inbetween",
         "tag",
         track_label,
     )
-    .state(on_timeline),
+    .state(on_timeline)
+    .with(Flags::PALETTE),
     c(
         "anim.track_label.inbetween-done",
         "track-label-inbetween-done",
         "tag",
         track_label,
     )
-    .state(on_timeline),
+    .state(on_timeline)
+    .with(Flags::PALETTE),
     c(
         "anim.track_label.reverse-sheet",
         "track-label-reverse-sheet",
         "tag",
         track_label,
     )
-    .state(on_timeline),
+    .state(on_timeline)
+    .with(Flags::PALETTE),
     c(
         "anim.track_label.none",
         "track-label-none",
         "delete",
         track_label,
     )
-    .state(on_timeline),
+    .state(on_timeline)
+    .with(Flags::PALETTE),
     c(
         "anim.play_range.start",
         "playback-starts-here",
         "frame-first",
         play_range,
     )
-    .state(on_timeline),
+    .state(on_timeline)
+    .with(Flags::PALETTE),
     c(
         "anim.play_range.end",
         "playback-ends-here",
         "frame-last",
         play_range,
     )
-    .state(on_timeline),
+    .state(on_timeline)
+    .with(Flags::PALETTE),
     c(
         "anim.play_range.clear",
         "play-every-frame",
         "reset",
         play_range,
     )
-    .state(on_timeline),
+    .state(on_timeline)
+    .with(Flags::PALETTE),
     c(
         "anim.thumbnails.none",
         "thumbnails-none",
         "view-list",
         thumbnails,
     )
-    .state(thumbnails_state),
+    .state(thumbnails_state)
+    .with(Flags::PALETTE),
     c(
         "anim.thumbnails.smallest",
         "thumbnails-smallest",
         "view-grid-small",
         thumbnails,
     )
-    .state(thumbnails_state),
+    .state(thumbnails_state)
+    .with(Flags::PALETTE),
     c(
         "anim.thumbnails.small",
         "thumbnails-small",
         "view-grid-small",
         thumbnails,
     )
-    .state(thumbnails_state),
+    .state(thumbnails_state)
+    .with(Flags::PALETTE),
     c(
         "anim.thumbnails.medium",
         "thumbnails-medium",
         "view-grid",
         thumbnails,
     )
-    .state(thumbnails_state),
+    .state(thumbnails_state)
+    .with(Flags::PALETTE),
     c(
         "anim.thumbnails.large",
         "thumbnails-large",
         "view-grid",
         thumbnails,
     )
-    .state(thumbnails_state),
+    .state(thumbnails_state)
+    .with(Flags::PALETTE),
     c(
         "anim.thumbnails.largest",
         "thumbnails-largest",
         "view-grid",
         thumbnails,
     )
-    .state(thumbnails_state),
+    .state(thumbnails_state)
+    .with(Flags::PALETTE),
     c(
         "anim.time_unit.frames",
         "time-in-frames",
         "recent",
         time_unit,
     )
-    .state(time_unit_state),
+    .state(time_unit_state)
+    .with(Flags::PALETTE),
     c(
         "anim.time_unit.seconds",
         "time-in-seconds-and-frames",
         "recent",
         time_unit,
     )
-    .state(time_unit_state),
+    .state(time_unit_state)
+    .with(Flags::PALETTE),
     c(
         "anim.time_unit.timecode",
         "time-in-time-code",
         "recent",
         time_unit,
     )
-    .state(time_unit_state),
+    .state(time_unit_state)
+    .with(Flags::PALETTE),
     c("anim.cel.show.", "show-cel", "cel", cel_show)
         .state(on_timeline)
-        .with(Flags::FAMILY),
-    c("anim.key.layer", "add-layer-keyframe", "plus", key_layer).state(on_timeline),
-    c("anim.key.ease.smooth", "keyframe-smooth", "edit", key_ease).state(on_timeline),
-    c("anim.key.ease.linear", "keyframe-linear", "edit", key_ease).state(on_timeline),
-    c("anim.key.ease.hold", "keyframe-hold", "edit", key_ease).state(on_timeline),
+        .with(Flags::FAMILY)
+        .with(Flags::PALETTE),
+    c("anim.key.layer", "add-layer-keyframe", "plus", key_layer)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
+    c("anim.key.ease.smooth", "keyframe-smooth", "edit", key_ease)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
+    c("anim.key.ease.linear", "keyframe-linear", "edit", key_ease)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
+    c("anim.key.ease.hold", "keyframe-hold", "edit", key_ease)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
     c(
         "anim.keyframes",
         "enable-layer-keyframes",
         "film",
         keyframes,
     )
-    .state(keyframes_state),
+    .state(keyframes_state)
+    .with(Flags::PALETTE),
     c(
         "anim.audio.settings",
         "audio-clip-settings-ellipsis",
         "audio",
         audio_settings,
     )
-    .state(has_sound),
+    .state(has_sound)
+    .with(Flags::PALETTE),
     c(
         "anim.audio.mute",
         "mute-or-unmute-audio",
         "audio",
         audio_track,
     )
-    .state(has_sound),
+    .state(has_sound)
+    .with(Flags::PALETTE),
     c(
         "anim.audio.delete",
         "delete-audio-track",
         "delete",
         audio_track,
     )
-    .state(has_sound),
+    .state(has_sound)
+    .with(Flags::PALETTE),
     c(
         "anim.export.audio",
         "export-animation-audio-ellipsis",
