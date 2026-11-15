@@ -151,3 +151,15 @@ icons-exported = Sue's icons are in { $path }.
 icons-replaced = { $name } is replaced; { $count } things could not be read.
 icons-failed = That did not work: { $error }
 icons-not-read = { $count } things in the icons in use could not be read; Sue's own stand in for them.
+
+## settings.rs: the window on Sue's shared controls (P4-18)
+
+preset-hint = Sets every setting this look holds at once. Each change can be undone.
+open-page-hint = Open this page of Settings.
+fold-open-hint = Show the settings in this group.
+fold-close-hint = Hide the settings in this group.
+filter-settings = Filter Settings
+filter-settings-hint = Type a word to find the settings it names, on every page.
+settings-reset-page-hint = Puts every setting on this page back to how Sue comes.
+settings-reset-all-hint = Puts every setting in Sue back to how Sue comes. Asks once more first.
+keys-take-from-hint = The other command lets go of the key, and this one keeps it.

@@ -20,12 +20,14 @@ pub(crate) use keys::{SUE_KEYMAP, sue_keymap};
 
 use std::collections::{HashMap, HashSet};
 
-use egui::{Align, Layout, RichText, ScrollArea, Sense, Stroke, Ui, vec2};
+use egui::{Align, Label, Layout, RichText, Sense, Ui, vec2};
 use sue_platform::FormFactor;
 use sue_rice::{Keybind, RiceEntry, RiceParameter, RiceSchema, RiceValue, SetRiceValue};
+use sue_wm::icons::Icon;
+use sue_wm::ui::{self, Density, ScrollView, Space, TextRole, Tip};
 use sue_wm::{
     AppletContext, AppletManifest, AppletRole, Catalog, RiceEdit, SettingsGroup, SettingsItem,
-    SettingsPage, ShellRequest, SueApplet, Theme, widgets,
+    SettingsPage, ShellRequest, SueApplet, Theme,
 };
 
 /// The applet id.
@@ -164,21 +166,36 @@ fn matches(entry: &RiceEntry, needle: &str, words: &[(String, String)]) -> bool 
             .is_some_and(|text| text.to_lowercase().contains(needle))
 }
 
-/// A monochrome on and off switch.
-fn toggle(ui: &mut Ui, on: bool, theme: &Theme) -> bool {
-    let size = vec2(theme.ui_size * 2.6, theme.ui_size * 1.4);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    let t = ui.ctx().animate_bool_responsive(response.id, on);
-    let radius = rect.height() / 2.0;
-    let track = if on { theme.text } else { theme.hover };
-    ui.painter().rect_filled(rect, radius, track);
-    ui.painter()
-        .rect_stroke(rect, radius, theme.hairline(), egui::StrokeKind::Inside);
-    let x = egui::lerp((rect.left() + radius)..=(rect.right() - radius), t);
-    let knob = if on { theme.void } else { theme.muted };
-    ui.painter()
-        .circle_filled(egui::pos2(x, rect.center().y), radius * 0.72, knob);
-    response.clicked()
+/// Text in `role`, muted or not, wrapping at the edge of `ui`.
+fn words(ui: &mut Ui, text: &str, role: TextRole, muted: bool, theme: &Theme) -> egui::Response {
+    let color = if muted {
+        theme.text_muted()
+    } else {
+        theme.text
+    };
+    ui.add(Label::new(RichText::new(text).font(theme.text_font(role)).color(color)).wrap())
+}
+
+/// The tooltip of a strip whose parts take the pointer themselves (a
+/// segmented strip): shown under it once the pointer rests on it.
+pub(crate) fn strip_tip(ui: &Ui, response: &egui::Response, tip: &Tip<'_>, theme: &Theme) {
+    if !response.contains_pointer() {
+        return;
+    }
+    let delay = ui.style().interaction.tooltip_delay;
+    let still = ui.input(|input| input.pointer.time_since_last_movement());
+    if still >= delay {
+        let id = response.id.with("sue-strip-tip");
+        ui::tip_beside(ui.ctx(), id, response.rect, ui::Side::Below, tip, theme);
+    } else {
+        ui.ctx().request_repaint_after_secs(delay - still);
+    }
+}
+
+/// A setting's name and the line under it, as tooltip words: what the
+/// control beside them is called.
+fn tip_of(entry: &RiceEntry) -> (String, String) {
+    (label_of(entry), description_of(entry).unwrap_or_default())
 }
 
 /// Catches the next key press while Settings records a shortcut, before
@@ -348,17 +365,14 @@ impl Settings {
             return None;
         }
         let theme = &cx.theme;
-        ui.add(
-            egui::Button::new(
-                RichText::new(tr!("settings-reset"))
-                    .size(theme.small_size)
-                    .color(theme.muted),
-            )
-            .frame(false),
-        )
-        .on_hover_text(tr!("settings-reset-hint"))
-        .clicked()
-        .then(|| Edit::Set(entry.path().to_owned(), shipped))
+        let name = tr!("settings-reset");
+        let help = tr!("settings-reset-hint");
+        let response = ui::icon_button(("sue-setting-reset", entry.path()), Icon::Reset, "")
+            .quiet()
+            .show(ui, theme);
+        ui::tooltip(response, &Tip::new(&name).help(&help), theme)
+            .clicked()
+            .then(|| Edit::Set(entry.path().to_owned(), shipped))
     }
 
     fn apply(&mut self, cx: &mut AppletContext<'_>, edit: Edit) {
@@ -390,64 +404,53 @@ impl Settings {
     fn control(&mut self, ui: &mut Ui, entry: &RiceEntry, cx: &AppletContext<'_>) -> Option<Edit> {
         let theme = cx.theme;
         let path = entry.path().to_owned();
+        let (name, help) = tip_of(entry);
+        let tip = Tip::new(&name).help(&help);
         if let Some(choices) = cx.catalog.choices.get(entry.path()) {
             let current = cx.rice().get_str(entry.path()).unwrap_or("").to_owned();
-            let selected = choices.iter().position(|choice| choice.value == current);
-            let text =
-                selected.map_or_else(|| current.clone(), |index| choices[index].label.clone());
-            let mut picked = None;
-            egui::ComboBox::from_id_salt(("sue-choice", entry.path()))
-                .selected_text(text)
+            // What can be chosen now, and what is chosen even when it
+            // cannot be any more.
+            let shown: Vec<_> = choices
+                .iter()
+                .filter(|choice| choice.enabled || choice.value == current)
+                .collect();
+            let labels: Vec<&str> = shown.iter().map(|choice| choice.label.as_str()).collect();
+            let Some(mut index) = shown.iter().position(|choice| choice.value == current) else {
+                words(ui, &current, TextRole::Body, false, theme);
+                return None;
+            };
+            let response = ui::dropdown(("sue-choice", entry.path()), &mut index, &labels)
+                .label(&name)
                 .width(self.field)
-                .show_ui(ui, |ui| {
-                    for choice in choices {
-                        let on = choice.value == current;
-                        if ui
-                            .add_enabled(
-                                choice.enabled,
-                                egui::Button::selectable(on, &choice.label),
-                            )
-                            .clicked()
-                        {
-                            picked = Some(choice.value.clone());
-                        }
-                    }
-                });
-            return picked.map(|value| Edit::Set(path, RiceValue::Text(value)));
+                .show(ui, theme);
+            let response = ui::tooltip(response, &tip, theme);
+            return (response.changed() && shown[index].enabled)
+                .then(|| Edit::Set(path, RiceValue::Text(shown[index].value.clone())));
         }
         match entry.parameter() {
             RiceParameter::Bool { value } => {
-                toggle(ui, *value, theme).then(|| Edit::Set(path, RiceValue::Bool(!value)))
+                let response = ui::switch(("sue-switch", entry.path()), &name, *value)
+                    .bare()
+                    .show(ui, theme);
+                ui::tooltip(response, &tip, theme)
+                    .clicked()
+                    .then(|| Edit::Set(path, RiceValue::Bool(!value)))
             }
             RiceParameter::IntRange { value, min, max } => {
                 let (min, max) = (min.unwrap_or(0), max.unwrap_or(100));
-                let mut number = *value;
-                ui.label(
-                    RichText::new(number.to_string())
-                        .font(theme.mono(theme.ui_size))
-                        .color(theme.text),
-                );
-                let response = slider(
-                    ui,
-                    egui::Slider::new(&mut number, min..=max).show_value(false),
-                );
-                slider_edit(&response, path, RiceValue::Int(number), number != *value)
+                let range = min as f64..=max as f64;
+                let (number, track) =
+                    self.number_control(ui, entry, *value as f64, range, 0, &tip, theme);
+                let number = number.round() as i64;
+                number_edit(track, path, RiceValue::Int(number), number != *value)
             }
             RiceParameter::FloatRange { value, min, max } => {
                 let (min, max) = (min.unwrap_or(0.0), max.unwrap_or(1.0));
-                let mut number = *value;
-                ui.label(
-                    RichText::new(format!("{number:.2}"))
-                        .font(theme.mono(theme.ui_size))
-                        .color(theme.text),
-                );
-                let response = slider(
-                    ui,
-                    egui::Slider::new(&mut number, min..=max).show_value(false),
-                );
+                let (number, track) =
+                    self.number_control(ui, entry, *value, min..=max, 2, &tip, theme);
                 let rounded = (number * 100.0).round() / 100.0;
-                slider_edit(
-                    &response,
+                number_edit(
+                    track,
                     path,
                     RiceValue::Float(rounded),
                     (rounded - value).abs() > f64::EPSILON,
@@ -478,123 +481,41 @@ impl Settings {
                     .map(|option| choice_of(entry.path(), option))
                     .collect();
                 let selected = options.iter().position(|option| option == value);
-                // Side by side when they fit the row, else a list to pick from.
-                let room = labels
-                    .iter()
-                    .map(|label| label.chars().count() as f32 * theme.ui_size * 0.6 + 24.0)
-                    .sum::<f32>();
+                // Side by side when a few short ones fit the row, else a
+                // list to pick from.
+                let strip = ui::segmented(("sue-enum", entry.path()), &labels, selected);
                 let short = labels.len() <= 5
                     && labels.iter().map(String::len).sum::<usize>() < 48
-                    && (!self.stacked || room <= self.field);
+                    && strip.size(ui.painter(), theme, Density::of(ui)).x <= self.field;
                 if short {
-                    widgets::segmented(ui, &labels, selected, theme)
+                    let shown = strip.show(ui, theme);
+                    strip_tip(ui, &shown.response, &tip, theme);
+                    shown
+                        .picked
                         .map(|index| Edit::Set(path, RiceValue::Text(options[index].clone())))
                 } else {
-                    let mut picked = None;
-                    egui::ComboBox::from_id_salt(("sue-enum", entry.path()))
-                        .selected_text(
-                            selected.map_or_else(String::new, |index| labels[index].clone()),
-                        )
-                        .width(self.field)
-                        .show_ui(ui, |ui| {
-                            for (index, label) in labels.iter().enumerate() {
-                                if ui
-                                    .add(egui::Button::selectable(selected == Some(index), label))
-                                    .clicked()
-                                {
-                                    picked = Some(options[index].clone());
-                                }
-                            }
-                        });
-                    picked.map(|value| Edit::Set(path, RiceValue::Text(value)))
+                    let mut index = selected.unwrap_or(0);
+                    let response =
+                        ui::dropdown(("sue-enum-list", entry.path()), &mut index, &labels)
+                            .label(&name)
+                            .width(self.field)
+                            .show(ui, theme);
+                    let response = ui::tooltip(response, &tip, theme);
+                    (response.changed() && Some(index) != selected)
+                        .then(|| Edit::Set(path, RiceValue::Text(options[index].clone())))
                 }
             }
-            RiceParameter::Keybind { value } => {
-                // Every chord as a chip: click one to change it, x to take
-                // it away, + to add another.
-                let recording = self
-                    .recording
-                    .as_ref()
-                    .filter(|(known, _)| known == entry.path())
-                    .map(|(_, index)| *index);
-                let chip = |ui: &mut Ui, text: String, on: bool| {
-                    ui.add(
-                        egui::Button::new(
-                            RichText::new(text)
-                                .font(theme.mono(theme.ui_size))
-                                .color(theme.text),
-                        )
-                        .fill(if on { theme.active } else { theme.pill })
-                        .stroke(if on {
-                            theme.hairline_active()
-                        } else {
-                            theme.hairline()
-                        }),
-                    )
-                };
-                let mut edit = None;
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    for (index, chord) in value.chords().iter().enumerate() {
-                        let on = recording == Some(Some(index));
-                        let text = if on {
-                            tr!("press-keys-ellipsis")
-                        } else {
-                            chord.to_string()
-                        };
-                        if chip(ui, text, on)
-                            .on_hover_text(tr!("click-then-press-shortcut-put-here"))
-                            .clicked()
-                        {
-                            self.recording = Some((path.clone(), Some(index)));
-                        }
-                        if ui
-                            .add(
-                                egui::Button::new(RichText::new("\u{00D7}").color(theme.muted))
-                                    .frame(false)
-                                    .small(),
-                            )
-                            .on_hover_text(tr!("take-this-shortcut-away"))
-                            .clicked()
-                        {
-                            let mut next = value.clone();
-                            next.remove(index);
-                            edit = Some(Edit::Set(path.clone(), RiceValue::Keybind(next)));
-                        }
-                    }
-                    if value.is_empty() && recording.is_none() {
-                        ui.label(RichText::new(tr!("none")).color(theme.muted));
-                    }
-                    let adding = recording == Some(None);
-                    if adding {
-                        chip(ui, tr!("press-keys-ellipsis"), true);
-                    } else if ui
-                        .add(egui::Button::new(RichText::new("+").color(theme.text)).small())
-                        .on_hover_text(tr!("add-another-shortcut-as-many-as"))
-                        .clicked()
-                    {
-                        self.recording = Some((path.clone(), None));
-                    }
-                });
-                if edit.is_some() {
-                    return edit;
-                }
-                if let Some(index) = recording {
-                    return self
-                        .record_chord(ui, value, index)
-                        .map(|next| Edit::Set(path, RiceValue::Keybind(next)));
-                }
-                None
-            }
+            RiceParameter::Keybind { value } => self.keybind_chips(ui, entry, value, theme),
             RiceParameter::Text { value } | RiceParameter::ShaderPath { value } => {
                 let text = self
                     .texts
                     .entry(path.clone())
                     .or_insert_with(|| value.clone());
-                let response = ui.add(
-                    egui::TextEdit::singleline(text)
-                        .desired_width(self.field.max(240.0).min(ui.available_width())),
-                );
+                let response = ui::text_field(("sue-text", entry.path()), text)
+                    .label(&name)
+                    .width(self.field.min(ui.available_width()))
+                    .show(ui, theme);
+                let response = ui::tooltip(response, &tip, theme);
                 if response.lost_focus() {
                     let typed = self.texts.remove(&path).unwrap_or_default();
                     return (typed != *value).then_some(Edit::Set(path, RiceValue::Text(typed)));
@@ -605,6 +526,136 @@ impl Settings {
                 None
             }
         }
+    }
+
+    /// A slider and the field that types its number, side by side in the
+    /// control's room, each with the setting's tooltip. Gives the number
+    /// after this frame, and what happened to the slider (a field that
+    /// changed reads as a plain change).
+    #[allow(clippy::too_many_arguments)]
+    fn number_control(
+        &self,
+        ui: &mut Ui,
+        entry: &RiceEntry,
+        value: f64,
+        range: std::ops::RangeInclusive<f64>,
+        decimals: usize,
+        tip: &Tip<'_>,
+        theme: &Theme,
+    ) -> (f64, NumberChange) {
+        let density = Density::of(ui);
+        let room = ui
+            .allocate_space(vec2(
+                self.field.min(ui.available_width()),
+                density.control_height(),
+            ))
+            .1;
+        let gap = theme.space(Space::S3);
+        let field_width = (density.control_height() * 2.4).round();
+        let field_rect =
+            egui::Rect::from_min_max(egui::pos2(room.right() - field_width, room.top()), room.max);
+        let track_rect = egui::Rect::from_min_max(
+            room.min,
+            egui::pos2((field_rect.left() - gap).max(room.left()), room.bottom()),
+        );
+        let mut number = value;
+        let track = ui::slider(("sue-slider", entry.path()), &mut number, range.clone())
+            .name(tip.name)
+            .decimals(decimals)
+            .field(false)
+            .show_at(ui, track_rect, theme);
+        let track = ui::tooltip(track, tip, theme);
+        let mut typed = number;
+        let field = ui::number_field(("sue-number", entry.path()), &mut typed)
+            .range(range)
+            .decimals(decimals)
+            .label(tip.name)
+            .show_at(ui, field_rect, theme);
+        let field = ui::tooltip(field, tip, theme);
+        if field.changed() {
+            number = typed;
+            return (number, NumberChange::Set);
+        }
+        let change = if track.drag_stopped() {
+            NumberChange::Released
+        } else if track.dragged() {
+            NumberChange::Dragged
+        } else if track.changed() {
+            NumberChange::Set
+        } else {
+            NumberChange::None
+        };
+        (number, change)
+    }
+
+    /// A setting's keys as chips: a click on one changes it, its cross
+    /// takes it away, + adds another.
+    fn keybind_chips(
+        &mut self,
+        ui: &mut Ui,
+        entry: &RiceEntry,
+        value: &sue_rice::Keybinds,
+        theme: &Theme,
+    ) -> Option<Edit> {
+        let path = entry.path().to_owned();
+        let recording = self
+            .recording
+            .as_ref()
+            .filter(|(known, _)| known == entry.path())
+            .map(|(_, index)| *index);
+        let mut edit = None;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = theme.space(Space::S2);
+            for (index, chord) in value.chords().iter().enumerate() {
+                let on = recording == Some(Some(index));
+                let text = if on {
+                    tr!("press-keys-ellipsis")
+                } else {
+                    chord.to_string()
+                };
+                let take = tr!("take-this-shortcut-away");
+                let chip = ui::chip(("sue-chord", entry.path(), index), &text, on)
+                    .removable(&take)
+                    .show(ui, theme);
+                if chip.removed {
+                    let mut next = value.clone();
+                    next.remove(index);
+                    edit = Some(Edit::Set(path.clone(), RiceValue::Keybind(next)));
+                } else {
+                    let help = tr!("click-then-press-shortcut-put-here");
+                    let tip = Tip::new(&text).help(&help);
+                    if ui::tooltip(chip.response, &tip, theme).clicked() {
+                        self.recording = Some((path.clone(), Some(index)));
+                    }
+                }
+            }
+            if value.is_empty() && recording.is_none() {
+                words(ui, &tr!("none"), TextRole::Body, true, theme);
+            }
+            let adding = recording == Some(None);
+            if adding {
+                let _ = ui::chip(
+                    ("sue-chord-new", entry.path()),
+                    &tr!("press-keys-ellipsis"),
+                    true,
+                )
+                .show(ui, theme);
+            } else {
+                let name = tr!("add-another-shortcut-as-many-as");
+                if ui::icon_button(("sue-chord-add", entry.path()), Icon::Plus, &name)
+                    .show(ui, theme)
+                    .clicked()
+                {
+                    self.recording = Some((path.clone(), None));
+                }
+            }
+        });
+        if edit.is_some() {
+            return edit;
+        }
+        let index = recording?;
+        self.record_chord(ui, value, index)
+            .map(|next| Edit::Set(path, RiceValue::Keybind(next)))
     }
 
     /// The next key press with its modifiers, as a chord put in place of
@@ -643,46 +694,42 @@ impl Settings {
         let width = ui.available_width();
         let mut edit = None;
         let switch = matches!(entry.parameter(), RiceParameter::Bool { .. });
-        if self.stacked && !switch {
+        // A slider needs a long track: where the room beside its name is
+        // short (fingers, a narrow window), it goes under the name.
+        let slider = matches!(
+            entry.parameter(),
+            RiceParameter::IntRange { .. } | RiceParameter::FloatRange { .. }
+        ) && !cx.catalog.choices.contains_key(entry.path());
+        let density = Density::of(ui);
+        let beside = width * 0.5 - theme.space(Space::S5) - density.icon_button();
+        let short = slider && beside < density.control_height() * 7.0;
+        if (self.stacked || short) && !switch {
             // Narrow: the name and what it does, then the control under
             // them across the whole width.
             self.field = width;
-            ui.label(
-                RichText::new(label_of(entry))
-                    .size(theme.ui_size)
-                    .color(theme.text),
-            );
+            words(ui, &label_of(entry), TextRole::Body, false, &theme);
             if let Some(description) = description_of(entry) {
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(description)
-                            .size(theme.small_size)
-                            .color(theme.muted),
-                    )
-                    .wrap(),
-                );
+                words(ui, &description, TextRole::Caption, true, &theme);
             }
-            ui.add_space(4.0);
+            ui.add_space(theme.space(Space::S2));
             ui.horizontal_wrapped(|ui| {
                 ui.set_max_width(width);
-                ui.spacing_mut().slider_width = (width - 72.0).max(80.0);
+                // Room for the reset button beside the control.
+                self.field = (width - Density::of(ui).icon_button() - theme.space(Space::S3))
+                    .max(Density::of(ui).control_height() * 3.0);
                 edit = self.control(ui, entry, cx);
                 if let Some(reset) = Self::reset_button(ui, entry, cx) {
                     edit = Some(reset);
                 }
             });
         } else {
-            self.field = if self.stacked { width } else { 200.0 };
             self.side_by_side(ui, entry, width, &mut edit, cx);
         }
-        ui.add_space(4.0);
+        ui.add_space(theme.space(Space::S2));
         let line = ui.available_rect_before_wrap();
-        ui.painter().hline(
-            line.x_range(),
-            line.top(),
-            Stroke::new(theme.border_width, theme.border),
-        );
-        ui.add_space(6.0);
+        ui.painter()
+            .hline(line.x_range(), line.top(), theme.hairline());
+        ui.add_space(theme.space(Space::S3));
         if let Some(edit) = edit {
             self.apply(cx, edit);
         }
@@ -699,29 +746,26 @@ impl Settings {
         cx: &mut AppletContext<'_>,
     ) {
         let theme = cx.theme.clone();
+        let density = Density::of(ui);
+        let gap = theme.space(Space::S5);
         let label_width = if self.stacked {
-            (width - 64.0).max(80.0)
+            (width - density.icon_button() * 2.0).max(density.control_height() * 3.0)
         } else {
-            (width * 0.5).max(160.0)
+            (width * 0.5).max(theme.space(Space::S9) * 4.0)
         };
+        // The control takes the rest of the row, less the reset button,
+        // and no more than a comfortable field.
+        self.field = (width - label_width - gap - density.icon_button()).clamp(
+            density.control_height() * 3.0,
+            density.control_height() * 10.0,
+        );
         ui.horizontal(|ui| {
             ui.set_width(width);
             ui.vertical(|ui| {
                 ui.set_width(label_width);
-                ui.label(
-                    RichText::new(label_of(entry))
-                        .size(theme.ui_size)
-                        .color(theme.text),
-                );
+                words(ui, &label_of(entry), TextRole::Body, false, &theme);
                 if let Some(description) = description_of(entry) {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(description)
-                                .size(theme.small_size)
-                                .color(theme.muted),
-                        )
-                        .wrap(),
-                    );
+                    words(ui, &description, TextRole::Caption, true, &theme);
                 }
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -749,50 +793,49 @@ impl Settings {
             SettingsItem::Fact(id) if needle.is_empty() => {
                 if let Some((label, value)) = cx.catalog.facts.get(id).cloned() {
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(RichText::new(label).color(theme.muted));
-                        ui.label(RichText::new(value).color(theme.text));
+                        words(ui, &label, TextRole::Body, true, &theme);
+                        words(ui, &value, TextRole::Body, false, &theme);
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(theme.space(Space::S3));
                 }
             }
             SettingsItem::Note(text) if needle.is_empty() => {
-                ui.add(egui::Label::new(RichText::new(text).color(theme.muted)).wrap());
-                ui.add_space(6.0);
+                words(ui, text, TextRole::Body, true, &theme);
+                ui.add_space(theme.space(Space::S3));
             }
             SettingsItem::Table(id) if needle.is_empty() => {
                 if let Some(table) = cx.catalog.tables.get(id).cloned() {
                     if table.rows.is_empty() {
-                        ui.add(
-                            egui::Label::new(RichText::new(&table.empty).color(theme.muted)).wrap(),
-                        );
+                        words(ui, &table.empty, TextRole::Body, true, &theme);
                     } else {
                         egui::Grid::new(("sue-table", id.as_str()))
                             .striped(false)
-                            .spacing([theme.padding * 2.0, 4.0])
+                            .spacing([theme.space(Space::S6), theme.space(Space::S2)])
                             .show(ui, |ui| {
                                 for column in &table.columns {
-                                    ui.label(
-                                        RichText::new(column)
-                                            .size(theme.small_size)
-                                            .color(theme.muted),
-                                    );
+                                    ui::heading(ui, column, &theme);
                                 }
                                 ui.end_row();
                                 for row in &table.rows {
                                     for cell in row {
-                                        ui.label(RichText::new(cell).color(theme.text));
+                                        words(ui, cell, TextRole::Body, false, &theme);
                                     }
                                     ui.end_row();
                                 }
                             });
                     }
-                    ui.add_space(6.0);
+                    ui.add_space(theme.space(Space::S3));
                 }
             }
             SettingsItem::Actions(buttons) if needle.is_empty() => {
                 ui.horizontal_wrapped(|ui| {
                     for button in buttons {
-                        if widgets::pill_button(ui, &button.label, false, &theme).clicked() {
+                        let response = ui::button(
+                            ("sue-settings-action", button.command.as_str()),
+                            &button.label,
+                        )
+                        .show(ui, &theme);
+                        if ui::tooltip(response, &Tip::new(&button.label), &theme).clicked() {
                             match &button.applet {
                                 // A studio's own dialog: over the studio,
                                 // with Settings out of the way.
@@ -813,7 +856,7 @@ impl Settings {
                         }
                     }
                 });
-                ui.add_space(6.0);
+                ui.add_space(theme.space(Space::S3));
             }
             SettingsItem::Keys(id) => self.keys_ui(ui, id, needle, cx),
             SettingsItem::Icons if needle.is_empty() => self.icons_ui(ui, cx),
@@ -821,9 +864,16 @@ impl Settings {
                 ui.horizontal_wrapped(|ui| {
                     for preset in cx.catalog.presets.clone() {
                         let active = preset.is_active(cx.rice());
-                        if widgets::pill_button(ui, &preset.name, active, &theme).clicked()
-                            && !active
-                        {
+                        let response = ui::toggle_button(
+                            ("sue-preset", preset.name.as_str()),
+                            &preset.name,
+                            active,
+                        )
+                        .show(ui, &theme);
+                        let help = tr!("preset-hint");
+                        let response =
+                            ui::tooltip(response, &Tip::new(&preset.name).help(&help), &theme);
+                        if response.clicked() && !active {
                             let txn = preset.transaction(cx.rice());
                             if let Err(error) = cx.apply(RiceEdit(txn)) {
                                 self.error = Some(error.to_string());
@@ -831,41 +881,37 @@ impl Settings {
                         }
                     }
                 });
-                ui.add_space(6.0);
+                ui.add_space(theme.space(Space::S3));
             }
             _ => {}
         }
     }
 }
 
-/// A slider whose knob stays a comfortable size when the controls around
-/// it are tall for fingers (its track still takes the whole row).
-fn slider(ui: &mut Ui, slider: egui::Slider<'_>) -> egui::Response {
-    ui.scope(|ui| {
-        let spacing = ui.spacing_mut();
-        spacing.interact_size.y = spacing.interact_size.y.min(26.0);
-        ui.add(slider)
-    })
-    .inner
+/// What a number's controls did this frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NumberChange {
+    None,
+    /// Typed, stepped by a key or clicked: one undo step.
+    Set,
+    /// Dragged: a preview.
+    Dragged,
+    /// A drag ended: the preview becomes one undo step.
+    Released,
 }
 
-/// A slider's edit: live while dragged, one undo step on release.
-fn slider_edit(
-    response: &egui::Response,
+/// A number's edit: live while dragged, one undo step on release.
+fn number_edit(
+    change: NumberChange,
     path: String,
     value: RiceValue,
     changed: bool,
 ) -> Option<Edit> {
-    if response.drag_stopped() {
-        return Some(Edit::Release(path));
-    }
-    if !changed {
-        return None;
-    }
-    if response.dragged() {
-        Some(Edit::Preview(path, value))
-    } else {
-        Some(Edit::Set(path, value))
+    match change {
+        NumberChange::Released => Some(Edit::Release(path)),
+        NumberChange::Dragged if changed => Some(Edit::Preview(path, value)),
+        NumberChange::Set if changed => Some(Edit::Set(path, value)),
+        _ => None,
     }
 }
 
@@ -924,41 +970,51 @@ impl SueApplet for Settings {
         self.page = self.page.min(pages.len().saturating_sub(1));
         let full = ui.max_rect();
         let form = cx.view.form_factor;
-        // Fingers get rows and controls at least 44 points tall on a
-        // phone, 36 on a tablet.
-        let target = match form {
-            FormFactor::Desktop => None,
-            FormFactor::Tablet => Some(36.0),
-            FormFactor::Mobile => Some(44.0),
+        // Fingers get the touch sizes on a phone and a tablet: rows and
+        // controls 44 points tall.
+        let density = match form {
+            FormFactor::Desktop => Density::of(ui),
+            FormFactor::Tablet | FormFactor::Mobile => Density::Touch,
         };
-        let row = target.unwrap_or(theme.ui_size * 2.1);
+        density.scope(ui, |ui| self.sheet_ui(ui, full, form, &pages, cx, &theme));
+    }
+}
+
+impl Settings {
+    /// The window's body at the density chosen for the screen.
+    fn sheet_ui(
+        &mut self,
+        ui: &mut Ui,
+        full: egui::Rect,
+        form: FormFactor,
+        pages: &[SettingsPage],
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) {
+        let margin = theme.space(Space::S5);
         // An upright phone, or any sheet too narrow for two panes, lists
         // the pages and opens one at a time; wider sheets (a phone on its
         // side too) keep the list at the left, sized to the sheet.
         let upright = full.height() >= full.width();
-        if (form == FormFactor::Mobile && upright) || full.width() < 560.0 {
+        let narrow = full.width() < theme.space(Space::S9) * 14.0;
+        if (form == FormFactor::Mobile && upright) || narrow {
             self.stacked = true;
-            let mut body =
-                ui.new_child(egui::UiBuilder::new().max_rect(full.shrink(theme.padding * 1.5)));
-            fingers(&mut body, target);
+            let mut body = ui.new_child(egui::UiBuilder::new().max_rect(full.shrink(margin)));
             if self.opened || !self.filter.trim().is_empty() {
-                if back_row(&mut body, row, &theme) {
+                if back_row(&mut body, theme) {
                     self.opened = false;
                     self.filter.clear();
                 }
-                self.page_ui(&mut body, &pages, cx);
+                self.page_ui(&mut body, pages, cx);
             } else {
-                self.filter_box(&mut body, &theme);
-                body.add_space(theme.padding);
-                ScrollArea::vertical()
-                    .id_salt("sue-settings-list")
-                    .auto_shrink([false, false])
-                    .show(&mut body, |ui| {
-                        if let Some(index) = page_list(ui, &pages, None, row, true, &theme) {
-                            self.page = index;
-                            self.opened = true;
-                        }
-                    });
+                self.filter_box(&mut body, theme);
+                body.add_space(theme.space(Space::S4));
+                ScrollView::vertical("sue-settings-list").show(&mut body, theme, |ui| {
+                    if let Some(index) = page_list(ui, pages, None, true, theme) {
+                        self.page = index;
+                        self.opened = true;
+                    }
+                });
             }
             return;
         }
@@ -966,43 +1022,30 @@ impl SueApplet for Settings {
         let width = if form == FormFactor::Desktop {
             theme.settings_sidebar_width
         } else {
-            (full.width() * 0.3).clamp(180.0, 300.0)
+            (full.width() * 0.3).clamp(theme.space(Space::S9) * 4.5, theme.space(Space::S9) * 7.5)
         };
         let sidebar = egui::Rect::from_min_size(full.min, vec2(width, full.height()));
-        let pane =
-            egui::Rect::from_min_max(egui::pos2(sidebar.right() + 1.0, full.top()), full.max);
+        let pane = egui::Rect::from_min_max(egui::pos2(sidebar.right(), full.top()), full.max);
         ui.painter()
-            .rect_filled(sidebar, 0.0, theme.void.gamma_multiply(0.6));
+            .rect_filled(sidebar, egui::CornerRadius::ZERO, theme.surface(1));
         ui.painter()
             .vline(sidebar.right(), full.y_range(), theme.hairline());
 
-        let mut side = ui.new_child(egui::UiBuilder::new().max_rect(sidebar.shrink(theme.padding)));
-        side.spacing_mut().item_spacing.y = 2.0;
+        let mut side =
+            ui.new_child(egui::UiBuilder::new().max_rect(sidebar.shrink(theme.space(Space::S4))));
+        side.spacing_mut().item_spacing.y = theme.space(Space::S1);
         let chosen = self.filter.trim().is_empty().then_some(self.page);
-        ScrollArea::vertical()
-            .id_salt("sue-settings-pages")
-            .auto_shrink([false, false])
-            .show(&mut side, |ui| {
-                if let Some(index) = page_list(ui, &pages, chosen, row, false, &theme) {
-                    self.page = index;
-                    self.filter.clear();
-                }
-            });
+        ScrollView::vertical("sue-settings-pages").show(&mut side, theme, |ui| {
+            if let Some(index) = page_list(ui, pages, chosen, false, theme) {
+                self.page = index;
+                self.filter.clear();
+            }
+        });
 
-        let mut right =
-            ui.new_child(egui::UiBuilder::new().max_rect(pane.shrink(theme.padding * 1.5)));
-        fingers(&mut right, target);
-        self.filter_box(&mut right, &theme);
-        right.add_space(theme.padding);
-        self.page_ui(&mut right, &pages, cx);
-    }
-}
-
-/// Controls at least `target` points tall, for fingers.
-fn fingers(ui: &mut Ui, target: Option<f32>) {
-    if let Some(height) = target {
-        ui.spacing_mut().interact_size.y = height;
-        ui.spacing_mut().button_padding = vec2(10.0, 8.0);
+        let mut right = ui.new_child(egui::UiBuilder::new().max_rect(pane.shrink(margin)));
+        self.filter_box(&mut right, theme);
+        right.add_space(theme.space(Space::S4));
+        self.page_ui(&mut right, pages, cx);
     }
 }
 
@@ -1012,47 +1055,29 @@ fn page_list(
     ui: &mut Ui,
     pages: &[SettingsPage],
     chosen: Option<usize>,
-    row: f32,
     arrows: bool,
     theme: &Theme,
 ) -> Option<usize> {
     let mut clicked = None;
     for (index, page) in pages.iter().enumerate() {
         let on = chosen == Some(index);
-        let (rect, response) =
-            ui.allocate_exact_size(vec2(ui.available_width(), row), Sense::click());
-        if on || response.hovered() {
-            ui.painter().rect_filled(
-                rect,
-                theme.control_radius,
-                if on { theme.active } else { theme.hover },
-            );
-        }
-        ui.painter().text(
-            rect.left_center() + vec2(theme.padding, 0.0),
-            egui::Align2::LEFT_CENTER,
-            &page.title,
-            theme.font(theme.ui_size),
-            if on || arrows {
-                theme.text
-            } else {
-                theme.muted
-            },
-        );
+        let row = ui::list_row(("sue-settings-page", page.id.as_str()), &page.title)
+            .selected(on)
+            .show(ui, theme);
+        let rect = row.response.rect;
         if arrows {
-            ui.painter().text(
-                rect.right_center() - vec2(theme.padding, 0.0),
-                egui::Align2::RIGHT_CENTER,
-                "\u{203A}",
-                theme.font(theme.ui_size * 1.4),
-                theme.muted,
+            let side = Density::of(ui).icon();
+            let mark = egui::Rect::from_center_size(
+                egui::pos2(
+                    rect.right() - theme.space(Space::S4) - side / 2.0,
+                    rect.center().y,
+                ),
+                egui::Vec2::splat(side),
             );
-            ui.painter().hline(
-                rect.x_range(),
-                rect.bottom() + 1.0,
-                Stroke::new(theme.border_width, theme.border),
-            );
+            sue_wm::icons::paint(ui.painter(), mark, Icon::ChevronRight, theme.text_muted());
         }
+        let help = tr!("open-page-hint");
+        let response = ui::tooltip(row.response, &Tip::new(&page.title).help(&help), theme);
         if response.clicked() {
             clicked = Some(index);
         }
@@ -1060,21 +1085,13 @@ fn page_list(
     clicked
 }
 
-/// A phone's back arrow to the list of pages; `true` when tapped.
-fn back_row(ui: &mut Ui, row: f32, theme: &Theme) -> bool {
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), row), Sense::click());
-    if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, theme.control_radius, theme.hover);
-    }
-    ui.painter().text(
-        rect.left_center() + vec2(theme.padding * 0.5, 0.0),
-        egui::Align2::LEFT_CENTER,
-        format!("\u{2039}  {}", tr!("all-settings")),
-        theme.font(theme.ui_size),
-        theme.text,
-    );
-    response.clicked()
+/// A phone's way back to the list of pages; `true` when tapped.
+fn back_row(ui: &mut Ui, theme: &Theme) -> bool {
+    let label = tr!("all-settings");
+    let row = ui::list_row("sue-settings-back", &label)
+        .icon(Icon::ChevronLeft)
+        .show(ui, theme);
+    ui::tooltip(row.response, &Tip::new(&label), theme).clicked()
 }
 
 /// `true` while `group` is to be shown: always, or while the setting it
@@ -1121,28 +1138,16 @@ impl Settings {
     fn fold(&mut self, ui: &mut Ui, key: &str, title: &str, closed: bool, theme: &Theme) -> bool {
         let flipped = self.flipped.contains(key);
         let open = !closed || flipped;
-        let icon = if open {
-            sue_wm::icons::Icon::ChevronDown
+        let row = ui::tree_row(("sue-settings-fold", key), title)
+            .expanded(open)
+            .show(ui, theme);
+        let help = if open {
+            tr!("fold-close-hint")
         } else {
-            sue_wm::icons::Icon::ChevronRight
+            tr!("fold-open-hint")
         };
-        let response = ui
-            .horizontal(|ui| {
-                let size = egui::Vec2::splat(theme.ui_size);
-                let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-                sue_wm::icons::paint(ui.painter(), rect, icon, theme.muted);
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(title)
-                            .size(theme.ui_size)
-                            .strong()
-                            .color(theme.text),
-                    )
-                    .sense(Sense::click()),
-                )
-            })
-            .inner;
-        if response.clicked() && closed {
+        let response = ui::tooltip(row.response, &Tip::new(title).help(&help), theme);
+        if (response.clicked() || row.toggled) && closed {
             if flipped {
                 self.flipped.remove(key);
             } else {
@@ -1153,16 +1158,14 @@ impl Settings {
     }
 
     fn filter_box(&mut self, ui: &mut Ui, theme: &Theme) {
-        let height = ui.spacing().interact_size.y;
-        ui.add(
-            egui::TextEdit::singleline(&mut self.filter)
-                .id(egui::Id::unique("sue-settings-filter"))
-                .hint_text(tr!("filter-settings-ellipsis"))
-                .desired_width(f32::INFINITY)
-                .min_size(vec2(0.0, height))
-                .align(egui::Align2::LEFT_CENTER)
-                .font(theme.font(theme.ui_size)),
-        );
+        let hint = tr!("filter-settings-ellipsis");
+        let name = tr!("filter-settings");
+        let response = ui::search_field("sue-settings-filter", &mut self.filter)
+            .hint(&hint)
+            .label(&name)
+            .show(ui, theme);
+        let help = tr!("filter-settings-hint");
+        ui::tooltip(response, &Tip::new(&name).help(&help), theme);
     }
 
     /// The open page's title and its groups of settings, or every page's
@@ -1177,104 +1180,119 @@ impl Settings {
         } else {
             tr!("results-for", filter = self.filter.trim())
         };
-        ui.add(
-            egui::Label::new(
-                RichText::new(title)
-                    .size(theme.heading_size)
-                    .color(theme.text),
-            )
-            .wrap(),
-        );
-        if let Some(error) = &self.error {
-            ui.add(egui::Label::new(RichText::new(format!("! {error}")).color(theme.text)).wrap());
+        words(ui, &title, TextRole::Heading, false, &theme);
+        if let Some(error) = self.error.clone() {
+            ui.horizontal_wrapped(|ui| {
+                let side = theme.text_size(TextRole::Body);
+                let (mark, _) = ui.allocate_exact_size(egui::Vec2::splat(side), Sense::hover());
+                sue_wm::icons::paint(ui.painter(), mark, Icon::Warning, theme.text);
+                words(ui, &error, TextRole::Body, false, &theme);
+            });
         }
-        if let Some(notice) = &self.notice {
-            ui.add(egui::Label::new(RichText::new(notice).color(theme.text)).wrap());
+        if let Some(notice) = self.notice.clone() {
+            words(ui, &notice, TextRole::Body, false, &theme);
         }
         // Back to how Sue ships: this page, or everything (asked twice).
         if needle.is_empty()
             && let Some(page) = pages.get(self.page)
         {
-            let on_page: Vec<RiceEntry> = page
-                .groups
-                .iter()
-                .flat_map(|group| &group.items)
-                .flat_map(|item| entries_of(cx.rice(), item))
-                .cloned()
-                .collect();
-            let page_changes = changed(&on_page, cx.rice());
-            let all_changes = changed(cx.rice().entries(), cx.rice());
-            let mut reset = None;
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add_enabled(
-                        !page_changes.is_empty(),
-                        egui::Button::new(tr!("settings-reset-page")),
-                    )
-                    .clicked()
-                {
-                    reset = Some(page_changes.clone());
-                }
-                let label = if self.confirm_reset {
-                    tr!("settings-reset-all-confirm")
-                } else {
-                    tr!("settings-reset-all")
-                };
-                if ui
-                    .add_enabled(!all_changes.is_empty(), egui::Button::new(label))
-                    .clicked()
-                {
-                    if self.confirm_reset {
-                        reset = Some(all_changes.clone());
-                        self.confirm_reset = false;
-                    } else {
-                        self.confirm_reset = true;
-                    }
-                }
-            });
-            if let Some(reset) = reset {
-                self.reset(cx, reset);
-            }
+            self.reset_buttons(ui, page, cx);
         }
-        ui.add_space(theme.padding * 0.5);
+        ui.add_space(theme.space(Space::S2));
         let shown: Vec<&SettingsPage> = if needle.is_empty() {
             pages.get(self.page).into_iter().collect()
         } else {
             pages.iter().collect()
         };
-        ScrollArea::vertical()
-            .id_salt(("sue-settings-scroll", self.page, needle.is_empty()))
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for page in shown {
-                    for group in &page.groups {
-                        if !shows(group, cx.rice()) {
+        let salt = ("sue-settings-scroll", self.page, needle.is_empty());
+        ScrollView::vertical(salt).show(ui, &theme, |ui| {
+            // A gutter at the right for the scroll bar, which lies over
+            // what it scrolls.
+            ui.set_max_width(ui.available_width() - theme.space(Space::S4));
+            for page in shown {
+                for group in &page.groups {
+                    if !shows(group, cx.rice()) {
+                        continue;
+                    }
+                    let visible = needle.is_empty()
+                        || group
+                            .items
+                            .iter()
+                            .any(|item| self.item_finds(item, &needle, cx));
+                    if !visible {
+                        continue;
+                    }
+                    ui.add_space(theme.space(Space::S4));
+                    if group.advanced {
+                        let key = format!("{}/{}", page.id, group.title);
+                        if !self.fold(ui, &key, &group.title, needle.is_empty(), &theme) {
                             continue;
                         }
-                        let visible = needle.is_empty()
-                            || group
-                                .items
-                                .iter()
-                                .any(|item| self.item_finds(item, &needle, cx));
-                        if !visible {
-                            continue;
-                        }
-                        ui.add_space(theme.padding * 0.5);
-                        if group.advanced {
-                            let key = format!("{}/{}", page.id, group.title);
-                            if !self.fold(ui, &key, &group.title, needle.is_empty(), &theme) {
-                                continue;
-                            }
-                        } else {
-                            widgets::heading(ui, &group.title, &theme);
-                        }
-                        ui.add_space(4.0);
-                        for item in &group.items {
-                            self.item(ui, item, &needle, cx);
-                        }
+                    } else {
+                        ui::heading(ui, &group.title.to_uppercase(), &theme);
+                    }
+                    ui.add_space(theme.space(Space::S2));
+                    for item in &group.items {
+                        self.item(ui, item, &needle, cx);
                     }
                 }
-            });
+            }
+        });
+    }
+
+    /// Reset This Page and Reset All Settings (asked twice).
+    fn reset_buttons(&mut self, ui: &mut Ui, page: &SettingsPage, cx: &mut AppletContext<'_>) {
+        let theme = cx.theme.clone();
+        let on_page: Vec<RiceEntry> = page
+            .groups
+            .iter()
+            .flat_map(|group| &group.items)
+            .flat_map(|item| entries_of(cx.rice(), item))
+            .cloned()
+            .collect();
+        let page_changes = changed(&on_page, cx.rice());
+        let all_changes = changed(cx.rice().entries(), cx.rice());
+        let mut reset = None;
+        ui.add_space(theme.space(Space::S2));
+        ui.horizontal_wrapped(|ui| {
+            let label = tr!("settings-reset-page");
+            let help = tr!("settings-reset-page-hint");
+            if ui::button("sue-settings-reset-page", &label)
+                .ghost()
+                .icon(Icon::Reset)
+                .enabled(!page_changes.is_empty())
+                .hint(&help)
+                .show(ui, &theme)
+                .clicked()
+            {
+                reset = Some(page_changes.clone());
+            }
+            let label = if self.confirm_reset {
+                tr!("settings-reset-all-confirm")
+            } else {
+                tr!("settings-reset-all")
+            };
+            let help = tr!("settings-reset-all-hint");
+            let button = ui::button("sue-settings-reset-all", &label)
+                .enabled(!all_changes.is_empty())
+                .hint(&help);
+            let button = if self.confirm_reset {
+                button.danger()
+            } else {
+                button.ghost()
+            };
+            if button.show(ui, &theme).clicked() {
+                if self.confirm_reset {
+                    reset = Some(all_changes.clone());
+                    self.confirm_reset = false;
+                } else {
+                    self.confirm_reset = true;
+                }
+            }
+        });
+        if let Some(reset) = reset {
+            self.reset(cx, reset);
+        }
     }
 }
 
