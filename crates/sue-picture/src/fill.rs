@@ -163,6 +163,13 @@ pub fn referred(
         .iter()
         .find(|layer| Some(layer.id) == editing)
         .and_then(|layer| layer.around.first().copied());
+    // A reference folder (an animation folder set as the reference, say)
+    // makes every layer in it a reference layer.
+    let reference_folders: Vec<EntityId> = layers
+        .iter()
+        .filter(|layer| layer.folder && layer.reference)
+        .map(|layer| layer.id)
+        .collect();
     let wanted = |layer: &ReferLayer| match refer {
         Refer::Editing => Some(layer.id) == editing,
         Refer::All => true,
@@ -171,7 +178,13 @@ pub fn referred(
             Some(folder) => layer.around.contains(&folder),
             None => layer.around.is_empty(),
         },
-        Refer::Reference => layer.reference,
+        Refer::Reference => {
+            layer.reference
+                || layer
+                    .around
+                    .iter()
+                    .any(|folder| reference_folders.contains(folder))
+        }
     };
     let left_out = |layer: &ReferLayer| {
         refer != Refer::Editing
@@ -201,19 +214,39 @@ pub fn reference(
     refer: Refer,
     exclude: Exclude,
 ) -> Option<Vec<u8>> {
+    reference_in(arena, picture, size, editing, picked, refer, exclude, None)
+}
+
+/// [`reference`] at one frame of an animation: `frame` is what the frame
+/// shows (its cels, and the layers its keyframes move or fade), so a fill
+/// that looks at several layers sees only the cels of that frame.
+#[must_use]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "reference's setting and the frame"
+)]
+pub fn reference_in(
+    arena: &Arena,
+    picture: EntityId,
+    size: [u32; 2],
+    editing: Option<EntityId>,
+    picked: &[EntityId],
+    refer: Refer,
+    exclude: Exclude,
+    frame: Option<&FrameView>,
+) -> Option<Vec<u8>> {
     if refer == Refer::Editing {
         return layer_on_picture(arena, editing?, size);
     }
     let layers = ReferLayer::of_picture(arena, picture);
     let keep = referred(&layers, editing, picked, refer, exclude);
-    let view = FrameView {
-        hidden: layers
+    let mut view = frame.cloned().unwrap_or_default();
+    view.hidden.extend(
+        layers
             .iter()
             .filter(|layer| !layer.folder && !keep.contains(&layer.id))
-            .map(|layer| layer.id)
-            .collect(),
-        ..FrameView::default()
-    };
+            .map(|layer| layer.id),
+    );
     Some(composite::render_view(
         arena,
         picture,
@@ -1613,6 +1646,13 @@ mod tests {
             "outside folders: the layers outside folders"
         );
         assert_eq!(take(1, &[], Refer::Reference, none), [ids[5]]);
+        // A reference folder: the layers in it count as reference layers.
+        let mut folders = layers.clone();
+        folders[6].reference = true;
+        assert_eq!(
+            referred(&folders, Some(ids[1]), &[], Refer::Reference, none),
+            [ids[5], ids[7], ids[8]]
+        );
         // The exclusions, one at a time and all together.
         let leave = |exclude: Exclude| take(1, &[], Refer::All, exclude);
         assert!(
