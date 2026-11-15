@@ -8,6 +8,11 @@
 //! viewport's first frame draws nowhere and the window appears on the next.
 //! What every viewport draws is kept and painted when the frame is done,
 //! before the main window, so textures arrive in the order egui made them.
+//!
+//! A dialog belongs to the window whose frame showed it: the main window,
+//! or one of Sue's other windows (`crate::windows`). It is drawn in that
+//! window's frames, that window draws again when the dialog has input,
+//! and it closes when a frame of that window no longer shows it.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -48,6 +53,8 @@ pub(crate) struct Viewports {
     drawn: Vec<Drawn>,
     /// Viewports shown this frame; the others' windows close.
     seen: HashSet<ViewportId>,
+    /// The viewport whose frame showed each one.
+    parents: HashMap<ViewportId, ViewportId>,
 }
 
 pub(crate) type Shared = Rc<RefCell<Viewports>>;
@@ -61,6 +68,8 @@ pub(crate) fn install(ctx: &egui::Context, shared: &Shared) {
         let raw = {
             let mut viewports = shared.borrow_mut();
             viewports.seen.insert(id);
+            viewports.parents.insert(id, viewport.ids.parent);
+            let owner = viewports.owner(id);
             match viewports.children.get_mut(&id) {
                 Some(child) => {
                     let mut raw = child.state.take_egui_input(&child.window);
@@ -82,8 +91,8 @@ pub(crate) fn install(ctx: &egui::Context, shared: &Shared) {
                     egui_winit::update_viewport_info(info, ctx, &child.window, false);
                     if std::mem::take(&mut child.close) {
                         info.events.push(egui::ViewportEvent::Close);
-                        // One more frame closes its window if it goes.
-                        ctx.request_repaint_of(egui::ViewportId::ROOT);
+                        // One more frame of its window closes it if it goes.
+                        ctx.request_repaint_of(owner);
                     }
                     raw
                 }
@@ -143,6 +152,20 @@ pub(crate) fn install(ctx: &egui::Context, shared: &Shared) {
 }
 
 impl Viewports {
+    /// The window whose frames draw viewport `id`: the main window's or
+    /// one of Sue's other windows, past any dialog that showed it.
+    pub(crate) fn owner(&self, id: ViewportId) -> ViewportId {
+        let mut at = id;
+        // A chain longer than every viewport known is a loop: stop.
+        for _ in 0..=self.parents.len() {
+            match self.parents.get(&at) {
+                Some(parent) if *parent != at => at = *parent,
+                _ => return at,
+            }
+        }
+        at
+    }
+
     /// Makes the windows of viewports shown without one. True when any
     /// was made (draw again, so it shows).
     pub(crate) fn open_wanted(
@@ -192,21 +215,22 @@ impl Viewports {
         opened
     }
 
-    /// Hands a window's event to its viewport. False when the window is
-    /// not a viewport's (the main window).
+    /// Hands a window's event to its viewport, and says which window's
+    /// frame draws it (to draw again). `None` when the window is not a
+    /// viewport's.
     pub(crate) fn window_event(
         &mut self,
         gpu: &GpuContext,
         window_id: WindowId,
         event: &WindowEvent,
-    ) -> bool {
-        let Some(child) = self
+    ) -> Option<ViewportId> {
+        let id = self
             .children
-            .values_mut()
-            .find(|child| child.window.id() == window_id)
-        else {
-            return false;
-        };
+            .iter()
+            .find(|(_, child)| child.window.id() == window_id)
+            .map(|(id, _)| *id)?;
+        let owner = self.owner(id);
+        let child = self.children.get_mut(&id)?;
         let _ = child.state.on_window_event(&child.window, event);
         match event {
             WindowEvent::CloseRequested => child.close = true,
@@ -217,17 +241,19 @@ impl Viewports {
             }
             _ => {}
         }
-        true
+        Some(owner)
     }
 
-    /// Paints what every viewport drew this frame into its window, and
-    /// closes the windows of viewports no longer shown.
+    /// Paints what every viewport drew in a frame of window `ended` into
+    /// its window, and closes the windows of that window's viewports the
+    /// frame no longer showed. Another window's dialogs stay.
     pub(crate) fn paint(
         &mut self,
         gpu: &GpuContext,
         painter: &mut EguiPainter,
         ctx: &egui::Context,
         clear: egui::Color32,
+        ended: ViewportId,
     ) {
         for drawn in std::mem::take(&mut self.drawn) {
             let target = self.children.get_mut(&drawn.id).and_then(|child| {
@@ -257,9 +283,55 @@ impl Viewports {
                 None => painter.apply_textures(drawn.textures),
             }
         }
-        let seen = std::mem::take(&mut self.seen);
-        self.children.retain(|id, _| seen.contains(id));
-        self.wanted.retain(|id, _| seen.contains(id));
+        self.forget_unseen(ended);
+    }
+
+    /// Lets go of every viewport of window `closed`, which closed.
+    pub(crate) fn forget_window(&mut self, closed: ViewportId) {
+        let shown: Vec<ViewportId> = self
+            .seen
+            .iter()
+            .copied()
+            .filter(|id| self.owner(*id) == closed)
+            .collect();
+        for id in shown {
+            self.seen.remove(&id);
+        }
+        self.forget_unseen(closed);
+    }
+
+    /// Lets go of the viewports of window `ended` its frame did not show.
+    fn forget_unseen(&mut self, ended: ViewportId) {
+        let gone: Vec<ViewportId> = self
+            .children
+            .keys()
+            .chain(self.wanted.keys())
+            .copied()
+            .filter(|id| !self.seen.contains(id) && self.owner(*id) == ended)
+            .collect();
+        for id in &gone {
+            self.children.remove(id);
+            self.wanted.remove(id);
+        }
+        let shown: Vec<ViewportId> = self
+            .seen
+            .iter()
+            .copied()
+            .filter(|id| self.owner(*id) == ended)
+            .collect();
+        for id in shown {
+            self.seen.remove(&id);
+        }
+        let Self {
+            children,
+            wanted,
+            seen,
+            parents,
+            ..
+        } = self;
+        parents.retain(|id, _| {
+            children.contains_key(id) || wanted.contains_key(id) || seen.contains(id)
+        });
     }
 }
 
@@ -295,5 +367,43 @@ mod tests {
         assert_eq!(viewports.drawn.len(), 1, "what it drew waits to be painted");
         assert!(!viewports.drawn[0].shapes.is_empty());
         viewports.drawn[0].textures.clear();
+        assert_eq!(viewports.owner(id), ViewportId::ROOT);
+    }
+
+    #[test]
+    fn a_windows_frame_closes_only_its_own_dialogs() {
+        let mut viewports = Viewports::default();
+        let second = ViewportId::from_hash_of("second window");
+        let main_dialog = ViewportId::from_hash_of("main dialog");
+        let second_dialog = ViewportId::from_hash_of("second dialog");
+        let nested = ViewportId::from_hash_of("a dialog's dialog");
+        for (id, parent) in [
+            (main_dialog, ViewportId::ROOT),
+            (second_dialog, second),
+            (nested, second_dialog),
+        ] {
+            viewports.wanted.insert(id, ViewportBuilder::default());
+            viewports.parents.insert(id, parent);
+        }
+        assert_eq!(viewports.owner(nested), second, "past the dialog");
+        // The second window's frame showed its dialog but not the nested
+        // one: the nested one goes, the main window's stays.
+        viewports.seen.insert(second_dialog);
+        viewports.forget_unseen(second);
+        assert!(viewports.wanted.contains_key(&second_dialog));
+        assert!(!viewports.wanted.contains_key(&nested));
+        assert!(viewports.wanted.contains_key(&main_dialog));
+        assert!(viewports.seen.is_empty());
+        // The main window's frame showed nothing: its dialog goes, the
+        // second window's stays.
+        viewports.forget_unseen(ViewportId::ROOT);
+        assert!(!viewports.wanted.contains_key(&main_dialog));
+        assert!(viewports.wanted.contains_key(&second_dialog));
+        assert_eq!(viewports.parents.len(), 1);
+        // The second window closes: its dialog goes with it.
+        viewports.seen.insert(second_dialog);
+        viewports.forget_window(second);
+        assert!(viewports.wanted.is_empty());
+        assert!(viewports.parents.is_empty());
     }
 }

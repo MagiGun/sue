@@ -1,6 +1,15 @@
-//! The native desktop host: one `winit` window, a `wgpu` surface, and egui
-//! (`egui-winit` for input, IME and the clipboard; [`EguiPainter`] for
+//! The native desktop host: a main `winit` window, a `wgpu` surface, and
+//! egui (`egui-winit` for input, IME and the clipboard; [`EguiPainter`] for
 //! drawing).
+//!
+//! On a desktop the application can have more windows besides the main
+//! one ([`DesktopApp::windows`], see [`crate::windows`]): each is a
+//! system window with Sue's frame that can go to another screen, with its
+//! own surface, input, scale factor and frames. A window draws for its own
+//! input, for its own motion, and when what it shows changed in another
+//! window ([`DesktopApp::revision`]), never because another window drew.
+//! Where the system has one window (phones, tablets, the browser) the
+//! application draws them inside the main window instead.
 //!
 //! Rendering is event-driven. After every frame the loop asks two
 //! questions: does the application still animate (a spring in motion, which
@@ -24,6 +33,7 @@ use winit::window::{Icon, Window, WindowId};
 use crate::gpu::{GpuContext, GpuPreference, WindowSurface};
 use crate::paint::EguiPainter;
 use crate::time::Instant;
+use crate::windows::{WindowSpec, WindowSupport};
 use crate::{
     FormFactor, HardwareCapabilities, InputEvent, OsFamily, PlatformError, PlatformHost,
     PlatformPaths, SafeAreaInsets, SurfaceDescriptor, SurfaceId, SurfaceInfo,
@@ -206,6 +216,42 @@ pub trait DesktopApp {
     fn exit(&mut self, host: &mut DesktopHost) {
         let _ = host;
     }
+
+    /// The windows it wants besides the main one, asked after every event.
+    /// A key that leaves the list closes its window; a new key opens one.
+    /// Only hosts with [`WindowSupport::Many`] open them.
+    fn windows(&mut self) -> Vec<WindowSpec> {
+        Vec::new()
+    }
+
+    /// Builds one frame of the window named `key` into `ui`, which covers
+    /// it. Runs in that window's own frames, apart from the main window's.
+    fn window_ui(&mut self, key: &str, ui: &mut egui::Ui, host: &mut DesktopHost) {
+        let _ = (key, ui, host);
+    }
+
+    /// The person closed the window named `key` (its close button, or the
+    /// system closed it, or it could not be opened). It closes once
+    /// [`Self::windows`] leaves it out.
+    fn window_close_requested(&mut self, key: &str, host: &mut DesktopHost) {
+        let _ = (key, host);
+    }
+
+    /// A number that changes whenever what any window shows may have
+    /// changed (a document, the settings). A window whose last frame showed
+    /// another number draws again.
+    fn revision(&self) -> u64 {
+        0
+    }
+}
+
+/// One of the application's windows besides the main one.
+#[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+struct OsWindow {
+    window: Arc<Window>,
+    /// `None` when the GPU could not draw into it.
+    surface: Option<WindowSurface>,
+    state: egui_winit::State,
 }
 
 /// The id of the main window surface.
@@ -231,6 +277,14 @@ pub struct DesktopHost {
     /// Dialogs and floating palettes in windows of their own.
     #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
     viewports: crate::viewports::Shared,
+    /// The application's windows besides the main one.
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+    windows: crate::windows::WindowSet<OsWindow>,
+    /// Windows whose closing the application has to hear of, by key.
+    close_asked: Vec<String>,
+    /// How the main window was asked for: other windows open the same way.
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+    options: DesktopOptions,
     /// Joins the window's pointer and touch events with the pens' packets
     /// for the pen's sample stream (see `crate::stylus`).
     pen: crate::stylus::Router,
@@ -480,6 +534,11 @@ impl DesktopHost {
             exit_requested: false,
             #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
             viewports,
+            #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+            windows: crate::windows::WindowSet::new(),
+            close_asked: Vec::new(),
+            #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+            options: options.clone(),
             pen: crate::stylus::Router::default(),
             #[cfg(target_os = "windows")]
             tablet: None,
@@ -523,6 +582,72 @@ impl DesktopHost {
     #[must_use]
     pub fn window_info(&self) -> &SurfaceInfo {
         &self.info
+    }
+
+    /// How many windows this system gives Sue: where it is
+    /// [`WindowSupport::One`], [`DesktopApp::windows`] opens nothing and
+    /// the application draws them inside the main window.
+    #[must_use]
+    pub fn window_support(&self) -> WindowSupport {
+        WindowSupport::current()
+    }
+
+    /// The size and scale of the window named `key`, while it is open.
+    #[must_use]
+    pub fn sue_window(&self, key: &str) -> Option<&SurfaceInfo> {
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+        return self.windows.by_key(key).map(|tracked| &tracked.info);
+        #[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
+        {
+            let _ = key;
+            None
+        }
+    }
+
+    /// Where the window named `key` is on the desktop: its top left
+    /// corner, in the desktop's pixels, while it is open (to open it there
+    /// again with [`WindowSpec::at`]).
+    #[must_use]
+    pub fn sue_window_at(&self, key: &str) -> Option<[i32; 2]> {
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+        return self.windows.by_key(key).and_then(|tracked| {
+            let at = tracked.native.window.outer_position().ok()?;
+            Some([at.x, at.y])
+        });
+        #[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
+        {
+            let _ = key;
+            None
+        }
+    }
+
+    /// The screens the desktop has, the main window's first, so a window
+    /// can be opened on another one ([`WindowSpec::at`]).
+    #[must_use]
+    pub fn screens(&self) -> Vec<crate::windows::Screen> {
+        let current = self.window.current_monitor();
+        let mut screens: Vec<(bool, crate::windows::Screen)> = self
+            .window
+            .available_monitors()
+            .map(|monitor| {
+                // Pixels, not points: screens of different scales share
+                // no points, so a point would name two places.
+                let at = monitor.position();
+                let size = monitor.size();
+                let main = current.as_ref() == Some(&monitor);
+                (
+                    main,
+                    crate::windows::Screen {
+                        name: monitor.name().unwrap_or_default(),
+                        at: [at.x, at.y],
+                        pixels: [size.width, size.height],
+                        scale: monitor.scale_factor() as f32,
+                    },
+                )
+            })
+            .collect();
+        screens.sort_by_key(|(main, _)| !*main);
+        screens.into_iter().map(|(_, screen)| screen).collect()
     }
 
     /// The color behind everything egui draws.
@@ -756,7 +881,12 @@ impl DesktopHost {
         // last frame becomes this frame's pen samples.
         self.pen.flush_frame();
         let ctx = self.ctx.clone();
-        let output = ctx.run_ui(raw, |ui| app.ui(ui, self));
+        let mut output = ctx.run_ui(raw, |ui| {
+            app.ui(ui, self);
+            // The other windows stay known to egui while they are open.
+            #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+            crate::windows::keep(ui.ctx(), &app.windows());
+        });
         // The pen's samples went with this frame's events.
         crate::stylus::end_frame();
         #[cfg(any(
@@ -791,7 +921,7 @@ impl DesktopHost {
             }
         }
         self.egui
-            .handle_platform_output(&self.window, output.platform_output);
+            .handle_platform_output(&self.window, std::mem::take(&mut output.platform_output));
         // What Sue asks of the main window: its title, and, with Sue's own
         // frame, moving, resizing, minimizing and maximizing it.
         if let Some(root) = output.viewport_output.get(&egui::ViewportId::ROOT) {
@@ -804,6 +934,13 @@ impl DesktopHost {
                 &mut Vec::new(),
             );
         }
+        // What it asked of the other windows (to come to the front).
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+        {
+            self.window_commands(&output);
+            self.windows
+                .after_pass(&output, None, app.revision(), Instant::now());
+        }
         let delay = output
             .viewport_output
             .get(&egui::ViewportId::ROOT)
@@ -812,9 +949,13 @@ impl DesktopHost {
         self.repaint_at = (delay < Duration::from_secs(86_400)).then(|| Instant::now() + delay);
         // The windows of their own first: their textures came first.
         #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
-        self.viewports
-            .borrow_mut()
-            .paint(&self.gpu, &mut self.painter, &ctx, self.clear);
+        self.viewports.borrow_mut().paint(
+            &self.gpu,
+            &mut self.painter,
+            &ctx,
+            self.clear,
+            egui::ViewportId::ROOT,
+        );
         let Some(surface) = self.surface.as_mut() else {
             // No window to draw into: keep egui's textures in step.
             self.painter.apply_textures(output.textures_delta);
@@ -847,6 +988,331 @@ impl DesktopHost {
     }
 }
 
+/// The application's other windows: opening, closing, their events and
+/// their frames.
+#[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+impl DesktopHost {
+    /// Opens, closes and retitles windows so they are `wanted`. A window
+    /// the system will not open is reported closed to the application.
+    fn sync_windows(&mut self, event_loop: &ActiveEventLoop, wanted: &[WindowSpec]) {
+        let plan = self.windows.plan(wanted);
+        if plan.is_empty() {
+            return;
+        }
+        for surface in &plan.close {
+            // Dropping the system window closes it; the windows of its
+            // dialogs go with it.
+            if let Some(gone) = self.windows.remove(*surface) {
+                self.viewports
+                    .borrow_mut()
+                    .forget_window(gone.spec.viewport());
+            }
+        }
+        for (surface, title) in &plan.retitle {
+            if let Some(tracked) = self.windows.get(*surface) {
+                tracked.native.window.set_title(title);
+            }
+            self.windows.retitle(*surface, title);
+        }
+        for spec in plan.open {
+            match self.open_os_window(event_loop, &spec) {
+                Ok((window, size, scale)) => {
+                    window.window.request_redraw();
+                    self.windows.insert(spec, window, size, scale);
+                }
+                Err(_) => self.close_asked.push(spec.key),
+            }
+        }
+    }
+
+    /// Opens the system window for `spec`, with Sue's frame where Sue
+    /// draws the frames, and its GPU surface; its size in points and its
+    /// scale.
+    fn open_os_window(
+        &self,
+        event_loop: &ActiveEventLoop,
+        spec: &WindowSpec,
+    ) -> Result<(OsWindow, [f32; 2], f32), PlatformError> {
+        let mut attributes = Window::default_attributes()
+            .with_title(spec.title.clone())
+            .with_window_icon(pixel_icon(&self.options))
+            .with_inner_size(LogicalSize::new(spec.size[0], spec.size[1]))
+            .with_min_inner_size(LogicalSize::new(240.0, 160.0))
+            .with_decorations(self.options.decorations);
+        if let Some([x, y]) = spec.at {
+            attributes = attributes.with_position(winit::dpi::PhysicalPosition::new(x, y));
+        }
+        // The main window waits hidden for its first frame; these show at
+        // once.
+        let attributes = system_attributes(attributes, &self.options).with_visible(true);
+        let window = Arc::new(
+            event_loop
+                .create_window(attributes)
+                .map_err(|error| PlatformError::Window(error.to_string()))?,
+        );
+        #[cfg(target_os = "windows")]
+        resource_icons(&window);
+        let physical = window.inner_size();
+        let surface = self
+            .gpu
+            .instance
+            .create_surface(Arc::clone(&window))
+            .ok()
+            .and_then(|surface| {
+                WindowSurface::new(
+                    surface,
+                    &self.gpu,
+                    physical.width.max(1),
+                    physical.height.max(1),
+                )
+                .ok()
+            });
+        let scale = window.scale_factor() as f32;
+        let state = egui_winit::State::new(
+            self.ctx.clone(),
+            spec.viewport(),
+            event_loop,
+            Some(scale),
+            window.theme(),
+            Some(self.painter.max_texture_side()),
+        );
+        let size = [
+            physical.width as f32 / scale,
+            physical.height as f32 / scale,
+        ];
+        Ok((
+            OsWindow {
+                window,
+                surface,
+                state,
+            },
+            size,
+            scale,
+        ))
+    }
+
+    /// Hands an event to the application's window it is for; `None` when
+    /// it is not one of them.
+    fn other_window_event(
+        &mut self,
+        window_id: WindowId,
+        event: &OsWindowEvent,
+    ) -> Option<WindowEventOutcome> {
+        let gpu = &self.gpu;
+        let tracked = self
+            .windows
+            .find_mut(|native| native.window.id() == window_id)?;
+        let surface = tracked.surface;
+        let response = tracked
+            .native
+            .state
+            .on_window_event(&tracked.native.window, event);
+        let mut outcome = WindowEventOutcome {
+            surface,
+            // egui asks to repaint after the redraw itself too; answering
+            // that one would draw forever.
+            redraw: response.repaint && !matches!(event, OsWindowEvent::RedrawRequested),
+            draw_now: false,
+            close: None,
+        };
+        let mut resized = None;
+        match event {
+            OsWindowEvent::CloseRequested => {
+                outcome.close = Some(tracked.spec.key.clone());
+            }
+            OsWindowEvent::Resized(size) => {
+                if let Some(surface) = tracked
+                    .native
+                    .surface
+                    .as_mut()
+                    .filter(|_| size.width > 0 && size.height > 0)
+                {
+                    surface.resize(gpu, size.width, size.height);
+                }
+                let scale = tracked.native.window.scale_factor() as f32;
+                resized = Some((
+                    [size.width as f32 / scale, size.height as f32 / scale],
+                    scale,
+                ));
+            }
+            OsWindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                // Moved to a screen of another scale: `Resized` follows
+                // with its size in pixels there.
+                let scale = *scale_factor as f32;
+                let size = tracked.native.window.inner_size();
+                resized = Some((
+                    [size.width as f32 / scale, size.height as f32 / scale],
+                    scale,
+                ));
+            }
+            OsWindowEvent::RedrawRequested => outcome.draw_now = true,
+            _ => {}
+        }
+        if let Some((points, scale)) = resized {
+            self.windows.resized(surface, points, scale);
+            outcome.redraw = true;
+        }
+        Some(outcome)
+    }
+
+    /// Builds, paints and presents one frame of the application's window
+    /// `surface`: its own input, its own pass, its own surface.
+    fn other_frame<A: DesktopApp>(&mut self, surface: crate::SurfaceId, app: &mut A) {
+        let ctx = self.ctx.clone();
+        let Some((key, raw)) = self.windows.get_mut(surface).map(|tracked| {
+            let native = &mut tracked.native;
+            let mut raw = native.state.take_egui_input(&native.window);
+            egui_winit::update_viewport_info(
+                raw.viewports.entry(tracked.spec.viewport()).or_default(),
+                &ctx,
+                &native.window,
+                false,
+            );
+            (tracked.spec.key.clone(), raw)
+        }) else {
+            return;
+        };
+        let before = app.revision();
+        let mut output = crate::windows::window_pass(&ctx, &key, raw, |ui| {
+            app.window_ui(&key, ui, self);
+        });
+        let after = app.revision();
+        if after != before {
+            // What the main window shows changed in this one.
+            self.window.request_redraw();
+        }
+        let viewport = crate::windows::viewport_of(&key);
+        let platform = std::mem::take(&mut output.platform_output);
+        if let Some(tracked) = self.windows.get_mut(surface) {
+            tracked
+                .native
+                .state
+                .handle_platform_output(&tracked.native.window, platform);
+        }
+        // What it asked of the main window (a frame or a title).
+        if let Some(root) = output.viewport_output.get(&egui::ViewportId::ROOT) {
+            let mut info = egui::ViewportInfo::default();
+            egui_winit::process_viewport_commands(
+                &ctx,
+                &mut info,
+                root.commands.iter().cloned(),
+                &self.window,
+                &mut Vec::new(),
+            );
+        }
+        // Its title bar's moves and buttons, and what it asked of others.
+        self.window_commands(&output);
+        self.windows
+            .after_pass(&output, Some(surface), after, Instant::now());
+        // Its dialogs first: their textures came first.
+        self.viewports
+            .borrow_mut()
+            .paint(&self.gpu, &mut self.painter, &ctx, self.clear, viewport);
+        let target = self.windows.get_mut(surface).and_then(|tracked| {
+            let surface = tracked.native.surface.as_mut()?;
+            let size = surface.size();
+            surface
+                .acquire(&self.gpu)
+                .map(|frame| (frame, size, Arc::clone(&tracked.native.window)))
+        });
+        match target {
+            Some((frame, (width, height), window)) => {
+                let view = frame
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                self.painter.paint(
+                    &ctx,
+                    &view,
+                    [width, height],
+                    self.clear,
+                    output.shapes,
+                    output.textures_delta,
+                    output.pixels_per_point,
+                );
+                window.pre_present_notify();
+                self.gpu.queue.present(frame);
+            }
+            None => {
+                // Keep egui's textures in step and try again soon.
+                self.painter.apply_textures(output.textures_delta);
+                if let Some(tracked) = self.windows.get_mut(surface) {
+                    tracked.repaint_at = Some(Instant::now() + Duration::from_millis(16));
+                }
+            }
+        }
+    }
+
+    /// Carries out what a frame asked of the application's windows:
+    /// moving and resizing them with Sue's frame, its buttons, coming to
+    /// the front.
+    fn window_commands(&mut self, output: &egui::FullOutput) {
+        for tracked in self.windows.iter_mut() {
+            let Some(viewport) = output.viewport_output.get(&tracked.spec.viewport()) else {
+                continue;
+            };
+            if viewport.commands.is_empty() {
+                continue;
+            }
+            let mut info = egui::ViewportInfo::default();
+            egui_winit::process_viewport_commands(
+                &self.ctx,
+                &mut info,
+                viewport.commands.iter().cloned(),
+                &tracked.native.window,
+                &mut Vec::new(),
+            );
+            if info.events.contains(&egui::ViewportEvent::Close) {
+                self.close_asked.push(tracked.spec.key.clone());
+            }
+            tracked.native.window.request_redraw();
+        }
+    }
+
+    /// Asks the application's windows that are due to draw for a frame:
+    /// egui wants one, or what they show changed. The soonest one wants
+    /// to later.
+    fn wake_windows(&mut self, revision: u64) -> Option<Instant> {
+        for surface in self.windows.due(Instant::now(), revision) {
+            if let Some(tracked) = self.windows.get(surface) {
+                tracked.native.window.request_redraw();
+            }
+        }
+        self.windows.next_wake()
+    }
+
+    /// Asks the application's window `surface` for a frame.
+    fn request_window_redraw(&self, surface: crate::SurfaceId) {
+        if let Some(tracked) = self.windows.get(surface) {
+            tracked.native.window.request_redraw();
+        }
+    }
+
+    /// Asks the window whose frames draw `viewport` for a frame: the main
+    /// window, or one of the application's other windows.
+    fn request_viewport_redraw(&self, viewport: egui::ViewportId) {
+        match self
+            .windows
+            .iter()
+            .find(|tracked| tracked.spec.viewport() == viewport)
+        {
+            Some(tracked) => tracked.native.window.request_redraw(),
+            None => self.window.request_redraw(),
+        }
+    }
+}
+
+/// What an event of one of the application's other windows calls for.
+#[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+struct WindowEventOutcome {
+    surface: crate::SurfaceId,
+    /// Draw it again.
+    redraw: bool,
+    /// Draw it now (the system asked).
+    draw_now: bool,
+    /// The person closed it: tell the application, by its key.
+    close: Option<String>,
+}
+
 impl PlatformHost for DesktopHost {
     fn os(&self) -> OsFamily {
         self.os
@@ -868,8 +1334,10 @@ impl PlatformHost for DesktopHost {
         &mut self,
         _descriptor: &SurfaceDescriptor,
     ) -> Result<SurfaceInfo, PlatformError> {
+        // A window needs the event loop and the application's frames: the
+        // application asks for it with `DesktopApp::windows`.
         Err(PlatformError::Unsupported(
-            "the desktop host drives a single main window",
+            "the desktop host opens other windows through DesktopApp::windows",
         ))
     }
 
@@ -879,13 +1347,22 @@ impl PlatformHost for DesktopHost {
         width: f32,
         height: f32,
     ) -> Result<SurfaceInfo, PlatformError> {
-        if id != MAIN_SURFACE {
+        if self.surface(id).is_none() {
             return Err(PlatformError::UnknownSurface(id));
         }
         if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
             return Err(PlatformError::InvalidSurface(
                 "size must be positive and finite",
             ));
+        }
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+        if let Some(tracked) = self.windows.get(id) {
+            // `Resized` reports what the system made of it.
+            let _ = tracked
+                .native
+                .window
+                .request_inner_size(LogicalSize::new(width, height));
+            return Ok(tracked.info.clone());
         }
         // The OS may refuse or adjust the size; `Resized` reports the outcome.
         let _ = self
@@ -895,15 +1372,28 @@ impl PlatformHost for DesktopHost {
     }
 
     fn destroy_surface(&mut self, id: SurfaceId) -> Result<(), PlatformError> {
-        if id != MAIN_SURFACE {
-            return Err(PlatformError::UnknownSurface(id));
+        if id == MAIN_SURFACE {
+            self.exit_requested = true;
+            return Ok(());
         }
-        self.exit_requested = true;
-        Ok(())
+        // Another window closes as if the person closed it: the
+        // application hears of it and leaves it out of its list.
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+        if let Some(tracked) = self.windows.get(id) {
+            self.close_asked.push(tracked.spec.key.clone());
+            return Ok(());
+        }
+        Err(PlatformError::UnknownSurface(id))
     }
 
     fn surface(&self, id: SurfaceId) -> Option<&SurfaceInfo> {
-        (id == MAIN_SURFACE).then_some(&self.info)
+        if id == MAIN_SURFACE {
+            return Some(&self.info);
+        }
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+        return self.windows.get(id).map(|tracked| &tracked.info);
+        #[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
+        None
     }
 
     fn poll_events(&mut self) -> Vec<InputEvent> {
@@ -1145,6 +1635,16 @@ fn plan_step(
         .map_or(Step::Wait, Step::WaitUntil)
 }
 
+/// The main window's step, waking in time for the soonest of the other
+/// windows (`wake`) too: each of those is asked for its own frame then.
+fn with_windows(step: Step, wake: Option<Instant>) -> Step {
+    match (step, wake) {
+        (Step::Redraw, _) | (_, None) => step,
+        (Step::Wait, Some(at)) => Step::WaitUntil(at),
+        (Step::WaitUntil(main), Some(at)) => Step::WaitUntil(main.min(at)),
+    }
+}
+
 impl<A: DesktopApp> Runner<A> {
     /// Starts the application on a new host.
     fn begin(&mut self, event_loop: &ActiveEventLoop, created: Result<DesktopHost, PlatformError>) {
@@ -1265,6 +1765,24 @@ impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
         if host.poll_wayland_pen() {
             host.window.request_redraw();
         }
+        // The application's other windows: closings it has to hear of,
+        // then open and close windows to match its list (twice, so a
+        // window the system would not open is let go of at once), then
+        // those due to draw are asked to.
+        for _ in 0..2 {
+            for key in std::mem::take(&mut host.close_asked) {
+                self.app.window_close_requested(&key, host);
+            }
+            #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+            {
+                let wanted = self.app.windows();
+                host.sync_windows(event_loop, &wanted);
+            }
+        }
+        #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
+        let windows_wake = host.wake_windows(self.app.revision());
+        #[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
+        let windows_wake = None;
         let now = Instant::now();
         let mut pacing = self.app.pacing(now);
         if let FramePacing::WakeAt(at) = pacing
@@ -1282,12 +1800,15 @@ impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
             };
         }
         let display_hz = host.capabilities.display_refresh_hz;
-        let step = plan_step(
-            pacing,
-            host.repaint_at,
-            Instant::now(),
-            self.last_frame,
-            display_hz,
+        let step = with_windows(
+            plan_step(
+                pacing,
+                host.repaint_at,
+                Instant::now(),
+                self.last_frame,
+                display_hz,
+            ),
+            windows_wake,
         );
         // Going to sleep: a Wayland pen's events wake the loop.
         #[cfg(any(
@@ -1414,16 +1935,44 @@ impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
         let Some(host) = self.host.as_mut() else {
             return;
         };
-        // A dialog's or palette's own window: it draws with the main
-        // window's frame.
+        // One of the application's other windows: its own input, its own
+        // frames.
         #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
         if window_id != host.window.id() {
-            if host
-                .viewports
-                .borrow_mut()
-                .window_event(&host.gpu, window_id, &event)
-            {
-                host.window.request_redraw();
+            if let Some(outcome) = host.other_window_event(window_id, &event) {
+                if let Some(key) = outcome.close {
+                    self.app.window_close_requested(&key, host);
+                    // The main window shows the change (the window gone).
+                    host.window.request_redraw();
+                }
+                if outcome.draw_now {
+                    host.other_frame(outcome.surface, &mut self.app);
+                    // Windows for its dialogs first shown in this frame.
+                    let opened = host.viewports.borrow_mut().open_wanted(
+                        event_loop,
+                        &host.ctx,
+                        &host.gpu,
+                        host.painter.max_texture_side(),
+                    );
+                    if opened || outcome.redraw {
+                        host.request_window_redraw(outcome.surface);
+                    }
+                } else if outcome.redraw {
+                    host.request_window_redraw(outcome.surface);
+                }
+            } else {
+                // A dialog's or palette's own window: it draws with the
+                // frames of the window that showed it.
+                let owner = host
+                    .viewports
+                    .borrow_mut()
+                    .window_event(&host.gpu, window_id, &event);
+                if let Some(owner) = owner {
+                    host.request_viewport_redraw(owner);
+                }
+            }
+            if host.exit_requested {
+                self.finish(event_loop);
             }
             return;
         }
@@ -1484,6 +2033,24 @@ impl<A: DesktopApp> ApplicationHandler<Wake> for Runner<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_other_windows_wake_the_loop_in_time() {
+        let now = Instant::now();
+        let soon = now + Duration::from_millis(40);
+        let later = now + Duration::from_millis(400);
+        assert_eq!(with_windows(Step::Wait, None), Step::Wait);
+        assert_eq!(with_windows(Step::Wait, Some(soon)), Step::WaitUntil(soon));
+        assert_eq!(
+            with_windows(Step::WaitUntil(later), Some(soon)),
+            Step::WaitUntil(soon)
+        );
+        assert_eq!(
+            with_windows(Step::WaitUntil(soon), Some(later)),
+            Step::WaitUntil(soon)
+        );
+        assert_eq!(with_windows(Step::Redraw, Some(soon)), Step::Redraw);
+    }
 
     #[test]
     fn pacing_turns_into_loop_steps() {

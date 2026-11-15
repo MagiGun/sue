@@ -44,6 +44,7 @@ mod sue_menu;
 mod window;
 
 pub use hub::{HUB_FILES, HUB_HOME, HubButton, HubRow, WorkShelf};
+pub use window::view_key;
 
 /// The rice key of the Hub's pin: the studio or tool Sue opens into at
 /// launch, empty for the Hub.
@@ -236,6 +237,13 @@ pub struct Shell {
     /// The notices of saved files still showing, each with the file its
     /// button shows, the newest last.
     revealed: Vec<(crate::ui::ToastId, PathBuf)>,
+    /// The applets' views in windows of their own (or floating), the
+    /// front one last.
+    views: Vec<window::View>,
+    /// The view whose window was asked for again, to bring to the front.
+    raise_view: Option<String>,
+    /// How many windows the system gives Sue.
+    window_support: sue_platform::WindowSupport,
 }
 
 impl std::fmt::Debug for Shell {
@@ -309,6 +317,9 @@ impl Shell {
             hub: hub::HubState::default(),
             toasts: crate::ui::Toasts::new("sue-notices"),
             revealed: Vec::new(),
+            views: Vec::new(),
+            raise_view: None,
+            window_support: sue_platform::WindowSupport::default(),
             config,
             theme,
             applied_theme: None,
@@ -864,6 +875,14 @@ impl Shell {
                 self.notify_saved(&path, &note);
             }
             ShellRequest::CloseWindow => self.close_window(),
+            ShellRequest::OpenView {
+                applet,
+                view,
+                title,
+            } => self.open_view(applet, &view, &title),
+            ShellRequest::CloseView { applet, view } => {
+                self.close_view(&window::view_key(&applet, &view), io, now);
+            }
             ShellRequest::OpenWindow(id) => self.open_window(id),
             ShellRequest::AppletCommand { applet, command } => {
                 let view = self.view(now, 0.0);
@@ -1086,6 +1105,7 @@ impl Shell {
         if layout.status.height() >= 1.0 {
             self.status_ui(root, layout.status, io, &theme);
         }
+        self.views_ui(&ctx, layout.page, io, &theme, now, dt);
         self.notice_ui(&ctx, layout.page, io, &theme);
         self.palette_ui(&ctx, io, &theme, now);
         self.window_ui(&ctx, frame, io, &theme, now, dt);

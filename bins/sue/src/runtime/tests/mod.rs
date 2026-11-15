@@ -36,6 +36,7 @@ mod paint_view;
 mod paint_window;
 mod settings;
 mod shell;
+mod windows;
 mod writer;
 
 pub(crate) fn runtime(tag: &str) -> (Runtime, PathBuf) {

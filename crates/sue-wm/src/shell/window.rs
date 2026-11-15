@@ -1,15 +1,24 @@
-//! The window that floats over the page (Settings and the like).
+//! The window that floats over the page (Settings and the like), and the
+//! applets' views in windows of their own.
 //!
-//! On a computer and a tablet it is Sue's dialog host, sized to the screen
-//! and how the tablet is held; on a phone it fills the screen, clear of
-//! notches, and rises from below.
+//! On a computer and a tablet the floating window is Sue's dialog host,
+//! sized to the screen and how the tablet is held; on a phone it fills the
+//! screen, clear of notches, and rises from below.
+//!
+//! A view ([`ShellRequest::OpenView`](crate::ShellRequest::OpenView)) is
+//! a system window of its own where the system gives Sue many (the host
+//! opens what [`Shell::os_windows`] lists and draws each with
+//! [`Shell::view_window_ui`]), and a frame floating over the page where it
+//! gives one (phones, tablets, the browser).
 
-use egui::{Align, Id, Layout, Order, Rect, RichText, Sense, UiBuilder, Vec2, pos2, vec2};
-use sue_platform::FormFactor;
+use egui::{
+    Align, Id, Layout, Order, Pos2, Rect, RichText, Sense, Ui, UiBuilder, Vec2, pos2, vec2,
+};
 use sue_platform::time::Instant;
+use sue_platform::{FormFactor, WindowSpec, WindowSupport};
 
 use super::{Shell, ShellIo, split};
-use crate::ui::{Answer, Density, Dialog, Space};
+use crate::ui::{Answer, Density, Dialog, Elevation, Radius, Space, TextRole};
 use crate::{AppletId, Theme, widgets};
 
 impl Shell {
@@ -207,3 +216,342 @@ impl Shell {
         }
     }
 }
+
+// ----- Views in windows of their own ----------------------------------------
+
+/// How big a view's window opens, in points, when nothing smaller fits.
+const VIEW_SIZE: Vec2 = vec2(960.0, 640.0);
+
+/// One of an applet's views in a window of its own
+/// ([`ShellRequest::OpenView`](crate::ShellRequest::OpenView)), or, where
+/// the system gives Sue one window, in a frame floating over the page.
+#[derive(Clone, Debug)]
+pub(super) struct View {
+    applet: AppletId,
+    view: String,
+    title: String,
+    /// Where the floating frame's top left corner is (`None`: not placed
+    /// yet).
+    at: Option<Pos2>,
+    /// Where the last frame drew the floating frame, and its close button.
+    rect: Rect,
+    close: Rect,
+}
+
+impl View {
+    fn key(&self) -> String {
+        view_key(&self.applet, &self.view)
+    }
+}
+
+/// The key of view `view` of `applet`: names its window while it is open.
+#[must_use]
+pub fn view_key(applet: &AppletId, view: &str) -> String {
+    format!("{}/{view}", applet.as_str())
+}
+
+impl Shell {
+    /// Says how many windows the system gives Sue: with
+    /// [`WindowSupport::Many`] each view opens in a window of its own
+    /// ([`Self::os_windows`]), with [`WindowSupport::One`] it floats over
+    /// the page.
+    pub fn set_window_support(&mut self, support: WindowSupport) {
+        self.window_support = support;
+    }
+
+    /// How many windows the system gives Sue.
+    #[must_use]
+    pub fn window_support(&self) -> WindowSupport {
+        self.window_support
+    }
+
+    /// Opens view `view` of `applet` in a window titled `title`, or brings
+    /// its window to the front when it is open (taking the new title).
+    pub fn open_view(&mut self, applet: AppletId, view: &str, title: &str) {
+        let key = view_key(&applet, view);
+        match self.views.iter().position(|open| open.key() == key) {
+            Some(index) => {
+                let mut open = self.views.remove(index);
+                title.clone_into(&mut open.title);
+                // The last is the front one.
+                self.views.push(open);
+                self.raise_view = Some(key);
+            }
+            None => self.views.push(View {
+                applet,
+                view: view.to_owned(),
+                title: title.to_owned(),
+                at: None,
+                rect: Rect::NOTHING,
+                close: Rect::NOTHING,
+            }),
+        }
+        self.touch();
+    }
+
+    /// Closes the window of the view named `key` and tells its applet.
+    pub fn close_view(&mut self, key: &str, io: &mut ShellIo<'_>, now: Instant) {
+        let Some(index) = self.views.iter().position(|open| open.key() == key) else {
+            return;
+        };
+        let gone = self.views.remove(index);
+        let theme = self.theme.clone();
+        let view = self.view(now, 0.0);
+        let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &gone.applet));
+        let (applets, mut cx) = split(io, &theme, view);
+        if let Some(applet) = applets.get_mut(&gone.applet) {
+            applet.view_closed(&gone.view, &mut cx);
+        }
+        self.touch();
+    }
+
+    /// The keys of the views open in windows of their own or floating, the
+    /// front one last.
+    #[must_use]
+    pub fn views(&self) -> Vec<String> {
+        self.views.iter().map(View::key).collect()
+    }
+
+    /// Where the last frame drew the floating frame of the view named
+    /// `key`, and its close button (only where it floats).
+    #[must_use]
+    pub fn view_rects(&self, key: &str) -> Option<(Rect, Rect)> {
+        self.views
+            .iter()
+            .find(|open| open.key() == key)
+            .filter(|open| open.rect.is_positive())
+            .map(|open| (open.rect, open.close))
+    }
+
+    /// The windows of their own the views want, for the host to open
+    /// ([`WindowSupport::Many`] only; none where they float).
+    #[must_use]
+    pub fn os_windows(&self) -> Vec<WindowSpec> {
+        if !self.window_support.many() {
+            return Vec::new();
+        }
+        self.views
+            .iter()
+            .map(|open| WindowSpec::new(open.key(), open.title.clone(), [VIEW_SIZE.x, VIEW_SIZE.y]))
+            .collect()
+    }
+
+    /// Builds one frame of the window of the view named `key` into `root`,
+    /// which covers that window: Sue's title bar where Sue draws the
+    /// frames, then the applet's view.
+    pub fn view_window_ui(&mut self, key: &str, root: &mut Ui, io: &mut ShellIo<'_>, now: Instant) {
+        let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
+        let Some(open) = self.views.iter().find(|open| open.key() == key).cloned() else {
+            return;
+        };
+        let ctx = root.ctx().clone();
+        let theme = self.page_theme(&open.applet, &io.world.rice, &self.theme);
+        let nominal = 1.0 / self.scheduler.target_hz().max(1) as f32;
+        let window = root.max_rect();
+        let mut close = false;
+        let mut body = window;
+        if self.own_frame {
+            // Sue's title bar, as the main window's: in Sue's own theme.
+            let bar =
+                Rect::from_min_size(window.min, vec2(window.width(), crate::widgets::TITLE_BAR));
+            let sue_theme = self.theme.clone();
+            close = crate::widgets::title_bar(root, bar, &open.title, true, &sue_theme);
+            body.min.y = bar.bottom();
+        }
+        self.with_theme(&ctx, &theme, |shell| {
+            // The view wears its applet's theme, as its page does.
+            root.painter().rect_filled(body, 0.0, theme.void);
+            let mut body_ui = root.new_child(
+                UiBuilder::new()
+                    .max_rect(body)
+                    .id_salt(("sue-view", key))
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            body_ui.set_clip_rect(body);
+            let view = shell.view(now, nominal);
+            let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &open.applet));
+            let (applets, mut cx) = split(io, &theme, view);
+            if let Some(applet) = applets.get_mut(&open.applet) {
+                applet.view_ui(&open.view, &mut body_ui, &mut cx);
+            }
+        });
+        if self.own_frame {
+            crate::widgets::resize_edges(root, window);
+        }
+        if close {
+            self.close_view(key, io, now);
+        }
+    }
+
+    /// Draws the views that float over the page where the system gives
+    /// Sue one window: each in a frame with its title and a close button,
+    /// moved by its title strip, kept on the page. On a phone a view fills
+    /// the page. Where views have windows of their own, it only brings a
+    /// window asked for again to the front.
+    #[allow(clippy::too_many_arguments, reason = "frames over the page")]
+    pub(super) fn views_ui(
+        &mut self,
+        ctx: &egui::Context,
+        page: Rect,
+        io: &mut ShellIo<'_>,
+        theme: &Theme,
+        now: Instant,
+        dt: f32,
+    ) {
+        if self.window_support.many() {
+            if let Some(key) = self.raise_view.take() {
+                ctx.send_viewport_cmd_to(
+                    sue_platform::windows::viewport_of(&key),
+                    egui::ViewportCommand::Focus,
+                );
+            }
+            return;
+        }
+        let raise = self.raise_view.take();
+        let caret_blink = self.config.caret_blink;
+        let form = self.form_factor();
+        let phone = form == FormFactor::Mobile;
+        // The systems with one window are the touch ones: there the title
+        // strip and its close button are finger sized.
+        let density = if form == FormFactor::Desktop && !crate::widgets::is_touch(ctx) {
+            Density::Compact
+        } else {
+            Density::Touch
+        };
+        let strip = density.tab_strip();
+        let step = theme.space(Space::S6);
+        let mut closed = Vec::new();
+        for index in 0..self.views.len() {
+            let open = self.views[index].clone();
+            let key = open.key();
+            // The frame is Sue's; the view inside wears its applet's theme.
+            let page_theme = self.page_theme(&open.applet, &io.world.rice, theme);
+            let size = if phone {
+                page.size()
+            } else {
+                VIEW_SIZE.min(page.size() * 0.8)
+            };
+            // A new frame is cascaded from the page's middle; a frame keeps
+            // its title strip on the page.
+            let cascade = page.center() - size / 2.0 + Vec2::splat(step * index as f32);
+            let wanted = if phone {
+                page.min
+            } else {
+                open.at.unwrap_or(cascade)
+            };
+            let at = pos2(
+                wanted
+                    .x
+                    .clamp(page.left(), (page.right() - size.x).max(page.left())),
+                wanted
+                    .y
+                    .clamp(page.top(), (page.bottom() - strip).max(page.top())),
+            );
+            let frame = Rect::from_min_size(at, size);
+            let area = egui::Area::new(Id::unique(("sue-view-frame", key.as_str())))
+                .order(Order::Middle)
+                .fixed_pos(at)
+                .constrain(false);
+            let shown = area.show(ctx, |ui| {
+                let painter = ui.painter().clone();
+                let radius = theme.radius(Radius::Md);
+                // Lifted off the page as a popover is, so its edge reads
+                // where the view and the page share a color.
+                painter.add(theme.elevation(Elevation::Floating).as_shape(frame, radius));
+                painter.rect_filled(frame, radius, page_theme.void);
+                // The title strip: dragging it moves the frame.
+                let header = Rect::from_min_size(frame.min, vec2(size.x, strip));
+                let top = radius.round().clamp(0.0, f32::from(u8::MAX)) as u8;
+                let corners = egui::CornerRadius {
+                    nw: top,
+                    ne: top,
+                    sw: 0,
+                    se: 0,
+                };
+                painter.rect_filled(header, corners, theme.surface(0));
+                painter.hline(header.x_range(), header.bottom(), theme.hairline());
+                painter.rect_stroke(frame, radius, theme.hairline(), egui::StrokeKind::Outside);
+                let grip = ui.interact(
+                    header,
+                    Id::unique(("sue-view-grip", key.as_str())),
+                    Sense::click_and_drag(),
+                );
+                let button = density.icon_button().min(strip);
+                let close = Rect::from_min_size(
+                    pos2(
+                        header.right() - button - theme.space(Space::S1),
+                        header.center().y - button / 2.0,
+                    ),
+                    Vec2::splat(button),
+                );
+                let inset = theme.space(Space::S4);
+                let room = (close.left() - header.left() - 2.0 * inset).max(0.0);
+                let galley = painter.layout(
+                    open.title.clone(),
+                    theme.text_font(if density == Density::Touch {
+                        TextRole::Body
+                    } else {
+                        TextRole::Caption
+                    }),
+                    theme.text_muted(),
+                    room,
+                );
+                painter.with_clip_rect(header).galley(
+                    pos2(
+                        header.left() + inset,
+                        header.center().y - galley.size().y / 2.0,
+                    ),
+                    galley,
+                    theme.text_muted(),
+                );
+                let closing = crate::ui::icon_button(
+                    ("sue-view-close", key.as_str()),
+                    crate::icons::Icon::Close,
+                    &tr!("window-close"),
+                )
+                .show_at(ui, close, theme)
+                .clicked();
+                // The view itself, below the strip.
+                let body = Rect::from_min_max(pos2(frame.left(), header.bottom()), frame.max);
+                let mut body_ui = ui.new_child(
+                    UiBuilder::new()
+                        .max_rect(body)
+                        .id_salt(("sue-view", key.as_str()))
+                        .layout(Layout::top_down(Align::Min)),
+                );
+                body_ui.set_clip_rect(body);
+                body_ui.style_mut().visuals = page_theme.visuals(caret_blink);
+                let view = self.view(now, dt);
+                let _language =
+                    sue_lang::scope(&crate::applet_language(&io.world.rice, &open.applet));
+                let (applets, mut cx) = split(io, &page_theme, view);
+                if let Some(applet) = applets.get_mut(&open.applet) {
+                    applet.view_ui(&open.view, &mut body_ui, &mut cx);
+                }
+                // The frame takes the clicks it covers.
+                ui.allocate_rect(frame, Sense::hover());
+                (grip.drag_delta(), close, closing)
+            });
+            if raise.as_deref() == Some(key.as_str()) {
+                ctx.move_to_top(shown.response.layer_id);
+            }
+            let (moved, close, closing) = shown.inner;
+            let entry = &mut self.views[index];
+            entry.at = Some(at + moved);
+            entry.rect = frame;
+            entry.close = close;
+            if moved != Vec2::ZERO {
+                self.touch();
+            }
+            if closing {
+                closed.push(key);
+            }
+        }
+        for key in closed {
+            self.close_view(&key, io, now);
+        }
+    }
+}
+
+#[cfg(test)]
+mod view_tests;
