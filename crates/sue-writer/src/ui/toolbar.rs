@@ -4,7 +4,7 @@ use egui::{Id, Rect, Ui, UiBuilder, Vec2};
 use sue_core::Value;
 use sue_model::mark_kind as kind;
 use sue_wm::icons::Icon;
-use sue_wm::ui::{Density, Space, dropdown, icon_button, popover};
+use sue_wm::ui::{Density, Space, dropdown, icon_button, picker_box, popover, toggle_button};
 use sue_wm::{AppletContext, Theme, widgets};
 
 use crate::studio::{SueWriter, View};
@@ -322,39 +322,74 @@ impl SueWriter {
         chars: &sue_type::CharFormat,
     ) {
         let font = chars.font.clone().unwrap_or_else(|| para.font.clone());
-        let font_id = Id::unique("writer-font-filter");
-        // The installed fonts with a search field: the shared font list
-        // inside a combo box, as Settings shows it.
+        // The installed fonts, each in its own face, under a search field:
+        // a box like the style's and the size's opens them in a popover.
+        let open_id = Id::unique("writer-font-open");
+        let filter_id = Id::unique("writer-font-filter");
+        let mut open = ui.data(|data| data.get_temp::<bool>(open_id).unwrap_or(false));
         let line = Density::of(ui).control_height();
-        let font_box = egui::ComboBox::from_id_salt("writer-font")
-            .selected_text(font.clone())
-            .width(line * FONT_BOX)
-            .height(line * FONT_LIST)
-            .show_ui(ui, |ui| {
-                let mut filter: String = ui.data(|data| data.get_temp(font_id)).unwrap_or_default();
-                sue_wm::ui::search_field("writer-font-search", &mut filter)
+        let name = tr!("font");
+        let font_box = picker_box(
+            ui,
+            "writer-font",
+            &font,
+            &name,
+            open,
+            line * FONT_BOX,
+            theme,
+        );
+        let opened = font_box.clicked() && !open;
+        if font_box.clicked() {
+            open = !open;
+        }
+        let picked = popover(
+            ui.ctx(),
+            open_id.with("list"),
+            font_box.rect,
+            &mut open,
+            theme,
+            |ui| {
+                ui.set_width(line * FONT_SEARCH);
+                let mut filter: String =
+                    ui.data(|data| data.get_temp(filter_id)).unwrap_or_default();
+                let search = sue_wm::ui::search_field("writer-font-search", &mut filter)
                     .hint(&tr!("search-fonts"))
                     .width(line * FONT_SEARCH)
                     .show(ui, theme);
-                ui.data_mut(|data| data.insert_temp(font_id, filter.clone()));
+                if opened {
+                    search.request_focus();
+                }
+                ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
                 if !sue_wm::fonts::ready() {
                     ui.label(
                         egui::RichText::new(tr!("finding-installed-fonts-ellipsis"))
                             .color(theme.text_muted()),
                     );
                 }
-                if ui
-                    .selectable_label(chars.font.is_none(), tr!("styles-font"))
+                let mut picked = None;
+                let styles = tr!("styles-font");
+                if toggle_button("writer-font-style", &styles, chars.font.is_none())
+                    .ghost()
+                    .full_width()
+                    .show(ui, theme)
                     .clicked()
                 {
-                    self.editor.set_char(cx, kind::FONT, None, &tr!("font"));
+                    picked = Some(None);
                 }
                 if let Some(family) = sue_wm::fonts::list_ui(ui, &font, &filter) {
-                    self.editor
-                        .set_char(cx, kind::FONT, Some(Value::Text(family)), &tr!("font"));
+                    picked = Some(Some(family));
                 }
-            });
-        font_box.response.on_hover_text(tr!("font"));
+                picked
+            },
+        )
+        .flatten();
+        if let Some(family) = picked {
+            self.editor
+                .set_char(cx, kind::FONT, family.map(Value::Text), &name);
+            open = false;
+            font_box.request_focus();
+        }
+        ui.data_mut(|data| data.insert_temp(open_id, open));
         let size = chars.size.unwrap_or(para.size);
         let mut sizes: Vec<f32> = SIZES.to_vec();
         if !sizes.iter().any(|option| (option - size).abs() < 0.1) {
