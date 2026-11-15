@@ -122,6 +122,19 @@ impl SuePaint {
         if column == Column::Main && self.tiled && self.main_docs().len() > 1 {
             viewport = self.tile_others(ui, viewport, cx, theme);
         }
+        // The Page Manager fills the canvas area, or a column of it (in
+        // Sue Paint's column; a canvas window shows its canvas alone).
+        let viewport = if column == Column::Main {
+            let Some(viewport) = self.page_manager_area(ui, viewport, cx, theme) else {
+                if !self.bare {
+                    self.status_strip(ui, status, None, column, cx, theme);
+                }
+                return;
+            };
+            viewport
+        } else {
+            viewport
+        };
         self.viewport = viewport;
         ui.painter().rect_filled(
             viewport,
@@ -162,6 +175,7 @@ impl SuePaint {
         self.tone_overlay(ui, viewport, size, cx);
         self.page_frames(ui, viewport, size, cx, theme);
         self.overlays(ui, viewport, size, &response, cx, theme);
+        self.comic_overlay(ui, viewport, size, cx, theme);
         self.view_marks(ui, viewport, size, cx, theme);
         self.typing_ui(ui, viewport, size, cx);
         self.warp_ui(ui, viewport, size, cx, theme);

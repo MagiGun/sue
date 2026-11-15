@@ -13,6 +13,7 @@ mod menus;
 mod paint_canvas;
 mod paint_canvas_chrome;
 mod paint_color;
+mod paint_comic;
 mod paint_dialogs;
 mod paint_dock;
 mod paint_figure;
@@ -76,6 +77,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_dialogs::menu_and_dialogs(tour)?;
     paint_dialogs::pages(tour)?;
     paint_modifiers::scenes(tour)?;
+    paint_comic::pages(tour)?;
+    paint_comic::frames(tour)?;
     paint_timeline::timeline(tour)?;
     paint_view::marks(tour)?;
     paint_canvas_chrome::window(tour)?;

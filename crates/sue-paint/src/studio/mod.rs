@@ -837,6 +837,12 @@ pub struct SuePaint {
     /// Fill, when it looks at vector layers, stops at their lines'
     /// middles instead of their edges (Fill up to vector path).
     pub(crate) fill_vector_path: bool,
+    /// The Page Manager while it shows in the canvas area, filling it or
+    /// docked beside the page (see `pages.rs`).
+    pub(crate) page_view: Option<crate::pages::PageView>,
+    /// The frame border panels the Object tool picked last, by layer
+    /// and index, for Divide Frame Border Equally and Combine Frames.
+    pub(crate) comic_picked: Option<(EntityId, Vec<usize>)>,
 }
 
 impl Default for SuePaint {
@@ -1030,6 +1036,8 @@ impl Default for SuePaint {
             line_lines_shown: None,
             line_hex: [String::new(), String::new()],
             fill_vector_path: false,
+            page_view: None,
+            comic_picked: None,
         }
     }
 }

@@ -97,7 +97,7 @@ impl SuePaint {
             // Frame borders and effect lines: their panels, corners and
             // ends move.
             let reach = 10.0 / zoom.max(0.01);
-            self.gesture = self.comic_object_at(p, reach, &cx.world.arena);
+            self.gesture = self.comic_object_at(p, reach, modifiers.shift, &cx.world.arena);
             return;
         }
         if picks(PICKS_3D)

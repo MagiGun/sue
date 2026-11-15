@@ -124,6 +124,8 @@ pub(crate) enum Dialog {
     Convert(sue_core::EntityId, u8, String),
     /// File, Manage Fonts: Sue's shared font list.
     Fonts(sue_wm::fonts::FontManager),
+    /// Layer, Ruler/Frame, Divide Frame Border Equally.
+    DivideFrame(crate::comic::DivideSpec),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,7 +165,7 @@ impl Dialog {
                 ),
             ),
             Dialog::Shortcuts => (tr!("keyboard-shortcuts"), vec2(470.0, 560.0)),
-            Dialog::Pages(_) => (tr!("page-manager"), vec2(820.0, 620.0)),
+            Dialog::Pages(_) => (tr!("binding-preview-3d"), vec2(820.0, 620.0)),
             Dialog::Comps(_) => (tr!("layer-comps"), vec2(420.0, 300.0)),
             Dialog::Exposure => (tr!("exposure-sheet"), vec2(520.0, 560.0)),
             Dialog::Frame(_) => (tr!("new-frame-border-folder"), vec2(420.0, 330.0)),
@@ -184,7 +186,8 @@ impl Dialog {
                 vec2(320.0, 140.0),
             ),
             Dialog::Gamut(..) => (tr!("select-color-gamut"), vec2(340.0, 170.0)),
-            Dialog::Webtoon(..) => (tr!("export-webtoon"), vec2(340.0, 170.0)),
+            Dialog::Webtoon(..) => (tr!("export-webtoon"), vec2(360.0, 240.0)),
+            Dialog::DivideFrame(_) => (tr!("divide-frame-border-equally"), vec2(360.0, 290.0)),
             Dialog::Timeline(..) => (tr!("edit-timeline"), vec2(320.0, 150.0)),
             Dialog::Shape3D(_) => (tr!("new-3d-layer"), vec2(300.0, 230.0)),
             Dialog::Workspace(_) => (tr!("register-workspace"), vec2(340.0, 140.0)),
@@ -197,8 +200,8 @@ impl Dialog {
             Dialog::CommandBar(_) => (tr!("command-bar-settings"), vec2(420.0, 460.0)),
             Dialog::CanvasProperties(_) => (tr!("canvas-properties"), vec2(380.0, 230.0)),
             Dialog::Proof(_) => (tr!("color-profile-preview-settings"), vec2(400.0, 230.0)),
-            Dialog::PageSettings(_) => (tr!("change-page-settings"), vec2(380.0, 270.0)),
-            Dialog::StoryInfo(_) => (tr!("change-story-information"), vec2(420.0, 360.0)),
+            Dialog::PageSettings(_) => (tr!("change-page-settings"), vec2(400.0, 370.0)),
+            Dialog::StoryInfo(_) => (tr!("change-story-information"), vec2(460.0, 500.0)),
             Dialog::StoryEditor(_) => (tr!("story-editor"), vec2(520.0, 520.0)),
             Dialog::Convert(..) => (tr!("convert-layer"), vec2(360.0, 190.0)),
             Dialog::Fonts(_) => (tr!("manage-fonts"), sue_wm::fonts::MANAGE_SIZE),
@@ -385,7 +388,7 @@ impl SuePaint {
             Dialog::AdvancedFill => self.advanced_fill_dialog_ui(ui, theme),
             Dialog::Filter(filter) => filter_ui(ui, filter, theme),
             Dialog::Pressure(pressure) => pressure_ui(ui, pressure, theme),
-            Dialog::Pages(pages) => self.pages_ui(ui, pages, cx, theme),
+            Dialog::Pages(preview) => self.binding_ui(ui, preview, cx, theme),
             Dialog::Comps(comps) => self.comps_ui(ui, comps, cx, theme),
             Dialog::Exposure => self.exposure_ui(ui, cx, theme),
             Dialog::Frame(frame) => frame_ui(ui, frame, theme),
@@ -406,6 +409,7 @@ impl SuePaint {
             Dialog::Message(_, paragraphs) => message_ui(ui, paragraphs, size, theme),
             Dialog::Gamut(tolerance, all) => gamut_ui(ui, tolerance, all, theme),
             Dialog::Webtoon(height, width) => webtoon_ui(ui, height, width, theme),
+            Dialog::DivideFrame(spec) => crate::comic::divide_frame_ui(ui, spec, theme),
             Dialog::Timeline(fps, length) => timeline_ui(ui, fps, length, theme),
             Dialog::Shape3D(kind) => shape_3d_ui(ui, kind, theme),
             Dialog::Material(name) => material_ui(ui, name, theme),
@@ -467,6 +471,7 @@ impl SuePaint {
             Dialog::CanvasProperties(props) => Self::canvas_properties_ok(cx, &props),
             Dialog::Convert(layer, kind, name) => self.convert_ok(cx, layer, kind, &name),
             Dialog::Webtoon(height, width) => self.ask_export_webtoon(cx, height, width),
+            Dialog::DivideFrame(spec) => self.divide_frame_ok(cx, &spec),
             Dialog::Shape3D(kind) => self.shape_3d_ok(cx, kind),
             Dialog::Timeline(fps, length) => self.timeline_ok(cx, fps, length),
             Dialog::Onion(onion) => self.onion_ok(cx, &onion),
@@ -510,6 +515,7 @@ impl SuePaint {
             | Dialog::SelectBy(..)
             | Dialog::Gamut(..)
             | Dialog::Webtoon(..)
+            | Dialog::DivideFrame(_)
             | Dialog::Timeline(..)
             | Dialog::Shape3D(_)
             | Dialog::Workspace(_)

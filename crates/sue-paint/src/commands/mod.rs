@@ -29,6 +29,7 @@ mod tool;
 mod view;
 mod window;
 
+pub(crate) use story::{WEBTOON_READING, webtoon_right_to_left};
 pub(crate) use view::{ViewMarks, special_snaps};
 
 /// Commands the shell's own keys run (`keys.undo`, `keys.redo`,

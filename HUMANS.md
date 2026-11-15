@@ -767,6 +767,16 @@ Once a canvas is open:
   in name order, such as a stack of scans. Story, Change Story Information
   numbers the pages (the folio), at their outer corners or centered, and
   sets whether page 1 starts alone or facing page 2.
+- **The Page Manager and the bound book:** the Page Manager is part of
+  the canvas area. It shows the spreads, read from the bound side, or
+  (View, Webtoon columns, or Webtoon Reading Direction) the pages down
+  columns. Double-click a page, or pick it and press Enter, and the page
+  opens with the pages in a column beside it; the button at its top
+  fills the area again. Drag a page onto another's place to move it.
+  Right-click a page for everything the Story menu does to it, ending
+  with **3D Preview for Binding**: the story as a printed book, cut at
+  its bleed, the pages bending up from the spine. Zoom with the wheel or
+  the buttons and turn the pages with the arrow keys.
 - **Panels, balloons and effects:** Layer, New Layer, Frame Border Folder
   lays out panels with gutters; what you draw on layers under it shows only
   inside the panels. The Frame Border tool draws more panels, or divides one
@@ -778,6 +788,12 @@ Once a canvas is open:
   balloons and tails join into one outlined shape. The Frame Border tool's
   Polyline frame makes panels of any shape the same way, and the Object
   tool on a frame border layer drags a panel's corner or the whole panel.
+  Click a panel with the Object tool to pick it (Shift picks more):
+  Layer, Ruler/Frame, **Divide Frame Border Equally** cuts it into panels
+  across and down with the gutters you set, and **Combine Frames** makes
+  the panels picked one. On a story's page a Rectangle frame snaps to
+  the page's default border. A new balloon layer lines its balloons in
+  the color you draw with and fills them with the other one.
   The Figure tool's Saturated Line (drag the clear middle) and Speed Line
   (drag the direction) each draw on an effect line layer that stays
   editable: the Object tool drags its ends, and Tool Property sets how many

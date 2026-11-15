@@ -129,6 +129,10 @@ const CASES: &[Case] = &[
     case("layer.ruler.perspective", &[], 0),
     case("layer.ruler.symmetry", &[], 1),
     case("layer.ruler.circle", &[], 1),
+    // Without a frame border layer and a panel picked they cannot work
+    // (grayed out); paint_comic.rs drives them on panels, undo included.
+    case("layer.frame.divide_equally", &[], 0),
+    case("layer.frame.combine", &[], 0),
     case("layer.toggle.visible", &[], 1),
     case("layer.rename", &[], 0),
     case("layer.toggle.clip", &[], 1),

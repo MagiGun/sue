@@ -1,17 +1,28 @@
-//! The story's dialogs: the Page Manager, Change Page Settings, Change
-//! Story Information, the Story Editor and Export Webtoon.
+//! The story's dialogs: 3D Preview for Binding, Change Page Settings,
+//! Change Story Information, the Story Editor and Export Webtoon.
 
-use egui::{RichText, Ui, vec2};
+use egui::{RichText, Ui};
 use sue_core::EntityId;
 use sue_wm::{AppletContext, Theme};
 
-use super::{Outcome, label, ok_cancel};
+use super::{Outcome, ok_cancel};
 use crate::studio::SuePaint;
 
-/// The Page Manager: the story's pages as spreads, one chosen.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// 3D Preview for Binding: the story as a bound book (the Page Manager
+/// itself is a view of the canvas area, `pages.rs`).
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PagesDialog {
-    pub chosen: usize,
+    /// The spread open, by its index among the book's spreads.
+    pub spread: usize,
+    /// How near the book is, 1 fitting it to the window.
+    pub zoom: f32,
+}
+
+impl PagesDialog {
+    /// The book open at spread `spread`, fitted to the window.
+    pub(crate) const fn at(spread: usize) -> Self {
+        Self { spread, zoom: 1.0 }
+    }
 }
 
 /// Change Page Settings: every page's size, resolution and borders.
@@ -39,52 +50,92 @@ pub(crate) struct StoryInfo {
     pub folio: crate::story::Folio,
 }
 
+/// A whole number field over `value`, from `least` to `most`, with
+/// `suffix` after it.
+fn whole_field(
+    ui: &mut Ui,
+    salt: &str,
+    value: &mut f64,
+    (least, most): (f64, f64),
+    suffix: &str,
+    theme: &Theme,
+) {
+    sue_wm::ui::number_field(("sue-paint-story", salt), value)
+        .range(least..=most)
+        .suffix(suffix)
+        .show(ui, theme);
+    *value = value.round();
+}
+
+/// A number field over `value` with `decimals` places.
+fn decimal_field(
+    ui: &mut Ui,
+    salt: &str,
+    value: &mut f64,
+    (least, most, decimals): (f64, f64, usize),
+    suffix: &str,
+    theme: &Theme,
+) {
+    sue_wm::ui::number_field(("sue-paint-story", salt), value)
+        .range(least..=most)
+        .decimals(decimals)
+        .step(0.5)
+        .suffix(suffix)
+        .show(ui, theme);
+}
+
+/// A one-of-two choice: `on` holds the second option.
+fn either(ui: &mut Ui, salt: &str, options: [String; 2], on: &mut bool, theme: &Theme) {
+    let picked = sue_wm::ui::segmented(("sue-paint-story", salt), &options, Some(usize::from(*on)))
+        .show(ui, theme)
+        .picked;
+    if let Some(picked) = picked {
+        *on = picked == 1;
+    }
+}
+
+/// A line of help under a form.
+fn note(ui: &mut Ui, text: &str, theme: &Theme) {
+    ui.label(
+        RichText::new(text)
+            .size(theme.small_size)
+            .color(theme.text_muted()),
+    );
+}
+
 /// Change Page Settings.
 pub(super) fn page_settings_ui(ui: &mut Ui, settings: &mut PageSettings, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
-    ui.horizontal(|ui| {
-        label(ui, &tr!("size"), theme);
-        ui.add(
-            egui::DragValue::new(&mut settings.width)
-                .range(1..=10_000)
-                .suffix(tr!("px")),
-        );
-        ui.label("by");
-        ui.add(
-            egui::DragValue::new(&mut settings.height)
-                .range(1..=10_000)
-                .suffix(tr!("px")),
-        );
+    let (px, dpi, mm) = (tr!("px"), tr!("dpi"), tr!("mm"));
+    sue_wm::ui::form_grid(ui, "sue-paint-page-settings", theme, |form| {
+        form.row(&tr!("width"), |ui| {
+            let mut width = f64::from(settings.width);
+            whole_field(ui, "width", &mut width, (1.0, 10_000.0), &px, theme);
+            settings.width = width as u32;
+        });
+        form.row(&tr!("height"), |ui| {
+            let mut height = f64::from(settings.height);
+            whole_field(ui, "height", &mut height, (1.0, 10_000.0), &px, theme);
+            settings.height = height as u32;
+        });
+        form.row(&tr!("resolution"), |ui| {
+            decimal_field(ui, "dpi", &mut settings.dpi, (1.0, 2400.0, 0), &dpi, theme);
+        });
+        form.row(&tr!("bleed"), |ui| {
+            decimal_field(ui, "bleed", &mut settings.bleed, (0.0, 50.0, 1), &mm, theme);
+        });
+        form.row(&tr!("inner-border"), |ui| {
+            decimal_field(
+                ui,
+                "inner",
+                &mut settings.inner,
+                (0.0, 100.0, 1),
+                &mm,
+                theme,
+            );
+        });
     });
-    ui.horizontal(|ui| {
-        label(ui, &tr!("resolution"), theme);
-        ui.add(
-            egui::DragValue::new(&mut settings.dpi)
-                .range(1.0..=2400.0)
-                .suffix(tr!("dpi")),
-        );
-    });
-    ui.horizontal(|ui| {
-        label(ui, &tr!("bleed"), theme);
-        ui.add(
-            egui::DragValue::new(&mut settings.bleed)
-                .range(0.0..=50.0)
-                .suffix(tr!("mm")),
-        );
-    });
-    ui.horizontal(|ui| {
-        label(ui, &tr!("inner-border"), theme);
-        ui.add(
-            egui::DragValue::new(&mut settings.inner)
-                .range(0.0..=100.0)
-                .suffix(tr!("mm")),
-        );
-    });
-    ui.label(
-        RichText::new(tr!("every-page-story-changes-each-keeps"))
-            .size(theme.small_size)
-            .color(theme.muted),
-    );
+    note(ui, &tr!("every-page-story-changes-each-keeps"), theme);
     ok_cancel(ui, &mut outcome);
     outcome
 }
@@ -92,44 +143,63 @@ pub(super) fn page_settings_ui(ui: &mut Ui, settings: &mut PageSettings, theme: 
 /// Change Story Information, with the folio.
 pub(super) fn story_info_ui(ui: &mut Ui, info: &mut StoryInfo, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
-    ui.horizontal(|ui| {
-        label(ui, &tr!("title"), theme);
-        ui.text_edit_singleline(&mut info.title);
-    });
-    ui.horizontal(|ui| {
-        label(ui, &tr!("author"), theme);
-        ui.text_edit_singleline(&mut info.author);
-    });
-    ui.horizontal(|ui| {
-        label(ui, &tr!("first-page-number"), theme);
-        ui.add(egui::DragValue::new(&mut info.first).range(0..=9_999));
-    });
-    ui.horizontal(|ui| {
-        label(ui, &tr!("binding"), theme);
-        ui.radio_value(&mut info.right_bound, false, tr!("left-left-to-right"));
-        ui.radio_value(&mut info.right_bound, true, tr!("right-manga"));
-    });
-    ui.horizontal(|ui| {
-        label(ui, &tr!("first-page-place"), theme);
-        ui.radio_value(&mut info.paired, false, tr!("start-page-alone"));
-        ui.radio_value(&mut info.paired, true, tr!("start-page-paired"));
-    });
-    ui.separator();
-    // Clip Studio Paint's folio: page numbers on the pages.
-    ui.checkbox(&mut info.folio.show, tr!("show-folio"));
-    ui.add_enabled_ui(info.folio.show, |ui| {
-        ui.horizontal(|ui| {
-            label(ui, &tr!("size-2"), theme);
-            ui.add(
-                egui::DragValue::new(&mut info.folio.size)
-                    .range(4.0..=72.0)
-                    .suffix(" pt"),
+    sue_wm::ui::form_grid(ui, "sue-paint-story-info", theme, |form| {
+        form.row(&tr!("title"), |ui| {
+            sue_wm::ui::text_field("sue-paint-story-title", &mut info.title).show(ui, theme);
+        });
+        form.row(&tr!("author"), |ui| {
+            sue_wm::ui::text_field("sue-paint-story-author", &mut info.author).show(ui, theme);
+        });
+        form.row(&tr!("first-page-number"), |ui| {
+            let mut first = info.first as f64;
+            whole_field(ui, "first", &mut first, (0.0, 9_999.0), "", theme);
+            info.first = first as i64;
+        });
+        form.row(&tr!("binding"), |ui| {
+            either(
+                ui,
+                "binding",
+                [tr!("left-left-to-right"), tr!("right-manga")],
+                &mut info.right_bound,
+                theme,
             );
         });
-        ui.horizontal(|ui| {
-            label(ui, &tr!("folio-position"), theme);
-            ui.radio_value(&mut info.folio.center, false, tr!("folio-outside"));
-            ui.radio_value(&mut info.folio.center, true, tr!("folio-center"));
+        form.row(&tr!("first-page-place"), |ui| {
+            either(
+                ui,
+                "start",
+                [tr!("start-page-alone"), tr!("start-page-paired")],
+                &mut info.paired,
+                theme,
+            );
+        });
+        // Clip Studio Paint's folio: page numbers on the pages.
+        form.row("", |ui| {
+            if sue_wm::ui::checkbox("sue-paint-story-folio", &tr!("show-folio"), info.folio.show)
+                .show(ui, theme)
+                .clicked()
+            {
+                info.folio.show = !info.folio.show;
+            }
+        });
+        let show = info.folio.show;
+        form.row(&tr!("size-2"), |ui| {
+            ui.add_enabled_ui(show, |ui| {
+                let mut size = f64::from(info.folio.size);
+                decimal_field(ui, "folio-size", &mut size, (4.0, 72.0, 1), " pt", theme);
+                info.folio.size = size as f32;
+            });
+        });
+        form.row(&tr!("folio-position"), |ui| {
+            ui.add_enabled_ui(show, |ui| {
+                either(
+                    ui,
+                    "folio-place",
+                    [tr!("folio-outside"), tr!("folio-center")],
+                    &mut info.folio.center,
+                    theme,
+                );
+            });
         });
     });
     ok_cancel(ui, &mut outcome);
@@ -144,14 +214,16 @@ pub(super) fn story_editor_ui(
     theme: &Theme,
 ) -> Outcome {
     let mut outcome = Outcome::Open;
+    // Room under the pages for OK and Cancel.
+    let footer = theme.space(sue_wm::ui::Space::S9) * 2.0;
     egui::ScrollArea::vertical()
-        .max_height(size.y - 120.0)
+        .max_height(size.y - footer)
         .show(ui, |ui| {
             let mut last_page = 0;
             for (number, _, _, words) in texts.iter_mut() {
                 if *number != last_page {
                     last_page = *number;
-                    ui.add_space(4.0);
+                    ui.add_space(theme.space(sue_wm::ui::Space::S2));
                     ui.label(
                         RichText::new(tr!("page", number = number))
                             .color(theme.text)
@@ -172,30 +244,20 @@ pub(super) fn story_editor_ui(
 /// Export Webtoon: where it is cut and how wide the pieces are.
 pub(super) fn webtoon_ui(ui: &mut Ui, height: &mut u32, width: &mut u32, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
-    egui::Grid::new("sue-paint-webtoon")
-        .num_columns(2)
-        .spacing(vec2(12.0, 8.0))
-        .show(ui, |ui| {
-            label(ui, &tr!("split-every"), theme);
-            ui.add(
-                egui::DragValue::new(height)
-                    .range(200..=20000)
-                    .suffix(tr!("px")),
-            );
-            ui.end_row();
-            label(ui, &tr!("output-width"), theme);
-            ui.add(
-                egui::DragValue::new(width)
-                    .range(100..=4000)
-                    .suffix(tr!("px")),
-            );
-            ui.end_row();
+    let px = tr!("px");
+    sue_wm::ui::form_grid(ui, "sue-paint-webtoon", theme, |form| {
+        form.row(&tr!("split-every"), |ui| {
+            let mut split = f64::from(*height);
+            whole_field(ui, "split", &mut split, (200.0, 20_000.0), &px, theme);
+            *height = split as u32;
         });
-    ui.label(
-        RichText::new(tr!("tall-canvas-cut-into-numbered-pictures"))
-            .size(theme.small_size)
-            .color(theme.muted),
-    );
+        form.row(&tr!("output-width"), |ui| {
+            let mut wide = f64::from(*width);
+            whole_field(ui, "webtoon-width", &mut wide, (100.0, 4000.0), &px, theme);
+            *width = wide as u32;
+        });
+    });
+    note(ui, &tr!("tall-canvas-cut-into-numbered-pictures"), theme);
     ok_cancel(ui, &mut outcome);
     outcome
 }

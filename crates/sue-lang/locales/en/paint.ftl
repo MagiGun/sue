@@ -2655,3 +2655,31 @@ no-legacy-lines-to-update = Every line of this layer already uses the new brush 
 fill-up-to-vector-path = Fill up to vector path
 fill-up-to-vector-path-hint = Where the fill looks at vector layers, it stops at the middle of their lines, so no gap shows under them
 fill-up-to-vector-path-off-hint = Works when the fill refers to other layers: turn on Refer multiple above
+binding-preview-3d = 3D Preview for Binding
+binding-preview-3d-ellipsis = 3D Preview for Binding...
+binding-spread-of = { $pages } of { $count }
+turn-page-left = Turn the page to the left (Left)
+turn-page-right = Turn the page to the right (Right)
+close-page-manager = Close Page Manager
+page-manager-fill-canvas-area = Fill the canvas area
+page-manager-dock-beside-page = Dock beside the page
+page-manager-webtoon-columns = Webtoon columns
+page-manager-spreads = Spreads
+page-manager-cell-help = Click to pick, double-click or Enter to open, drag to move, right-click for more
+page-count = { $count ->
+    [one] { $count } page
+   *[other] { $count } pages
+}
+page-reordering = Page Reordering
+batch-process = Batch Process
+reading-right-to-left = Right to Left
+reading-left-to-right = Left to Right
+divide-frame-border-equally = Divide Frame Border Equally
+divide-frame-border-equally-ellipsis = Divide Frame Border Equally...
+combine-frames = Combine Frames
+panels-across = Panels across:
+panels-down = Panels down:
+gutter-across = Gutter across:
+gutter-down = Gutter down:
+pick-one-panel-to-divide = Pick one panel with the Object tool first (Shift picks more)
+pick-panels-to-combine = Pick two or more panels with the Object tool and Shift first

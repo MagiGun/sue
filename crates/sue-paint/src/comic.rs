@@ -130,6 +130,301 @@ pub(crate) struct FrameSpec {
     pub gap_y: f32,
 }
 
+/// A balloon layer's line color, `#rrggbb` (`Text`). Saved data: never
+/// renamed without a migration. A layer without it has black lines.
+pub(crate) const BALLOON_LINE_COLOR: &str = "balloon.line_color";
+/// A balloon layer's fill color, `#rrggbb` (`Text`). Without it, white.
+pub(crate) const BALLOON_FILL_COLOR: &str = "balloon.fill_color";
+
+/// The colors a balloon layer draws its balloons in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BalloonStyle {
+    pub line: [u8; 3],
+    pub fill: [u8; 3],
+}
+
+impl BalloonStyle {
+    /// Balloon layer `entity`'s colors (black lines on white where it
+    /// names none, as balloons were before they had colors).
+    pub(crate) fn of(entity: &Entity) -> Self {
+        let color = |key: &str, default: [u8; 3]| {
+            entity
+                .property(key)
+                .and_then(Value::as_str)
+                .and_then(parse_hex)
+                .unwrap_or(default)
+        };
+        Self {
+            line: color(BALLOON_LINE_COLOR, [0, 0, 0]),
+            fill: color(BALLOON_FILL_COLOR, [255, 255, 255]),
+        }
+    }
+
+    /// Colors balloons drawn black on white (`manga::render_balloons`):
+    /// each pixel goes from the line color to the fill color as it goes
+    /// from black to white, its coverage kept.
+    pub(crate) fn tint(self, pixels: &mut [u8]) {
+        if self.line == [0, 0, 0] && self.fill == [255, 255, 255] {
+            return;
+        }
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            if pixel[3] == 0 {
+                continue;
+            }
+            let white = f32::from(pixel[0]) / 255.0;
+            for ((value, from), to) in pixel.iter_mut().zip(self.line).zip(self.fill) {
+                let (from, to) = (f32::from(from), f32::from(to));
+                *value = (from + (to - from) * white).round() as u8;
+            }
+        }
+    }
+}
+
+/// `rgb` as `#rrggbb`.
+fn hex(rgb: [u8; 3]) -> String {
+    format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
+}
+
+/// `#rrggbb` read back.
+fn parse_hex(text: &str) -> Option<[u8; 3]> {
+    let digits = text.strip_prefix('#')?;
+    if digits.len() != 6 {
+        return None;
+    }
+    let byte = |at: usize| u8::from_str_radix(digits.get(at..at + 2)?, 16).ok();
+    Some([byte(0)?, byte(2)?, byte(4)?])
+}
+
+/// How near, in screen points, a frame's corner snaps to the default
+/// border.
+const FRAME_SNAP: f32 = 12.0;
+/// How strongly a picked panel is tinted with the selection color, 0 to 1:
+/// enough to see which panel is picked, little enough to see the drawing.
+const SELECTION_TINT: f32 = 0.3;
+
+/// Divide Frame Border Equally: panel `panel` of frame layer `layer` cut
+/// into `across` by `down` panels, `gap_x` and `gap_y` apart (pixels).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DivideSpec {
+    pub layer: EntityId,
+    pub panel: usize,
+    pub across: f64,
+    pub down: f64,
+    pub gap_x: f64,
+    pub gap_y: f64,
+}
+
+/// Divide Frame Border Equally's settings.
+pub(crate) fn divide_frame_ui(
+    ui: &mut egui::Ui,
+    spec: &mut DivideSpec,
+    theme: &sue_wm::Theme,
+) -> crate::dialogs::Outcome {
+    let px = tr!("px");
+    sue_wm::ui::form_grid(ui, "sue-paint-divide-frame", theme, |form| {
+        form.row(&tr!("panels-across"), |ui| {
+            sue_wm::ui::number_field("sue-paint-divide-across", &mut spec.across)
+                .range(1.0..=MOST_PANELS)
+                .show(ui, theme);
+        });
+        form.row(&tr!("panels-down"), |ui| {
+            sue_wm::ui::number_field("sue-paint-divide-down", &mut spec.down)
+                .range(1.0..=MOST_PANELS)
+                .show(ui, theme);
+        });
+        form.row(&tr!("gutter-across"), |ui| {
+            sue_wm::ui::number_field("sue-paint-divide-gap-x", &mut spec.gap_x)
+                .range(0.0..=MOST_GUTTER)
+                .suffix(&px)
+                .show(ui, theme);
+        });
+        form.row(&tr!("gutter-down"), |ui| {
+            sue_wm::ui::number_field("sue-paint-divide-gap-y", &mut spec.gap_y)
+                .range(0.0..=MOST_GUTTER)
+                .suffix(&px)
+                .show(ui, theme);
+        });
+    });
+    ui.add_space(theme.space(sue_wm::ui::Space::S4));
+    let mut outcome = crate::dialogs::Outcome::Open;
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Max), |ui| {
+        if sue_wm::ui::button("sue-paint-divide-ok", &tr!("ok"))
+            .primary()
+            .show(ui, theme)
+            .clicked()
+        {
+            outcome = crate::dialogs::Outcome::Ok;
+        }
+        if sue_wm::ui::button("sue-paint-divide-cancel", &tr!("cancel"))
+            .show(ui, theme)
+            .clicked()
+        {
+            outcome = crate::dialogs::Outcome::Cancel;
+        }
+    });
+    outcome
+}
+
+/// The most panels Divide Frame Border Equally makes each way.
+const MOST_PANELS: f64 = 12.0;
+/// The widest gutter it leaves, in pixels.
+const MOST_GUTTER: f64 = 500.0;
+
+/// The box round `panel`: `[left, top, right, bottom]`.
+fn bounds(panel: &Panel) -> [f32; 4] {
+    panel.iter().fold(
+        [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+        |[x0, y0, x1, y1], p| [x0.min(p[0]), y0.min(p[1]), x1.max(p[0]), y1.max(p[1])],
+    )
+}
+
+/// `pieces` each cut into `count` equal parts along `axis` (0 across, 1
+/// down), `gap` apart, the earlier part first.
+fn cut_equally(pieces: Vec<Panel>, count: usize, axis: usize, gap: f32) -> Vec<Panel> {
+    let mut out = Vec::new();
+    for piece in pieces {
+        let [x0, y0, x1, y1] = bounds(&piece);
+        let (start, length) = if axis == 0 {
+            (x0, x1 - x0)
+        } else {
+            (y0, y1 - y0)
+        };
+        let cell = (length - gap * (count as f32 - 1.0)) / count as f32;
+        if count < 2 || cell < 1.0 {
+            out.push(piece);
+            continue;
+        }
+        let mut done = Vec::new();
+        let mut rest = piece;
+        for step in 1..count {
+            let at = start + step as f32 * cell + (step as f32 - 0.5) * gap;
+            let (a, b) = if axis == 0 {
+                ([at, y0 - 1.0], [at, y1 + 1.0])
+            } else {
+                ([x0 - 1.0, at], [x1 + 1.0, at])
+            };
+            let Some(mut two) = manga::divide(std::slice::from_ref(&rest), a, b, gap) else {
+                break;
+            };
+            two.sort_by(|p, q| bounds(p)[axis].total_cmp(&bounds(q)[axis]));
+            let Some(later) = two.pop() else {
+                break;
+            };
+            done.extend(two);
+            rest = later;
+        }
+        done.push(rest);
+        out.extend(done);
+    }
+    out
+}
+
+/// `panel` cut into `across` columns and `down` rows of equal size,
+/// `gap` (across, down) apart, in reading order: row by row, each left
+/// to right.
+pub(crate) fn divide_equally(
+    panel: &Panel,
+    across: usize,
+    down: usize,
+    gap: [f32; 2],
+) -> Vec<Panel> {
+    let rows = cut_equally(vec![panel.clone()], down, 1, gap[1]);
+    cut_equally(rows, across, 0, gap[0])
+}
+
+/// `panels` with the panels at `picked` (two or more) made one: the
+/// smallest convex panel holding them all, where the first of them was.
+/// The panels after and the new one's index; `None` if fewer than two
+/// of them exist.
+pub(crate) fn combine_panels(panels: &[Panel], picked: &[usize]) -> Option<(Vec<Panel>, usize)> {
+    if picked.iter().filter(|index| **index < panels.len()).count() < 2 {
+        return None;
+    }
+    let first = *picked.iter().min()?;
+    let mut points: Vec<[f32; 2]> = picked
+        .iter()
+        .filter_map(|index| panels.get(*index))
+        .flatten()
+        .copied()
+        .collect();
+    // Andrew's monotone chain: the convex hull, lower half then upper.
+    points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    points.dedup();
+    let turn = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
+    let mut hull: Vec<[f32; 2]> = Vec::new();
+    for upper in [false, true] {
+        let start = hull.len();
+        let mut walk = |point: [f32; 2]| {
+            while hull.len() >= start + 2
+                && turn(hull[hull.len() - 2], hull[hull.len() - 1], point) <= 0.0
+            {
+                hull.pop();
+            }
+            hull.push(point);
+        };
+        if upper {
+            points.iter().rev().for_each(|point| walk(*point));
+        } else {
+            points.iter().for_each(|point| walk(*point));
+        }
+        hull.pop();
+    }
+    if hull.len() < 3 {
+        return None;
+    }
+    let mut out: Vec<Panel> = Vec::new();
+    let mut at = 0;
+    for (index, panel) in panels.iter().enumerate() {
+        if index == first {
+            at = out.len();
+            out.push(hull.clone());
+        } else if !picked.contains(&index) {
+            out.push(panel.clone());
+        }
+    }
+    Some((out, at))
+}
+
+/// `true` when `panel` turns the same way at every corner.
+fn is_convex(panel: &Panel) -> bool {
+    let count = panel.len();
+    let mut sign = 0.0_f32;
+    for index in 0..count {
+        let (a, b, c) = (
+            panel[index],
+            panel[(index + 1) % count],
+            panel[(index + 2) % count],
+        );
+        let turn = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+        if turn.abs() < f32::EPSILON {
+            continue;
+        }
+        if sign != 0.0 && turn.signum() != sign {
+            return false;
+        }
+        sign = turn.signum();
+    }
+    count >= 3
+}
+
+/// `p` moved onto the edges of `border` (`[left, top, right, bottom]`)
+/// that are within `reach` of it, each axis on its own.
+pub(crate) fn snap_to_border(p: [f32; 2], border: [f32; 4], reach: f32) -> [f32; 2] {
+    let snap = |value: f32, edges: [f32; 2]| {
+        edges
+            .into_iter()
+            .filter(|edge| (edge - value).abs() <= reach)
+            .min_by(|a, b| (a - value).abs().total_cmp(&(b - value).abs()))
+            .unwrap_or(value)
+    };
+    [
+        snap(p[0], [border[0], border[2]]),
+        snap(p[1], [border[1], border[3]]),
+    ]
+}
+
 impl Default for FrameSpec {
     fn default() -> Self {
         Self {
@@ -349,6 +644,10 @@ impl SuePaint {
             );
             return;
         }
+        // The corners snap to the page's default border.
+        let reach = self.frame_reach();
+        let a = self.frame_snap(&cx.world.arena, a, reach);
+        let b = self.frame_snap(&cx.world.arena, b, reach);
         if (b[0] - a[0]).abs() < 4.0 || (b[1] - a[1]).abs() < 4.0 {
             return;
         }
@@ -462,11 +761,17 @@ impl SuePaint {
         let Some((_, [width, height], _)) = self.page(&cx.world.arena) else {
             return;
         };
-        let line = sub.tip.size.max(1.0);
+        // A line width of 0 draws balloons with no edge.
+        let line = sub.tip.size.max(0.0);
         let existing = self.layer_of_class(&cx.world.arena, manga::BALLOON);
+        // A balloon layer keeps the colors it was made with.
+        let style = existing
+            .and_then(|layer| cx.world.arena.get_by_id(layer).ok())
+            .map_or_else(|| self.balloon_style(), BalloonStyle::of);
         let mut shapes = self.balloon_shapes(&cx.world.arena);
         shapes.extend(new);
-        let pixels = manga::render_balloons(&shapes, width, height, line);
+        let mut pixels = manga::render_balloons(&shapes, width, height, line);
+        style.tint(&mut pixels);
         let text = manga::encode_shapes(&shapes);
         match existing {
             Some(layer) => {
@@ -481,10 +786,25 @@ impl SuePaint {
                     vec![
                         (manga::SHAPES, Value::from(text)),
                         (manga::LINE, Value::from(f64::from(line))),
+                        (BALLOON_LINE_COLOR, Value::from(hex(style.line))),
+                        (BALLOON_FILL_COLOR, Value::from(hex(style.fill))),
                     ],
                 );
             }
         }
+    }
+
+    /// The colors a new balloon layer takes: the line in the color being
+    /// drawn with, the inside in the other of the main and sub colors
+    /// (black on white by default, as Clip Studio Paint's main and sub
+    /// drawing colors give).
+    fn balloon_style(&self) -> BalloonStyle {
+        let (line, fill) = if self.sub_active {
+            (self.sub, self.main)
+        } else {
+            (self.main, self.sub)
+        };
+        BalloonStyle { line, fill }
     }
 
     /// A polyline or curve balloon closed with the corners `points`.
@@ -559,10 +879,13 @@ impl SuePaint {
     /// The Object tool pressed at `p` on a frame border or effect line
     /// layer: a panel's corner or the panel under it to move, or effect
     /// lines' ends. `reach` is how near a handle counts (picture pixels).
+    /// The panel pressed becomes the one picked; with `add` (Shift) it is
+    /// added to the panels picked, or taken out of them.
     pub(crate) fn comic_object_at(
-        &self,
+        &mut self,
         p: Pos2,
         reach: f32,
+        add: bool,
         arena: &sue_core::Arena,
     ) -> Option<crate::studio::Gesture> {
         let layer = self.layer()?;
@@ -572,7 +895,7 @@ impl SuePaint {
         let edit = if entity.class() == manga::FRAME {
             let (panels, _, _) = Self::frame_of(arena, layer)?;
             // A corner first, then the panel the press is inside.
-            let (panel, corner) = panels
+            let found = panels
                 .iter()
                 .enumerate()
                 .find_map(|(panel, points)| {
@@ -586,7 +909,14 @@ impl SuePaint {
                         .iter()
                         .position(|points| manga::signed_distance(points, at) <= 0.0)
                         .map(|panel| (panel, None))
-                })?;
+                });
+            let Some((panel, corner)) = found else {
+                if !add {
+                    self.comic_picked = None;
+                }
+                return None;
+            };
+            self.pick_panel(layer, panel, add);
             ComicEdit::Panel {
                 layer,
                 now: panels.clone(),
@@ -613,6 +943,209 @@ impl SuePaint {
             }
         };
         Some(crate::studio::Gesture::Comic(Box::new(edit)))
+    }
+
+    /// Picks panel `panel` of frame layer `layer`; with `add`, adds it to
+    /// the panels picked on that layer or takes it out of them.
+    fn pick_panel(&mut self, layer: EntityId, panel: usize, add: bool) {
+        match &mut self.comic_picked {
+            Some((on, picked)) if add && *on == layer => {
+                if let Some(at) = picked.iter().position(|known| *known == panel) {
+                    picked.remove(at);
+                } else {
+                    picked.push(panel);
+                }
+            }
+            _ => self.comic_picked = Some((layer, vec![panel])),
+        }
+    }
+
+    /// The frame border layer to divide or combine on, and the panels
+    /// picked on it that still exist, in order. A layer of one panel has
+    /// that panel picked.
+    pub(crate) fn picked_panels(&self, arena: &sue_core::Arena) -> Option<(EntityId, Vec<usize>)> {
+        let layer = self.layer_of_class(arena, manga::FRAME)?;
+        let (panels, _, _) = Self::frame_of(arena, layer)?;
+        let mut picked: Vec<usize> = match &self.comic_picked {
+            Some((on, picked)) if *on == layer => picked
+                .iter()
+                .copied()
+                .filter(|panel| *panel < panels.len())
+                .collect(),
+            _ if panels.len() == 1 => vec![0],
+            _ => Vec::new(),
+        };
+        picked.sort_unstable();
+        picked.dedup();
+        Some((layer, picked))
+    }
+
+    /// Layer, Ruler/Frame, Divide Frame Border Equally: asks how, for the
+    /// one panel picked.
+    pub(crate) fn ask_divide_frame(&mut self, cx: &mut AppletContext<'_>) {
+        let arena = &cx.world.arena;
+        let Some((layer, picked)) = self.picked_panels(arena) else {
+            cx.fail(tr!("make-frame-borders-first-layer-new"));
+            return;
+        };
+        let [panel] = picked[..] else {
+            cx.notify(tr!("pick-one-panel-to-divide"));
+            return;
+        };
+        let gutter = Self::frame_of(arena, layer).map_or(20.0, |(_, _, gutter)| gutter);
+        self.dialog = Some(crate::dialogs::Dialog::DivideFrame(DivideSpec {
+            layer,
+            panel,
+            across: 2.0,
+            down: 1.0,
+            gap_x: f64::from(gutter),
+            gap_y: f64::from(gutter * 2.0),
+        }));
+    }
+
+    /// Divides the panel `spec` names as it says, as one undo step; the
+    /// new panels are picked.
+    pub(crate) fn divide_frame_ok(&mut self, cx: &mut AppletContext<'_>, spec: &DivideSpec) {
+        let Some((_, [width, height], paper)) = self.page(&cx.world.arena) else {
+            return;
+        };
+        let Some((mut panels, border, _)) = Self::frame_of(&cx.world.arena, spec.layer) else {
+            return;
+        };
+        let Some(panel) = panels.get(spec.panel) else {
+            return;
+        };
+        let pieces = divide_equally(
+            panel,
+            spec.across.round().max(1.0) as usize,
+            spec.down.round().max(1.0) as usize,
+            [spec.gap_x as f32, spec.gap_y as f32],
+        );
+        if pieces.len() < 2 {
+            return;
+        }
+        let made = pieces.len();
+        panels.splice(spec.panel..=spec.panel, pieces);
+        let pixels = manga::render_frames(&panels, width, height, border, paper);
+        self.redraw_layer(
+            cx,
+            spec.layer,
+            &tr!("divide-frame-border-equally"),
+            manga::PANELS,
+            manga::encode_panels(&panels),
+            pixels,
+        );
+        self.comic_picked = Some((spec.layer, (spec.panel..spec.panel + made).collect()));
+    }
+
+    /// Layer, Ruler/Frame, Combine Frames: the panels picked become one,
+    /// the smallest convex panel holding them all, as one undo step.
+    pub(crate) fn combine_frames(&mut self, cx: &mut AppletContext<'_>) {
+        let Some((_, [width, height], paper)) = self.page(&cx.world.arena) else {
+            return;
+        };
+        let Some((layer, picked)) = self.picked_panels(&cx.world.arena) else {
+            return;
+        };
+        if picked.len() < 2 {
+            cx.notify(tr!("pick-panels-to-combine"));
+            return;
+        }
+        let Some((panels, border, _)) = Self::frame_of(&cx.world.arena, layer) else {
+            return;
+        };
+        let Some((combined, at)) = combine_panels(&panels, &picked) else {
+            return;
+        };
+        let pixels = manga::render_frames(&combined, width, height, border, paper);
+        self.redraw_layer(
+            cx,
+            layer,
+            &tr!("combine-frames"),
+            manga::PANELS,
+            manga::encode_panels(&combined),
+            pixels,
+        );
+        self.comic_picked = Some((layer, vec![at]));
+    }
+
+    /// Where a Rectangle frame's corner lands: on the page's default
+    /// border when it is within `reach` of it (picture pixels), as Clip
+    /// Studio Paint's frames snap to it.
+    fn frame_snap(&self, arena: &sue_core::Arena, p: [f32; 2], reach: f32) -> [f32; 2] {
+        self.picture()
+            .and_then(|picture| crate::story::borders(arena, picture))
+            .map_or(p, |borders| snap_to_border(p, borders.inner, reach))
+    }
+
+    /// How near a frame corner snaps to the default border, in picture
+    /// pixels at the current zoom.
+    fn frame_reach(&self) -> f32 {
+        FRAME_SNAP / self.doc().map_or(1.0, |doc| doc.view.zoom.max(0.01))
+    }
+
+    /// What the canvas shows over the page for comic work: the panels the
+    /// Object tool picked, and where a Rectangle frame being dragged will
+    /// land once it snaps to the default border.
+    pub(crate) fn comic_overlay(
+        &self,
+        ui: &egui::Ui,
+        viewport: egui::Rect,
+        size: [u32; 2],
+        cx: &AppletContext<'_>,
+        theme: &sue_wm::Theme,
+    ) {
+        let Some(doc) = self.doc() else {
+            return;
+        };
+        let view = doc.view;
+        let screen = |p: [f32; 2]| view.to_screen(viewport, size, egui::pos2(p[0], p[1]));
+        let painter = ui.painter().with_clip_rect(viewport);
+        let stroke = egui::Stroke::new(theme.focus_stroke().width, theme.selection.to_opaque());
+        let arena = &cx.world.arena;
+        if self.toolbox.tool() == crate::tools::Tool::Operation
+            && self.on_comic_layer(arena)
+            && let Some((layer, picked)) = self.picked_panels(arena)
+            && self
+                .comic_picked
+                .as_ref()
+                .is_some_and(|(on, _)| *on == layer)
+            && let Some((panels, _, _)) = Self::frame_of(arena, layer)
+        {
+            for panel in picked.iter().filter_map(|index| panels.get(*index)) {
+                let points: Vec<egui::Pos2> = panel.iter().map(|p| screen(*p)).collect();
+                // Tinted as a selection is; a panel that is not convex
+                // (a polyline frame) is outlined only, as a fill could
+                // spill out of it.
+                if is_convex(panel) {
+                    painter.add(egui::Shape::convex_polygon(
+                        points.clone(),
+                        theme.selection.gamma_multiply(SELECTION_TINT),
+                        egui::Stroke::NONE,
+                    ));
+                }
+                painter.add(egui::Shape::closed_line(points, stroke));
+            }
+        }
+        if let Some(crate::studio::Gesture::Shape {
+            tool: crate::tools::Tool::Frame,
+            sub,
+            from,
+            to,
+            ..
+        }) = &self.gesture
+            && sub.mode == 0
+        {
+            let reach = self.frame_reach();
+            let a = self.frame_snap(arena, [from.x, from.y], reach);
+            let b = self.frame_snap(arena, [to.x, to.y], reach);
+            if a != [from.x, from.y] || b != [to.x, to.y] {
+                painter.add(egui::Shape::closed_line(
+                    manga::rectangle(a, b).into_iter().map(screen).collect(),
+                    stroke,
+                ));
+            }
+        }
     }
 
     /// The Object tool let go: the moved panel or effect lines kept as one
@@ -699,8 +1232,127 @@ impl SuePaint {
             vec![
                 (manga::SHAPES, Value::from(String::new())),
                 (manga::LINE, Value::from(3.0)),
+                (
+                    BALLOON_LINE_COLOR,
+                    Value::from(hex(self.balloon_style().line)),
+                ),
+                (
+                    BALLOON_FILL_COLOR,
+                    Value::from(hex(self.balloon_style().fill)),
+                ),
             ],
         );
         self.toolbox.pick(crate::tools::Tool::Balloon);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_panel_divides_into_equal_panels_with_gutters_between() {
+        let panel = manga::rectangle([0.0, 0.0], [220.0, 100.0]);
+        let pieces = divide_equally(&panel, 3, 2, [20.0, 10.0]);
+        assert_eq!(pieces.len(), 6);
+        let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+        // Reading order: the first row left to right, then the second.
+        for (index, piece) in pieces.iter().enumerate() {
+            let b = bounds(piece);
+            let (column, row) = ((index % 3) as f32, (index / 3) as f32);
+            assert!(near(b[0], column * 80.0), "{index}: {b:?}");
+            assert!(near(b[2] - b[0], 60.0), "{index}: {b:?}");
+            assert!(near(b[1], row * 55.0), "{index}: {b:?}");
+            assert!(near(b[3] - b[1], 45.0), "{index}: {b:?}");
+        }
+        // One by one is the panel itself.
+        assert_eq!(divide_equally(&panel, 1, 1, [20.0, 10.0]), vec![panel]);
+    }
+
+    #[test]
+    fn panels_combine_into_the_one_that_holds_them() {
+        let panels = vec![
+            manga::rectangle([0.0, 0.0], [100.0, 50.0]),
+            manga::rectangle([0.0, 60.0], [45.0, 120.0]),
+            manga::rectangle([55.0, 60.0], [100.0, 120.0]),
+        ];
+        let (combined, at) = combine_panels(&panels, &[1, 2]).unwrap();
+        assert_eq!(combined.len(), 2);
+        assert_eq!(at, 1);
+        assert_eq!(bounds(&combined[1]), [0.0, 60.0, 100.0, 120.0]);
+        assert_eq!(combined[1].len(), 4, "a rectangle again: {:?}", combined[1]);
+        assert_eq!(combined[0], panels[0]);
+        // One panel alone combines with nothing.
+        assert!(combine_panels(&panels, &[0]).is_none());
+    }
+
+    #[test]
+    fn balloons_take_their_layer_colors_and_may_have_no_edge() {
+        let shapes = vec![Shape::Ellipse([4.0, 4.0, 36.0, 28.0])];
+        let style = BalloonStyle {
+            line: [200, 10, 10],
+            fill: [250, 240, 200],
+        };
+        let mut pixels = manga::render_balloons(&shapes, 40, 32, 3.0);
+        style.tint(&mut pixels);
+        let at = |x: usize, y: usize| {
+            let index = (y * 40 + x) * 4;
+            [
+                pixels[index],
+                pixels[index + 1],
+                pixels[index + 2],
+                pixels[index + 3],
+            ]
+        };
+        assert_eq!(at(20, 16), [250, 240, 200, 255], "filled inside");
+        assert_eq!(at(20, 2), [200, 10, 10, 255], "lined round the edge");
+        assert_eq!(at(1, 1)[3], 0, "clear outside");
+        // No edge: a line of 0 leaves the fill alone.
+        let mut bare = manga::render_balloons(&shapes, 40, 32, 0.0);
+        style.tint(&mut bare);
+        assert!(
+            bare.as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|pixel| pixel[3] == 255)
+                .all(|pixel| pixel[..3] == [250, 240, 200]),
+            "only fill"
+        );
+        // The colors round-trip through the layer's properties.
+        assert_eq!(parse_hex(&hex([1, 128, 255])), Some([1, 128, 255]));
+        assert_eq!(parse_hex("red"), None);
+        let entity = Entity::empty("Balloon", manga::BALLOON)
+            .with_property(BALLOON_LINE_COLOR, Value::from(hex(style.line)))
+            .with_property(BALLOON_FILL_COLOR, Value::from(hex(style.fill)));
+        assert_eq!(BalloonStyle::of(&entity), style);
+        let old = Entity::empty("Balloon", manga::BALLOON);
+        assert_eq!(
+            BalloonStyle::of(&old),
+            BalloonStyle {
+                line: [0, 0, 0],
+                fill: [255, 255, 255]
+            }
+        );
+    }
+
+    #[test]
+    fn convex_panels_are_told_from_others() {
+        assert!(is_convex(&manga::rectangle([0.0, 0.0], [10.0, 5.0])));
+        let notch = vec![
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [5.0, 3.0],
+            [10.0, 10.0],
+            [0.0, 10.0],
+        ];
+        assert!(!is_convex(&notch));
+    }
+
+    #[test]
+    fn a_corner_snaps_to_the_default_border_within_reach() {
+        let border = [50.0, 60.0, 450.0, 640.0];
+        assert_eq!(snap_to_border([55.0, 300.0], border, 8.0), [50.0, 300.0]);
+        assert_eq!(snap_to_border([445.0, 633.0], border, 8.0), [450.0, 640.0]);
+        assert_eq!(snap_to_border([70.0, 300.0], border, 8.0), [70.0, 300.0]);
     }
 }
