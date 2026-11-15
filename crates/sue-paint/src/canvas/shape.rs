@@ -420,6 +420,10 @@ pub(crate) fn corner_line(
     }
 }
 
+/// The radius of the rings marking a Figure's corners, ends and
+/// handles on screen, as the other tools' corners are marked.
+const HANDLE: f32 = 3.5;
+
 /// What the overlay needs to draw a Figure under way.
 pub(crate) struct Preview<'a> {
     pub painter: &'a Painter,
@@ -431,7 +435,16 @@ pub(crate) struct Preview<'a> {
     pub guides: &'a Guides,
 }
 
+/// The width of a Figure's preview line on screen, as thin as the other
+/// tools' previews.
+const LINE: f32 = 1.0;
+
 impl Preview<'_> {
+    /// The preview line in `color`.
+    pub(crate) fn line_of(color: egui::Color32) -> Stroke {
+        Stroke::new(LINE, color)
+    }
+
     fn line(&self, points: &[[f32; 2]], closed: bool) {
         let path: Vec<Pos2> = points.iter().map(|p| (self.screen)(*p)).collect();
         self.painter.add(if closed {
@@ -455,7 +468,7 @@ impl Preview<'_> {
                 self.line(&[mirror, b], false);
                 for end in [mirror, b] {
                     self.painter
-                        .circle_stroke((self.screen)(end), 3.0, self.stroke);
+                        .circle_stroke((self.screen)(end), HANDLE, self.stroke);
                 }
             }
             _ => {
@@ -474,7 +487,7 @@ impl Preview<'_> {
         self.line(&bent(bend.from, bend.to, through), false);
         for end in [bend.from, bend.to] {
             self.painter
-                .circle_stroke((self.screen)(end), 3.5, self.stroke);
+                .circle_stroke((self.screen)(end), HANDLE, self.stroke);
         }
     }
 
@@ -503,7 +516,7 @@ impl Preview<'_> {
         self.line(&corner_line(mode, &line, &handles, false), false);
         for corner in points {
             self.painter
-                .circle_stroke((self.screen)(*corner), 3.5, self.stroke);
+                .circle_stroke((self.screen)(*corner), HANDLE, self.stroke);
         }
     }
 }

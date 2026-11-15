@@ -294,7 +294,7 @@ impl SuePaint {
         let figure = super::shape::Preview {
             painter: &painter,
             screen: &screen,
-            stroke: Stroke::new(1.0, theme.border_active),
+            stroke: super::shape::Preview::line_of(theme.border_active),
             pointer: self.pointer.map(|at| {
                 let at = view.to_picture(viewport, size, at);
                 [at.x, at.y]
