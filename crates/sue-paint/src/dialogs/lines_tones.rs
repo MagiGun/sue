@@ -300,11 +300,16 @@ fn preview_ui(ui: &mut Ui, dialog: &mut LinesTonesDialog, theme: &Theme) {
     let [width, height] = dialog.small_size.map(|side| side as f32);
     let fit = (room / width.max(height)).min(ui.available_width() / width);
     let size = egui::Vec2::new(width * fit, height * fit);
-    let response = ui.add(
-        egui::Image::new(texture)
-            .fit_to_exact_size(size)
-            .sense(Sense::hover()),
-    );
+    // In the middle of the dialog, under the settings it shows.
+    let response = ui
+        .vertical_centered(|ui| {
+            ui.add(
+                egui::Image::new(texture)
+                    .fit_to_exact_size(size)
+                    .sense(Sense::hover()),
+            )
+        })
+        .inner;
     ui.painter().rect_stroke(
         response.rect,
         theme.radius(Radius::Xs),
