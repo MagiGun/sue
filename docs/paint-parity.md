@@ -48,13 +48,13 @@ rows are at the end.
 | 3D | 7 | 2 | 4 | 62 |
 | Colors | 9 | 0 | 1 | 90 |
 | View and navigation | 10 | 3 | 0 | 88 |
-| Window, palettes and workspaces | 21 | 3 | 1 | 90 |
+| Window, palettes and workspaces | 25 | 4 | 1 | 90 |
 | Materials and assets | 6 | 3 | 1 | 75 |
 | Print | 0 | 2 | 2 | 25 |
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 10 | 2 | 2 | 79 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 267 | 60 | 26 | 84 |
+| **All of Sue Paint** | 271 | 61 | 26 | 84 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -490,19 +490,24 @@ The order of work is the plan at the end.
 
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
-| Clip Studio's default frame | Workspace | done | Tools, Sub Tool and colors at the left, Navigator and layers at the right, a strip of folded palettes at the far right |
+| Clip Studio's default frame | Workspace | done | The "Clip Studio" layout style: Sub Tool, Tool Property and Brush Size stacked over the six color palettes at the left, Navigator, Layer Property and Layer at the right, the Timeline folded under the canvas, Material in the strip |
+| Layout styles | (Sue's own) | done | Window, Layout Style and Settings; "Clip Studio" is built, "Sue Paint" is listed grayed out for later; each style keeps its own layout and workspaces |
 | Palette docking, floating windows, folding into the strip | Palette menus | done | The menu also docks at the top or bottom and in a new column on either side; floats sit over the canvas |
 | Pop Out into Separate Window | Palette menus | done | A window of its own that goes anywhere, outside Sue's window too |
 | Dock at the top, beside the command bar | Palettes | done | Drop a palette on the canvas's top edge, or the menu's Dock at the Top |
-| Tear a palette's tab off into a palette of its own | Palettes | done | Tool Property, Brush Size, Color Slider, Intermediate and Approximate Color, Color History, Material, Sub View, Layer Property, History and Animation Cels; closing one puts it back among the tabs |
+| Every palette a palette of its own | Palettes | done | Each opens as itself from the Window menu, none shows in two places, a tab drags off its group; closing one (its menu, or a floating palette's X) hides it for good until the Window menu shows it again |
+| Palette menu at the top left with the palette's commands and Hide X Palette | Palette menus | done | Layer and Timeline have their commands; the other palettes' commands come with their own work |
+| Roll a floating palette up by a double-click | Palettes | done | |
+| Display palette as tab or as pop-up (strip icons) | Palettes | done | Right-click an icon of the strip |
 | Command Bar and Tool palette move and resize like any palette | Palettes | done | The tool palette grows more columns as its column widens and lies on its side in a row |
 | Drag a palette by its title bar, tab or icon to dock it left, right or under the canvas, beside another or in a column of its own, or to float or fold it | Palettes | done | The shared dock in `sue-wm` (`sue_wm::dock`) lights up where it will go |
 | Palette groups: palettes stacked as tabs, reordered by dragging a tab | Palettes | done | Drop a palette onto another's middle or onto a tab |
 | The palette layout kept between runs | Workspace | done | `layout.txt` in Sue Paint's data folder, never in a document; Settings, Remember the palette layout |
 | Drag column widths and palette heights | Dock | done | Also the widths in the row under the canvas and its height; narrow windows fold the widest palettes by themselves |
 | Use Current Workspace as Default, Reset to Default | Window > Workspace | done | Reset goes back to the workspace you chose as the default, and again to Sue Paint's own |
-| Register and Manage Workspaces | Window > Workspace | done | Register, switch, rename and delete; layouts saved before tabs still open |
-| Hide All Palettes, Hide Menu Bar | Window | done | Tab and Shift+Tab |
+| Register and Manage Workspaces | Window > Workspace | done | Register, switch, rename and delete; layouts saved before tabs still open; the one in use is checked, Reload puts it back; Illustration and Animation ship with Sue |
+| What a workspace keeps | Register Workspace | partial | Palettes, the menu bar and the command bar's buttons; not yet shortcuts, units, Quick Access or the tool order |
+| Hide All Palettes, Hide Menu Bar | Window | done | Tab and Shift+Tab; Hide All hides every palette but the command bar and shows them back as they were, reading Show All Palettes meanwhile |
 | Command Bar | Window > Command Bar | done | |
 | Palettes: Tool, Sub Tool, Tool Property, Brush Size, Tool Sliders | Window | done | The names the tutorials show; the Window menu reads each palette's own title, in Clip Studio's order and groups, and Tool Sliders is Sue's own |
 | Palettes: Color Wheel, Color Slider, Color Set, Color History, Intermediate Color, Approximate Color | Window | done | |
@@ -512,7 +517,7 @@ The order of work is the plan at the end.
 | Item Bank palette | Window > Item Bank | done | Keeps sub tools to add again |
 | Information palette | Window > Information | partial | Canvas size, resolution and physical size; not the cursor position or selection info |
 | Cascade, Tile, New Window | Window > Canvas | partial | Commands exist; verify |
-| Interface: Automatic, Desktop, Tablet, Phone | Window > Interface | done | |
+| Interface: Automatic, Desktop, Tablet, Phone | Window > Interface | done | In the Sue menu and Settings, so Window has one layout menu, Layout Style; the command palette finds the choices too |
 | Companion Mode | Window | missing | A phone as a second screen |
 | Dialogs as movable, resizable windows | Dialogs | done | Their own windows, outside Sue's too |
 

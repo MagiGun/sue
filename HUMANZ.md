@@ -1900,27 +1900,52 @@ line in a row, with `panels::Flow`, as the command bar wraps), the line
 between two groups their shares. Dragging a palette by its title bar, tab,
 icon or grip (the command bar's and a row's tool palette's, at their left
 end) drops it into a group, beside one, into a new column, at the top,
-under the canvas, into the strip or into a floating window. Dragging a
-palette's inner tab off (`torn_header` in `panels.rs`) tears it into a
-palette of its own: the six optional ones (`ToolProperty`, `BrushGrid`,
-`ColorSlider`, `Intermediate`, `Approximate`, `ColorHistory`) or the
-strip's (`Material`, `SubView`, `LayerProperty`, `History`, `Cels`); a
-tab whose palette is open elsewhere does not show, and closing an
-optional palette removes it. A palette's menu docks it on either side, in
-a new column on either side, at the top or at the bottom, floats it in an
-`egui::Window` over the canvas, pops it out into a viewport of its own
-(`DockLayout::windows`, where Sue has its own windows), collapses it to an
-icon in the strip at the far right (shown beside the strip on a click),
-or closes it. When the columns, the strip and 300 points of canvas
+under the canvas, into the strip or into a floating window. Every
+palette is one of its own (`Palette::of_window_command` maps each Window
+item to it): a palette in the dock shows only its own header tab
+(`torn_header` keeps the old inner tabs for a phone's sheet), and
+`SuePaint::toggle_palette` shows it or closes it for good
+(`DockLayout::close`; one with a switch in `Panels` keeps its place),
+`show_palette` putting one the layout lacks back where the layout style
+has it. A palette's menu (`palette_menu`, top left of its header, on
+floating palettes too) lists `Palette::menu_commands`, then docks it on
+either side, in a new column on either side, at the top or at the
+bottom, floats it in an `egui::Window` over the canvas (collapsible: a
+double-click on the title rolls it up), pops it out into a viewport of
+its own (`DockLayout::windows`, where Sue has its own windows),
+collapses it to an icon in the strip at the far right (shown beside the
+strip on a click, or kept open as a tab, `strip_as_tab`), and ends with
+Hide X Palette. Rows folded into icons (`Laid::bottom_strip`) and closed
+rows are drawn by `row_strips`. Hide All Palettes keeps `(Panels, Dock)`
+in `hidden_all` and puts them back.
+
+**Layout styles** (`layout_style.rs`, D9): a registry of
+`sue_wm::dock::LayoutStyle<Palette>` read through `DockPanel::styles`;
+`classic` ("Clip Studio", `dock::classic_layout`) is built, `sue_paint`
+is listed unavailable. The rice key `sue_paint.layout_style` is an enum
+of the ids; `layout_style::current` falls back to the default for an
+unavailable or unknown id, the Window menu's family
+`window.layout_style.<id>` and Settings' drop-down
+(`SueApplet::setting_choices`, merged into the catalog by the engine)
+never offer it, and `follow_layout_style` follows a change each frame
+(`switch_layout_style` keeps the old style's lines, in memory and in its
+files, and loads the new style's). Each style has its own `layout`,
+`workspaces` and `default_workspace` files (`layout_style::file_for`). When the columns, the strip and 300 points of canvas
 do not fit, the widest columns (never the tools) fold into the strip for
-that frame. The layout, with the Window menu's palette flags, is written
-to `layout.txt` in Sue Paint's data folder half a second after it last
-changed (`sue_paint.remember_layout`, on by default) and read at start;
-registered workspaces are the same lines by name in `workspaces.txt`, and
-Use Current Workspace as Default writes them to `default_workspace.txt`,
-which Reset to Default (`window.workspace.reset`) goes back to (and Sue
-Paint starts with when no layout was kept). A tablet layout keeps the
-desktop's aside and gives it back.
+that frame. The layout, with the Window menu's palette flags, the menu bar, the
+style, the strip's mode and the command bar's items (`workspace_now`), is
+written to `layout.txt` in Sue Paint's data folder half a second after
+it last changed (`sue_paint.remember_layout`, on by default) and read at
+start; registered workspaces are the same lines by name in
+`workspaces.txt`, and Use Current Workspace as Default writes them to
+`default_workspace.txt`, which Reset to Default
+(`window.workspace.reset`) goes back to (and Sue Paint starts with when
+no layout was kept). The lines are a file format written with `format!`,
+never through the language database (`docs/paint-workspace-files.md`);
+lines 0.0.75 wrote in another language are read through `OLD_WORDS` in
+`extras.rs` and written again in English, and `SuePaint::read_layout`
+puts the palettes that were inner tabs then back as tabs of the same
+palettes. A tablet layout keeps the desktop's aside and gives it back.
 
 **Timeline navigation** (`anim_ui::TimelineView`): the Timeline keeps its
 zoom (points per frame, 4 to 60), the frame at its left edge (fractional
