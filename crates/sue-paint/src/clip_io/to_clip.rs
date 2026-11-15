@@ -7,7 +7,7 @@
 //! held beyond its layers comes back while the canvas keeps its size.
 
 use sue_core::{Arena, ComponentKind, Entity, EntityId, PixelFormat, RasterTile2D};
-use sue_io::clip::{ClipBitmap, ClipDocument, ClipLayer, ClipMask};
+use sue_io::clip::{ClipBitmap, ClipDocument, ClipLayer, ClipMask, RASTER};
 use sue_model::picture::{self, LayerKind};
 use sue_model::{BlendMode, Foreign};
 
@@ -38,6 +38,25 @@ fn rgba(raster: &RasterTile2D) -> Option<Vec<u8>> {
         PixelFormat::RgbaF32 => raster
             .f32_samples()
             .map(|samples| samples.iter().map(|s| unit_byte(*s)).collect()),
+    }
+}
+
+/// How a layer changed in Sue comes out, by what its kept data was: one
+/// Clip Studio drew from more than pixels (text, vector lines, a
+/// correction, a fill) is written as its pixels only, and its own data
+/// is gone from the file.
+fn lost(entity: &Entity) -> Outcome {
+    let Some(layer) =
+        kept(entity, "layer").and_then(|foreign| keep::layer_from(&foreign.data).ok())
+    else {
+        return Outcome::Exact;
+    };
+    if super::to_sue::drawn_by_clip_studio(&layer.columns)
+        || !(layer.layer_type == RASTER || layer.is_paper() || layer.is_folder())
+    {
+        Outcome::Flattened
+    } else {
+        Outcome::Exact
     }
 }
 
@@ -83,7 +102,8 @@ impl Writing<'_> {
                 Some((self.folder(info, children), Outcome::Exact))
             } else {
                 self.layer(entity, info)
-            };
+            }
+            .map(|(layer, outcome)| (layer, outcome.max(lost(entity))));
             let Some((mut layer, outcome)) = made else {
                 self.report.lines.push(Line {
                     name: info.name.clone(),

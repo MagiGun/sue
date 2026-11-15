@@ -506,6 +506,48 @@ fn what_clip_studio_has_no_layer_for_is_left_out_and_said() {
 }
 
 #[test]
+fn a_changed_layer_clip_studio_drew_from_more_than_pixels_is_said_flattened() {
+    let mut doc = ClipDocument::new(40, 30, 72.0);
+    let layer = |name: &str| {
+        ClipLayer::raster(
+            name,
+            0,
+            0,
+            ClipBitmap::color(40, 30, &[5_u8, 6, 7, 255].repeat(40 * 30)),
+        )
+    };
+    let mut tone = layer("Tone");
+    tone.columns.push((
+        "FilterLayerInfo".to_owned(),
+        sue_io::sqlite::Value::Blob(vec![1, 2, 3]),
+    ));
+    let mut text = layer("Words");
+    text.layer_type = 7;
+    doc.root.children = vec![layer("Ink"), tone, text];
+    let (mut arena, picture, opened) = opened(&write(&doc).unwrap());
+    assert_eq!(opened.names(Outcome::Kept), ["Tone", "Words"]);
+    // Untouched, each goes back as it came: nothing to say.
+    let (_, report) = encode_with_report(&arena, picture).unwrap();
+    assert!(report.exact(), "{}", report.summary());
+    // Painted on in Sue: the plain layer is still exact, the other two
+    // lose what Clip Studio drew them from, and the report says so.
+    for info in doc::layers(&arena, picture) {
+        doc::raster_mut(&mut arena, info.id)
+            .unwrap()
+            .bytes_mut()
+            .unwrap()[0] ^= 0xff;
+    }
+    let (_, report) = encode_with_report(&arena, picture).unwrap();
+    assert_eq!(report.names(Outcome::Exact), ["Ink"]);
+    assert_eq!(report.names(Outcome::Flattened), ["Tone", "Words"]);
+    assert!(
+        report
+            .summary()
+            .contains("written as their pixels: Tone, Words")
+    );
+}
+
+#[test]
 fn settings_of_0_0_75_save_a_sue_project_unless_clip_was_chosen() {
     let old = include_str!("../../../sue-rice/rice/history/v6.suerice");
     assert!(old.contains("save_format = \"clip\""), "0.0.75's default");

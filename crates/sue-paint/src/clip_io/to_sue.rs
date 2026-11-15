@@ -263,7 +263,7 @@ impl Making<'_> {
 
 /// Whether Clip Studio draws this layer from settings Sue cannot redo yet
 /// (a correction, a gradient or a fill layer).
-fn drawn_by_clip_studio(columns: &Columns) -> bool {
+pub(super) fn drawn_by_clip_studio(columns: &Columns) -> bool {
     ["FilterLayerInfo", "GradationFillInfo"]
         .iter()
         .any(|name| column(columns, name).and_then(Value::bytes).is_some())
