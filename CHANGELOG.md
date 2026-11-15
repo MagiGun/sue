@@ -183,7 +183,7 @@ follow [Semantic Versioning](https://semver.org/).
   paragraph style and the size are dropdowns, and Highlight opens a
   small list of colors. Every button names itself and its keys in its
   tooltip, keys you change in Settings included, and Tab reaches each
-  one with a focus ring. The edges of the binder and the inspector can
+  one with a focus ring; the find bar's boxes name themselves too. The edges of the binder and the inspector can
   be moved with the arrow keys too, and a double click puts them back.
   Composition mode writes on your theme's page.
 - Settings is regrouped: General (with updates), Language, Appearance,
