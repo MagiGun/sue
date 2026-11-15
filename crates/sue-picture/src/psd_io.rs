@@ -414,7 +414,10 @@ mod tests {
         let (mut edit, mask) =
             doc::new_mask(&arena, ink, |x, _| if x < 4 { 1.0 } else { 0.0 }).unwrap();
         edit.apply(&mut arena).unwrap();
-        assert_eq!(doc::raster(&arena, mask).unwrap().format(), PixelFormat::Gray8);
+        assert_eq!(
+            doc::raster(&arena, mask).unwrap().format(),
+            PixelFormat::Gray8
+        );
         let alpha = |arena: &Arena| -> Vec<u8> {
             let psd = to_psd(arena, picture).unwrap();
             let layer = psd.layers.iter().find(|layer| layer.name == "Ink").unwrap();

@@ -1880,7 +1880,10 @@ fn sue_paint_locked_transparent_pixels_still_take_paint() {
         .zip(after.chunks(4))
         .filter(|(a, b)| a[3] > 0 && a[..3] != b[..3])
         .count();
-    assert!(recolored > 50, "the crossing took the new color: {recolored} px");
+    assert!(
+        recolored > 50,
+        "the crossing took the new color: {recolored} px"
+    );
 }
 
 /// The Blend tool on a layer with keyframes on is refused like a brush:
@@ -1906,7 +1909,11 @@ fn sue_paint_a_layer_with_keyframes_on_refuses_the_blend_tool() {
         egui::Modifiers::NONE,
     );
     assert_eq!(paint.layers().last().unwrap().2, before, "nothing blended");
-    assert_eq!(paint.runtime.engine.history.depth(), depth, "nothing to undo");
+    assert_eq!(
+        paint.runtime.engine.history.depth(),
+        depth,
+        "nothing to undo"
+    );
     assert!(
         paint.notice().to_lowercase().contains("keyframes"),
         "a notice says why: {:?}",
