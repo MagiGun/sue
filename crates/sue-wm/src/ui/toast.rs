@@ -38,6 +38,7 @@ use egui::{
 use super::focus::focus_ring;
 use super::motion::{self, Motion, Pace};
 use super::tokens::{Density, Elevation, Layer, Radius, Space, TextRole};
+use super::tooltip::{Tip, tooltip};
 use crate::Theme;
 use crate::icons::{self, Icon};
 
@@ -64,6 +65,8 @@ const MAX_WIDTH: f32 = 420.0;
 
 /// How many card edges show behind a folded stack, at most.
 const EDGES: usize = 2;
+
+/// What a notice, or a question, is about. Each has a glyph of its own.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Tone {
     /// Something to know: a ring with a letter i.
@@ -162,7 +165,7 @@ pub(super) fn close_button(ui: &Ui, id: Id, rect: Rect, label: &str, theme: &The
     painter.line_segment([middle + vec2(-arm, -arm), middle + vec2(arm, arm)], stroke);
     painter.line_segment([middle + vec2(arm, -arm), middle + vec2(-arm, arm)], stroke);
     focus_ring(ui, &response, radius, theme);
-    response.on_hover_text(label)
+    tooltip(response, &Tip::new(label), theme)
 }
 
 /// One notice.
@@ -883,7 +886,7 @@ fn fold_button(
         ink,
     );
     focus_ring(ui, &response, radius, theme);
-    response.on_hover_text(label)
+    tooltip(response, &Tip::new(label), theme)
 }
 
 /// The action button of a notice: its label in a hairline box.
@@ -913,7 +916,7 @@ fn text_button(
         theme.text,
     );
     focus_ring(ui, &response, radius, theme);
-    response.on_hover_text(text)
+    tooltip(response, &Tip::new(text), theme)
 }
 
 #[cfg(test)]
