@@ -228,9 +228,13 @@ fn a_picture_through_a_clip_comes_back_with_the_same_composite_and_layers() {
     let mask = doc::mask_of(&back, moved).unwrap();
     assert_eq!(
         doc::raster(&back, mask).unwrap().format(),
-        PixelFormat::Rgba8,
-        "a mask Sue paints on as ever"
+        PixelFormat::Gray8,
+        "a gray mask, as Sue makes and paints them"
     );
+    // Sue Paint turns old masks gray when it shows a picture: an
+    // imported one is gray already, so its fingerprint stays.
+    let mut shown = back.clone();
+    assert_eq!(doc::migrate_masks(&mut shown), 0, "nothing to turn");
     // Written again unchanged, the file is the same.
     assert_eq!(encode(&back, again).unwrap(), bytes);
 }
