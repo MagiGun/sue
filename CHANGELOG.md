@@ -13,6 +13,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Writer's binder: press F2 to rename the chosen item (the whole
+  name is chosen, so typing replaces it) and Delete to move it to the
+  Trash; the right-click menu shows each command's key. Items left out
+  of the export say so on their row, and a row's tooltip shows its
+  synopsis.
+- Sue Writer's corkboard, outliner and inspector: Enter opens the card
+  or row that has the keyboard; an empty folder says what to do and
+  offers New Document; the synopsis and notes fields grow as you write.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
@@ -177,6 +185,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Writer's binder, outliner, corkboard, inspector and comments are
+  drawn with Sue's shared controls and icons, so they follow the theme
+  (the corkboard's cards were paper colored in every theme) and an icon
+  pack changes their icons too. Every button names its key in its
+  tooltip, and the keyboard shows where it is.
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait
