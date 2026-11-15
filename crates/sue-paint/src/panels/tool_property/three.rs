@@ -126,12 +126,14 @@ struct DragSpec {
 fn drag_row(ui: &mut Ui, theme: &Theme, specs: [DragSpec; 3]) -> [Dragged; 3] {
     let gap = ui.spacing().item_spacing.x;
     let height = Density::of(ui).control_height();
-    let width = ((ui.available_width() - gap * 2.0) / 3.0).max(height);
-    let (row, _) = ui.allocate_exact_size(vec2(width * 3.0 + gap * 2.0, height), Sense::hover());
-    let mut at = 0.0;
+    let count = specs.len() as f32;
+    let width = ((ui.available_width() - gap * (count - 1.0)) / count).max(height);
+    let across = width * count + gap * (count - 1.0);
+    let (row, _) = ui.allocate_exact_size(vec2(across, height), Sense::hover());
+    let mut left = row.left();
     specs.map(|spec| {
-        let rect = Rect::from_min_size(pos2(row.left() + at, row.top()), vec2(width, height));
-        at += width + gap;
+        let rect = Rect::from_min_size(pos2(left, row.top()), vec2(width, height));
+        left += width + gap;
         drag_button(ui, theme, rect, &spec)
     })
 }

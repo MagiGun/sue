@@ -102,7 +102,9 @@ fn control(paint: &mut PaintDriver, name: &str) -> egui::Rect {
         let mut same: Vec<_> = told.iter().filter(|(label, ..)| label == name).collect();
         // The one nearest Tool Property's tab when others share the name
         // (the canvas's own bars name a Zoom too).
-        let tab = paint.rect_of("Tool Property").expect("the Tool Property tab");
+        let tab = paint
+            .rect_of("Tool Property")
+            .expect("the Tool Property tab");
         same.sort_by(|(_, _, a), (_, _, b)| {
             let far = |rect: &egui::Rect| (rect.center().x - tab.center().x).abs();
             far(a).total_cmp(&far(b))
@@ -390,9 +392,7 @@ fn sue_paint_3d_camera_buttons_turn_move_and_zoom_as_one_step_each() {
         &mut paint,
         layer,
         "bring the camera nearer",
-        |paint| {
-            drag_control(paint, "Zoom", vec2(0.0, -80.0))
-        },
+        |paint| drag_control(paint, "Zoom", vec2(0.0, -80.0)),
         |paint| assert!(view(paint).distance < start.distance * 0.8),
     );
     // Manga Perspective, on and off, from its checkbox.
