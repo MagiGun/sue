@@ -87,10 +87,30 @@ pub(crate) fn write_sections<'a>(items: impl Iterator<Item = (&'a str, Vec<Strin
     out
 }
 
+/// What the Information, Item Bank, Auto Action, Sub View and Material
+/// palettes keep besides the older fields of `SuePaint`.
+#[derive(Debug, Default)]
+pub(crate) struct Extras {
+    /// What the Information palette shows.
+    pub info: crate::panels::InfoOptions,
+    /// The Item Bank's pictures, PNG files in its folder.
+    pub pictures: Vec<std::path::PathBuf>,
+    /// Thumbnails of the Item Bank's pictures.
+    pub bank_thumbs: crate::panels::item_bank::Thumbs,
+    /// The Material palette's view: its folder, search, size and picks.
+    pub material: crate::panels::MaterialView,
+    /// The library keys of the favorite materials, as of the last frame
+    /// the Material palette drew.
+    pub material_favorites: Vec<String>,
+}
+
 /// The file in Sue Paint's data folder that keeps the palette layout
 /// between runs (never inside a document), for the default layout style
 /// (another style keeps `layout.<id>.txt`, `layout_style::file_for`).
 const LAYOUT_FILE: &str = "layout.txt";
+
+/// The file the Auto Action sets are kept in.
+pub(crate) const AUTO_FILE: &str = "auto_actions.txt";
 
 /// The file the registered workspaces are kept in, a section each.
 const WORKSPACES_FILE: &str = "workspaces.txt";
@@ -321,11 +341,15 @@ impl SuePaint {
         }
         self.auto.loaded = true;
         let folder = crate::colorsets::folder(cx);
-        self.auto.sets = read(folder.as_deref(), "auto_actions.txt")
-            .map_or_else(AutoActions::builtin, |text| AutoActions::parse(&text));
+        self.auto
+            .load(read(folder.as_deref(), AUTO_FILE).as_deref());
         self.item_bank = read(folder.as_deref(), "item_bank.txt")
             .map(|text| text.lines().filter_map(Item::from_line).collect())
             .unwrap_or_default();
+        self.extras.info = read(folder.as_deref(), crate::panels::InfoOptions::FILE)
+            .map(|text| crate::panels::InfoOptions::from_text(&text))
+            .unwrap_or_default();
+        self.extras.pictures = crate::panels::bank_pictures(folder.as_deref());
         self.canvas_presets = read(folder.as_deref(), "canvas_presets.txt")
             .map(|text| {
                 text.lines()
@@ -502,22 +526,18 @@ impl SuePaint {
             .collect();
         let spaces = workspaces_text(&self.workspaces);
         let spaces_file = crate::layout_style::file_for(self.layout_style, WORKSPACES_FILE);
-        let written = write(
-            folder.as_deref(),
-            "auto_actions.txt",
-            &AutoActions::write(&self.auto.sets),
-        )
-        .and_then(|()| self.save_command_bar(folder.as_deref()))
-        .and_then(|()| write(folder.as_deref(), "item_bank.txt", &bank))
-        .and_then(|()| {
-            let presets: String = self
-                .canvas_presets
-                .iter()
-                .map(crate::dialogs::CanvasPreset::to_line)
-                .collect();
-            write(folder.as_deref(), "canvas_presets.txt", &presets)
-        })
-        .and_then(|()| write(folder.as_deref(), &spaces_file, &spaces));
+        let written = write(folder.as_deref(), AUTO_FILE, &self.auto.to_text())
+            .and_then(|()| self.save_command_bar(folder.as_deref()))
+            .and_then(|()| write(folder.as_deref(), "item_bank.txt", &bank))
+            .and_then(|()| {
+                let presets: String = self
+                    .canvas_presets
+                    .iter()
+                    .map(crate::dialogs::CanvasPreset::to_line)
+                    .collect();
+                write(folder.as_deref(), "canvas_presets.txt", &presets)
+            })
+            .and_then(|()| write(folder.as_deref(), &spaces_file, &spaces));
         if let Err(error) = written {
             cx.fail(tr!("cannot-keep-the-palettes-settings", error = error));
         }
@@ -610,6 +630,23 @@ impl SuePaint {
             self.menus_hidden = false;
             self.current_workspace = None;
             self.refresh_workspace_menu();
+        }
+    }
+
+    /// The snapshot tour's routes into these palettes:
+    /// `extras/show/<palette key>` shows a palette where the layout has
+    /// it.
+    pub(crate) fn extras_navigate(&mut self, target: &str) -> bool {
+        use sue_wm::dock::DockPanel;
+        match target.strip_prefix("extras/show/") {
+            Some(key) => match crate::dock::Palette::named(key) {
+                Some(palette) => {
+                    self.show_palette(palette);
+                    true
+                }
+                None => false,
+            },
+            None => false,
         }
     }
 

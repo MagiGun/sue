@@ -18,6 +18,7 @@ use crate::studio::{KEYS_SECTION, SuePaint};
 mod anim;
 mod canvas;
 mod edit;
+mod extras;
 mod figure;
 mod file;
 mod filter;
@@ -60,6 +61,7 @@ pub fn registry() -> &'static CommandRegistry<SuePaint> {
         registry.add(canvas::COMMANDS);
         registry.add(figure::COMMANDS);
         registry.add(tool::COMMANDS);
+        registry.add(extras::COMMANDS);
         registry
     })
 }
@@ -152,6 +154,8 @@ impl SuePaint {
         let bound = &self.bound;
         let taken =
             ctx.input_mut(|input| bound.take(input, cx.rice(), KEYS_SECTION, shortcut_table()));
+        // The keys people gave Auto Actions.
+        self.auto_keys(ctx, cx);
         let registry = crate::commands::registry();
         for name in taken {
             if self.tool_key(name, cx) {

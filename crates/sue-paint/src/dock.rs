@@ -338,6 +338,12 @@ impl Palette {
                 "anim.onion_settings",
                 "anim.loop",
             ],
+            Self::Navigator => &crate::panels::NAVIGATOR_COMMANDS,
+            Self::SubView => &crate::panels::SUB_VIEW_COMMANDS,
+            Self::Info => &crate::panels::INFO_COMMANDS,
+            Self::ItemBank => &crate::panels::ITEM_BANK_COMMANDS,
+            Self::AutoAction => &crate::panels::AUTO_ACTION_COMMANDS,
+            Self::Material => &crate::panels::MATERIAL_COMMANDS,
             _ => &[],
         }
     }

@@ -603,6 +603,10 @@ pub struct SuePaint {
     pub(crate) material_pick: Option<String>,
     /// Material thumbnails, by a hash of the material.
     pub(crate) material_thumbs: HashMap<u64, Vec<u8>>,
+    /// What the Information, Item Bank, Auto Action, Sub View and
+    /// Material palettes keep besides the fields above (their options,
+    /// kept pictures, sets and filters).
+    pub(crate) extras: crate::extras::Extras,
     /// Photos being read by the Pose and Hand Scanners.
     pub(crate) scans: crate::scan::Scans,
     /// The kinds of material, registered at start.
@@ -832,6 +836,7 @@ impl Default for SuePaint {
             material_kind: 0,
             material_pick: None,
             material_thumbs: HashMap::new(),
+            extras: crate::extras::Extras::default(),
             scans: crate::scan::Scans::default(),
             material_kinds: crate::materials::MaterialKinds::builtin(),
             hub: crate::hub::MaterialsPlace::default(),

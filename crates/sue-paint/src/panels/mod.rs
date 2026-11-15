@@ -21,6 +21,7 @@ mod layer_property;
 mod material;
 mod navigator;
 mod quick_access;
+mod run_button;
 mod sub_tool;
 mod sub_view;
 mod timeline;
@@ -35,9 +36,15 @@ use sue_wm::{AppletContext, Theme};
 use crate::icons::{self, Icon};
 use crate::studio::SuePaint;
 
+pub(crate) use auto_action::MENU_COMMANDS as AUTO_ACTION_COMMANDS;
 pub(crate) use command_bar::icon_picker;
+pub(crate) use info::{InfoOptions, MENU_COMMANDS as INFO_COMMANDS, Unit};
+pub(crate) use item_bank::{MENU_COMMANDS as ITEM_BANK_COMMANDS, bank_pictures};
 pub(crate) use material::material_thumb;
+pub(crate) use material::{MENU_COMMANDS as MATERIAL_COMMANDS, MaterialView, ThumbSize};
+pub(crate) use navigator::MENU_COMMANDS as NAVIGATOR_COMMANDS;
 pub(crate) use quick_access::MENU_COMMANDS as QUICK_ACCESS_COMMANDS;
+pub(crate) use sub_view::MENU_COMMANDS as SUB_VIEW_COMMANDS;
 pub(crate) use tool::{slot_icon, tool_icon};
 
 /// A child `Ui` confined to `rect`.

@@ -1,6 +1,8 @@
-//! The History tab.
+//! The History palette.
 
-use egui::{Align2, Rect, Sense, Ui, vec2};
+use egui::{Rect, Ui};
+use sue_wm::icons::Icon;
+use sue_wm::ui::{Density, ListRow};
 use sue_wm::{AppletContext, Theme};
 
 use crate::panels::child;
@@ -8,8 +10,9 @@ use crate::studio::SuePaint;
 
 impl SuePaint {
     /// History, as Clip Studio Paint lists it: the start, then every step
-    /// to the current one (lit) and the steps undone after it (dimmed); a
-    /// click on any of them goes back or forward to it.
+    /// to the current one (chosen) and the steps undone after it (marked
+    /// with the redo arrow and "Undone"); a click on any of them goes back
+    /// or forward to it. A long history costs only the rows in view.
     pub(super) fn history_tab(
         &mut self,
         ui: &mut Ui,
@@ -55,32 +58,18 @@ impl SuePaint {
             .collect();
         let mut go = None;
         let mut inner = child(ui, body, "layer-history");
-        egui::ScrollArea::vertical()
-            .id_salt("sue-paint-history")
+        let height = ListRow::height(theme, Density::of(&inner), false);
+        let undone_note = tr!("history-undone");
+        sue_wm::ui::ScrollView::vertical("sue-paint-history")
+            .on(theme.panel)
             .stick_to_bottom(true)
-            .show(&mut inner, |ui| {
-                for (node, label, applied) in &rows {
-                    let (row, response) =
-                        ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
-                    let painter = ui.painter();
-                    if *node == cursor {
-                        painter.rect_filled(row, 0.0, theme.active);
-                    } else if response.hovered() {
-                        painter.rect_filled(row, 0.0, theme.hover);
+            .show_rows(&mut inner, theme, height, rows.len(), |ui, range| {
+                for (node, label, applied) in &rows[range] {
+                    let mut row = ListRow::new(("history", node), label).selected(*node == cursor);
+                    if !*applied {
+                        row = row.icon(Icon::Redo).note(&undone_note);
                     }
-                    painter.hline(row.x_range(), row.bottom(), theme.hairline());
-                    painter.text(
-                        row.left_center() + vec2(8.0, 0.0),
-                        Align2::LEFT_CENTER,
-                        label,
-                        theme.font(theme.small_size + 0.5),
-                        if *applied {
-                            theme.text
-                        } else {
-                            theme.muted.gamma_multiply(0.6)
-                        },
-                    );
-                    if response.clicked() && *node != cursor {
+                    if row.show(ui, theme).response.clicked() && *node != cursor {
                         go = Some(*node);
                     }
                 }

@@ -9,6 +9,56 @@ use super::SuePaint;
 use crate::doc;
 
 impl SuePaint {
+    /// Puts `tile` (RGBA8) on a new layer named `name` above the current
+    /// one, fitted inside the canvas with its middle at the picture point
+    /// `at` (in the middle without one): a picture dropped on the canvas
+    /// from the Item Bank or the Material palette. One undo step.
+    /// Returns `true` when it was added.
+    pub(crate) fn paste_picture_at(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        name: &str,
+        tile: &sue_core::RasterTile2D,
+        at: Option<[f32; 2]>,
+    ) -> bool {
+        let Some(picture) = self.picture() else {
+            return false;
+        };
+        let Some(size) = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(sue_model::picture::size)
+        else {
+            return false;
+        };
+        let Some(raster) = crate::materials::placed(tile, size, at) else {
+            cx.fail(tr!("cannot-read-the-material", name = name));
+            return false;
+        };
+        match doc::add_layer_pixels(
+            &cx.world.arena,
+            picture,
+            self.layer(),
+            name.to_owned(),
+            raster,
+        ) {
+            Ok((spawn, id)) => {
+                let added =
+                    Self::apply(cx, doc::Edit::new(tr!("paste-2", name = name)).then(spawn));
+                if added && let Some(doc) = self.doc_mut() {
+                    doc.layer = Some(id);
+                }
+                added
+            }
+            Err(error) => {
+                cx.fail(error);
+                false
+            }
+        }
+    }
+
     /// Keeps the current layer as a picture material named `name`.
     pub(crate) fn register_material(&mut self, cx: &mut AppletContext<'_>, name: &str) {
         let (Some(folder), Some(layer)) = (crate::materials::location(cx), self.layer()) else {

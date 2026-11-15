@@ -30,7 +30,6 @@ pub enum Icon {
     Balloon,
     CorrectLine,
     New,
-    Open,
     Save,
     Undo,
     Redo,
@@ -46,7 +45,6 @@ pub enum Icon {
     ZoomIn,
     ZoomOut,
     Fit,
-    Actual,
     Eye,
     Lock,
     LockAlpha,
@@ -552,7 +550,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             page(false);
             curve(0.5, 0.75, 0.16, 200.0, 340.0);
         }
-        Icon::Open => folder(false),
         Icon::NewFolder => folder(true),
         Icon::Save => {
             closed(&[
@@ -622,15 +619,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             ] {
                 line(&[a, b, c]);
             }
-        }
-        Icon::Actual => {
-            painter.text(
-                area.center(),
-                egui::Align2::CENTER_CENTER,
-                "1:1",
-                egui::FontId::proportional(side * 0.5),
-                color,
-            );
         }
         Icon::Eye => {
             painter.add(Shape::line(

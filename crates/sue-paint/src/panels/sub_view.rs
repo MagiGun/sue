@@ -1,16 +1,43 @@
-//! The Sub View palette: the reference picture showing, the list of
-//! every picture, and the zoom, turn and picture buttons below them.
+//! The Sub View palette: the reference picture showing (mirrored as its
+//! flips say), or the list of every picture; under it the zoom and turn
+//! sliders (Show Rotate and Flip) and the buttons (Show Command Bar).
+//! Its palette menu holds the choices of gap WS-21 of the 0.0.8 plan:
+//! Switch to Eyedropper Automatically, Show Command Bar, Show Rotate and
+//! Flip, the two flips, and Sub View itself to hide it.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use egui::{Color32, Id, Mesh, Rect, Sense, Shape, Ui, pos2, vec2};
-use sue_wm::{AppletContext, AppletId, FilePick, ShellRequest, Theme};
+use sue_wm::icons::Icon;
+use sue_wm::ui::{Density, ListRow, Space, TextRole, Tip};
+use sue_wm::{AppletContext, Theme};
 
-use crate::icons::Icon;
-use crate::panels::icon_button;
 use crate::studio::SuePaint;
 use crate::subview::{Shown, decode, place, unplace};
+
+/// The commands of the Sub View's palette menu.
+pub(crate) const MENU_COMMANDS: [&str; 6] = [
+    "subview.eyedropper",
+    "subview.show_bar",
+    "subview.show_turn",
+    "subview.flip_h",
+    "subview.flip_v",
+    "window.sub_view",
+];
+
+/// The Sub View's buttons, left to right.
+pub(crate) const BAR_COMMANDS: [(&str, Icon); 9] = [
+    ("subview.import", Icon::Import),
+    ("subview.previous", Icon::ChevronLeft),
+    ("subview.next", Icon::ChevronRight),
+    ("subview.list", Icon::PictureList),
+    ("subview.eyedropper", Icon::ToolEyedropper),
+    ("subview.flip_h", Icon::FlipHorizontal),
+    ("subview.flip_v", Icon::FlipVertical),
+    ("subview.fit", Icon::ZoomFit),
+    ("subview.remove", Icon::Delete),
+];
 
 impl SuePaint {
     /// The Sub View palette's body.
@@ -21,9 +48,27 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        let controls = 58.0;
-        let image_area = Rect::from_min_max(body.min, pos2(body.right(), body.bottom() - controls));
-        ui.painter().rect_filled(image_area, 0.0, theme.void);
+        let density = Density::of(ui);
+        let gap = theme.space(Space::S2);
+        let button = density.icon_button();
+        let slider = density.control_height();
+        let bar = if self.sub_view.show_bar {
+            // As many lines of buttons as the width takes.
+            let per_line = ((body.width() + gap) / (button + gap)).floor().max(1.0) as usize;
+            let lines = BAR_COMMANDS.len().div_ceil(per_line);
+            lines as f32 * (button + gap)
+        } else {
+            0.0
+        };
+        let turn = if self.sub_view.show_turn {
+            slider + gap
+        } else {
+            0.0
+        };
+        let image_area =
+            Rect::from_min_max(body.min, pos2(body.right(), body.bottom() - bar - turn));
+        ui.painter()
+            .rect_filled(image_area, theme.corner(sue_wm::ui::Radius::Sm), theme.void);
         let view = &mut self.sub_view;
         let current = view.images.get(view.current).cloned();
         if view.shown.as_ref().map(|shown| &shown.path) != current.as_ref() {
@@ -39,16 +84,19 @@ impl SuePaint {
         let mut choose = None;
         if view.list {
             // Every picture, by name, to pick one.
-            let mut inner = crate::panels::child(ui, image_area.shrink(4.0), "sub-view-list");
-            egui::ScrollArea::vertical()
-                .id_salt("sue-paint-sub-view-list")
-                .show(&mut inner, |ui| {
+            let mut inner = crate::panels::child(ui, image_area.shrink(gap), "sub-view-list");
+            sue_wm::ui::ScrollView::vertical("sue-paint-sub-view-list")
+                .on(theme.void)
+                .show(&mut inner, theme, |ui| {
                     for (index, path) in view.images.iter().enumerate() {
                         let name = path
                             .file_name()
                             .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-                        if ui
-                            .add(egui::Button::selectable(index == view.current, name))
+                        if ListRow::new(("sub-view-picture", path), &name)
+                            .icon(Icon::Picture)
+                            .selected(index == view.current)
+                            .show(ui, theme)
+                            .response
                             .clicked()
                         {
                             choose = Some(index);
@@ -73,13 +121,15 @@ impl SuePaint {
                     pos2(0.0, shown.size[1] as f32),
                 ]
                 .map(|corner| place(image_area, shown.size, view.zoom, view.rotation, corner));
+                // A flip mirrors which part of the picture each corner shows.
+                let (u0, u1) = if view.flip_h { (1.0, 0.0) } else { (0.0, 1.0) };
+                let (v0, v1) = if view.flip_v { (1.0, 0.0) } else { (0.0, 1.0) };
                 let mut mesh = Mesh::with_texture(texture);
-                for (corner, uv) in corners.iter().zip([
-                    pos2(0.0, 0.0),
-                    pos2(1.0, 0.0),
-                    pos2(1.0, 1.0),
-                    pos2(0.0, 1.0),
-                ]) {
+                for (corner, uv) in
+                    corners
+                        .iter()
+                        .zip([pos2(u0, v0), pos2(u1, v0), pos2(u1, v1), pos2(u0, v1)])
+                {
                     mesh.vertices.push(egui::epaint::Vertex {
                         pos: *corner,
                         uv,
@@ -101,7 +151,8 @@ impl SuePaint {
                 && (response.clicked() || response.dragged())
                 && let Some(pointer) = response.interact_pointer_pos()
             {
-                let p = unplace(image_area, shown.size, view.zoom, view.rotation, pointer);
+                let at = unplace(image_area, shown.size, view.zoom, view.rotation, pointer);
+                let p = view.mirrored(shown.size, at);
                 if p.x >= 0.0
                     && p.y >= 0.0
                     && (p.x as u32) < shown.size[0]
@@ -118,9 +169,9 @@ impl SuePaint {
             ui.painter().text(
                 image_area.center(),
                 egui::Align2::CENTER_CENTER,
-                "Import a picture to see it here",
-                theme.font(theme.small_size + 0.5),
-                theme.muted,
+                tr!("sub-view-empty"),
+                theme.text_font(TextRole::Caption),
+                theme.text_muted(),
             );
         }
         if let Some(index) = choose {
@@ -128,83 +179,56 @@ impl SuePaint {
             view.list = false;
         }
         // Zoom and turn.
-        let mut inner = crate::panels::child(
-            ui,
-            Rect::from_min_max(pos2(body.left(), image_area.bottom() + 4.0), body.max),
-            "sub-view-controls",
-        );
-        inner.spacing_mut().slider_width = ((body.width() - 30.0) / 2.0 - 40.0).max(30.0);
-        inner.horizontal(|ui| {
-            ui.add(
-                egui::Slider::new(&mut view.zoom, 0.1..=8.0)
-                    .logarithmic(true)
-                    .max_decimals(1)
-                    .suffix("x"),
-            )
-            .on_hover_text(tr!("zoom-the-reference"));
-            ui.add(
-                egui::Slider::new(&mut view.rotation, -180.0..=180.0)
-                    .max_decimals(0)
-                    .suffix(" \u{b0}"),
-            )
-            .on_hover_text(tr!("turn-the-reference"));
-        });
-        let row = inner.available_rect_before_wrap();
-        let count = view.images.len();
-        let buttons: [(Icon, &str, bool, bool); 7] = [
-            (Icon::Open, &tr!("import-a-picture"), true, false),
-            (Icon::Prev, &tr!("previous-picture"), count > 1, false),
-            (Icon::Next, &tr!("next-picture"), count > 1, false),
-            (Icon::List, &tr!("every-picture"), count > 0, view.list),
-            (
-                Icon::Eyedropper,
-                &tr!("pick-colors-from-the-picture"),
-                true,
-                view.eyedropper,
-            ),
-            (Icon::Fit, &tr!("fit-untilted"), count > 0, false),
-            (
-                Icon::Delete,
-                &tr!("take-this-picture-away"),
-                count > 0,
-                false,
-            ),
-        ];
-        let mut clicked = None;
-        for (index, (icon, tip, enabled, active)) in buttons.into_iter().enumerate() {
-            let rect = Rect::from_min_size(
-                pos2(row.left() + index as f32 * 26.0, row.top()),
-                vec2(22.0, 22.0),
+        if view.show_turn {
+            let row = Rect::from_min_size(
+                pos2(body.left(), image_area.bottom() + gap),
+                vec2(body.width(), slider),
             );
-            if icon_button(&mut inner, rect, icon, enabled, active, tip, theme) {
-                clicked = Some(index);
-            }
+            let mut inner = crate::panels::child(ui, row, "sub-view-turn");
+            let half = (row.width() - gap) / 2.0;
+            let mut zoom = f64::from(view.zoom);
+            let mut degrees = f64::from(view.rotation);
+            let zoom_name = tr!("zoom-the-reference");
+            let turn_name = tr!("turn-the-reference");
+            let a = sue_wm::ui::slider("sue-paint-sub-view-zoom", &mut zoom, 0.1..=8.0)
+                .logarithmic()
+                .decimals(1)
+                .suffix("x")
+                .name(&zoom_name)
+                .show_at(
+                    &mut inner,
+                    Rect::from_min_size(row.min, vec2(half, slider)),
+                    theme,
+                );
+            sue_wm::ui::tooltip(a, &Tip::new(&zoom_name), theme);
+            let b = sue_wm::ui::slider("sue-paint-sub-view-turn", &mut degrees, -180.0..=180.0)
+                .decimals(0)
+                .suffix("\u{b0}")
+                .name(&turn_name)
+                .show_at(
+                    &mut inner,
+                    Rect::from_min_size(
+                        pos2(row.left() + half + gap, row.top()),
+                        vec2(half, slider),
+                    ),
+                    theme,
+                );
+            sue_wm::ui::tooltip(b, &Tip::new(&turn_name), theme);
+            view.zoom = zoom as f32;
+            view.rotation = degrees as f32;
         }
-        match clicked {
-            Some(0) => cx.request(ShellRequest::PickFile(
-                FilePick::open(
-                    Some(AppletId::new(crate::studio::ID).expect("a valid id")),
-                    "subview",
-                    &tr!("import-a-reference-picture"),
-                )
-                .extensions(&[
-                    "png", "jpg", "jpeg", "jxl", "webp", "bmp", "gif", "tif", "tiff", "tga", "qoi",
-                ]),
-            )),
-            Some(1) => view.current = (view.current + count - 1) % count.max(1),
-            Some(2) => view.current = (view.current + 1) % count.max(1),
-            Some(3) => view.list = !view.list,
-            Some(4) => view.eyedropper = !view.eyedropper,
-            Some(5) => {
-                view.zoom = 1.0;
-                view.rotation = 0.0;
+        if self.sub_view.show_bar {
+            let area = Rect::from_min_max(pos2(body.left(), body.bottom() - bar), body.max);
+            let buttons = crate::panels::child(ui, area, "sub-view-buttons");
+            let mut at = area.min;
+            for (command, icon) in BAR_COMMANDS {
+                if at.x + button > area.right() + 0.5 && at.x > area.left() {
+                    at = pos2(area.left(), at.y + button + gap);
+                }
+                let rect = Rect::from_min_size(at, vec2(button, button));
+                self.command_button(&buttons, rect, command, icon, cx, theme);
+                at.x += button + gap;
             }
-            Some(6) => {
-                view.images.remove(view.current.min(count - 1));
-                view.current = view.current.min(view.images.len().saturating_sub(1));
-                view.shown = None;
-            }
-            _ => {}
         }
         if let Some(rgb) = picked {
             self.set_drawing_color(rgb);

@@ -1,11 +1,41 @@
-//! The Navigator palette.
+//! The Navigator palette: the whole picture small, the part the canvas
+//! shows framed on it (drag or click to move the view), and under it two
+//! rows, zoom and rotation, each a number, a wedge to drag and the View
+//! commands' buttons.
 
 use egui::{Color32, Id, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use sue_wm::icons::Icon;
+use sue_wm::ui::{Density, Space, Tip};
 use sue_wm::{AppletContext, Theme};
 
-use crate::icons::Icon;
-use crate::panels::{Wedge, child, icon_button};
+use crate::icons::Icon as OldIcon;
+use crate::panels::child;
 use crate::studio::{SuePaint, texture_key};
+
+/// The zoom row's buttons: View commands, as the View menu has them.
+pub(crate) const ZOOM_COMMANDS: [(&str, Icon); 4] = [
+    ("view.zoom_out", Icon::ZoomOut),
+    ("view.zoom_in", Icon::ZoomIn),
+    ("view.actual", Icon::ZoomActual),
+    ("view.fit", Icon::ZoomFit),
+];
+
+/// The rotation row's buttons.
+pub(crate) const TURN_COMMANDS: [(&str, Icon); 5] = [
+    ("view.rotate_left", Icon::RotateLeft),
+    ("view.rotate_right", Icon::RotateRight),
+    ("view.rotate_reset", Icon::Reset),
+    ("view.flip_h", Icon::FlipHorizontal),
+    ("view.flip_v", Icon::FlipVertical),
+];
+
+/// The commands of the Navigator's palette menu.
+pub(crate) const MENU_COMMANDS: [&str; 4] = [
+    "view.fit_navigator",
+    "view.reset_display",
+    "view.actual",
+    "view.reset_turn",
+];
 
 impl SuePaint {
     pub(crate) fn navigator(
@@ -19,10 +49,10 @@ impl SuePaint {
             ui,
             rect,
             &[
-                (tr!("navigator"), Icon::Navigator, true, None),
+                (tr!("navigator"), OldIcon::Navigator, true, None),
                 (
                     tr!("sub-view"),
-                    Icon::SubView,
+                    OldIcon::SubView,
                     true,
                     Some(crate::dock::Palette::SubView),
                 ),
@@ -31,190 +61,189 @@ impl SuePaint {
             theme,
         );
         self.nav_tab = tab;
-        let body = body.shrink(6.0);
+        let body = body.shrink(theme.space(Space::S3));
         if self.nav_tab == 1 {
             self.sub_view(ui, body, cx, theme);
             return;
         }
-        let viewport = self.viewport;
-        let controls = 58.0;
+        let density = Density::of(ui);
+        let row = density.icon_button();
+        let gap = theme.space(Space::S2);
+        // Two rows of a value and its wedge, then the buttons in as many
+        // lines as the width takes.
+        let count = ZOOM_COMMANDS.len() + TURN_COMMANDS.len();
+        let per_line = ((body.width() + gap) / (row + gap)).floor().max(1.0) as usize;
+        let lines = count.div_ceil(per_line) as f32;
+        let controls = (2.0 + lines) * (row + gap) + gap;
         let thumb_area = Rect::from_min_max(body.min, pos2(body.right(), body.bottom() - controls));
-        ui.painter().rect_filled(thumb_area, 0.0, theme.void);
-        let Some(doc) = self.docs.get_mut(self.active) else {
-            return;
-        };
-        let (pixels, size, version) = doc.compositor.display();
-        if size[0] == 0 {
-            return;
+        ui.painter()
+            .rect_filled(thumb_area, theme.corner(sue_wm::ui::Radius::Sm), theme.void);
+        let viewport = self.viewport;
+        let mut zoomed = None;
+        let mut turned = None;
+        if let Some(doc) = self.docs.get_mut(self.active) {
+            let (pixels, size, version) = doc.compositor.display();
+            if size[0] > 0 && thumb_area.width() > 0.0 && thumb_area.height() > 0.0 {
+                let scale =
+                    (thumb_area.width() / size[0] as f32).min(thumb_area.height() / size[1] as f32);
+                let thumb = Rect::from_center_size(
+                    thumb_area.center(),
+                    vec2(size[0] as f32, size[1] as f32) * scale,
+                );
+                // The canvas's own texture: only what changed goes up.
+                let compositor = &doc.compositor;
+                if let Some(texture) = cx.textures.texture_changed(
+                    texture_key(doc.picture, 0),
+                    version,
+                    size,
+                    4,
+                    pixels,
+                    doc.view.zoom >= 2.0,
+                    &|since| compositor.changed_since(since),
+                ) {
+                    ui.painter().image(
+                        texture,
+                        thumb,
+                        Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                }
+                // The part the canvas shows: the theme's own frame, a
+                // line in the focus color over a wider one in the shadow
+                // color, so it reads on light and dark pictures alike.
+                let corners: Vec<Pos2> = [
+                    viewport.left_top(),
+                    viewport.right_top(),
+                    viewport.right_bottom(),
+                    viewport.left_bottom(),
+                ]
+                .map(|corner| {
+                    let p = doc.view.to_picture(viewport, size, corner);
+                    thumb.min + p.to_vec2() * scale
+                })
+                .to_vec();
+                let line = theme.selected_stroke();
+                let clipped = ui.painter().with_clip_rect(thumb_area);
+                clipped.add(Shape::closed_line(
+                    corners.clone(),
+                    Stroke::new(line.width + theme.space(Space::S1), theme.shadow),
+                ));
+                clipped.add(Shape::closed_line(
+                    corners,
+                    Stroke::new(line.width, theme.focus()),
+                ));
+                let response = ui.interact(
+                    thumb_area,
+                    Id::unique("sue-paint-navigator"),
+                    Sense::click_and_drag(),
+                );
+                if let Some(pointer) = response.interact_pointer_pos()
+                    && (response.dragged() || response.clicked())
+                {
+                    let p = ((pointer - thumb.min) / scale).to_pos2();
+                    doc.view.center_on(viewport, size, p);
+                }
+                if response.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                }
+            }
         }
-        let scale = (thumb_area.width() / size[0] as f32).min(thumb_area.height() / size[1] as f32);
-        let thumb = Rect::from_center_size(
-            thumb_area.center(),
-            vec2(size[0] as f32, size[1] as f32) * scale,
-        );
-        // The canvas's own texture: only what changed goes up.
-        let compositor = &doc.compositor;
-        if let Some(texture) = cx.textures.texture_changed(
-            texture_key(doc.picture, 0),
-            version,
-            size,
-            4,
-            pixels,
-            doc.view.zoom >= 2.0,
-            &|since| compositor.changed_since(since),
-        ) {
-            ui.painter().image(
-                texture,
-                thumb,
-                Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
-                Color32::WHITE,
+        // Zoom and rotation: each a value and a wedge on a row of its own;
+        // the View commands' buttons under them.
+        let zoom = self.doc().map_or(1.0, |doc| doc.view.zoom);
+        let rotation = self.doc().map_or(0.0, |doc| doc.view.rotation);
+        let has_doc = self.doc().is_some();
+        let field = (row * 2.6).round();
+        let top = thumb_area.bottom() + gap;
+        for index in 0..2_usize {
+            let y = top + index as f32 * (row + gap);
+            let line = Rect::from_min_max(pos2(body.left(), y), pos2(body.right(), y + row));
+            let mut inner = child(ui, line, if index == 0 { "nav-zoom" } else { "nav-turn" });
+            let wedge_width = (line.width() - field - gap).max(0.0);
+            let field_rect = Rect::from_min_size(line.min, vec2(field, row));
+            let wedge_rect = Rect::from_min_size(
+                pos2(field_rect.right() + gap, line.top()),
+                vec2(wedge_width, row),
             );
-        }
-        // The part the canvas shows.
-        let corners = [
-            viewport.left_top(),
-            viewport.right_top(),
-            viewport.right_bottom(),
-            viewport.left_bottom(),
-        ]
-        .map(|corner| {
-            let p = doc.view.to_picture(viewport, size, corner);
-            thumb.min + p.to_vec2() * scale
-        });
-        // Clipped: zoomed out, the view is larger than the picture. The
-        // theme's own frame (rule 10 of the 0.0.8 plan: never Clip Studio
-        // Paint's red): the focus color over a wider line of the shadow
-        // color, so it reads on light and dark pictures alike.
-        let line = theme.selected_stroke();
-        let clipped = ui.painter().with_clip_rect(thumb_area);
-        clipped.add(Shape::closed_line(
-            corners.to_vec(),
-            Stroke::new(line.width + 2.0, theme.shadow),
-        ));
-        clipped.add(Shape::closed_line(
-            corners.to_vec(),
-            Stroke::new(line.width, theme.focus()),
-        ));
-        let response = ui.interact(
-            thumb_area,
-            Id::unique("sue-paint-navigator"),
-            Sense::click_and_drag(),
-        );
-        if let Some(pointer) = response.interact_pointer_pos()
-            && (response.dragged() || response.clicked())
-        {
-            let p = ((pointer - thumb.min) / scale).to_pos2();
-            doc.view.center_on(viewport, size, p);
-        }
-        // Zoom and rotation, as Clip Studio Paint's Navigator: each a
-        // value, a wedge and its buttons on one row; fit and the flips
-        // below.
-        let row = 22.0;
-        let buttons_width = 5.0 * (row + 4.0);
-        let wedge_width = (body.width() - 62.0 - 8.0 - buttons_width - 4.0).max(24.0);
-        let mut zoom_button = None;
-        let mut turn_button = None;
-        let mut percent = doc.view.zoom * 100.0;
-        let mut rotation = doc.view.rotation;
-        let mut inner = child(
-            ui,
-            Rect::from_min_max(pos2(body.left(), thumb_area.bottom() + 4.0), body.max),
-            "navigator-controls",
-        );
-        inner.spacing_mut().item_spacing = vec2(4.0, 4.0);
-        let mut zoomed = false;
-        let mut turned = false;
-        inner.horizontal(|ui| {
-            zoomed |= ui
-                .add_sized(
-                    vec2(62.0, row),
-                    egui::DragValue::new(&mut percent)
-                        .range(1.0..=6400.0)
-                        .max_decimals(1),
-                )
-                .on_hover_text(tr!("zoom"))
-                .changed();
-            zoomed |= ui
-                .add(Wedge::new(&mut percent, 1.0..=6400.0, wedge_width, theme).logarithmic())
-                .on_hover_text(tr!("zoom"))
-                .changed();
-            for (index, (icon, tip)) in [
-                (Icon::ZoomOut, tr!("zoom-out")),
-                (Icon::ZoomIn, tr!("zoom-in")),
-                (Icon::Actual, "100%".to_owned()),
-                (Icon::Fit, tr!("fit-to-screen-2")),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(row), Sense::hover());
-                if icon_button(ui, rect, icon, true, false, &tip, theme) {
-                    zoom_button = Some(index);
-                }
-            }
-        });
-        inner.horizontal(|ui| {
-            turned |= ui
-                .add_sized(
-                    vec2(62.0, row),
-                    egui::DragValue::new(&mut rotation)
-                        .range(-180.0..=180.0)
-                        .max_decimals(1),
-                )
-                .on_hover_text(tr!("rotation"))
-                .changed();
-            turned |= ui
-                .add(Wedge::new(
-                    &mut rotation,
-                    -180.0..=180.0,
-                    wedge_width,
-                    theme,
-                ))
-                .on_hover_text(tr!("rotation"))
-                .changed();
-            for (index, (icon, tip)) in [
-                (Icon::RotateLeft, tr!("rotate-left")),
-                (Icon::RotateRight, tr!("rotate-right")),
-                (Icon::Reset, tr!("reset-rotation")),
-                (Icon::FlipH, tr!("flip-horizontally")),
-                (Icon::FlipV, tr!("flip-vertically")),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(row), Sense::hover());
-                let active = match index {
-                    3 => doc.view.flip_h,
-                    4 => doc.view.flip_v,
-                    _ => false,
+            if index == 0 {
+                let mut percent = f64::from(zoom * 100.0);
+                let name = tr!("zoom");
+                let a = sue_wm::ui::number_field("sue-paint-nav-zoom", &mut percent)
+                    .range(1.0..=6400.0)
+                    .decimals(1)
+                    .suffix("%")
+                    .label(&name)
+                    .enabled(has_doc)
+                    .show_at(&mut inner, field_rect, theme);
+                let a = sue_wm::ui::tooltip(a, &Tip::new(&name), theme);
+                let mut wedged = percent;
+                let b = if wedge_width >= row {
+                    let b =
+                        sue_wm::ui::wedge("sue-paint-nav-zoom-wedge", &mut wedged, 1.0..=6400.0)
+                            .logarithmic()
+                            .decimals(1)
+                            .label(&name)
+                            .enabled(has_doc)
+                            .show_at(&mut inner, wedge_rect, theme);
+                    sue_wm::ui::tooltip(b, &Tip::new(&name), theme).changed()
+                } else {
+                    false
                 };
-                if icon_button(ui, rect, icon, true, active, &tip, theme) {
-                    turn_button = Some(index);
+                if a.changed() {
+                    zoomed = Some(percent as f32 / 100.0);
+                } else if b {
+                    zoomed = Some(wedged as f32 / 100.0);
+                }
+            } else {
+                let mut degrees = f64::from(rotation);
+                let name = tr!("rotation");
+                let a = sue_wm::ui::number_field("sue-paint-nav-turn", &mut degrees)
+                    .range(-180.0..=180.0)
+                    .decimals(1)
+                    .suffix("\u{b0}")
+                    .label(&name)
+                    .enabled(has_doc)
+                    .show_at(&mut inner, field_rect, theme);
+                let a = sue_wm::ui::tooltip(a, &Tip::new(&name), theme);
+                let mut wedged = degrees;
+                let b = if wedge_width >= row {
+                    let b =
+                        sue_wm::ui::wedge("sue-paint-nav-turn-wedge", &mut wedged, -180.0..=180.0)
+                            .decimals(1)
+                            .label(&name)
+                            .enabled(has_doc)
+                            .show_at(&mut inner, wedge_rect, theme);
+                    sue_wm::ui::tooltip(b, &Tip::new(&name), theme).changed()
+                } else {
+                    false
+                };
+                if a.changed() {
+                    turned = Some(degrees as f32);
+                } else if b {
+                    turned = Some(wedged as f32);
                 }
             }
-        });
-        let center = viewport.center();
-        if zoomed {
-            doc.view
-                .set_zoom_at(viewport, size, center, percent / 100.0);
         }
-        if turned {
-            doc.view.set_rotation(viewport, size, rotation);
+        let area = Rect::from_min_max(pos2(body.left(), top + 2.0 * (row + gap)), body.max);
+        let buttons = child(ui, area, "nav-buttons");
+        let mut at = area.min;
+        for (command, icon) in ZOOM_COMMANDS.iter().chain(TURN_COMMANDS.iter()) {
+            if at.x + row > area.right() + gap && at.x > area.left() {
+                at = pos2(area.left(), at.y + row + gap);
+            }
+            let rect = Rect::from_min_size(at, vec2(row, row));
+            self.command_button(&buttons, rect, command, *icon, cx, theme);
+            at.x += row + gap;
         }
-        match zoom_button {
-            Some(0) => doc.view.zoom_at(viewport, size, center, 0.8),
-            Some(1) => doc.view.zoom_at(viewport, size, center, 1.25),
-            Some(2) => doc.view.set_zoom_at(viewport, size, center, 1.0),
-            Some(_) => doc.view.fit(viewport, size),
-            None => {}
-        }
-        match turn_button {
-            Some(0) => doc.view.rotate_by(viewport, size, -15.0),
-            Some(1) => doc.view.rotate_by(viewport, size, 15.0),
-            Some(2) => doc.view.set_rotation(viewport, size, 0.0),
-            Some(3) => doc.view.flip(viewport, size, true),
-            Some(_) => doc.view.flip(viewport, size, false),
-            None => {}
+        if let Some(doc) = self.docs.get_mut(self.active) {
+            let size = doc.compositor.display().1;
+            let center = viewport.center();
+            if let Some(zoom) = zoomed {
+                doc.view.set_zoom_at(viewport, size, center, zoom);
+            }
+            if let Some(degrees) = turned {
+                doc.view.set_rotation(viewport, size, degrees);
+            }
         }
     }
 }
