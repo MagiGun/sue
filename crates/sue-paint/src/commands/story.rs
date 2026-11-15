@@ -667,7 +667,8 @@ mod tests {
                 "story.editor",
                 "story.import_text",
                 "story.export_page",
-                "story.export_pages"
+                "story.export_pages",
+                "story.preview_binding"
             ]
         );
         assert!(
