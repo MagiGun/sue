@@ -1,133 +1,217 @@
 //! Tool Property for Fill, Auto Select and Gradient.
 
 use egui::Ui;
-use sue_wm::Theme;
 
 use super::select::select_ops;
-use super::small_text;
-use crate::fill::Refer;
-use crate::panels::slider_row;
+use super::{Category, Rows};
+use crate::brush::AntiAlias;
+use crate::fill::{Exclude, Refer};
 use crate::select::Op;
 use crate::tools::{SubTool, Tool};
 
-/// Fill and Auto Select: the tolerance, the layers they refer to, and
-/// Fill's gap closing, area scaling and opacity.
+/// The choices of Refer multiple: every way of looking at more than the
+/// editing layer, in Tool Property's order.
+const MULTIPLE: [Refer; 4] = [Refer::All, Refer::Selected, Refer::Folder, Refer::Reference];
+
+/// Fill and Auto Select, in Clip Studio Paint's order: Auto Select's
+/// selection mode, then Apply to connected pixels only, Close gap,
+/// Tolerance, Area scaling, Refer multiple with what it leaves out,
+/// Anti-aliasing, and Fill's opacity.
 pub(super) fn fill_properties(
     ui: &mut Ui,
+    rows: &mut Rows<'_>,
     tool: Tool,
     sub: &mut SubTool,
     select_op: &mut Op,
-    theme: &Theme,
 ) {
-    let small = small_text(theme);
-    let mut tolerance = sub.tolerance * 100.0;
-    if slider_row(
+    if tool == Tool::AutoSelect {
+        select_ops(ui, rows, select_op);
+    }
+    rows.check(
         ui,
-        &tr!("tolerance"),
-        &mut tolerance,
-        0.0..=100.0,
-        " %",
-        false,
-        theme,
+        "connected-only",
+        Category::Area,
+        &tr!("apply-to-connected-pixels-only"),
+        Some(&tr!("apply-to-connected-pixels-only-hint")),
+        &mut sub.connected_only,
+    );
+    let gaps = [
+        tr!("none"),
+        tr!("weak"),
+        tr!("medium"),
+        tr!("strong"),
+        tr!("max"),
+    ];
+    let mut gap = (sub.gap as usize).min(gaps.len() - 1);
+    if rows.choice(
+        ui,
+        "close-gap",
+        Category::Area,
+        &tr!("close-gap"),
+        &mut gap,
+        &gaps,
     ) {
-        sub.tolerance = tolerance / 100.0;
+        sub.gap = gap as u32;
     }
-    ui.horizontal(|ui| {
-        ui.label(small(&tr!("refer")));
-        // The layers looked at are the sub tool's refer setting; its mode
-        // says what it does (fill, close and fill, paint unpainted area).
-        let mut refer = sub.referred();
-        for choice in [Refer::Editing, Refer::All, Refer::Reference] {
-            ui.selectable_value(&mut refer, choice, choice.label());
-        }
-        if refer != sub.referred() {
-            sub.set_referred(refer);
-        }
-    });
-    if tool == Tool::Fill {
-        ui.horizontal(|ui| {
-            ui.label(small(&tr!("close-gap")));
-            for (level, name) in [
-                tr!("none"),
-                tr!("weak"),
-                tr!("medium"),
-                tr!("strong"),
-                tr!("max"),
-            ]
-            .iter()
-            .enumerate()
-            {
-                ui.selectable_value(&mut sub.gap, level as u32, name.as_str());
-            }
-        })
-        .response
-        .on_hover_text(tr!("fills-hold-inside-lines-small-breaks"));
-        let mut spread = sub.spread as f32;
-        if slider_row(
-            ui,
-            &tr!("area-scaling"),
-            &mut spread,
-            0.0..=20.0,
-            &tr!("px"),
-            false,
-            theme,
-        ) {
-            sub.spread = spread.round() as i32;
-        }
+    rows.percent(
+        ui,
+        "tolerance",
+        Category::Area,
+        &tr!("tolerance"),
+        &mut sub.tolerance,
+        0.0,
+        100.0,
+    );
+    let mut spread = sub.spread as f32;
+    if rows.slider(
+        ui,
+        "area-scaling",
+        Category::Area,
+        &tr!("area-scaling"),
+        &mut spread,
+        -20.0..=20.0,
+        &tr!("px"),
+        false,
+    ) {
+        sub.spread = spread.round() as i32;
+    }
+    refer_rows(ui, rows, sub);
+    let levels: Vec<String> = AntiAlias::ALL.iter().map(|level| level.label()).collect();
+    let mut level = AntiAlias::ALL
+        .iter()
+        .position(|found| *found == sub.area_aa)
+        .unwrap_or(0);
+    if rows.choice(
+        ui,
+        "area-anti-aliasing",
+        Category::AntiAliasing,
+        &tr!("anti-aliasing"),
+        &mut level,
+        &levels,
+    ) {
+        sub.area_aa = AntiAlias::ALL[level];
     }
     if tool == Tool::Fill {
-        let mut opacity = sub.tip.opacity * 100.0;
-        if slider_row(
+        rows.percent(
             ui,
+            "fill-opacity",
+            Category::Ink,
             &tr!("opacity"),
-            &mut opacity,
-            0.0..=100.0,
-            " %",
-            false,
-            theme,
-        ) {
-            sub.tip.opacity = opacity / 100.0;
-        }
-        ui.add_enabled(
-            false,
-            egui::Checkbox::new(&mut false, small(&tr!("close-gap"))),
+            &mut sub.tip.opacity,
+            0.0,
+            100.0,
         );
-    } else {
-        select_ops(ui, select_op, theme);
     }
 }
 
-/// Gradient: its shape, its colors and its opacity.
-pub(super) fn gradient_properties(ui: &mut Ui, sub: &mut SubTool, theme: &Theme) {
-    let small = small_text(theme);
-    ui.horizontal(|ui| {
-        ui.label(small(&tr!("shape-2")));
-        let mut radial = sub.mode == 2;
-        ui.selectable_value(&mut radial, false, tr!("linear"));
-        ui.selectable_value(&mut radial, true, tr!("radial"));
-        if radial {
-            sub.mode = 2;
-        } else if sub.mode == 2 {
-            sub.mode = 0;
-        }
-    });
-    if sub.mode != 2 {
-        ui.horizontal(|ui| {
-            ui.label(small(&tr!("colors-2")));
-            ui.selectable_value(&mut sub.mode, 0, tr!("to-transparent"));
-            ui.selectable_value(&mut sub.mode, 1, tr!("main-to-sub"));
-        });
-    }
-    let mut opacity = sub.tip.opacity * 100.0;
-    if slider_row(
+/// Refer multiple: whether more than the editing layer is looked at,
+/// which layers, and the kinds of layer left out.
+fn refer_rows(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
+    rows.check(
         ui,
-        &tr!("opacity"),
-        &mut opacity,
-        0.0..=100.0,
-        " %",
-        false,
-        theme,
-    ) {
-        sub.tip.opacity = opacity / 100.0;
+        "refer-multiple",
+        Category::Reference,
+        &tr!("refer-multiple"),
+        Some(&tr!("refer-multiple-hint")),
+        &mut sub.refer_multiple,
+    );
+    if !sub.refer_multiple {
+        return;
     }
+    let names: Vec<String> = MULTIPLE.iter().map(|refer| refer.label()).collect();
+    let mut chosen = MULTIPLE
+        .iter()
+        .position(|refer| *refer == sub.refer)
+        .unwrap_or(0);
+    if rows.choice(
+        ui,
+        "refer-layers",
+        Category::Reference,
+        &tr!("refer"),
+        &mut chosen,
+        &names,
+    ) {
+        sub.set_referred(MULTIPLE[chosen]);
+    }
+    let Exclude {
+        mut drafts,
+        mut text,
+        mut paper,
+        mut locked,
+    } = sub.exclude;
+    rows.check(
+        ui,
+        "exclude-drafts",
+        Category::Reference,
+        &tr!("exclude-draft-layers"),
+        None,
+        &mut drafts,
+    );
+    rows.check(
+        ui,
+        "exclude-text",
+        Category::Reference,
+        &tr!("exclude-text-layers"),
+        None,
+        &mut text,
+    );
+    rows.check(
+        ui,
+        "exclude-paper",
+        Category::Reference,
+        &tr!("exclude-paper-layers"),
+        None,
+        &mut paper,
+    );
+    rows.check(
+        ui,
+        "exclude-locked",
+        Category::Reference,
+        &tr!("exclude-locked-layers"),
+        None,
+        &mut locked,
+    );
+    sub.exclude = Exclude {
+        drafts,
+        text,
+        paper,
+        locked,
+    };
+}
+
+/// Gradient: its shape, its colors and its opacity.
+pub(super) fn gradient_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
+    let mut shape = usize::from(sub.mode == 2);
+    if rows.choice(
+        ui,
+        "gradient-shape",
+        Category::Operation,
+        &tr!("shape-2"),
+        &mut shape,
+        &[tr!("linear"), tr!("radial")],
+    ) {
+        sub.mode = if shape == 1 { 2 } else { 0 };
+    }
+    if sub.mode != 2 {
+        let mut colors = usize::from(sub.mode == 1);
+        if rows.choice(
+            ui,
+            "gradient-colors",
+            Category::Ink,
+            &tr!("colors-2"),
+            &mut colors,
+            &[tr!("to-transparent"), tr!("main-to-sub")],
+        ) {
+            sub.mode = colors as u8;
+        }
+    }
+    rows.percent(
+        ui,
+        "gradient-opacity",
+        Category::Ink,
+        &tr!("opacity"),
+        &mut sub.tip.opacity,
+        0.0,
+        100.0,
+    );
 }

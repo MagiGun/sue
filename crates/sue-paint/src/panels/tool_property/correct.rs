@@ -1,38 +1,35 @@
 //! Tool Property for the Correct Line tool.
 
 use egui::Ui;
-use sue_wm::Theme;
 
-use super::small_text;
-use crate::panels::slider_row;
+use super::{Category, Rows};
 use crate::tools::SubTool;
 
 /// Correct Line's sub tools: control points, pinch, simplify, connect,
 /// line width, redraw and dust.
-pub(super) fn correct_line_properties(ui: &mut Ui, sub: &mut SubTool, theme: &Theme) {
-    let small = small_text(theme);
-    let size = |ui: &mut Ui, sub: &mut crate::tools::SubTool| {
-        slider_row(
+pub(super) fn correct_line_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
+    let size = |ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool| {
+        rows.slider(
             ui,
+            "correct-size",
+            Category::BrushSize,
             &tr!("brush-size"),
             &mut sub.tip.size,
             1.0..=500.0,
             &tr!("px"),
             true,
-            theme,
         );
     };
-    let levels = |ui: &mut Ui, name: &str, level: &mut u32| {
-        ui.horizontal(|ui| {
-            ui.label(small(name));
-            for value in 1..=5 {
-                ui.selectable_value(level, value, value.to_string());
-            }
-        });
+    let levels: Vec<String> = (1..=5).map(|level: u32| level.to_string()).collect();
+    let level = |ui: &mut Ui, rows: &mut Rows<'_>, id: &str, name: &str, value: &mut u32| {
+        let mut chosen = (*value).clamp(1, 5) as usize - 1;
+        if rows.choice(ui, id, Category::Operation, name, &mut chosen, &levels) {
+            *value = chosen as u32 + 1;
+        }
     };
     match sub.mode {
         0 => {
-            for (kind, name) in [
+            let names = [
                 tr!("move-control-points"),
                 tr!("add-control-point"),
                 tr!("delete-control-point"),
@@ -40,98 +37,126 @@ pub(super) fn correct_line_properties(ui: &mut Ui, sub: &mut SubTool, theme: &Th
                 tr!("adjust-line-width"),
                 tr!("adjust-opacity"),
                 tr!("split-line"),
-            ]
-            .iter()
-            .enumerate()
-            {
-                ui.radio_value(&mut sub.kind, kind as u8, name.as_str());
-            }
-            ui.label(small(&match sub.kind {
-                1 => tr!("click-line-add-control-point"),
-                2 => tr!("click-control-point-delete"),
-                3 => tr!("click-control-point-make-corner-smooth"),
-                4 => tr!("drag-control-point-up-widen-line"),
-                5 => tr!("drag-control-point-up-more-opacity"),
-                6 => tr!("click-line-split-two-there"),
-                _ => tr!("drag-control-point-move"),
-            }));
+            ];
+            rows.choice_u8(
+                ui,
+                "control-point-process",
+                Category::Operation,
+                &tr!("process"),
+                &mut sub.kind,
+                &names,
+            );
+            rows.hint(
+                ui,
+                &match sub.kind {
+                    1 => tr!("click-line-add-control-point"),
+                    2 => tr!("click-control-point-delete"),
+                    3 => tr!("click-control-point-make-corner-smooth"),
+                    4 => tr!("drag-control-point-up-widen-line"),
+                    5 => tr!("drag-control-point-up-more-opacity"),
+                    6 => tr!("click-line-split-two-there"),
+                    _ => tr!("drag-control-point-move"),
+                },
+            );
         }
         1 => {
-            ui.horizontal(|ui| {
-                ui.label(small(&tr!("fix-end")));
-                ui.selectable_value(&mut sub.kind, 0, tr!("both-ends"));
-                ui.selectable_value(&mut sub.kind, 1, tr!("free"));
-            });
-            levels(ui, &tr!("pinch-level"), &mut sub.level);
-            slider_row(
+            rows.choice_u8(
                 ui,
+                "pinch-fix-end",
+                Category::Operation,
+                &tr!("fix-end"),
+                &mut sub.kind,
+                &[tr!("both-ends"), tr!("free")],
+            );
+            level(ui, rows, "pinch-level", &tr!("pinch-level"), &mut sub.level);
+            rows.slider(
+                ui,
+                "pinch-range",
+                Category::Operation,
                 &tr!("effect-range"),
                 &mut sub.amount,
                 1.0..=500.0,
                 &tr!("px"),
                 true,
-                theme,
             );
-            ui.label(small(&tr!("drag-line-pull-into-shape")));
+            rows.hint(ui, &tr!("drag-line-pull-into-shape"));
         }
         2 => {
-            levels(ui, &tr!("simplify"), &mut sub.level);
-            ui.checkbox(&mut sub.whole, small(&tr!("delete-short-lines")));
-            size(ui, sub);
+            level(ui, rows, "simplify-level", &tr!("simplify"), &mut sub.level);
+            rows.check(
+                ui,
+                "delete-short-lines",
+                Category::Operation,
+                &tr!("delete-short-lines"),
+                None,
+                &mut sub.whole,
+            );
+            size(ui, rows, sub);
         }
         3 => {
-            ui.label(small(&tr!("brush-over-ends-two-lines-join")));
-            size(ui, sub);
+            rows.hint(ui, &tr!("brush-over-ends-two-lines-join"));
+            size(ui, rows, sub);
         }
         4 => {
-            for (kind, name) in crate::correct::Widen::NAMES.iter().enumerate() {
-                ui.radio_value(&mut sub.kind, kind as u8, crate::localize(name));
-            }
+            let names = super::names(&crate::correct::Widen::NAMES);
+            rows.choice_u8(
+                ui,
+                "line-width-process",
+                Category::Operation,
+                &tr!("process"),
+                &mut sub.kind,
+                &names,
+            );
             if matches!(sub.kind, 0 | 1 | 4) {
-                slider_row(
+                rows.slider(
                     ui,
+                    "line-width-amount",
+                    Category::Operation,
                     &tr!("width-2"),
                     &mut sub.amount,
                     0.1..=100.0,
                     &tr!("px"),
                     true,
-                    theme,
                 );
             }
-            ui.checkbox(&mut sub.whole, small(&tr!("process-whole-line")));
-            size(ui, sub);
+            rows.check(
+                ui,
+                "process-whole-line",
+                Category::Operation,
+                &tr!("process-whole-line"),
+                None,
+                &mut sub.whole,
+            );
+            size(ui, rows, sub);
         }
         5 => {
-            let mut level = sub.stabilization as f32;
-            if slider_row(
+            rows.slider_u32(
                 ui,
+                "redraw-stabilization",
+                Category::Correction,
                 &tr!("stabilization"),
-                &mut level,
-                0.0..=100.0,
-                "",
-                false,
-                theme,
-            ) {
-                sub.stabilization = level.round() as u32;
-            }
-            ui.label(small(&tr!("trace-over-part-line-draw-again")));
+                &mut sub.stabilization,
+                0..=100,
+            );
+            rows.hint(ui, &tr!("trace-over-part-line-draw-again"));
         }
         6 => {
-            size(ui, sub);
-            ui.label(small(&tr!("trace-over-line-width-follows-your")));
+            size(ui, rows, sub);
+            rows.hint(ui, &tr!("trace-over-line-width-follows-your"));
         }
         _ => {
-            slider_row(
+            rows.slider(
                 ui,
+                "dust-size",
+                Category::Operation,
                 &tr!("dust-size"),
                 &mut sub.amount,
                 1.0..=100.0,
                 &tr!("px"),
                 false,
-                theme,
             );
-            ui.label(small(&tr!("drag-box-remove-specks-click-whole")));
+            rows.hint(ui, &tr!("drag-box-remove-specks-click-whole"));
         }
     }
-    ui.label(small(&tr!("correct-line-works-vector-layers-remove")));
+    rows.hint(ui, &tr!("correct-line-works-vector-layers-remove"));
 }

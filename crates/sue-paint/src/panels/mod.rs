@@ -18,8 +18,9 @@ mod layer_property;
 mod material;
 mod navigator;
 mod sub_tool;
+pub(crate) mod sub_tool_detail;
 mod timeline;
-mod tool;
+pub(crate) mod tool;
 mod tool_property;
 
 use egui::{
@@ -32,7 +33,12 @@ use crate::studio::SuePaint;
 
 pub(crate) use command_bar::BAR_GROUPS;
 pub(crate) use material::material_thumb;
-pub(crate) use tool::{slot_icon, tool_icon};
+pub(crate) use sub_tool_detail::ToolPalettes;
+pub(crate) use tool::{PROPERTY_MENU, SUB_TOOL_MENU, TOOL_MENU, slot_icon, tool_icon};
+
+/// The rice key: the Tool palette shows the main and sub colors under its
+/// tools (its menu's Show Color Icon).
+pub(crate) const TOOL_COLOR_ICON: &str = "sue_paint.tool_color_icon";
 
 /// A child `Ui` confined to `rect`.
 pub(crate) fn child(ui: &mut Ui, rect: Rect, salt: &str) -> Ui {
@@ -540,6 +546,7 @@ impl SuePaint {
                 self.tool_tab = was;
             }
             Palette::BrushGrid => self.brush_size_grid(ui, body.shrink2(vec2(6.0, 6.0)), theme),
+            Palette::SubToolDetail => self.sub_tool_detail(ui, body, cx, theme),
             Palette::ColorSlider => {
                 let mut inner = child(ui, body.shrink(8.0), "color-slider-palette");
                 self.color_sliders(&mut inner, theme);

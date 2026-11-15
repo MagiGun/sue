@@ -15,6 +15,23 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Sue Paint: every sub tool can be given a key of its own in Settings,
   Keyboard Shortcuts, Sub Tools; the key picks the sub tool and its tool.
+- Sue Paint: a Sub Tool Detail palette (Tool Property's wrench, Window)
+  shows every setting of the picked sub tool by category, with a sample
+  stroke, a help box, and an eye on each setting that says whether Tool
+  Property shows it.
+- Sue Paint: Tool Property has a lock that keeps a sub tool's settings
+  from changing, a reset button, and Show Categories in its menu.
+- Sue Paint: the Tool palette's menu has Tool Settings, Delete Tool, Add
+  Tool from Default, Reset Tool Palette, Import and Export Tool Layout and
+  Show Color Icon. Drag a tool to reorder the palette; drag a sub tool
+  onto it to make a tool of its own, or onto a tool to move it there.
+- Sue Paint: the Sub Tool palette has delete, duplicate and reset
+  buttons under its list, an Add Sub Tool row at its end, a right-click
+  menu (rename, new group, make into a tool, Sub Tool Detail), and named
+  dialogs for Duplicate Sub Tool and New Sub Tool Group. Sub tools are
+  dragged to reorder them or onto a group's tab.
+- Sue Paint: Fill and Auto Select show Apply to connected pixels only,
+  and Refer multiple can leave out draft, text, paper and locked layers.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
@@ -333,6 +350,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint: a brush file let go on Sue Paint now lands at the end of
+  the sub tool group shown, and is picked, instead of the tool's last
+  group.
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
   the update. It now takes the theme as it ships; colors you picked

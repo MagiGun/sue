@@ -202,6 +202,12 @@ impl SueApplet for SuePaint {
                 "Sue Paint opens with its palettes where they were left (Window, Workspace)",
             )
             .labeled("Remember the palette layout"),
+            RiceDeclaration::new(
+                crate::panels::TOOL_COLOR_ICON,
+                RiceParameter::Bool { value: true },
+                "The Tool palette shows the main and sub colors under its tools (Tool palette menu, Show Color Icon)",
+            )
+            .labeled("Tool color icon"),
         ]);
         for (key, name, choices) in crate::dialogs::MODIFIERS {
             declarations.push(RiceDeclaration::new(
@@ -511,6 +517,7 @@ impl SueApplet for SuePaint {
             "batch-import" => self.batch_import(cx, path),
             "story-text" => self.import_text(cx, path),
             "brush-import" => self.import_brushes(cx, path),
+            "tool-layout" => self.import_tool_layout(cx, path),
             "batch" => self.export_canvases(cx, path),
             "import-vector" | "import-movie" | "import-pattern" => {
                 self.import_file(cx, pick.purpose.as_str(), path)
@@ -772,6 +779,7 @@ impl SueApplet for SuePaint {
             "dialog/close" => {
                 self.dialog = None;
                 self.save_ask = None;
+                self.tool_palettes.naming = None;
                 self.menubar.close();
                 true
             }

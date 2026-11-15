@@ -2,328 +2,347 @@
 //! brushes, the airbrush, decoration, the eraser and the figure tools,
 //! and the Blend tool beside them.
 
-use egui::{Sense, Stroke, Ui, vec2};
-use sue_wm::Theme;
+use egui::Ui;
 
-use super::brush::{color_jitter_ui, dynamic_row, starting_and_ending_ui};
-use super::small_text;
+use super::brush::{color_jitter, dynamic_row, starting_and_ending};
+use super::{Category, Rows};
 use crate::brush::{AntiAlias, Tip};
-use crate::panels::{row_label, slider_row};
 use crate::tools::{SubTool, Tool};
 
 /// A painting tool's settings: its size, opacity, hardness and
-/// smoothing, then its tip.
-pub(super) fn paint_properties(ui: &mut Ui, tool: Tool, sub: &mut SubTool, theme: &Theme) {
-    let small = small_text(theme);
-    // Clip Studio Paint 5.0's Smart Shape.
-    ui.checkbox(&mut sub.smart_shape, small(&tr!("smart-shape")))
-        .on_hover_text(tr!("smart-shape-hint"));
+/// anti-aliasing, its smoothing, then its tip.
+pub(super) fn paint_properties(ui: &mut Ui, rows: &mut Rows<'_>, tool: Tool, sub: &mut SubTool) {
     if tool == Tool::Eraser {
         // How it erases lines on vector layers.
-        ui.horizontal(|ui| {
-            ui.label(small(&tr!("vector")));
-            egui::ComboBox::from_id_salt("sue-paint-vector-eraser")
-                .selected_text(crate::localize(
-                    crate::vector::Erase::NAMES[usize::from(sub.kind.min(2))],
-                ))
-                .show_ui(ui, |ui| {
-                    for (kind, name) in crate::vector::Erase::NAMES.iter().enumerate() {
-                        ui.selectable_value(&mut sub.kind, kind as u8, crate::localize(name));
-                    }
-                });
-        });
+        let names = super::names(&crate::vector::Erase::NAMES);
+        rows.choice_u8(
+            ui,
+            "vector-erase",
+            Category::Operation,
+            &tr!("vector"),
+            &mut sub.kind,
+            &names,
+        );
     }
     let tip = &mut sub.tip;
     let (mut screen_size, mut at_least_one) = (tip.screen_size, tip.at_least_one);
     dynamic_row(
         ui,
+        rows,
+        "brush-size",
+        Category::BrushSize,
         &tr!("brush-size"),
         &mut tip.size,
         0.5..=1000.0,
         &tr!("px"),
         true,
         &mut tip.size_by,
-        |ui| {
+        |ui, theme| {
             ui.separator();
-            ui.checkbox(&mut screen_size, small(&tr!("specify-by-size-on-screen")))
-                .on_hover_text(tr!("brush-looks-same-size-any-zoom"));
-            ui.checkbox(&mut at_least_one, small(&tr!("at-least-1-pixel")))
-                .on_hover_text(tr!("light-pressure-never-thins-line-below"));
+            for (id, label, hint, value) in [
+                (
+                    "screen-size",
+                    tr!("specify-by-size-on-screen"),
+                    tr!("brush-looks-same-size-any-zoom"),
+                    &mut screen_size,
+                ),
+                (
+                    "at-least-one",
+                    tr!("at-least-1-pixel"),
+                    tr!("light-pressure-never-thins-line-below"),
+                    &mut at_least_one,
+                ),
+            ] {
+                if sue_wm::ui::checkbox(("sue-paint-size-option", id), &label, *value)
+                    .show(ui, theme)
+                    .on_hover_text(hint)
+                    .clicked()
+                {
+                    *value = !*value;
+                }
+            }
         },
-        theme,
     );
     tip.screen_size = screen_size;
     tip.at_least_one = at_least_one;
     let mut opacity = tip.opacity * 100.0;
     if dynamic_row(
         ui,
+        rows,
+        "opacity",
+        Category::Ink,
         &tr!("opacity"),
         &mut opacity,
         0.0..=100.0,
         " %",
         false,
         &mut tip.opacity_by,
-        |_| {},
-        theme,
+        |_, _| {},
     ) {
         tip.opacity = opacity / 100.0;
     }
-    let mut hardness = tip.hardness * 100.0;
-    if slider_row(
+    rows.percent(
         ui,
+        "hardness",
+        Category::Ink,
         &tr!("hardness"),
-        &mut hardness,
-        0.0..=100.0,
-        " %",
-        false,
-        theme,
-    ) {
-        tip.hardness = hardness / 100.0;
-    }
-    ui.horizontal(|ui| {
-        ui.add_sized(
-            vec2(78.0, 18.0),
-            egui::Label::new(small(&tr!("anti-aliasing"))),
-        );
-        for level in AntiAlias::ALL {
-            let (rect, response) = ui.allocate_exact_size(vec2(26.0, 20.0), Sense::click());
-            let chosen = tip.aa == level;
-            ui.painter()
-                .rect_filled(rect, 3.0, if chosen { theme.active } else { theme.pill });
-            let soft = level.edge();
-            let center = rect.center();
-            ui.painter().circle_filled(center, 5.0, theme.text);
-            if soft > 0.0 {
-                ui.painter().circle_stroke(
-                    center,
-                    5.0 + soft,
-                    Stroke::new(soft, theme.text.gamma_multiply(0.35)),
-                );
-            }
-            if response.on_hover_text(level.label()).clicked() {
-                tip.aa = level;
-            }
-        }
-    });
-    let mut stabilization = sub.stabilization as f32;
-    if slider_row(
+        &mut tip.hardness,
+        0.0,
+        100.0,
+    );
+    let levels: Vec<String> = AntiAlias::ALL.iter().map(|level| level.label()).collect();
+    let mut level = AntiAlias::ALL
+        .iter()
+        .position(|found| *found == tip.aa)
+        .unwrap_or(0);
+    if rows.choice(
         ui,
+        "anti-aliasing",
+        Category::AntiAliasing,
+        &tr!("anti-aliasing"),
+        &mut level,
+        &levels,
+    ) {
+        tip.aa = AntiAlias::ALL[level];
+    }
+    rows.slider_u32(
+        ui,
+        "stabilization",
+        Category::Correction,
         &tr!("stabilization"),
-        &mut stabilization,
-        0.0..=100.0,
-        "",
-        false,
-        theme,
-    ) {
-        sub.stabilization = stabilization.round() as u32;
-    }
-    ui.checkbox(&mut sub.adjust_by_speed, small(&tr!("adjust-by-speed")))
-        .on_hover_text(tr!("less-smoothing-as-pen-moves-faster"));
-    let mut correction = sub.correction as f32;
-    if slider_row(
+        &mut sub.stabilization,
+        0..=100,
+    );
+    rows.check(
         ui,
+        "adjust-by-speed",
+        Category::Correction,
+        &tr!("adjust-by-speed"),
+        Some(&tr!("less-smoothing-as-pen-moves-faster")),
+        &mut sub.adjust_by_speed,
+    );
+    rows.slider_u32(
+        ui,
+        "post-correction",
+        Category::Correction,
         &tr!("correction"),
-        &mut correction,
-        0.0..=10.0,
-        "",
-        false,
-        theme,
-    ) {
-        sub.correction = correction.round() as u32;
-    }
-    ui.checkbox(&mut sub.flick, small(&tr!("flick-into-a-point")))
-        .on_hover_text(tr!("quick-stroke-carries-along-pens-momentum"));
-    tip_properties(ui, &mut sub.tip, theme);
+        &mut sub.correction,
+        0..=10,
+    );
+    rows.check(
+        ui,
+        "flick",
+        Category::Correction,
+        &tr!("flick-into-a-point"),
+        Some(&tr!("quick-stroke-carries-along-pens-momentum")),
+        &mut sub.flick,
+    );
+    // Clip Studio Paint 5.0's Smart Shape.
+    rows.check(
+        ui,
+        "smart-shape",
+        Category::Correction,
+        &tr!("smart-shape"),
+        Some(&tr!("smart-shape-hint")),
+        &mut sub.smart_shape,
+    );
+    tip_properties(ui, rows, &mut sub.tip);
     if tool == Tool::Figure {
-        ui.label(small(&tr!("drag-canvas-draw-shape")));
+        rows.hint(ui, &tr!("drag-canvas-draw-shape"));
     }
 }
 
-/// The brush tip: its shape, starting and ending, color jitter, direction
-/// and spray, spacing, build up, color mixing and paper grain.
-fn tip_properties(ui: &mut Ui, tip: &mut Tip, theme: &Theme) {
-    let small = small_text(theme);
+/// The brush tip: its shape and how it turns and scatters, spacing, build
+/// up, color mixing, paper grain, starting and ending, and color jitter.
+fn tip_properties(ui: &mut Ui, rows: &mut Rows<'_>, tip: &mut Tip) {
     let shapes = crate::brush::shapes();
     if !shapes.is_empty() || tip.shape != 0 {
-        ui.horizontal(|ui| {
-            ui.label(small(&tr!("brush-tip")));
-            let now = shapes
-                .iter()
-                .find(|(id, _)| *id == tip.shape)
-                .map_or_else(|| tr!("round"), |(_, name)| name.clone());
-            egui::ComboBox::from_id_salt("sue-paint-tip-shape")
-                .selected_text(now)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut tip.shape, 0, tr!("round"));
-                    for (id, name) in &shapes {
-                        ui.selectable_value(&mut tip.shape, *id, name);
-                    }
-                });
-        });
-    }
-    starting_and_ending_ui(ui, tip, theme);
-    let stamps = tip.dabbed();
-    color_jitter_ui(ui, &mut tip.jitter, stamps, theme);
-    if tip.shape != 0 {
-        // Clip Studio Paint's Direction and Spray: how each
-        // shape turns and how far it falls from the line.
-        ui.checkbox(&mut tip.ribbon, small(&tr!("lay-as-a-ribbon")))
-            .on_hover_text(tr!("the-shape-bends-along-the-whole-stroke"));
-        ui.checkbox(&mut tip.follow, small(&tr!("turn-along-the-line")));
-        ui.checkbox(&mut tip.follow_tilt, small(&tr!("turn-with-pen-tilt")))
-            .on_hover_text(tr!("a-flat-tip-turns-the-way-the-pen-leans"));
-        slider_row(
+        let mut ids = vec![0];
+        let mut names = vec![tr!("round")];
+        for (id, name) in &shapes {
+            ids.push(*id);
+            names.push(name.clone());
+        }
+        let mut chosen = ids.iter().position(|id| *id == tip.shape).unwrap_or(0);
+        if rows.choice(
             ui,
+            "tip-shape",
+            Category::BrushTip,
+            &tr!("brush-tip"),
+            &mut chosen,
+            &names,
+        ) {
+            tip.shape = ids[chosen];
+        }
+    }
+    if tip.shape != 0 {
+        // Clip Studio Paint's Direction and Spray: how each shape turns
+        // and how far it falls from the line.
+        rows.check(
+            ui,
+            "ribbon",
+            Category::BrushTip,
+            &tr!("lay-as-a-ribbon"),
+            Some(&tr!("the-shape-bends-along-the-whole-stroke")),
+            &mut tip.ribbon,
+        );
+        rows.check(
+            ui,
+            "follow-line",
+            Category::BrushTip,
+            &tr!("turn-along-the-line"),
+            None,
+            &mut tip.follow,
+        );
+        rows.check(
+            ui,
+            "follow-tilt",
+            Category::BrushTip,
+            &tr!("turn-with-pen-tilt"),
+            Some(&tr!("a-flat-tip-turns-the-way-the-pen-leans")),
+            &mut tip.follow_tilt,
+        );
+        rows.slider(
+            ui,
+            "tip-angle",
+            Category::BrushTip,
             &tr!("angle-2"),
             &mut tip.angle,
             -180.0..=180.0,
             "\u{b0}",
             false,
-            theme,
         );
-        let mut scatter = tip.scatter * 100.0;
-        if slider_row(
+        rows.percent(
             ui,
+            "scatter",
+            Category::BrushTip,
             &tr!("scatter"),
-            &mut scatter,
-            0.0..=300.0,
-            " %",
-            false,
-            theme,
-        ) {
-            tip.scatter = scatter / 100.0;
-        }
-        let mut size = tip.size_jitter * 100.0;
-        if slider_row(
+            &mut tip.scatter,
+            0.0,
+            300.0,
+        );
+        rows.percent(
             ui,
+            "size-jitter",
+            Category::BrushTip,
             &tr!("size-jitter"),
-            &mut size,
-            0.0..=100.0,
-            " %",
-            false,
-            theme,
-        ) {
-            tip.size_jitter = size / 100.0;
-        }
-        let mut turn = tip.turn_jitter * 100.0;
-        if slider_row(
+            &mut tip.size_jitter,
+            0.0,
+            100.0,
+        );
+        rows.percent(
             ui,
+            "turn-jitter",
+            Category::BrushTip,
             &tr!("turn-jitter"),
-            &mut turn,
-            0.0..=100.0,
-            " %",
-            false,
-            theme,
-        ) {
-            tip.turn_jitter = turn / 100.0;
-        }
+            &mut tip.turn_jitter,
+            0.0,
+            100.0,
+        );
     }
     if tip.dabbed() {
-        let mut spacing = tip.spacing * 100.0;
-        if slider_row(
+        rows.percent(
             ui,
+            "spacing",
+            Category::Stroke,
             &tr!("spacing"),
-            &mut spacing,
-            1.0..=200.0,
-            " %",
-            true,
-            theme,
-        ) {
-            tip.spacing = spacing / 100.0;
-        }
+            &mut tip.spacing,
+            1.0,
+            200.0,
+        );
     }
-    ui.checkbox(&mut tip.build_up, small(&tr!("build-up-airbrush")));
+    rows.check(
+        ui,
+        "build-up",
+        Category::Stroke,
+        &tr!("build-up-airbrush"),
+        None,
+        &mut tip.build_up,
+    );
     if tip.build_up {
-        let mut flow = tip.flow * 100.0;
-        if slider_row(ui, &tr!("flow"), &mut flow, 1.0..=100.0, " %", false, theme) {
-            tip.flow = flow / 100.0;
-        }
+        rows.percent(
+            ui,
+            "flow",
+            Category::Stroke,
+            &tr!("flow"),
+            &mut tip.flow,
+            1.0,
+            100.0,
+        );
     }
     if !tip.eraser {
-        let mut mix = tip.mix * 100.0;
-        if slider_row(
+        rows.percent(
             ui,
+            "color-mixing",
+            Category::Ink,
             &tr!("color-mixing"),
-            &mut mix,
-            0.0..=100.0,
-            " %",
-            false,
-            theme,
-        ) {
-            tip.mix = mix / 100.0;
-        }
+            &mut tip.mix,
+            0.0,
+            100.0,
+        );
     }
-    let mut grain = tip.grain * 100.0;
-    if slider_row(
+    rows.percent(
         ui,
+        "paper-grain",
+        Category::Texture,
         &tr!("paper-grain"),
-        &mut grain,
-        0.0..=100.0,
-        " %",
-        false,
-        theme,
-    ) {
-        tip.grain = grain / 100.0;
-    }
-    ui.add_enabled(
-        false,
-        egui::Checkbox::new(&mut false, small(&tr!("vector-magnet"))),
+        &mut tip.grain,
+        0.0,
+        100.0,
     );
+    starting_and_ending(ui, rows, tip);
+    let stamps = tip.dabbed();
+    color_jitter(ui, rows, &mut tip.jitter, stamps);
 }
 
 /// The Blend tool: its size and strength, and what the sub tool does.
-pub(super) fn blend_properties(ui: &mut Ui, sub: &mut SubTool, theme: &Theme) {
-    let small = small_text(theme);
-    slider_row(
+pub(super) fn blend_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
+    rows.slider(
         ui,
+        "blend-size",
+        Category::BrushSize,
         &tr!("brush-size"),
         &mut sub.tip.size,
         2.0..=600.0,
         &tr!("px"),
         true,
-        theme,
     );
-    let mut strength = sub.tip.opacity * 100.0;
-    if slider_row(
+    rows.percent(
         ui,
+        "strength",
+        Category::Ink,
         &tr!("strength"),
-        &mut strength,
-        1.0..=100.0,
-        " %",
-        false,
-        theme,
-    ) {
-        sub.tip.opacity = strength / 100.0;
-    }
-    // Liquify's mode, one of its seven (`blend::LiquifyMode`): a row like
-    // the sliders above, its choice in a drop-down that the arrow keys
-    // and the wheel step through.
+        &mut sub.tip.opacity,
+        1.0,
+        100.0,
+    );
+    // Liquify's mode, one of its seven (`blend::LiquifyMode`).
     if let Some(mode) = crate::blend::LiquifyMode::of_mode(sub.mode) {
         let modes = crate::blend::LiquifyMode::ALL;
         let names: Vec<String> = modes.iter().map(|found| found.label()).collect();
         let mut chosen = modes.iter().position(|found| *found == mode).unwrap_or(0);
-        ui.horizontal(|ui| {
-            let label = tr!("mode");
-            row_label(ui, &label, theme);
-            let width = ui.available_width();
-            if sue_wm::ui::input::dropdown("sue-paint-liquify-mode", &mut chosen, &names)
-                .label(&label)
-                .width(width)
-                .show(ui, theme)
-                .changed()
-            {
-                sub.mode = modes[chosen].mode();
-            }
-        });
+        if rows.choice(
+            ui,
+            "liquify-mode",
+            Category::Operation,
+            &tr!("mode"),
+            &mut chosen,
+            &names,
+        ) {
+            sub.mode = modes[chosen].mode();
+        }
     }
-    ui.label(small(&match sub.mode {
-        0 => tr!("softens-what-under-brush"),
-        1 => tr!("drags-color-along-the-stroke"),
-        2 => tr!("moves-picture-along-stroke"),
-        3 => tr!("swells-picture-brushs-middle"),
-        4 => tr!("draws-picture-into-brushs-middle"),
-        8 | 9 => tr!("moves-picture-across-stroke"),
-        crate::blend::COPY_STAMP => tr!("copies-picture-from-source"),
-        _ => tr!("turns-picture-around-brushs-middle"),
-    }));
+    rows.hint(
+        ui,
+        &match sub.mode {
+            0 => tr!("softens-what-under-brush"),
+            1 => tr!("drags-color-along-the-stroke"),
+            2 => tr!("moves-picture-along-stroke"),
+            3 => tr!("swells-picture-brushs-middle"),
+            4 => tr!("draws-picture-into-brushs-middle"),
+            8 | 9 => tr!("moves-picture-across-stroke"),
+            crate::blend::COPY_STAMP => tr!("copies-picture-from-source"),
+            _ => tr!("turns-picture-around-brushs-middle"),
+        },
+    );
 }

@@ -110,6 +110,22 @@ pub(crate) fn take(input: &mut egui::InputState, rice: &RiceSchema) -> Vec<Strin
         .collect()
 }
 
+/// The keys people gave commands without a default key, sub tools'
+/// among them, as Settings keeps them now.
+#[must_use]
+pub(crate) fn keys(rice: &RiceSchema) -> SparseKeys {
+    SparseKeys::read(rice, KEYS_SECTION)
+}
+
+/// The keys of `command` in `keys`, as people read them (`Shift+F9`),
+/// when it has any.
+#[must_use]
+pub(crate) fn key_text(keys: &SparseKeys, command: &str) -> Option<String> {
+    let chords = keys.get(command)?;
+    let text: Vec<String> = chords.chords().iter().map(ToString::to_string).collect();
+    (!text.is_empty()).then(|| text.join(", "))
+}
+
 /// Picks the sub tool a command names, telling the person when it is
 /// gone.
 fn run(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {

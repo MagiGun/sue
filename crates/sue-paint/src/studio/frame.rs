@@ -312,6 +312,7 @@ impl SuePaint {
         self.canvas_area(ui, center, cx, theme);
         if self.ready {
             self.keep_layout(ui.ctx(), cx);
+            self.tool_palettes_frame(ui.ctx(), cx, theme);
         }
     }
 }

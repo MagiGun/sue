@@ -671,6 +671,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         canvas,
         canvas_state,
     ),
+    c(
+        "window.sub_tool_detail",
+        "sub-tool-detail",
+        "wrench",
+        palette,
+        palette_state,
+    ),
 ];
 
 #[cfg(test)]

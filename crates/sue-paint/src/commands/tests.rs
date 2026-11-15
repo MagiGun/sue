@@ -61,7 +61,7 @@ fn every_menu_command_is_registered() {
 /// Animation Cels and light table palettes, and the 3D drawing figure's
 /// tool property. Named one by one, so a command no one can reach cannot
 /// hide behind a prefix.
-const IN_PALETTES: [&str; 16] = [
+const IN_PALETTES: [&str; 33] = [
     "anim.camera.key",
     "anim.camera.unkey",
     "anim.light_table.reverse",
@@ -78,6 +78,23 @@ const IN_PALETTES: [&str; 16] = [
     "figure.register_pose",
     "figure.pose_scanner",
     "figure.hand_scanner",
+    "tool_palette.settings",
+    "tool_palette.delete",
+    "tool_palette.restore",
+    "tool_palette.reset",
+    "tool_palette.import",
+    "tool_palette.export",
+    "tool_palette.color_icon",
+    "sub_tool.duplicate",
+    "sub_tool.rename",
+    "sub_tool.delete",
+    "sub_tool.reset",
+    "sub_tool.new_group",
+    "sub_tool.rename_group",
+    "sub_tool.import",
+    "sub_tool.detail",
+    "sub_tool.lock",
+    "sub_tool.categories",
 ];
 
 /// The palettes' code, which runs those commands by name: every source

@@ -112,7 +112,11 @@ pub(crate) fn page(title: &str) -> SettingsPage {
         vec![
             group(
                 tr!("settings-group-layout"),
-                params(&[crate::layout_style::KEY, crate::extras::REMEMBER_LAYOUT]),
+                params(&[
+                    crate::layout_style::KEY,
+                    crate::extras::REMEMBER_LAYOUT,
+                    crate::panels::TOOL_COLOR_ICON,
+                ]),
             ),
             group(
                 tr!("settings-group-new-canvas"),

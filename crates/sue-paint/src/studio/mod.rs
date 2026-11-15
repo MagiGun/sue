@@ -738,6 +738,9 @@ pub struct SuePaint {
     /// The pen's samples since its latest touch down, for a stroke of the
     /// new brush engine (see `canvas/engine.rs`).
     pub(crate) pen_stream: Vec<sue_platform::stylus::PenSample>,
+    /// What the tool palettes keep between frames: Sub Tool Detail's
+    /// category, the naming dialog, the arrangement last kept.
+    pub(crate) tool_palettes: crate::panels::ToolPalettes,
 }
 
 impl Default for SuePaint {
@@ -914,6 +917,7 @@ impl Default for SuePaint {
             current_workspace: None,
             kept_styles: Vec::new(),
             pen_stream: Vec::new(),
+            tool_palettes: crate::panels::ToolPalettes::default(),
         }
     }
 }
