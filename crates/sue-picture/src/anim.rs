@@ -688,6 +688,19 @@ pub fn without_track(sequence: &Sequence, track: usize) -> Sequence {
 /// `None` when there is nothing to hear.
 #[must_use]
 pub fn mix(arena: &Arena, sequence: &Sequence) -> Option<sue_core::PCMFloat1D> {
+    let out = mixed(arena, sequence, 0, None)?;
+    sue_core::PCMFloat1D::new(MIX_RATE, 2, out).ok()
+}
+
+/// The stereo samples of [`mix`] from sample frame `from` on, `count` of
+/// them (`None`: to the end), mixed for that stretch only; `None` when
+/// the timeline has no sound.
+fn mixed(
+    arena: &Arena,
+    sequence: &Sequence,
+    from: usize,
+    count: Option<usize>,
+) -> Option<Vec<f32>> {
     let mut placed = Vec::new();
     for index in audio_tracks(sequence) {
         let track = &sequence.tracks[index];
@@ -715,15 +728,16 @@ pub fn mix(arena: &Arena, sequence: &Sequence) -> Option<sue_core::PCMFloat1D> {
                     as usize
         })
         .max()?;
-    let mut out = vec![0.0_f32; frames * 2];
+    let end = count.map_or(frames, |count| from.saturating_add(count).min(frames));
+    let mut out = vec![0.0_f32; end.saturating_sub(from) * 2];
     for (pcm, start, volume) in placed {
         let ratio = f64::from(pcm.sample_rate().max(1)) / f64::from(MIX_RATE);
         let offset = (start * f64::from(MIX_RATE)) as usize;
         let channels = usize::from(pcm.channels().max(1));
         let samples = pcm.samples();
         let last = pcm.frames().saturating_sub(1);
-        for frame in 0..frames.saturating_sub(offset) {
-            let t = frame as f64 * ratio;
+        for at_frame in offset.max(from)..end {
+            let t = (at_frame - offset) as f64 * ratio;
             if t >= last as f64 {
                 break;
             }
@@ -731,14 +745,14 @@ pub fn mix(arena: &Arena, sequence: &Sequence) -> Option<sue_core::PCMFloat1D> {
             let at = |i: usize, channel: usize| samples[i * channels + channel.min(channels - 1)];
             for channel in 0..2 {
                 let value = at(i0, channel) + (at(i0 + 1, channel) - at(i0, channel)) * mixing;
-                out[(offset + frame) * 2 + channel] += value * volume;
+                out[(at_frame - from) * 2 + channel] += value * volume;
             }
         }
     }
     for value in &mut out {
         *value = value.clamp(-1.0, 1.0);
     }
-    sue_core::PCMFloat1D::new(MIX_RATE, 2, out).ok()
+    Some(out)
 }
 
 /// How loud an audio clip plays (a clip property, 0 to 2, 1 as it is).
@@ -785,18 +799,17 @@ pub fn with_volume(sequence: &Sequence, track: usize, volume: f32) -> Sequence {
 /// `None` when nothing sounds there.
 #[must_use]
 pub fn scrub(arena: &Arena, sequence: &Sequence, frame: u32) -> Option<sue_core::PCMFloat1D> {
-    let all = mix(arena, sequence)?;
     let per_frame = (f64::from(MIX_RATE) / fps(sequence).max(1.0)).round() as usize;
     let from = (Time::from_frames(i64::from(frame), sequence.rate)
         .seconds()
         .max(0.0)
         * f64::from(MIX_RATE)) as usize;
-    let samples = all.samples();
-    let slice = samples.get(from * 2..((from + per_frame) * 2).min(samples.len()))?;
+    // Only this frame's stretch is mixed: a drag asks for many.
+    let slice = mixed(arena, sequence, from, Some(per_frame))?;
     if slice.iter().all(|sample| *sample == 0.0) {
         return None;
     }
-    sue_core::PCMFloat1D::new(MIX_RATE, 2, slice.to_vec()).ok()
+    sue_core::PCMFloat1D::new(MIX_RATE, 2, slice).ok()
 }
 
 /// The name a new animation folder of `picture` takes: `Folder` and the

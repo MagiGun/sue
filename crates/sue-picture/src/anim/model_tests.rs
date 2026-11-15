@@ -702,6 +702,12 @@ fn audio_clips_play_at_their_volume() {
     // Scrubbing at frame 2 hears one frame of it.
     let heard = scrub(&arena, &quiet, 2).unwrap();
     assert_eq!(heard.frames(), (MIX_RATE / 10) as usize);
+    let from = (MIX_RATE / 5) as usize * 2;
+    assert_eq!(
+        heard.samples(),
+        &mixed.samples()[from..from + heard.samples().len()],
+        "the same samples the whole mix has there"
+    );
     assert!(scrub(&arena, &quiet, 20).is_none(), "the tone is over");
 }
 
