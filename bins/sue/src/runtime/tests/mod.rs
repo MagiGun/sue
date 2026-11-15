@@ -26,6 +26,7 @@ mod paint_select;
 mod paint_vector_3d;
 mod settings;
 mod paint_view;
+mod paint_window;
 mod shell;
 mod writer;
 

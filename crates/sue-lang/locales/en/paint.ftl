@@ -2389,3 +2389,4 @@ toggle-special-ruler-snapping = Toggle Special Ruler Snapping
 switch-special-ruler-snap = Switch Special Ruler Snap
 playback-fps-shown = { $fps } fps
 grayscale = Grayscale
+go-to-canvas = Go to Canvas

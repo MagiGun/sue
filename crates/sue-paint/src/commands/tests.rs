@@ -163,6 +163,7 @@ fn every_command_can_be_reached() {
         [
             "edit.transform.cancel",
             "edit.material.paste",
+            "window.canvas.",
             "figure.flip",
             "figure.reset",
             "figure.preset.",
