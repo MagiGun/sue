@@ -5,6 +5,7 @@
 
 mod anim;
 mod canvas;
+mod color;
 mod comps;
 mod fill;
 mod filter;
@@ -36,6 +37,7 @@ use story::{page_settings_ui, story_editor_ui, story_info_ui, webtoon_ui};
 use text::text_ui;
 
 pub(crate) use canvas::{CanvasDialog, CanvasProperties, ResolutionDialog};
+pub(crate) use color::{ColorDialog, ColorTarget, cmyk_of, rgb_of_cmyk};
 pub(crate) use comps::CompsDialog;
 pub(crate) use fill::AdvancedFill;
 pub(crate) use filter::FilterDialog;
@@ -121,6 +123,8 @@ pub(crate) enum Dialog {
     Convert(sue_core::EntityId, u8, String),
     /// File, Manage Fonts: Sue's shared font list.
     Fonts(sue_wm::fonts::FontManager),
+    /// Color Settings, Edit Color Sets, and the names of sets and colors.
+    Color(ColorDialog),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -199,6 +203,7 @@ impl Dialog {
             Dialog::StoryEditor(_) => (tr!("story-editor"), vec2(520.0, 520.0)),
             Dialog::Convert(..) => (tr!("convert-layer"), vec2(360.0, 190.0)),
             Dialog::Fonts(_) => (tr!("manage-fonts"), sue_wm::fonts::MANAGE_SIZE),
+            Dialog::Color(color) => color.title_and_size(),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -419,6 +424,7 @@ impl SuePaint {
                     Outcome::Open
                 }
             }
+            Dialog::Color(color) => self.color_dialog_ui(ui, color, theme),
         }
     }
 
@@ -478,6 +484,7 @@ impl SuePaint {
             | Dialog::Comps(_)
             | Dialog::Exposure
             | Dialog::Fonts(_) => {}
+            Dialog::Color(color) => self.color_dialog_ok(cx, color),
         }
     }
 
@@ -521,6 +528,7 @@ impl SuePaint {
             | Dialog::Convert(..)
             | Dialog::Shortcuts
             | Dialog::Fonts(_) => {}
+            Dialog::Color(color) => self.color_dialog_cancel(cx, color),
         }
     }
 }
