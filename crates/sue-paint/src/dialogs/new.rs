@@ -7,7 +7,7 @@ use egui::Ui;
 use sue_core::txn::SetProperty;
 use sue_core::{Color, EntityId, Preset, PresetLibrary, Properties, Value};
 use sue_wm::icons::Icon;
-use sue_wm::ui::{Space, dropdown, form_grid, icon_button, segmented, text_field};
+use sue_wm::ui::{FormGrid, Space, dropdown, form_grid, icon_button, segmented, text_field};
 use sue_wm::{AppletContext, Theme};
 
 use super::canvas::anchor_ui;
@@ -787,12 +787,16 @@ pub(super) fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome
             timeline_ui(&mut columns[1], new, theme);
         });
     } else {
-        canvas_ui(ui, new, theme);
-        if new.project.is_comic() {
-            comic_ui(ui, new, theme);
-        } else {
-            moving_ui(ui, new, theme);
-        }
+        // One form for the canvas and the project's own settings, so
+        // their controls stand in one column.
+        form_grid(ui, "sue-paint-new-canvas", theme, |form| {
+            canvas_ui(form, new, theme);
+            if new.project.is_comic() {
+                comic_ui(form, new, theme);
+            } else {
+                moving_ui(form, new, theme);
+            }
+        });
     }
     let [width, height] = new.canvas_size();
     note(
@@ -889,78 +893,76 @@ fn preset_row(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) {
 
 /// The Canvas group of a picture or a comic: width and height with the
 /// paper sizes, resolution, expression color, paper color.
-fn canvas_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) {
-    form_grid(ui, "sue-paint-new-canvas", theme, |form| {
-        form.section(&tr!("canvas"));
-        size_rows(form, new, theme);
-        let name = bare(tr!("basic-expression-color"));
-        form.row(&name, |ui| {
-            let colors: Vec<String> = Expression::ALL.iter().map(|e| e.label()).collect();
-            let chosen = Expression::ALL
-                .iter()
-                .position(|expression| *expression == new.expression);
-            let strip = segmented("sue-paint-color-mode", &colors, chosen).show(ui, theme);
-            tip(strip.response, &name, "", theme);
-            if let Some(picked) = strip.picked {
-                new.expression = Expression::ALL[picked];
+fn canvas_ui(form: &mut FormGrid<'_, '_>, new: &mut NewDialog, theme: &Theme) {
+    form.section(&tr!("canvas"));
+    size_rows(form, new, theme);
+    let name = bare(tr!("basic-expression-color"));
+    form.row(&name, |ui| {
+        let colors: Vec<String> = Expression::ALL.iter().map(|e| e.label()).collect();
+        let chosen = Expression::ALL
+            .iter()
+            .position(|expression| *expression == new.expression);
+        let strip = segmented("sue-paint-color-mode", &colors, chosen).show(ui, theme);
+        tip(strip.response, &name, "", theme);
+        if let Some(picked) = strip.picked {
+            new.expression = Expression::ALL[picked];
+        }
+    });
+    if new.expression == Expression::Monochrome {
+        // Which inks a monochrome work draws, and its tones' lines an
+        // inch.
+        form.row(&tr!("mono-drawing-colors"), |ui| {
+            let black = tr!("mono-black");
+            check(
+                ui,
+                "sue-paint-new-mono-black",
+                &mut new.mono_black,
+                &black,
+                "",
+                theme,
+            );
+            let white = tr!("mono-white");
+            check(
+                ui,
+                "sue-paint-new-mono-white",
+                &mut new.mono_white,
+                &white,
+                "",
+                theme,
+            );
+            if !new.mono_black && !new.mono_white {
+                new.mono_black = true;
             }
         });
-        if new.expression == Expression::Monochrome {
-            // Which inks a monochrome work draws, and its tones' lines an
-            // inch.
-            form.row(&tr!("mono-drawing-colors"), |ui| {
-                let black = tr!("mono-black");
-                check(
-                    ui,
-                    "sue-paint-new-mono-black",
-                    &mut new.mono_black,
-                    &black,
-                    "",
-                    theme,
-                );
-                let white = tr!("mono-white");
-                check(
-                    ui,
-                    "sue-paint-new-mono-white",
-                    &mut new.mono_white,
-                    &white,
-                    "",
-                    theme,
-                );
-                if !new.mono_black && !new.mono_white {
-                    new.mono_black = true;
-                }
-            });
-            let name = tr!("default-tone-frequency");
-            form.row(&name, |ui| {
-                let lpi = tr!("lpi");
-                let reads = Reads {
-                    range: 5.0..=300.0,
-                    decimals: 1,
-                    suffix: &lpi,
-                };
-                number(
-                    ui,
-                    "sue-paint-new-frequency",
-                    &mut new.frequency,
-                    &reads,
-                    &name,
-                    theme,
-                );
-            });
-        }
-        form.wide(|ui| {
-            let name = tr!("paper-color");
-            check(ui, "sue-paint-new-paper", &mut new.paper, &name, "", theme);
-            ui.add_enabled_ui(new.paper, |ui| {
-                let [r, g, b] = new.paper_color;
-                let mut rgba = [r, g, b, 255];
-                if sue_wm::color_button(ui, "sue-paint-new-paper-color", &mut rgba, false, theme)
-                    .changed
-                {
-                    new.paper_color = [rgba[0], rgba[1], rgba[2]];
-                }
-            });
+        let name = tr!("default-tone-frequency");
+        form.row(&name, |ui| {
+            let lpi = tr!("lpi");
+            let reads = Reads {
+                range: 5.0..=300.0,
+                decimals: 1,
+                suffix: &lpi,
+            };
+            number(
+                ui,
+                "sue-paint-new-frequency",
+                &mut new.frequency,
+                &reads,
+                &name,
+                theme,
+            );
+        });
+    }
+    form.wide(|ui| {
+        let name = tr!("paper-color");
+        check(ui, "sue-paint-new-paper", &mut new.paper, &name, "", theme);
+        ui.add_enabled_ui(new.paper, |ui| {
+            let [r, g, b] = new.paper_color;
+            let mut rgba = [r, g, b, 255];
+            if sue_wm::color_button(ui, "sue-paint-new-paper-color", &mut rgba, false, theme)
+                .changed
+            {
+                new.paper_color = [rgba[0], rgba[1], rgba[2]];
+            }
         });
     });
 }
@@ -1061,106 +1063,102 @@ fn size_rows(form: &mut sue_wm::ui::FormGrid<'_, '_>, new: &mut NewDialog, theme
 
 /// A comic's settings: pages, binding, bleed and inner border, and with
 /// Show all comic settings its author and first page number.
-fn comic_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) {
-    form_grid(ui, "sue-paint-new-comic", theme, |form| {
-        form.section(&tr!("comic-settings"));
-        let name = bare(tr!("pages"));
+fn comic_ui(form: &mut FormGrid<'_, '_>, new: &mut NewDialog, theme: &Theme) {
+    form.section(&tr!("comic-settings"));
+    let name = bare(tr!("pages"));
+    form.row(&name, |ui| {
+        count_field(
+            ui,
+            "sue-paint-new-pages",
+            &mut new.pages,
+            1..=500,
+            "",
+            &name,
+            theme,
+        );
+    });
+    let name = bare(tr!("binding"));
+    form.row(&name, |ui| {
+        let sides = [tr!("right-manga-right-to-left"), tr!("left-left-to-right")];
+        let chosen = usize::from(!new.right_bound);
+        let strip = segmented("sue-paint-new-binding", &sides, Some(chosen)).show(ui, theme);
+        tip(strip.response, &name, "", theme);
+        if let Some(picked) = strip.picked {
+            new.right_bound = picked == 0;
+        }
+    });
+    let mm = tr!("mm");
+    let reads = Reads {
+        range: 0.0..=50.0,
+        decimals: 1,
+        suffix: &mm,
+    };
+    let name = tr!("bleed-width");
+    form.row(&name, |ui| {
+        number(
+            ui,
+            "sue-paint-new-bleed",
+            &mut new.bleed,
+            &reads,
+            &name,
+            theme,
+        );
+    });
+    let name = bare(tr!("inner-border"));
+    form.row(&name, |ui| {
+        number(
+            ui,
+            "sue-paint-new-inner",
+            &mut new.inner,
+            &reads,
+            &name,
+            theme,
+        );
+    });
+    if new.project == Project::ComicAll {
+        form.section(&tr!("story-information"));
+        let name = bare(tr!("author"));
+        form.row(&name, |ui| {
+            let response = text_field("sue-paint-new-author", &mut new.author)
+                .label(&name)
+                .show(ui, theme);
+            tip(response, &name, "", theme);
+        });
+        let name = bare(tr!("first-page-number"));
         form.row(&name, |ui| {
             count_field(
                 ui,
-                "sue-paint-new-pages",
-                &mut new.pages,
-                1..=500,
+                "sue-paint-new-first",
+                &mut new.first_page,
+                0..=9999,
                 "",
                 &name,
                 theme,
             );
         });
-        let name = bare(tr!("binding"));
-        form.row(&name, |ui| {
-            let sides = [tr!("right-manga-right-to-left"), tr!("left-left-to-right")];
-            let chosen = usize::from(!new.right_bound);
-            let strip = segmented("sue-paint-new-binding", &sides, Some(chosen)).show(ui, theme);
-            tip(strip.response, &name, "", theme);
-            if let Some(picked) = strip.picked {
-                new.right_bound = picked == 0;
-            }
-        });
-        let mm = tr!("mm");
-        let reads = Reads {
-            range: 0.0..=50.0,
-            decimals: 1,
-            suffix: &mm,
-        };
-        let name = tr!("bleed-width");
-        form.row(&name, |ui| {
-            number(
-                ui,
-                "sue-paint-new-bleed",
-                &mut new.bleed,
-                &reads,
-                &name,
-                theme,
-            );
-        });
-        let name = bare(tr!("inner-border"));
-        form.row(&name, |ui| {
-            number(
-                ui,
-                "sue-paint-new-inner",
-                &mut new.inner,
-                &reads,
-                &name,
-                theme,
-            );
-        });
-        if new.project == Project::ComicAll {
-            form.section(&tr!("story-information"));
-            let name = bare(tr!("author"));
-            form.row(&name, |ui| {
-                let response = text_field("sue-paint-new-author", &mut new.author)
-                    .label(&name)
-                    .show(ui, theme);
-                tip(response, &name, "", theme);
-            });
-            let name = bare(tr!("first-page-number"));
-            form.row(&name, |ui| {
-                count_field(
-                    ui,
-                    "sue-paint-new-first",
-                    &mut new.first_page,
-                    0..=9999,
-                    "",
-                    &name,
-                    theme,
-                );
-            });
-        }
-    });
+    }
 }
 
 /// Create moving illustration: an illustration with a timeline, its
 /// frame rate and playback time.
-fn moving_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) {
-    form_grid(ui, "sue-paint-new-moving", theme, |form| {
-        form.wide(|ui| {
-            let name = tr!("create-animated-illustration");
-            let help = tr!("animated-illustration-hint");
-            check(
-                ui,
-                "sue-paint-new-moving",
-                &mut new.moving,
-                &name,
-                &help,
-                theme,
-            );
-        });
-        if new.moving {
-            rate_and_time(form, new, theme);
-        } else {
-            form.wide(|ui| note(ui, &tr!("animated-illustration-hint"), theme));
-        }
+fn moving_ui(form: &mut FormGrid<'_, '_>, new: &mut NewDialog, theme: &Theme) {
+    form.wide(|ui| {
+        let name = tr!("create-animated-illustration");
+        let help = tr!("animated-illustration-hint");
+        check(
+            ui,
+            "sue-paint-new-moving",
+            &mut new.moving,
+            &name,
+            &help,
+            theme,
+        );
     });
+    if new.moving {
+        rate_and_time(form, new, theme);
+    } else {
+        form.wide(|ui| note(ui, &tr!("animated-illustration-hint"), theme));
+    }
 }
 
 /// Frame rate and playback time, as rows of `form`.
@@ -1368,14 +1366,50 @@ fn preview(ui: &mut Ui, new: &NewDialog, theme: &Theme) {
             rect.min + egui::Vec2::new(x, y) * scale,
             egui::Vec2::new(w, h) * scale,
         );
-        ui.painter().rect_stroke(
+        // What lies outside the output frame (the blank space or the
+        // overflow frame) is dimmed, so the frame reads at a glance on
+        // any paper.
+        let painter = ui.painter();
+        let outside = [
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, inner.min.y)),
+            egui::Rect::from_min_max(egui::pos2(rect.min.x, inner.max.y), rect.max),
+            egui::Rect::from_min_max(
+                egui::pos2(rect.min.x, inner.min.y),
+                egui::pos2(inner.min.x, inner.max.y),
+            ),
+            egui::Rect::from_min_max(
+                egui::pos2(inner.max.x, inner.min.y),
+                egui::pos2(rect.max.x, inner.max.y),
+            ),
+        ];
+        for part in outside {
+            if part.is_positive() {
+                painter.rect_filled(part, egui::CornerRadius::ZERO, theme.scrim());
+            }
+        }
+        let width = theme.selected_stroke().width;
+        painter.rect_stroke(
             inner,
             egui::CornerRadius::ZERO,
-            theme.selected_stroke(),
+            egui::Stroke::new(width, theme.border_strong_on(fill)),
             egui::StrokeKind::Inside,
         );
+        if new.title_safe {
+            // The title-safe area: the middle 80 percent of the frame,
+            // where words stay clear of any screen's edge.
+            let safe = egui::Rect::from_center_size(inner.center(), inner.size() * TITLE_SAFE);
+            painter.rect_stroke(
+                safe,
+                egui::CornerRadius::ZERO,
+                egui::Stroke::new(width, theme.text_muted_on(fill)),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
 }
+
+/// How much of the output frame the title-safe area takes, per side.
+const TITLE_SAFE: f32 = 0.8;
 
 /// An animation's right column: the timeline's name, frame rate,
 /// playback time, scene, shot and division line.
