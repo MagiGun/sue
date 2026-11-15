@@ -805,6 +805,7 @@ impl SuePaint {
                 .show(&mut list_ui, theme);
         }
         let menus = self.menus.clone();
+        let row_height = sue_wm::ui::ListRow::height(theme, density, false);
         sue_wm::ui::ScrollView::vertical("sue-paint-auto")
             .on(theme.panel)
             .show(&mut list_ui, theme, |ui| {
@@ -822,53 +823,58 @@ impl SuePaint {
                         .as_ref()
                         .filter(|(at, _)| *at == index)
                         .is_some();
-                    ui.horizontal(|ui| {
-                        let check = sue_wm::ui::checkbox(
-                            ("sue-paint-auto-on", &action.id),
-                            &action.name,
-                            action_on,
-                        )
-                        .bare()
-                        .show(ui, theme);
-                        let check = sue_wm::ui::tooltip(
-                            check,
-                            &Tip::new(&tr!("auto-turn-on-off", name = action.name.clone())),
-                            theme,
-                        );
-                        if check.clicked() {
-                            action_on = !action_on;
-                        }
-                        if renaming {
-                            if let Some((_, typed)) = auto.renaming.as_mut() {
-                                let response =
-                                    sue_wm::ui::text_field("sue-paint-auto-rename", typed)
-                                        .show(ui, theme);
-                                response.request_focus();
-                                if response.lost_focus() {
-                                    clicked = true;
-                                }
-                            }
-                            return;
-                        }
-                        let note = if recording == Some(index) {
-                            Some(recording_note.as_str())
-                        } else if action.off {
-                            Some(off_note.as_str())
-                        } else {
-                            None
-                        };
-                        let output = TreeRow::new(("sue-paint-auto-row", &action.id), &action.name)
-                            .expanded(open)
-                            .selected(chosen)
-                            .row(|row| match note {
-                                Some(note) => row.note(note),
-                                None => row,
-                            })
+                    ui.allocate_ui_with_layout(
+                        vec2(ui.available_width(), row_height),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            let check = sue_wm::ui::checkbox(
+                                ("sue-paint-auto-on", &action.id),
+                                &action.name,
+                                action_on,
+                            )
+                            .bare()
                             .show(ui, theme);
-                        toggled = output.toggled;
-                        clicked = output.response.clicked();
-                        double = output.response.double_clicked();
-                    });
+                            let check = sue_wm::ui::tooltip(
+                                check,
+                                &Tip::new(&tr!("auto-turn-on-off", name = action.name.clone())),
+                                theme,
+                            );
+                            if check.clicked() {
+                                action_on = !action_on;
+                            }
+                            if renaming {
+                                if let Some((_, typed)) = auto.renaming.as_mut() {
+                                    let response =
+                                        sue_wm::ui::text_field("sue-paint-auto-rename", typed)
+                                            .show(ui, theme);
+                                    response.request_focus();
+                                    if response.lost_focus() {
+                                        clicked = true;
+                                    }
+                                }
+                                return;
+                            }
+                            let note = if recording == Some(index) {
+                                Some(recording_note.as_str())
+                            } else if action.off {
+                                Some(off_note.as_str())
+                            } else {
+                                None
+                            };
+                            let output =
+                                TreeRow::new(("sue-paint-auto-row", &action.id), &action.name)
+                                    .expanded(open)
+                                    .selected(chosen)
+                                    .row(|row| match note {
+                                        Some(note) => row.note(note),
+                                        None => row,
+                                    })
+                                    .show(ui, theme);
+                            toggled = output.toggled;
+                            clicked = output.response.clicked();
+                            double = output.response.double_clicked();
+                        },
+                    );
                     if renaming && clicked {
                         if let Some((at, typed)) = auto.renaming.take() {
                             let typed = typed.trim().to_owned();
@@ -910,34 +916,38 @@ impl SuePaint {
                             .or_else(|| crate::commands::registry().label(command))
                             .unwrap_or_else(|| command.clone());
                         let on = auto.sets[index].step_on(step);
-                        ui.horizontal(|ui| {
-                            let check = sue_wm::ui::checkbox(
-                                ("sue-paint-auto-step-on", &id, step),
-                                &label,
-                                on,
-                            )
-                            .bare()
-                            .show(ui, theme);
-                            let check = sue_wm::ui::tooltip(
-                                check,
-                                &Tip::new(&tr!("auto-turn-step-on-off", name = label.clone())),
-                                theme,
-                            );
-                            if check.clicked() {
-                                auto.sets[index].set_step(step, !on);
-                                changed = true;
-                            }
-                            let chosen = auto.selected == index && auto.step == Some(step);
-                            let row = TreeRow::new(("sue-paint-auto-step", &id, step), &label)
-                                .depth(1)
-                                .selected(chosen)
-                                .row(|row| if on { row } else { row.note(&off_note) })
+                        ui.allocate_ui_with_layout(
+                            vec2(ui.available_width(), row_height),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                let check = sue_wm::ui::checkbox(
+                                    ("sue-paint-auto-step-on", &id, step),
+                                    &label,
+                                    on,
+                                )
+                                .bare()
                                 .show(ui, theme);
-                            if row.response.clicked() {
-                                auto.selected = index;
-                                auto.step = Some(step);
-                            }
-                        });
+                                let check = sue_wm::ui::tooltip(
+                                    check,
+                                    &Tip::new(&tr!("auto-turn-step-on-off", name = label.clone())),
+                                    theme,
+                                );
+                                if check.clicked() {
+                                    auto.sets[index].set_step(step, !on);
+                                    changed = true;
+                                }
+                                let chosen = auto.selected == index && auto.step == Some(step);
+                                let row = TreeRow::new(("sue-paint-auto-step", &id, step), &label)
+                                    .depth(1)
+                                    .selected(chosen)
+                                    .row(|row| if on { row } else { row.note(&off_note) })
+                                    .show(ui, theme);
+                                if row.response.clicked() {
+                                    auto.selected = index;
+                                    auto.step = Some(step);
+                                }
+                            },
+                        );
                     }
                 }
             });
