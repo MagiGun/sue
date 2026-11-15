@@ -993,8 +993,19 @@ Once a canvas is open:
   exports show the animation through it.
 - **Timelapse** (File, Timelapse, or Record timelapse in New): while it
   records, Sue keeps a picture of the canvas after every change. Export
-  Timelapse makes a video (or a GIF) of how you drew it, fitted to the
-  length you choose or with every frame.
+  Timelapse makes a video (MP4 where Windows has an encoder, AVI, or a
+  GIF) of how you drew it, fitted to the length you choose or with every
+  frame, in the shape you choose (the canvas's, 16:9, 9:16, 1:1, 4:5 or
+  4:3, the drawing fitted on white). Its dialog plays a preview of the
+  video first, at its speed and in its shape.
+- **Exports in the background.** Movies, image sequences, animated
+  pictures, cels and timelapses are made while you keep working: a
+  notice at the bottom shows how far each is, with Cancel (which leaves
+  no file, not even part of one), and the Hub's Transfers list has them
+  too. What is exported is the picture as it was when you started the
+  export; what you draw meanwhile is not in it. When it is done the
+  notice says where the file went and offers Show in Folder. Quitting
+  while one runs asks first: Keep Exporting, or Stop and Quit.
 
 `Ctrl+N` makes a new canvas: pick a preset or a paper size, a unit, a
 resolution and a paper color. `Ctrl+O` opens a PNG, JPEG or JPEG XL picture,

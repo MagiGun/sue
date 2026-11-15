@@ -46,9 +46,23 @@ impl Shell {
         io: &mut ShellIo<'_>,
         theme: &Theme,
     ) {
+        self.working_notices(io);
         for event in self.toasts.show(ctx, room, theme) {
             let (ToastEvent::Action(id) | ToastEvent::Dismissed(id) | ToastEvent::Expired(id)) =
                 event;
+            if let Some(at) = self.working.iter().position(|(_, shown)| *shown == id) {
+                let (transfer, _) = self.working.remove(at);
+                match event {
+                    // Cancel: the work stops, and whoever started it says
+                    // that nothing was written.
+                    ToastEvent::Action(_) => io.transfers.cancel(transfer),
+                    // Closed: it goes on, in the Transfers list.
+                    ToastEvent::Dismissed(_) | ToastEvent::Expired(_) => {
+                        self.hidden.push(transfer);
+                    }
+                }
+                continue;
+            }
             let Some(at) = self.revealed.iter().position(|(shown, _)| *shown == id) else {
                 continue;
             };
@@ -65,6 +79,58 @@ impl Shell {
         self.revealed.retain(|(id, _)| toasts.get(*id).is_some());
     }
 
+    /// Keeps a notice for every noticed transfer that runs: put up when
+    /// it starts, its bar moved on as it goes, sent away when it ends
+    /// (the work then says how it went in a notice of its own).
+    fn working_notices(&mut self, io: &mut ShellIo<'_>) {
+        let transfers = &*io.transfers;
+        let toasts = &mut self.toasts;
+        self.working.retain(|(transfer, toast)| {
+            match transfers.get(*transfer).map(|found| &found.state) {
+                Some(crate::TransferState::Running(fraction)) => {
+                    toasts.set_progress(*toast, *fraction);
+                    true
+                }
+                _ => {
+                    toasts.dismiss(*toast);
+                    false
+                }
+            }
+        });
+        for transfer in transfers.list() {
+            let crate::TransferState::Running(fraction) = transfer.state else {
+                continue;
+            };
+            if !transfer.noticed
+                || self.hidden.contains(&transfer.id)
+                || self.working.iter().any(|(id, _)| *id == transfer.id)
+            {
+                continue;
+            }
+            let text = match transfer.kind {
+                crate::TransferKind::Export => tr!("exporting-file", name = transfer.label.clone()),
+                crate::TransferKind::Import => tr!("importing-file", name = transfer.label.clone()),
+                crate::TransferKind::Copy => tr!("copying-file", name = transfer.label.clone()),
+            };
+            let toast = self
+                .toasts
+                .push(Toast::info(text).progress(fraction).action(tr!("cancel")));
+            self.working.push((transfer.id, toast));
+        }
+        self.hidden
+            .retain(|id| transfers.get(*id).is_some_and(|found| !found.finished()));
+    }
+
+    /// The notice of the noticed transfer `id` while it runs and shows
+    /// (scripted runs and tests).
+    #[must_use]
+    pub fn working_notice_rects(&self, id: u64) -> Option<crate::ui::ToastRects> {
+        self.working
+            .iter()
+            .find(|(transfer, _)| *transfer == id)
+            .and_then(|(_, toast)| self.toasts.rects(*toast))
+    }
+
     /// How many notices the stack holds, those leaving included.
     #[must_use]
     pub fn notices(&self) -> usize {
@@ -76,6 +142,7 @@ impl Shell {
     pub fn clear_notices(&mut self) {
         self.toasts.clear();
         self.revealed.clear();
+        self.working.clear();
         self.touch();
     }
 

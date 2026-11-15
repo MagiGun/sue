@@ -1,4 +1,5 @@
-//! Leaving Sue: the question about work that is not saved.
+//! Leaving Sue: the question about work that is not saved, then the
+//! one about exports that still run.
 
 use sue_platform::time::Instant;
 
@@ -30,6 +31,9 @@ impl Shell {
                 .map(|(key, name)| (manifest.id.clone(), manifest.title(), key, name))
         });
         let Some((id, studio, key, name)) = next else {
+            if self.exports_running_ui(ctx, io, theme) {
+                return;
+            }
             self.quitting = None;
             io.requests
                 .push(ShellRequest::Command("app.quit.checked".to_owned()));
@@ -63,6 +67,53 @@ impl Shell {
         }
         if answer.is_some() {
             self.touch();
+        }
+    }
+
+    /// Work a person waits for (an export) that still runs when every
+    /// piece of work not saved was asked about: Keep Exporting (Enter,
+    /// and Cancel) keeps Sue open; Stop and Quit stops it, so nothing of
+    /// it is written, and quits. Returns `true` while it asks.
+    fn exports_running_ui(
+        &mut self,
+        ctx: &egui::Context,
+        io: &mut ShellIo<'_>,
+        theme: &Theme,
+    ) -> bool {
+        let running: Vec<(u64, String)> = io
+            .transfers
+            .list()
+            .iter()
+            .filter(|transfer| transfer.noticed && !transfer.finished())
+            .map(|transfer| (transfer.id, transfer.label.clone()))
+            .collect();
+        if running.is_empty() || self.quit_stops_work {
+            return false;
+        }
+        let title = tr!("quit-sue");
+        let dialog = Dialog::new("sue-quit-exporting", &title, theme)
+            .accept(tr!("keep-exporting"))
+            .alternate(tr!("stop-and-quit"))
+            .cancel();
+        let message = match running.as_slice() {
+            [(_, name)] => tr!("quit-stops-export", name = name.as_str()),
+            _ => tr!("quit-stops-exports", count = running.len()),
+        };
+        match confirm(ctx, dialog, Tone::Warning, &message) {
+            Some(Answer::Alternate) => {
+                for (id, _) in &running {
+                    io.transfers.cancel(*id);
+                }
+                self.quit_stops_work = true;
+                self.touch();
+                false
+            }
+            Some(Answer::Accept | Answer::Cancel) => {
+                self.quitting = None;
+                self.touch();
+                true
+            }
+            Some(Answer::Extra) | None => true,
         }
     }
 }

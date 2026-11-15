@@ -27,6 +27,7 @@ use crate::view::View;
 mod applet;
 mod clipboard;
 mod edit;
+pub(crate) mod exports;
 mod files;
 mod frame;
 mod layers;
@@ -890,6 +891,8 @@ pub struct SuePaint {
     /// A rectangle or ellipse selection dragged out with Adjust angle
     /// after fixed, turning with the pointer until a click fixes it.
     pub(crate) select_turn: Option<SelectTurn>,
+    /// The exports running in the background.
+    pub(crate) exports: exports::Exports,
 }
 
 /// How the brush engine took a stroke (for the runtime tests).
@@ -1111,6 +1114,7 @@ impl Default for SuePaint {
             gradients: crate::dialogs::GradientLibrary::default(),
             gradient_work: GradientWork::default(),
             select_turn: None,
+            exports: exports::Exports::default(),
         }
     }
 }
@@ -1335,6 +1339,7 @@ impl SuePaint {
 pub(crate) const KEYS_SECTION: &str = "sue_paint_keys";
 
 pub(crate) use crate::commands::shortcut_table;
+pub use exports::{export_at_once, hold_export_starts, hold_exports_to};
 pub(crate) use files::export_dir;
 
 /// Sue Paint's applet id.

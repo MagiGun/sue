@@ -456,3 +456,45 @@ fn a_notice_reads_as_an_alert_to_a_screen_reader() {
     assert_eq!(label, "Dismiss");
     assert!(close.width() >= crate::ui::Density::Regular.min_hit());
 }
+
+#[test]
+fn a_notice_of_work_going_on_shows_a_bar_moves_on_in_place_and_stays() {
+    let mut bench = Bench::new();
+    let mut toasts = Toasts::new("progress");
+    let plain = toasts.push(Toast::info("Exporting Walk.mp4"));
+    let working = toasts.push(
+        Toast::info("Exporting Walk.mp4")
+            .progress(0.25)
+            .action("Cancel"),
+    );
+    assert_ne!(plain, working, "a bar makes it another notice");
+    let toast = toasts.get(working).unwrap();
+    assert_eq!(toast.progress, Some(0.25));
+    assert_eq!(toast.seconds, None, "it stays until its work ends");
+    run(&mut bench, &mut toasts, 40);
+    let tall = toasts.rects(working).unwrap().toast.height();
+    let short = toasts.rects(plain).unwrap().toast.height();
+    assert!(tall > short, "the bar takes a row: {tall} against {short}");
+    // Moving the bar keeps its place, its words and its time.
+    let before = toasts.rects(working).unwrap();
+    toasts.set_progress(working, 0.75);
+    toasts.set_progress(working, f32::NAN);
+    assert_eq!(toasts.get(working).unwrap().progress, Some(0.0));
+    toasts.set_progress(working, 2.0);
+    assert_eq!(toasts.get(working).unwrap().progress, Some(1.0));
+    run(
+        &mut bench,
+        &mut toasts,
+        frames_in(f64::from(DEFAULT_SECONDS) + 1.0),
+    );
+    assert!(toasts.get(plain).is_none(), "the plain notice left");
+    assert!(toasts.get(working).is_some(), "the working one stays");
+    assert_eq!(
+        toasts.rects(working).unwrap().toast.height(),
+        before.toast.height()
+    );
+    // Its action says so, and its owner sends it away.
+    let action = toasts.rects(working).unwrap().action.unwrap();
+    let events = click(&mut bench, &mut toasts, action.center());
+    assert!(events.contains(&ToastEvent::Action(working)));
+}

@@ -235,6 +235,13 @@ const PICTURE: &[(&str, &str, Exempt)] = &[
         "layer_thumbnail",
         Exempt::All,
     ),
+    // Export Timelapse's preview: the video's white ground and the
+    // drawing on it.
+    (
+        "crates/sue-paint/src/dialogs",
+        "timelapse_picture",
+        Exempt::All,
+    ),
     // A filter dialog's gradients and its small copies of the layer.
     (
         "crates/sue-paint/src/gradient_bar",

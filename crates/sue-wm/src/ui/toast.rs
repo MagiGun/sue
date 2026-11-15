@@ -11,6 +11,12 @@
 //! can carry one action ("Show in Folder") and always has a button that
 //! closes it.
 //!
+//! A notice can also show how far a piece of work running in the
+//! background is ([`Toast::progress`]): a bar under its words that the
+//! owner moves on with [`Toasts::set_progress`], and an action such as
+//! "Cancel". Such a notice stays until its owner sends it away
+//! ([`Toasts::dismiss`]); closing it only hides it, the work goes on.
+//!
 //! The stack stays small: at most [`MAX_SHOWN`] notices show on a wide
 //! screen and [`MAX_SHOWN_NARROW`] on a narrow one. Older ones fold
 //! behind the oldest shown, as the edges of cards under it and a button
@@ -37,6 +43,7 @@ use egui::{
 
 use super::focus::focus_ring;
 use super::motion::{self, Motion, Pace};
+use super::progress::ProgressBar;
 use super::tokens::{Density, Elevation, Layer, Radius, Space, TextRole};
 use super::tooltip::{Tip, tooltip};
 use crate::Theme;
@@ -179,6 +186,9 @@ pub struct Toast {
     pub action: Option<String>,
     /// How long it stays, in seconds. `None` stays until it is closed.
     pub seconds: Option<f32>,
+    /// How far the work it is about has come, from 0 to 1, shown as a bar
+    /// under its words; `None` shows no bar.
+    pub progress: Option<f32>,
 }
 
 impl Toast {
@@ -190,6 +200,7 @@ impl Toast {
             text: text.into(),
             action: None,
             seconds: Some(DEFAULT_SECONDS),
+            progress: None,
         }
     }
 
@@ -236,6 +247,24 @@ impl Toast {
     pub fn sticky(mut self) -> Self {
         self.seconds = None;
         self
+    }
+
+    /// Shows a bar `fraction` full (0 to 1) under its words, for work
+    /// still going on. It stays until it is sent away.
+    #[must_use]
+    pub fn progress(mut self, fraction: f32) -> Self {
+        self.progress = Some(progress_of(fraction));
+        self.seconds = None;
+        self
+    }
+}
+
+/// `fraction` as a bar shows it: 0 to 1, and 0 for what is not a number.
+fn progress_of(fraction: f32) -> f32 {
+    if fraction.is_nan() {
+        0.0
+    } else {
+        fraction.clamp(0.0, 1.0)
     }
 }
 
@@ -372,6 +401,15 @@ impl Toasts {
     pub fn dismiss(&mut self, id: ToastId) {
         if let Some(entry) = self.entries.iter_mut().find(|entry| entry.id == id) {
             entry.dismissed = true;
+        }
+    }
+
+    /// Moves the bar of the notice `id` to `fraction` (0 to 1), in place:
+    /// its time, its place and its words stay. A notice without a bar
+    /// gets one.
+    pub fn set_progress(&mut self, id: ToastId, fraction: f32) {
+        if let Some(entry) = self.entries.iter_mut().find(|entry| entry.id == id) {
+            entry.toast.progress = Some(progress_of(fraction));
         }
     }
 
@@ -626,9 +664,14 @@ impl Toasts {
                     );
                     let entered = entry.shown.map_or(0.0, along);
                     let left = entry.leaving.map_or(0.0, along);
+                    // A bar for work going on, under the words.
+                    let bar = entry
+                        .toast
+                        .progress
+                        .map_or(0.0, |_| tight + ProgressBar::thickness(theme, density));
                     Laid {
                         index,
-                        height: text.size().y.max(control) + pad.y * 2.0,
+                        height: text.size().y.max(control) + bar + pad.y * 2.0,
                         text,
                         action,
                         presence: entered * (1.0 - left),
@@ -768,9 +811,10 @@ impl Toasts {
                     vec2(icon, icon),
                 );
                 entry.toast.tone.paint(&painter, glyph, theme);
+                let lines = toast.text.size().y.max(control);
                 let text_at = pos2(
                     glyph.right() + gap,
-                    row.center().y - toast.text.size().y / 2.0,
+                    row.top() + (lines - toast.text.size().y) / 2.0,
                 );
                 painter.galley(text_at, toast.text.clone(), theme.text);
                 let close = Rect::from_center_size(
@@ -797,6 +841,21 @@ impl Toasts {
                 if closed.clicked() && entry.leaving.is_none() {
                     entry.leaving = Some(now);
                     events.push(ToastEvent::Dismissed(entry.id));
+                }
+                if let Some(fraction) = entry.toast.progress {
+                    let thick = ProgressBar::thickness(theme, density);
+                    let track = Rect::from_min_max(
+                        pos2(text_at.x, row.top() + lines + tight),
+                        pos2(
+                            row.right() - tight - control / 2.0,
+                            row.top() + lines + tight + thick,
+                        ),
+                    );
+                    let mut bar = child.new_child(UiBuilder::new().max_rect(track));
+                    ProgressBar::new(fraction)
+                        .width(track.width())
+                        .label(entry.toast.text.as_str())
+                        .show(&mut bar, theme);
                 }
                 entry.rects = Some(ToastRects {
                     toast: place,

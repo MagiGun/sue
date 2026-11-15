@@ -26,6 +26,7 @@ mod pressure;
 mod settings;
 mod story;
 mod text;
+mod timelapse;
 
 use egui::{Response, Ui, vec2};
 use sue_core::EntityId;
@@ -36,7 +37,7 @@ use crate::filters::Filter;
 use crate::studio::SuePaint;
 
 pub(crate) use anim::AnimDialog;
-use anim::{onion_ui, timelapse_ui, timeline_ui};
+use anim::{onion_ui, timeline_ui};
 use canvas::{
     canvas_properties_ui, canvas_ui, convert_ui, grid_ui, material_ui, perspective_ui, print_ui,
     proof_ui, resolution_ui, shape_3d_ui,
@@ -71,6 +72,7 @@ pub(crate) use pressure::{DEFAULT_PEN_PRESSURE, PEN_PRESSURE, PressureDialog};
 pub(crate) use settings::GESTURES;
 pub(crate) use settings::MODIFIERS;
 pub(crate) use story::{PageSettings, PagesDialog, StoryInfo};
+pub(crate) use timelapse::TimelapseDialog;
 
 /// An open dialog.
 #[derive(Clone, Debug)]
@@ -101,8 +103,9 @@ pub(crate) enum Dialog {
     Perspective(PerspectiveDialog),
     /// Onion Skin Settings.
     Onion(crate::anim::Onion),
-    /// Export Timelapse: the video's size and length.
-    Timelapse(crate::timelapse::Export),
+    /// Export Timelapse: the video's size, length and shape, and its
+    /// preview.
+    Timelapse(Box<TimelapseDialog>),
     /// Register Material, Image: its name.
     Material(String),
     /// Expand with round corners (0), Shrink (1), Blur the border of (2),
@@ -598,7 +601,7 @@ impl SuePaint {
             Dialog::Timeline(fps, length) => timeline_ui(ui, fps, length, theme),
             Dialog::Shape3D(kind) => shape_3d_ui(ui, kind, theme),
             Dialog::Material(name) => material_ui(ui, name, theme),
-            Dialog::Timelapse(export) => timelapse_ui(ui, export, theme),
+            Dialog::Timelapse(dialog) => dialog.ui(ui, theme),
             Dialog::Perspective(perspective) => perspective_ui(ui, perspective, theme),
             Dialog::Correction(_, filter, ..) => self.correction_dialog_ui(ui, filter, cx, theme),
             Dialog::Colorize(colorize) => colorize_ui(ui, colorize, theme),
@@ -655,7 +658,7 @@ impl SuePaint {
             Dialog::Frame(frame) => self.add_frame_layer(cx, frame),
             Dialog::Text(layer, lettering) => self.put_text(cx, layer, &lettering),
             Dialog::Perspective(perspective) => self.perspective_ok(cx, perspective),
-            Dialog::Timelapse(export) => self.ask_export_timelapse(cx, export),
+            Dialog::Timelapse(dialog) => self.ask_export_timelapse(cx, dialog.export),
             Dialog::Material(name) => self.register_material(cx, &name),
             Dialog::SelectBy(3, width) => self.outline_selection(cx, width),
             Dialog::SelectBy(kind, amount) => self.select_by_ok(kind, amount),

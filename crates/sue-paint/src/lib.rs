@@ -82,7 +82,10 @@ pub use bar_items::bar_button_rect;
 pub use commands::registry;
 pub use launchers::shown_buttons;
 pub use menus::menus;
-pub use studio::{ID, StrokeSeen, SuePaint, last_stroke, mirror};
+pub use studio::{
+    ID, StrokeSeen, SuePaint, export_at_once, hold_export_starts, hold_exports_to, last_stroke,
+    mirror,
+};
 
 use sue_core::EntityId;
 use sue_wm::{AppletContext, ArenaEdit};

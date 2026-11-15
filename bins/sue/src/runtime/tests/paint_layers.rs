@@ -202,6 +202,8 @@ Paper	{ink},0,1,normal"
     std::fs::create_dir_all(out.parent().unwrap()).unwrap();
     let _ = runtime.answer_pick(&out, &mut NoTextures, start);
     step(&mut runtime, Vec::new());
+    // The comps are made in the background.
+    until_exports_end(&mut runtime, |runtime| step(runtime, Vec::new()));
     let read = |name: &str| {
         let bytes = std::fs::read(out.with_file_name(name)).expect(name);
         sue_io::decode_png(&bytes).unwrap().tile.bytes().unwrap()[..3].to_vec()

@@ -118,58 +118,6 @@ pub(super) fn timeline_ui(ui: &mut Ui, fps: &mut u32, length: &mut u32, theme: &
     outcome
 }
 
-/// Export Timelapse: the video's size and length.
-pub(super) fn timelapse_ui(
-    ui: &mut Ui,
-    export: &mut crate::timelapse::Export,
-    theme: &Theme,
-) -> Outcome {
-    let mut outcome = Outcome::Open;
-    const SIDES: [u32; 5] = [480, 720, 1080, 1280, 1920];
-    let sides: Vec<String> = SIDES.iter().map(|side| tr!("px-2", side = *side)).collect();
-    let lengths = [tr!("fit-to-specified-length"), tr!("export-all-frames")];
-    wm_ui::form_grid(ui, "anim-timelapse-form", theme, |grid| {
-        grid.row(&tr!("long-side"), |ui| {
-            let mut chosen = SIDES
-                .iter()
-                .position(|side| *side == export.side)
-                .unwrap_or(2);
-            if wm_ui::dropdown("anim-timelapse-side", &mut chosen, &sides)
-                .show(ui, theme)
-                .changed()
-            {
-                export.side = SIDES[chosen];
-            }
-        });
-        grid.row(&tr!("length"), |ui| {
-            let mut chosen = usize::from(export.seconds.is_none());
-            if wm_ui::dropdown("anim-timelapse-length", &mut chosen, &lengths)
-                .show(ui, theme)
-                .changed()
-            {
-                export.seconds = (chosen == 0).then_some(30.0);
-            }
-        });
-        if let Some(seconds) = export.seconds.as_mut() {
-            grid.row("", |ui| {
-                let mut value = f64::from(*seconds);
-                if wm_ui::number_field("anim-timelapse-seconds", &mut value)
-                    .range(1.0..=600.0)
-                    .decimals(0)
-                    .suffix(" s")
-                    .show(ui, theme)
-                    .changed()
-                {
-                    *seconds = value as f32;
-                }
-            });
-        }
-    });
-    help(ui, &tr!("motion-jpeg-avi-video-animated-gif"), theme);
-    ok_cancel(ui, &mut outcome);
-    outcome
-}
-
 impl SuePaint {
     /// Changes the timeline's frame rate and length.
     pub(super) fn timeline_ok(&mut self, cx: &mut AppletContext<'_>, fps: u32, length: u32) {

@@ -187,7 +187,7 @@ pub struct Runtime {
     /// The files of late and the work Sue kept (the Hub's lists).
     work: WorkList,
     /// The files brought in, written out and copied in this run.
-    transfers: Transfers,
+    pub(crate) transfers: Transfers,
     /// When to read running transfers' progress next.
     next_transfer_poll: Option<Instant>,
     /// The arena's revision when the work was last looked at for keeping.

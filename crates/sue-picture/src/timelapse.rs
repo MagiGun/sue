@@ -70,6 +70,64 @@ pub fn capture(dir: &Path, index: usize, pixels: &[u8], size: [u32; 2]) -> Resul
         .map_err(|error| error.to_string())
 }
 
+/// The shape of the video Export Timelapse makes. The drawing is fitted
+/// into it on white, so a tall picture in a wide video has white at its
+/// sides.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Aspect {
+    /// As the picture was when the last frame was kept.
+    #[default]
+    Canvas,
+    /// 16:9, wide, as most players and video sites show.
+    Wide,
+    /// 9:16, tall, as phones and short video sites show.
+    Tall,
+    /// 1:1, square.
+    Square,
+    /// 4:5, a little taller than wide, as picture feeds show.
+    Portrait,
+    /// 4:3, as older screens are.
+    Classic,
+}
+
+impl Aspect {
+    /// Every shape, in the order a dialog offers them.
+    pub const ALL: [Self; 6] = [
+        Self::Canvas,
+        Self::Wide,
+        Self::Tall,
+        Self::Square,
+        Self::Portrait,
+        Self::Classic,
+    ];
+
+    /// Width to height, or `None` for the canvas's own.
+    #[must_use]
+    pub fn ratio(self) -> Option<(u32, u32)> {
+        match self {
+            Self::Canvas => None,
+            Self::Wide => Some((16, 9)),
+            Self::Tall => Some((9, 16)),
+            Self::Square => Some((1, 1)),
+            Self::Portrait => Some((4, 5)),
+            Self::Classic => Some((4, 3)),
+        }
+    }
+
+    /// What a person reads.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::Canvas => tr!("aspect-same-as-canvas"),
+            Self::Wide => tr!("aspect-wide"),
+            Self::Tall => tr!("aspect-tall"),
+            Self::Square => tr!("aspect-square"),
+            Self::Portrait => tr!("aspect-portrait"),
+            Self::Classic => tr!("aspect-classic"),
+        }
+    }
+}
+
 /// How Export Timelapse lays the video out.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Export {
@@ -77,6 +135,8 @@ pub struct Export {
     pub side: u32,
     /// Fit to this many seconds; `None` exports every frame at 30 a second.
     pub seconds: Option<f32>,
+    /// The video's shape.
+    pub aspect: Aspect,
 }
 
 impl Default for Export {
@@ -84,59 +144,175 @@ impl Default for Export {
         Self {
             side: 1080,
             seconds: Some(30.0),
+            aspect: Aspect::Canvas,
         }
     }
 }
 
-/// The frames of `dir` read back, each laid over white in a `size` box
-/// (the last frame's shape at `export.side`), and the frames a second:
-/// every frame at 30 a second, or as many as fit the length, skipping some
-/// when there are more than 60 a second. The last frame holds a second.
-///
-/// # Errors
-/// If there are no frames, or one will not read.
-pub fn video_frames(dir: &Path, export: Export) -> Result<(Vec<RasterTile2D>, u32), String> {
-    let paths = frames(dir);
-    let last = paths
-        .last()
-        .ok_or(tr!("canvas-has-no-timelapse-yet-record"))?;
-    let read = |path: &Path| -> Result<RasterTile2D, String> {
-        let bytes = sue_platform::fs::read(path).map_err(|error| error.to_string())?;
-        Ok(sue_io::decode_jpeg(&bytes)?.tile)
-    };
-    let shape = read(last)?;
-    // Even sides, as video players like them.
-    let even = |value: u32| (value.max(2) / 2) * 2;
-    let size = fit([shape.width(), shape.height()], export.side.max(16)).map(even);
-    let count = paths.len();
-    let (fps, step) = match export.seconds {
+impl Export {
+    /// The video's size for a drawing of `shape`: its long side `side`
+    /// (a canvas smaller than that stays its size when the shape is the
+    /// canvas's), both sides even, as video players like them.
+    #[must_use]
+    pub fn size(&self, shape: [u32; 2]) -> [u32; 2] {
+        let even = |value: u32| (value.max(2) / 2) * 2;
+        // The short side of a ratio: the even number nearest to it, so
+        // 16:9 at 1,080 is 1,080 by 608 (607.5), not 606.
+        let short = |side: u32, over: u32, under: u32| {
+            let exact = u64::from(side) * u64::from(over);
+            let under = u64::from(under.max(1));
+            u32::try_from((exact + under) / (2 * under) * 2).unwrap_or(u32::MAX)
+        };
+        let side = self.side.max(16);
+        let size = match self.aspect.ratio() {
+            None => fit(shape, side),
+            Some((wide, high)) if wide >= high => [side, short(side, high, wide)],
+            Some((wide, high)) => [short(side, wide, high), side],
+        };
+        size.map(even)
+    }
+}
+
+/// How a video of `count` kept frames laid out as `export` goes: its
+/// frames a second, and every how many kept frames it shows one (every
+/// frame at 30 a second, or as many as fit the length, skipping some when
+/// there would be more than 60 a second).
+#[must_use]
+pub fn pace(count: usize, export: Export) -> (u32, usize) {
+    match export.seconds {
         Some(seconds) if seconds > 0.0 => {
             let wanted = (count as f32 / seconds).ceil().max(1.0);
             if wanted > 60.0 {
-                (60, (wanted / 60.0).ceil() as usize)
+                (60, ((wanted / 60.0).ceil() as usize).max(1))
             } else {
                 (wanted as u32, 1)
             }
         }
         _ => (30, 1),
-    };
-    let mut out = Vec::new();
-    let mut chosen: Vec<&PathBuf> = paths.iter().step_by(step).collect();
-    if chosen.last() != Some(&last) {
-        chosen.push(last);
     }
-    for path in chosen {
-        out.push(letterbox(&read(path)?, size));
+}
+
+/// How many kept frames a video of `count` shows when it shows every
+/// `step`th, the last always among them.
+#[must_use]
+pub fn shown(count: usize, step: usize) -> usize {
+    if count == 0 {
+        return 0;
     }
-    if let Some(end) = out.last().cloned() {
-        out.extend(std::iter::repeat_n(end, fps as usize));
+    let step = step.max(1);
+    count.div_ceil(step) + usize::from(!(count - 1).is_multiple_of(step))
+}
+
+/// Which kept frames a timelapse video shows, how big and how fast: what
+/// Export Timelapse works from, read off a list of frames taken when it
+/// began (frames kept while it runs are not in it).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Plan {
+    /// The frame files shown, in order, the last frame among them.
+    pub chosen: Vec<PathBuf>,
+    /// The video's size.
+    pub size: [u32; 2],
+    /// Frames a second.
+    pub fps: u32,
+}
+
+impl Plan {
+    /// The plan for the frames `paths` laid out as `export`: every frame
+    /// at 30 a second, or as many as fit the length, skipping some when
+    /// there are more than 60 a second. The shape of the canvas is the
+    /// last frame's.
+    ///
+    /// # Errors
+    /// If there are no frames, or the last will not read.
+    pub fn new(paths: &[PathBuf], export: Export) -> Result<Self, String> {
+        let last = paths
+            .last()
+            .ok_or(tr!("canvas-has-no-timelapse-yet-record"))?;
+        let shape = read_frame(last)?;
+        Ok(Self::sized(paths, export, [shape.width(), shape.height()]))
     }
-    Ok((out, fps))
+
+    /// [`Self::new`] for a canvas of `shape`, without reading a frame.
+    /// `paths` is not empty.
+    #[must_use]
+    pub fn sized(paths: &[PathBuf], export: Export, shape: [u32; 2]) -> Self {
+        let size = export.size(shape);
+        let (fps, step) = pace(paths.len(), export);
+        let mut chosen: Vec<PathBuf> = paths.iter().step_by(step).cloned().collect();
+        if let Some(last) = paths.last()
+            && chosen.last() != Some(last)
+        {
+            chosen.push(last.clone());
+        }
+        Self { chosen, size, fps }
+    }
+
+    /// How many frames the video has: the chosen ones, and the last held
+    /// for a second.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.chosen.len() + self.fps as usize
+    }
+
+    /// `true` when it shows nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.chosen.is_empty()
+    }
+
+    /// How long the video plays, in seconds.
+    #[must_use]
+    pub fn seconds(&self) -> f64 {
+        self.len() as f64 / f64::from(self.fps.max(1))
+    }
+
+    /// Which chosen frame the video's frame `index` shows.
+    #[must_use]
+    pub fn source(&self, index: usize) -> usize {
+        index.min(self.chosen.len().saturating_sub(1))
+    }
+
+    /// The video's frame `index`: its frame laid over white in the
+    /// video's size.
+    ///
+    /// # Errors
+    /// If the frame will not read.
+    pub fn frame(&self, index: usize) -> Result<RasterTile2D, String> {
+        let path = self
+            .chosen
+            .get(self.source(index))
+            .ok_or(tr!("no-frames"))?;
+        Ok(letterbox(&read_frame(path)?, self.size))
+    }
+}
+
+/// A kept frame read back.
+///
+/// # Errors
+/// If it will not read or decode.
+pub fn read_frame(path: &Path) -> Result<RasterTile2D, String> {
+    let bytes = sue_platform::fs::read(path).map_err(|error| error.to_string())?;
+    Ok(sue_io::decode_jpeg(&bytes)?.tile)
+}
+
+/// The frames of `dir` read back, each laid over white in the video's
+/// size, and the frames a second ([`Plan`]). The last frame holds a
+/// second.
+///
+/// # Errors
+/// If there are no frames, or one will not read.
+pub fn video_frames(dir: &Path, export: Export) -> Result<(Vec<RasterTile2D>, u32), String> {
+    let plan = Plan::new(&frames(dir), export)?;
+    let out = (0..plan.len())
+        .map(|index| plan.frame(index))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((out, plan.fps))
 }
 
 /// `tile` scaled to fit `size`, centered on white.
-fn letterbox(tile: &RasterTile2D, size: [u32; 2]) -> RasterTile2D {
-    let from = [tile.width(), tile.height()];
+#[must_use]
+pub fn letterbox(tile: &RasterTile2D, size: [u32; 2]) -> RasterTile2D {
+    let from = [tile.width().max(1), tile.height().max(1)];
     let scale =
         (f64::from(size[0]) / f64::from(from[0])).min(f64::from(size[1]) / f64::from(from[1]));
     let to = [
@@ -198,6 +374,7 @@ mod tests {
         let all = Export {
             side: 32,
             seconds: None,
+            ..Export::default()
         };
         let (video, fps) = video_frames(&dir, all).unwrap();
         assert_eq!(fps, 30);
@@ -216,10 +393,106 @@ mod tests {
             Export {
                 side: 32,
                 seconds: Some(1.0),
+                ..Export::default()
             },
         )
         .unwrap();
         assert_eq!(fps, 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_video_takes_the_shape_asked_and_fits_the_drawing_on_white() {
+        let wide = Export {
+            side: 1280,
+            aspect: Aspect::Wide,
+            ..Export::default()
+        };
+        assert_eq!(wide.size([600, 800]), [1280, 720]);
+        let tall = Export {
+            aspect: Aspect::Tall,
+            ..wide
+        };
+        assert_eq!(tall.size([600, 800]), [720, 1280]);
+        let square = Export {
+            aspect: Aspect::Square,
+            ..wide
+        };
+        assert_eq!(square.size([600, 800]), [1280, 1280]);
+        let portrait = Export {
+            aspect: Aspect::Portrait,
+            ..wide
+        };
+        assert_eq!(portrait.size([600, 800]), [1024, 1280]);
+        // A short side that is not whole goes to the nearest even one.
+        let odd = Export { side: 1080, ..wide };
+        assert_eq!(odd.size([600, 800]), [1080, 608]);
+        assert_eq!(Export { side: 1080, ..tall }.size([1, 1]), [608, 1080]);
+        assert_eq!(
+            Export {
+                side: 1080,
+                ..portrait
+            }
+            .size([1, 1]),
+            [864, 1080]
+        );
+        // The canvas's own: a small canvas stays its size, sides even.
+        assert_eq!(Export::default().size([301, 201]), [300, 200]);
+        assert_eq!(Aspect::ALL.len(), 6);
+        assert!(Aspect::ALL.iter().all(|aspect| !aspect.label().is_empty()));
+        // A tall drawing in a wide video: white at its sides, the drawing
+        // in the middle.
+        let tile =
+            RasterTile2D::from_bytes(2, 4, PixelFormat::Rgba8, [0, 0, 0, 255].repeat(8)).unwrap();
+        let boxed = letterbox(&tile, [16, 8]);
+        let px = |x: u32, y: u32| {
+            let at = ((y * 16 + x) * 4) as usize;
+            boxed.bytes().unwrap()[at]
+        };
+        assert_eq!(px(0, 4), 255, "white at the side");
+        assert_eq!(px(8, 4), 0, "the drawing in the middle");
+    }
+
+    #[test]
+    fn a_plan_is_made_from_the_frames_it_was_given() {
+        let dir = std::env::temp_dir().join(format!("sue-timelapse-plan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for index in 0..5 {
+            capture(&dir, index, &[128, 128, 128, 255].repeat(16 * 16), [16, 16]).unwrap();
+        }
+        let taken = frames(&dir);
+        let plan = Plan::new(
+            &taken,
+            Export {
+                side: 16,
+                seconds: None,
+                ..Export::default()
+            },
+        )
+        .unwrap();
+        // A frame kept after the plan was made is not in it.
+        capture(&dir, 5, &[0, 0, 0, 255].repeat(16 * 16), [16, 16]).unwrap();
+        assert_eq!(plan.chosen.len(), 5);
+        assert_eq!(shown(5, 1), 5);
+        assert_eq!(shown(5, 2), 3, "0, 2, 4");
+        assert_eq!(shown(6, 4), 3, "0, 4 and the last, 5");
+        assert_eq!(shown(0, 3), 0);
+        assert_eq!(
+            pace(
+                5,
+                Export {
+                    seconds: None,
+                    ..Export::default()
+                }
+            ),
+            (30, 1)
+        );
+        assert_eq!(pace(7200, Export::default()), (60, 4));
+        assert_eq!(plan.len(), 5 + 30);
+        assert!((plan.seconds() - 35.0 / 30.0).abs() < 1e-9);
+        assert_eq!(plan.source(plan.len() - 1), 4, "the last frame holds");
+        assert!(plan.frame(34).unwrap().bytes().unwrap()[0] > 100);
+        assert!(Plan::new(&[], Export::default()).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

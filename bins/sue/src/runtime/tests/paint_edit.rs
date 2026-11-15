@@ -621,6 +621,8 @@ fn sue_paint_selections_shrink_become_layers_and_quick_masks() {
         &mut NoTextures,
         start,
     );
+    // The pieces are made in the background.
+    until_exports_end(&mut runtime, |runtime| step(runtime, Vec::new()));
     let piece = std::fs::read(root.join("Strip-001.png")).expect("the first piece");
     let tile = sue_io::decode_png(&piece).unwrap().tile;
     assert_eq!(tile.width(), 800);

@@ -187,6 +187,8 @@ fn sue_paint_animates_cels_on_a_timeline_and_exports_them() {
         &mut NoTextures,
         start,
     );
+    // The export runs in the background; the window draws meanwhile.
+    until_exports_end(&mut runtime, |runtime| step(runtime, Vec::new()));
     let ink = |frame: u32, upper: bool| {
         let bytes = std::fs::read(root.join(format!("Walk-{frame:04}.png"))).unwrap();
         let tile = sue_io::decode_png(&bytes).unwrap().tile;
@@ -223,6 +225,7 @@ fn sue_paint_animates_cels_on_a_timeline_and_exports_them() {
         &mut NoTextures,
         start,
     );
+    until_exports_end(&mut runtime, |runtime| step(runtime, Vec::new()));
     assert!(
         std::fs::read(root.join("Walk.gif"))
             .unwrap()
@@ -530,6 +533,7 @@ fn sue_paint_records_a_timelapse_and_exports_it_as_a_video() {
         &mut NoTextures,
         start,
     );
+    until_exports_end(&mut runtime, |runtime| step(runtime, Vec::new()));
     let video = std::fs::read(root.join("Drawing.avi")).unwrap();
     assert_eq!(&video[..4], b"RIFF");
     assert_eq!(&video[8..12], b"AVI ");
@@ -734,14 +738,14 @@ fn timeline_of(paint: &PaintDriver) -> sue_model::Sequence {
 }
 
 /// One press of `key` with no modifier.
-fn press(paint: &mut PaintDriver, key_name: egui::Key) {
+pub(super) fn press(paint: &mut PaintDriver, key_name: egui::Key) {
     paint.step(vec![key(key_name, egui::Modifiers::NONE)]);
     paint.settle(2);
 }
 
 /// The control on the row of the label `label`, right of it: what a
 /// dialog's form draws there, found by where the label was drawn.
-fn right_of(paint: &PaintDriver, label: &str) -> egui::Rect {
+pub(super) fn right_of(paint: &PaintDriver, label: &str) -> egui::Rect {
     let at = paint
         .rect_of(label)
         .unwrap_or_else(|| panic!("{label:?} is on screen: {:?}", paint.texts));
@@ -758,7 +762,7 @@ fn right_of(paint: &PaintDriver, label: &str) -> egui::Rect {
 
 /// Clicks the field at `rect`, types `text` over what it holds and ends
 /// typing with Tab.
-fn type_into(paint: &mut PaintDriver, rect: egui::Rect, text: &str) {
+pub(super) fn type_into(paint: &mut PaintDriver, rect: egui::Rect, text: &str) {
     let at = rect.center();
     let button = |pressed| egui::Event::PointerButton {
         pos: at,
@@ -777,7 +781,7 @@ fn type_into(paint: &mut PaintDriver, rect: egui::Rect, text: &str) {
 }
 
 /// Types `text` into the field beside the label `label`.
-fn fill(paint: &mut PaintDriver, label: &str, text: &str) {
+pub(super) fn fill(paint: &mut PaintDriver, label: &str, text: &str) {
     let rect = right_of(paint, label);
     type_into(paint, rect, text);
 }
@@ -794,10 +798,13 @@ fn picked(paint: &mut PaintDriver, purpose: &str, path: &std::path::Path) {
         paint.now,
     );
     paint.settle(2);
+    // An export runs in the background: wait until it has said how it
+    // went.
+    paint.finish_exports();
 }
 
 /// Draws a short line across the canvas `dy` points from its middle.
-fn line_on_canvas(paint: &mut PaintDriver, dy: f32) {
+pub(super) fn line_on_canvas(paint: &mut PaintDriver, dy: f32) {
     let middle = paint_middle(&paint.runtime);
     paint.drag(
         middle + vec2(-80.0, dy),
@@ -808,7 +815,7 @@ fn line_on_canvas(paint: &mut PaintDriver, dy: f32) {
 
 /// An animation folder with a drawn cel on frame 1 and another on frame
 /// 4, and a 2 second tone on the timeline.
-fn walk(paint: &mut PaintDriver) {
+pub(super) fn walk(paint: &mut PaintDriver) {
     paint.command("anim.layer.folder");
     paint.command("anim.cel.new");
     paint.settle(2);

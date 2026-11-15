@@ -24,6 +24,17 @@ pub(super) const STOP: Art = Art {
     solid: &[],
 };
 
+/// Two upright bars with round ends, side by side: hold the playing
+/// where it is.
+pub(super) const PAUSE: Art = Art {
+    keyline: Keyline::Square,
+    line: &[Part::Stroke(
+        "M6.75 8.25 A1.5 1.5 0 0 1 9.75 8.25 V15.75 A1.5 1.5 0 0 1 6.75 15.75 Z M14.25 8.25 A1.5 \
+         1.5 0 0 1 17.25 8.25 V15.75 A1.5 1.5 0 0 1 14.25 15.75 Z",
+    )],
+    solid: &[],
+};
+
 /// The two solid triangles of first frame, pointing to the left.
 const TWO_LEFT: &str = "M9.25 12 L14.25 7.5 V16.5 Z M14.25 12 L19.25 7.5 V16.5 Z";
 

@@ -459,6 +459,7 @@ own files are. A twin marked "yes" also has a `<name>.solid.svg`.
 | --- | --- | --- |
 | `play` |  | A triangle that points to the right. Play. |
 | `stop` |  | A small square, well inside the square of maximize. Stop playing. |
+| `pause` |  | Two upright bars with round ends, side by side. Hold the playing where it is, to go on from there. |
 | `frame-first` |  | Two solid triangles that point to the left, the one at the front touching the back of the other, at an upright bar they run into. Go to the first frame. |
 | `frame-last` |  | Two solid triangles that point to the right, the one at the front touching the back of the other, at an upright bar they run into. Go to the last frame. |
 | `frame-prev` |  | A triangle that points to the left and leaves an upright bar behind it. One frame back. |
