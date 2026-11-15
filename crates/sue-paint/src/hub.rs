@@ -20,17 +20,14 @@ use std::path::{Path, PathBuf};
 
 use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, Vec2, pos2, vec2};
 use sue_core::{EntityId, Properties};
-use sue_wm::files::browser::{
-    COLUMN, lay_out, preview, show, sort_buttons, toolbar_frame, view_buttons,
-};
+use sue_wm::files::browser::{COLUMN, preview, show, sort_buttons, toolbar_frame, view_buttons};
 use sue_wm::files::thumbs::shrink;
 use sue_wm::files::{Thumb, Thumbnailer, View, texture_key};
 use sue_wm::icons::Icon;
 use sue_wm::start::{
-    self as page, Card, CardClick, Category, CategoryClick, Chosen, Glyph, PopupOutcome, Row,
-    Trailing,
+    self as page, CardClick, Category, CategoryClick, Chosen, Glyph, PopupOutcome, Row, Trailing,
 };
-use sue_wm::ui::{Density, Space, TextRole};
+use sue_wm::ui::{Density, Leading, ListRow, RowAction, Space, TextRole, Thumbnail, ThumbnailCard};
 use sue_wm::{
     AppletContext, AppletId, FilePick, HubPlace, ItemState, MenuBar, MenuItem, ShellRequest, Theme,
     TransferKind, TransferState, ago, unix_now,
@@ -552,11 +549,16 @@ impl SuePaint {
             .map(|entry| entry.id)
             .collect();
 
-        // The tree, with Add, Delete and the folder over it.
+        // The tree, with Add, Delete and the folder over it, inset as the
+        // Files place insets its labels so the two places line up.
+        let inset = theme.space(Space::S5);
         let right = if narrow {
             body
         } else {
-            let column = Rect::from_min_size(body.min, vec2(COLUMN, body.height()));
+            let column = Rect::from_min_size(
+                body.min + Vec2::splat(inset),
+                vec2(COLUMN, body.height() - inset * 2.0),
+            );
             let mut col = ui.new_child(
                 UiBuilder::new()
                     .max_rect(column)
@@ -634,7 +636,10 @@ impl SuePaint {
                     None => {}
                 }
             }
-            Rect::from_min_max(pos2(column.right() + 12.0, body.top()), body.max)
+            Rect::from_min_max(
+                pos2(column.right() + inset, body.top() + inset),
+                pos2(body.right() - inset, body.bottom()),
+            )
         };
 
         // Search, chips and the toolbar.
@@ -797,40 +802,31 @@ impl SuePaint {
             });
             return;
         }
-        let mut clicks = Vec::new();
         let view = state.view;
-        let cards: Vec<Card> = shown
+        let hover = if canvas {
+            tr!("start-click-to-put-on-canvas")
+        } else {
+            tr!("start-open-canvas-for-materials")
+        };
+        let pictures: Vec<_> = shown
             .iter()
-            .map(|entry| {
-                let picture = self.material_texture(entry, cx);
-                let kind = kinds
-                    .get(&entry.material.kind)
-                    .map(|kind| crate::localize(&kind.name))
-                    .unwrap_or_default();
-                Card {
-                    title: crate::localize(&entry.material.name),
-                    detail: kind,
-                    picture,
-                    placeholder: Glyph::Materials,
-                    favorite: Some(entry.favorite),
-                    chosen: state.chosen.contains(&entry.id),
-                    hover: if canvas {
-                        tr!("start-click-to-put-on-canvas")
-                    } else {
-                        tr!("start-open-canvas-for-materials")
-                    },
-                }
-            })
+            .map(|entry| self.material_texture(entry, cx))
             .collect();
+        let chosen: Vec<bool> = shown
+            .iter()
+            .map(|entry| state.chosen.contains(&entry.id))
+            .collect();
+        let mut clicks = Vec::new();
         egui::ScrollArea::vertical()
             .id_salt("sue-paint-materials")
             .auto_shrink([false, false])
             .show(&mut area, |ui| {
-                let width = ui.available_width();
-                lay_out(ui, width, view, &cards, theme, |index, click, response| {
+                let drawn = material_cards(ui, &shown, &pictures, &chosen, view, &kinds, theme);
+                for (index, click, response) in drawn {
                     if let Some(click) = click {
                         clicks.push((index, click));
                     }
+                    let response = response.on_hover_text(&hover);
                     response.context_menu(|ui| {
                         if ui
                             .add_enabled(canvas, egui::Button::new(tr!("paste-to-canvas")))
@@ -844,7 +840,7 @@ impl SuePaint {
                             ui.close();
                         }
                     });
-                });
+                }
             });
         for (index, click) in clicks {
             let Some(entry) = shown.get(index) else {
@@ -1032,6 +1028,130 @@ impl SuePaint {
             hub.armed = false;
         }
     }
+}
+
+/// Draws the materials `shown` as the Files place draws its files: as
+/// thumbnail cards that fill the rows evenly (`view` Large or Small), or
+/// as list rows, each with Favorite and Details at its end and a tick
+/// box for the toolbar. `pictures` and `chosen` go with `shown` one to
+/// one. Returns every card's click, if any, and its response.
+fn material_cards(
+    ui: &mut Ui,
+    shown: &[crate::materials::Entry],
+    pictures: &[Option<(egui::TextureId, [u32; 2])>],
+    chosen: &[bool],
+    view: View,
+    kinds: &crate::materials::MaterialKinds,
+    theme: &Theme,
+) -> Vec<(usize, Option<CardClick>, egui::Response)> {
+    let density = Density::of(ui);
+    let width = ui.available_width();
+    let gap = theme.space(Space::S5);
+    let (favorite, details, select) = (
+        tr!("start-favorite"),
+        tr!("start-details"),
+        tr!("start-select-all"),
+    );
+    // As many columns as cards of the view's smallest width fit, each
+    // stretched so that the rows end flush.
+    let size = (view != View::List).then(|| {
+        let least = theme.space(Space::S9) * if view == View::Large { 4.5 } else { 3.0 };
+        let columns = ((width + gap) / (least + gap)).floor().max(1.0) as usize;
+        let card = ((width - gap * (columns - 1) as f32) / columns as f32).floor();
+        (
+            columns,
+            vec2(card, card.round() + ListRow::height(theme, density, true)),
+        )
+    });
+    let mut drawn = Vec::new();
+    let mut one = |ui: &mut Ui, index: usize| {
+        let entry = &shown[index];
+        let title = crate::localize(&entry.material.name);
+        let kind = kinds
+            .get(&entry.material.kind)
+            .map(|kind| crate::localize(&kind.name))
+            .unwrap_or_default();
+        let actions = [
+            RowAction::new(Icon::Heart, &favorite).on(entry.favorite),
+            RowAction::new(Icon::Details, &details),
+        ];
+        let picture = pictures.get(index).copied().flatten();
+        let ticked_now = chosen.get(index).copied().unwrap_or(false);
+        let (response, ticked, action) = match size {
+            None => {
+                let leading = picture.map_or(Leading::Icon(Icon::Materials), |(texture, _)| {
+                    Leading::Picture(texture)
+                });
+                let row = ListRow::new(("sue-paint-material-row", entry.id), &title)
+                    .detail(&kind)
+                    .leading(leading)
+                    .actions(&actions)
+                    .selected(ticked_now)
+                    .width(width)
+                    .show(ui, theme);
+                (row.response, false, row.action)
+            }
+            Some((_, size)) => {
+                let thumbnail = picture.map_or(
+                    Thumbnail::Placeholder(Icon::Materials),
+                    |(texture, size)| Thumbnail::Picture(texture, size),
+                );
+                let out = ThumbnailCard::new(("sue-paint-material-card", entry.id), &title)
+                    .detail(&kind)
+                    .thumbnail(thumbnail)
+                    .actions(&actions)
+                    .selected(ticked_now)
+                    .tick(ticked_now, &select)
+                    .size(size)
+                    .show(ui, theme);
+                (out.response, out.ticked, out.action)
+            }
+        };
+        let click = if ticked {
+            Some(CardClick::Choose)
+        } else if let Some(action) = action {
+            Some(if action == 0 {
+                CardClick::Favorite
+            } else {
+                CardClick::Details
+            })
+        } else if response.clicked() {
+            let chooses = response
+                .ctx
+                .input(|input| input.modifiers.command || input.modifiers.shift);
+            Some(if chooses {
+                CardClick::Choose
+            } else {
+                CardClick::Open
+            })
+        } else {
+            None
+        };
+        drawn.push((index, click, response));
+    };
+    match size {
+        None => {
+            ui.spacing_mut().item_spacing.y = theme.space(Space::S1);
+            for index in 0..shown.len() {
+                one(ui, index);
+            }
+        }
+        Some((columns, _)) => {
+            let mut index = 0;
+            while index < shown.len() {
+                let end = (index + columns).min(shown.len());
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    for at in index..end {
+                        one(ui, at);
+                    }
+                });
+                ui.add_space(gap);
+                index = end;
+            }
+        }
+    }
+    drawn
 }
 
 /// The rows of the materials tree: All (with the kinds under it while
