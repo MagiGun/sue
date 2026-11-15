@@ -14,6 +14,7 @@ mod paint_canvas;
 mod paint_color;
 mod paint_dialogs;
 mod paint_dock;
+mod paint_handles;
 mod paint_layers;
 mod paint_saving;
 mod paint_start;
@@ -59,6 +60,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_tools::first_tab(tour);
     paint_layers::first_tab(tour);
     paint_canvas::launchers(tour)?;
+    paint_handles::scenes(tour)?;
     paint_dialogs::galleries(tour)?;
     paint_canvas::figure(tour)?;
     shell::sue_menu_in_paint(tour)?;
