@@ -25,6 +25,7 @@ sub	selection	Lasso
 sub	selection	Polyline
 sub	selection	Selection pen
 sub	selection	Erase selection
+sub	selection	Shrink selection
 tool	Auto Select	auto_select	W
 group	Auto Select
 sub	auto_select	Refer Only Editing Layer

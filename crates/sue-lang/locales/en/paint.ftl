@@ -2519,3 +2519,5 @@ ruler-show-in-same-folder = Show in same folder
 ruler-show-when-editing-target = Show only when editing target
 moves-picture-across-stroke = Moves the picture sideways across the stroke
 copies-picture-from-source = Copies the picture from where Alt and click set, as you paint
+# P4-1b: selection, fill, gradient on the canvas
+name-shrink-selection = Shrink selection
