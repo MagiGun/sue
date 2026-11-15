@@ -16,8 +16,24 @@ use crate::studio::SuePaint;
 /// How many control heights the label column of a slider row is wide.
 const LABEL_ROWS: f32 = 0.9;
 
-/// A slider row of the color palettes: `name`, the track and its field.
-/// `true` when the value changed.
+/// How many colors a color slider's track is painted with.
+const STOPS: usize = 13;
+
+/// The colors along a color slider's track: what `at(t)` gives from `t`
+/// 0 to 1.
+fn stops(at: impl Fn(f32) -> [u8; 3]) -> Vec<egui::Color32> {
+    (0..STOPS)
+        .map(|index| {
+            let [r, g, b] = at(index as f32 / (STOPS - 1) as f32);
+            egui::Color32::from_rgb(r, g, b)
+        })
+        .collect()
+}
+
+/// A slider row of the color palettes: `name`, the track (painted with
+/// `colors`, the color each place on it gives; none for a plain one) and
+/// its field. `true` when the value changed.
+#[allow(clippy::too_many_arguments, reason = "one row, said in full")]
 fn slider_row(
     ui: &mut Ui,
     salt: impl egui::AsIdSalt,
@@ -25,6 +41,7 @@ fn slider_row(
     value: &mut f32,
     range: std::ops::RangeInclusive<f64>,
     unit: &str,
+    colors: &[egui::Color32],
     theme: &Theme,
 ) -> bool {
     let mut wide = f64::from(*value);
@@ -33,6 +50,7 @@ fn slider_row(
         .label(name)
         .label_width(label)
         .suffix(unit)
+        .gradient(colors)
         .show(ui, theme);
     let changed = ui::tooltip(response, &ui::Tip::new(name), theme).changed();
     if changed {
@@ -223,6 +241,7 @@ impl SuePaint {
             &mut steps,
             2.0..=24.0,
             "",
+            &[],
             theme,
         ) {
             self.intermediate.1 = steps.round() as u32;
@@ -307,6 +326,7 @@ impl SuePaint {
             &mut spread,
             5.0..=100.0,
             "%",
+            &[],
             theme,
         ) {
             self.approximate.2 = spread / 100.0;
@@ -390,6 +410,11 @@ impl SuePaint {
                 let mut changed = false;
                 let names = [tr!("color-r"), tr!("color-g"), tr!("color-b")];
                 for (index, name) in names.iter().enumerate() {
+                    let colors = stops(|t| {
+                        let mut at = rgb;
+                        at[index] = (t * 255.0).round() as u8;
+                        at
+                    });
                     changed |= slider_row(
                         ui,
                         ("rgb", index),
@@ -397,6 +422,7 @@ impl SuePaint {
                         &mut values[index],
                         0.0..=255.0,
                         "",
+                        &colors,
                         theme,
                     );
                 }
@@ -413,12 +439,24 @@ impl SuePaint {
                 ];
                 let mut changed = false;
                 let names = [tr!("color-h"), tr!("color-s"), tr!("color-v")];
+                let now = [values[0], values[1] / 100.0, values[2] / 100.0];
                 for (index, name) in names.iter().enumerate() {
                     let (range, unit) = if index == 0 {
                         (0.0..=359.0, "\u{b0}")
                     } else {
                         (0.0..=100.0, "%")
                     };
+                    // Hue shows every hue at full strength, so it reads
+                    // even on a gray; saturation and value run between
+                    // the color's own ends.
+                    let colors = stops(|t| {
+                        let [h, s, v] = match index {
+                            0 => [t * 359.0, 1.0, 1.0],
+                            1 => [now[0], t, now[2]],
+                            _ => [now[0], now[1], t],
+                        };
+                        color::bytes(Hsv { h, s, v }.to_rgb())
+                    });
                     changed |= slider_row(
                         ui,
                         ("hsv", index),
@@ -426,6 +464,7 @@ impl SuePaint {
                         &mut values[index],
                         range,
                         unit,
+                        &colors,
                         theme,
                     );
                 }
@@ -450,7 +489,13 @@ impl SuePaint {
                     tr!("color-y"),
                     tr!("color-k"),
                 ];
+                let inks = values.map(|ink| ink / 100.0);
                 for (index, name) in names.iter().enumerate() {
+                    let colors = stops(|t| {
+                        let mut at = inks;
+                        at[index] = t;
+                        rgb_of_cmyk(at)
+                    });
                     changed |= slider_row(
                         ui,
                         ("cmyk", index),
@@ -458,6 +503,7 @@ impl SuePaint {
                         &mut values[index],
                         0.0..=100.0,
                         "%",
+                        &colors,
                         theme,
                     );
                 }
