@@ -58,6 +58,157 @@ pub const FOG: &str = "view3d.fog";
 /// How high the fog reaches, 0 (the model's foot) to 1 (its top)
 /// (`Float`).
 pub const FOG_HEIGHT: &str = "view3d.fog_height";
+/// Manga Perspective: how much more the parts nearest the camera grow, as
+/// in a drawn foreshortening, 0 (off) to 1 (`Float`). The model's middle
+/// keeps its size; the lens widens and the camera comes nearer.
+pub const MANGA: &str = "view3d.manga";
+
+/// Where the object stands on its 3D layer: across, up and toward the
+/// camera's front, in the units of its shape (`Float`, on the model).
+pub const OBJECT_X: &str = "object.x";
+/// See [`OBJECT_X`].
+pub const OBJECT_Y: &str = "object.y";
+/// See [`OBJECT_X`].
+pub const OBJECT_Z: &str = "object.z";
+/// How far the object is turned round its up axis, in degrees (`Float`).
+pub const OBJECT_YAW: &str = "object.yaw";
+/// How far it leans forward or back, in degrees (`Float`).
+pub const OBJECT_PITCH: &str = "object.pitch";
+/// How far it tilts to the side, in degrees (`Float`).
+pub const OBJECT_ROLL: &str = "object.roll";
+/// How large it is, 1 as made (`Float`).
+pub const OBJECT_SCALE: &str = "object.scale";
+
+/// The angles an object can be set to at once: a name and a turn round,
+/// a lean and a tilt, in degrees.
+pub const ANGLES: [(&str, [f32; 3]); 6] = [
+    ("Facing front", [0.0, 0.0, 0.0]),
+    ("Facing back", [180.0, 0.0, 0.0]),
+    ("Facing left", [90.0, 0.0, 0.0]),
+    ("Facing right", [-90.0, 0.0, 0.0]),
+    ("Lying face up", [0.0, -90.0, 0.0]),
+    ("Lying face down", [0.0, 90.0, 0.0]),
+];
+
+/// Where an object of a 3D layer stands, how it is turned and how large it
+/// is (Clip Studio Paint's Object scale, Position and Angle). It lives on
+/// the model entity, so every 3D layer showing the model shows it placed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Placement {
+    /// Across, up and forward.
+    pub position: [f32; 3],
+    /// Degrees round (about up), leaning (about across) and tilting (about
+    /// forward), applied in that order.
+    pub turn: [f32; 3],
+    /// How large, 1 as made.
+    pub scale: f32,
+}
+
+impl Default for Placement {
+    fn default() -> Self {
+        Self {
+            position: [0.0; 3],
+            turn: [0.0; 3],
+            scale: 1.0,
+        }
+    }
+}
+
+impl Placement {
+    /// The sizes people may choose.
+    pub const SCALES: std::ops::RangeInclusive<f32> = 0.05..=20.0;
+
+    /// The placement of model `entity`.
+    #[must_use]
+    pub fn of(entity: &Entity) -> Self {
+        let number = |key: &str, or: f32| {
+            entity
+                .property(key)
+                .and_then(Value::as_f64)
+                .map(|value| value as f32)
+                .filter(|value| value.is_finite())
+                .unwrap_or(or)
+        };
+        Self {
+            position: [
+                number(OBJECT_X, 0.0),
+                number(OBJECT_Y, 0.0),
+                number(OBJECT_Z, 0.0),
+            ],
+            turn: [
+                number(OBJECT_YAW, 0.0),
+                number(OBJECT_PITCH, 0.0),
+                number(OBJECT_ROLL, 0.0),
+            ],
+            scale: number(OBJECT_SCALE, 1.0).clamp(*Self::SCALES.start(), *Self::SCALES.end()),
+        }
+    }
+
+    /// `true` when it leaves the object as made.
+    #[must_use]
+    pub fn is_identity(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The turn as a matrix (columns are where x, y and z go).
+    #[must_use]
+    pub fn matrix(&self) -> [[f32; 3]; 3] {
+        let [yaw, pitch, roll] = self.turn.map(f32::to_radians);
+        let (sy, cy) = yaw.sin_cos();
+        let (sx, cx) = pitch.sin_cos();
+        let (sz, cz) = roll.sin_cos();
+        let ry = [[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]];
+        let rx = [[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]];
+        let rz = [[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]];
+        let mul = |a: &[[f32; 3]; 3], b: &[[f32; 3]; 3]| {
+            [0, 1, 2]
+                .map(|row| [0, 1, 2].map(|column| (0..3).map(|k| a[row][k] * b[k][column]).sum()))
+        };
+        mul(&mul(&ry, &rx), &rz)
+    }
+
+    /// Point `p` of the object as made, placed.
+    #[must_use]
+    pub fn apply(&self, p: [f32; 3]) -> [f32; 3] {
+        let m = self.matrix();
+        let s = p.map(|value| value * self.scale);
+        [0, 1, 2]
+            .map(|row| self.position[row] + m[row][0] * s[0] + m[row][1] * s[1] + m[row][2] * s[2])
+    }
+
+    /// Its properties and values, in a fixed order.
+    #[must_use]
+    pub fn values(&self) -> [(&'static str, f64); 7] {
+        [
+            (OBJECT_X, f64::from(self.position[0])),
+            (OBJECT_Y, f64::from(self.position[1])),
+            (OBJECT_Z, f64::from(self.position[2])),
+            (OBJECT_YAW, f64::from(self.turn[0])),
+            (OBJECT_PITCH, f64::from(self.turn[1])),
+            (OBJECT_ROLL, f64::from(self.turn[2])),
+            (OBJECT_SCALE, f64::from(self.scale)),
+        ]
+    }
+
+    /// The placement as property edits on `model`.
+    #[must_use]
+    pub fn edits(&self, model: EntityId) -> Vec<SetProperty> {
+        self.values()
+            .into_iter()
+            .map(|(key, value)| SetProperty::new(model, key, value))
+            .collect()
+    }
+
+    /// `mesh` placed.
+    #[must_use]
+    pub fn mesh(&self, mesh: &MeshBuffer3D) -> MeshBuffer3D {
+        if self.is_identity() {
+            return mesh.clone();
+        }
+        let positions = mesh.positions().iter().map(|p| self.apply(*p)).collect();
+        MeshBuffer3D::new(positions, mesh.indices().to_vec()).unwrap_or_else(|_| mesh.clone())
+    }
+}
 
 /// What people read for the styles, in order.
 pub const STYLES: [&str; 3] = ["Shaded", "Line art", "Shaded with lines"];
@@ -115,6 +266,8 @@ pub struct View3D {
     pub fog: f32,
     /// How high the fog reaches, 0 to 1 of the model's height.
     pub fog_height: f32,
+    /// Manga Perspective, 0 (off) to 1.
+    pub manga: f32,
 }
 
 impl Default for View3D {
@@ -137,6 +290,7 @@ impl Default for View3D {
             follow_light: false,
             fog: 0.0,
             fog_height: 0.5,
+            manga: 0.0,
         }
     }
 }
@@ -184,7 +338,25 @@ impl View3D {
                 .unwrap_or(still.follow_light),
             fog: number(FOG, still.fog).clamp(0.0, 1.0),
             fog_height: number(FOG_HEIGHT, still.fog_height).clamp(0.0, 1.0),
+            manga: number(MANGA, still.manga).clamp(0.0, 1.0),
         }
+    }
+
+    /// The widest lens Manga Perspective opens to, in degrees.
+    pub const MANGA_FOV: f32 = 90.0;
+
+    /// The field of view and distance the camera really has: as set, or,
+    /// with Manga Perspective, a lens opened toward [`Self::MANGA_FOV`]
+    /// from as much nearer as keeps the model's middle the same size.
+    #[must_use]
+    pub fn lens(&self) -> (f32, f32) {
+        let manga = self.manga.clamp(0.0, 1.0);
+        if manga <= 0.0 || self.fov >= Self::MANGA_FOV {
+            return (self.fov, self.distance);
+        }
+        let fov = self.fov + (Self::MANGA_FOV - self.fov) * manga;
+        let half = |degrees: f32| (degrees.to_radians() / 2.0).tan();
+        (fov, self.distance * half(self.fov) / half(fov))
     }
 
     /// The view from Clip Studio Paint's camera preset `index` in
@@ -203,31 +375,42 @@ impl View3D {
     /// The view as property edits on `layer`.
     #[must_use]
     pub fn edits(&self, layer: EntityId) -> Vec<SetProperty> {
+        self.values()
+            .into_iter()
+            .map(|(key, value)| SetProperty::new(layer, key, value))
+            .collect()
+    }
+
+    /// The view as the properties and values of its 3D layer.
+    #[must_use]
+    pub fn values(&self) -> Vec<(&'static str, Value)> {
         vec![
-            SetProperty::new(layer, YAW, f64::from(self.yaw)),
-            SetProperty::new(layer, PITCH, f64::from(self.pitch)),
-            SetProperty::new(layer, DISTANCE, f64::from(self.distance)),
-            SetProperty::new(layer, FOV, f64::from(self.fov)),
-            SetProperty::new(layer, LIGHT, f64::from(self.light)),
-            SetProperty::new(layer, STYLE, i64::from(self.style)),
-            SetProperty::new(layer, LINE_WIDTH, f64::from(self.line_width)),
-            SetProperty::new(layer, CREASE, f64::from(self.crease)),
-            SetProperty::new(layer, PAN_X, f64::from(self.pan[0])),
-            SetProperty::new(layer, PAN_Y, f64::from(self.pan[1])),
-            SetProperty::new(layer, INTENSITY, f64::from(self.intensity)),
-            SetProperty::new(layer, AMBIENT, f64::from(self.ambient)),
-            SetProperty::new(layer, SHADOWS, self.shadows),
-            SetProperty::new(
-                layer,
+            (YAW, Value::from(f64::from(self.yaw))),
+            (PITCH, Value::from(f64::from(self.pitch))),
+            (DISTANCE, Value::from(f64::from(self.distance))),
+            (FOV, Value::from(f64::from(self.fov))),
+            (LIGHT, Value::from(f64::from(self.light))),
+            (STYLE, Value::from(i64::from(self.style))),
+            (LINE_WIDTH, Value::from(f64::from(self.line_width))),
+            (CREASE, Value::from(f64::from(self.crease))),
+            (PAN_X, Value::from(f64::from(self.pan[0]))),
+            (PAN_Y, Value::from(f64::from(self.pan[1]))),
+            (INTENSITY, Value::from(f64::from(self.intensity))),
+            (AMBIENT, Value::from(f64::from(self.ambient))),
+            (SHADOWS, Value::from(self.shadows)),
+            (
                 LINE_COLOR,
-                i64::from(self.line_color[0]) << 16
-                    | i64::from(self.line_color[1]) << 8
-                    | i64::from(self.line_color[2]),
+                Value::from(
+                    i64::from(self.line_color[0]) << 16
+                        | i64::from(self.line_color[1]) << 8
+                        | i64::from(self.line_color[2]),
+                ),
             ),
-            SetProperty::new(layer, LINE_OPACITY, f64::from(self.line_opacity)),
-            SetProperty::new(layer, FOLLOW_LIGHT, self.follow_light),
-            SetProperty::new(layer, FOG, f64::from(self.fog)),
-            SetProperty::new(layer, FOG_HEIGHT, f64::from(self.fog_height)),
+            (LINE_OPACITY, Value::from(f64::from(self.line_opacity))),
+            (FOLLOW_LIGHT, Value::from(self.follow_light)),
+            (FOG, Value::from(f64::from(self.fog))),
+            (FOG_HEIGHT, Value::from(f64::from(self.fog_height))),
+            (MANGA, Value::from(f64::from(self.manga))),
         ]
     }
 }
@@ -446,10 +629,13 @@ impl Camera {
     pub fn new(view: &View3D, size: [u32; 2], frame: ([f32; 3], f32)) -> Self {
         let (middle, extent) = frame;
         let (yaw, pitch) = (view.yaw.to_radians(), view.pitch.to_radians());
+        // Manga Perspective: a wider lens from nearer, so the middle keeps
+        // its size and what comes toward the camera grows.
+        let (fov, distance) = view.lens();
         let eye = [
-            view.distance * pitch.cos() * yaw.sin(),
-            view.distance * pitch.sin(),
-            view.distance * pitch.cos() * yaw.cos(),
+            distance * pitch.cos() * yaw.sin(),
+            distance * pitch.sin(),
+            distance * pitch.cos() * yaw.cos(),
         ];
         let forward = normalized(sub([0.0; 3], eye));
         let right = normalized(cross(forward, [0.0, 1.0, 0.0]));
@@ -463,7 +649,7 @@ impl Camera {
             right,
             up,
             forward,
-            focal: (size[1] as f32 / 2.0) / (view.fov.to_radians() / 2.0).tan(),
+            focal: (size[1] as f32 / 2.0) / (fov.to_radians() / 2.0).tan(),
             size: [size[0] as f32, size[1] as f32],
         }
     }
@@ -471,21 +657,7 @@ impl Camera {
     /// The camera for `mesh`, framed by its own bounds.
     #[must_use]
     pub fn fitting(mesh: &MeshBuffer3D, view: &View3D, size: [u32; 2]) -> Self {
-        let (mut min, mut max) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
-        for p in mesh.positions() {
-            for axis in 0..3 {
-                min[axis] = min[axis].min(p[axis]);
-                max[axis] = max[axis].max(p[axis]);
-            }
-        }
-        if !min[0].is_finite() {
-            return Self::new(view, size, ([0.0; 3], 2.0));
-        }
-        let middle = [0, 1, 2].map(|axis| (min[axis] + max[axis]) / 2.0);
-        let extent = (0..3)
-            .map(|axis| max[axis] - min[axis])
-            .fold(0.0_f32, f32::max);
-        Self::new(view, size, (middle, extent))
+        Self::new(view, size, frame_of(mesh))
     }
 
     /// `p` (model units) in the world the camera orbits, and in the
@@ -522,6 +694,27 @@ impl Camera {
             [s[0], s[1]]
         })
     }
+}
+
+/// The middle and largest extent of `mesh`, which a camera frames it by
+/// (a box 2 wide round the middle when it has no points).
+#[must_use]
+pub fn frame_of(mesh: &MeshBuffer3D) -> ([f32; 3], f32) {
+    let (mut min, mut max) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+    for p in mesh.positions() {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(p[axis]);
+            max[axis] = max[axis].max(p[axis]);
+        }
+    }
+    if !min[0].is_finite() {
+        return ([0.0; 3], 2.0);
+    }
+    let middle = [0, 1, 2].map(|axis| (min[axis] + max[axis]) / 2.0);
+    let extent = (0..3)
+        .map(|axis| max[axis] - min[axis])
+        .fold(0.0_f32, f32::max);
+    (middle, extent)
 }
 
 /// The model `mesh` as `view` sees it on a `size` canvas: the depth,
@@ -829,9 +1022,26 @@ pub fn buffers_of(
     size: [u32; 2],
 ) -> Option<Buffers> {
     let model = arena.get_by_id(model_of(arena, layer)?).ok()?;
+    render_model(model, view, size, &Placement::of(model))
+}
+
+/// Model `model` placed as `place` says, as `view` sees it on a `size`
+/// canvas. A figure is framed by its body; any other shape by its own
+/// bounds as made, so placing it moves it on the canvas rather than the
+/// camera after it.
+#[must_use]
+pub fn render_model(
+    model: &Entity,
+    view: &View3D,
+    size: [u32; 2],
+    place: &Placement,
+) -> Option<Buffers> {
     if crate::figure::is_figure(model) {
         let pose = crate::figure::Pose::of(model);
-        let body = crate::figure::Body::of(model);
+        let body = crate::figure::Body {
+            place: *place,
+            ..crate::figure::Body::of(model)
+        };
         return Some(render_framed(
             &crate::figure::mesh(&pose, &body),
             view,
@@ -840,7 +1050,82 @@ pub fn buffers_of(
         ));
     }
     let mesh = model.ext::<Geometry>()?.to_mesh();
-    Some(render_buffers(&mesh, view, size))
+    if place.is_identity() {
+        return Some(render_buffers(&mesh, view, size));
+    }
+    Some(render_framed(
+        &place.mesh(&mesh),
+        view,
+        size,
+        Some(frame_of(&mesh)),
+    ))
+}
+
+/// How far below the ground (height 0) the lowest point of model `model`
+/// placed as `place` is: what Put on the ground lifts it by.
+#[must_use]
+pub fn lowest(model: &Entity, place: &Placement) -> Option<f32> {
+    let positions: Vec<[f32; 3]> = if crate::figure::is_figure(model) {
+        let body = crate::figure::Body {
+            place: *place,
+            ..crate::figure::Body::of(model)
+        };
+        crate::figure::mesh(&crate::figure::Pose::of(model), &body)
+            .positions()
+            .to_vec()
+    } else {
+        let mesh = model.ext::<Geometry>()?.to_mesh();
+        place.mesh(&mesh).positions().to_vec()
+    };
+    positions.iter().map(|p| p[1]).reduce(f32::min)
+}
+
+/// The edit that places the object of 3D layer `layer` as `place` and
+/// draws the layer again, as one step named `label`.
+#[must_use]
+pub fn set_placement(
+    arena: &Arena,
+    layer: EntityId,
+    place: &Placement,
+    label: &str,
+) -> Option<Edit> {
+    let model_id = model_of(arena, layer)?;
+    let model = arena.get_by_id(model_id).ok()?;
+    let raster = crate::doc::raster(arena, layer)?;
+    let view = View3D::of(arena.get_by_id(layer).ok()?);
+    let buffers = render_model(model, &view, [raster.width(), raster.height()], place)?;
+    let drawn = draw(&buffers, &view)?;
+    let mut edit = Edit::new(label);
+    for set in place.edits(model_id) {
+        edit = edit.then(set);
+    }
+    Some(edit.then(ReplaceComponent::new(layer, drawn, label)))
+}
+
+/// The edit that sets 3D layer `layer` to `view` and its object to
+/// `place` and draws the layer again, as one step named `label` (a drag
+/// of Tool Property that moved both).
+#[must_use]
+pub fn set_view_placed(
+    arena: &Arena,
+    layer: EntityId,
+    view: &View3D,
+    place: &Placement,
+    label: &str,
+) -> Option<Edit> {
+    let model_id = model_of(arena, layer)?;
+    let model = arena.get_by_id(model_id).ok()?;
+    let raster = crate::doc::raster(arena, layer)?;
+    let buffers = render_model(model, view, [raster.width(), raster.height()], place)?;
+    let drawn = draw(&buffers, view)?;
+    let mut edit = Edit::new(label);
+    for set in view.edits(layer) {
+        edit = edit.then(set);
+    }
+    for set in place.edits(model_id) {
+        edit = edit.then(set);
+    }
+    Some(edit.then(ReplaceComponent::new(layer, drawn, label)))
 }
 
 /// The edit that makes a 3D layer named `name` showing `model` (an
@@ -1193,5 +1478,125 @@ mod tests {
             &before[..],
             "undone"
         );
+    }
+
+    #[test]
+    fn an_object_is_placed_turned_sized_and_put_on_the_ground_as_one_step() {
+        let mut arena = Arena::new();
+        let (mut edit, picture_id) = crate::doc::create(&crate::doc::NewPicture {
+            width: 100,
+            height: 80,
+            ..crate::doc::NewPicture::default()
+        })
+        .unwrap();
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let model = Entity::empty("Cube", sue_model::class::MODEL).with_ext(shape(0));
+        let model_id = model.id();
+        let (mut edit, layer) = new_layer(&arena, picture_id, None, "Cube", model).unwrap();
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let pixels = |arena: &Arena| {
+            crate::doc::raster(arena, layer)
+                .unwrap()
+                .bytes()
+                .unwrap()
+                .to_vec()
+        };
+        let ink = |bytes: &[u8]| bytes.chunks(4).filter(|p| p[3] > 0).count();
+        let before = pixels(&arena);
+        let props_before = arena.get_by_id(model_id).unwrap().properties().clone();
+        // Placing as made changes nothing it draws.
+        let same = set_placement(&arena, layer, &Placement::default(), "Place").unwrap();
+        let mut same = same;
+        sue_core::ReversibleTransaction::apply(&mut same, &mut arena).unwrap();
+        assert_eq!(pixels(&arena), before, "as made draws as before");
+        sue_core::ReversibleTransaction::revert(&mut same, &mut arena).unwrap();
+        // Half the size draws less; the camera does not follow it.
+        let small = Placement {
+            scale: 0.5,
+            ..Placement::default()
+        };
+        let mut shrink = set_placement(&arena, layer, &small, "Object Scale").unwrap();
+        sue_core::ReversibleTransaction::apply(&mut shrink, &mut arena).unwrap();
+        assert!(ink(&pixels(&arena)) * 2 < ink(&before), "smaller");
+        assert_eq!(Placement::of(arena.get_by_id(model_id).unwrap()), small);
+        sue_core::ReversibleTransaction::revert(&mut shrink, &mut arena).unwrap();
+        assert_eq!(pixels(&arena), before, "undone");
+        assert_eq!(
+            arena.get_by_id(model_id).unwrap().properties(),
+            &props_before,
+            "no property left behind"
+        );
+        sue_core::ReversibleTransaction::apply(&mut shrink, &mut arena).unwrap();
+        assert_eq!(
+            Placement::of(arena.get_by_id(model_id).unwrap()),
+            small,
+            "redone"
+        );
+        // A turn about up moves a corner; Put on the ground lifts the cube
+        // so its lowest corner touches height 0.
+        let turned = Placement {
+            turn: [45.0, 30.0, 0.0],
+            ..small
+        };
+        let corner = turned.apply([1.0, 1.0, 1.0]);
+        assert!((corner[1] - small.apply([1.0, 1.0, 1.0])[1]).abs() > 0.05);
+        let model = arena.get_by_id(model_id).unwrap();
+        let low = lowest(model, &turned).unwrap();
+        assert!(low < 0.0, "the turned cube reaches below the ground: {low}");
+        let grounded = Placement {
+            position: [0.0, -low, 0.0],
+            ..turned
+        };
+        assert!(lowest(model, &grounded).unwrap().abs() < 1e-4);
+        // Kept on the model, and read back clamped.
+        let wild = Entity::empty("Cube", sue_model::class::MODEL)
+            .with_property(OBJECT_SCALE, Value::from(500.0))
+            .with_property(OBJECT_X, Value::from(f64::NAN));
+        let read = Placement::of(&wild);
+        assert_eq!(read.scale, 20.0);
+        assert_eq!(read.position[0], 0.0);
+    }
+
+    #[test]
+    fn manga_perspective_keeps_the_middle_and_grows_what_comes_near() {
+        let size = [200, 200];
+        let frame = ([0.0, 0.0, 0.0], 2.0);
+        let plain = View3D {
+            yaw: 0.0,
+            pitch: 0.0,
+            ..View3D::default()
+        };
+        let manga = View3D {
+            manga: 1.0,
+            ..plain
+        };
+        let (fov, distance) = manga.lens();
+        assert_eq!(fov, View3D::MANGA_FOV);
+        assert!(distance < plain.distance, "nearer");
+        let half = |degrees: f32| (degrees.to_radians() / 2.0).tan();
+        assert!((distance * half(fov) - plain.distance * half(plain.fov)).abs() < 1e-4);
+        assert_eq!(plain.lens(), (plain.fov, plain.distance), "off: as set");
+        let see = |view: &View3D, p: [f32; 3]| Camera::new(view, size, frame).project(p).unwrap();
+        // A point on the middle's plane shows where it did.
+        let side = [0.5, 0.0, 0.0];
+        assert!((see(&plain, side)[0] - see(&manga, side)[0]).abs() < 0.5);
+        // A point toward the camera shows further out.
+        let near = [0.5, 0.0, 0.8];
+        let spread = |view: &View3D| see(view, near)[0] - 100.0;
+        assert!(spread(&manga) > spread(&plain) * 1.2, "foreshortened");
+        // Kept as a property.
+        let mut arena = Arena::new();
+        let layer = Entity::empty("3D", CLASS);
+        let id = layer.id();
+        arena.insert_keep_id(layer).unwrap();
+        for mut set in (View3D {
+            manga: 0.4,
+            ..plain
+        })
+        .edits(id)
+        {
+            sue_core::ReversibleTransaction::apply(&mut set, &mut arena).unwrap();
+        }
+        assert!((View3D::of(arena.get_by_id(id).unwrap()).manga - 0.4).abs() < 1e-6);
     }
 }

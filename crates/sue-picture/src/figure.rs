@@ -36,6 +36,130 @@ pub const HEIGHT: &str = "figure.height";
 pub const HEADS: &str = "figure.heads";
 /// What the figure is: `body`, `hand` or `head` (`Text`).
 pub const KIND: &str = "figure.kind";
+/// A body's type: `male` or `female` (`Text`).
+pub const BUILD: &str = "figure.build";
+/// A body's shape on the body shape chart, whole and part by part (see
+/// [`Shape::to_text`], `Text`).
+pub const SHAPE: &str = "figure.shape";
+/// The head to body ratio follows the height, as a real person's does
+/// (`Bool`, Clip Studio Paint's Adjust head to body ratio with height).
+pub const FOLLOW: &str = "figure.follow_height";
+
+/// A body's type: how its shoulders, waist and hips are built.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Build {
+    /// Broad shoulders, narrow hips: the figure as Sue Paint has made it.
+    #[default]
+    Male,
+    /// Narrower shoulders and waist, wider hips.
+    Female,
+}
+
+impl Build {
+    /// Every type, in the order people see them.
+    pub const ALL: [Self; 2] = [Self::Male, Self::Female];
+
+    /// Its name in [`BUILD`].
+    #[must_use]
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Male => "male",
+            Self::Female => "female",
+        }
+    }
+
+    /// What people read, kept in English (`localize` shows it).
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Male => "Male",
+            Self::Female => "Female",
+        }
+    }
+
+    /// The type named `key`; male for anything else.
+    #[must_use]
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "female" => Self::Female,
+            _ => Self::Male,
+        }
+    }
+}
+
+/// The parts of a body the body shape chart shapes, in order: the first
+/// is the whole body, the rest add to it.
+pub const PARTS: [&str; 5] = ["Full body", "Head", "Upper body", "Arms", "Legs"];
+
+/// A body's place on the body shape chart, whole and part by part: across
+/// from thin (-1) to fat (1), up from less muscle (-1) to more (1).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Shape(pub [[f32; 2]; PARTS.len()]);
+
+impl Shape {
+    /// The shape as text: `v1;` then every part's `thin to fat,muscle`.
+    #[must_use]
+    pub fn to_text(&self) -> String {
+        let parts: Vec<String> = self
+            .0
+            .iter()
+            .map(|[fat, muscle]| format!("{fat},{muscle}"))
+            .collect();
+        format!("v1;{}", parts.join(";"))
+    }
+
+    /// The shape `text` holds; the plain one for anything unreadable, and
+    /// every value kept on the chart.
+    #[must_use]
+    pub fn from_text(text: &str) -> Self {
+        let mut shape = Self::default();
+        let Some(rest) = text.strip_prefix("v1;") else {
+            return shape;
+        };
+        for (part, pair) in shape.0.iter_mut().zip(rest.split(';')) {
+            let mut values = pair
+                .split(',')
+                .map(|value| value.trim().parse::<f32>().unwrap_or(0.0));
+            for value in part.iter_mut() {
+                let read = values.next().unwrap_or(0.0);
+                *value = if read.is_finite() {
+                    read.clamp(-1.0, 1.0)
+                } else {
+                    0.0
+                };
+            }
+        }
+        shape
+    }
+
+    /// Which part of [`PARTS`] joint `at` of [`JOINTS`] belongs to.
+    #[must_use]
+    pub fn part_of(at: usize) -> usize {
+        match at {
+            4 => 1,
+            0..=3 => 2,
+            5..=10 => 3,
+            _ => 4,
+        }
+    }
+
+    /// How much wider across and through joint `at` is drawn: the whole
+    /// body's place on the chart and its part's, added and kept on it.
+    #[must_use]
+    pub fn widths(&self, at: usize) -> [f32; 2] {
+        let part = Self::part_of(at);
+        let [fat, muscle] =
+            [0, 1].map(|axis| (self.0[0][axis] + self.0[part][axis]).clamp(-1.0, 1.0));
+        // The head and the trunk carry fat; the limbs carry muscle too.
+        let (bulk, depth) = match part {
+            1 => (0.05, 0.04),
+            2 => (0.1, 0.16),
+            _ => (0.22, 0.18),
+        };
+        let soft = 1.0 + 0.4 * fat;
+        [soft * (1.0 + bulk * muscle), soft * (1.0 + depth * muscle)]
+    }
+}
 
 /// What a figure is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -498,7 +622,8 @@ pub const JOINTS: [Joint; 17] = [
 pub const FRAME: ([f32; 3], f32) = ([0.0, 0.95, 0.0], 2.1);
 
 /// The figure's body shape: how tall, and how many heads tall, and what
-/// kind of figure it is.
+/// kind of figure it is, its type and its place on the body shape chart,
+/// and where it stands on its 3D layer.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Body {
     /// Centimeters.
@@ -507,6 +632,14 @@ pub struct Body {
     pub heads: f32,
     /// A body, a hand or a head.
     pub kind: Kind,
+    /// A body's type (hands and heads have none).
+    pub build: Build,
+    /// A body's place on the body shape chart.
+    pub shape: Shape,
+    /// The head to body ratio follows the height.
+    pub follow: bool,
+    /// Where it stands, how it is turned and how large it is.
+    pub place: crate::three::Placement,
 }
 
 impl Body {
@@ -537,7 +670,102 @@ impl Body {
                 .property(KIND)
                 .and_then(Value::as_str)
                 .map_or(Kind::Body, Kind::from_key),
+            build: entity
+                .property(BUILD)
+                .and_then(Value::as_str)
+                .map_or(Build::Male, Build::from_key),
+            shape: entity
+                .property(SHAPE)
+                .and_then(Value::as_str)
+                .map_or_else(Shape::default, Shape::from_text),
+            follow: entity
+                .property(FOLLOW)
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            place: crate::three::Placement::of(entity),
         }
+    }
+
+    /// The head to body ratio of a person `height` centimeters tall, as
+    /// Adjust head to body ratio with height sets it: four heads at 50 cm,
+    /// seven and a half at 170, kept among [`Self::RATIOS`].
+    #[must_use]
+    pub fn heads_for(height: f32) -> f32 {
+        (4.0 + 3.5 * (height - 50.0) / (Self::HEIGHT - 50.0))
+            .clamp(*Self::RATIOS.start(), *Self::RATIOS.end())
+    }
+
+    /// The same body `height` tall, its ratio following when it follows.
+    #[must_use]
+    pub fn with_height(self, height: f32) -> Self {
+        let height = height.clamp(*Self::HEIGHTS.start(), *Self::HEIGHTS.end());
+        Self {
+            height,
+            heads: if self.follow {
+                Self::heads_for(height)
+            } else {
+                self.heads
+            },
+            ..self
+        }
+    }
+
+    /// The same body with its shape as made: height, ratio, type and chart
+    /// back to Sue Paint's (Clip Studio Paint's Initialize). Its kind and
+    /// where it stands stay.
+    #[must_use]
+    pub fn initialized(self) -> Self {
+        Self {
+            kind: self.kind,
+            place: self.place,
+            ..Self::default()
+        }
+    }
+
+    /// The body shape as text, for a body shape material: one `key=value`
+    /// line each for the type, height, ratio, chart and whether the ratio
+    /// follows the height.
+    #[must_use]
+    pub fn shape_text(&self) -> String {
+        format!(
+            "build={}\nheight={}\nheads={}\nshape={}\nfollow={}\n",
+            self.build.key(),
+            self.height,
+            self.heads,
+            self.shape.to_text(),
+            self.follow,
+        )
+    }
+
+    /// This body shaped as `text` ([`Self::shape_text`]) says; what it
+    /// does not say stays. `None` when it says nothing readable.
+    #[must_use]
+    pub fn with_shape_text(self, text: &str) -> Option<Self> {
+        let mut body = self;
+        let mut read = false;
+        for line in text.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let value = value.trim();
+            let number = value.parse::<f32>().ok().filter(|v| v.is_finite());
+            match key.trim() {
+                "build" => body.build = Build::from_key(value),
+                "height" => {
+                    let Some(height) = number else { continue };
+                    body.height = height.clamp(*Self::HEIGHTS.start(), *Self::HEIGHTS.end());
+                }
+                "heads" => {
+                    let Some(heads) = number else { continue };
+                    body.heads = heads.clamp(*Self::RATIOS.start(), *Self::RATIOS.end());
+                }
+                "shape" => body.shape = Shape::from_text(value),
+                "follow" => body.follow = value == "true",
+                _ => continue,
+            }
+            read = true;
+        }
+        read.then_some(body)
     }
 
     /// The middle and size Sue Paint frames this figure by, so posing
@@ -586,7 +814,7 @@ impl Body {
     /// chibi, not a thin adult.
     #[must_use]
     pub fn joints(&self) -> Vec<Joint> {
-        let scale = self.height / Self::HEIGHT;
+        let scale = self.height / Self::HEIGHT * self.place.scale;
         let scaled = |joints: &[Joint]| -> Vec<Joint> {
             joints
                 .iter()
@@ -607,7 +835,15 @@ impl Body {
         let head = Self::HEADS / self.heads;
         let rest = (1.0 - 1.0 / self.heads) / (1.0 - 1.0 / Self::HEADS);
         let mut joints = JOINTS;
+        if self.build == Build::Female {
+            built_female(&mut joints);
+        }
         for (at, joint) in joints.iter_mut().enumerate() {
+            let [across, through] = self.shape.widths(at);
+            for half in [&mut joint.start, &mut joint.end] {
+                half[0] *= across;
+                half[1] *= through;
+            }
             if at == HEAD {
                 joint.bone = joint.bone.map(|value| value * head * scale);
                 joint.start = joint.start.map(|value| value * head * scale);
@@ -631,7 +867,38 @@ impl Default for Body {
             height: Self::HEIGHT,
             heads: Self::HEADS,
             kind: Kind::Body,
+            build: Build::Male,
+            shape: Shape::default(),
+            follow: false,
+            place: crate::three::Placement::default(),
         }
+    }
+}
+
+/// [`JOINTS`] built as a female body: shoulders, chest, waist, neck and
+/// arms narrower, hips and thighs set wider.
+fn built_female(joints: &mut [Joint; 17]) {
+    let across = |joint: &mut Joint, by: f32| {
+        joint.start[0] *= by;
+        joint.end[0] *= by;
+    };
+    // The hips wider, the waist, chest and neck narrower.
+    across(&mut joints[0], 1.12);
+    across(&mut joints[1], 0.86);
+    across(&mut joints[2], 0.88);
+    across(&mut joints[3], 0.86);
+    for arm in [5, 6, 7, 8, 9, 10] {
+        let joint = &mut joints[arm];
+        joint.start = joint.start.map(|value| value * 0.9);
+        joint.end = joint.end.map(|value| value * 0.9);
+    }
+    // Shoulders in, legs out.
+    for shoulder in [5, 8] {
+        joints[shoulder].offset[0] *= 0.88;
+    }
+    for thigh in [11, 14] {
+        joints[thigh].offset[0] *= 1.1;
+        joints[thigh].start[0] *= 1.06;
     }
 }
 
@@ -933,6 +1200,10 @@ fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 #[must_use]
 pub fn solve(pose: &Pose, body: &Body) -> Vec<([f32; 3], Mat3)> {
     let mut placed: Vec<([f32; 3], Mat3)> = Vec::with_capacity(JOINTS.len());
+    // Where the body stands: the root placed, everything else hanging
+    // from it (its size is in the joints already).
+    let stand = body.place.matrix();
+    let root = |offset: [f32; 3]| add(body.place.position, apply(&stand, offset));
     for (at, joint) in body.joints().iter().enumerate() {
         let turn = euler(pose.0.get(at).copied().unwrap_or([0.0; 3]));
         let (position, rotation) = match joint.parent {
@@ -940,7 +1211,7 @@ pub fn solve(pose: &Pose, body: &Body) -> Vec<([f32; 3], Mat3)> {
                 let (from, frame) = placed[parent];
                 (add(from, apply(&frame, joint.offset)), mul(&frame, &turn))
             }
-            None => (joint.offset, turn),
+            None => (root(joint.offset), mul(&stand, &turn)),
         };
         placed.push((position, rotation));
     }
@@ -1210,12 +1481,19 @@ pub fn set_body(arena: &Arena, layer: EntityId, body: &Body, label: &str) -> Opt
     let pose = Pose::of(arena.get_by_id(model).ok()?);
     let buffers = crate::three::render_framed(&mesh(&pose, body), &view, size, Some(body.frame()));
     let drawn = crate::three::draw(&buffers, &view)?;
-    Some(
-        Edit::new(label)
-            .then(SetProperty::new(model, HEIGHT, f64::from(body.height)))
-            .then(SetProperty::new(model, HEADS, f64::from(body.heads)))
-            .then(ReplaceComponent::new(layer, drawn, label)),
-    )
+    let mut edit = Edit::new(label)
+        .then(SetProperty::new(model, HEIGHT, f64::from(body.height)))
+        .then(SetProperty::new(model, HEADS, f64::from(body.heads)));
+    if body.kind == Kind::Body {
+        edit = edit
+            .then(SetProperty::new(model, BUILD, body.build.key()))
+            .then(SetProperty::new(model, SHAPE, body.shape.to_text()))
+            .then(SetProperty::new(model, FOLLOW, body.follow));
+    }
+    for set in body.place.edits(model) {
+        edit = edit.then(set);
+    }
+    Some(edit.then(ReplaceComponent::new(layer, drawn, label)))
 }
 
 #[cfg(test)]
@@ -1259,7 +1537,7 @@ mod tests {
             Body {
                 height: 180.0,
                 heads: 10.0,
-                kind: Kind::Body,
+                ..Body::default()
             }
         );
     }
@@ -1359,5 +1637,142 @@ mod tests {
         let text = Pose(vec![[1.0, 2.0, 3.0]; 17]).to_text();
         assert_eq!(Pose::from_text_for(&text, 16).0.len(), 16);
         assert!(!geometry(&fist, &body).to_mesh().indices().is_empty());
+    }
+
+    #[test]
+    fn body_types_are_built_their_own_way() {
+        let male = Body::default();
+        let female = Body {
+            build: Build::Female,
+            ..male
+        };
+        let rest = Pose::rest();
+        let width = |body: &Body, joint: usize| body.joints()[joint].start[0];
+        let shoulder = |body: &Body| bones(&rest, body)[5].0[0];
+        let hip = |body: &Body| bones(&rest, body)[11].0[0];
+        assert!(shoulder(&female) < shoulder(&male), "narrower shoulders");
+        assert!(hip(&female) > hip(&male), "legs set wider");
+        assert!(width(&female, 0) > width(&male, 0), "wider hips");
+        assert!(width(&female, 1) < width(&male, 1), "a narrower waist");
+        // Kept as a property; anything else reads as male.
+        let model = new_model("Figure").with_property(BUILD, Value::from("female"));
+        assert_eq!(Body::of(&model).build, Build::Female);
+        assert_eq!(Build::from_key("nonsense"), Build::Male);
+        for build in Build::ALL {
+            assert_eq!(Build::from_key(build.key()), build);
+        }
+    }
+
+    #[test]
+    fn the_body_shape_chart_shapes_the_whole_body_and_each_part() {
+        let plain = Body::default();
+        let mut fat = plain;
+        fat.shape.0[0] = [1.0, 0.0];
+        let mut strong_arms = plain;
+        strong_arms.shape.0[3] = [0.0, 1.0];
+        let across = |body: &Body, joint: usize| body.joints()[joint].start[0];
+        for joint in 0..JOINTS.len() {
+            assert!(across(&fat, joint) > across(&plain, joint) * 1.3, "{joint}");
+        }
+        assert!(across(&strong_arms, 5) > across(&plain, 5) * 1.15, "an arm");
+        assert_eq!(across(&strong_arms, 11), across(&plain, 11), "not a leg");
+        // Thin and fat add and stay on the chart.
+        let mut both = fat;
+        both.shape.0[4] = [1.0, 0.0];
+        assert_eq!(across(&both, 12), across(&fat, 12));
+        // Lengths never change: the chart is width only.
+        assert_eq!(
+            bones(&Pose::rest(), &fat)[16],
+            bones(&Pose::rest(), &plain)[16]
+        );
+        // As text, and read back clamped.
+        let mut shape = Shape::default();
+        shape.0[2] = [0.25, -0.5];
+        assert_eq!(Shape::from_text(&shape.to_text()), shape);
+        assert_eq!(Shape::from_text("v1;9,-9").0[0], [1.0, -1.0]);
+        assert_eq!(Shape::from_text("nonsense"), Shape::default());
+        assert_eq!(Shape::from_text("v1;NaN,x").0[0], [0.0, 0.0]);
+        assert_eq!(PARTS.len(), 5);
+        for joint in 0..JOINTS.len() {
+            assert!(Shape::part_of(joint) > 0 && Shape::part_of(joint) < PARTS.len());
+        }
+    }
+
+    #[test]
+    fn the_head_to_body_ratio_can_follow_the_height() {
+        assert!((Body::heads_for(Body::HEIGHT) - Body::HEADS).abs() < 1e-4);
+        assert!((Body::heads_for(50.0) - 4.0).abs() < 1e-4);
+        assert!(Body::heads_for(250.0) <= *Body::RATIOS.end());
+        let free = Body::default().with_height(100.0);
+        assert_eq!(free.heads, Body::HEADS, "free: the ratio stays");
+        let following = Body {
+            follow: true,
+            ..Body::default()
+        }
+        .with_height(100.0);
+        assert!(following.heads < 6.0, "a child: {}", following.heads);
+        assert_eq!(Body::default().with_height(9999.0).height, 250.0);
+        // Initialize keeps the kind and where it stands.
+        let moved = Body {
+            build: Build::Female,
+            heads: 3.0,
+            place: crate::three::Placement {
+                position: [1.0, 0.0, 0.0],
+                ..crate::three::Placement::default()
+            },
+            ..Body::default()
+        };
+        let fresh = moved.initialized();
+        assert_eq!(fresh.build, Build::Male);
+        assert_eq!(fresh.heads, Body::HEADS);
+        assert_eq!(fresh.place, moved.place);
+    }
+
+    #[test]
+    fn a_body_shape_round_trips_as_text() {
+        let mut body = Body {
+            build: Build::Female,
+            height: 150.0,
+            heads: 6.0,
+            follow: true,
+            ..Body::default()
+        };
+        body.shape.0[1] = [0.5, 0.25];
+        let read = Body::default().with_shape_text(&body.shape_text()).unwrap();
+        assert_eq!(read, body);
+        assert!(Body::default().with_shape_text("nothing here").is_none());
+        let partial = Body::default()
+            .with_shape_text("height=999\nheads=x")
+            .unwrap();
+        assert_eq!(partial.height, 250.0);
+        assert_eq!(partial.heads, Body::HEADS, "unreadable stays");
+    }
+
+    #[test]
+    fn a_placed_figure_moves_turns_and_grows_whole() {
+        let rest = Pose::rest();
+        let still = Body::default();
+        let moved = Body {
+            place: crate::three::Placement {
+                position: [0.5, 0.0, 0.0],
+                turn: [90.0, 0.0, 0.0],
+                scale: 2.0,
+            },
+            ..still
+        };
+        let a = bones(&rest, &still);
+        let b = bones(&rest, &moved);
+        // The hips stand twice as high and moved across.
+        assert!((b[0].0[1] - a[0].0[1] * 2.0).abs() < 1e-4);
+        assert!((b[0].0[0] - 0.5).abs() < 1e-4);
+        // Turned a quarter round: the left shoulder (+x) is now toward -z.
+        assert!(b[5].0[2] < -0.2, "{:?}", b[5].0);
+        // The framing stays, so a placed figure moves on the canvas.
+        assert_eq!(moved.frame(), still.frame());
+        // A posed joint still turns everything hanging from it.
+        let mut raised = rest.clone();
+        raised.0[5] = [0.0, 0.0, 90.0];
+        assert_ne!(bones(&raised, &moved)[7], b[7]);
+        assert_eq!(bones(&raised, &moved)[16], b[16]);
     }
 }
