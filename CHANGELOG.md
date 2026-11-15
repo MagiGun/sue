@@ -177,6 +177,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint: a floating palette has a slim header in place of a window
+  title bar: its name and menu, and buttons to roll it up to the
+  header, dock it again and hide it. Dragging the header moves it, and
+  over the dock docks it. Tabs can be dragged along a header to reorder
+  them, and the palette menus, palette tabs and the buttons that hide or
+  fold a side use Sue's shared menus, icons and focus rings.
+
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait
@@ -330,6 +337,12 @@ follow [Semantic Versioning](https://semver.org/).
   crash in the middle loses at most the last change kept.
 
 ### Fixed
+
+- Sue Paint: each palette shows its name once, on its tab in the
+  palette's header, instead of a tab and a second title under it. In a
+  narrow column the tabs no longer cut their names in the middle ("Color
+  Wh"): when the names do not all fit, tabs show their icons and name
+  themselves on hover, with the key that shows the palette.
 
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
