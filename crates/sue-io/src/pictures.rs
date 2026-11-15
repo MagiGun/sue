@@ -448,6 +448,20 @@ fn crc32(kind: &[u8], data: &[u8]) -> u32 {
 /// If there are no frames, they differ in size or format, or encoding
 /// fails.
 pub fn encode_gif_animation(frames: &[RasterTile2D], delay_ms: u32) -> Result<Vec<u8>, String> {
+    encode_gif_animation_looping(frames, delay_ms, None)
+}
+
+/// An animated GIF of `frames`, each shown `delay_ms`, played `loops`
+/// times (`None` for ever).
+///
+/// # Errors
+/// No frames, frames of different sizes or not RGBA8, or the encoder
+/// failing.
+pub fn encode_gif_animation_looping(
+    frames: &[RasterTile2D],
+    delay_ms: u32,
+    loops: Option<u16>,
+) -> Result<Vec<u8>, String> {
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame};
     let first = frames.first().ok_or("an animation needs frames")?;
@@ -456,7 +470,7 @@ pub fn encode_gif_animation(frames: &[RasterTile2D], delay_ms: u32) -> Result<Ve
     {
         let mut encoder = GifEncoder::new_with_speed(&mut out, 10);
         encoder
-            .set_repeat(Repeat::Infinite)
+            .set_repeat(loops.map_or(Repeat::Infinite, Repeat::Finite))
             .map_err(|error| error.to_string())?;
         for tile in frames {
             if tile.width() != width
@@ -498,6 +512,30 @@ mod tests {
         assert!(encode_gif_animation(&[], 80).is_err());
         let other = RasterTile2D::from_bytes(2, 2, PixelFormat::Rgba8, vec![0; 16]).unwrap();
         assert!(encode_gif_animation(&[frame(0), other], 80).is_err());
+    }
+
+    #[test]
+    fn an_animated_gif_says_how_often_it_loops() {
+        let frame = RasterTile2D::from_bytes(2, 2, PixelFormat::Rgba8, vec![9; 16]).unwrap();
+        // The loop count follows the NETSCAPE2.0 name, little end first;
+        // 0 loops for ever.
+        let count = |bytes: &[u8]| {
+            let at = bytes
+                .windows(11)
+                .position(|window| window == b"NETSCAPE2.0")
+                .expect("a loop extension");
+            u16::from_le_bytes([bytes[at + 13], bytes[at + 14]])
+        };
+        let frames = [frame.clone(), frame];
+        assert_eq!(count(&encode_gif_animation(&frames, 50).unwrap()), 0);
+        assert_eq!(
+            count(&encode_gif_animation_looping(&frames, 50, Some(3)).unwrap()),
+            3
+        );
+        assert_eq!(
+            count(&encode_gif_animation_looping(&frames, 50, None).unwrap()),
+            0
+        );
     }
 
     #[test]
