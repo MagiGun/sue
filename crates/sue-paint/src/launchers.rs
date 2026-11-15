@@ -358,6 +358,14 @@ fn menu_commands(menus: &[sue_wm::Menu]) -> Vec<(String, String)> {
     for menu in menus {
         walk(&menu.items, &menu.title, &mut out);
     }
+    // What a selection is for comes first: the Select menu's commands,
+    // then Edit's, Layer's and Filter's, then the rest, each in menu order.
+    out.sort_by_key(|(command, _)| {
+        ["select.", "edit.", "layer.", "filter."]
+            .iter()
+            .position(|prefix| command.starts_with(prefix))
+            .unwrap_or(4)
+    });
     out
 }
 
@@ -399,7 +407,7 @@ impl SuePaint {
             .and_then(|()| sue_platform::fs::write(folder.join(SELECTION_FILE), text));
         if let Err(error) = written {
             cx.fail(tr!(
-                "cannot-keep-the-palettes-settings",
+                "cannot-keep-the-selection-launcher",
                 error = error.to_string()
             ));
         }
@@ -526,6 +534,7 @@ impl SuePaint {
                     RowAction::new(Icon::Close, &off),
                 ];
                 let mut act = None;
+                crate::transform_ui::caption(ui, &tr!("launcher-on-it"), theme);
                 egui::ScrollArea::vertical()
                     .id_salt("sue-paint-launcher-buttons")
                     .max_height(row * 7.0)
@@ -568,9 +577,12 @@ impl SuePaint {
                     changed = true;
                 }
                 sue_wm::ui::divider(ui, theme);
-                sue_wm::ui::search_field("sue-paint-launcher-search", &mut search)
-                    .hint(&tr!("add-a-command"))
+                crate::transform_ui::caption(ui, &tr!("launcher-to-add"), theme);
+                let hint = tr!("add-a-command");
+                let field = sue_wm::ui::search_field("sue-paint-launcher-search", &mut search)
+                    .hint(&hint)
                     .show(ui, theme);
+                sue_wm::ui::tooltip(field, &Tip::new(&hint), theme);
                 let needle = search.to_lowercase();
                 let plus = tr!("add-to-launcher");
                 let add = [RowAction::new(Icon::Plus, &plus)];
@@ -607,28 +619,24 @@ impl SuePaint {
                     });
                 sue_wm::ui::divider(ui, theme);
                 ui.horizontal(|ui| {
-                    if sue_wm::ui::button(
-                        "sue-paint-launcher-separator",
-                        &tr!("launcher-add-separator"),
-                    )
-                    .icon(Icon::Minus)
-                    .show(ui, theme)
-                    .clicked()
-                    {
+                    let name = tr!("launcher-add-separator");
+                    let pressed = sue_wm::ui::button("sue-paint-launcher-separator", &name)
+                        .icon(Icon::Minus)
+                        .show(ui, theme);
+                    if pressed.clicked() {
                         items.push(SEPARATOR.to_owned());
                         changed = true;
                     }
-                    if sue_wm::ui::button(
-                        "sue-paint-launcher-default",
-                        &tr!("launcher-restore-default"),
-                    )
-                    .icon(Icon::Reset)
-                    .show(ui, theme)
-                    .clicked()
-                    {
+                    sue_wm::ui::tooltip(pressed, &Tip::new(&name), theme);
+                    let name = tr!("launcher-restore-default");
+                    let pressed = sue_wm::ui::button("sue-paint-launcher-default", &name)
+                        .icon(Icon::Reset)
+                        .show(ui, theme);
+                    if pressed.clicked() {
                         items = default_items();
                         changed = true;
                     }
+                    sue_wm::ui::tooltip(pressed, &Tip::new(&name), theme);
                 });
             },
         );
@@ -1047,5 +1055,14 @@ mod tests {
                 "{name} is in a menu, so Settings can add it back"
             );
         }
+        // The Select menu's commands are offered first, not File's.
+        assert!(offered[0].0.starts_with("select."), "{:?}", offered[0]);
+        let first_file = offered
+            .iter()
+            .position(|(command, _)| command.starts_with("file."));
+        let last_select = offered
+            .iter()
+            .rposition(|(command, _)| command.starts_with("select."));
+        assert!(first_file > last_select, "{first_file:?} {last_select:?}");
     }
 }
