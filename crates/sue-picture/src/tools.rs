@@ -51,6 +51,18 @@ pub const POLYLINE_BALLOON: u8 = 8;
 /// The Frame Border tool's polyline frame (0 is the rectangle, 1 the
 /// division).
 pub const POLYLINE_FRAME: u8 = 2;
+/// The Operation tool's Light table and Edit timeline sub tools, by
+/// mode (0 is Object, 1 Select layer).
+pub const OPERATION_LIGHT_TABLE: u8 = 2;
+pub const OPERATION_EDIT_TIMELINE: u8 = 3;
+/// What the Object sub tool picks (Selectable object), as bits of
+/// [`SubTool::objects`]: vector lines, raster layers (it moves them), the
+/// comic parts (frame borders and effect lines), 3D layers, the camera.
+pub const PICKS_VECTOR: u8 = 1;
+pub const PICKS_RASTER: u8 = 2;
+pub const PICKS_COMIC: u8 = 4;
+pub const PICKS_3D: u8 = 8;
+pub const PICKS_CAMERA: u8 = 16;
 /// The Figure tool's effect lines, by mode.
 pub const SATURATED_LINES: u8 = 5;
 pub const SPEED_LINES: u8 = 6;
@@ -473,8 +485,14 @@ impl Tool {
                     },
                 ]
             }
-            // Clip Studio Paint's Operation group.
-            Self::Operation => vec![plain("Object", 0), plain("Select layer", 1)],
+            // Clip Studio Paint's Operation group: Light table drags the
+            // light table's layers, Edit timeline steps the frames.
+            Self::Operation => vec![
+                plain("Object", 0),
+                plain("Select layer", 1),
+                plain("Light table", OPERATION_LIGHT_TABLE),
+                plain("Edit timeline", OPERATION_EDIT_TIMELINE),
+            ],
             Self::Decoration => brushes(self),
         }
     }
@@ -612,6 +630,20 @@ pub struct SubTool {
     /// The Figure tool's rectangles and polygons: how round their
     /// corners are, in picture pixels (Roundness of corner; 0 sharp).
     pub roundness: f32,
+    /// What the Object sub tool picks, bits of `PICKS_*` (Selectable
+    /// object).
+    pub objects: u8,
+    /// What the Object sub tool does on a raster layer where the click
+    /// lands on no paint (Operation of transparent part): 0 moves the
+    /// layer all the same, 1 picks the layer painted there and moves it,
+    /// 2 nothing.
+    pub transparent: u8,
+    /// Move layer moves the layer painted where the click lands, not the
+    /// current one (Move the object at the clicked position).
+    pub move_clicked: bool,
+    /// The layer [`Self::move_clicked`] moves becomes the current one
+    /// (Moved layers become selected).
+    pub move_select: bool,
 }
 
 impl SubTool {
@@ -653,6 +685,10 @@ impl SubTool {
             smart_shape: true,
             corners: 5,
             roundness: 0.0,
+            objects: PICKS_VECTOR | PICKS_RASTER | PICKS_COMIC | PICKS_3D | PICKS_CAMERA,
+            transparent: 0,
+            move_clicked: false,
+            move_select: true,
         }
     }
 

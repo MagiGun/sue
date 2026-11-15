@@ -14,6 +14,8 @@ tool	Operation	operation	O
 group	Operation
 sub	operation	Object
 sub	operation	Select layer
+sub	operation	Light table
+sub	operation	Edit timeline
 tool	Move Layer	move_layer	K
 group	Move Layer
 sub	move_layer	Move Layer

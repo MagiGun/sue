@@ -344,12 +344,11 @@ pub(crate) enum Gesture {
         start: Pos2,
         turn: bool,
     },
-    /// Moving a layer.
+    /// Moving layers (one, or a folder's): each layer, where it was and
+    /// its position properties before.
     Move {
-        layer: EntityId,
+        layers: Vec<(EntityId, [i64; 2], [Option<Value>; 2])>,
         start: Pos2,
-        origin: [i64; 2],
-        old: [Option<Value>; 2],
     },
     /// Picking colors while the button is down.
     Pick { mode: u8 },
@@ -365,6 +364,16 @@ pub(crate) enum Gesture {
         sub: Box<crate::tools::SubTool>,
         op: Op,
         points: Vec<[f32; 2]>,
+    },
+    /// A drag that scrubs: the Zoom tool's zoom, or the Operation tool's
+    /// Edit timeline through the frames; from `start` on screen, with the
+    /// zoom or the frame it began at.
+    Scrub {
+        tool: crate::tools::Tool,
+        sub: Box<crate::tools::SubTool>,
+        start: Pos2,
+        base: f32,
+        moved: bool,
     },
 }
 
@@ -757,6 +766,18 @@ pub struct SuePaint {
     /// A Figure line under way between clicks: a Curve to bend, a
     /// Bezier Curve's handles (see `canvas/shape.rs`).
     pub(crate) figure_draft: crate::canvas::FigureDraft,
+    /// What the modifier keys, the wheel and the right and middle
+    /// buttons do on the canvas, read from its file on first use.
+    pub(crate) modifier_keys: Option<crate::modifier_keys::ModifierKeys>,
+    /// A tool picked by holding its key, to go back from when the key
+    /// comes up.
+    pub(crate) held_tool: Option<crate::modifier_keys::HeldTool>,
+    /// The transform under way was started by Move layer to move the
+    /// selected pixels, and ends when the drag does.
+    pub(crate) move_lift: bool,
+    /// How a turn of the view snaps: its step in degrees (0 turns
+    /// freely), and whether Shift snaps it (by that step, else 45).
+    pub(crate) turning: (f32, bool),
 }
 
 impl Default for SuePaint {
@@ -934,6 +955,10 @@ impl Default for SuePaint {
             kept_styles: Vec::new(),
             pen_stream: Vec::new(),
             figure_draft: crate::canvas::FigureDraft::default(),
+            modifier_keys: None,
+            held_tool: None,
+            move_lift: false,
+            turning: (0.0, true),
         }
     }
 }

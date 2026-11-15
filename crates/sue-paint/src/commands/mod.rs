@@ -85,8 +85,11 @@ impl SuePaint {
     pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) {
         // Words being typed are kept before anything else happens.
         self.finish_typing(cx);
-        // A tool's command (from a script or Auto Actions) picks the tool.
+        // A tool's command (a key, a script or Auto Actions) picks the
+        // tool; while its key is held down, only until the key comes up.
+        let before = self.tool_state();
         if command.starts_with("tool.") && self.tool_key(command, cx) {
+            self.hold_tool_key(command, before);
             return;
         }
         // Studio Mode's keys T1 to T7 run the commands the rice names.
@@ -138,6 +141,8 @@ impl SuePaint {
     /// The studio's shortcuts (the shell already took undo, redo, save,
     /// open, Settings and the command palette).
     pub(crate) fn keys(&mut self, ctx: &egui::Context, cx: &mut AppletContext<'_>) {
+        // A tool picked by holding its key goes back once the key is up.
+        self.follow_held_tool(ctx, cx);
         // Puppet warp keeps Enter and Esc for itself.
         if ctx.text_edit_focused()
             || self.dialog.is_some()
@@ -154,7 +159,9 @@ impl SuePaint {
             ctx.input_mut(|input| bound.take(input, cx.rice(), KEYS_SECTION, shortcut_table()));
         let registry = crate::commands::registry();
         for name in taken {
+            let before = self.tool_state();
             if self.tool_key(name, cx) {
+                self.hold_tool_key(name, before);
                 continue;
             }
             if registry.has(name) {

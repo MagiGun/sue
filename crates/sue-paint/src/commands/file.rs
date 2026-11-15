@@ -466,15 +466,11 @@ fn shortcuts(_: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 }
 
 fn modifiers(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    let rice = cx.rice();
-    let chosen = crate::dialogs::MODIFIERS.map(|(key, _, choices)| {
-        let now = rice.get_str(key).unwrap_or(choices[0]);
-        choices
-            .iter()
-            .position(|choice| *choice == now)
-            .unwrap_or(0)
-    });
-    paint.dialog = Some(Dialog::Modifiers(chosen));
+    let map = paint.modifier_map(cx).clone();
+    let tool = paint.toolbox.tool();
+    paint.dialog = Some(Dialog::Modifiers(Box::new(
+        crate::dialogs::ModifiersDialog::new(map, tool),
+    )));
 }
 
 fn command_bar(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {

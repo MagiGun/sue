@@ -236,11 +236,7 @@ impl SuePaint {
         if !keep {
             return;
         }
-        let label = if session.free {
-            tr!("free-transform")
-        } else {
-            tr!("scale-rotate")
-        };
+        let label = self.transform_label(session.free);
         if let Some(after) = &after
             && let Some(patch) =
                 doc::diff_patch(&session.before, after, session.size[0], session.size[1])
@@ -323,11 +319,7 @@ impl SuePaint {
         {
             bytes.copy_from_slice(&session.before);
         }
-        let label = if session.free {
-            tr!("free-transform")
-        } else {
-            tr!("scale-rotate")
-        };
+        let label = self.transform_label(session.free);
         let offset = [session.offset[0] + low[0], session.offset[1] + low[1]];
         let edit = sue_core::txn::Batch::new(label.clone())
             .then(sue_core::txn::ReplaceComponent::new(

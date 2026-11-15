@@ -34,6 +34,27 @@ follow [Semantic Versioning](https://semver.org/).
   perspective ruler's plane. A figure on a vector layer stays a vector
   line. Saturated and speed lines land on a layer named after their
   sub tool.
+- Sue Paint, File, Modifier Key Settings is rebuilt: for every tool
+  (General) or one tool, say what each key held on the canvas does
+  (the tool's own use, change tool temporarily to any tool or sub tool,
+  change brush size), what the mouse wheel does with each key (zoom,
+  rotate, scroll, brush size) and what the right and middle buttons do.
+  Ctrl alone can now be set (to rotate the view, say). Changed rows are
+  kept in a file you can share (docs/paint-modifier-keys.md).
+- Sue Paint: Ctrl held borrows the Object tool, which moves a raster
+  layer and picks vector lines; Alt picks a color with Fill and
+  Gradient too; Ctrl and Alt size the Blend tool's brush.
+- Sue Paint: hold a tool's key (E for the Eraser) to use that tool only
+  while the key is down; let go and the tool before is back.
+- Sue Paint: the Rotate tool snaps to 45 degrees with Shift, or to its
+  Snap angle; the Zoom tool zooms as you drag across the canvas.
+- Sue Paint: Move layer moves only what is selected when there is a
+  selection, and every layer of a folder when a folder is current.
+- Sue Paint: the Operation tool's Select layer picks every layer painted
+  in a box you drag out, and the Operation tool has Light table and Edit
+  timeline sub tools (a click steps a frame, a drag scrubs the frames).
+- Sue Paint: the Eyedropper's Obtain layer color on an empty spot picks
+  the transparent color.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
