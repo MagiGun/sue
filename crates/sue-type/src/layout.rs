@@ -149,8 +149,9 @@ impl Ink {
 /// alone; a theme that gives its roles a hue colors them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PageMarks {
-    /// Behind selected text while the editor has the keyboard (with its
-    /// alpha: it is laid over the paper and under the text).
+    /// Behind selected text while the editor has the keyboard. Like
+    /// every wash here it is opaque, the role mixed into the paper, so it
+    /// shows as worked out whatever space the screen blends in.
     pub selection: Color32,
     /// Behind selected text while something else has the keyboard.
     pub selection_idle: Color32,
@@ -162,27 +163,27 @@ pub struct PageMarks {
     pub inserted: Color32,
     /// Text a tracked change deleted (also struck through).
     pub deleted: Color32,
-    /// Behind words a comment is on (with its alpha).
+    /// Behind words a comment is on.
     pub comment: Color32,
-    /// Behind the words of a footnote or an endnote (with its alpha).
+    /// Behind the words of a footnote or an endnote.
     pub note: Color32,
     /// The shadow under a page in page view.
     pub page_shadow: Shadow,
 }
 
-/// How strongly the selection washes the paper, at most, and the least a
-/// wash may keep while the text over it still has to read.
-const SELECTION_WASH: f32 = 0.30;
+/// How far the selection mixes its color into the paper, at most: less
+/// where the text over it would no longer read.
+const SELECTION_WASH: f32 = 0.24;
 /// The least wash that still shows on the paper.
-const LEAST_WASH: f32 = 0.10;
-/// An idle selection, a comment and a note wash the paper this much of
-/// the selection's.
-const IDLE_SHARE: f32 = 0.55;
+const LEAST_WASH: f32 = 0.08;
+/// An idle selection, a comment and a note mix the text color into the
+/// paper this much of the selection's wash.
+const IDLE_SHARE: f32 = 0.5;
 /// See [`IDLE_SHARE`].
-const COMMENT_SHARE: f32 = 0.45;
+const COMMENT_SHARE: f32 = 0.55;
 /// See [`IDLE_SHARE`].
-const NOTE_SHARE: f32 = 0.22;
-/// A hued theme's comment and note washes, as alpha.
+const NOTE_SHARE: f32 = 0.28;
+/// How far a hued theme's comment and note colors mix into the paper.
 const HUED_COMMENT: f32 = 0.33;
 /// See [`HUED_COMMENT`].
 const HUED_NOTE: f32 = 0.17;
@@ -205,16 +206,6 @@ fn reading(role: Color32, text: Color32, paper: Color32, ratio: f32) -> Color32 
         .map(|step| mix(role, text, step as f32 / 20.0))
         .find(|color| contrast(*color, paper) >= ratio)
         .unwrap_or(text)
-}
-
-/// `color` with alpha `alpha`, kept unmultiplied.
-fn washed(color: Color32, alpha: f32) -> Color32 {
-    Color32::from_rgba_unmultiplied(
-        color.r(),
-        color.g(),
-        color.b(),
-        (alpha.clamp(0.0, 1.0) * 255.0).round() as u8,
-    )
 }
 
 impl PageMarks {
@@ -243,7 +234,7 @@ impl PageMarks {
             offset: [0, 2],
             blur: 8,
             spread: 0,
-            color: washed(Color32::BLACK, 0.25),
+            color: Color32::from_black_alpha(64),
         };
         Self::with(ink, None, None, None, None, None, shadow)
     }
@@ -270,12 +261,12 @@ impl PageMarks {
             wash -= 0.02;
         }
         let tint = |role: Option<Color32>, share: f32, hued: f32| match role {
-            Some(role) => washed(role, hued),
-            None => washed(text, wash * share),
+            Some(role) => mix(paper, role, hued),
+            None => mix(paper, text, wash * share),
         };
         Self {
-            selection: washed(base, wash),
-            selection_idle: washed(text, wash * IDLE_SHARE),
+            selection: mix(paper, base, wash),
+            selection_idle: mix(paper, text, wash * IDLE_SHARE),
             handle: reading(focus.unwrap_or(text), text, paper, EDGE_CONTRAST),
             misspelt: danger.map_or(text, |role| reading(role, text, paper, EDGE_CONTRAST)),
             inserted: info.map_or(text, |role| reading(role, text, paper, TEXT_CONTRAST)),
