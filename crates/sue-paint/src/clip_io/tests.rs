@@ -420,6 +420,9 @@ fn the_clip_sue_0_0_75_wrote_opens_from_its_copy() {
     );
     let (arena, picture) = picture_arena(&bytes).unwrap();
     assert!(doc::layers(&arena, picture).len() > 2);
+    // Opened again while it is open: nothing to bring in, the same canvas.
+    let (again, _) = open(&arena, &bytes, "picture", "Open").unwrap();
+    assert!(matches!(again, Opened::Copy(None, id) if id == picture));
 }
 
 #[test]
