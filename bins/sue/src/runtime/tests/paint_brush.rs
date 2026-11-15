@@ -1852,6 +1852,37 @@ fn sue_paint_a_vector_layers_mask_takes_strokes() {
     );
 }
 
+/// With the layer's transparent pixels locked, a stroke across a line
+/// recolors the line where it crosses (and adds nothing off it).
+#[test]
+fn sue_paint_locked_transparent_pixels_still_take_paint() {
+    let mut paint = new_engine("paint-engine-lock-paints");
+    let middle = paint.middle();
+    paint.slow(
+        middle - vec2(120.0, 0.0),
+        middle + vec2(120.0, 0.0),
+        egui::Modifiers::NONE,
+    );
+    let before = paint.layers().last().unwrap().2.clone();
+    paint.command("layer.toggle.lock_alpha");
+    // The sub color (white), so the crossing shows.
+    paint.command("color.swap");
+    paint.slow(
+        middle - vec2(0.0, 100.0),
+        middle + vec2(0.0, 100.0),
+        egui::Modifiers::NONE,
+    );
+    let after = paint.layers().last().unwrap().2.clone();
+    let alphas = |bytes: &[u8]| bytes.iter().skip(3).step_by(4).copied().collect::<Vec<_>>();
+    assert_eq!(alphas(&after), alphas(&before), "no alpha changed");
+    let recolored = before
+        .chunks(4)
+        .zip(after.chunks(4))
+        .filter(|(a, b)| a[3] > 0 && a[..3] != b[..3])
+        .count();
+    assert!(recolored > 50, "the crossing took the new color: {recolored} px");
+}
+
 /// The Blend tool on a layer with keyframes on is refused like a brush:
 /// nothing changes and nothing goes on the undo stack.
 #[test]
