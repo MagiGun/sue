@@ -23,6 +23,7 @@ mod paint_cmd_story;
 mod paint_cmd_tool;
 mod paint_comic;
 mod paint_edit;
+mod paint_figure;
 mod paint_files;
 mod paint_filter;
 mod paint_hub;
