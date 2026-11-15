@@ -142,6 +142,7 @@ impl SuePaint {
     /// which cels this frame shows.
     pub(crate) fn animate(&mut self, cx: &mut AppletContext<'_>, ctx: &egui::Context) {
         let now = cx.view.now;
+        self.sound_export_ui(cx, ctx);
         // An older project's cels go into their animation folders once a
         // session (undo takes that back and it stays back).
         if let Some(picture) = self.picture()
@@ -171,24 +172,39 @@ impl SuePaint {
         };
         let looping = self.looping;
         let onion = self.onion;
+        // Playback runs over the playback range (its markers on the
+        // ruler), from the frame it started on.
+        let (first, last) = self
+            .picture()
+            .map_or((0, length.saturating_sub(1)), |picture| {
+                anim::setup::Settings::of(&cx.world.arena, picture).range(length)
+            });
+        let span = i64::from(last - first + 1);
         let mut moved = None;
+        let mut lap = None;
         if let Some(doc) = self.doc_mut()
             && let Some((started, from)) = doc.playing
         {
             let elapsed = now.saturating_duration_since(started).as_secs_f64();
-            let frame = i64::from(from) + (elapsed * anim::fps(&sequence)) as i64;
-            if !looping && frame >= i64::from(length) {
+            let begin = i64::from(from.clamp(first, last) - first);
+            let gone = begin + (elapsed * anim::fps(&sequence)) as i64;
+            if !looping && gone >= span {
                 doc.playing = None;
-                moved = Some(i64::from(length) - 1);
+                moved = Some(i64::from(last));
             } else {
-                moved = Some(frame);
+                moved = Some(i64::from(first) + gone.rem_euclid(span));
+                lap = Some(gone.div_euclid(span));
             }
             ctx.request_repaint();
         }
         if let Some(frame) = moved {
             self.go_to_frame(&cx.world.arena, frame);
+            self.measure_playback(now, frame as u32);
+        } else {
+            self.anim_ui.clock = None;
+            self.anim_ui.measured = 0.0;
         }
-        self.sync_audio(cx, &sequence, length, moved);
+        self.sync_audio(cx, &sequence, lap.zip(moved));
         let settings = self
             .picture()
             .map(|picture| anim::Onion::of(&cx.world.arena, picture))
@@ -249,13 +265,24 @@ impl SuePaint {
         };
         if let Some(doc) = self.doc_mut() {
             let playing = doc.playing.is_some();
-            let mut view = anim::view_in(
+            // The frame as it plays: layer keyframes, clips and folder
+            // cels, with onion skin while it stands still.
+            let mut view = anim::frame_view(
                 arena,
                 doc.picture,
-                &sequence,
                 doc.frame,
                 (onion && !playing).then_some(&settings),
-            );
+                Some(false),
+            )
+            .unwrap_or_else(|| {
+                anim::view_in(
+                    arena,
+                    doc.picture,
+                    &sequence,
+                    doc.frame,
+                    (onion && !playing).then_some(&settings),
+                )
+            });
             view.cameras = cameras_at(doc.frame);
             if !playing {
                 view = view
@@ -272,19 +299,17 @@ impl SuePaint {
         &mut self,
         cx: &mut AppletContext<'_>,
         sequence: &sue_model::Sequence,
-        length: u32,
-        playing_at: Option<i64>,
+        playing_at: Option<(i64, i64)>,
     ) {
         const OWNER: &str = "sue-paint";
-        let Some(at) = playing_at.filter(|_| self.doc().is_some_and(|doc| doc.playing.is_some()))
+        let Some((lap, at)) =
+            playing_at.filter(|_| self.doc().is_some_and(|doc| doc.playing.is_some()))
         else {
             if self.audio_lap.take().is_some() && cx.transport.is_playing_for(OWNER) {
                 cx.transport.stop(cx.audio.as_deref_mut());
             }
             return;
         };
-        let length = i64::from(length.max(1));
-        let lap = at.div_euclid(length);
         if self.audio_lap == Some(lap) {
             return;
         }
@@ -299,6 +324,15 @@ impl SuePaint {
                 for clip in track.clips() {
                     clip.source.hash(&mut hasher);
                     clip.start.flicks().hash(&mut hasher);
+                    // A sound changed in Audio Clip Settings, or its
+                    // volume, mixes again.
+                    clip.duration.flicks().hash(&mut hasher);
+                    anim::volume_of(clip).to_bits().hash(&mut hasher);
+                    cx.world
+                        .arena
+                        .get_by_id(clip.source)
+                        .map_or(0, |entity| entity.revision())
+                        .hash(&mut hasher);
                 }
             }
             hasher.finish()
@@ -314,7 +348,7 @@ impl SuePaint {
         let Some((_, mixed)) = self.audio_mix.clone() else {
             return;
         };
-        let seconds = at.rem_euclid(length) as f64 / anim::fps(sequence).max(1.0);
+        let seconds = at.max(0) as f64 / anim::fps(sequence).max(1.0);
         let start = (seconds * f64::from(anim::MIX_RATE)) as usize;
         let end = mixed.frames();
         if start >= end {
@@ -353,6 +387,30 @@ impl SuePaint {
         if Self::apply(cx, edit) {
             self.light_table = true;
             self.light_cel = true;
+        }
+    }
+
+    /// Measures how many frames a second playback reaches, for the bar's
+    /// readout.
+    fn measure_playback(&mut self, now: std::time::Instant, frame: u32) {
+        match self.anim_ui.clock {
+            Some((since, seen)) if seen != frame => {
+                let seconds = now.saturating_duration_since(since).as_secs_f64();
+                if seconds > 0.0 {
+                    // Frames passed (one at a wrap to the range's start).
+                    let passed = if frame > seen { frame - seen } else { 1 };
+                    let fps = f64::from(passed) / seconds;
+                    // Smoothed, so the number does not flicker.
+                    self.anim_ui.measured = if self.anim_ui.measured > 0.0 {
+                        self.anim_ui.measured * 0.8 + fps * 0.2
+                    } else {
+                        fps
+                    };
+                }
+                self.anim_ui.clock = Some((now, frame));
+            }
+            Some(_) => {}
+            None => self.anim_ui.clock = Some((now, frame)),
         }
     }
 }

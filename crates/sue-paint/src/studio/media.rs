@@ -375,45 +375,48 @@ impl SuePaint {
         ));
     }
 
-    /// Writes each animation cel as a picture of its own, named for it, next
-    /// to `path`.
+    /// Writes each animation cel as a picture of its own, flattened (a
+    /// folder cel with everything in it), named for it. With the
+    /// settings' "a folder for each animation folder" (the default, as
+    /// Clip Studio Paint does it), each animation folder's cels go in a
+    /// folder of that name beside `path`, so cel "1" of two folders never
+    /// overwrites the other; without it, the files are `<name>-<folder>-
+    /// <cel>` beside `path`.
     pub(super) fn export_cels(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
+        let form = self.anim_ui.pending.cels.take().unwrap_or_default();
         let Some(picture) = self.picture() else {
             return;
         };
-        let Some(sequence) = crate::anim::timeline(&cx.world.arena, picture) else {
+        if crate::anim::timeline(&cx.world.arena, picture).is_none() {
             cx.fail(tr!("make-timeline-first-animation-timeline-new"));
             return;
-        };
-        let mut cels: Vec<EntityId> = crate::anim::folders(sequence)
-            .into_iter()
-            .flat_map(|index| crate::anim::keys(&sequence.tracks[index], sequence.rate))
-            .filter_map(|(_, cel)| cel)
-            .collect();
-        cels.sort();
-        cels.dedup();
+        }
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
         }
         let extension = path.extension().map_or_else(
-            || "png".to_owned(),
+            || {
+                sue_io::PICTURE_SAVE_TYPES
+                    .get(form.format)
+                    .and_then(|(_, extensions)| extensions.first())
+                    .map_or_else(|| "png".to_owned(), |ext| (*ext).to_owned())
+            },
             |ext| ext.to_string_lossy().to_ascii_lowercase(),
         );
         let stem = path
             .file_stem()
             .map_or_else(|| tr!("cel"), |stem| stem.to_string_lossy().into_owned());
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let mut written = 0;
-        for cel in cels {
-            let (Some(raster), Ok(entity)) = (
-                doc::raster(&cx.world.arena, cel),
-                cx.world.arena.get_by_id(cel),
-            ) else {
-                continue;
-            };
-            let name: String = entity
-                .name()
-                .chars()
+        let size = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(sue_model::picture::size)
+            .unwrap_or([1, 1]);
+        // A file name of `text`, its odd characters made plain.
+        let plain = |text: &str| -> String {
+            text.chars()
                 .map(|c| {
                     if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
                         c
@@ -421,15 +424,56 @@ impl SuePaint {
                         '_'
                     }
                 })
-                .collect();
-            let target = dir.join(format!("{stem}-{name}.{extension}"));
-            match sue_io::encode_as(raster, &extension, 92, 7)
-                .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
-            {
-                Ok(()) => written += 1,
-                Err(error) => {
-                    cx.fail(tr!("cannot-export-2", name = name, error = error));
-                    return;
+                .collect()
+        };
+        let mut written = 0;
+        for (folder, cels) in self.cels_by_folder(&cx.world.arena) {
+            let folder = plain(&folder);
+            let into = if form.per_folder {
+                dir.join(&folder)
+            } else {
+                dir.clone()
+            };
+            if let Err(error) = sue_platform::fs::create_dir_all(&into) {
+                cx.fail(tr!(
+                    "cannot-export-2",
+                    name = folder,
+                    error = error.to_string()
+                ));
+                return;
+            }
+            for cel in cels {
+                let Ok(entity) = cx.world.arena.get_by_id(cel) else {
+                    continue;
+                };
+                let name = plain(entity.name());
+                let tile = crate::composite::thumbnail(&cx.world.arena, cel, size)
+                    .and_then(|(pixels, [width, height])| {
+                        sue_core::RasterTile2D::from_bytes(
+                            width,
+                            height,
+                            sue_core::PixelFormat::Rgba8,
+                            pixels,
+                        )
+                        .ok()
+                    })
+                    .or_else(|| doc::raster(&cx.world.arena, cel).cloned());
+                let Some(tile) = tile else {
+                    continue;
+                };
+                let file = if form.per_folder {
+                    format!("{name}.{extension}")
+                } else {
+                    format!("{stem}-{folder}-{name}.{extension}")
+                };
+                match sue_io::encode_as(&tile, &extension, 92, 7).and_then(|bytes| {
+                    write_atomic(&into.join(file), &bytes).map_err(|error| error.to_string())
+                }) {
+                    Ok(()) => written += 1,
+                    Err(error) => {
+                        cx.fail(tr!("cannot-export-2", name = name, error = error));
+                        return;
+                    }
                 }
             }
         }

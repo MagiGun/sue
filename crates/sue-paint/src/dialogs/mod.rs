@@ -22,6 +22,7 @@ use sue_wm::{AppletContext, Theme, widgets};
 use crate::filters::Filter;
 use crate::studio::SuePaint;
 
+pub(crate) use anim::AnimDialog;
 use anim::{onion_ui, timelapse_ui, timeline_ui};
 use canvas::{
     canvas_properties_ui, canvas_ui, convert_ui, material_ui, perspective_ui, print_ui, proof_ui,
@@ -121,6 +122,9 @@ pub(crate) enum Dialog {
     Convert(sue_core::EntityId, u8, String),
     /// File, Manage Fonts: Sue's shared font list.
     Fonts(sue_wm::fonts::FontManager),
+    /// A dialog of the timeline (New Timeline, the animation exports,
+    /// Audio Clip Settings and the rest).
+    Anim(Box<AnimDialog>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -199,6 +203,7 @@ impl Dialog {
             Dialog::StoryEditor(_) => (tr!("story-editor"), vec2(520.0, 520.0)),
             Dialog::Convert(..) => (tr!("convert-layer"), vec2(360.0, 190.0)),
             Dialog::Fonts(_) => (tr!("manage-fonts"), sue_wm::fonts::MANAGE_SIZE),
+            Dialog::Anim(dialog) => (dialog.title(), dialog.size()),
             Dialog::Correction(_, filter, ..) => (
                 filter.label(),
                 vec2(
@@ -412,6 +417,7 @@ impl SuePaint {
             Dialog::Canvas(canvas) => canvas_ui(ui, canvas, theme),
             Dialog::Resolution(resolution) => resolution_ui(ui, resolution, theme),
             Dialog::Shortcuts => shortcuts_ui(ui, cx, size, change_keys, theme),
+            Dialog::Anim(dialog) => dialog.ui(ui, theme),
             Dialog::Fonts(manager) => {
                 if sue_wm::fonts::manage_ui(ui, manager, theme) {
                     Outcome::Ok
@@ -472,6 +478,7 @@ impl SuePaint {
             }
             Dialog::Canvas(canvas) => self.canvas_ok(cx, &canvas),
             Dialog::Resolution(resolution) => self.resolution_ok(cx, &resolution),
+            Dialog::Anim(dialog) => self.anim_dialog_ok(cx, *dialog),
             Dialog::Message(..)
             | Dialog::Shortcuts
             | Dialog::Pages(_)
@@ -520,7 +527,8 @@ impl SuePaint {
             | Dialog::StoryEditor(_)
             | Dialog::Convert(..)
             | Dialog::Shortcuts
-            | Dialog::Fonts(_) => {}
+            | Dialog::Fonts(_)
+            | Dialog::Anim(_) => {}
         }
     }
 }

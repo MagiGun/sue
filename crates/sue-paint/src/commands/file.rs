@@ -339,19 +339,9 @@ fn export_animation(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call
     paint.ask_export_animation(cx, call.name);
 }
 
-/// Export each animation cel as a picture.
-fn export_cels(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    let name = picture_name(paint, cx, &tr!("cel"));
-    cx.request(ShellRequest::PickFile(
-        FilePick::save(
-            Some(me_id()),
-            "anim-cels",
-            &tr!("export-animation-cels"),
-            &format!("{name}.png"),
-        )
-        .types(picture_types())
-        .starting_in(paint.last_dir.clone()),
-    ));
+/// Export each animation cel as a picture: its settings first.
+fn export_cels(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    paint.ask_export_animation(cx, call.name);
 }
 
 /// Batch export: a story's pages, else every open canvas.

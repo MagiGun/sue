@@ -100,8 +100,8 @@ fn every_animation_command_runs_and_each_change_undoes_and_redoes() {
         }
     }
     // The commands that change the picture did, and were undone.
+    // (New Timeline opens its dialog, which Escape closed.)
     for name in [
-        "anim.timeline.new",
         "anim.layer.folder",
         "anim.layer.camera",
         "anim.cel.new",
@@ -305,8 +305,9 @@ fn light_table_and_camera_commands_undo_and_redo() {
         assert!(arena_bytes(runtime) == after, "{name}: redo");
     };
 
-    // A cel on frame 1, and two layers to trace from.
-    command(&mut runtime, "anim.timeline.new");
+    // A cel on frame 1, and two layers to trace from. (New Animation
+    // Folder makes the timeline with its folder; New Timeline asks first.)
+    command(&mut runtime, "anim.layer.folder");
     command(&mut runtime, "anim.cel.new");
     command(&mut runtime, "layer.new");
     one_step(&mut runtime, "anim.light_table.register");

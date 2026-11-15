@@ -56,33 +56,28 @@ impl SuePaint {
             );
             return true;
         }
+        // A family (`anim.thumbnails.small`): the entry whose prefix it
+        // starts with, the rest its argument.
+        if let Some((entry, arg)) = COMMANDS.iter().find_map(|entry| {
+            command
+                .strip_prefix(entry.name)
+                .filter(|arg| entry.flags.has(Flags::FAMILY) && !arg.is_empty())
+                .map(|arg| (entry, arg))
+        }) {
+            (entry.run)(self, cx, Call { name: command, arg });
+            return true;
+        }
         false
     }
 }
 
 // ----- Run: the timeline ----------------------------------------------------
 
-/// New Timeline: a timeline of 24 frames at 24 per second, opened on its
-/// first folder; a canvas that has one says where it is edited.
+/// New Timeline: a dialog for its name, frame rate, length and the rest
+/// (Clip Studio Paint's New timeline). It makes no folder: every layer
+/// gets a track. A canvas with a timeline keeps it one pick away.
 fn timeline_new(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    let Some(here) = paint.here(&cx.world.arena) else {
-        return;
-    };
-    if here.timeline.is_some() {
-        cx.notify(tr!("canvas-has-timeline-timeline-palette-edits"));
-    } else if SuePaint::apply(
-        cx,
-        anim::new_timeline(&cx.world.arena, here.picture, 24, 24),
-    ) {
-        paint.panels.timeline = true;
-        if let Some((_, sequence, _)) = paint.timeline_here(&cx.world.arena)
-            && let Some(folder) = sequence.tracks.first().and_then(anim::track_folder)
-            && let Some(doc) = paint.doc_mut()
-        {
-            doc.track = 0;
-            doc.layer = Some(folder);
-        }
-    }
+    paint.ask_timeline_form(cx, true);
 }
 
 /// Edit Timeline: its frame rate and length, in a dialog.
@@ -731,6 +726,197 @@ fn cel_locked(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
     flag(paint.cel_lock.is_some())
 }
 
+// ----- Run: the Timeline palette's own (P4-7) --------------------------------
+
+/// Change Settings: the timeline's name, rate, length, playback range,
+/// scene, shot and division line.
+fn timeline_settings(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.ask_timeline_form(cx, false);
+}
+
+/// Shows the timeline kept aside in the entity named by the argument.
+fn timeline_switch(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    if let Ok(aside) = call.arg.parse::<EntityId>() {
+        paint.timeline_action(cx, crate::panels::timeline::Action::Switch(aside));
+    }
+}
+
+/// Zooms the frames in or out.
+fn zoom(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
+    let view = &mut paint.timeline_view;
+    let step = view.step.unwrap_or(15.0);
+    let factor = if call.name == "anim.zoom_in" {
+        1.25
+    } else {
+        1.0 / 1.25
+    };
+    view.zoom_at(step, 0.0, factor);
+}
+
+/// Cut, Copy, Paste and Delete of the frames picked on the timeline.
+fn edit_frames(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let what = call.name.trim_start_matches("anim.edit.");
+    paint.timeline_clipboard(cx, what);
+}
+
+/// Split Clip, Merge Clips, Set as First and Last Displayed Frame.
+fn clip(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let what = call.name.trim_start_matches("anim.clip.");
+    paint.timeline_clip(cx, what);
+}
+
+/// A timeline label at the frame shown, in a dialog.
+fn label(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    if paint.timeline_here(&cx.world.arena).is_some() {
+        paint.ask_label(cx);
+    } else {
+        cx.fail(tr!("make-timeline-first-animation-timeline-new"));
+    }
+}
+
+/// A track label at the frame shown (the argument names its kind).
+fn track_label(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    paint.timeline_track_label(cx, call.name.trim_start_matches("anim.track_label."));
+}
+
+/// The playback range starts or ends at the frame shown, or is cleared.
+fn play_range(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let what = call.name.trim_start_matches("anim.play_range.");
+    paint.timeline_play_range(cx, what);
+}
+
+/// How big the cels' pictures are on the timeline.
+fn thumbnails(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
+    if let Some(size) =
+        crate::panels::timeline::Thumbs::from_name(call.name.trim_start_matches("anim.thumbnails."))
+    {
+        paint.anim_ui.thumbs = size;
+    }
+}
+
+fn thumbnails_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
+    let size = crate::panels::timeline::Thumbs::from_name(
+        call.name.trim_start_matches("anim.thumbnails."),
+    );
+    flag(size == Some(paint.anim_ui.thumbs))
+}
+
+/// How times read on the timeline.
+fn time_unit(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
+    if let Some(unit) = crate::panels::timeline::TimeUnit::from_name(
+        call.name.trim_start_matches("anim.time_unit."),
+    ) {
+        paint.anim_ui.unit = unit;
+    }
+}
+
+fn time_unit_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
+    let unit = crate::panels::timeline::TimeUnit::from_name(
+        call.name.trim_start_matches("anim.time_unit."),
+    );
+    flag(unit == Some(paint.anim_ui.unit))
+}
+
+/// Shows a cel (by its id) or a blank on the current track from the frame
+/// shown: the cel names of the timeline's right-click menu.
+fn cel_show(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let Some(doc) = paint.doc() else {
+        return;
+    };
+    let (track, frame) = (doc.track, doc.frame);
+    let cel = if call.arg == "blank" {
+        None
+    } else {
+        match call.arg.parse::<EntityId>() {
+            Ok(cel) => Some(cel),
+            Err(_) => return,
+        }
+    };
+    paint.timeline_action(
+        cx,
+        crate::panels::timeline::Action::Assign { track, frame, cel },
+    );
+}
+
+/// Keys the current layer at the frame shown.
+fn key_layer(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.key_layer_here(cx);
+}
+
+/// How the current layer's key at the frame shown moves on.
+fn key_ease(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    paint.ease_here(cx, call.name.trim_start_matches("anim.key.ease."));
+}
+
+/// Keyframes on or off for the current layer.
+fn keyframes(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.toggle_keyframes(cx);
+}
+
+fn keyframes_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    flag(paint.layer().is_some_and(|layer| {
+        facts
+            .arena
+            .get_by_id(layer)
+            .is_ok_and(anim::motion::keyframes_on)
+    }))
+}
+
+/// Audio Clip Settings of the audio clip picked.
+fn audio_settings(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.ask_audio_clip_here(cx);
+}
+
+/// Mutes, unmutes or takes away the audio track picked.
+fn audio_track(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let Some((_, sequence, _)) = paint.timeline_here(&cx.world.arena) else {
+        return;
+    };
+    let audio = anim::audio_tracks(&sequence);
+    let Some(track) = paint
+        .anim_ui
+        .audio_track
+        .filter(|track| audio.contains(track))
+        .or_else(|| audio.first().copied())
+    else {
+        cx.fail(tr!("pick-an-audio-clip-first"));
+        return;
+    };
+    let action = if call.name == "anim.audio.mute" {
+        crate::panels::timeline::Action::AudioMute(track)
+    } else {
+        paint.anim_ui.audio_track = None;
+        crate::panels::timeline::Action::AudioDelete(track)
+    };
+    paint.timeline_action(cx, action);
+}
+
+/// File, Export Animation, Audio: the timeline's sound.
+fn export_audio(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.ask_export_audio(cx);
+}
+
+/// The timeline has sound.
+fn has_sound(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    let sound = paint
+        .timeline_here(facts.arena)
+        .is_some_and(|(_, sequence, _)| !anim::audio_tracks(&sequence).is_empty());
+    if sound {
+        ItemState::on()
+    } else {
+        ItemState::off()
+    }
+}
+
+/// Paste works once something was cut or copied.
+fn can_paste(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    if paint.anim_ui.clipboard.is_empty() {
+        ItemState::off()
+    } else {
+        on_timeline(paint, facts, call)
+    }
+}
+
 // ----- The table -------------------------------------------------------------
 
 /// A command of this group: it works while a canvas is open, and Auto
@@ -947,6 +1133,201 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     )
     .state(on_timeline)
     .with(Flags::PALETTE),
+    // The Timeline palette's own (P4-7): its settings, editing the frames
+    // and clips, labels, the playback range, how it looks, keys and
+    // sound.
+    c(
+        "anim.timeline.settings",
+        "change-settings-ellipsis",
+        "settings",
+        timeline_settings,
+    )
+    .state(on_timeline),
+    c(
+        "anim.timeline.switch.",
+        "switch-timeline",
+        "timeline-new",
+        timeline_switch,
+    )
+    .state(on_timeline)
+    .with(Flags::FAMILY),
+    c("anim.zoom_in", "zoom-in", "zoom-in", zoom).state(on_timeline),
+    c("anim.zoom_out", "zoom-out", "zoom-out", zoom).state(on_timeline),
+    c("anim.edit.cut", "cut-frames", "cut", edit_frames).state(on_timeline),
+    c("anim.edit.copy", "copy-frames", "copy", edit_frames).state(on_timeline),
+    c("anim.edit.paste", "paste-frames", "paste", edit_frames).state(can_paste),
+    c("anim.edit.delete", "delete-frames", "delete", edit_frames).state(on_timeline),
+    c("anim.clip.split", "split-clip", "cut", clip).state(on_timeline),
+    c("anim.clip.merge", "merge-clips", "layer-merge-down", clip).state(on_timeline),
+    c(
+        "anim.clip.first",
+        "set-as-first-displayed-frame",
+        "frame-first",
+        clip,
+    )
+    .state(on_timeline),
+    c(
+        "anim.clip.last",
+        "set-as-last-displayed-frame",
+        "frame-last",
+        clip,
+    )
+    .state(on_timeline),
+    c("anim.label", "timeline-label-ellipsis", "tag", label).state(on_timeline),
+    c(
+        "anim.track_label.inbetween",
+        "track-label-inbetween",
+        "tag",
+        track_label,
+    )
+    .state(on_timeline),
+    c(
+        "anim.track_label.inbetween-done",
+        "track-label-inbetween-done",
+        "tag",
+        track_label,
+    )
+    .state(on_timeline),
+    c(
+        "anim.track_label.reverse-sheet",
+        "track-label-reverse-sheet",
+        "tag",
+        track_label,
+    )
+    .state(on_timeline),
+    c(
+        "anim.track_label.none",
+        "track-label-none",
+        "delete",
+        track_label,
+    )
+    .state(on_timeline),
+    c(
+        "anim.play_range.start",
+        "playback-starts-here",
+        "frame-first",
+        play_range,
+    )
+    .state(on_timeline),
+    c(
+        "anim.play_range.end",
+        "playback-ends-here",
+        "frame-last",
+        play_range,
+    )
+    .state(on_timeline),
+    c(
+        "anim.play_range.clear",
+        "play-every-frame",
+        "reset",
+        play_range,
+    )
+    .state(on_timeline),
+    c(
+        "anim.thumbnails.none",
+        "thumbnails-none",
+        "view-list",
+        thumbnails,
+    )
+    .state(thumbnails_state),
+    c(
+        "anim.thumbnails.smallest",
+        "thumbnails-smallest",
+        "view-grid-small",
+        thumbnails,
+    )
+    .state(thumbnails_state),
+    c(
+        "anim.thumbnails.small",
+        "thumbnails-small",
+        "view-grid-small",
+        thumbnails,
+    )
+    .state(thumbnails_state),
+    c(
+        "anim.thumbnails.medium",
+        "thumbnails-medium",
+        "view-grid",
+        thumbnails,
+    )
+    .state(thumbnails_state),
+    c(
+        "anim.thumbnails.large",
+        "thumbnails-large",
+        "view-grid",
+        thumbnails,
+    )
+    .state(thumbnails_state),
+    c(
+        "anim.thumbnails.largest",
+        "thumbnails-largest",
+        "view-grid",
+        thumbnails,
+    )
+    .state(thumbnails_state),
+    c(
+        "anim.time_unit.frames",
+        "time-in-frames",
+        "recent",
+        time_unit,
+    )
+    .state(time_unit_state),
+    c(
+        "anim.time_unit.seconds",
+        "time-in-seconds-and-frames",
+        "recent",
+        time_unit,
+    )
+    .state(time_unit_state),
+    c(
+        "anim.time_unit.timecode",
+        "time-in-time-code",
+        "recent",
+        time_unit,
+    )
+    .state(time_unit_state),
+    c("anim.cel.show.", "show-cel", "cel", cel_show)
+        .state(on_timeline)
+        .with(Flags::FAMILY),
+    c("anim.key.layer", "add-layer-keyframe", "plus", key_layer).state(on_timeline),
+    c("anim.key.ease.smooth", "keyframe-smooth", "edit", key_ease).state(on_timeline),
+    c("anim.key.ease.linear", "keyframe-linear", "edit", key_ease).state(on_timeline),
+    c("anim.key.ease.hold", "keyframe-hold", "edit", key_ease).state(on_timeline),
+    c(
+        "anim.keyframes",
+        "enable-layer-keyframes",
+        "film",
+        keyframes,
+    )
+    .state(keyframes_state),
+    c(
+        "anim.audio.settings",
+        "audio-clip-settings-ellipsis",
+        "audio",
+        audio_settings,
+    )
+    .state(has_sound),
+    c(
+        "anim.audio.mute",
+        "mute-or-unmute-audio",
+        "audio",
+        audio_track,
+    )
+    .state(has_sound),
+    c(
+        "anim.audio.delete",
+        "delete-audio-track",
+        "delete",
+        audio_track,
+    )
+    .state(has_sound),
+    c(
+        "anim.export.audio",
+        "export-animation-audio-ellipsis",
+        "export",
+        export_audio,
+    )
+    .state(has_sound),
 ];
 
 #[cfg(test)]
@@ -983,7 +1364,13 @@ mod tests {
         // does; every name is the registry's too, with the same entry.
         let registry = super::super::registry();
         for command in COMMANDS {
-            let (found, _) = registry.find(command.name).expect("registered");
+            // A family is found by a name that goes past its prefix.
+            let name = if command.flags.has(Flags::FAMILY) {
+                format!("{}x", command.name)
+            } else {
+                command.name.to_owned()
+            };
+            let (found, _) = registry.find(&name).expect("registered");
             assert_eq!(found.label, command.label, "{}", command.name);
             assert!(
                 std::ptr::fn_addr_eq(found.run, command.run),

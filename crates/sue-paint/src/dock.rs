@@ -319,12 +319,8 @@ impl Palette {
                 "layer.rename",
                 "layer.properties",
             ],
-            Self::Timeline => &[
-                "anim.timeline.edit",
-                "anim.onion",
-                "anim.onion_settings",
-                "anim.loop",
-            ],
+            // The Timeline palette's owner keeps its list.
+            Self::Timeline => crate::panels::timeline::MENU,
             _ => &[],
         }
     }

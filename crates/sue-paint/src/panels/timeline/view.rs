@@ -1,8 +1,9 @@
 //! Where the Timeline palette looks: zoom, pan and scroll, and its
 //! scrollbars.
 
-use egui::{Rect, Sense, Ui, pos2, vec2};
+use egui::{CornerRadius, Rect, Sense, Ui, pos2, vec2};
 use sue_wm::Theme;
+use sue_wm::ui::Radius;
 
 /// Where the Timeline palette looks, as Clip Studio Paint's: how wide a
 /// frame is, the frame at the left edge (fractional while it pans) and
@@ -120,12 +121,13 @@ pub(super) fn timeline_scrollbars(
     let painter = ui.painter().with_clip_rect(rows);
     let bar = |track: Rect, thumb: Rect, id: &str| {
         let response = ui.interact(track, ui.scope_id().with(id), Sense::drag());
-        painter.rect_filled(track, 0.0, theme.void.gamma_multiply(0.5));
+        painter.rect_filled(track, CornerRadius::ZERO, theme.surface(0));
         let lit = response.hovered() || response.dragged();
+        let round = CornerRadius::same(theme.radius(Radius::Sm) as u8);
         painter.rect_filled(
             thumb.shrink(1.5),
-            3.0,
-            theme.muted.gamma_multiply(if lit { 1.0 } else { 0.6 }),
+            round,
+            if lit { theme.text } else { theme.text_muted() },
         );
         response.drag_delta()
     };
