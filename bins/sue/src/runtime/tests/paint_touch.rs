@@ -303,6 +303,21 @@ fn with_draw_with_fingers_off_a_finger_moves_the_view_and_only_the_pen_draws() {
         moved + 40 < first,
         "the view moved with the finger: the line starts at {moved}, before at {first}"
     );
+    paint.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    paint.settle(4);
+
+    // A finger that lands and lifts without pressing the canvas (as when
+    // the window hands over no pointer for it) leaves the mouse its own:
+    // a mouse drag after it still draws instead of moving the view.
+    paint.step(vec![touch(1, egui::TouchPhase::Start, middle, None)]);
+    paint.step(vec![touch(1, egui::TouchPhase::End, middle, None)]);
+    paint.settle(4);
+    let start = depth(&paint);
+    paint.drag(from, to, egui::PointerButton::Primary);
+    assert_eq!(depth(&paint), start + 1, "the mouse drew after the finger");
+    assert_ne!(layer_bytes(&paint.runtime).0, blank);
+    paint.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    paint.settle(4);
 
     // Switched back on, a finger draws again.
     paint.command("touch.finger_draws");
@@ -377,6 +392,87 @@ fn the_two_finger_pinch_zooms_only_while_its_setting_allows_it() {
     set(&mut paint, "scale");
     pinch(&mut paint, middle);
     assert_ne!(zoom_in_title(&paint), was, "a pinch zooms again");
+}
+
+/// Two fingers land either side of `middle` and move together by `shift`
+/// while turning by `turn` radians about their middle, then lift.
+fn two_fingers(paint: &mut PaintDriver, middle: Pos2, shift: egui::Vec2, turn: f32) {
+    let arm = vec2(40.0, 0.0);
+    paint.step(touch_down(7, middle - arm, None));
+    paint.step(vec![touch(8, egui::TouchPhase::Start, middle + arm, None)]);
+    let mut at = (middle - arm, middle + arm);
+    for step in 1..=8 {
+        let part = step as f32 / 8.0;
+        let centre = middle + shift * part;
+        let arm = egui::emath::Rot2::from_angle(turn * part) * arm;
+        at = (centre - arm, centre + arm);
+        paint.step(vec![
+            touch(7, egui::TouchPhase::Move, at.0, None),
+            touch(8, egui::TouchPhase::Move, at.1, None),
+            egui::Event::PointerMoved(at.0),
+        ]);
+    }
+    paint.step(vec![
+        touch(8, egui::TouchPhase::End, at.1, None),
+        touch(7, egui::TouchPhase::End, at.0, None),
+        button(at.0, false),
+    ]);
+    paint.settle(10);
+}
+
+// 01:04:44: the two-finger swipe and rotation follow their settings too.
+// A mouse line drawn after each gesture lands where the view put the
+// picture: in the same place while the gesture is set to Nothing.
+#[test]
+fn the_two_finger_swipe_and_rotation_move_the_view_only_while_set_to() {
+    let mut paint = PaintDriver::new("touch-swipe-rotation-setting");
+    let middle = paint_middle(&paint.runtime);
+    let (from, to) = (middle - vec2(60.0, 10.0), middle + vec2(30.0, 25.0));
+    let set = |paint: &mut PaintDriver, key: &str, value: &str| {
+        paint
+            .runtime
+            .engine
+            .world
+            .rice
+            .set(key, sue_rice::RiceValue::Text(value.to_owned()))
+            .unwrap();
+    };
+    let line = |paint: &mut PaintDriver| {
+        paint.drag(from, to, egui::PointerButton::Primary);
+        let drawn = layer_bytes(&paint.runtime).0;
+        paint.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+        paint.settle(4);
+        drawn
+    };
+    paint.command("view.reset_display");
+    paint.settle(4);
+    let still = line(&mut paint);
+    let gestures = [
+        (
+            sue_paint::studio_mode::SWIPE_KEY,
+            "move",
+            vec2(90.0, 0.0),
+            0.0,
+        ),
+        (
+            sue_paint::studio_mode::ROTATE_KEY,
+            "rotate",
+            vec2(0.0, 0.0),
+            0.6,
+        ),
+    ];
+    for (setting, on, shift, turn) in gestures {
+        set(&mut paint, setting, "none");
+        two_fingers(&mut paint, middle, shift, turn);
+        assert_eq!(line(&mut paint), still, "{setting} set to Nothing");
+        set(&mut paint, setting, on);
+        two_fingers(&mut paint, middle, shift, turn);
+        assert_ne!(line(&mut paint), still, "{setting} moved the view");
+        // Back to where the picture was, for the next gesture.
+        paint.command("view.reset_display");
+        paint.settle(4);
+        assert_eq!(line(&mut paint), still, "{setting}: the view reset");
+    }
 }
 
 // FG-36 (01:04:50): the edge key bar from either side; once see-through,
@@ -490,7 +586,7 @@ fn studio_modes_command_bar_switches_draw_with_fingers_and_the_timelapse() {
     assert_eq!(tablet.on(&record), Some(false));
     tablet.tap(&record);
     assert_eq!(tablet.on(&record), Some(true), "recording");
-    // Undo and Redo name their two- and three-finger taps' keys too.
+    // Undo is on the bar beside them.
     assert!(tablet.find(&sue_lang::text("paint", "undo")).is_some());
 }
 
