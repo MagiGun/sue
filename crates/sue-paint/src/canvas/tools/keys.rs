@@ -365,13 +365,6 @@ impl SuePaint {
             return;
         }
         let held = &*held;
-        // The key held down repeats: that picks nothing more (P would go
-        // on from the Pen to the Pencil and back).
-        ctx.input_mut(|input| {
-            input.events.retain(|event| {
-                !matches!(event, egui::Event::Key { key, repeat: true, .. } if held.keys.contains(key))
-            });
-        });
         // What the tool began on the canvas ends with it.
         if self.gesture.is_some() {
             return;
