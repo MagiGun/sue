@@ -1132,10 +1132,25 @@ impl SuePaint {
                 let moving = selection
                     .as_ref()
                     .is_some_and(|selection| selection.contains(row.track, at));
+                // The first frame of a cel picked alone: the drag moves
+                // where the cel starts, so the cel before it holds longer
+                // or shorter.
+                let alone = selection.as_ref().is_some_and(|selection| {
+                    selection.tracks == [row.track]
+                        && selection.start == at
+                        && selection.span() == 1
+                });
+                let key = if alone && row.kind == Kind::Cels {
+                    anim::editing::key_moves(&sequence, row.track, at, length)
+                        .map(|range| (*range.start(), *range.end()))
+                } else {
+                    None
+                };
                 self.anim_ui.press = Some(Press {
                     track: index,
                     frame: at,
                     moving,
+                    key,
                 });
             }
             if response.clicked()
@@ -1222,7 +1237,29 @@ impl SuePaint {
             let held = ui.input(|input| input.pointer.primary_down());
             let at = hover_frame.unwrap_or(press.frame);
             let row_now = hovered_row.unwrap_or(press.track);
-            if press.moving {
+            if let Some((low, high)) = press.key {
+                // Where the cel would start: a line and its frame.
+                let to = at.clamp(low, high);
+                let x = column(to);
+                cells_painter.vline(x, below.y_range(), Stroke::new(thick, theme.focus()));
+                cells_painter.text(
+                    pos2(x + pad / 2.0, below.top() + pad),
+                    Align2::LEFT_TOP,
+                    self.anim_ui.unit.show(to, fps),
+                    font.clone(),
+                    theme.text,
+                );
+                if !held {
+                    if let Some(row) = layout.get(press.track) {
+                        actions.push(Action::MoveKey {
+                            track: row.track,
+                            from: press.frame,
+                            to,
+                        });
+                    }
+                    self.anim_ui.press = None;
+                }
+            } else if press.moving {
                 if let Some(selection) = &selection {
                     let to = (i64::from(selection.start) + i64::from(at) - i64::from(press.frame))
                         .max(0) as u32;

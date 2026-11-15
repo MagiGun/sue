@@ -156,6 +156,10 @@ pub(crate) struct Press {
     pub frame: u32,
     /// It started on a picked frame: the drag moves what is picked.
     pub moving: bool,
+    /// It started on the first frame of a cel picked alone: the drag
+    /// moves where that cel starts, between the keys around it (the
+    /// frames it may start on), so the holds around it change.
+    pub key: Option<(u32, u32)>,
 }
 
 /// What the Timeline palette keeps between frames besides its view.

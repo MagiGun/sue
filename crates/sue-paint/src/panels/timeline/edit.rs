@@ -32,6 +32,9 @@ pub(crate) enum Action {
     Select(Selection),
     /// Move what is picked to start at `frame`.
     MoveTo(u32),
+    /// Move the key of `track` that starts on `from` to start on `to`
+    /// (a drag of a picked cel's first frame): the holds around it change.
+    MoveKey { track: usize, from: u32, to: u32 },
     /// Show or hide a track's layer or folder.
     Eye(usize, bool),
     /// Move an audio track's clip to start at a frame.
@@ -131,6 +134,20 @@ impl SuePaint {
                         start: to,
                         end: to + selection.span(),
                     });
+                    self.go_to_frame(&cx.world.arena, i64::from(to));
+                }
+            }
+            Action::MoveKey { track, from, to } => {
+                // Kept between the keys around it, as the drag showed.
+                let Some(range) = editing::key_moves(&sequence, track, from, length) else {
+                    return;
+                };
+                let to = to.clamp(*range.start(), *range.end());
+                let Some(moved) = editing::move_key(&sequence, track, from, to, length) else {
+                    return;
+                };
+                if Self::apply(cx, anim::set(picture, moved, &tr!("move-cels"))) {
+                    self.anim_ui.selection = Some(Selection::dragged(vec![track], to, to));
                     self.go_to_frame(&cx.world.arena, i64::from(to));
                 }
             }
