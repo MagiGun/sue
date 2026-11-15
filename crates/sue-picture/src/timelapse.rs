@@ -156,17 +156,18 @@ impl Export {
     #[must_use]
     pub fn size(&self, shape: [u32; 2]) -> [u32; 2] {
         let even = |value: u32| (value.max(2) / 2) * 2;
+        // The short side of a ratio: the even number nearest to it, so
+        // 16:9 at 1,080 is 1,080 by 608 (607.5), not 606.
+        let short = |side: u32, over: u32, under: u32| {
+            let exact = u64::from(side) * u64::from(over);
+            let under = u64::from(under.max(1));
+            u32::try_from((exact + under) / (2 * under) * 2).unwrap_or(u32::MAX)
+        };
         let side = self.side.max(16);
         let size = match self.aspect.ratio() {
             None => fit(shape, side),
-            Some((wide, high)) if wide >= high => [
-                side,
-                (u64::from(side) * u64::from(high) / u64::from(wide)) as u32,
-            ],
-            Some((wide, high)) => [
-                (u64::from(side) * u64::from(wide) / u64::from(high)) as u32,
-                side,
-            ],
+            Some((wide, high)) if wide >= high => [side, short(side, high, wide)],
+            Some((wide, high)) => [short(side, wide, high), side],
         };
         size.map(even)
     }
@@ -423,6 +424,18 @@ mod tests {
             ..wide
         };
         assert_eq!(portrait.size([600, 800]), [1024, 1280]);
+        // A short side that is not whole goes to the nearest even one.
+        let odd = Export { side: 1080, ..wide };
+        assert_eq!(odd.size([600, 800]), [1080, 608]);
+        assert_eq!(Export { side: 1080, ..tall }.size([1, 1]), [608, 1080]);
+        assert_eq!(
+            Export {
+                side: 1080,
+                ..portrait
+            }
+            .size([1, 1]),
+            [864, 1080]
+        );
         // The canvas's own: a small canvas stays its size, sides even.
         assert_eq!(Export::default().size([301, 201]), [300, 200]);
         assert_eq!(Aspect::ALL.len(), 6);
