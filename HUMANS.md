@@ -52,6 +52,14 @@ Folder**. New notices stack under the older ones. Out of the box Sue is black,
 white and grays only, so your own pictures and words are the only color you
 see (you can color it yourself in Settings).
 
+Notices stay few: at most three show at once (one on a phone, just above
+the tab bar), and older ones fold behind them, as card edges with a small
+**2 more** button that unfolds them (and **Show fewer** folds them again).
+A folded notice keeps its own time, so old news leaves by itself. A
+notice never covers a dialog: while one is open the notices wait under it
+with their clock stopped, and come back when it closes. On the Hub the
+page leaves room at its end, so you can always scroll past them.
+
 ```text
 ┌──────┬────────────────────────────────────────────────────────────┐
 │ Sue  │ File  Edit  Layer  ...   (the menus of what is open)       │
@@ -87,11 +95,20 @@ make, by kind) and **Open** (your computer's open dialog), then:
 - **Jump Back In**: your newest work as cards with pictures, one click from
   open, and **All Files** to see everything. It shows only once there is
   work, so a first run is not a page of empty boxes.
+- **Start Something New** (while there is nothing to jump back into): a
+  row per studio of its kinds of work (Illustration, Print A4, Blank
+  Document, Letter and more). One click makes the file and opens its
+  studio; **New** has every kind.
 - **Your Work**: buttons that open Files already sorted: **Recent**,
   **Projects**, **Unsaved Work**, **Favorites**, each with how many it
   holds, and **Folder**, which opens Sue's own folder in your file manager
   where your system has one. Unsaved Work is outlined while there is work
   to recover, so you notice it.
+- **Good to Know** (on a first run, under Your Work): **Find Any
+  Command** opens the command search and names its key, **Open Your
+  Files** reminds you that files dropped on Sue open where they belong
+  (and opens the open dialog), and **Make Sue Yours** opens Settings for
+  themes, icon packs, layouts and keys.
 
 At the top right of every studio card is a round **pin** (it shows when you
 point at the card). Pin the studio or tool you use most and Sue opens

@@ -231,6 +231,10 @@ ok = OK
 dialog-close = Close
 toast-dismiss = Dismiss
 notices = Notices
+# The button over notices folded behind the newest: it shows them all.
+toast-more = { $count } more
+# The same button once they show: it folds them again.
+toast-fewer = Show fewer
 ## icons/pack.rs: what an icon pack could not read, and why a pack
 ## action failed. { $file } is a file of the pack, as it is named there.
 
@@ -319,6 +323,18 @@ hub-forgot = { $count ->
 hub-search = Search or run a command
 hub-search-files = Search files
 hub-search-hint = Find a command, a setting or a studio (Tab)
+# Home while there is no work to jump back into: kinds of work that
+# start with one click, then three tiles of what is good to know.
+hub-start-new = Start Something New
+hub-start-new-tip = A new { $kind } in { $studio }
+hub-good-to-know = Good to Know
+hub-tip-search = Find Any Command
+hub-tip-search-detail = Search at the top, or press { $key }
+hub-tip-search-plain = Search at the top of the Hub
+hub-tip-open = Open Your Files
+hub-tip-open-detail = Drop pictures and documents on Sue to open them
+hub-tip-yours = Make Sue Yours
+hub-tip-yours-detail = Themes, icon packs, layouts and keys
 files-transfers = Transfers
 
 ## export.rs: the export settings dialog
