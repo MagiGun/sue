@@ -713,6 +713,25 @@ impl SueApplet for SuePaint {
                 }
                 true
             }
+            // A palette floating over the canvas, `dock/float/<palette
+            // key>`, and rolled up to its header, `dock/roll/<key>`.
+            float if float.starts_with("dock/float/") => {
+                use sue_wm::dock::DockPanel;
+                let Some(palette) = crate::dock::Palette::named(&float["dock/float/".len()..])
+                else {
+                    return false;
+                };
+                self.dock.float(palette, egui::pos2(480.0, 160.0));
+                true
+            }
+            roll if roll.starts_with("dock/roll/") => {
+                use sue_wm::dock::DockPanel;
+                let Some(palette) = crate::dock::Palette::named(&roll["dock/roll/".len()..]) else {
+                    return false;
+                };
+                self.roll(palette, true);
+                true
+            }
             // A palette's tab: `tab/<palette>/<index>`.
             tab if tab.starts_with("tab/") => {
                 let mut parts = tab["tab/".len()..].split('/');
