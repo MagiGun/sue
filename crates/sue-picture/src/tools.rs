@@ -1023,9 +1023,11 @@ impl Toolbox {
         slot.picked = slot.put(group, at, copy);
     }
 
-    /// Adds `sub` at the end of the last group of its tool's entry (the
-    /// current entry when it is one of that tool), picks it and makes that
-    /// entry current (the Item Bank's Add).
+    /// Adds `sub` at the end of a group of its tool's entry and picks it,
+    /// making that entry current (the Item Bank's Add, a brush file let
+    /// go on the Sub Tool palette): the current entry when it is one of
+    /// that tool, into the group of its picked sub tool; else the tool's
+    /// own entry, into its last group.
     pub fn add_sub(&mut self, sub: SubTool) {
         let tool = sub.tool;
         let current = (self.slots[self.current].kind == tool).then_some(self.current);
@@ -1041,8 +1043,15 @@ impl Toolbox {
             return;
         };
         let entry = &mut self.slots[slot];
-        let last = entry.groups.len() - 1;
-        entry.picked = entry.put(last, usize::MAX, sub);
+        // Into the group shown when the entry is out (a brush file let go
+        // on the Sub Tool palette lands where it was let go), else its
+        // last.
+        let group = if slot == self.current {
+            entry.group_of(entry.picked)
+        } else {
+            entry.groups.len() - 1
+        };
+        entry.picked = entry.put(group, usize::MAX, sub);
         self.current = slot;
     }
 
@@ -1987,14 +1996,17 @@ mod tests {
         let speed = one.slots()[figure].group_range(2).start;
         assert!(one.delete_sub(Tool::Figure, speed));
         assert_eq!(one.slots()[figure].groups().len(), 2);
-        // An Item Bank sub tool lands at the end of its tool.
+        // An Item Bank sub tool lands at the end of the group shown (the
+        // Pen's own while its first sub tool is picked).
         let mut bank = Toolbox::default();
+        bank.pick(Tool::Pen);
         let mut sub = Tool::Pen.sub_tools()[0].clone();
         sub.name = "From the bank".to_owned();
         bank.add_sub(sub);
         assert_eq!(bank.current().name, "From the bank");
         assert_eq!(bank.tool(), Tool::Pen);
-        assert_eq!(groups(&bank, pen)[1], ("Marker".to_owned(), 5));
+        assert_eq!(groups(&bank, pen)[0], ("Pen".to_owned(), 8));
+        assert_eq!(groups(&bank, pen)[1], ("Marker".to_owned(), 4));
     }
 
     #[test]
@@ -2089,5 +2101,25 @@ mod tests {
         for slot in Toolbox::default().slots() {
             assert!(slot.subs().iter().all(|sub| sub.hidden.is_empty()));
         }
+    }
+
+    #[test]
+    fn an_added_sub_tool_lands_in_the_group_shown() {
+        let mut toolbox = Toolbox::default();
+        toolbox.pick(Tool::Pen);
+        let pen = toolbox.current_slot();
+        assert!(
+            toolbox.current_entry().groups().len() > 1,
+            "the Pen has groups"
+        );
+        // The first group is shown: the new sub tool ends it, not the last.
+        toolbox.pick_sub(Tool::Pen, 0);
+        let tip = toolbox.current().tip;
+        toolbox.add_sub(SubTool::new(Tool::Pen, "Dropped", 0, tip));
+        let entry = toolbox.current_entry();
+        assert_eq!(toolbox.current_slot(), pen);
+        assert_eq!(entry.subs()[entry.picked()].name, "Dropped");
+        assert_eq!(entry.group_of(entry.picked()), 0);
+        assert_eq!(entry.picked(), entry.group_range(0).end - 1);
     }
 }
