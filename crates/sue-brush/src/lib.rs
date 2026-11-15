@@ -34,6 +34,6 @@ pub mod math;
 pub mod paint;
 pub mod presets;
 pub mod raster;
-pub mod worker;
 pub mod replay;
 pub mod texture;
+pub mod worker;
