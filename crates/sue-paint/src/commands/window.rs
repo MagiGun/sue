@@ -146,7 +146,8 @@ fn canvas_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
 }
 
 /// New Window: a second view of the current canvas, at its own place
-/// in the tabs, with the canvases tiled.
+/// in the tabs, shown at once; the canvases stay in tabs or tiled as
+/// they were.
 fn new_window(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
     if let Some(doc) = paint.doc() {
         let mut view = Doc::new(doc.picture);
@@ -156,7 +157,6 @@ fn new_window(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
         view.track = doc.track;
         paint.docs.insert(paint.active + 1, view);
         paint.active += 1;
-        paint.tiled = true;
     }
 }
 
@@ -895,12 +895,20 @@ mod tests {
             assert!(!enabled(&paint, cx, "window.canvas.x"));
             assert_eq!(paint.active, 2);
             // New Window: a second view of the current canvas after it,
-            // the canvases tiled; Cascade puts them back in tabs.
+            // shown as a tab of its own: the canvases are not tiled
+            // (Clip Studio Paint's New Window leaves tiling alone).
             let picture = paint.docs[2].picture;
             registry().run(&mut paint, cx, "window.new");
             assert_eq!(paint.docs.len(), 4);
             assert_eq!(paint.active, 3);
             assert_eq!(paint.docs[3].picture, picture);
+            assert!(!paint.tiled && !checked(&paint, cx, "window.tile"));
+            assert!(!enabled(&paint, cx, "window.cascade"));
+            // Tile, then New Window keeps the canvases tiled; Cascade
+            // puts them back in tabs.
+            registry().run(&mut paint, cx, "window.tile");
+            registry().run(&mut paint, cx, "window.new");
+            assert_eq!(paint.docs.len(), 5);
             assert!(paint.tiled && checked(&paint, cx, "window.tile"));
             assert!(enabled(&paint, cx, "window.cascade"));
             registry().run(&mut paint, cx, "window.cascade");
