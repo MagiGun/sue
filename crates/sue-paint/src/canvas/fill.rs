@@ -430,6 +430,11 @@ impl SuePaint {
             target.id,
             &tr!("gradient"),
             |pixels, width, height| {
+                if clear && alpha_lock {
+                    // Lock Transparent Pixels keeps alpha, so clearing
+                    // changes nothing (as the bucket's clearing does).
+                    return;
+                }
                 if !clear {
                     fill::gradient(
                         pixels,
@@ -686,6 +691,33 @@ pub(in crate::canvas) mod tests {
             paint.bucket(&[[40.0, 10.0], [60.0, 10.0]], &fill, SIZE, cx);
             assert_eq!(pixel(cx, ids[0], 40), [255, 0, 0, 255]);
             assert_eq!(pixel(cx, ids[0], 60), [0, 0, 0, 0]);
+        });
+    }
+
+    #[test]
+    fn a_clearing_gradient_keeps_a_layer_whose_transparent_pixels_are_locked() {
+        // The transparent color clears like the bucket does: not on a
+        // layer with Lock Transparent Pixels.
+        let full = picture(|_, _| true);
+        with_layers(vec![(full, false)], |paint, cx, ids| {
+            let lock = sue_core::txn::SetProperty::new(
+                ids[0],
+                sue_model::picture::ALPHA_LOCKED,
+                true,
+            );
+            assert!(SuePaint::apply(cx, lock));
+            paint.transparent = true;
+            let gradient = sub(Tool::Gradient, 0);
+            let depth = cx.history.depth();
+            paint.gradient(Pos2::new(0.0, 0.0), Pos2::new(80.0, 0.0), &gradient, cx);
+            assert_eq!(cx.history.depth(), depth, "nothing changed");
+            assert_eq!(alpha(cx, ids[0], 5), 255);
+            // Unlocked, it clears from full at the start to none at the end.
+            assert!(cx.history.undo(cx.world).is_ok());
+            paint.gradient(Pos2::new(0.0, 0.0), Pos2::new(80.0, 0.0), &gradient, cx);
+            assert_eq!(cx.history.depth(), depth, "the gradient took the lock's place");
+            assert!(alpha(cx, ids[0], 1) < 10);
+            assert!(alpha(cx, ids[0], 78) > 245);
         });
     }
 }
