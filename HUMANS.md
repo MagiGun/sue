@@ -705,6 +705,15 @@ Once a canvas is open:
   drawing round instead of clicking: every area inside that the lines close
   off fills at once, and the Figure tool's **Lasso fill** fills whatever
   you draw round.
+- **Fill by dragging, on frames and masks:** drag the fill bucket across
+  the picture and every area the drag crosses fills, as one undo step. In
+  an animation, fills and Auto Select see only the cels of the frame
+  shown. While a layer's mask is edited, fills, gradients and Edit, Fill
+  go to the mask: any color shows the layer there, the transparent color
+  hides it. With the transparent color they clear instead of painting.
+- **Shrink selection:** the Selection area tool's seventh sub tool. Draw
+  round a drawing, roughly, and the selection shrinks to the drawing,
+  keeping the holes it closes in.
 - **Blend** (J): Blur softens, Finger Tip smudges the colors along your
   stroke, and Liquify pushes the drawing along, swells it, pinches it or
   twirls it under the brush. **Copy stamp** copies one part of a layer to
