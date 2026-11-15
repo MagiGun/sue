@@ -34,6 +34,11 @@ pub(super) fn text_ui(
             .desired_width(f32::INFINITY)
             .hint_text(tr!("type-here")),
     );
+    // Its name for assistive technology and in its tooltip, as every
+    // other control of the dialog has.
+    let words = tr!("text");
+    edit.widget_info(|| egui::WidgetInfo::labeled(egui::Role::MultilineTextInput, true, &words));
+    let edit = tip(edit, &words, "", theme);
     // The words take the keys while nothing else does.
     if ui.ctx().memory(|memory| memory.focused().is_none()) {
         edit.request_focus();
