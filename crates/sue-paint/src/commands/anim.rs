@@ -1384,7 +1384,8 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "export",
         export_audio,
     )
-    .state(has_sound),
+    .state(has_sound)
+    .with(Flags::PALETTE),
 ];
 
 #[cfg(test)]
