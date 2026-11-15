@@ -1606,7 +1606,11 @@ fn gradient_sets_ui(
                         .0
                         .shrink(theme.space(Space::S1));
                     paint_gradient(ui.painter(), swatch, &shown, theme);
-                    let on = library.picked == Some(index);
+                    // Before one is picked, the gradient the dialog opened with
+                    // shows as the one being edited when it is in the set.
+                    let on = library
+                        .picked
+                        .map_or_else(|| looks_alike(&shown, map), |at| at == index);
                     if on {
                         ui.painter().rect_stroke(
                             rect,
@@ -1678,6 +1682,17 @@ fn gradient_sets_ui(
     if let Some(text) = &library.note {
         note(ui, text, theme);
     }
+}
+
+/// `true` when `a` and `b` map every brightness to the same color and
+/// opacity, wherever their stops' colors come from.
+fn looks_alike(a: &GradientMap, b: &GradientMap) -> bool {
+    a.mix == b.mix
+        && a.stops().len() == b.stops().len()
+        && a.stops()
+            .iter()
+            .zip(b.stops())
+            .all(|(a, b)| a.at == b.at && a.rgb == b.rgb && a.alpha == b.alpha)
 }
 
 /// `map` painted across `rect`, over a checkerboard where it is see
