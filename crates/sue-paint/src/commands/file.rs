@@ -446,10 +446,8 @@ fn record_timelapse(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_
     paint.toggle_timelapse(cx);
 }
 
-fn export_timelapse(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    if paint.picture().is_some() {
-        paint.dialog = Some(Dialog::Timelapse(paint.timelapse_export));
-    }
+fn export_timelapse(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.open_timelapse_export(cx);
 }
 
 fn print_settings(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {

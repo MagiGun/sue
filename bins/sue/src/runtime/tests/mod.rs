@@ -60,6 +60,26 @@ mod writer_bars;
 mod writer_dialogs;
 mod writer_panes;
 
+/// Runs `step` (one frame) until every export running in the background
+/// has ended, then a few frames more, so each has said how it went.
+pub(crate) fn until_exports_end(runtime: &mut Runtime, mut step: impl FnMut(&mut Runtime)) {
+    let start = Instant::now();
+    let mut after = 0;
+    while after < 12 {
+        assert!(
+            start.elapsed() < Duration::from_secs(120),
+            "the exports end"
+        );
+        // The desktop's timer reads the transfers; here each frame does.
+        if runtime.transfers.poll() {
+            after = 0;
+        } else {
+            after += 1;
+        }
+        step(runtime);
+    }
+}
+
 pub(crate) fn runtime(tag: &str) -> (Runtime, PathBuf) {
     let (host, root) = temp_host(tag);
     // Sue Paint's palettes as 0.0.75 laid them out by default (the
@@ -413,6 +433,21 @@ impl PaintDriver {
     /// The page's top, under Sue's own bar.
     pub(crate) fn page_top(&self) -> f32 {
         self.runtime.shell.page_rect().top()
+    }
+
+    /// Frames until every export running in the background has ended
+    /// and said how it went.
+    pub(crate) fn finish_exports(&mut self) {
+        let start = Instant::now();
+        // The desktop's timer reads the transfers; here each frame does.
+        while self.runtime.transfers.poll() {
+            assert!(
+                start.elapsed() < Duration::from_secs(120),
+                "the exports end"
+            );
+            self.step(Vec::new());
+        }
+        self.settle(12);
     }
 }
 

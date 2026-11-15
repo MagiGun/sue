@@ -3,10 +3,9 @@
 //! dialogs of `dialogs/anim.rs`), then where the file goes; what the
 //! settings dialog kept waits on the studio until the file is picked.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sue_core::{EntityId, PixelFormat, RasterTile2D};
-use sue_platform::write_atomic;
 use sue_wm::{AppletContext, FilePick, FileType, ShellRequest};
 
 use super::forms::{Animated, AnimatedForm, CelsForm, MovieForm, Range, SequenceForm};
@@ -14,6 +13,7 @@ use crate::anim;
 use crate::composite::{self, RenderOptions};
 use crate::dialogs::{AnimDialog, Dialog};
 use crate::studio::SuePaint;
+use crate::studio::exports::{Done, Staged, Steps, What, write_whole};
 
 /// What a picked file is exported with: the settings kept in the dialog
 /// before it.
@@ -23,14 +23,6 @@ pub(crate) struct Pending {
     pub sequence: Option<SequenceForm>,
     pub animated: Option<AnimatedForm>,
     pub cels: Option<CelsForm>,
-}
-
-/// The frames of an export, rendered: the pictures and frames a second.
-pub(crate) struct Rendered {
-    pub frames: Vec<RasterTile2D>,
-    pub fps: f64,
-    /// The first frame rendered (from 0).
-    pub first: u32,
 }
 
 /// `tile` scaled to `size` (straight RGBA8), as it is when it is that size
@@ -94,6 +86,150 @@ fn cropped(tile: &RasterTile2D, [x, y, width, height]: [i64; 4]) -> Option<Raste
     RasterTile2D::from_bytes(w, h, PixelFormat::Rgba8, out).ok()
 }
 
+/// The frames of an export: a snapshot of the document, and which of its
+/// timeline's frames go out, rendered one at a time as the export needs
+/// them ([`SuePaint::export_frames`]).
+pub(crate) struct Frames {
+    /// The document as it was when the export began.
+    arena: sue_core::Arena,
+    picture: EntityId,
+    /// The timeline frames written (from 0).
+    frames: std::ops::Range<u32>,
+    /// Seen through the 2D camera folders.
+    camera: bool,
+    /// The output frame's rect, when there is one.
+    output: Option<[i64; 4]>,
+    /// The timeline's frames a second.
+    pub fps: f64,
+    /// The timeline, for its sound.
+    sequence: sue_model::Sequence,
+}
+
+impl Frames {
+    /// How many frames go out.
+    pub(crate) fn len(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// The first frame written (from 0).
+    pub(crate) fn first(&self) -> u32 {
+        self.frames.start
+    }
+
+    /// The `index`th frame written, flattened as it plays; `None` when it
+    /// will not render.
+    pub(crate) fn render(&self, index: usize) -> Option<RasterTile2D> {
+        let frame = self.frames.start.checked_add(u32::try_from(index).ok()?)?;
+        if frame >= self.frames.end {
+            return None;
+        }
+        let options = RenderOptions {
+            paper: true,
+            drafts: false,
+        };
+        let view = anim::frame_view(&self.arena, self.picture, frame, None, Some(self.camera))?;
+        let tile = composite::flatten_view(&self.arena, self.picture, options, Some(&view))?;
+        match self.output {
+            Some(rect) => cropped(&tile, rect),
+            None => Some(tile),
+        }
+    }
+
+    /// The timeline's sound under the frames written, interleaved stereo
+    /// at [`anim::MIX_RATE`], as long as the frames last.
+    fn sound(&self) -> Option<Vec<f32>> {
+        let pcm = anim::mix(&self.arena, &self.sequence)?;
+        let fps = self.fps.max(1.0);
+        let rate = f64::from(anim::MIX_RATE);
+        let from = (f64::from(self.first()) / fps * rate) as usize;
+        // The movie lasts as long as the timeline's frames, whatever its
+        // own frame rate (see `retimed`).
+        let frames = (self.len() as f64 / fps * rate).ceil() as usize;
+        let samples = pcm.samples();
+        let start = (from * 2).min(samples.len());
+        let end = ((from + frames) * 2).min(samples.len());
+        Some(samples[start..end].to_vec())
+    }
+}
+
+/// The movie of `frames` with the settings of `form`, and how many frames
+/// it holds. The same whether it runs in the background or at once
+/// ([`Steps::NOW`]): the frames are rendered one at a time as the sink
+/// takes them.
+///
+/// # Errors
+/// The movie error's English text (`io.ftl`), or that it was cancelled.
+pub(crate) fn movie_bytes(
+    frames: &Frames,
+    form: &MovieForm,
+    steps: Steps<'_>,
+) -> Result<(Vec<u8>, usize), String> {
+    let settings = form.settings();
+    let sound = settings.sound.and_then(|_| frames.sound());
+    let mut sink = sue_platform::movie::open(form.chosen(), settings)
+        .map_err(|error| error.text().to_owned())?;
+    let order = retimed(frames.len(), frames.fps, form.fps);
+    let mut last: Option<(usize, RasterTile2D)> = None;
+    for (at, index) in order.iter().copied().enumerate() {
+        steps.go_on()?;
+        steps.part(at, order.len(), 0.95);
+        // A frame shown twice in a row is rendered and scaled once; one
+        // that will not render shows the one before it.
+        if last.as_ref().is_none_or(|(was, _)| *was != index)
+            && let Some(frame) = frames.render(index)
+        {
+            last = Some((index, scaled(frame, form.size)));
+        }
+        if let Some((_, frame)) = &last {
+            sink.push_frame(frame)
+                .map_err(|error| error.text().to_owned())?;
+        }
+    }
+    if let Some(samples) = &sound {
+        sink.push_sound(samples)
+            .map_err(|error| error.text().to_owned())?;
+    }
+    steps.go_on()?;
+    let count = sink.frames();
+    let bytes = sink.finish().map_err(|error| error.text().to_owned())?;
+    Ok((bytes, count))
+}
+
+/// The animated picture of `frames` (`kind`), each frame scaled to `size`
+/// when one is given, looping `loops` times (0 for ever).
+///
+/// # Errors
+/// When a frame will not encode, or it was cancelled.
+pub(crate) fn animated_bytes(
+    frames: &Frames,
+    kind: Animated,
+    size: Option<[u32; 2]>,
+    loops: u32,
+    steps: Steps<'_>,
+) -> Result<Vec<u8>, String> {
+    let mut tiles = Vec::with_capacity(frames.len());
+    for index in 0..frames.len() {
+        steps.go_on()?;
+        steps.part(index, frames.len(), 0.8);
+        if let Some(frame) = frames.render(index) {
+            tiles.push(match size {
+                Some(size) => scaled(frame, size),
+                None => frame,
+            });
+        }
+    }
+    steps.go_on()?;
+    let delay = (1000.0 / frames.fps.max(1.0)).round() as u32;
+    match kind {
+        Animated::WebP => sue_io::encode_webp_animation(&tiles, delay),
+        Animated::Apng => sue_io::encode_apng(&tiles, delay),
+        Animated::Gif => sue_io::encode_gif_animation_looping(
+            &tiles,
+            delay,
+            u16::try_from(loops).ok().filter(|loops| *loops > 0),
+        ),
+    }
+}
 impl SuePaint {
     /// The size an export starts from: the output frame's, else the
     /// canvas's.
@@ -247,7 +383,8 @@ impl SuePaint {
 
     /// Writes the animation to `path` as a movie, in the format and with
     /// the settings its dialog kept (MP4 first where the system has an
-    /// encoder, else the Motion JPEG AVI), the timeline's sound with it.
+    /// encoder, else the Motion JPEG AVI), the timeline's sound with it,
+    /// in the background ([`crate::studio::exports`]).
     pub(crate) fn export_movie(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
         let form = self.anim_ui.pending.movie.take().unwrap_or_else(|| {
             // A pick with no dialog before it: the AVI at the canvas size.
@@ -271,110 +408,55 @@ impl SuePaint {
                 range: Range::All,
             }
         });
-        if let Some(dir) = path.parent() {
-            self.last_dir = Some(dir.to_path_buf());
-        }
-        let Some(rendered) = self.render_frames(&cx.world.arena, form.range, form.camera) else {
+        let Some(frames) = self.export_frames(&cx.world.arena, form.range, form.camera) else {
             return;
         };
-        let settings = form.settings();
-        let sound = settings.sound.and_then(|_| {
-            let (_, sequence, _) = self.timeline_here(&cx.world.arena)?;
-            let pcm = anim::mix(&cx.world.arena, &sequence)?;
-            // From the first frame written, as long as the frames last.
-            let from = (f64::from(rendered.first) / rendered.fps.max(1.0)
-                * f64::from(anim::MIX_RATE)) as usize;
-            // The movie lasts as long as the timeline's frames, whatever its
-            // own frame rate (see `retimed`).
-            let frames = (rendered.frames.len() as f64 / rendered.fps.max(1.0)
-                * f64::from(anim::MIX_RATE))
-            .ceil() as usize;
-            let samples = pcm.samples();
-            let start = (from * 2).min(samples.len());
-            let end = ((from + frames) * 2).min(samples.len());
-            Some(samples[start..end].to_vec())
+        let target = path.to_path_buf();
+        self.run_export(cx, What::Movie, path, move |steps| {
+            let (bytes, count) = movie_bytes(&frames, &form, steps)?;
+            write_whole(&target, &bytes, steps)?;
+            Ok(Done {
+                frames: count,
+                bytes: bytes.len(),
+                files: 1,
+            })
         });
-        let result = (|| -> Result<(usize, usize), sue_io::MovieError> {
-            let mut sink = sue_platform::movie::open(form.chosen(), settings)?;
-            let order = retimed(rendered.frames.len(), rendered.fps, form.fps);
-            let mut last: Option<(usize, RasterTile2D)> = None;
-            for index in order {
-                // A frame shown twice in a row is scaled once.
-                if last.as_ref().is_none_or(|(was, _)| *was != index) {
-                    last = Some((index, scaled(rendered.frames[index].clone(), form.size)));
-                }
-                if let Some((_, frame)) = &last {
-                    sink.push_frame(frame)?;
-                }
-            }
-            if let Some(samples) = &sound {
-                sink.push_sound(samples)?;
-            }
-            let count = sink.frames();
-            let bytes = sink.finish()?;
-            write_atomic(path, &bytes)
-                .map_err(|error| sue_io::MovieError::Encoder(error.to_string()))?;
-            Ok((bytes.len(), count))
-        })();
-        match result {
-            Ok((size, count)) => cx.saved(
-                path,
-                tr!("frames-kib", value = size.div_ceil(1024), count = count),
-            ),
-            Err(error) => cx.fail(tr!(
-                "cannot-export-the-movie",
-                error = sue_lang::translate("io", error.text())
-            )),
-        }
     }
 
-    /// The frames `range` of the timeline covers, flattened as they play
-    /// (layer keyframes, clips, folder cels), through the 2D cameras when
-    /// `camera` says so, and cut to the output frame when there is one.
-    pub(crate) fn render_frames(
+    /// The frames `range` of the timeline covers, to be flattened as they
+    /// play (layer keyframes, clips, folder cels), through the 2D cameras
+    /// when `camera` says so, and cut to the output frame when there is
+    /// one: read from a snapshot of the document taken now, so an export
+    /// made from them never sees what is drawn meanwhile.
+    pub(crate) fn export_frames(
         &self,
         arena: &sue_core::Arena,
         range: Range,
         camera: bool,
-    ) -> Option<Rendered> {
+    ) -> Option<Frames> {
         let (picture, sequence, length) = self.timeline_here(arena)?;
-        let options = RenderOptions {
-            paper: true,
-            drafts: false,
-        };
         let played = anim::setup::Settings::of(arena, picture).range(length);
-        let frames = range.frames(length, played);
-        let first = frames.start;
-        let output = anim::setup::OutputFrame::of(arena, picture).map(|frame| frame.rect());
-        let frames = frames
-            .filter_map(|frame| {
-                let view = anim::frame_view(arena, picture, frame, None, Some(camera))?;
-                let tile = composite::flatten_view(arena, picture, options, Some(&view))?;
-                match output {
-                    Some(rect) => cropped(&tile, rect),
-                    None => Some(tile),
-                }
-            })
-            .collect();
-        Some(Rendered {
-            frames,
+        Some(Frames {
+            // Shares every raster (D21): a reference count, not a copy.
+            arena: arena.clone(),
+            picture,
+            frames: range.frames(length, played),
+            camera,
+            output: anim::setup::OutputFrame::of(arena, picture).map(|frame| frame.rect()),
             fps: anim::fps(&sequence),
-            first,
+            sequence,
         })
     }
 
     /// Writes the animation to `path`: one GIF, animated PNG or animated
     /// WebP (`animated`, with the settings its dialog kept), or a sequence
-    /// of pictures named as its dialog said.
+    /// of pictures named as its dialog said, in the background.
     pub(crate) fn export_animation(
         &mut self,
         cx: &mut AppletContext<'_>,
         path: &Path,
         animated: bool,
     ) {
-        if let Some(dir) = path.parent() {
-            self.last_dir = Some(dir.to_path_buf());
-        }
         if animated {
             self.export_animated(cx, path);
         } else {
@@ -397,50 +479,28 @@ impl SuePaint {
         let (range, camera) = form
             .as_ref()
             .map_or((Range::All, true), |form| (form.range, form.camera));
-        let Some(rendered) = self.render_frames(&cx.world.arena, range, camera) else {
+        let Some(frames) = self.export_frames(&cx.world.arena, range, camera) else {
             return;
         };
         let size = form.as_ref().map(|form| form.size);
-        let frames: Vec<RasterTile2D> = rendered
-            .frames
-            .into_iter()
-            .map(|frame| match size {
-                Some(size) => scaled(frame, size),
-                None => frame,
-            })
-            .collect();
-        let delay = (1000.0 / rendered.fps.max(1.0)).round() as u32;
         let loops = form.as_ref().map_or(0, |form| form.loops);
-        let encoded = match kind {
-            Animated::WebP => sue_io::encode_webp_animation(&frames, delay),
-            Animated::Apng => sue_io::encode_apng(&frames, delay),
-            Animated::Gif => sue_io::encode_gif_animation_looping(
-                &frames,
-                delay,
-                u16::try_from(loops).ok().filter(|loops| *loops > 0),
-            ),
-        };
-        match encoded.and_then(|bytes| {
-            write_atomic(path, &bytes)
-                .map_err(|error| error.to_string())
-                .map(|()| bytes.len())
-        }) {
-            Ok(size) => cx.saved(
-                path,
-                tr!(
-                    "frames-kib",
-                    count = frames.len(),
-                    value = size.div_ceil(1024)
-                ),
-            ),
-            Err(error) => cx.fail(tr!("cannot-export-the-animation", error = error)),
-        }
+        let target = path.to_path_buf();
+        self.run_export(cx, What::Animation, path, move |steps| {
+            let bytes = animated_bytes(&frames, kind, size, loops, steps)?;
+            write_whole(&target, &bytes, steps)?;
+            Ok(Done {
+                frames: frames.len(),
+                bytes: bytes.len(),
+                files: 1,
+            })
+        });
     }
 
-    /// Numbered pictures, one a frame.
+    /// Numbered pictures, one a frame. They appear together when the last
+    /// is made, and none does when the export stops early.
     fn export_sequence(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
         let form = self.anim_ui.pending.sequence.take().unwrap_or_default();
-        let Some(rendered) = self.render_frames(&cx.world.arena, form.range, form.camera) else {
+        let Some(frames) = self.export_frames(&cx.world.arena, form.range, form.camera) else {
             return;
         };
         let extension = path.extension().map_or_else(
@@ -451,27 +511,42 @@ impl SuePaint {
             .file_stem()
             .map_or_else(|| tr!("frame"), |stem| stem.to_string_lossy().into_owned());
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let count = rendered.frames.len();
-        for (index, frame) in rendered.frames.into_iter().enumerate() {
-            let size = [
-                (u64::from(frame.width()) * u64::from(form.scale.max(1)) / 100).max(1) as u32,
-                (u64::from(frame.height()) * u64::from(form.scale.max(1)) / 100).max(1) as u32,
-            ];
-            let frame = scaled(frame, size);
-            let number = form.first_number.saturating_add(index as u32);
-            let target = dir.join(form.file_name(&stem, number, &extension));
-            if let Err(error) = sue_io::encode_as(&frame, &extension, 90, 7)
-                .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
-            {
-                cx.fail(tr!("cannot-export-frame", value = index + 1, error = error));
-                return;
+        let targets: Vec<PathBuf> = (0..frames.len())
+            .map(|index| {
+                let number = form.first_number.saturating_add(index as u32);
+                dir.join(form.file_name(&stem, number, &extension))
+            })
+            .collect();
+        let Some(first) = targets.first().cloned() else {
+            return;
+        };
+        let scale = form.scale.max(1);
+        let held = first.clone();
+        self.run_export(cx, What::Sequence, &first, move |steps| {
+            let mut staged = Staged::default();
+            for (index, target) in targets.iter().enumerate() {
+                steps.go_on()?;
+                steps.part(index, targets.len(), 0.95);
+                let Some(frame) = frames.render(index) else {
+                    continue;
+                };
+                let size = [
+                    (u64::from(frame.width()) * u64::from(scale) / 100).max(1) as u32,
+                    (u64::from(frame.height()) * u64::from(scale) / 100).max(1) as u32,
+                ];
+                let frame = scaled(frame, size);
+                let bytes = sue_io::encode_as(&frame, &extension, 90, 7).map_err(|error| {
+                    tr!("cannot-export-frame", value = index + 1, error = error)
+                })?;
+                staged.write(target, &bytes)?;
             }
-        }
-        cx.notify(tr!(
-            "exported-frames-to",
-            count = count,
-            dir = dir.display()
-        ));
+            let files = staged.finish(&held, steps)?;
+            Ok(Done {
+                frames: files,
+                bytes: 0,
+                files,
+            })
+        });
     }
 
     /// The cels each animation folder of the timeline shows, by folder:

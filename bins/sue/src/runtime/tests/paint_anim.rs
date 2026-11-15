@@ -187,6 +187,8 @@ fn sue_paint_animates_cels_on_a_timeline_and_exports_them() {
         &mut NoTextures,
         start,
     );
+    // The export runs in the background; the window draws meanwhile.
+    until_exports_end(&mut runtime, |runtime| step(runtime, Vec::new()));
     let ink = |frame: u32, upper: bool| {
         let bytes = std::fs::read(root.join(format!("Walk-{frame:04}.png"))).unwrap();
         let tile = sue_io::decode_png(&bytes).unwrap().tile;
@@ -223,6 +225,7 @@ fn sue_paint_animates_cels_on_a_timeline_and_exports_them() {
         &mut NoTextures,
         start,
     );
+    until_exports_end(&mut runtime, |runtime| step(runtime, Vec::new()));
     assert!(
         std::fs::read(root.join("Walk.gif"))
             .unwrap()
@@ -530,6 +533,7 @@ fn sue_paint_records_a_timelapse_and_exports_it_as_a_video() {
         &mut NoTextures,
         start,
     );
+    until_exports_end(&mut runtime, |runtime| step(runtime, Vec::new()));
     let video = std::fs::read(root.join("Drawing.avi")).unwrap();
     assert_eq!(&video[..4], b"RIFF");
     assert_eq!(&video[8..12], b"AVI ");
@@ -794,6 +798,9 @@ fn picked(paint: &mut PaintDriver, purpose: &str, path: &std::path::Path) {
         paint.now,
     );
     paint.settle(2);
+    // An export runs in the background: wait until it has said how it
+    // went.
+    paint.finish_exports();
 }
 
 /// Draws a short line across the canvas `dy` points from its middle.

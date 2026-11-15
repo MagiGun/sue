@@ -634,13 +634,17 @@ impl SueApplet for SuePaint {
         // Batch Convert Pictures goes on while its dialog is closed and
         // Sue Paint is not shown.
         self.poll_batch(cx);
+        // So do the exports running in the background: each says how it
+        // went when it ends.
+        self.poll_exports(cx);
         sue_wm::Tick {
-            wake: self
+            wake: (self
                 .files
                 .batch
                 .as_ref()
                 .is_some_and(sue_wm::job_list::JobList::busy)
-                .then(|| cx.view.now + std::time::Duration::from_millis(100)),
+                || self.exports.busy())
+            .then(|| cx.view.now + std::time::Duration::from_millis(100)),
             ..sue_wm::Tick::default()
         }
     }

@@ -28,6 +28,7 @@ use crate::view::View;
 mod applet;
 mod clipboard;
 mod edit;
+pub(crate) mod exports;
 mod files;
 mod frame;
 mod layers;
@@ -882,6 +883,8 @@ pub struct SuePaint {
     pub(crate) screen_pick_asked: Option<bool>,
     /// The gradient sets, read the first time a gradient map opens.
     pub(crate) gradients: crate::dialogs::GradientLibrary,
+    /// The exports running in the background.
+    pub(crate) exports: exports::Exports,
 }
 
 impl Default for SuePaint {
@@ -1090,6 +1093,7 @@ impl Default for SuePaint {
             screen_pick: None,
             screen_pick_asked: None,
             gradients: crate::dialogs::GradientLibrary::default(),
+            exports: exports::Exports::default(),
         }
     }
 }
@@ -1294,6 +1298,7 @@ impl SuePaint {
 pub(crate) const KEYS_SECTION: &str = "sue_paint_keys";
 
 pub(crate) use crate::commands::shortcut_table;
+pub use exports::{export_at_once, hold_exports_to};
 pub(crate) use files::export_dir;
 
 /// Sue Paint's applet id.

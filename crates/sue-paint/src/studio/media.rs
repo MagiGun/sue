@@ -1,13 +1,14 @@
 //! Timelapse recording, the camera, audio, and the exports of cels,
 //! webtoons, layer comps and vectors.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sue_core::{Arena, EntityId, Value};
 use sue_model::picture;
 use sue_platform::write_atomic;
 use sue_wm::{AppletContext, FilePick, ShellRequest};
 
+use super::exports::{Done, Staged, Steps, What, write_whole};
 use super::{SuePaint, me_id};
 use crate::composite::{self, RenderOptions};
 use crate::doc;
@@ -135,7 +136,22 @@ impl SuePaint {
         Self::apply(cx, edit)
     }
 
-    /// Asks where to export the timelapse laid out as `export`.
+    /// Export Timelapse: its dialog, with a preview of the frames kept so
+    /// far.
+    pub(crate) fn open_timelapse_export(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let paths = crate::colorsets::folder(cx)
+            .map(|base| crate::timelapse::frames(&crate::timelapse::folder(&base, picture)))
+            .unwrap_or_default();
+        self.dialog = Some(crate::dialogs::Dialog::Timelapse(Box::new(
+            crate::dialogs::TimelapseDialog::open(paths, self.timelapse_export),
+        )));
+    }
+
+    /// Asks where to export the timelapse laid out as `export`: an MP4
+    /// first where the system has an encoder, then the AVI and the GIF.
     pub(crate) fn ask_export_timelapse(
         &mut self,
         cx: &mut AppletContext<'_>,
@@ -146,53 +162,58 @@ impl SuePaint {
             .picture()
             .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
             .map_or_else(|| tr!("timelapse"), |entity| entity.name().to_owned());
+        let mp4 = sue_platform::movie::mp4_available();
+        let mut types = Vec::new();
+        if mp4 {
+            types.push(sue_wm::FileType::new(&tr!("mp4-video"), &["mp4"]));
+        }
+        types.push(sue_wm::FileType::new(
+            &tr!("motion-jpeg-avi-video"),
+            &["avi"],
+        ));
+        types.push(sue_wm::FileType::new(&tr!("animated-gif"), &["gif"]));
+        let file = if mp4 {
+            tr!("timelapse-mp4", name = name)
+        } else {
+            tr!("timelapse-avi", name = name)
+        };
         cx.request(ShellRequest::PickFile(
-            FilePick::save(
-                Some(me_id()),
-                "timelapse",
-                &tr!("export-timelapse"),
-                &tr!("timelapse-avi", name = name),
-            )
-            .types(vec![
-                sue_wm::FileType::new(&tr!("motion-jpeg-avi-video"), &["avi"]),
-                sue_wm::FileType::new(&tr!("animated-gif"), &["gif"]),
-            ])
-            .starting_in(self.last_dir.clone()),
+            FilePick::save(Some(me_id()), "timelapse", &tr!("export-timelapse"), &file)
+                .types(types)
+                .starting_in(self.last_dir.clone()),
         ));
     }
 
-    /// Writes the current canvas's timelapse to `path`, as a video or a
-    /// GIF by its extension.
+    /// Writes the current canvas's timelapse to `path`, as an MP4 or AVI
+    /// video or a GIF by its extension, in the background: from the
+    /// frames kept when it begins (recording goes on meanwhile).
     pub(super) fn export_timelapse(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
         let (Some(picture), Some(base)) = (self.picture(), crate::colorsets::folder(cx)) else {
             return;
         };
-        if let Some(dir) = path.parent() {
-            self.last_dir = Some(dir.to_path_buf());
+        let paths = crate::timelapse::frames(&crate::timelapse::folder(&base, picture));
+        if paths.is_empty() {
+            cx.fail(tr!(
+                "cannot-export-the-timelapse",
+                error = tr!("canvas-has-no-timelapse-yet-record")
+            ));
+            return;
         }
-        let dir = crate::timelapse::folder(&base, picture);
-        let gif = path
+        let export = self.timelapse_export;
+        let extension = path
             .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"));
-        let result = if gif {
-            crate::timelapse::video_frames(&dir, self.timelapse_export).and_then(|(frames, fps)| {
-                let count = frames.len();
-                sue_io::encode_gif_animation(&frames, 1000 / fps.max(1)).map(|bytes| (bytes, count))
+            .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let target = path.to_path_buf();
+        self.run_export(cx, What::Timelapse, path, move |steps| {
+            let (bytes, frames) = timelapse_bytes(&paths, export, &extension, steps)?;
+            write_whole(&target, &bytes, steps)?;
+            Ok(Done {
+                frames,
+                bytes: bytes.len(),
+                files: 1,
             })
-        } else {
-            crate::timelapse::export_avi(&dir, self.timelapse_export)
-        };
-        match result.and_then(|(bytes, count)| {
-            write_atomic(path, &bytes)
-                .map_err(|error| error.to_string())
-                .map(|()| (bytes.len(), count))
-        }) {
-            Ok((size, count)) => cx.saved(
-                path,
-                tr!("frames-kib", value = size.div_ceil(1024), count = count),
-            ),
-            Err(error) => cx.fail(tr!("cannot-export-the-timelapse", error = error)),
-        }
+        });
     }
 
     /// The current layer when it is a camera folder.
@@ -439,12 +460,13 @@ impl SuePaint {
     }
 
     /// Writes each animation cel as a picture of its own, flattened (a
-    /// folder cel with everything in it), named for it. With the
-    /// settings' "a folder for each animation folder" (the default, as
-    /// Clip Studio Paint does it), each animation folder's cels go in a
-    /// folder of that name beside `path`, so cel "1" of two folders never
-    /// overwrites the other; without it, the files are `<name>-<folder>-
-    /// <cel>` beside `path`.
+    /// folder cel with everything in it), named for it, in the
+    /// background. With the settings' "a folder for each animation
+    /// folder" (the default, as Clip Studio Paint does it), each animation
+    /// folder's cels go in a folder of that name beside `path`, so cel "1"
+    /// of two folders never overwrites the other; without it, the files
+    /// are `<name>-<folder>-<cel>` beside `path`. The files appear
+    /// together when the last is made, and none does when it stops early.
     pub(super) fn export_cels(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
         let form = self.anim_ui.pending.cels.take().unwrap_or_default();
         let Some(picture) = self.picture() else {
@@ -453,9 +475,6 @@ impl SuePaint {
         if crate::anim::timeline(&cx.world.arena, picture).is_none() {
             cx.fail(tr!("make-timeline-first-animation-timeline-new"));
             return;
-        }
-        if let Some(dir) = path.parent() {
-            self.last_dir = Some(dir.to_path_buf());
         }
         let extension = path.extension().map_or_else(
             || {
@@ -489,28 +508,41 @@ impl SuePaint {
                 })
                 .collect()
         };
-        let mut written = 0;
-        for (folder, cels) in self.cels_by_folder(&cx.world.arena) {
+        // Which cel goes to which file, read now.
+        let mut cels: Vec<(EntityId, PathBuf)> = Vec::new();
+        for (folder, ids) in self.cels_by_folder(&cx.world.arena) {
             let folder = plain(&folder);
             let into = if form.per_folder {
                 dir.join(&folder)
             } else {
                 dir.clone()
             };
-            if let Err(error) = sue_platform::fs::create_dir_all(&into) {
-                cx.fail(tr!(
-                    "cannot-export-2",
-                    name = folder,
-                    error = error.to_string()
-                ));
-                return;
-            }
-            for cel in cels {
+            for cel in ids {
                 let Ok(entity) = cx.world.arena.get_by_id(cel) else {
                     continue;
                 };
                 let name = plain(entity.name());
-                let tile = crate::composite::thumbnail(&cx.world.arena, cel, size)
+                let file = if form.per_folder {
+                    format!("{name}.{extension}")
+                } else {
+                    format!("{stem}-{folder}-{name}.{extension}")
+                };
+                cels.push((cel, into.join(file)));
+            }
+        }
+        let Some((_, first)) = cels.first().cloned() else {
+            cx.notify(tr!("exported-cels", written = 0));
+            return;
+        };
+        // Shares every raster (D21): a reference count, not a copy.
+        let arena = cx.world.arena.clone();
+        let held = first.clone();
+        self.run_export(cx, What::Cels, &first, move |steps| {
+            let mut staged = Staged::default();
+            for (index, (cel, target)) in cels.iter().enumerate() {
+                steps.go_on()?;
+                steps.part(index, cels.len(), 0.95);
+                let tile = crate::composite::thumbnail(&arena, *cel, size)
                     .and_then(|(pixels, [width, height])| {
                         sue_core::RasterTile2D::from_bytes(
                             width,
@@ -520,27 +552,23 @@ impl SuePaint {
                         )
                         .ok()
                     })
-                    .or_else(|| doc::raster(&cx.world.arena, cel).cloned());
+                    .or_else(|| doc::raster(&arena, *cel).cloned());
                 let Some(tile) = tile else {
                     continue;
                 };
-                let file = if form.per_folder {
-                    format!("{name}.{extension}")
-                } else {
-                    format!("{stem}-{folder}-{name}.{extension}")
-                };
-                match sue_io::encode_as(&tile, &extension, 92, 7).and_then(|bytes| {
-                    write_atomic(&into.join(file), &bytes).map_err(|error| error.to_string())
-                }) {
-                    Ok(()) => written += 1,
-                    Err(error) => {
-                        cx.fail(tr!("cannot-export-2", name = name, error = error));
-                        return;
-                    }
+                if let Some(into) = target.parent() {
+                    staged.folder(into)?;
                 }
+                let bytes = sue_io::encode_as(&tile, &extension, 92, 7)?;
+                staged.write(target, &bytes)?;
             }
-        }
-        cx.notify(tr!("exported-cels", written = written));
+            let files = staged.finish(&held, steps)?;
+            Ok(Done {
+                frames: 0,
+                bytes: 0,
+                files,
+            })
+        });
     }
 
     /// Puts the sound file at `path` on a new audio track of the timeline,
@@ -575,4 +603,63 @@ impl SuePaint {
             Err(error) => cx.fail(tr!("cannot-import", name = name, error = error)),
         }
     }
+}
+
+/// The timelapse of the frame files `paths` laid out as `export`: a GIF
+/// when `extension` is `gif`, an MP4 when it is `mp4`, else the Motion
+/// JPEG AVI; and how many frames it holds. The same in the background as
+/// at once ([`Steps::NOW`]).
+///
+/// # Errors
+/// When there are no frames, one will not read, the encoder refuses (its
+/// English text, `io.ftl`), or it was cancelled.
+pub(crate) fn timelapse_bytes(
+    paths: &[PathBuf],
+    export: crate::timelapse::Export,
+    extension: &str,
+    steps: Steps<'_>,
+) -> Result<(Vec<u8>, usize), String> {
+    let plan = crate::timelapse::Plan::new(paths, export)?;
+    // A frame held (the last, for a second) is read once.
+    let mut last: Option<(usize, sue_core::RasterTile2D)> = None;
+    let mut frame = |index: usize| -> Result<sue_core::RasterTile2D, String> {
+        let source = plan.source(index);
+        if let Some((was, tile)) = &last
+            && *was == source
+        {
+            return Ok(tile.clone());
+        }
+        let tile = plan.frame(index)?;
+        last = Some((source, tile.clone()));
+        Ok(tile)
+    };
+    if extension == "gif" {
+        let mut frames = Vec::with_capacity(plan.len());
+        for index in 0..plan.len() {
+            steps.go_on()?;
+            steps.part(index, plan.len(), 0.8);
+            frames.push(frame(index)?);
+        }
+        steps.go_on()?;
+        let count = frames.len();
+        let bytes = sue_io::encode_gif_animation(&frames, 1000 / plan.fps.max(1))?;
+        return Ok((bytes, count));
+    }
+    let format = if extension == "mp4" {
+        sue_io::MovieFormat::Mp4H264
+    } else {
+        sue_io::MovieFormat::MjpegAvi
+    };
+    let mut settings = sue_io::MovieSettings::new(plan.size[0], plan.size[1], plan.fps.max(1));
+    settings.quality = sue_io::MovieQuality::High;
+    let text = |error: sue_io::MovieError| error.text().to_owned();
+    let mut sink = sue_platform::movie::open(format, settings).map_err(text)?;
+    for index in 0..plan.len() {
+        steps.go_on()?;
+        steps.part(index, plan.len(), 0.95);
+        sink.push_frame(&frame(index)?).map_err(text)?;
+    }
+    steps.go_on()?;
+    let count = sink.frames();
+    Ok((sink.finish().map_err(text)?, count))
 }

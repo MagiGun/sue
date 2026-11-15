@@ -3414,3 +3414,27 @@ artistic-line-opacity = Line Opacity
 stop-main-color = Main Color
 stop-sub-color = Sub Color
 filter-color = Color
+# Export Timelapse: the video's shape and its preview; exports that run in the background.
+aspect-ratio = Aspect ratio:
+aspect-same-as-canvas = Same as the canvas
+aspect-wide = 16:9 (wide)
+aspect-tall = 9:16 (tall)
+aspect-square = 1:1 (square)
+aspect-portrait = 4:5 (portrait)
+aspect-classic = 4:3 (classic)
+timelapse-preview = Preview of the timelapse
+timelapse-preview-loading = Reading the timelapse
+timelapse-play = Play
+timelapse-pause = Pause
+timelapse-scrub = Position in the timelapse
+timelapse-time = { $now } of { $total }
+timelapse-video-size = { $width } by { $height } px, { $count } frames at { $fps } a second
+timelapse-formats = An MP4 or AVI video, or an animated GIF, by the type of file chosen. It is made in the background: you can keep drawing.
+mp4-video = MP4 video
+and-more-files = { $count ->
+    [one] and 1 more
+   *[other] and { $count } more
+}
+export-cancelled = Stopped exporting { $name }; nothing was written
+export-was-cancelled = The export was cancelled
+timelapse-mp4 = { $name } timelapse.mp4
