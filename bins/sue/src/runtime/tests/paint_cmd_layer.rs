@@ -160,6 +160,9 @@ const CASES: &[Case] = &[
     case("layer.rasterize", &["layer.new.vector"], 1),
     case("layer.convert", &[], 0),
     case("layer.lines_tones_vector", &["layer.new.figure"], 1),
+    // A new vector layer has no line to update: a notice, no step. The
+    // update itself is driven in paint_vector_3d.rs.
+    case("layer.update_lines", &["layer.new.vector"], 0),
 ];
 
 #[test]
