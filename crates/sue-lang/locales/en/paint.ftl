@@ -2519,3 +2519,28 @@ ruler-show-in-same-folder = Show in same folder
 ruler-show-when-editing-target = Show only when editing target
 moves-picture-across-stroke = Moves the picture sideways across the stroke
 copies-picture-from-source = Copies the picture from where Alt and click set, as you paint
+
+## Vector lines (P4-14): the Object tool's settings for picked lines,
+## figures on vector layers, Update Lines to New Brush Engine.
+editing-vector = Editing vector
+lines-mode-hint = Scale keeps the box a box; Free transform moves each corner on its own
+adjust-line-thickness-when-scaling = Adjust line thickness when scaling
+pick-lines-hint = Click a line to pick it, or draw a loop round several. Shift adds to what is picked.
+lines-picked = { $count ->
+    [one] 1 line picked
+   *[other] { $count } lines picked
+}
+hex-code-of = Hex code of { $name }
+hex-code-hint = Type six digits, such as 141414; the picked lines change as soon as the code is whole
+use-drawing-color-hint = Gives the picked lines the color you draw with
+brush-shape = Brush shape
+brush-shape-as-drawn = As drawn
+brush-shape-hint = Gives the picked lines the brush of a sub tool; each keeps its size
+vector-magnet-hint = A figure on a vector layer joins its ends to the ends of lines near them
+transform-lines = Transform Lines
+line-style = Line Style
+update-lines-to-new-brush-engine = Update Lines to New Brush Engine
+updated-lines = Updated { $updated } lines to the new brush engine. Undo takes it back.
+updated-lines-kept-some = Updated { $updated } lines to the new brush engine. { $kept } lines with a flick or post correction stay as they are, since the new engine cannot draw those yet.
+no-lines-updated-kept = Nothing was updated: the { $kept } lines left have a flick or post correction, which the new brush engine cannot draw yet.
+no-legacy-lines-to-update = Every line of this layer already uses the new brush engine.

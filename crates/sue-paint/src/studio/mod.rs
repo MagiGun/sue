@@ -350,6 +350,9 @@ pub(crate) enum Gesture {
     },
     /// Picking colors while the button is down.
     Pick { mode: u8 },
+    /// A loop picking vector lines, the picked lines' box dragged, or
+    /// the Vector eraser over several layers (`canvas/lines.rs`).
+    Lines(Box<crate::canvas::lines::LinesGesture>),
 }
 
 /// Which palettes show.
@@ -738,6 +741,22 @@ pub struct SuePaint {
     /// The pen's samples since its latest touch down, for a stroke of the
     /// new brush engine (see `canvas/engine.rs`).
     pub(crate) pen_stream: Vec<sue_platform::stylus::PenSample>,
+    /// The Object tool's Mode on picked vector lines: Free transform
+    /// moves the box's corners one by one; off, the handles scale it.
+    pub(crate) line_free: bool,
+    /// Adjust line thickness when scaling picked vector lines.
+    pub(crate) line_thicken: bool,
+    /// Figures on a vector layer join their ends to the ends of lines
+    /// near them (Vector magnet).
+    pub(crate) vector_magnet: bool,
+    /// What Tool Property asked of the picked lines this frame.
+    pub(crate) pending_lines: Option<crate::canvas::lines::LineChange>,
+    /// The picked lines as they were while Tool Property shows a change.
+    pub(crate) line_preview: Option<crate::canvas::lines::LinePreview>,
+    /// The lines Tool Property's change shows now.
+    pub(crate) line_lines_shown: Option<Vec<crate::vector::Line>>,
+    /// The hex codes typed for the picked lines' main and sub color.
+    pub(crate) line_hex: [String; 2],
 }
 
 impl Default for SuePaint {
@@ -914,6 +933,13 @@ impl Default for SuePaint {
             current_workspace: None,
             kept_styles: Vec::new(),
             pen_stream: Vec::new(),
+            line_free: false,
+            line_thicken: true,
+            vector_magnet: false,
+            pending_lines: None,
+            line_preview: None,
+            line_lines_shown: None,
+            line_hex: [String::new(), String::new()],
         }
     }
 }

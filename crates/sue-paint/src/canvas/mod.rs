@@ -20,6 +20,7 @@ use view::{SCROLLBAR, scrollbar};
 pub(crate) mod engine;
 mod fill;
 mod input;
+pub(crate) mod lines;
 mod overlays;
 mod pick;
 mod shape;
