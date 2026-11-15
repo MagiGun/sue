@@ -2364,3 +2364,10 @@ keys-group-other = Other Commands
 manage-fonts-ellipsis = Manage Fonts...
 manage-fonts = Manage Fonts
 pose-scanner-from-image-ellipsis = Pose Scanner (Scan Pose from Image)...
+copy-vectors-as-svg = Copy Vectors as SVG
+no-vector-lines-to-copy = There are no lines on this vector layer to copy.
+copied-vector-lines-as-svg = { $count ->
+    [one] Copied one line as SVG
+   *[other] Copied { $count } lines as SVG
+}
+cannot-copy-to-clipboard = Cannot copy to the clipboard: { $error }

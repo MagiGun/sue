@@ -28,6 +28,9 @@ follow [Semantic Versioning](https://semver.org/).
   faces and a sample line; Pose Scanner (Scan Pose from Image) runs from
   the command palette and makes a 3D drawing figure first when none is
   picked. Both join the File menu with the menu work of this release.
+- Sue Paint: Edit, Copy Vectors as SVG puts the lines of the vector
+  layer (only the ones the Operation tool picked, when it picked some) on
+  the clipboard as SVG code, for any program that draws vectors.
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
@@ -90,6 +93,8 @@ follow [Semantic Versioning](https://semver.org/).
   nothing. Typing a Clip Studio option's name in the Settings filter finds
   Sue's setting. Studio Mode's keys T1 to T7 are picked from a list of
   commands instead of typed as command names.
+- Sue Paint: Edit, Paste to Shown Position answers to Ctrl+Shift+V, as
+  in Clip Studio Paint (it had no key).
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an
   empty or single color tile costs a byte, a tile found twice (a duplicated

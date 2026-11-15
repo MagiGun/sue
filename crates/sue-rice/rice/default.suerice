@@ -176,6 +176,7 @@ filter_invert = "Ctrl+I"       # @keybind Reverse Gradient
 edit_cut = "Ctrl+X or F2"      # @keybind Cut
 edit_copy = "Ctrl+C or F3"     # @keybind Copy
 edit_paste = "Ctrl+V or F4"    # @keybind Paste
+edit_paste_here = "Ctrl+Shift+V" # @keybind Paste to Shown Position
 edit_clear = "Ctrl+Delete or Ctrl+Backspace or Delete or Backspace" # @keybind Delete
 edit_fill = "Shift+Delete or Shift+Backspace or Alt+Delete or Alt+Backspace" # @keybind Fill
 layer_toggle_clip = "Ctrl+Alt+G" # @keybind Clip to Layer Below
