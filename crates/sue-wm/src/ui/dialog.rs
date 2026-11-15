@@ -348,10 +348,30 @@ impl<'a> Dialog<'a> {
         let screen = ctx.content_rect();
         let (appeared, shown) = entered(ctx, self.id, Pace::Slow);
         let rise = (1.0 - shown) * theme.space(Space::S4);
+        // Once it has come in it keeps its top where it stood: a body that
+        // grows or shrinks (a list, a row shown or hidden) moves only its
+        // bottom, never the controls under the pointer. Only when it would
+        // run past the screen's bottom does it rise.
+        let kept = self.id.with("sue-dialog-kept");
+        if appeared {
+            ctx.data_mut(|data| data.remove::<Rect>(kept));
+        }
+        let placed: Option<Rect> = ctx.data(|data| data.get_temp(kept));
         let area = Area::new(self.id)
             .kind(UiKind::Modal)
-            .order(Layer::Dialog.order())
-            .anchor(Align2::CENTER_CENTER, vec2(0.0, rise))
+            .order(Layer::Dialog.order());
+        let area = match placed.filter(|_| shown >= 1.0) {
+            Some(last) => {
+                let room = theme.space(Space::S6);
+                let top = last
+                    .top()
+                    .min(screen.bottom() - room - last.height())
+                    .max(screen.top() + room);
+                area.fixed_pos(pos2(last.left(), top))
+            }
+            None => area.anchor(Align2::CENTER_CENTER, vec2(0.0, rise)),
+        };
+        let area = area
             .sense(Sense::hover())
             .interactable(true)
             .fade_in(false)
@@ -412,6 +432,9 @@ impl<'a> Dialog<'a> {
             (parts, panel.response.rect)
         });
         let (parts, rect) = shown_area.inner;
+        if shown >= 1.0 {
+            ctx.data_mut(|data| data.insert_temp(kept, rect));
+        }
         DialogResponse {
             inner: parts.inner,
             answer: parts.answer,
