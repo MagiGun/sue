@@ -18,7 +18,7 @@ pub mod browser;
 pub mod model;
 pub mod thumbs;
 
-pub use browser::{Event, project_popup, projects_ui, transfers_popup};
+pub use browser::{Browse, Event, Spot, browse, project_popup, projects_ui, transfers_popup};
 pub use model::{
     Item, ProjectKey, ProjectsState, Shelf, Studio, Type, View, forget, items, shown, texture_key,
 };

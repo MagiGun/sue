@@ -1400,8 +1400,13 @@ impl SueApplet for SueWriter {
     }
 
     fn manifest(&self) -> AppletManifest {
-        let mut manifest = AppletManifest::new(ID, "Sue Writer", AppletRole::Studio, "\u{1F4DD}")
-            .localized("writer");
+        let mut manifest = AppletManifest::new(
+            ID,
+            "Sue Writer",
+            AppletRole::Studio,
+            sue_wm::icons::Icon::AppWriter,
+        )
+        .localized("writer");
         manifest.summary = "Write documents, novels, scripts and papers, then publish them as PDF, Word, EPUB and more.".to_owned();
         manifest.order = 26;
         manifest

@@ -69,44 +69,65 @@ see (you can color it yourself in Settings).
 
 ### The Hub
 
-Sue opens on the **Hub**, a page of boxes: the **Studios** (Sue Paint, Sue
-Writer). Each box says what it is for. Click one to go there: it comes in
-over the Hub, and a studio slides its panels in from the edges. New studios
-and tools appear in the Hub by themselves as they are added.
+Sue opens on the **Hub**, your workspace. Down its left side runs a rail
+of places: **Home**, **Files**, and any place a studio adds (Sue Paint's
+materials). On a phone, or whenever the window is narrow, the rail becomes a
+tab bar along the bottom.
 
-At the bottom right of every box is a **pin**. Pin the studio or tool you
-use most and Sue opens straight into it from then on, with no stop at the
-Hub. Only one can be pinned: pinning another moves the pin, and clicking the
-pinned one again takes it away. `Ctrl+Z` undoes a pin like any other change,
-and you can also choose it under Settings, General, Startup.
+**Home** greets you with **New** (a menu of everything every studio can
+make, by kind) and **Open** (your computer's open dialog), then:
 
-Under the boxes are three lists, side by side when the window is wide and
-one under the other when it is not:
+- **Studios**: a card for each studio (Sue Paint, Sue Writer) with its icon
+  and what it is for. Click one to go there: it comes in over the Hub, and a
+  studio slides its panels in from the edges. New studios and tools appear
+  here by themselves as they are added.
+- **Jump Back In**: your newest work as cards with pictures, one click from
+  open, and **All Files** to see everything. It shows only once there is
+  work, so a first run is not a page of empty boxes.
+- **Your Work**: buttons that open Files already sorted: **Recent**,
+  **Projects**, **Unsaved Work**, **Favorites**, each with how many it
+  holds, and **Folder**, which opens Sue's own folder in your file manager
+  where your system has one. Unsaved Work is outlined while there is work
+  to recover, so you notice it.
 
-- **Recent**: the files and projects you opened or saved lately, newest
-  first, each with when, the folder it is in, and what it is (a project, a
-  PNG). Settings, General, Startup says how many it shows.
-- **Saved Projects**: every Sue project (`.sue`) you saved or opened, by
-  name, with the studio it was saved from.
-- **Unsaved Work**: work Sue kept for you by itself. Sue keeps whatever you
-  have not saved a minute after you change it, and again when you quit, so
-  a crash or a quick Quit loses nothing. Each piece says when it was kept
-  and whether it was never saved or is newer than its project file.
-  **Recover** (or a click on it) brings it back in the studio it was made
-  in; save it to keep it. **Discard** asks once more (Really Discard) and
-  then throws it away.
+At the top right of every studio card is a round **pin** (it shows when you
+point at the card). Pin the studio or tool you use most and Sue opens
+straight into it from then on, with no stop at the Hub. Only one can be
+pinned: pinning another moves the pin, and clicking the pinned one again
+takes it away. `Ctrl+Z` undoes a pin like any other change, and you can
+also choose it under Settings, General, Startup.
 
-Click a recent file or a saved project to open it where it belongs: a
-project opens in the studio it was saved from. Opening a project while you
-have unsaved work does not lose that work: it goes to Unsaved Work. Files
-that are gone drop off the lists by themselves.
+**Files** shows the work of every studio as cards with pictures (or as a
+list): the files and projects you opened or saved lately, and the work Sue
+kept for you. Search it, narrow it by studio and by type, sort it by date or
+name, mark favorites and sort work under labels of your own. A card's
+`>` says what it is, where it is, and offers Show in Folder and Remove from
+List (the file itself stays). Sue keeps whatever you have not saved a
+minute after you change it, and again when you quit, so a crash or a quick
+Quit loses nothing; that kept work has **Recover** on its card (or click
+the card), which brings it back in the studio it was made in, and
+**Discard**, which asks once more and then throws it away. The `...` menu
+of Files rebuilds the thumbnails, forgets files that are gone, and clears
+the transfers that are done.
+
+Click a file or project to open it where it belongs: a project opens in the
+studio it was saved from. Opening a project while you have unsaved work
+does not lose that work: it goes to Unsaved Work. Files that are gone drop
+off the list by themselves.
+
+Over the Hub the top bar holds a **search field** (click it, or press
+`Tab`, to find any command, setting or studio) and, at its right,
+**Transfers** (what Sue opened, saved and copied in this run) and
+**Settings**. The arrow keys walk the Hub's places, buttons and cards, and
+`Enter` uses the one in focus.
 
 ### The Sue button and its menu
 
 At the very top left of the window, always in the same place, is the **Sue**
 button (Sue's silhouette). Right after it come the menus of whatever is open:
 Sue Paint's File, Edit, Story and the rest, or Sue Writer's, or a tool's. On
-the Hub the bar just says Hub.
+the Hub the bar holds the search field and the Transfers and Settings
+buttons.
 
 The Sue button opens the **Sue menu**, for Sue as a whole:
 

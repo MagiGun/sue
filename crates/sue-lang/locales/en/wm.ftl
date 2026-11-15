@@ -282,3 +282,44 @@ font-sample = The quick brown fox jumps over the lazy dog 0123456789
 font-bundled = Comes with Sue
 font-faces = Faces: { $faces }
 fonts-come-from-the-device = Sue sets text in the fonts installed on this device. A font installed in the system shows here and in every studio.
+
+## shell/hub.rs, shell/hub/*.rs, shell/bar.rs: the Hub's places
+
+hub-home = Home
+hub-files = Files
+hub-welcome = Welcome to Sue
+hub-new = New
+hub-new-hint = Start something new in any studio
+hub-open = Open
+hub-open-hint = Open a file from your computer
+hub-jump-back-in = Jump Back In
+hub-all-files = All Files
+hub-your-work = Your Work
+hub-projects = Projects
+hub-unsaved-work = Unsaved Work
+hub-favorites = Favorites
+hub-folder = Folder
+hub-folder-detail = Sue's folder, in your file manager
+hub-count = { $count ->
+    [0] Nothing yet
+    [one] { $count } item
+   *[other] { $count } items
+}
+hub-to-recover = { $count ->
+    [one] { $count } to recover
+   *[other] { $count } to recover
+}
+hub-file-gone = { $path } is gone; it is taken off the list
+hub-upkeep = More
+hub-rebuild-thumbnails = Rebuild Thumbnails
+hub-thumbnails-rebuilt = The thumbnails are drawn again
+hub-forget-missing = Forget Files That Are Gone
+hub-forgot = { $count ->
+    [0] Every file on the list is still there
+    [one] One file that is gone was taken off the list
+   *[other] { $count } files that are gone were taken off the list
+}
+hub-search = Search or run a command
+hub-search-files = Search files
+hub-search-hint = Find a command, a setting or a studio (Tab)
+files-transfers = Transfers

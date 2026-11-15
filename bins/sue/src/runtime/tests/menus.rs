@@ -48,9 +48,15 @@ fn has(texts: &[(String, egui::Rect)], text: &str) -> bool {
 
 /// Where `text` shows to the right of `of`: in a menu nested beside it.
 fn beside(texts: &[(String, egui::Rect)], text: &str, of: egui::Rect) -> Option<egui::Rect> {
+    // On its line: the page under the menu may say the same (the Hub's
+    // studio cards name the studios too).
     texts
         .iter()
-        .find(|(found, rect)| found == text && rect.left() > of.right())
+        .find(|(found, rect)| {
+            found == text
+                && rect.left() > of.right()
+                && (rect.top() - of.top()).abs() < of.height() * 2.0
+        })
         .map(|(_, rect)| *rect)
 }
 
