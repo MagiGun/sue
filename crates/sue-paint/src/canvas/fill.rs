@@ -25,47 +25,22 @@ impl SuePaint {
             return None;
         }
         let picture_id = self.picture()?;
-        let reference = if sub.mode == 2 {
-            // Only the reference layers, as they show.
-            let view = composite::FrameView {
-                hidden: doc::layers(arena, picture_id)
-                    .into_iter()
-                    .map(|info| info.id)
-                    .filter(|id| !doc::is_reference(arena, *id))
-                    .collect(),
-                ..composite::FrameView::default()
-            };
-            composite::render_view(
-                arena,
-                picture_id,
-                [0, 0, size[0], size[1]],
-                RenderOptions {
-                    paper: false,
-                    drafts: true,
-                },
-                Some(&view),
-            )
-        } else if sub.mode == 1 {
-            composite::render(
-                arena,
-                picture_id,
-                [0, 0, size[0], size[1]],
-                RenderOptions {
-                    paper: false,
-                    drafts: true,
-                },
-            )
-        } else {
-            self.layer_on_picture(arena, size)?
+        let reference = match sub.referred() {
+            fill::Refer::Editing => self.layer_on_picture(arena, size)?,
+            refer => {
+                let picked = self.doc().map(|doc| doc.picked.clone()).unwrap_or_default();
+                fill::reference(
+                    arena,
+                    picture_id,
+                    size,
+                    self.layer(),
+                    &picked,
+                    refer,
+                    sub.exclude,
+                )?
+            }
         };
-        let mut mask = fill::flood_closing(
-            &reference,
-            size,
-            [p.x as u32, p.y as u32],
-            sub.tolerance,
-            fill::gap_radius(sub.gap),
-            sub.spread,
-        );
+        let mut mask = fill::area(&reference, size, [p.x as u32, p.y as u32], &sub.area());
         if let Some(selection) = self.doc().and_then(|doc| doc.selection.as_ref()) {
             for (index, value) in mask.iter_mut().enumerate() {
                 let (x, y) = (index as u32 % size[0], index as u32 / size[0]);

@@ -571,6 +571,103 @@ impl Handle {
     }
 }
 
+/// The layer the rulers belong to (`Entity`); none: the whole picture.
+pub const LAYER: &str = "ruler.layer";
+/// Where the rulers show ([`ShowRange::id`], `Text`); none: everywhere.
+pub const RANGE: &str = "ruler.range";
+
+/// Where a picture's rulers show and guide strokes, as Clip Studio
+/// Paint's ruler show range: by the layer they belong to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ShowRange {
+    /// While any layer is edited.
+    #[default]
+    AllLayers,
+    /// While a layer in the same folder as the ruler's layer is edited.
+    SameFolder,
+    /// Only while the ruler's own layer is edited.
+    EditingLayer,
+}
+
+impl ShowRange {
+    /// Every choice, in the menu's order.
+    pub const ALL: [Self; 3] = [Self::AllLayers, Self::SameFolder, Self::EditingLayer];
+
+    /// Its stable name in saved pictures.
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::AllLayers => "all_layers",
+            Self::SameFolder => "same_folder",
+            Self::EditingLayer => "editing_layer",
+        }
+    }
+
+    /// The choice named `id`.
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|range| range.id() == id)
+    }
+
+    /// What people read.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::AllLayers => tr!("ruler-show-in-all-layers"),
+            Self::SameFolder => tr!("ruler-show-in-same-folder"),
+            Self::EditingLayer => tr!("ruler-show-when-editing-target"),
+        }
+    }
+
+    /// Where `picture`'s rulers show (everywhere when it says nothing, as
+    /// every picture made before the show range).
+    #[must_use]
+    pub fn of(arena: &Arena, picture: EntityId) -> Self {
+        arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(|entity| entity.property(RANGE))
+            .and_then(Value::as_str)
+            .and_then(Self::from_id)
+            .unwrap_or_default()
+    }
+
+    /// The edit that sets `picture`'s rulers to belong to `layer` and show
+    /// as `self` says, named `label`; one undo step.
+    #[must_use]
+    pub fn edit(self, picture: EntityId, layer: Option<EntityId>, label: &str) -> Edit {
+        let range = match self {
+            Self::AllLayers => SetProperty::remove(picture, RANGE),
+            other => SetProperty::new(picture, RANGE, other.id()),
+        };
+        Edit::new(label).then(range).then(match layer {
+            Some(layer) => SetProperty::new(picture, LAYER, Value::Entity(layer)),
+            None => SetProperty::remove(picture, LAYER),
+        })
+    }
+}
+
+/// `true` if `picture`'s rulers show (and guide strokes) while `editing`
+/// is the layer being edited.
+#[must_use]
+pub fn shown(arena: &Arena, picture: EntityId, editing: Option<EntityId>) -> bool {
+    let owner = arena
+        .get_by_id(picture)
+        .ok()
+        .and_then(|entity| entity.property(LAYER))
+        .and_then(Value::as_entity);
+    let Some(owner) = owner else {
+        return true;
+    };
+    match ShowRange::of(arena, picture) {
+        ShowRange::AllLayers => true,
+        ShowRange::EditingLayer => editing == Some(owner),
+        ShowRange::SameFolder => editing.is_some_and(|editing| {
+            crate::doc::folder_of(arena, editing) == crate::doc::folder_of(arena, owner)
+        }),
+    }
+}
+
 /// The edit that sets `key` of `picture` to `value`, or takes it away for
 /// `None`, named `label`.
 #[must_use]
@@ -943,5 +1040,62 @@ mod tests {
                 .iter()
                 .all(|point| (point[1] - 90.0).abs() < 1e-3)
         );
+    }
+
+    #[test]
+    fn the_ruler_show_range_follows_the_layer_being_edited_and_undoes() {
+        use sue_core::{ReversibleTransaction, UndoStack};
+        let mut arena = Arena::new();
+        let (mut make, picture) = crate::doc::create(&crate::doc::NewPicture {
+            name: "Rulers".to_owned(),
+            width: 8,
+            height: 8,
+            dpi: 72.0,
+            paper: None,
+            timelapse: false,
+        })
+        .unwrap();
+        make.apply(&mut arena).unwrap();
+        let first = crate::doc::layers(&arena, picture).last().unwrap().id;
+        let (mut spawn, second) =
+            crate::doc::add_raster_layer(&arena, picture, Some(first), "B".to_owned(), None)
+                .unwrap();
+        spawn.apply(&mut arena).unwrap();
+        // A picture from before the show range shows its rulers everywhere.
+        assert_eq!(ShowRange::of(&arena, picture), ShowRange::AllLayers);
+        assert!(shown(&arena, picture, Some(second)));
+        // The picture as it stands: its rulers' properties.
+        let state = |arena: &Arena| {
+            let entity = arena.get_by_id(picture).unwrap();
+            (
+                entity.property(RANGE).cloned(),
+                entity.property(LAYER).cloned(),
+            )
+        };
+        let before = state(&arena);
+        let mut stack = UndoStack::new();
+        let only_first =
+            ShowRange::EditingLayer.edit(picture, Some(first), "Show only when editing");
+        stack.apply(&mut arena, only_first).unwrap();
+        let after = state(&arena);
+        assert!(shown(&arena, picture, Some(first)));
+        assert!(!shown(&arena, picture, Some(second)));
+        assert!(!shown(&arena, picture, None));
+        // Both layers are outside folders: the same folder shows on both.
+        let same = ShowRange::SameFolder.edit(picture, Some(first), "Same folder");
+        stack.apply(&mut arena, same).unwrap();
+        assert!(shown(&arena, picture, Some(second)));
+        // Undo and redo, exactly (rule 7).
+        stack.undo(&mut arena).unwrap();
+        assert_eq!(state(&arena), after);
+        stack.undo(&mut arena).unwrap();
+        assert_eq!(state(&arena), before);
+        assert_eq!(before, (None, None), "nothing written before");
+        stack.redo(&mut arena).unwrap();
+        assert_eq!(state(&arena), after);
+        for range in ShowRange::ALL {
+            assert_eq!(ShowRange::from_id(range.id()), Some(range));
+            assert!(!range.label().is_empty());
+        }
     }
 }

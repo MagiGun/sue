@@ -32,7 +32,7 @@ use crate::studio::SuePaint;
 
 pub(crate) use command_bar::BAR_GROUPS;
 pub(crate) use material::material_thumb;
-pub(crate) use tool::tool_icon;
+pub(crate) use tool::{slot_icon, tool_icon};
 
 /// A child `Ui` confined to `rect`.
 pub(crate) fn child(ui: &mut Ui, rect: Rect, salt: &str) -> Ui {
@@ -462,6 +462,19 @@ fn tall_slider(
     Some(((track.bottom() - pointer.y) / track.height()).clamp(0.0, 1.0))
 }
 
+/// The name at the start of a Tool Property row, as wide as every other
+/// row's so their controls line up.
+fn row_label(ui: &mut Ui, label: &str, theme: &Theme) {
+    ui.add_sized(
+        vec2(78.0, 18.0),
+        egui::Label::new(
+            RichText::new(label)
+                .size(theme.small_size + 0.5)
+                .color(theme.muted),
+        ),
+    );
+}
+
 /// A labelled horizontal slider row.
 fn slider_row(
     ui: &mut Ui,
@@ -473,14 +486,7 @@ fn slider_row(
     theme: &Theme,
 ) -> bool {
     ui.horizontal(|ui| {
-        ui.add_sized(
-            vec2(78.0, 18.0),
-            egui::Label::new(
-                RichText::new(label)
-                    .size(theme.small_size + 0.5)
-                    .color(theme.muted),
-            ),
-        );
+        row_label(ui, label, theme);
         ui.spacing_mut().slider_width = (ui.available_width() - 62.0).max(36.0);
         ui.add(
             egui::Slider::new(value, range)

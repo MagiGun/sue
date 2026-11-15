@@ -394,15 +394,20 @@ fn sue_paint_lasso_fill_close_and_fill_and_copy_stamp_paint() {
             })
             .collect()
     };
-    let sub = |runtime: &mut Runtime, tool: &str, index: usize| {
+    // A tool's key goes round the tools that share it, so each pick
+    // starts from the Eraser (alone on E); then `steps` sub tools on from
+    // the one the tool has picked (each tool keeps its own).
+    let sub = |runtime: &mut Runtime, tool: &str, steps: usize| {
+        command(runtime, "tool.eraser");
         command(runtime, tool);
-        for _ in 0..index {
+        for _ in 0..steps {
             command(runtime, "tool.next_sub");
         }
     };
-    // Lasso fill: the area drawn round fills.
+    // Lasso fill, the Fill tool's fourth sub tool as in Clip Studio Paint
+    // Ver. 4: the area drawn round fills.
     assert_eq!(painted(&runtime), 0);
-    sub(&mut runtime, "tool.figure", 7);
+    sub(&mut runtime, "tool.fill", 3);
     drag(
         &mut runtime,
         &mut step,
@@ -414,7 +419,8 @@ fn sue_paint_lasso_fill_close_and_fill_and_copy_stamp_paint() {
     // Close and fill: nothing closed off on a new layer, then a ring
     // drawn with the pen fills inside.
     command(&mut runtime, "layer.new");
-    sub(&mut runtime, "tool.fill", 1);
+    // Close and fill, the third: from the fourth, round past the fifth.
+    sub(&mut runtime, "tool.fill", 4);
     let around = ring(middle + vec2(80.0, 0.0), 50.0);
     drag(&mut runtime, &mut step, &around, plain);
     assert_eq!(painted(&runtime), lasso, "no lines, nothing closed off");
@@ -426,7 +432,7 @@ fn sue_paint_lasso_fill_close_and_fill_and_copy_stamp_paint() {
         plain,
     );
     let lines = painted(&runtime);
-    sub(&mut runtime, "tool.fill", 1);
+    sub(&mut runtime, "tool.fill", 0);
     drag(&mut runtime, &mut step, &around, plain);
     let filled = painted(&runtime);
     assert!(
@@ -436,7 +442,8 @@ fn sue_paint_lasso_fill_close_and_fill_and_copy_stamp_paint() {
     // Copy stamp: nothing until Alt and click sets a source, then the
     // lasso fill's paint copies onto an empty place.
     command(&mut runtime, "layer.select_below");
-    sub(&mut runtime, "tool.blend", 6);
+    // Copy stamp, the Blend tool's third (Liquify is a tool of its own).
+    sub(&mut runtime, "tool.blend", 2);
     let empty = middle + vec2(-80.0, 120.0);
     let line = [empty, empty + vec2(10.0, 0.0), empty + vec2(20.0, 0.0)];
     drag(&mut runtime, &mut step, &line, plain);
@@ -455,10 +462,10 @@ fn sue_paint_lasso_fill_close_and_fill_and_copy_stamp_paint() {
     );
     // Polyline and Curve: a click at each corner, a double-click on the
     // last ends the line.
-    // (The Figure tool still has Lasso fill, so each is one on.)
-    for index in [8, 9] {
+    // (Direct draw's sixth and seventh.)
+    for (index, steps) in [(5, 5), (6, 1)] {
         let before = painted(&runtime);
-        sub(&mut runtime, "tool.figure", 1);
+        sub(&mut runtime, "tool.figure", steps);
         let base = middle + vec2(-150.0, -150.0 + index as f32 * 20.0);
         for corner in [base, base + vec2(60.0, 30.0), base + vec2(120.0, 0.0)] {
             drag(&mut runtime, &mut step, &[corner], plain);
@@ -688,17 +695,14 @@ fn sue_paint_liquify_pushes_a_stroke_in_one_undo_step() {
     assert!(ink(&runtime, 590..610) > 0);
     assert_eq!(ink(&runtime, 640..700), 0);
     let depth = runtime.engine.history.depth();
-    // J for Blend, then two sub tools on: Liquify, Push. Push down.
+    // J for Blend, J again for Liquify, a tool of its own (its one sub
+    // tool, in Push mode). Push down.
     let path: Vec<Pos2> = (0..12)
         .map(|index| middle + vec2(0.0, -10.0 + index as f32 * 4.0))
         .collect();
     drag(
         &mut runtime,
-        vec![
-            key(egui::Key::J, plain),
-            key(egui::Key::Period, plain),
-            key(egui::Key::Period, plain),
-        ],
+        vec![key(egui::Key::J, plain), key(egui::Key::J, plain)],
         &path,
     );
     assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");

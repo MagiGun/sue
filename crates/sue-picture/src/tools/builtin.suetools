@@ -1,0 +1,180 @@
+sue-tool-layout 1
+# Sue Paint's own tool palette: Clip Studio Paint Ver. 4's order of
+# tools and its sub tool groups, with Sue Paint's own sub tools. The
+# format is described in docs/tool-layout-format.md.
+tool	Zoom	zoom	/
+group	Zoom
+sub	zoom	Zoom In
+sub	zoom	Zoom Out
+tool	Hand	hand	H
+group	Move
+sub	hand	Hand
+sub	hand	Rotate
+tool	Operation	operation	O
+group	Operation
+sub	operation	Object
+sub	operation	Select layer
+tool	Move Layer	move_layer	K
+group	Move Layer
+sub	move_layer	Move Layer
+tool	Selection	selection	M
+group	Selection Area
+sub	selection	Rectangle
+sub	selection	Ellipse
+sub	selection	Lasso
+sub	selection	Polyline
+sub	selection	Selection pen
+sub	selection	Erase selection
+tool	Auto Select	auto_select	W
+group	Auto Select
+sub	auto_select	Refer Only Editing Layer
+sub	auto_select	Refer Other Layers
+sub	auto_select	Refer Reference Layers
+tool	Eyedropper	eyedropper	I
+group	Eyedropper
+sub	eyedropper	Obtain Display Color
+sub	eyedropper	Obtain Layer Color
+tool	Pen	pen	P
+group	Pen
+sub	pen	G-pen
+sub	pen	Grainy G-pen
+sub	pen	Mapping pen
+sub	pen	Turnip pen
+sub	pen	Textured pen
+sub	pen	Rough pen
+sub	pen	Calligraphy
+group	Marker
+sub	pen	Fineliner
+sub	pen	Felt pen
+sub	pen	Dot pen
+sub	pen	Flat marker
+tool	Sketch	pencil	P
+group	Pencil
+sub	pencil	Pencil
+sub	pencil	Mechanical pencil
+group	Pastel
+sub	pencil	Charcoal
+sub	pencil	Crayon
+sub	pencil	Pastel
+sub	pencil	Chalk
+tool	Brush	brush	B
+group	Watercolor
+sub	brush	Round watercolor brush
+sub	brush	Flat watercolor brush
+sub	brush	Wet wash
+group	Thick paint
+sub	brush	Gouache
+sub	brush	Oil paint
+sub	brush	Thick oil paint
+group	India ink
+sub	brush	Brush pen
+sub	brush	Dry ink
+sub	brush	Watery ink
+sub	brush	Pointillism
+tool	Airbrush	airbrush	B
+group	Airbrush
+sub	airbrush	Soft
+sub	airbrush	Spray
+sub	airbrush	Droplet
+tool	Decoration	decoration	B
+group	Decoration
+sub	decoration	Stars
+sub	decoration	Hearts
+sub	decoration	Sparkles
+sub	decoration	Snow
+sub	decoration	Flowers
+sub	decoration	Leaves
+sub	decoration	Bubbles
+sub	decoration	Chain
+sub	decoration	Lace
+sub	decoration	Stitches
+sub	decoration	Dotted line
+sub	decoration	Dashed line
+group	Ribbon
+sub	decoration	Rope
+sub	decoration	Rickrack
+sub	decoration	Film strip
+sub	decoration	Checkered band
+sub	decoration	Stitched ribbon
+sub	decoration	Lace ribbon
+tool	Eraser	eraser	E
+group	Eraser
+sub	eraser	Hard
+sub	eraser	Soft
+sub	eraser	Rough
+sub	eraser	Vector
+sub	eraser	Kneaded eraser
+tool	Blend	blend	J
+group	Blend
+sub	blend	Blur
+sub	blend	Finger Tip
+sub	blend	Copy stamp
+tool	Liquify	blend	J
+group	Liquify
+sub	blend	Liquify
+tool	Fill	fill	G
+group	Fill
+sub	fill	Refer Other Layers
+sub	fill	Refer Only Editing Layer
+sub	fill	Close and fill
+sub	figure	Lasso fill
+sub	fill	Paint unpainted area
+tool	Gradient	gradient	G
+group	Gradient
+sub	gradient	Drawing Color to Transparent
+sub	gradient	Main to Sub Color
+sub	gradient	Radial
+tool	Figure	figure	U
+group	Direct draw
+sub	figure	Straight Line
+sub	figure	Rectangle
+sub	figure	Ellipse
+sub	figure	Filled Rectangle
+sub	figure	Filled Ellipse
+sub	figure	Polyline
+sub	figure	Curve
+group	Saturated Line
+sub	figure	Saturated Line
+group	Speed Line
+sub	figure	Speed Line
+tool	Frame Border	frame_border	U
+group	Frame Border
+sub	frame_border	Rectangle Frame
+sub	frame_border	Polyline frame
+sub	frame_border	Frame Border Division
+tool	Ruler	ruler	U
+group	Create ruler
+sub	ruler	Linear Ruler
+sub	ruler	Curve Ruler
+sub	ruler	Figure Ruler
+sub	ruler	Ruler Pen
+sub	ruler	Special Ruler
+sub	ruler	Perspective Ruler
+sub	ruler	Symmetrical Ruler
+tool	Text	text	T
+group	Text
+sub	text	Text
+sub	text	Text on Curve
+tool	Balloon	balloon	T
+group	Balloon
+sub	balloon	Ellipse Balloon
+sub	balloon	Rounded Rectangle Balloon
+sub	balloon	Cloud Balloon
+sub	balloon	Flash Balloon
+sub	balloon	Curve Balloon
+sub	balloon	Polyline Balloon
+sub	balloon	Balloon Pen
+group	Balloon Tail
+sub	balloon	Balloon Tail
+sub	balloon	Thought Balloon Tail
+tool	Correct Line	correct_line	Y
+group	Correct Line
+sub	correct_line	Control point
+sub	correct_line	Pinch vector line
+sub	correct_line	Simplify vector line
+sub	correct_line	Connect vector lines
+sub	correct_line	Adjust line width
+sub	correct_line	Redraw vector line
+sub	correct_line	Redraw vector line width
+group	Remove dust
+sub	correct_line	Remove dust

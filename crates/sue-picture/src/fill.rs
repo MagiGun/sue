@@ -1,8 +1,380 @@
 //! Area fills: the paint bucket's flood fill, masked fills and gradients.
 //! They work on a copy of a layer's pixels (straight RGBA8); the studio
 //! turns the change into one undo step with [`crate::doc::rewrite`].
+//!
+//! Which pixels a Fill or Auto Select looks at is [`reference`]'s work
+//! ([`Refer`], [`Exclude`]); which of them it takes is [`area`]'s
+//! ([`AreaSettings`]).
 
+use sue_core::{Arena, EntityId};
+
+use crate::brush::AntiAlias;
+use crate::composite::{self, FrameView, RenderOptions};
+use crate::doc;
 use crate::select::Selection;
+
+// ----- What a fill looks at ----------------------------------------------------------
+
+/// The layers a Fill or Auto Select looks at (Clip Studio Paint's Refer
+/// multiple, and its single layer when that is off).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Refer {
+    /// The layer being edited only.
+    #[default]
+    Editing,
+    /// Every shown layer.
+    All,
+    /// The layers picked in the Layer palette, the editing one with them.
+    Selected,
+    /// The shown layers in the folder the editing layer is in.
+    Folder,
+    /// The shown reference layers.
+    Reference,
+}
+
+impl Refer {
+    /// Every choice, in Tool Property's order.
+    pub const ALL: [Self; 5] = [
+        Self::Editing,
+        Self::All,
+        Self::Selected,
+        Self::Folder,
+        Self::Reference,
+    ];
+
+    /// Its stable name in saved settings.
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Editing => "editing",
+            Self::All => "all",
+            Self::Selected => "selected",
+            Self::Folder => "folder",
+            Self::Reference => "reference",
+        }
+    }
+
+    /// The choice named `id`.
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|refer| refer.id() == id)
+    }
+
+    /// What people read.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::Editing => tr!("editing-layer"),
+            Self::All => tr!("all-layers"),
+            Self::Selected => tr!("refer-selected-layers"),
+            Self::Folder => tr!("refer-layers-in-folder"),
+            Self::Reference => tr!("reference-layer"),
+        }
+    }
+}
+
+/// Layers a fill that looks at several layers leaves out (Clip Studio
+/// Paint's exclusions, next to Refer multiple).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[allow(clippy::struct_excessive_bools, reason = "one switch each, as shown")]
+pub struct Exclude {
+    /// Draft layers.
+    pub drafts: bool,
+    /// Text layers.
+    pub text: bool,
+    /// Paper layers.
+    pub paper: bool,
+    /// Locked layers.
+    pub locked: bool,
+}
+
+impl Default for Exclude {
+    /// As Sue Paint always looked: paper left out, everything else in.
+    fn default() -> Self {
+        Self {
+            drafts: false,
+            text: false,
+            paper: true,
+            locked: false,
+        }
+    }
+}
+
+/// What [`referred`] needs to know of a layer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "what a layer is, flag by flag"
+)]
+pub struct ReferLayer {
+    /// The layer.
+    pub id: EntityId,
+    /// A draft layer.
+    pub draft: bool,
+    /// A text layer.
+    pub text: bool,
+    /// A paper layer.
+    pub paper: bool,
+    /// Locked against edits.
+    pub locked: bool,
+    /// A reference layer.
+    pub reference: bool,
+    /// A folder (looked at only through its members).
+    pub folder: bool,
+    /// The folders around it, innermost first.
+    pub around: Vec<EntityId>,
+}
+
+impl ReferLayer {
+    /// The layers of `picture` as [`referred`] sees them, bottom first.
+    #[must_use]
+    pub fn of_picture(arena: &Arena, picture: EntityId) -> Vec<Self> {
+        doc::layers(arena, picture)
+            .into_iter()
+            .map(|info| Self {
+                id: info.id,
+                draft: info.style.draft,
+                text: arena
+                    .get_by_id(info.id)
+                    .is_ok_and(|entity| entity.class() == doc::TEXT),
+                paper: info.kind == sue_model::picture::LayerKind::Paper,
+                locked: info.locked,
+                reference: doc::is_reference(arena, info.id),
+                folder: doc::is_folder(arena, info.id),
+                around: doc::folders_around(arena, info.id),
+            })
+            .collect()
+    }
+}
+
+/// The layers of `layers` a fill refers to, in their order: by `refer`,
+/// from the editing layer `editing` with `picked` picked beside it, less
+/// what `exclude` leaves out (when it looks at more than one). Folders
+/// never count themselves; their members do.
+#[must_use]
+pub fn referred(
+    layers: &[ReferLayer],
+    editing: Option<EntityId>,
+    picked: &[EntityId],
+    refer: Refer,
+    exclude: Exclude,
+) -> Vec<EntityId> {
+    let home = layers
+        .iter()
+        .find(|layer| Some(layer.id) == editing)
+        .and_then(|layer| layer.around.first().copied());
+    let wanted = |layer: &ReferLayer| match refer {
+        Refer::Editing => Some(layer.id) == editing,
+        Refer::All => true,
+        Refer::Selected => Some(layer.id) == editing || picked.contains(&layer.id),
+        Refer::Folder => match home {
+            Some(folder) => layer.around.contains(&folder),
+            None => layer.around.is_empty(),
+        },
+        Refer::Reference => layer.reference,
+    };
+    let left_out = |layer: &ReferLayer| {
+        refer != Refer::Editing
+            && ((exclude.drafts && layer.draft)
+                || (exclude.text && layer.text)
+                || (exclude.paper && layer.paper)
+                || (exclude.locked && layer.locked))
+    };
+    layers
+        .iter()
+        .filter(|layer| !layer.folder && wanted(layer) && !left_out(layer))
+        .map(|layer| layer.id)
+        .collect()
+}
+
+/// What a fill looks at in `picture`, as straight RGBA8 picture pixels
+/// (`size`): the editing layer's own pixels in place, or the referred
+/// layers as they show together. `None` when there is no editing layer to
+/// look at.
+#[must_use]
+pub fn reference(
+    arena: &Arena,
+    picture: EntityId,
+    size: [u32; 2],
+    editing: Option<EntityId>,
+    picked: &[EntityId],
+    refer: Refer,
+    exclude: Exclude,
+) -> Option<Vec<u8>> {
+    if refer == Refer::Editing {
+        return layer_on_picture(arena, editing?, size);
+    }
+    let layers = ReferLayer::of_picture(arena, picture);
+    let keep = referred(&layers, editing, picked, refer, exclude);
+    let view = FrameView {
+        hidden: layers
+            .iter()
+            .filter(|layer| !layer.folder && !keep.contains(&layer.id))
+            .map(|layer| layer.id)
+            .collect(),
+        ..FrameView::default()
+    };
+    Some(composite::render_view(
+        arena,
+        picture,
+        [0, 0, size[0], size[1]],
+        RenderOptions {
+            paper: !exclude.paper,
+            drafts: !exclude.drafts,
+        },
+        Some(&view),
+    ))
+}
+
+/// The pixels of raster layer `layer` laid where they sit in a picture of
+/// `size`, clear around them.
+fn layer_on_picture(arena: &Arena, layer: EntityId, size: [u32; 2]) -> Option<Vec<u8>> {
+    let raster = doc::raster(arena, layer)?;
+    let offset = arena
+        .get_by_id(layer)
+        .map(|entity| sue_model::picture::LayerStyle::of(entity).offset)
+        .unwrap_or([0, 0]);
+    let [width, height] = size;
+    let (lw, lh) = (raster.width(), raster.height());
+    let bytes = raster.bytes()?;
+    if offset == [0, 0] && [lw, lh] == size {
+        return Some(bytes.to_vec());
+    }
+    let mut out = vec![0; width as usize * height as usize * 4];
+    for y in 0..lh {
+        let py = i64::from(y) + offset[1];
+        if py < 0 || py >= i64::from(height) {
+            continue;
+        }
+        for x in 0..lw {
+            let px = i64::from(x) + offset[0];
+            if px < 0 || px >= i64::from(width) {
+                continue;
+            }
+            let from = ((y * lw + x) * 4) as usize;
+            let to = ((py as u32 * width + px as u32) * 4) as usize;
+            out[to..to + 4].copy_from_slice(&bytes[from..from + 4]);
+        }
+    }
+    Some(out)
+}
+
+// ----- Which pixels it takes ---------------------------------------------------------
+
+/// How a Fill or Auto Select takes its area from what it looks at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AreaSettings {
+    /// How different a color may be and still count, 0 to 1.
+    pub tolerance: f32,
+    /// Close gap level, 0 (none) to 4 ([`gap_radius`]).
+    pub gap: u32,
+    /// Area scaling in pixels: above nothing it spreads under the lines,
+    /// below nothing it keeps back from them.
+    pub spread: i32,
+    /// Only pixels joined to the one clicked (Apply to connected pixels
+    /// only); off, every like pixel of the picture.
+    pub connected_only: bool,
+    /// The edge of the area, hard or softened.
+    pub antialias: AntiAlias,
+}
+
+impl Default for AreaSettings {
+    fn default() -> Self {
+        Self {
+            tolerance: 0.0,
+            gap: 0,
+            spread: 0,
+            connected_only: true,
+            antialias: AntiAlias::None,
+        }
+    }
+}
+
+/// The area a click at `seed` takes in `reference` (straight RGBA8 rows of
+/// `size`), as one coverage byte a pixel.
+#[must_use]
+pub fn area(reference: &[u8], size: [u32; 2], seed: [u32; 2], settings: &AreaSettings) -> Vec<u8> {
+    let [width, height] = size;
+    let count = width as usize * height as usize;
+    if seed[0] >= width || seed[1] >= height || reference.len() < count * 4 {
+        return vec![0; count];
+    }
+    let hard = if settings.connected_only {
+        flood_closing(
+            reference,
+            size,
+            seed,
+            settings.tolerance,
+            gap_radius(settings.gap),
+            settings.spread,
+        )
+    } else {
+        let like = like_pixels(reference, size, seed, settings.tolerance);
+        scale_area(&like, width, height, settings.spread)
+            .into_iter()
+            .map(|inside| if inside { 255 } else { 0 })
+            .collect()
+    };
+    antialias(&hard, width, height, settings.antialias)
+}
+
+/// Every pixel of `reference` like the one at `seed`, joined to it or not.
+fn like_pixels(reference: &[u8], size: [u32; 2], seed: [u32; 2], tolerance: f32) -> Vec<bool> {
+    let premultiplied = |index: usize| {
+        let p = &reference[index * 4..index * 4 + 4];
+        let alpha = u32::from(p[3]);
+        [
+            u32::from(p[0]) * alpha / 255,
+            u32::from(p[1]) * alpha / 255,
+            u32::from(p[2]) * alpha / 255,
+            alpha,
+        ]
+    };
+    let target = premultiplied((seed[1] * size[0] + seed[0]) as usize);
+    let limit = (tolerance.clamp(0.0, 1.0) * 255.0).round() as u32;
+    (0..size[0] as usize * size[1] as usize)
+        .map(|index| {
+            premultiplied(index)
+                .iter()
+                .zip(target)
+                .all(|(a, b)| a.abs_diff(b) <= limit)
+        })
+        .collect()
+}
+
+/// `mask` with its edge softened: not at all for [`AntiAlias::None`],
+/// then over one, two or three pixels.
+#[must_use]
+pub fn antialias(mask: &[u8], width: u32, height: u32, level: AntiAlias) -> Vec<u8> {
+    let passes = match level {
+        AntiAlias::None => 0,
+        AntiAlias::Weak => 1,
+        AntiAlias::Medium => 2,
+        AntiAlias::Strong => 3,
+    };
+    let (w, h) = (width as usize, height as usize);
+    let mut out = mask.to_vec();
+    if w == 0 || h == 0 {
+        return out;
+    }
+    for _ in 0..passes {
+        let from = out.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let mut sum = 0_u32;
+                let mut n = 0_u32;
+                for ny in y.saturating_sub(1)..=(y + 1).min(h - 1) {
+                    for nx in x.saturating_sub(1)..=(x + 1).min(w - 1) {
+                        sum += u32::from(from[ny * w + nx]);
+                        n += 1;
+                    }
+                }
+                out[y * w + x] = ((sum + n / 2) / n) as u8;
+            }
+        }
+    }
+    out
+}
 
 /// The area a flood fill from `seed` reaches in `reference` (straight RGBA8
 /// rows of `size`): one coverage byte per pixel. Pixels count as the same
@@ -10,6 +382,17 @@ use crate::select::Selection;
 /// The area grows by one pixel so it tucks under anti-aliased edges.
 #[must_use]
 pub fn flood(reference: &[u8], size: [u32; 2], seed: [u32; 2], tolerance: f32) -> Vec<u8> {
+    let [width, height] = size;
+    let mask = flood_joined(reference, size, seed, tolerance);
+    if mask.len() < width as usize * height as usize || width == 0 || height == 0 {
+        return mask;
+    }
+    grow(&mask, width, height)
+}
+
+/// The pixels joined to `seed` that are like it, one byte a pixel, not
+/// yet grown under the edge.
+fn flood_joined(reference: &[u8], size: [u32; 2], seed: [u32; 2], tolerance: f32) -> Vec<u8> {
     let [width, height] = size;
     let count = width as usize * height as usize;
     let mut mask = vec![0_u8; count];
@@ -63,7 +446,7 @@ pub fn flood(reference: &[u8], size: [u32; 2], seed: [u32; 2], tolerance: f32) -
             }
         }
     }
-    grow(&mask, width, height)
+    mask
 }
 
 /// How far a Close gap level (0 none, then weak to strongest) reaches,
@@ -123,13 +506,16 @@ pub fn flood_closing(
     seed: [u32; 2],
     tolerance: f32,
     gap: u32,
-    spread: u32,
+    spread: i32,
 ) -> Vec<u8> {
     let plain = flood(reference, size, seed, tolerance);
     let [width, height] = size;
     if gap == 0 && spread == 0 {
         return plain;
     }
+    // The area itself, before the one pixel tucked under the lines that
+    // the spread below adds, so a spread of n reaches n pixels further.
+    let joined = flood_joined(reference, size, seed, tolerance);
     let count = (width * height) as usize;
     let premultiplied = |index: usize| {
         let p = &reference[index * 4..index * 4 + 4];
@@ -160,7 +546,7 @@ pub fn flood_closing(
         let blocked = dilate(&walls, width, height, gap);
         let start = (seed[1] * width + seed[0]) as usize;
         if blocked[start] {
-            plain.iter().map(|value| *value != 0).collect()
+            joined.iter().map(|value| *value != 0).collect()
         } else {
             let mut region = vec![false; count];
             let mut stack = vec![start];
@@ -214,13 +600,29 @@ pub fn flood_closing(
             region
         }
     } else {
-        plain.iter().map(|value| *value != 0).collect()
+        joined.iter().map(|value| *value != 0).collect()
     };
-    // Under the lines: one pixel always (as the plain fill), more by spread.
-    region = dilate(&region, width, height, 1 + spread);
+    // Under the lines: one pixel always (as the plain fill), more by a
+    // spread above nothing; a spread below nothing pulls the area back
+    // from the lines.
+    region = scale_area(&region, width, height, spread);
     region
         .into_iter()
         .map(|inside| if inside { 255 } else { 0 })
+        .collect()
+}
+
+/// `region` tucked one pixel under the lines it stops at, then grown by
+/// `spread` pixels or, below nothing, shrunk by as many (Area scaling).
+fn scale_area(region: &[bool], width: u32, height: u32, spread: i32) -> Vec<bool> {
+    if spread >= 0 {
+        return dilate(region, width, height, 1 + spread.unsigned_abs());
+    }
+    let tucked = dilate(region, width, height, 1);
+    let outside: Vec<bool> = tucked.iter().map(|inside| !inside).collect();
+    dilate(&outside, width, height, spread.unsigned_abs())
+        .into_iter()
+        .map(|outside| !outside)
         .collect()
 }
 
@@ -990,5 +1392,320 @@ mod tests {
         let left = advanced_mask(&layer, size, &half, &area);
         assert_eq!(left[at(2, 2)], 255);
         assert_eq!(left[at(12, 2)], 0, "only the selection");
+    }
+
+    /// A clear 40 by 40 picture with a black square outline, 2 pixels
+    /// thick, from 10 to 29, and a separate clear area beyond it.
+    fn boxed() -> (Vec<u8>, [u32; 2]) {
+        let (width, height) = (40_u32, 40_u32);
+        let mut pixels = vec![0_u8; (width * height * 4) as usize];
+        for y in 10..30 {
+            for x in 10..30 {
+                let edge = !(12..28).contains(&x) || !(12..28).contains(&y);
+                if edge {
+                    let at = ((y * width + x) * 4) as usize;
+                    pixels[at..at + 4].copy_from_slice(&[0, 0, 0, 255]);
+                }
+            }
+        }
+        (pixels, [width, height])
+    }
+
+    fn count(mask: &[u8]) -> usize {
+        mask.iter().filter(|value| **value != 0).count()
+    }
+
+    #[test]
+    fn area_scaling_spreads_under_lines_or_keeps_back_from_them() {
+        let (pixels, size) = boxed();
+        let at = |x: u32, y: u32| (y * size[0] + x) as usize;
+        let take = |spread: i32| {
+            area(
+                &pixels,
+                size,
+                [20, 20],
+                &AreaSettings {
+                    spread,
+                    ..AreaSettings::default()
+                },
+            )
+        };
+        let plain = take(0);
+        // The inside is 16 by 16; the plain fill tucks one pixel under.
+        assert_eq!(count(&plain), 18 * 18);
+        assert_eq!(plain[at(11, 20)], 255, "one under the line");
+        let wide = take(1);
+        assert_eq!(count(&wide), 20 * 20);
+        let narrow = take(-2);
+        assert_eq!(count(&narrow), 14 * 14);
+        assert_eq!(narrow[at(12, 20)], 0, "kept back from the line");
+        assert_eq!(narrow[at(13, 20)], 255);
+        // Close gap with a negative spread still holds inside.
+        let held = area(
+            &pixels,
+            size,
+            [20, 20],
+            &AreaSettings {
+                gap: 1,
+                spread: -1,
+                ..AreaSettings::default()
+            },
+        );
+        // The inside less its corners (the way back to the lines goes
+        // straight, a pixel a step), kept a pixel back from the lines.
+        assert!(
+            (16 * 16 - 4..=16 * 16).contains(&count(&held)),
+            "{}",
+            count(&held)
+        );
+        assert_eq!(held[at(11, 20)], 0);
+        assert_eq!(held[at(12, 20)], 255);
+    }
+
+    #[test]
+    fn connected_only_off_takes_every_like_pixel() {
+        let (pixels, size) = boxed();
+        let joined = area(&pixels, size, [20, 20], &AreaSettings::default());
+        let every = area(
+            &pixels,
+            size,
+            [20, 20],
+            &AreaSettings {
+                connected_only: false,
+                ..AreaSettings::default()
+            },
+        );
+        // Off, the clear outside counts as well; only the lines stay out.
+        assert!(count(&every) > count(&joined));
+        assert_eq!(count(&every), 40 * 40, "tucked under every line");
+    }
+
+    #[test]
+    fn anti_aliasing_softens_the_edge_only() {
+        let (pixels, size) = boxed();
+        let hard = area(&pixels, size, [20, 20], &AreaSettings::default());
+        assert!(hard.iter().all(|value| *value == 0 || *value == 255));
+        for (level, width) in [
+            (AntiAlias::Weak, 1),
+            (AntiAlias::Medium, 2),
+            (AntiAlias::Strong, 3),
+        ] {
+            let soft = area(
+                &pixels,
+                size,
+                [20, 20],
+                &AreaSettings {
+                    antialias: level,
+                    ..AreaSettings::default()
+                },
+            );
+            let partial = soft
+                .iter()
+                .filter(|value| (1..255).contains(*value))
+                .count();
+            assert!(partial > 0, "{level:?}");
+            // The middle stays whole and far outside stays clear.
+            assert_eq!(soft[(20 * size[0] + 20) as usize], 255);
+            assert_eq!(soft[(2 * size[0] + 2) as usize], 0);
+            let reach = soft.iter().filter(|value| **value != 0).count();
+            assert!(reach <= (18 + 2 * width) * (18 + 2 * width), "{level:?}");
+        }
+    }
+
+    #[test]
+    fn close_gap_works_for_auto_select_as_for_fill() {
+        // A ring with a gap: without Close gap the area leaks out.
+        let (mut pixels, size) = boxed();
+        for y in 19..21 {
+            for x in 10..12 {
+                let at = ((y * size[0] + x) * 4) as usize;
+                pixels[at..at + 4].copy_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+        let leak = area(&pixels, size, [20, 20], &AreaSettings::default());
+        assert!(count(&leak) > 1000);
+        // Auto Select takes its area with the same settings as Fill.
+        let settings = AreaSettings {
+            tolerance: 0.1,
+            gap: 2,
+            ..AreaSettings::default()
+        };
+        let held = area(&pixels, size, [20, 20], &settings);
+        assert!(count(&held) < 20 * 20, "{}", count(&held));
+    }
+
+    /// Five layers: a plain one, a draft, a text layer, paper, a locked
+    /// one, a reference layer, and two in a folder.
+    fn stack() -> (Vec<ReferLayer>, [EntityId; 9]) {
+        let ids: [EntityId; 9] = std::array::from_fn(|_| EntityId::new());
+        let layer = |index: usize| ReferLayer {
+            id: ids[index],
+            draft: false,
+            text: false,
+            paper: false,
+            locked: false,
+            reference: false,
+            folder: false,
+            around: Vec::new(),
+        };
+        let layers = vec![
+            ReferLayer {
+                paper: true,
+                ..layer(0)
+            },
+            layer(1),
+            ReferLayer {
+                draft: true,
+                ..layer(2)
+            },
+            ReferLayer {
+                text: true,
+                ..layer(3)
+            },
+            ReferLayer {
+                locked: true,
+                ..layer(4)
+            },
+            ReferLayer {
+                reference: true,
+                ..layer(5)
+            },
+            ReferLayer {
+                folder: true,
+                ..layer(6)
+            },
+            ReferLayer {
+                around: vec![ids[6]],
+                ..layer(7)
+            },
+            ReferLayer {
+                around: vec![ids[6]],
+                ..layer(8)
+            },
+        ];
+        (layers, ids)
+    }
+
+    #[test]
+    fn refer_modes_pick_their_layers() {
+        let (layers, ids) = stack();
+        let none = Exclude {
+            drafts: false,
+            text: false,
+            paper: false,
+            locked: false,
+        };
+        let take = |editing: usize, picked: &[EntityId], refer: Refer, exclude: Exclude| {
+            referred(&layers, Some(ids[editing]), picked, refer, exclude)
+        };
+        assert_eq!(take(1, &[], Refer::Editing, none), [ids[1]]);
+        let all: Vec<EntityId> = ids.iter().copied().filter(|id| *id != ids[6]).collect();
+        assert_eq!(
+            take(1, &[], Refer::All, none),
+            all,
+            "a folder is not a layer"
+        );
+        assert_eq!(take(1, &[ids[5]], Refer::Selected, none), [ids[1], ids[5]]);
+        assert_eq!(take(7, &[], Refer::Folder, none), [ids[7], ids[8]]);
+        assert_eq!(
+            take(1, &[], Refer::Folder, none),
+            [ids[0], ids[1], ids[2], ids[3], ids[4], ids[5]],
+            "outside folders: the layers outside folders"
+        );
+        assert_eq!(take(1, &[], Refer::Reference, none), [ids[5]]);
+        // The exclusions, one at a time and all together.
+        let leave = |exclude: Exclude| take(1, &[], Refer::All, exclude);
+        assert!(
+            !leave(Exclude {
+                drafts: true,
+                ..none
+            })
+            .contains(&ids[2])
+        );
+        assert!(!leave(Exclude { text: true, ..none }).contains(&ids[3]));
+        assert!(
+            !leave(Exclude {
+                paper: true,
+                ..none
+            })
+            .contains(&ids[0])
+        );
+        assert!(
+            !leave(Exclude {
+                locked: true,
+                ..none
+            })
+            .contains(&ids[4])
+        );
+        let every = Exclude {
+            drafts: true,
+            text: true,
+            paper: true,
+            locked: true,
+        };
+        assert_eq!(leave(every), [ids[1], ids[5], ids[7], ids[8]]);
+        // The editing layer alone ignores the exclusions.
+        assert_eq!(take(2, &[], Refer::Editing, every), [ids[2]]);
+        // Choices round-trip by name.
+        for refer in Refer::ALL {
+            assert_eq!(Refer::from_id(refer.id()), Some(refer));
+        }
+    }
+
+    #[test]
+    fn a_fill_looks_at_the_layers_it_refers_to_in_a_real_picture() {
+        use sue_core::ReversibleTransaction;
+        use sue_core::txn::SetProperty;
+        let mut arena = Arena::new();
+        let (mut edit, picture) = doc::create(&doc::NewPicture {
+            name: "Test".to_owned(),
+            width: 8,
+            height: 4,
+            dpi: 72.0,
+            paper: Some(sue_core::Color::srgb8(255, 255, 255)),
+            timelapse: false,
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let first = doc::layers(&arena, picture).last().unwrap().id;
+        let (mut spawn, second) =
+            doc::add_raster_layer(&arena, picture, Some(first), "Lines".to_owned(), None).unwrap();
+        spawn.apply(&mut arena).unwrap();
+        SetProperty::new(second, doc::REFERENCE, true)
+            .apply(&mut arena)
+            .unwrap();
+        // A line down the whole picture at `x`.
+        let paint = |arena: &mut Arena, layer: EntityId, x: u32| {
+            let raster = doc::raster_mut(arena, layer).unwrap();
+            for y in 0..4 {
+                let at = (y * raster.width() + x) as usize * 4;
+                raster.bytes_mut().unwrap()[at..at + 4].copy_from_slice(&[0, 0, 0, 255]);
+            }
+        };
+        paint(&mut arena, first, 1);
+        paint(&mut arena, second, 5);
+        let dark = |pixels: &[u8], x: u32| pixels[((8 + x) * 4 + 3) as usize] == 255;
+        let look = |refer: Refer, exclude: Exclude| {
+            reference(&arena, picture, [8, 4], Some(first), &[], refer, exclude).unwrap()
+        };
+        let editing = look(Refer::Editing, Exclude::default());
+        assert!(dark(&editing, 1) && !dark(&editing, 5));
+        let all = look(Refer::All, Exclude::default());
+        assert!(dark(&all, 1) && dark(&all, 5));
+        assert_eq!(all[3], 0, "paper left out by default");
+        let lines = look(Refer::Reference, Exclude::default());
+        assert!(!dark(&lines, 1) && dark(&lines, 5));
+        let with_paper = look(
+            Refer::All,
+            Exclude {
+                paper: false,
+                ..Exclude::default()
+            },
+        );
+        assert_eq!(&with_paper[..4], &[255, 255, 255, 255]);
+        // A fill from a clear point of the reference stops at its line.
+        let mask = area(&lines, [8, 4], [0, 1], &AreaSettings::default());
+        assert_eq!(mask[(8 + 5) as usize], 255, "tucked under the line");
+        assert_eq!(mask[(8 + 6) as usize], 0, "not past it");
     }
 }

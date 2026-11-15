@@ -7,9 +7,14 @@
 use egui::{Align2, Color32, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use sue_wm::{AppletContext, Theme};
 
-use crate::panels::{icon_button, tool_icon};
+use crate::icons::Icon;
+use crate::panels::{icon_button, slot_icon, tool_icon};
 use crate::studio::SuePaint;
 use crate::tools::Tool;
+
+/// A button of the Tools or Pens sheet: its icon, name, whether it can
+/// be used and is lit, and the tool palette entry (or tool) it picks.
+type SheetButton = (Icon, String, bool, bool, Result<usize, Tool>);
 
 /// What a sheet shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -142,35 +147,55 @@ impl SuePaint {
             }
             Sheet::Tools | Sheet::Pens => {
                 let columns = ((body.width() - 8.0) / (BUTTON + 8.0)).floor().max(1.0) as usize;
-                let current = self.toolbox.tool();
-                let tools: &[Tool] = if sheet == Sheet::Pens {
-                    &crate::simple::PENS
+                // Each button: its icon, name, whether it can be used and
+                // is lit, and the tool palette entry or tool it picks. The
+                // Tools sheet is the tool palette itself (Liquify and any
+                // sub tool made into a tool among them); Pens, the pens.
+                let current = self.toolbox.current_slot();
+                let kind = self.toolbox.current_entry().kind;
+                let buttons: Vec<SheetButton> = if sheet == Sheet::Pens {
+                    crate::simple::PENS
+                        .iter()
+                        .map(|tool| {
+                            let lit = *tool == kind;
+                            (
+                                tool_icon(*tool),
+                                tool.label(),
+                                tool.available(),
+                                lit,
+                                Err(*tool),
+                            )
+                        })
+                        .collect()
                 } else {
-                    &Tool::ALL
+                    self.toolbox
+                        .slots()
+                        .iter()
+                        .enumerate()
+                        .map(|(at, slot)| {
+                            let (icon, name) = (slot_icon(slot), crate::localize(&slot.name));
+                            (icon, name, slot.kind.available(), at == current, Ok(at))
+                        })
+                        .collect()
                 };
-                for (index, tool) in tools.iter().enumerate() {
+                for (index, (icon, name, available, lit, picks)) in buttons.iter().enumerate() {
                     let (row, column) = (index / columns, index % columns);
                     let at = pos2(
                         body.left() + 4.0 + column as f32 * (BUTTON + 8.0),
                         body.top() + 4.0 + row as f32 * (BUTTON + 22.0),
                     );
                     let button = Rect::from_min_size(at, vec2(BUTTON, BUTTON));
-                    if icon_button(
-                        &mut inner,
-                        button,
-                        tool_icon(*tool),
-                        tool.available(),
-                        *tool == current,
-                        &tool.label(),
-                        theme,
-                    ) {
-                        self.toolbox.pick(*tool);
+                    if icon_button(&mut inner, button, *icon, *available, *lit, name, theme) {
+                        match picks {
+                            Ok(slot) => self.toolbox.pick_slot(*slot),
+                            Err(tool) => self.toolbox.pick(*tool),
+                        }
                         self.sheet = None;
                     }
                     inner.painter().text(
                         pos2(button.center().x, button.bottom() + 2.0),
                         Align2::CENTER_TOP,
-                        tool.label(),
+                        name,
                         theme.font(theme.small_size - 1.0),
                         theme.muted,
                     );

@@ -69,16 +69,19 @@ impl SuePaint {
                 theme.control_radius,
                 theme.selection.gamma_multiply(0.6),
             );
+            // The tool palette entry that is current: its icon and name
+            // (Liquify for the Liquify tool, Fill while on its Lasso fill).
+            let entry = self.toolbox.current_entry();
             icons::paint(
                 inner.painter(),
                 Rect::from_center_size(group.left_center() + vec2(12.0, 0.0), vec2(14.0, 14.0)),
-                crate::panels::tool_icon(tool),
+                crate::panels::slot_icon(entry),
                 theme.text,
             );
             inner.painter().text(
                 group.left_center() + vec2(24.0, 0.0),
                 Align2::LEFT_CENTER,
-                tool.label(),
+                crate::localize(&entry.name),
                 theme.font(theme.small_size + 0.5),
                 theme.text,
             );
@@ -89,11 +92,14 @@ impl SuePaint {
                 .iter()
                 .map(|sub| crate::localize(&sub.name))
                 .collect();
+            // Sample strokes when the entry is a painting tool's, whichever
+            // sub tool is picked (Fill's Lasso fill is a Figure sub tool).
+            let paints = self.toolbox.current_entry().kind.paints();
             let tips: Vec<Option<crate::brush::Tip>> = self
                 .toolbox
                 .subs(tool)
                 .iter()
-                .map(|sub| tool.paints().then_some(sub.tip))
+                .map(|sub| paints.then_some(sub.tip))
                 .collect();
             egui::ScrollArea::vertical()
                 .id_salt("sue-paint-subs")
