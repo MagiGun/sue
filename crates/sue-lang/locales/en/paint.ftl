@@ -2519,3 +2519,22 @@ ruler-show-in-same-folder = Show in same folder
 ruler-show-when-editing-target = Show only when editing target
 moves-picture-across-stroke = Moves the picture sideways across the stroke
 copies-picture-from-source = Copies the picture from where Alt and click set, as you paint
+binding-preview-3d = 3D Preview for Binding
+binding-preview-3d-ellipsis = 3D Preview for Binding...
+binding-spread-of = { $pages } of { $count }
+turn-page-left = Turn the page to the left (Left)
+turn-page-right = Turn the page to the right (Right)
+close-page-manager = Close Page Manager
+page-manager-fill-canvas-area = Fill the canvas area
+page-manager-dock-beside-page = Dock beside the page
+page-manager-webtoon-columns = Webtoon columns
+page-manager-spreads = Spreads
+page-manager-cell-help = Click to pick, double-click or Enter to open, drag to move, right-click for more
+page-count = { $count ->
+    [one] { $count } page
+   *[other] { $count } pages
+}
+page-reordering = Page Reordering
+batch-process = Batch Process
+reading-right-to-left = Right to Left
+reading-left-to-right = Left to Right

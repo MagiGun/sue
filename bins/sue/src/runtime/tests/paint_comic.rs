@@ -748,3 +748,261 @@ fn sue_paint_text_tool_writes_and_edits_a_text_layer() {
     assert_eq!(runtime.engine.history.depth(), depth + 1, "one undo step");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+// ----- The Page Manager and the 3D preview (P4-15) ---------------------------
+
+/// A story of `count` pages on a new canvas, the first page shown; the
+/// driver and the pages in order.
+fn story_of_pages(tag: &str, count: usize) -> (PaintDriver, Vec<sue_core::EntityId>) {
+    let mut driver = PaintDriver::new(tag);
+    for _ in 1..count {
+        driver.command("story.add");
+        driver.settle(2);
+    }
+    driver.command("story.first");
+    driver.settle(4);
+    let pages = story_pages(&driver);
+    assert_eq!(pages.len(), count);
+    (driver, pages)
+}
+
+/// The pages of the story the picture shown is in.
+fn story_pages(driver: &PaintDriver) -> Vec<sue_core::EntityId> {
+    let arena = &driver.runtime.engine.world.arena;
+    let shown = shown_page(driver).expect("a picture is shown");
+    sue_paint::story::story_of(arena, shown)
+        .map(|story| sue_paint::story::pages(arena, story))
+        .unwrap_or_default()
+}
+
+/// The picture Sue Paint shows.
+fn shown_page(driver: &PaintDriver) -> Option<sue_core::EntityId> {
+    driver
+        .runtime
+        .applets
+        .get(&AppletId::new(sue_paint::ID).unwrap())
+        .and_then(|applet| applet.focus())
+}
+
+/// The middle of the Page Manager's cell of page `number` (counting from
+/// 1): the paper above the number drawn under it.
+fn page_cell(driver: &PaintDriver, number: usize) -> Pos2 {
+    let texts = &driver.texts;
+    let label = texts
+        .iter()
+        .filter(|(text, _)| *text == number.to_string() || *text == format!("{number} (open)"))
+        .map(|(_, rect)| *rect)
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap_or_else(|| panic!("page {number} is in the Page Manager: {texts:?}"));
+    label.center() - vec2(0.0, 40.0)
+}
+
+/// A press and release of `button` at `at`, then a few frames.
+fn press_at(driver: &mut PaintDriver, at: Pos2, button: egui::PointerButton) {
+    let event = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    driver.step(vec![egui::Event::PointerMoved(at)]);
+    driver.step(vec![event(true)]);
+    driver.step(vec![event(false)]);
+    driver.settle(6);
+}
+
+/// The story's property `key`, as text.
+fn story_text(driver: &PaintDriver, page: sue_core::EntityId, key: &str) -> Option<String> {
+    let arena = &driver.runtime.engine.world.arena;
+    let story = sue_paint::story::story_of(arena, page)?;
+    arena
+        .get_by_id(story)
+        .ok()?
+        .property(key)
+        .and_then(sue_core::Value::as_str)
+        .map(str::to_owned)
+}
+
+/// CTV-5 and FG-32: the Page Manager is a view that fills the canvas
+/// area; a page dragged onto another's place moves there as one undo
+/// step; a page opened takes the canvas, the pages docked in a column
+/// beside it.
+#[test]
+fn page_manager_fills_the_canvas_area_reorders_by_drag_and_docks() {
+    let (mut driver, pages) = story_of_pages("page-manager-view", 4);
+    driver.command("story.manager");
+    let texts = driver.settle(6);
+    assert!(
+        texts.iter().any(|(text, _)| text == "Page Manager"),
+        "the Page Manager shows: {texts:?}"
+    );
+    assert!(texts.iter().any(|(text, _)| text == "4 pages"));
+    let title = driver.rect_of("Page Manager").unwrap();
+    let second = page_cell(&driver, 2);
+    assert!(second.y > title.bottom());
+    // Page 2 dragged onto page 4's place.
+    let depth = driver.runtime.engine.history.depth();
+    let to = page_cell(&driver, 4);
+    driver.drag(second, to, egui::PointerButton::Primary);
+    let moved = story_pages(&driver);
+    assert_eq!(moved, vec![pages[0], pages[2], pages[3], pages[1]]);
+    assert_eq!(driver.runtime.engine.history.depth(), depth + 1);
+    driver.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    driver.settle(4);
+    assert_eq!(story_pages(&driver), pages, "undone");
+    driver.step(vec![key(egui::Key::Y, egui::Modifiers::COMMAND)]);
+    driver.settle(4);
+    assert_eq!(story_pages(&driver), moved, "redone");
+    driver.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    driver.settle(4);
+    // A double-click opens page 3; the pages stay, docked beside it,
+    // one under another.
+    let third = page_cell(&driver, 3);
+    let event = |pressed| egui::Event::PointerButton {
+        pos: third,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    driver.step(vec![egui::Event::PointerMoved(third)]);
+    driver.step(vec![event(true)]);
+    driver.step(vec![event(false)]);
+    driver.step(vec![event(true)]);
+    driver.step(vec![event(false)]);
+    driver.settle(8);
+    assert_eq!(shown_page(&driver), Some(pages[2]));
+    let (one, two) = (page_cell(&driver, 1), page_cell(&driver, 2));
+    assert!(
+        (one.x - two.x).abs() < 1.0 && two.y > one.y,
+        "docked, the pages stand in one column: {one:?} {two:?}"
+    );
+    let column = driver.rect_of("Page Manager").unwrap();
+    assert!(
+        column.left() < driver.runtime.shell.page_rect().center().x,
+        "docked at the left of the canvas area"
+    );
+    assert!(driver.texts.iter().any(|(text, _)| text == "3 (open)"));
+}
+
+/// CT-34 and CTV-6: the Page Manager's right-click menu in Clip Studio
+/// Paint's order, 3D Preview for Binding last; its page commands act on
+/// the page clicked; Webtoon Reading Direction stands the pages in
+/// columns read from the right.
+#[test]
+fn page_manager_right_click_menu_acts_on_the_page_and_turns_to_webtoon() {
+    let (mut driver, pages) = story_of_pages("page-manager-menu", 4);
+    driver.command("story.manager");
+    driver.settle(6);
+    let third = page_cell(&driver, 3);
+    press_at(&mut driver, third, egui::PointerButton::Secondary);
+    let in_order = |driver: &PaintDriver, order: &[&str]| {
+        let tops: Vec<f32> = order
+            .iter()
+            .map(|label| {
+                driver
+                    .rect_of(label)
+                    .unwrap_or_else(|| panic!("{label:?} is in the menu: {:?}", driver.texts))
+                    .top()
+            })
+            .collect();
+        assert!(
+            tops.windows(2).all(|pair| pair[0] < pair[1]),
+            "the menu's order: {order:?} {tops:?}"
+        );
+    };
+    in_order(
+        &driver,
+        &[
+            "Open Page",
+            "First Page",
+            "Previous Page",
+            "Next Page",
+            "Last Page",
+            "Add Page...",
+            "Duplicate Page",
+            "Delete Page",
+            "Combine Pages",
+            "Split Pages",
+        ],
+    );
+    // Taller than the room under the page, the menu scrolls: End shows
+    // its last item, 3D Preview for Binding.
+    driver.step(vec![key(egui::Key::End, egui::Modifiers::NONE)]);
+    driver.settle(30);
+    in_order(
+        &driver,
+        &[
+            "Page Reordering",
+            "Webtoon Reading Direction",
+            "Batch Process",
+            "Edit Text",
+            "3D Preview for Binding...",
+        ],
+    );
+    driver.step(vec![key(egui::Key::Home, egui::Modifiers::NONE)]);
+    driver.settle(30);
+    // Delete Page deletes the page right-clicked, not the one shown.
+    driver.click_text("Delete Page");
+    driver.settle(4);
+    assert_eq!(story_pages(&driver), vec![pages[0], pages[1], pages[3]]);
+    driver.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    driver.settle(6);
+    assert_eq!(story_pages(&driver), pages, "undone");
+    // Webtoon Reading Direction, Right to Left.
+    driver.command("story.manager");
+    driver.settle(6);
+    let first = page_cell(&driver, 1);
+    press_at(&mut driver, first, egui::PointerButton::Secondary);
+    // By the keyboard: typing its first letter finds the submenu, Right
+    // opens it, Enter picks its first item.
+    driver.step(vec![egui::Event::Text("W".to_owned())]);
+    driver.settle(4);
+    driver.step(vec![key(egui::Key::ArrowRight, egui::Modifiers::NONE)]);
+    driver.settle(30);
+    assert!(
+        driver.rect_of("Right to Left").is_some(),
+        "{:?}",
+        driver.texts
+    );
+    driver.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    driver.settle(6);
+    assert_eq!(
+        story_text(&driver, pages[0], "story.webtoon_reading").as_deref(),
+        Some("right")
+    );
+    // Down a column, then on to the next column, to the left.
+    let cells: Vec<Pos2> = (1..=4).map(|number| page_cell(&driver, number)).collect();
+    assert!(
+        (cells[0].x - cells[1].x).abs() < 1.0 && cells[1].y > cells[0].y,
+        "page 2 under page 1: {cells:?}"
+    );
+    assert!(
+        cells[3].x < cells[0].x,
+        "the last page in a column left of the first: {cells:?}"
+    );
+}
+
+/// CT-37 and FG-32: 3D Preview for Binding shows the book open at the
+/// spread of the page shown, turns with the arrow keys and closes.
+#[test]
+fn binding_preview_opens_at_the_page_turns_and_closes() {
+    let (mut driver, _) = story_of_pages("binding-preview", 4);
+    driver.command("story.preview_binding");
+    let texts = driver.settle(6);
+    assert!(
+        texts
+            .iter()
+            .any(|(text, _)| text == "3D Preview for Binding"),
+        "{texts:?}"
+    );
+    // A book bound on the left starts with page 1 alone.
+    assert!(driver.rect_of("1 of 4").is_some(), "{:?}", driver.texts);
+    driver.step(vec![key(egui::Key::ArrowRight, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    assert!(driver.rect_of("2 - 3 of 4").is_some(), "{:?}", driver.texts);
+    driver.step(vec![key(egui::Key::ArrowLeft, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    assert!(driver.rect_of("1 of 4").is_some());
+    driver.click_text("Close");
+    assert!(driver.rect_of("3D Preview for Binding").is_none());
+}

@@ -1,5 +1,5 @@
-//! The story's dialogs: the Page Manager, Change Page Settings, Change
-//! Story Information, the Story Editor and Export Webtoon.
+//! The story's dialogs: 3D Preview for Binding, Change Page Settings,
+//! Change Story Information, the Story Editor and Export Webtoon.
 
 use egui::{RichText, Ui, vec2};
 use sue_core::EntityId;
@@ -8,10 +8,21 @@ use sue_wm::{AppletContext, Theme};
 use super::{Outcome, label, ok_cancel};
 use crate::studio::SuePaint;
 
-/// The Page Manager: the story's pages as spreads, one chosen.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// 3D Preview for Binding: the story as a bound book (the Page Manager
+/// itself is a view of the canvas area, `pages.rs`).
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PagesDialog {
-    pub chosen: usize,
+    /// The spread open, by its index among the book's spreads.
+    pub spread: usize,
+    /// How near the book is, 1 fitting it to the window.
+    pub zoom: f32,
+}
+
+impl PagesDialog {
+    /// The book open at spread `spread`, fitted to the window.
+    pub(crate) const fn at(spread: usize) -> Self {
+        Self { spread, zoom: 1.0 }
+    }
 }
 
 /// Change Page Settings: every page's size, resolution and borders.
