@@ -31,6 +31,11 @@ follow [Semantic Versioning](https://semver.org/).
   Audio writes the timeline's sound as WAV, FLAC or AIFF.
 - Sue Paint: stopping Record Timelapse asks whether to keep what was
   recorded or delete it.
+- Sue Paint: on the timeline, drag a picked cel's first frame to make
+  the cel before it hold longer or shorter; a double click on a frame
+  shows there the layer picked before. A movie exported at another
+  frame rate than the timeline's keeps its length and its sound in
+  step. Onion Skin Settings no longer hides its OK button.
 
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
