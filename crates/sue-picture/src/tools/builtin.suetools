@@ -133,6 +133,9 @@ sub	figure	Filled Rectangle
 sub	figure	Filled Ellipse
 sub	figure	Polyline
 sub	figure	Curve
+sub	figure	Continuous Curve
+sub	figure	Bezier Curve
+sub	figure	Polygon
 group	Saturated Line
 sub	figure	Saturated Line
 group	Speed Line

@@ -25,8 +25,18 @@ pub const PAINT_UNPAINTED: u8 = 4;
 pub const LASSO_FILL: u8 = 7;
 /// The Figure tool's Polyline sub tool's mode.
 pub const POLYLINE: u8 = 8;
-/// The Figure tool's Curve sub tool's mode.
+/// The Figure tool's Curve sub tool's mode: a drag lays the ends, then
+/// the pointer bends the line and a click sets it.
 pub const CURVE: u8 = 9;
+/// The Figure tool's Continuous Curve sub tool's mode: a click at each
+/// point, the line smoothed through them.
+pub const CONTINUOUS_CURVE: u8 = 10;
+/// The Figure tool's Bezier Curve sub tool's mode: a click lays an anchor,
+/// a drag from it pulls out its handles.
+pub const BEZIER_CURVE: u8 = 11;
+/// The Figure tool's Polygon sub tool's mode: a regular polygon of
+/// [`SubTool::corners`] corners dragged out.
+pub const POLYGON: u8 = 12;
 
 /// The Balloon tool's sub tools, by mode (0 is the ellipse balloon, 1 the
 /// tail).
@@ -350,7 +360,11 @@ impl Tool {
                     // A click at each corner; a double-click (or Enter)
                     // ends it, a click on the first closes it.
                     SubTool::new(self, "Polyline", POLYLINE, line),
+                    // Drag the ends, move to bend, click.
                     SubTool::new(self, "Curve", CURVE, line),
+                    SubTool::new(self, "Continuous Curve", CONTINUOUS_CURVE, line),
+                    SubTool::new(self, "Bezier Curve", BEZIER_CURVE, line),
+                    SubTool::new(self, "Polygon", POLYGON, line),
                 ]
             }
             // Clip Studio Paint's order: rectangle, polyline, then cut.
@@ -590,6 +604,11 @@ pub struct SubTool {
     /// Holding the pen still at a stroke's end makes it a clean shape
     /// (Smart Shape).
     pub smart_shape: bool,
+    /// The Figure tool's Polygon: how many corners, 3 to 32.
+    pub corners: u32,
+    /// The Figure tool's rectangles and polygons: how round their
+    /// corners are, in picture pixels (Roundness of corner; 0 sharp).
+    pub roundness: f32,
 }
 
 impl SubTool {
@@ -629,6 +648,8 @@ impl SubTool {
             leading: 0.0,
             justify: 0,
             smart_shape: true,
+            corners: 5,
+            roundness: 0.0,
         }
     }
 
@@ -1732,7 +1753,7 @@ mod tests {
         assert_eq!(
             groups(&toolbox, figure),
             [
-                ("Direct draw".to_owned(), 7),
+                ("Direct draw".to_owned(), 10),
                 ("Saturated Line".to_owned(), 1),
                 ("Speed Line".to_owned(), 1)
             ]
@@ -1759,6 +1780,19 @@ mod tests {
                 .iter()
                 .any(|sub| sub.name == "Lasso fill"),
             "Lasso fill is not under Figure (A25V-14)"
+        );
+        // Direct draw ends with Clip Studio Paint's two other curves and
+        // its Polygon (A25V-14, FGV-35).
+        let direct: Vec<&str> = toolbox
+            .subs(Tool::Figure)
+            .iter()
+            .map(|sub| sub.name.as_str())
+            .take(10)
+            .collect();
+        assert_eq!(
+            direct[7..],
+            ["Continuous Curve", "Bezier Curve", "Polygon"],
+            "{direct:?}"
         );
         // Auto Select's three (CC-2), each looking at its own layers.
         let refers: Vec<Refer> = toolbox
