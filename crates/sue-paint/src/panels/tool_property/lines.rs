@@ -206,13 +206,25 @@ impl SuePaint {
             .collect();
         let mut names = vec![tr!("brush-shape-as-drawn")];
         names.extend(shapes.iter().map(|(name, _)| name.clone()));
-        let mut chosen = 0;
+        // The sub tool whose brush the first picked line has, if any.
+        let mut chosen = shapes
+            .iter()
+            .position(|(_, tip)| {
+                crate::brush::Tip {
+                    size: first.tip.size,
+                    eraser: first.tip.eraser,
+                    ..*tip
+                } == first.tip
+            })
+            .map_or(0, |at| at + 1);
+        let was = chosen;
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(tr!("brush-shape")).color(theme.muted));
             let response = dropdown("sue-paint-lines-shape", &mut chosen, &names)
                 .label(&tr!("brush-shape"))
                 .show(ui, theme);
             if response.changed()
+                && chosen != was
                 && let Some((_, tip)) = chosen.checked_sub(1).and_then(|at| shapes.get(at))
             {
                 change = Some(LineChange {
