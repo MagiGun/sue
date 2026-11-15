@@ -2576,3 +2576,4 @@ name-lying-face-up = Lying face up
 name-lying-face-down = Lying face down
 name-body-shapes = Body shapes
 camera-height = Camera height
+section-object-3d = 3D object

@@ -325,6 +325,11 @@ pub(crate) fn body_pose(points: &[[f32; 3]], body: &Body) -> Option<Pose> {
     if points.len() < 17 {
         return None;
     }
+    // In the figure's own space, wherever it stands.
+    let body = &Body {
+        place: crate::three::Placement::default(),
+        ..*body
+    };
     let joints = body.joints();
     let rest = crate::figure::bones(&Pose(vec![[0.0; 3]; joints.len()]), body);
     // The photo's points in the figure's space: across, up.
@@ -554,9 +559,14 @@ impl crate::studio::SuePaint {
         let Some(layer) = self.layer() else {
             return;
         };
+        // A photo poses the figure in its own space: where the figure
+        // stands on its 3D layer and how it is turned play no part.
         let Some(body) = crate::figure::of_layer(&cx.world.arena, layer)
             .and_then(|model| cx.world.arena.get_by_id(model).ok())
-            .map(Body::of)
+            .map(|model| Body {
+                place: crate::three::Placement::default(),
+                ..Body::of(model)
+            })
         else {
             return;
         };
@@ -696,6 +706,29 @@ mod tests {
             points.push(shot(bones[joint].0));
         }
         points
+    }
+
+    #[test]
+    fn a_placed_or_reshaped_figure_scans_in_its_own_space() {
+        let body = Body::default();
+        let points = photo_of(&body.preset(2), &body);
+        let plain = body_pose(&points, &body).unwrap();
+        let placed = Body {
+            place: crate::three::Placement {
+                position: [2.0, 1.0, 0.0],
+                turn: [90.0, 30.0, 0.0],
+                scale: 3.0,
+            },
+            ..body
+        };
+        assert_eq!(body_pose(&points, &placed).unwrap(), plain);
+        // A female body of another shape still stands the photo up.
+        let mut other = Body {
+            build: crate::figure::Build::Female,
+            ..body
+        };
+        other.shape.0[0] = [0.8, 0.5];
+        assert!(body_pose(&points, &other).is_some());
     }
 
     #[test]

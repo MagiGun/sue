@@ -132,10 +132,10 @@ fn drag_button(ui: &mut Ui, theme: &Theme, salt: &'static str, icon: Icon, name:
     if button.has_focus() {
         ui.input(|input| {
             for (key, by) in [
-                (egui::Key::ArrowLeft, vec2(-KEY_DRAG, 0.0)),
-                (egui::Key::ArrowRight, vec2(KEY_DRAG, 0.0)),
-                (egui::Key::ArrowUp, vec2(0.0, -KEY_DRAG)),
-                (egui::Key::ArrowDown, vec2(0.0, KEY_DRAG)),
+                (egui::Key::ArrowLeft, -Vec2::X * KEY_DRAG),
+                (egui::Key::ArrowRight, Vec2::X * KEY_DRAG),
+                (egui::Key::ArrowUp, -Vec2::Y * KEY_DRAG),
+                (egui::Key::ArrowDown, Vec2::Y * KEY_DRAG),
             ] {
                 if input.key_pressed(key) {
                     delta += by;
@@ -158,10 +158,10 @@ fn shape_chart(ui: &mut Ui, theme: &Theme, salt: usize, value: &mut [f32; 2]) ->
     let label_height = theme.text_size(TextRole::Caption) + theme.space(Space::S2);
     let side = ui
         .available_width()
-        .min(density.control_height() * 7.0)
+        .min(density.control_height() * 5.0)
         .max(density.control_height() * 3.0);
     let (outer, _) = ui.allocate_exact_size(
-        vec2(ui.available_width(), side + label_height * 2.0),
+        vec2(ui.available_width(), side + label_height + label_height),
         Sense::hover(),
     );
     let rect = Rect::from_center_size(outer.center(), Vec2::splat(side));
@@ -211,8 +211,13 @@ fn shape_chart(ui: &mut Ui, theme: &Theme, salt: usize, value: &mut [f32; 2]) ->
         let painter = ui.painter();
         let radius = theme.radius(Radius::Md);
         let line = egui::Stroke::new(theme.border_width, theme.border);
-        painter.rect_filled(rect, radius, theme.surface(1));
-        painter.rect_stroke(rect, radius, line, egui::StrokeKind::Inside);
+        painter.rect_filled(rect, radius, theme.surface(2));
+        painter.rect_stroke(
+            rect,
+            radius,
+            egui::Stroke::new(theme.border_width, theme.border_strong()),
+            egui::StrokeKind::Inside,
+        );
         painter.line_segment(
             [
                 pos2(rect.center().x, rect.top()),
@@ -262,7 +267,7 @@ fn shape_chart(ui: &mut Ui, theme: &Theme, salt: usize, value: &mut [f32; 2]) ->
         painter.circle_stroke(
             dot,
             theme.space(Space::S3),
-            egui::Stroke::new(theme.border_width, theme.surface(1)),
+            egui::Stroke::new(theme.border_width, theme.surface(2)),
         );
         ui::focus_ring(ui, &response, radius, theme);
     }
@@ -403,7 +408,7 @@ impl SuePaint {
         place: &mut crate::three::Placement,
     ) -> Slid {
         let mut slid = Slid::default();
-        ui::section(ui, theme, &tr!("object"), |ui| {
+        ui::section(ui, theme, &tr!("section-object-3d"), |ui| {
             let (move_by, turn_by, slide_by) = ui
                 .horizontal(|ui| {
                     (

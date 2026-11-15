@@ -298,7 +298,7 @@ fn sue_paint_3d_tool_property_has_the_object_camera_light_outline_and_body_rows(
     let seen = every_row(&mut paint);
     let shown: Vec<&str> = seen.iter().map(String::as_str).collect();
     for text in [
-        "Object",
+        "3D object",
         "Camera",
         "Light source",
         "Outline",
