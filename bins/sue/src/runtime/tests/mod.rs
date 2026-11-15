@@ -37,6 +37,7 @@ mod paint_files;
 mod paint_fill;
 mod paint_filter;
 mod paint_fit;
+mod paint_gradient;
 mod paint_handles;
 mod paint_hub;
 mod paint_layers;

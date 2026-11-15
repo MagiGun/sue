@@ -24,17 +24,22 @@ pub enum StopColor {
     Main,
     /// The sub drawing color, when the map is used.
     Sub,
+    /// The color brushes draw with when the gradient is used: the main
+    /// color, or the sub color while that one is in front (written `d`;
+    /// a Sue from before 0.0.8 skips a gradient that has it).
+    Drawing,
 }
 
 impl StopColor {
     /// Every kind, in the order a dialog offers them.
-    pub const ALL: [Self; 3] = [Self::Own, Self::Main, Self::Sub];
+    pub const ALL: [Self; 4] = [Self::Own, Self::Main, Self::Sub, Self::Drawing];
 
     const fn letter(self) -> char {
         match self {
             Self::Own => 'c',
             Self::Main => 'm',
             Self::Sub => 's',
+            Self::Drawing => 'd',
         }
     }
 
@@ -186,15 +191,49 @@ impl GradientMap {
     /// stops take them.
     #[must_use]
     pub fn with_colors(&self, main: [u8; 3], sub: [u8; 3]) -> Self {
+        self.with_drawing(main, sub, main)
+    }
+
+    /// [`Self::with_colors`], `drawing` filled in where a stop takes the
+    /// color brushes draw with.
+    #[must_use]
+    pub fn with_drawing(&self, main: [u8; 3], sub: [u8; 3], drawing: [u8; 3]) -> Self {
         let mut out = *self;
         for stop in &mut out.stops[..usize::from(self.count)] {
             match stop.color {
                 StopColor::Own => {}
                 StopColor::Main => stop.rgb = main,
                 StopColor::Sub => stop.rgb = sub,
+                StopColor::Drawing => stop.rgb = drawing,
             }
         }
         out
+    }
+
+    /// The gradient with every stop holding the color it shows now, so
+    /// it no longer follows the drawing colors (what a gradient layer
+    /// keeps: changing the main color must not change a layer).
+    #[must_use]
+    pub fn owned(&self) -> Self {
+        let mut out = *self;
+        for stop in &mut out.stops[..usize::from(self.count)] {
+            stop.color = StopColor::Own;
+        }
+        out
+    }
+
+    /// A gradient of two stops from `from` to `to` (each a color source
+    /// and an opacity), the colors themselves filled in when it is used.
+    #[must_use]
+    pub fn sourced(from: (StopColor, u8), to: (StopColor, u8)) -> Self {
+        let mut map = Self::two([0; 3], [255; 3]);
+        for (index, (color, alpha)) in [from, to].into_iter().enumerate() {
+            if let Some(stop) = map.stop_mut(index) {
+                stop.color = color;
+                stop.alpha = alpha;
+            }
+        }
+        map
     }
 
     /// The color and opacity at `t` (0 to 1) along the bar, before the
@@ -459,6 +498,24 @@ mod tests {
         map.mix = Response::new(&[[0.0, 0.0], [0.5, 0.7], [1.0, 1.0]]);
         let text = map.to_text();
         assert_eq!(GradientMap::from_text(&text), Some(map), "{text}");
+        // The drawing color as a source reads back, and is filled in.
+        let drawing = GradientMap::sourced((StopColor::Drawing, 255), (StopColor::Drawing, 0));
+        let text = drawing.to_text();
+        assert!(text.contains("@d"), "{text}");
+        assert_eq!(GradientMap::from_text(&text), Some(drawing));
+        let used = drawing.with_drawing([1; 3], [2; 3], [3; 3]);
+        assert_eq!(used.stops()[0].rgb, [3; 3]);
+        assert_eq!((used.stops()[1].rgb, used.stops()[1].alpha), ([3; 3], 0));
+        // Owned: the colors stay, the sources go.
+        let owned = used.owned();
+        assert!(
+            owned
+                .stops()
+                .iter()
+                .all(|stop| stop.color == StopColor::Own)
+        );
+        assert_eq!(owned.with_drawing([9; 3], [9; 3], [9; 3]), owned);
+        assert_eq!(owned.stops()[0].rgb, [3; 3]);
         assert!(!map.is_two());
         assert!(GradientMap::two([1, 2, 3], [4, 5, 6]).is_two());
         // Not a gradient.

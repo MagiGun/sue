@@ -32,6 +32,16 @@ pub const GRADIENT_START: &str = "gradient.start";
 pub const GRADIENT_END: &str = "gradient.end";
 /// Round from the start instead of straight across (`Bool`).
 pub const GRADIENT_RADIAL: &str = "gradient.radial";
+/// A gradient's stops and mixing curve, as a gradient set file writes a
+/// gradient (`String`, `docs/gradient-sets.md`); since 0.0.8.
+pub const GRADIENT_STOPS: &str = "gradient.stops";
+/// A gradient's shape, `linear`, `circle` or `ellipse` (`String`).
+pub const GRADIENT_SHAPE: &str = "gradient.shape";
+/// A gradient's edge process, `extend`, `repeat`, `mirror` or `clip`
+/// (`String`).
+pub const GRADIENT_EDGE: &str = "gradient.edge";
+/// An ellipse gradient's short axis against its long one (`Float`).
+pub const GRADIENT_ASPECT: &str = "gradient.aspect";
 
 /// The class of an image material layer: the picture its
 /// [`MATERIAL_IMAGE`] relation names, placed on the canvas.
@@ -56,14 +66,44 @@ pub const MATERIAL_TILE: &str = "material.tile";
 pub struct Gradient {
     /// Where it starts and ends, in picture pixels.
     pub line: [[f32; 2]; 2],
-    /// Its colors there (straight RGBA, 0 to 1).
-    pub colors: [[f32; 4]; 2],
-    /// Round from the start instead of straight across.
-    pub radial: bool,
+    /// Its stops (their colors filled in), shape and edge process.
+    pub look: crate::gradient::Look,
 }
 
 impl Gradient {
-    /// The gradient a gradient layer holds.
+    /// A gradient of two colors (straight RGBA, 0 to 1) from the start
+    /// of `line` to its end, round from the start when `radial`: what
+    /// gradient layers held before stops.
+    #[must_use]
+    pub fn two(line: [[f32; 2]; 2], colors: [[f32; 4]; 2], radial: bool) -> Self {
+        let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let stop = |at: f32, [r, g, b, a]: [f32; 4]| crate::gradient_map::Stop {
+            at,
+            rgb: [byte(r), byte(g), byte(b)],
+            alpha: byte(a),
+            color: crate::gradient_map::StopColor::Own,
+        };
+        Self {
+            line,
+            look: crate::gradient::Look {
+                map: crate::gradient_map::GradientMap::of(&[
+                    stop(0.0, colors[0]),
+                    stop(1.0, colors[1]),
+                ])
+                .unwrap_or_default(),
+                shape: if radial {
+                    crate::gradient::Shape::Circle
+                } else {
+                    crate::gradient::Shape::Linear
+                },
+                ..crate::gradient::Look::default()
+            },
+        }
+    }
+
+    /// The gradient a gradient layer holds. A layer from before stops
+    /// (no [`GRADIENT_STOPS`]) runs from its start color to its end
+    /// color, straight or round.
     #[must_use]
     pub fn of(entity: &Entity) -> Self {
         let number = |key: &str| entity.property(key).and_then(Value::as_f64).unwrap_or(0.0) as f32;
@@ -74,37 +114,77 @@ impl Gradient {
             }
             _ => or,
         };
-        Self {
-            line: [
-                [number(GRADIENT_FROM_X), number(GRADIENT_FROM_Y)],
-                [number(GRADIENT_TO_X), number(GRADIENT_TO_Y)],
-            ],
-            colors: [
+        let line = [
+            [number(GRADIENT_FROM_X), number(GRADIENT_FROM_Y)],
+            [number(GRADIENT_TO_X), number(GRADIENT_TO_Y)],
+        ];
+        let radial = entity
+            .property(GRADIENT_RADIAL)
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let mut gradient = Self::two(
+            line,
+            [
                 color(GRADIENT_START, [0.0, 0.0, 0.0, 1.0]),
                 color(GRADIENT_END, [1.0, 1.0, 1.0, 1.0]),
             ],
-            radial: entity
-                .property(GRADIENT_RADIAL)
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
+            radial,
+        );
+        let text = |key: &str| entity.property(key).and_then(Value::as_str);
+        let look = &mut gradient.look;
+        if let Some(map) =
+            text(GRADIENT_STOPS).and_then(crate::gradient_map::GradientMap::from_text)
+        {
+            look.map = map;
         }
+        if let Some(shape) = text(GRADIENT_SHAPE).and_then(crate::gradient::Shape::from_id) {
+            look.shape = shape;
+        }
+        if let Some(edge) = text(GRADIENT_EDGE).and_then(crate::gradient::Edge::from_id) {
+            look.edge = edge;
+        }
+        if let Some(aspect) = entity.property(GRADIENT_ASPECT).and_then(Value::as_f64) {
+            look.aspect = (aspect as f32).clamp(crate::gradient::MIN_ASPECT, 1.0);
+        }
+        gradient
+    }
+
+    /// The properties a gradient layer keeps for `self`: the stops,
+    /// shape, edge and aspect, and for a Sue from before stops the first
+    /// and last colors and whether it is round.
+    #[must_use]
+    pub fn properties(&self) -> Vec<(&'static str, Value)> {
+        let color = |[r, g, b, a]: [f32; 4]| {
+            Value::Color(Color {
+                rgb: [r, g, b],
+                alpha: a,
+                space: ColorSpace::Srgb,
+            })
+        };
+        let [[x0, y0], [x1, y1]] = self.line;
+        let look = &self.look;
+        vec![
+            (GRADIENT_FROM_X, Value::from(f64::from(x0))),
+            (GRADIENT_FROM_Y, Value::from(f64::from(y0))),
+            (GRADIENT_TO_X, Value::from(f64::from(x1))),
+            (GRADIENT_TO_Y, Value::from(f64::from(y1))),
+            (GRADIENT_START, color(look.map.raw_at(0.0))),
+            (GRADIENT_END, color(look.map.raw_at(1.0))),
+            (
+                GRADIENT_RADIAL,
+                Value::from(look.shape != crate::gradient::Shape::Linear),
+            ),
+            (GRADIENT_STOPS, Value::from(look.map.to_text())),
+            (GRADIENT_SHAPE, Value::from(look.shape.id())),
+            (GRADIENT_EDGE, Value::from(look.edge.id())),
+            (GRADIENT_ASPECT, Value::from(f64::from(look.aspect))),
+        ]
     }
 
     /// The color at picture pixel `(x, y)` (its middle).
     #[must_use]
     pub fn at(&self, x: i64, y: i64) -> [f32; 4] {
-        let [from, to] = self.line;
-        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-        let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
-        let length_sq = (dx * dx + dy * dy).max(1e-6);
-        let t = if self.radial {
-            (((px - from[0]).powi(2) + (py - from[1]).powi(2)) / length_sq).sqrt()
-        } else {
-            ((px - from[0]) * dx + (py - from[1]) * dy) / length_sq
-        }
-        .clamp(0.0, 1.0);
-        let [start, end] = self.colors;
-        std::array::from_fn(|channel| start[channel] + (end[channel] - start[channel]) * t)
+        self.look.color(self.line, [x as f32 + 0.5, y as f32 + 0.5])
     }
 }
 
@@ -194,25 +274,27 @@ pub fn new_gradient_layer(
     name: &str,
     gradient: Gradient,
 ) -> (Edit, EntityId) {
-    let color = |[r, g, b, a]: [f32; 4]| Color {
-        rgb: [r, g, b],
-        alpha: a,
-        space: ColorSpace::Srgb,
-    };
-    let [[x0, y0], [x1, y1]] = gradient.line;
-    let layer = Entity::empty(name, GRADIENT_LAYER)
-        .with_property(GRADIENT_FROM_X, f64::from(x0))
-        .with_property(GRADIENT_FROM_Y, f64::from(y0))
-        .with_property(GRADIENT_TO_X, f64::from(x1))
-        .with_property(GRADIENT_TO_Y, f64::from(y1))
-        .with_property(GRADIENT_START, color(gradient.colors[0]))
-        .with_property(GRADIENT_END, color(gradient.colors[1]))
-        .with_property(GRADIENT_RADIAL, gradient.radial);
+    let layer = gradient.properties().into_iter().fold(
+        Entity::empty(name, GRADIENT_LAYER),
+        |layer, (key, value)| layer.with_property(key, value),
+    );
     let id = layer.id();
     (
         Edit::new(tr!("new", name = name)).then(landed(arena, picture, current, layer)),
         id,
     )
+}
+
+/// The edit, named `label`, that makes gradient layer `layer` hold
+/// `gradient`: one undo step however many of its settings change.
+#[must_use]
+pub fn set_gradient(layer: EntityId, gradient: &Gradient, label: &str) -> Edit {
+    gradient
+        .properties()
+        .into_iter()
+        .fold(Edit::new(label), |edit, (key, value)| {
+            edit.then(sue_core::txn::SetProperty::new(layer, key, value))
+        })
 }
 
 /// The edit that makes an image material layer showing `image` placed as
@@ -312,13 +394,97 @@ mod tests {
     }
 
     #[test]
-    fn a_gradient_layer_runs_from_its_start_to_its_end() {
-        let (mut arena, picture, mut history, first) = start(5);
+    fn a_gradient_layer_keeps_its_stops_shape_and_edge_and_changes_as_one_step() {
+        use crate::gradient::{Edge, Look, Shape};
+        use crate::gradient_map::{GradientMap, Stop};
+        let (mut arena, picture, mut history, first) = start(6);
+        let look = Look {
+            map: GradientMap::of(&[
+                Stop::new(0.0, [255, 0, 0]),
+                Stop::new(0.5, [0, 255, 0]),
+                Stop::new(1.0, [0, 0, 255]),
+            ])
+            .unwrap(),
+            shape: Shape::Linear,
+            edge: Edge::Clip,
+            aspect: 0.25,
+        };
         let gradient = Gradient {
             line: [[0.5, 0.0], [4.5, 0.0]],
-            colors: [[0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]],
-            radial: false,
+            look,
         };
+        let (edit, layer) = new_gradient_layer(&arena, picture, Some(first), "Grad", gradient);
+        history.apply(&mut arena, edit).unwrap();
+        assert_eq!(Gradient::of(arena.get_by_id(layer).unwrap()), gradient);
+        let row = shown(&arena, picture, 6);
+        assert_eq!(row[2], [0, 255, 0, 255], "the middle stop");
+        assert_eq!(row[4], [0, 0, 255, 255], "the end");
+        assert_ne!(row[5], row[4], "Do not draw leaves what lies past the end");
+        // An older Sue reads its end colors and whether it is round.
+        let entity = arena.get_by_id(layer).unwrap();
+        assert_eq!(
+            entity.property(GRADIENT_RADIAL).and_then(Value::as_bool),
+            Some(false)
+        );
+        // Changed: one undo step, undone to what it was, ids and all.
+        let before = arena.get_by_id(layer).unwrap().clone();
+        let mut round = gradient;
+        round.look.shape = Shape::Ellipse;
+        round.look.edge = Edge::Mirror;
+        round.line[1] = [2.0, 0.0];
+        let depth = history.depth();
+        history
+            .apply(&mut arena, set_gradient(layer, &round, "Gradient"))
+            .unwrap();
+        assert_eq!(history.depth(), depth + 1);
+        let after = arena.get_by_id(layer).unwrap().clone();
+        assert_eq!(Gradient::of(&after), round);
+        history.undo(&mut arena).unwrap();
+        assert_eq!(arena.get_by_id(layer).unwrap(), &before);
+        history.redo(&mut arena).unwrap();
+        assert_eq!(arena.get_by_id(layer).unwrap(), &after);
+    }
+
+    #[test]
+    fn a_gradient_layer_from_before_stops_reads_as_two_colors() {
+        // Written as 0.0.8 before P4 wrote stops: start, end, round.
+        let old = Entity::empty("Old", GRADIENT_LAYER)
+            .with_property(GRADIENT_FROM_X, 0.0)
+            .with_property(GRADIENT_TO_X, 10.0)
+            .with_property(
+                GRADIENT_START,
+                Color {
+                    rgb: [1.0, 0.0, 0.0],
+                    alpha: 1.0,
+                    space: ColorSpace::Srgb,
+                },
+            )
+            .with_property(
+                GRADIENT_END,
+                Color {
+                    rgb: [0.0, 0.0, 1.0],
+                    alpha: 0.0,
+                    space: ColorSpace::Srgb,
+                },
+            )
+            .with_property(GRADIENT_RADIAL, true);
+        let gradient = Gradient::of(&old);
+        assert_eq!(gradient.look.shape, crate::gradient::Shape::Circle);
+        assert_eq!(gradient.look.edge, crate::gradient::Edge::Extend);
+        let stops = gradient.look.map.stops();
+        assert_eq!(stops.len(), 2);
+        assert_eq!((stops[0].rgb, stops[0].alpha), ([255, 0, 0], 255));
+        assert_eq!((stops[1].rgb, stops[1].alpha), ([0, 0, 255], 0));
+    }
+
+    #[test]
+    fn a_gradient_layer_runs_from_its_start_to_its_end() {
+        let (mut arena, picture, mut history, first) = start(5);
+        let gradient = Gradient::two(
+            [[0.5, 0.0], [4.5, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]],
+            false,
+        );
         let (edit, layer) = new_gradient_layer(&arena, picture, Some(first), "Grad", gradient);
         history.apply(&mut arena, edit).unwrap();
         let row = shown(&arena, picture, 5);

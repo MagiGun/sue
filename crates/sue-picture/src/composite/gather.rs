@@ -60,7 +60,7 @@ pub(super) enum Source<'a> {
     /// A fill layer: one color (straight RGBA) everywhere.
     Solid([f32; 4]),
     /// A gradient layer.
-    Gradient(crate::doc::Gradient),
+    Gradient(Box<crate::doc::Gradient>),
     /// An image material layer: its image, placed.
     Material {
         image: &'a RasterTile2D,
@@ -503,7 +503,7 @@ fn gather_layer<'a>(
             Source::Solid(color)
         }
         LayerKind::Other if entity.class() == crate::doc::GRADIENT_LAYER => {
-            Source::Gradient(crate::doc::Gradient::of(entity))
+            Source::Gradient(Box::new(crate::doc::Gradient::of(entity)))
         }
         LayerKind::Other if entity.class() == crate::doc::MATERIAL_LAYER => Source::Material {
             image: crate::doc::material_image(arena, entity.id())?,

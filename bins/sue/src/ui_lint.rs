@@ -237,7 +237,7 @@ const PICTURE: &[(&str, &str, Exempt)] = &[
     ),
     // A filter dialog's gradients and its small copies of the layer.
     (
-        "crates/sue-paint/src/dialogs",
+        "crates/sue-paint/src/gradient_bar",
         "paint_gradient",
         Exempt::All,
     ),

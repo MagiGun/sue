@@ -211,7 +211,7 @@ impl<'h> Rows<'h> {
 
     /// The width of a row's name, so the controls of a column line up.
     fn label_width(&self) -> f32 {
-        self.theme.space(Space::S9) * 2.0
+        name_width(self.theme)
     }
 
     /// Draws the row named `id` of `category` with `add` when this view
@@ -415,15 +415,7 @@ impl<'h> Rows<'h> {
         let width = self.label_width();
         self.row(ui, id, category, |ui, theme, enabled| {
             ui.horizontal(|ui| {
-                ui.add_sized(
-                    egui::vec2(width, Density::of(ui).control_height()),
-                    egui::Label::new(
-                        RichText::new(label)
-                            .size(theme.text_size(TextRole::Caption))
-                            .color(theme.text_muted()),
-                    )
-                    .truncate(),
-                );
+                name_cell(ui, label, width, theme);
                 let room = ui.available_width();
                 let strip =
                     sue_wm::ui::segmented(("sue-paint-tool-choice", id), options, Some(*chosen))
@@ -502,6 +494,24 @@ impl<'h> Rows<'h> {
     }
 }
 
+/// How wide the names of a palette's rows are, so their controls line up.
+pub(crate) fn name_width(theme: &Theme) -> f32 {
+    theme.space(Space::S9) * 2.0
+}
+
+/// A row's name in the column the names share, `width` wide.
+pub(crate) fn name_cell(ui: &mut Ui, label: &str, width: f32, theme: &Theme) {
+    ui.add_sized(
+        egui::vec2(width, Density::of(ui).control_height()),
+        egui::Label::new(
+            RichText::new(label)
+                .size(theme.text_size(TextRole::Caption))
+                .color(theme.text_muted()),
+        )
+        .truncate(),
+    );
+}
+
 /// The names of `options` in the language in use.
 pub(crate) fn names(options: &[&str]) -> Vec<String> {
     options
@@ -537,7 +547,15 @@ impl SuePaint {
                     self.vector_path_row(ui, theme);
                 }
             }
-            Tool::Gradient => fill::gradient_properties(ui, rows, sub),
+            Tool::Gradient => {
+                let colors = [self.main, self.sub, self.drawing_color()];
+                let parts = fill::GradientParts {
+                    library: &mut self.gradients,
+                    stop: &mut self.gradient_work.stop,
+                    colors,
+                };
+                fill::gradient_properties(ui, rows, self.toolbox.current_mut(), parts);
+            }
             Tool::Select => select::select_properties(ui, rows, sub, &mut self.select_op),
             Tool::Eyedropper => {
                 rows.choice_u8(
@@ -575,6 +593,23 @@ impl SuePaint {
         command
     }
 
+    /// The gradient layer Tool Property edits instead of the sub tool:
+    /// the current layer, when it is one and the Gradient tool (but for
+    /// Contour line fill) or the Object tool is on.
+    pub(crate) fn edited_gradient_layer(
+        &self,
+        arena: &sue_core::Arena,
+    ) -> Option<sue_core::EntityId> {
+        let tool = self.toolbox.tool();
+        let edits = tool == Tool::Operation
+            || (tool == Tool::Gradient
+                && self.toolbox.current().mode != crate::tools::CONTOUR_FILL);
+        if !edits {
+            return None;
+        }
+        self.gradient_layer(arena).map(|(layer, _)| layer)
+    }
+
     /// The settings of the current sub tool, and a command they ask for:
     /// Tool Property's body.
     pub(super) fn tool_properties(
@@ -606,6 +641,29 @@ impl SuePaint {
         }
         // The Object tool on a vector layer: the picked lines' settings.
         if tool == Tool::Operation && self.line_properties(ui, arena, theme) {
+            return None;
+        }
+        // The Gradient or Object tool on a gradient layer: its gradient,
+        // which stays editable.
+        if self.edited_gradient_layer(arena).is_some()
+            && let Some((layer, mut gradient)) = self.gradient_layer(arena)
+        {
+            ui.spacing_mut().item_spacing.y = theme.space(Space::S3);
+            let colors = [self.main, self.sub, self.drawing_color()];
+            // A locked layer shows its gradient but takes no change.
+            let unlocked = self.layer_info(arena).is_none_or(|info| !info.locked);
+            let mut rows = Rows::property(&[], self.tool_palettes.headings, unlocked, theme);
+            if fill::gradient_layer_properties(
+                ui,
+                &mut rows,
+                &mut gradient,
+                &mut self.gradient_work.stop,
+                colors,
+                &mut self.gradients,
+            ) && unlocked
+            {
+                self.gradient_work.pending = Some((layer, gradient));
+            }
             return None;
         }
         ui.spacing_mut().item_spacing.y = theme.space(Space::S3);

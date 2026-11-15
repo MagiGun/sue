@@ -233,7 +233,7 @@ fn sue_paint_fill_edit_fill_and_gradient_write_to_the_mask_being_edited() {
     // A gradient with the transparent color fades the layer out on the
     // mask: full cover at one end, none past the other.
     canvas.command("color.transparent");
-    canvas.sub("tool.gradient", 0);
+    canvas.sub("tool.pick.gradient", 0);
     let depth = canvas.depth();
     canvas.trace(&[middle - vec2(100.0, 0.0), middle, middle + vec2(100.0, 0.0)]);
     assert_eq!(canvas.depth(), depth + 1, "a gradient is one step");

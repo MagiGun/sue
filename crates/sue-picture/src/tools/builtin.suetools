@@ -127,6 +127,16 @@ group	Gradient
 sub	gradient	Drawing Color to Transparent
 sub	gradient	Main to Sub Color
 sub	gradient	Radial
+sub	gradient	Ellipse
+sub	gradient	Soft Glow
+sub	gradient	Repeating Bands
+sub	gradient	Dusk
+sub	gradient	Sea
+sub	gradient	Forest
+sub	gradient	Spectrum
+group	Contour line
+sub	gradient	Contour Fill
+sub	gradient	Contour Bands
 tool	Figure	figure	U
 group	Direct draw
 sub	figure	Straight Line

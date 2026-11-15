@@ -214,6 +214,23 @@ impl SuePaint {
                 self.figure_draft.bend = None;
             }
         }
+        if let Some(turn) = &self.select_turn {
+            // A selection waiting for its angle: Esc, another sub tool or
+            // another picture drops it; Enter fixes it as it was dragged.
+            let (escape, enter) = ui.input(|input| {
+                (
+                    input.key_pressed(Key::Escape),
+                    input.key_pressed(Key::Enter),
+                )
+            });
+            let now = (self.toolbox.tool(), self.toolbox.current().mode);
+            let elsewhere = self.picture() != Some(turn.picture);
+            if enter && !elsewhere {
+                self.fix_select_turn(None, size);
+            } else if escape || elsewhere || now.0 != Tool::Select || !matches!(now.1, 0 | 1) {
+                self.select_turn = None;
+            }
+        }
         if !self.curve_points.is_empty() {
             // Enter lays the curve ruler, Esc drops it.
             let (enter, escape) = ui.input(|input| {

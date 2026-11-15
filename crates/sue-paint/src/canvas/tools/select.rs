@@ -11,7 +11,7 @@ use super::Press;
 use super::corners::clicks_corners;
 use crate::brush::AntiAlias;
 use crate::select::{Aspect, Op, SHRINK_SELECTION, Selection};
-use crate::studio::{Gesture, SuePaint};
+use crate::studio::{Gesture, SelectTurn, SuePaint};
 use crate::tools::{SubTool, Tool};
 
 /// Where a box dragged from `from` to `p` ends: a rectangle or ellipse
@@ -24,11 +24,61 @@ pub(super) fn shape_end(tool: Tool, sub: &SubTool, from: Pos2, p: Pos2) -> Pos2 
     Pos2::new(x, y)
 }
 
+/// How far a selection waiting for its angle has turned with the pointer
+/// at `pointer` (picture pixels): the turn from the corner the drag ended
+/// at to the pointer, round the shape's middle, in radians.
+pub(in crate::canvas) fn turn_angle(turn: &SelectTurn, pointer: [f32; 2]) -> f32 {
+    let middle = [
+        (turn.from.x + turn.to.x) / 2.0,
+        (turn.from.y + turn.to.y) / 2.0,
+    ];
+    let start = (turn.to.y - middle[1]).atan2(turn.to.x - middle[0]);
+    let now = (pointer[1] - middle[1]).atan2(pointer[0] - middle[0]);
+    if (pointer[0] - middle[0]).hypot(pointer[1] - middle[1]) < 1.0 {
+        return 0.0;
+    }
+    now - start
+}
+
+/// The outline of a selection waiting for its angle, turned by `angle`
+/// round its middle (picture pixels): four corners, or an ellipse of
+/// many.
+pub(in crate::canvas) fn turn_outline(turn: &SelectTurn, angle: f32) -> Vec<[f32; 2]> {
+    let middle = [
+        (turn.from.x + turn.to.x) / 2.0,
+        (turn.from.y + turn.to.y) / 2.0,
+    ];
+    let half = [
+        (turn.to.x - turn.from.x).abs() / 2.0,
+        (turn.to.y - turn.from.y).abs() / 2.0,
+    ];
+    let (sin, cos) = angle.sin_cos();
+    let place = |[x, y]: [f32; 2]| [middle[0] + x * cos - y * sin, middle[1] + x * sin + y * cos];
+    if turn.sub.mode == 1 {
+        (0..96)
+            .map(|step| {
+                let t = step as f32 / 96.0 * std::f32::consts::TAU;
+                place([half[0] * t.cos(), half[1] * t.sin()])
+            })
+            .collect()
+    } else {
+        [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]
+            .into_iter()
+            .map(|[sx, sy]| place([sx * half[0], sy * half[1]]))
+            .collect()
+    }
+}
+
 impl SuePaint {
     /// The Selection area tool pressed.
     pub(super) fn select_press(&mut self, press: &Press, sub: SubTool, cx: &mut AppletContext<'_>) {
         let Press { p, op, size, .. } = *press;
         let tool = Tool::Select;
+        // A selection waiting for its angle: this click fixes it.
+        if self.select_turn.is_some() {
+            self.fix_select_turn(Some([p.x, p.y]), size);
+            return;
+        }
         if clicks_corners(tool, sub.mode) {
             self.corners_press(tool, &sub, press, cx);
         } else if matches!(sub.mode, 4 | 5) {
@@ -69,6 +119,21 @@ impl SuePaint {
                 }
             });
         }
+    }
+
+    /// Fixes the selection waiting for its angle, turned to `pointer`
+    /// (picture pixels; `None` as it was dragged), on a picture of `size`.
+    pub(in crate::canvas) fn fix_select_turn(&mut self, pointer: Option<[f32; 2]>, size: [u32; 2]) {
+        let Some(turn) = self.select_turn.take() else {
+            return;
+        };
+        if self.picture() != Some(turn.picture) {
+            return;
+        }
+        let angle = pointer.map_or(0.0, |pointer| turn_angle(&turn, pointer));
+        let mut shape = Selection::new(size[0], size[1]);
+        shape.polygon(&turn_outline(&turn, angle), Op::Replace);
+        self.select_shape(&shape, turn.op, turn.sub.area_aa);
     }
 
     /// The selection pen or eraser dragged to `pos`.
@@ -145,6 +210,21 @@ impl SuePaint {
             if let Some(doc) = self.docs.get_mut(self.active) {
                 doc.set_selection(None);
             }
+            return;
+        }
+        if sub.adjust_angle
+            && !tiny
+            && let Some(picture) = self.picture()
+        {
+            // Adjust angle after fixed: it turns with the pointer until a
+            // click fixes it.
+            self.select_turn = Some(SelectTurn {
+                picture,
+                sub: Box::new(sub.clone()),
+                op,
+                from,
+                to,
+            });
             return;
         }
         let mut shape = Selection::new(size[0], size[1]);

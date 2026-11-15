@@ -92,6 +92,11 @@ impl SuePaint {
             return;
         };
         let folder = doc::is_folder(&cx.world.arena, info.id);
+        let gradient = cx
+            .world
+            .arena
+            .get_by_id(info.id)
+            .is_ok_and(|entity| entity.class() == doc::GRADIENT_LAYER);
         sue_wm::ui::ScrollView::vertical("sue-paint-layer-property").show(ui, theme, |ui| {
             Density::Compact.scope(ui, |ui| {
                 ui.label(
@@ -103,6 +108,7 @@ impl SuePaint {
                     ui,
                     &match info.kind {
                         _ if folder => tr!("layer-folder"),
+                        _ if gradient => tr!("gradient-layer-kind"),
                         LayerKind::Raster => tr!("raster-layer"),
                         LayerKind::Paper => tr!("paper-2"),
                         LayerKind::Other => tr!("layer-kind-sue-cannot-edit-yet"),

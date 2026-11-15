@@ -455,7 +455,15 @@ impl SuePaint {
             body.shrink2(vec2(pad, theme.space(Space::S3))),
             "tool-panel",
         );
-        let sub_name = crate::localize(&self.toolbox.current().name);
+        // A gradient layer edited from Tool Property is named in the
+        // title, since the rows below are the layer's, not the sub tool's.
+        let sub_name = match self.edited_gradient_layer(&cx.world.arena) {
+            Some(layer) => self
+                .layer_info(&cx.world.arena)
+                .filter(|info| info.id == layer)
+                .map_or_else(|| tr!("gradient"), |info| info.name),
+            None => crate::localize(&self.toolbox.current().name),
+        };
         inner.horizontal(|ui| {
             ui.label(
                 RichText::new(&sub_name)
@@ -505,6 +513,9 @@ impl SuePaint {
         // go.
         let held = inner.ctx().input(|input| input.pointer.any_down());
         self.line_changes(held, cx);
+        // The Gradient tool's sets, and a gradient layer from Tool
+        // Property: shown now, kept when let go.
+        self.gradient_frame(held, cx);
         // A 3D layer's view from Tool Property: shown now, kept when let go.
         if let Some((layer, view)) = self.pending_view3d.take() {
             self.preview_view3d(cx, layer, &view);

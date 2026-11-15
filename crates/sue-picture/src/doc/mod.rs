@@ -28,11 +28,12 @@ pub use folders::{
     members, new_folder, set_folder,
 };
 pub use kinds::{
-    FILL_COLOR, FILL_LAYER, GRADIENT_END, GRADIENT_FROM_X, GRADIENT_FROM_Y, GRADIENT_LAYER,
-    GRADIENT_RADIAL, GRADIENT_START, GRADIENT_TO_X, GRADIENT_TO_Y, Gradient, MATERIAL_ANGLE,
-    MATERIAL_IMAGE, MATERIAL_IMAGE_CLASS, MATERIAL_LAYER, MATERIAL_SCALE, MATERIAL_TILE,
-    MATERIAL_X, MATERIAL_Y, Placement, material_image, new_fill_layer, new_gradient_layer,
-    new_material_layer,
+    FILL_COLOR, FILL_LAYER, GRADIENT_ASPECT, GRADIENT_EDGE, GRADIENT_END, GRADIENT_FROM_X,
+    GRADIENT_FROM_Y, GRADIENT_LAYER, GRADIENT_RADIAL, GRADIENT_SHAPE, GRADIENT_START,
+    GRADIENT_STOPS, GRADIENT_TO_X, GRADIENT_TO_Y, Gradient, MATERIAL_ANGLE, MATERIAL_IMAGE,
+    MATERIAL_IMAGE_CLASS, MATERIAL_LAYER, MATERIAL_SCALE, MATERIAL_TILE, MATERIAL_X, MATERIAL_Y,
+    Placement, material_image, new_fill_layer, new_gradient_layer, new_material_layer,
+    set_gradient,
 };
 pub use layers::{
     CORRECTION, CORRECTION_FILTER, REFERENCE, TEXT, add_layer_pixels, add_layers_pixels, add_paper,

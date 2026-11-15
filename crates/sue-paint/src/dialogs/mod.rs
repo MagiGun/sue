@@ -51,6 +51,7 @@ use settings::{shortcuts_ui, workspace_ui};
 use story::{page_settings_ui, story_editor_ui, story_info_ui, webtoon_ui};
 use text::text_ui;
 
+pub(crate) use crate::gradient_bar::GradientLibrary;
 pub(crate) use canvas::{
     CanvasDialog, CanvasProperties, ConvertDialog, PerspectiveDialog, ResolutionDialog,
 };
@@ -58,8 +59,8 @@ pub(crate) use color::{ColorDialog, ColorTarget, cmyk_of, rgb_of_cmyk};
 pub(crate) use colorize::ColorizeDialog;
 pub(crate) use command_bar::{BarDialog, BarTarget};
 pub(crate) use comps::CompsDialog;
-pub(crate) use fill::AdvancedFill;
-pub(crate) use filter::{FilterDialog, GradientLibrary};
+pub(crate) use fill::{AdvancedFill, target_label};
+pub(crate) use filter::FilterDialog;
 pub(crate) use lines_tones::LinesTonesDialog;
 pub(crate) use modifiers::ModifiersDialog;
 #[cfg(test)]

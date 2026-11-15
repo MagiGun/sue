@@ -180,7 +180,7 @@ impl SuePaint {
     /// reaches together, as a picture-sized mask; `clip` keeps it inside
     /// the selection (a fill does, Auto Select makes the next selection).
     /// A seed inside the area already taken adds nothing.
-    fn flood_mask(
+    pub(in crate::canvas) fn flood_mask(
         &self,
         seeds: &[[f32; 2]],
         sub: &SubTool,
@@ -369,7 +369,48 @@ impl SuePaint {
                 };
                 fill::unpainted(&layer, &reference, size, &lasso)
             } else {
-                fill::enclosed(&reference, size, &lasso)
+                // Target color: the lines that close the areas are the
+                // other layers' (so what the editing layer has painted
+                // can be filled again), and of the closed areas only the
+                // pixels the editing layer has in that color fill.
+                let others = (sub.close_target != fill::Target::All)
+                    .then(|| {
+                        fill::reference_in(
+                            &cx.world.arena,
+                            picture_id,
+                            size,
+                            self.layer(),
+                            &[],
+                            fill::Refer::All,
+                            fill::Exclude {
+                                editing: true,
+                                ..fill::Exclude::default()
+                            },
+                            self.frame_view(&cx.world.arena).as_ref(),
+                        )
+                    })
+                    .flatten();
+                let mut enclosed =
+                    fill::enclosed(others.as_ref().unwrap_or(&reference), size, &lasso);
+                if sub.close_target != fill::Target::All {
+                    let editing = if target.mask {
+                        placed(&cx.world.arena, target.id, target.offset, size)
+                    } else {
+                        self.layer_on_picture(&cx.world.arena, size)
+                    };
+                    let Some(layer) = editing else {
+                        return;
+                    };
+                    for (index, value) in enclosed.iter_mut().enumerate() {
+                        let pixel = layer
+                            .get(index * 4..index * 4 + 4)
+                            .map_or([0; 4], |p| [p[0], p[1], p[2], p[3]]);
+                        if !sub.close_target.matches(pixel, sub.tolerance) {
+                            *value = 0;
+                        }
+                    }
+                }
+                enclosed
             }
         } else {
             lasso
@@ -400,102 +441,6 @@ impl SuePaint {
                 .unwrap_or_else(|| Selection::new(size[0], size[1]));
             selection.apply_mask(&mask, op);
             doc.set_selection(Some(selection));
-        }
-    }
-
-    /// The gradient tool: from `from` to `to` on the editing layer (or
-    /// the mask being edited, where it shows the layer); with the
-    /// transparent color it clears as much as it would have laid.
-    pub(super) fn gradient(
-        &mut self,
-        from: Pos2,
-        to: Pos2,
-        sub: &SubTool,
-        cx: &mut AppletContext<'_>,
-    ) {
-        if (to - from).length() < 1.0 {
-            return;
-        }
-        let Ok(target) = self.area_target(&cx.world.arena) else {
-            return;
-        };
-        let opacity = sub.tip.opacity;
-        // Main to Sub Color runs from the main color to the sub color; the
-        // others from the color brushes draw with (which X switches) to
-        // nothing. On a mask every color shows the layer.
-        let unit = |rgb: [u8; 3]| {
-            if target.mask {
-                [1.0; 3]
-            } else {
-                color::unit(rgb)
-            }
-        };
-        let main_to_sub = sub.mode == 1;
-        let [r, g, b] = if main_to_sub {
-            unit(self.main)
-        } else {
-            target.color.unwrap_or([1.0; 3])
-        };
-        let start = [r, g, b, opacity];
-        let end = if main_to_sub {
-            let [r, g, b] = unit(self.sub);
-            [r, g, b, opacity]
-        } else {
-            [r, g, b, 0.0]
-        };
-        let clear = target.color.is_none() && !main_to_sub;
-        let selection = self.doc().and_then(|doc| doc.selection.clone());
-        let (offset, alpha_lock) = (target.offset, target.alpha_lock);
-        let line = [[from.x, from.y], [to.x, to.y]];
-        let radial = sub.mode == 2;
-        if let Ok(Some(edit)) = doc::rewrite(
-            &cx.world.arena,
-            target.id,
-            &tr!("gradient"),
-            |pixels, width, height| {
-                if clear && alpha_lock {
-                    // Lock Transparent Pixels keeps alpha, so clearing
-                    // changes nothing (as the bucket's clearing does).
-                    return;
-                }
-                if !clear {
-                    fill::gradient(
-                        pixels,
-                        [width, height],
-                        offset,
-                        line,
-                        [start, end],
-                        radial,
-                        selection.as_ref(),
-                        alpha_lock,
-                    );
-                    return;
-                }
-                // Clearing: the gradient's cover, laid on nothing, says
-                // how much of each pixel goes.
-                let mut cover = vec![0_u8; pixels.len()];
-                fill::gradient(
-                    &mut cover,
-                    [width, height],
-                    offset,
-                    line,
-                    [start, end],
-                    radial,
-                    selection.as_ref(),
-                    false,
-                );
-                for (pixel, shade) in pixels
-                    .as_chunks_mut::<4>()
-                    .0
-                    .iter_mut()
-                    .zip(cover.as_chunks::<4>().0)
-                {
-                    let keep = 1.0 - f32::from(shade[3]) / 255.0;
-                    pixel[3] = (f32::from(pixel[3]) * keep).round() as u8;
-                }
-            },
-        ) {
-            Self::apply(cx, edit);
         }
     }
 }
