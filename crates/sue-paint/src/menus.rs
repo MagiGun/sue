@@ -835,6 +835,7 @@ pub fn menus() -> Vec<Menu> {
                 item("view.object_launcher"),
                 SEP,
                 item("view.grid"),
+                item("view.grid_settings"),
                 item("view.ruler_bar"),
                 item("view.pixel_grid"),
                 item("view.crop_frame"),

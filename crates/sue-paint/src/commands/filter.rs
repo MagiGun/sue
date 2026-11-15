@@ -244,7 +244,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "filter.lines_tones",
         "convert-to-lines-and-tones-ellipsis",
         "extract-line",
-        |p, cx, _| p.lines_and_tones(cx),
+        |p, cx, _| p.open_lines_and_tones(cx),
     ),
     // Quick Filter and Quick Effect.
     c(
