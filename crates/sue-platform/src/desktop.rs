@@ -234,6 +234,9 @@ pub struct DesktopHost {
     /// Joins the window's pointer and touch events with the pens' packets
     /// for the pen's sample stream (see `crate::stylus`).
     pen: crate::stylus::Router,
+    /// A Windows Ink pen's packets, each with its own pressure.
+    #[cfg(target_os = "windows")]
+    ink: crate::ink_pen::InkHistory,
     /// A WinTab tablet's pen (see `crate::wintab_pen`): `None` until the
     /// first frame looks for one, then whether there is one.
     #[cfg(target_os = "windows")]
@@ -482,6 +485,8 @@ impl DesktopHost {
             viewports,
             pen: crate::stylus::Router::default(),
             #[cfg(target_os = "windows")]
+            ink: crate::ink_pen::InkHistory::default(),
+            #[cfg(target_os = "windows")]
             tablet: None,
             #[cfg(any(
                 target_os = "linux",
@@ -656,8 +661,32 @@ impl DesktopHost {
                     None => None,
                 };
                 let at = point(touch.location);
+                let mut sample =
+                    crate::stylus::PenSample::at(crate::stylus::PenSource::Touch, at, now);
+                sample.pressure = force;
+                // A Windows Ink pen: the packet's own pressure, lean, twist
+                // and time, which winit's event does not keep when one
+                // message stands for several packets.
+                #[cfg(target_os = "windows")]
+                if let Ok(origin) = self.window.inner_position()
+                    && let Some(packet) = self.ink.take(
+                        touch.id,
+                        [touch.location.x, touch.location.y],
+                        [origin.x, origin.y],
+                        sue_winpen::pen_history(touch.id as u32),
+                        now,
+                    )
+                {
+                    if packet.pressure.is_some() || force.is_none() {
+                        sample.pressure = packet.pressure.or(force);
+                    }
+                    sample.tilt = packet.tilt;
+                    sample.twist = packet.twist;
+                    sample.eraser = packet.eraser;
+                    sample.time = packet.time;
+                }
                 let pen = &mut self.pen;
-                crate::stylus::real(|stream| pen.touch(stream, touch.id, phase, at, force, now));
+                crate::stylus::real(|stream| pen.touch_sample(stream, touch.id, phase, sample));
             }
             _ => {}
         }
