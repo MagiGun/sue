@@ -13,6 +13,18 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, Figure tool: Continuous Curve, Bezier Curve and Polygon in
+  Direct draw. Curve now works as in Clip Studio Paint: drag from start
+  to end, let go, move the pointer to bend the line, click to set it
+  (the old click-by-click curve is Continuous Curve). Bezier Curve: a
+  click lays a point, a drag pulls out its handles; click the first
+  point to close, double-click the last to end. Shift keeps straight
+  lines to every 45 degrees and rectangles, ellipses and polygons
+  square or round. With the rulers shown, a straight line follows the
+  ruler it starts on and a rectangle, ellipse or polygon lies in the
+  perspective ruler's plane. A figure on a vector layer stays a vector
+  line. Saturated and speed lines land on a layer named after their
+  sub tool.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
