@@ -258,8 +258,9 @@ impl SuePaint {
                 theme,
             );
         }
-        // A curve ruler being placed, or a ruler being drawn with the pen.
-        let violet = Color32::from_rgb(170, 120, 255);
+        // A curve ruler being placed, or a ruler being drawn with the pen,
+        // in the color rulers have.
+        let violet = theme.focus();
         if !self.curve_points.is_empty() {
             let mut points = self.curve_points.clone();
             if let Some(pointer) = self.pointer {
@@ -543,8 +544,8 @@ pub(super) fn segment_distance(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
     (p[0] - a[0] - t * dx).hypot(p[1] - a[1] - t * dy)
 }
 
-/// Draws `rulers` (picture pixels, `screen` maps them) in Clip Studio
-/// Paint's violet, faint while their snapping (`[special, linear]`) is off,
+/// Draws `rulers` (picture pixels, `screen` maps them) in the theme's
+/// accent, faint while their snapping (`[special, linear]`) is off,
 /// with the first line of a vanishing point still to be drawn dashed.
 #[allow(clippy::too_many_arguments, reason = "the rulers and how they show")]
 #[allow(clippy::too_many_lines, reason = "one block per ruler")]
@@ -560,7 +561,9 @@ fn ruler_overlay(
     theme: &Theme,
 ) {
     use crate::rulers::Special;
-    let violet = Color32::from_rgb(170, 120, 255);
+    // Sue's own color for rulers, the theme's accent (rule 10 of the
+    // 0.0.8 plan: no color matched to Clip Studio Paint's).
+    let violet = theme.focus();
     let tone = |on: bool| {
         if on {
             violet
