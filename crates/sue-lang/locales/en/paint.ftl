@@ -2343,3 +2343,19 @@ zoom-100-percent = 100%
 zoom-200-percent = 200%
 paste-material = Paste Material
 cancel-transform = Cancel Transform
+
+# Sue Paint without its launcher (0.0.8, P3-13): the Hub's Materials
+# place, and the Help menu's web pages.
+materials-place = Materials
+materials-menu = Materials Menu
+materials-find-again = Find Materials Again
+materials-rebuild-thumbnails = Rebuild Thumbnails
+materials-thumbnails-redrawn = The pictures of the materials are drawn again
+materials-show-folder = Show Materials Folder
+materials-choose-location = Choose Location of Materials...
+materials-use-own-folder = Use Sue Paint's Own Folder
+help-basic-tips = Basic Tips
+help-online-guide = Using Sue Paint (Online)
+help-faq = Questions and Answers
+help-contact = Contact
+help-feedback = Feedback and Requests

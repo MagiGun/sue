@@ -230,11 +230,6 @@ impl SueApplet for SuePaint {
         self.follow_language(cx);
         let theme = cx.theme.clone();
         let rect = ui.max_rect();
-        let no_canvas = self.docs.is_empty();
-        if cx.view.form_factor != sue_platform::FormFactor::Desktop && self.start.shows(no_canvas) {
-            self.mobile_header(ui, rect, &theme);
-            return;
-        }
         if cx.view.form_factor != sue_platform::FormFactor::Desktop
             && !crate::simple::studio_mode(cx)
         {
@@ -247,11 +242,7 @@ impl SueApplet for SuePaint {
             self.studio_bar(ui, rect, cx, &theme);
             return;
         }
-        // The start page has no menus; everything is on its buttons.
-        if self.menus_hidden
-            || (cx.view.form_factor == sue_platform::FormFactor::Desktop
-                && self.start.shows(self.docs.is_empty()))
-        {
+        if self.menus_hidden {
             return;
         }
         let mut menubar = std::mem::take(&mut self.menubar);
@@ -264,6 +255,21 @@ impl SueApplet for SuePaint {
         if let Some(command) = picked {
             self.run(&command, cx);
         }
+    }
+
+    /// The Materials place, beside the Hub's Home and Files.
+    fn hub_places(&self) -> Vec<sue_wm::HubPlace> {
+        crate::hub::places()
+    }
+
+    fn hub_ui(&mut self, place: &str, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        self.place_ui(place, ui, cx);
+    }
+
+    /// The pictures of Sue Paint's projects, `.clip` and `.psd` files on
+    /// the Hub's cards.
+    fn thumbnail(&self) -> Option<sue_wm::files::Thumbnailer> {
+        Some(crate::hub::thumbnailer())
     }
 
     /// A layered picture is a canvas as it is; a flat picture becomes one
@@ -284,7 +290,7 @@ impl SueApplet for SuePaint {
     }
 
     /// Picture files come to Sue Paint as they are, wherever they are
-    /// opened (the Sue menu, the start page, a drop, the Hub): it reads
+    /// opened (the Sue menu, a drop, the Hub): it reads
     /// their layers where they have any, and opens each as a canvas. So
     /// do brush files, which become sub tools. A sound file is Sue Paint's
     /// only while a canvas is in front, where it goes on the timeline.
@@ -463,10 +469,11 @@ impl SueApplet for SuePaint {
         {
             cx.request(ShellRequest::Open(me_id()));
         }
-        if self.start_picked(&pick.purpose, path, cx) {
+        if self.place_picked(&pick.purpose, path, cx) {
             return;
         }
         match pick.purpose.as_str() {
+            "new-from-movie" => self.new_from_movie(path, cx),
             "open" => self.open_picked(cx, path, false),
             // A file opened anywhere in Sue that Sue Paint takes itself
             // (see `opens_file`).
@@ -671,7 +678,8 @@ impl SueApplet for SuePaint {
                 self.dialog = Some(Dialog::Pressure(pressure));
                 true
             }
-            start if start.starts_with("start/") => self.start.navigate(start),
+            place if place.starts_with("materials/") => self.hub.navigate(place),
+            page if page.starts_with("new-canvas") => self.new_canvas.navigate(page),
             // A palette's tab: `tab/<palette>/<index>`.
             tab if tab.starts_with("tab/") => {
                 let mut parts = tab["tab/".len()..].split('/');

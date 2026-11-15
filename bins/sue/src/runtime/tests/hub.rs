@@ -771,7 +771,9 @@ fn the_keyboard_walks_the_hub_and_enter_uses_what_has_focus() {
     press(&mut runtime, egui::Key::Enter);
     assert_eq!(runtime.shell.hub_place(), Some(sue_wm::HUB_FILES));
     assert!(!runtime.shell.palette_open());
-    // In Files the walk goes on past the rail to the place's menu.
+    // In Files the walk goes on past the rail (Sue Paint's Materials
+    // place is the last of it) to the place's menu.
+    press(&mut runtime, egui::Key::ArrowDown);
     press(&mut runtime, egui::Key::ArrowDown);
     let focused = ctx
         .memory(|memory| memory.focused())
@@ -783,6 +785,7 @@ fn the_keyboard_walks_the_hub_and_enter_uses_what_has_focus() {
         "the Files menu has focus"
     );
     // And back up to Home.
+    press(&mut runtime, egui::Key::ArrowUp);
     press(&mut runtime, egui::Key::ArrowUp);
     press(&mut runtime, egui::Key::ArrowUp);
     press(&mut runtime, egui::Key::Enter);

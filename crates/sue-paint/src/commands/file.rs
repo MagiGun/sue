@@ -28,7 +28,8 @@ impl SuePaint {
         let Basis { has_doc, .. } = self.basis(arena);
         match command {
             "file.new" | "file.open" | "file.save" | "file.save_as" | "file.preferences"
-            | "file.shortcuts" | "file.pressure" | "file.leave" | "app.quit" => ItemState::on(),
+            | "file.shortcuts" | "file.pressure" | "file.leave" | "file.start_page"
+            | "app.quit" => ItemState::on(),
             "file.timelapse.record" => self.doc().map_or(ItemState::off(), |doc| {
                 flag(
                     arena
@@ -70,9 +71,12 @@ impl SuePaint {
                 }
             }
             "file.revert" => self.revert(cx),
+            // The launcher's Start Page is gone: the command, under the
+            // name shortcuts saved, goes back to the Hub as File, Back to
+            // the Hub (`file.leave`) does, and offers it in the palette.
             "file.start_page" => {
-                self.start.forced = true;
                 self.dialog = None;
+                cx.request(ShellRequest::Hub);
             }
             "file.recent.clear" => {
                 for path in std::mem::take(&mut self.recent_files) {
@@ -366,7 +370,9 @@ const fn family(prefix: &'static str, label: &'static str) -> Command<SuePaint> 
 }
 
 pub(super) const COMMANDS: &[Command<SuePaint>] = &[
-    c("file.start_page", "start-page").with(Flags::PALETTE),
+    c("file.start_page", "back-to-the-hub")
+        .with(Flags::PALETTE)
+        .with(Flags::LEAVES_CANVAS),
     c("file.new", "new-ellipsis")
         .keys("Ctrl+N")
         .with(Flags::PALETTE),

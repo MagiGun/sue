@@ -146,7 +146,6 @@ pub fn menus() -> Vec<Menu> {
         Menu::new(
             tr!("file"),
             vec![
-                item("file.start_page"),
                 item("file.new"),
                 item("file.new_clipboard"),
                 named(&tr!("open-ellipsis"), "file.open").key("Ctrl+O"),
@@ -794,6 +793,12 @@ pub fn menus() -> Vec<Menu> {
                 item("help.guide"),
                 item("help.shortcuts"),
                 item("help.updates"),
+                SEP,
+                item("help.tips"),
+                item("help.online_guide"),
+                item("help.faq"),
+                item("help.contact"),
+                item("help.feedback"),
                 SEP,
                 item("help.about"),
             ],

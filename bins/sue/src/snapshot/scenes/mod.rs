@@ -46,7 +46,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 04 and 05. Settings in a computer's window.
     settings::desktop(tour)?;
 
-    // 08a to 08z. Sue Paint with no canvas open: its start page.
+    // 08a to 08z. Sue Paint with no canvas open, and its Materials place.
     paint_start::desktop(tour)?;
 
     // 08 to 11. Sue Paint with a sample illustration.

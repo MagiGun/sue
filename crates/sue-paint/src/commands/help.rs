@@ -1,7 +1,7 @@
 //! The Help menu's commands.
 
 use sue_core::{Arena, UndoStack};
-use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState, World};
+use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState, ShellRequest, World};
 
 use super::{Basis, when};
 use crate::dialogs::Dialog;
@@ -23,6 +23,7 @@ impl SuePaint {
         let Basis { has_doc, .. } = self.basis(arena);
         match command {
             "help.shortcuts" | "help.about" => ItemState::on(),
+            link if link_of(link).is_some() => ItemState::on(),
             _ => when(has_doc),
         }
     }
@@ -44,9 +45,43 @@ impl SuePaint {
             }
             "help.shortcuts" => self.dialog = Some(Dialog::Shortcuts),
             "help.about" => cx.notify(tr!("sue-paint-layered-painting-inside-sue")),
-            _ => {}
+            link => {
+                if let Some(page) = link_of(link) {
+                    cx.request(ShellRequest::Command(format!("open-url:{page}")));
+                }
+            }
         }
     }
+}
+
+/// The web pages the Help menu opens in the system's browser, by
+/// command: what the help popup of Sue Paint's removed launcher held.
+const LINKS: &[(&str, &str)] = &[
+    ("help.tips", "https://magigun.github.io/sue/"),
+    (
+        "help.online_guide",
+        "https://github.com/MagiGun/sue/blob/main/HUMANS.md#sue-paint-painting-and-illustration",
+    ),
+    (
+        "help.faq",
+        "https://github.com/MagiGun/sue/issues?q=label%3Aquestion",
+    ),
+    (
+        "help.contact",
+        "https://github.com/MagiGun/sue/issues/new/choose",
+    ),
+    (
+        "help.feedback",
+        "https://github.com/MagiGun/sue/issues/new?template=feature.yml",
+    ),
+];
+
+/// The web page the Help command `command` opens, if it opens one.
+fn link_of(command: &str) -> Option<&'static str> {
+    LINKS
+        .iter()
+        .find(|(name, _)| *name == command)
+        .map(|(_, page)| *page)
 }
 
 /// A command of this group.
@@ -61,4 +96,9 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         .with(Flags::PALETTE),
     c("help.updates", "check-for-updates").with(Flags::LEAVES_CANVAS),
     c("help.about", "about-sue-paint"),
+    c("help.tips", "help-basic-tips").with(Flags::LEAVES_CANVAS),
+    c("help.online_guide", "help-online-guide").with(Flags::LEAVES_CANVAS),
+    c("help.faq", "help-faq").with(Flags::LEAVES_CANVAS),
+    c("help.contact", "help-contact").with(Flags::LEAVES_CANVAS),
+    c("help.feedback", "help-feedback").with(Flags::LEAVES_CANVAS),
 ];

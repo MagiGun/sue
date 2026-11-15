@@ -159,19 +159,22 @@ fn sue_paint_menus_answer_the_keyboard() {
     paint.step(vec![plain(egui::Key::Escape)]);
     paint.settle(3);
     assert!(paint.rect_of("Save As...").is_none(), "Escape closed File");
-    assert!(paint.rect_of("Draw").is_none(), "the canvas is still open");
+    assert!(
+        paint.rect_of("No canvas is open").is_none(),
+        "the canvas is still open"
+    );
 
     // Enter runs the row the typing found.
     paint.click_text("File");
-    for letter in ["s", "t", "a", "r", "t"] {
+    for letter in ["b", "a", "c", "k"] {
         paint.step(vec![typed(letter)]);
     }
     paint.step(vec![plain(egui::Key::Enter)]);
     paint.settle(6);
     assert!(paint.rect_of("Save As...").is_none(), "Enter closed File");
     assert!(
-        paint.rect_of("Draw").is_some(),
-        "Enter ran Start Page: {:?}",
+        paint.runtime.shell.page().is_none(),
+        "Enter ran Back to the Hub: {:?}",
         paint.texts
     );
 }

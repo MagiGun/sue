@@ -55,7 +55,7 @@ pub(crate) fn set_mode(cx: &mut AppletContext<'_>, studio: bool) {
 }
 
 impl SuePaint {
-    /// Simple Mode's row in Sue's top bar: back to the start page at the
+    /// Simple Mode's row in Sue's top bar: back to the Hub at the
     /// left; Undo, Redo, the reference pictures and "..." at the right.
     pub(crate) fn simple_bar(
         &mut self,
@@ -78,7 +78,7 @@ impl SuePaint {
         )
         .clicked()
         {
-            self.start.forced = true;
+            run = Some("file.start_page".to_owned());
             self.sheet = None;
         }
         let right = |index: usize| bar.right() - 2.0 - (index as f32 + 1.0) * (side + 2.0);
