@@ -119,9 +119,16 @@ impl Runs {
 }
 
 /// The capsule from `a` to `b`, with `b`'s hardness, laid only ahead
-/// of `a` (see [`Swept`]).
+/// of `a` (see [`Swept`]). When the hardness changes between the two (a
+/// hardness that follows the pen), the disc laid at `a` had another rim
+/// than this capsule has there, so the capsule is laid whole.
 fn capsule(a: Spot, b: Spot, edge: f32) -> Swept {
-    Swept::after(a.disc, b.disc, RoundTip::new(b.hardness, edge))
+    let tip = RoundTip::new(b.hardness, edge);
+    if (a.hardness - b.hardness).abs() > HARDNESS {
+        Swept::whole(a.disc, b.disc, tip)
+    } else {
+        Swept::after(a.disc, b.disc, tip)
+    }
 }
 
 /// A capsule that goes on from a disc already laid at its start, laid
@@ -380,5 +387,72 @@ mod tests {
             runs.push(spot(i as f32, radius), 0.9, &mut out);
         }
         assert_eq!(out.len(), 2);
+    }
+
+    /// Laying only the part of a capsule ahead of its start disc, over
+    /// that disc, gives every pixel the coverage the whole capsule over
+    /// the disc gives (within one step of the 16-bit coverage, which no
+    /// layer byte can show), for hard and soft
+    /// tips, growing and shrinking radii, short and long segments.
+    #[test]
+    fn a_capsule_laid_ahead_of_its_start_lays_what_the_whole_one_does() {
+        use crate::buffer::{Combine, StrokeBuffer};
+
+        // A small fixed generator, so the cases are the same every run.
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 40) as f32 / (1_u64 << 24) as f32
+        };
+        let mut cases = 0;
+        let mut most = 0;
+        for hardness in [1.0, 0.85, 0.5, 0.0] {
+            for edge in [0.0, 0.9, 2.5] {
+                for _ in 0..24 {
+                    let ra = 2.0 + 90.0 * next() * next();
+                    let rb = (ra * (0.5 + next())).max(2.0);
+                    let length = 0.5 + 40.0 * next() * next();
+                    let turn = 6.283_185 * next();
+                    let at = [300.5 + 7.0 * next(), 300.25 + 7.0 * next()];
+                    let a = Disc::new(at, ra, 1.0).drawn(true);
+                    let b = Disc::new(
+                        [at[0] + length * turn.cos(), at[1] + length * turn.sin()],
+                        rb,
+                        1.0,
+                    )
+                    .drawn(true);
+                    let tip = RoundTip::new(hardness, edge);
+                    let lay = |second: Swept| {
+                        let mut buffer = StrokeBuffer::new(Combine::Max);
+                        let mut painter = buffer.committed();
+                        painter.fill(&Swept::whole(a, a, tip));
+                        painter.fill(&second);
+                        drop(painter);
+                        buffer
+                    };
+                    let ahead = lay(Swept::after(a, b, tip));
+                    let whole = lay(Swept::whole(a, b, tip));
+                    let r = Swept::whole(a, b, tip).bounds();
+                    for y in r.y0..r.y1 {
+                        for x in r.x0..r.x1 {
+                            let (shortcut, full) = (ahead.coverage(x, y), whole.coverage(x, y));
+                            // One step of the 16-bit coverage is float
+                            // rounding where the nearest disc sits a hair
+                            // ahead of the start: far under a byte's step.
+                            assert!(
+                                shortcut.abs_diff(full) <= 1,
+                                "({x}, {y}): {shortcut} against {full}, {a:?} to {b:?},                                  hardness {hardness}, edge {edge}"
+                            );
+                            most = most.max(shortcut.abs_diff(full));
+                        }
+                    }
+                    cases += 1;
+                }
+            }
+        }
+        assert_eq!(cases, 4 * 3 * 24);
+        assert!(most <= 1, "{most}");
     }
 }
