@@ -23,6 +23,9 @@ impl SuePaint {
     /// source set first).
     pub(super) fn blend_press(&mut self, press: &Press, sub: &SubTool, cx: &mut AppletContext<'_>) {
         let p = press.p;
+        if self.refuse_keyframed(cx) {
+            return;
+        }
         let info = match self.paintable(&cx.world.arena) {
             Ok(info) => info,
             Err(error) => {

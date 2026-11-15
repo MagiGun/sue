@@ -17,6 +17,25 @@ use crate::studio::{Gesture, SuePaint};
 use crate::tools::{SubTool, Tool};
 
 impl SuePaint {
+    /// A layer whose keyframes are on moves as its keys say: it takes no
+    /// strokes (the Layer palette shows its pen locked). `true`, with a
+    /// notice saying why, when the current layer is one.
+    pub(super) fn refuse_keyframed(&self, cx: &mut AppletContext<'_>) -> bool {
+        let Some(info) = self.layer_info(&cx.world.arena) else {
+            return false;
+        };
+        if !cx
+            .world
+            .arena
+            .get_by_id(info.id)
+            .is_ok_and(crate::anim::motion::keyframes_on)
+        {
+            return false;
+        }
+        cx.fail(tr!("keyframes-on-no-drawing", name = info.name));
+        true
+    }
+
     /// A brush tool pressed: a stroke begins.
     pub(super) fn brush_press(
         &mut self,
@@ -33,16 +52,7 @@ impl SuePaint {
             size,
             ..
         } = *press;
-        // A layer whose keyframes are on moves as its keys say: it takes
-        // no strokes (the Layer palette shows its pen locked).
-        if let Some(info) = self.layer_info(&cx.world.arena)
-            && cx
-                .world
-                .arena
-                .get_by_id(info.id)
-                .is_ok_and(crate::anim::motion::keyframes_on)
-        {
-            cx.fail(tr!("keyframes-on-no-drawing", name = info.name));
+        if self.refuse_keyframed(cx) {
             return;
         }
         // The brush engine draws every stroke it can (canvas/engine.rs);

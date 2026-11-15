@@ -1851,3 +1851,34 @@ fn sue_paint_a_vector_layers_mask_takes_strokes() {
         "one undo step takes it back"
     );
 }
+
+/// The Blend tool on a layer with keyframes on is refused like a brush:
+/// nothing changes and nothing goes on the undo stack.
+#[test]
+fn sue_paint_a_layer_with_keyframes_on_refuses_the_blend_tool() {
+    let mut paint = new_engine("paint-engine-keyframes-blend");
+    let middle = paint.middle();
+    paint.slow(
+        middle - vec2(120.0, 0.0),
+        middle + vec2(120.0, 0.0),
+        egui::Modifiers::NONE,
+    );
+    let layer = paint.top();
+    let mut on = sue_paint::anim::motion::enable_keyframes(layer, true);
+    sue_core::ReversibleTransaction::apply(&mut on, &mut paint.runtime.engine.world.arena).unwrap();
+    let before = paint.layers().last().unwrap().2.clone();
+    let depth = paint.runtime.engine.history.depth();
+    paint.command("tool.blend");
+    paint.slow(
+        middle - vec2(0.0, 60.0),
+        middle + vec2(0.0, 60.0),
+        egui::Modifiers::NONE,
+    );
+    assert_eq!(paint.layers().last().unwrap().2, before, "nothing blended");
+    assert_eq!(paint.runtime.engine.history.depth(), depth, "nothing to undo");
+    assert!(
+        paint.notice().to_lowercase().contains("keyframes"),
+        "a notice says why: {:?}",
+        paint.notice()
+    );
+}
