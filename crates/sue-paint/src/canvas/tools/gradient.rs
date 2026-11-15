@@ -36,6 +36,12 @@ impl SuePaint {
         if sub.mode != CONTOUR_FILL
             && let Some((layer, gradient)) = self.gradient_layer(arena)
         {
+            if let Some(info) = self.layer_info(arena)
+                && info.locked
+            {
+                cx.fail(tr!("is-locked", name = info.name));
+                return;
+            }
             let zoom = self.doc().map_or(1.0, |doc| doc.view.zoom.max(0.01));
             let reach = END_REACH / zoom;
             let near = |end: [f32; 2]| (end[0] - p.x).hypot(end[1] - p.y) <= reach;
@@ -210,10 +216,10 @@ impl SuePaint {
         let Some(picture) = self.picture() else {
             return;
         };
-        let gradient = doc::Gradient {
-            line,
-            look: self.gradient_look_now(sub, false),
-        };
+        let mut look = self.gradient_look_now(sub, false);
+        // The layer keeps the colors it is made with.
+        look.map = look.map.owned();
+        let gradient = doc::Gradient { line, look };
         let name = tr!("gradient");
         let (mut edit, layer) =
             doc::new_gradient_layer(&cx.world.arena, picture, self.layer(), &name, gradient);

@@ -210,6 +210,18 @@ impl GradientMap {
         out
     }
 
+    /// The gradient with every stop holding the color it shows now, so
+    /// it no longer follows the drawing colors (what a gradient layer
+    /// keeps: changing the main color must not change a layer).
+    #[must_use]
+    pub fn owned(&self) -> Self {
+        let mut out = *self;
+        for stop in &mut out.stops[..usize::from(self.count)] {
+            stop.color = StopColor::Own;
+        }
+        out
+    }
+
     /// A gradient of two stops from `from` to `to` (each a color source
     /// and an opacity), the colors themselves filled in when it is used.
     #[must_use]
@@ -494,6 +506,16 @@ mod tests {
         let used = drawing.with_drawing([1; 3], [2; 3], [3; 3]);
         assert_eq!(used.stops()[0].rgb, [3; 3]);
         assert_eq!((used.stops()[1].rgb, used.stops()[1].alpha), ([3; 3], 0));
+        // Owned: the colors stay, the sources go.
+        let owned = used.owned();
+        assert!(
+            owned
+                .stops()
+                .iter()
+                .all(|stop| stop.color == StopColor::Own)
+        );
+        assert_eq!(owned.with_drawing([9; 3], [9; 3], [9; 3]), owned);
+        assert_eq!(owned.stops()[0].rgb, [3; 3]);
         assert!(!map.is_two());
         assert!(GradientMap::two([1, 2, 3], [4, 5, 6]).is_two());
         // Not a gradient.

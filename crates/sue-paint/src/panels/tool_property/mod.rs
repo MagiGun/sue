@@ -635,7 +635,9 @@ impl SuePaint {
         {
             ui.spacing_mut().item_spacing.y = theme.space(Space::S3);
             let colors = [self.main, self.sub, self.drawing_color()];
-            let mut rows = Rows::property(&[], self.tool_palettes.headings, true, theme);
+            // A locked layer shows its gradient but takes no change.
+            let unlocked = self.layer_info(arena).is_none_or(|info| !info.locked);
+            let mut rows = Rows::property(&[], self.tool_palettes.headings, unlocked, theme);
             if fill::gradient_layer_properties(
                 ui,
                 &mut rows,
@@ -643,7 +645,8 @@ impl SuePaint {
                 &mut self.gradient_work.stop,
                 colors,
                 &mut self.gradients,
-            ) {
+            ) && unlocked
+            {
                 self.gradient_work.pending = Some((layer, gradient));
             }
             return None;

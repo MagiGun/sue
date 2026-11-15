@@ -336,10 +336,16 @@ pub(super) fn gradient_layer_properties(
     colors: [[u8; 3]; 3],
     library: &mut GradientLibrary,
 ) -> bool {
+    // A layer keeps the colors it was laid with: its stops never follow
+    // the drawing colors, or picking a new main color would change the
+    // layer (and add an undo step) behind the person's back. A stop
+    // given the main, sub or drawing color here takes that color once.
+    gradient.look.map = gradient.look.map.owned();
     let before = *gradient;
     rows.hint(ui, &tr!("gradient-layer-hint"));
     let look = &mut gradient.look;
     bar_rows(ui, rows, &mut look.map, stop, colors, library);
+    look.map = look.map.owned();
     shape_rows(ui, rows, &mut look.shape, &mut look.aspect);
     edge_row(ui, rows, &mut look.edge);
     *gradient != before
