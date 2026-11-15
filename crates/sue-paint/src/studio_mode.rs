@@ -248,10 +248,18 @@ pub(crate) fn tool_glyph(tool: Tool) -> Icon {
 
 impl SuePaint {
     /// A touch on the canvas, after the canvas has counted it: the first
-    /// finger down tells whether the pointer it moves is a finger.
+    /// finger down tells whether the pointer it moves is a finger. Once
+    /// every touch has lifted, the pointer is no finger's any more, so a
+    /// mouse press after a touch the canvas did not take still draws.
     pub(crate) fn touch_seen(&mut self, id: u64, phase: TouchPhase, force: Option<f32>) {
-        if phase == TouchPhase::Start && self.touches.len() == 1 {
-            self.touch.finger = is_finger(id, force);
+        match phase {
+            TouchPhase::Start if self.touches.len() == 1 => {
+                self.touch.finger = is_finger(id, force);
+            }
+            TouchPhase::End | TouchPhase::Cancel if self.touches.is_empty() => {
+                self.touch.finger = false;
+            }
+            _ => {}
         }
     }
 
