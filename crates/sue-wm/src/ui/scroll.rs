@@ -295,31 +295,95 @@ fn fades(
     surface: Color32,
     reach: f32,
 ) -> Vec<Shape> {
-    let clear = Color32::TRANSPARENT;
-    let tint = |strength: f32| surface.gamma_multiply(strength);
     let [top, bottom] = ScrollView::fade_strength(offset.y, content_size.y, view.height(), reach);
     let [left, right] = ScrollView::fade_strength(offset.x, content_size.x, view.width(), reach);
-    let band = |rect: Rect, direction: Direction, colors: [Color32; 2]| {
-        Shape::gradient_rect(rect, direction, colors)
-    };
     let mut shapes = Vec::new();
     if top > 0.0 {
         let rect = Rect::from_min_max(view.min, pos2(view.right(), view.top() + reach));
-        shapes.push(band(rect, Direction::TopDown, [tint(top), clear]));
+        shapes.push(fade_band(rect, Direction::TopDown, surface, [top, 0.0]));
     }
     if bottom > 0.0 {
         let rect = Rect::from_min_max(pos2(view.left(), view.bottom() - reach), view.max);
-        shapes.push(band(rect, Direction::TopDown, [clear, tint(bottom)]));
+        shapes.push(fade_band(rect, Direction::TopDown, surface, [0.0, bottom]));
     }
     if left > 0.0 {
         let rect = Rect::from_min_max(view.min, pos2(view.left() + reach, view.bottom()));
-        shapes.push(band(rect, Direction::LeftToRight, [tint(left), clear]));
+        shapes.push(fade_band(
+            rect,
+            Direction::LeftToRight,
+            surface,
+            [left, 0.0],
+        ));
     }
     if right > 0.0 {
         let rect = Rect::from_min_max(pos2(view.right() - reach, view.top()), view.max);
-        shapes.push(band(rect, Direction::LeftToRight, [clear, tint(right)]));
+        shapes.push(fade_band(
+            rect,
+            Direction::LeftToRight,
+            surface,
+            [0.0, right],
+        ));
     }
     shapes
+}
+
+/// How many steps a fade band is made of.
+const FADE_STEPS: u16 = 8;
+
+/// A band over `rect` that goes from `surface` at the opacity
+/// `opacity[0]` to it at `opacity[1]`, along `direction`. Sue's screen
+/// blends in linear light, so every step is the surface at its opacity in
+/// linear light: a gradient between the two ends alone mixes them in
+/// gamma, which darkens the middle of a light band into a gray smudge
+/// (in Paper it showed as a dark line along every list's edge).
+fn fade_band(rect: Rect, direction: Direction, surface: Color32, opacity: [f32; 2]) -> Shape {
+    let mut mesh = egui::Mesh::default();
+    for step in 0..=FADE_STEPS {
+        let t = f32::from(step) / f32::from(FADE_STEPS);
+        let color = in_linear_light(surface, opacity[0] + (opacity[1] - opacity[0]) * t);
+        let (a, b) = match direction {
+            Direction::LeftToRight | Direction::RightToLeft => {
+                let x = if direction == Direction::LeftToRight {
+                    rect.left() + rect.width() * t
+                } else {
+                    rect.right() - rect.width() * t
+                };
+                (pos2(x, rect.top()), pos2(x, rect.bottom()))
+            }
+            Direction::TopDown | Direction::BottomUp => {
+                let y = if direction == Direction::TopDown {
+                    rect.top() + rect.height() * t
+                } else {
+                    rect.bottom() - rect.height() * t
+                };
+                (pos2(rect.left(), y), pos2(rect.right(), y))
+            }
+        };
+        mesh.colored_vertex(a, color);
+        mesh.colored_vertex(b, color);
+        if step > 0 {
+            let at = u32::from(step) * 2;
+            mesh.add_triangle(at - 2, at - 1, at + 1);
+            mesh.add_triangle(at - 2, at + 1, at);
+        }
+    }
+    Shape::mesh(mesh)
+}
+
+/// `color` at `opacity`, premultiplied so that the screen, which turns
+/// each vertex color from gamma to linear light before it blends, lays
+/// it over what is under it as that share of it in linear light.
+fn in_linear_light(color: Color32, opacity: f32) -> Color32 {
+    use egui::ecolor::{gamma_u8_from_linear_f32, linear_f32_from_gamma_u8};
+    let [r, g, b, a] = color.to_srgba_unmultiplied();
+    let alpha = opacity.clamp(0.0, 1.0) * f32::from(a) / 255.0;
+    let channel = |value: u8| gamma_u8_from_linear_f32(alpha * linear_f32_from_gamma_u8(value));
+    Color32::from_rgba_premultiplied(
+        channel(r),
+        channel(g),
+        channel(b),
+        (alpha * 255.0).round() as u8,
+    )
 }
 
 #[cfg(test)]
@@ -409,7 +473,7 @@ mod tests {
             match shape {
                 Shape::Vec(inner) => found.extend(bands(inner)),
                 Shape::Mesh(mesh)
-                    if mesh.vertices.len() == 4
+                    if mesh.vertices.len() == 2 * (usize::from(FADE_STEPS) + 1)
                         && mesh.texture_id == egui::TextureId::default() =>
                 {
                     let top = mesh
@@ -423,6 +487,38 @@ mod tests {
             }
         }
         found
+    }
+
+    /// A fade into a light surface, over that surface, leaves it as it
+    /// is at every step: blended in linear light, as the screen blends,
+    /// it never darkens into a gray line (it did in Paper).
+    #[test]
+    fn a_fade_never_darkens_the_surface_it_fades_into() {
+        let linear = |channel: u8| egui::ecolor::linear_f32_from_gamma_u8(channel);
+        for surface in [
+            Color32::from_gray(0xfa),
+            Color32::from_gray(0xf2),
+            Color32::from_gray(0x11),
+        ] {
+            let rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(10.0, 24.0));
+            let Shape::Mesh(mesh) = fade_band(rect, Direction::TopDown, surface, [0.0, 1.0]) else {
+                panic!("a fade is a mesh");
+            };
+            assert_eq!(mesh.vertices.len(), 2 * (usize::from(FADE_STEPS) + 1));
+            let under = linear(surface.r());
+            for vertex in &mesh.vertices {
+                let alpha = f32::from(vertex.color.a()) / 255.0;
+                let seen = linear(vertex.color.r()) + (1.0 - alpha) * under;
+                assert!(
+                    (seen - under).abs() < 0.01,
+                    "{surface:?}: {vertex:?} {seen} {under}"
+                );
+            }
+            let first = mesh.vertices.first().unwrap().color;
+            let last = mesh.vertices.last().unwrap().color;
+            assert_eq!(first, Color32::TRANSPARENT, "clear at the start");
+            assert_eq!(last, surface, "the surface at the end");
+        }
     }
 
     #[test]
