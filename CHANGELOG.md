@@ -180,7 +180,8 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Writer's toolbar, status bar and find bar use Sue's own icons
   and controls: Bold, Italic, Underline, the alignments, the lists and
   the indents are icon buttons that light up while they are on, the
-  paragraph style and the size are dropdowns, and Highlight opens a
+  paragraph style and the size are dropdowns, the font box opens a
+  search over your fonts, each shown in its own face, and Highlight opens a
   small list of colors. Every button names itself and its keys in its
   tooltip, keys you change in Settings included, and Tab reaches each
   one with a focus ring; the find bar's boxes name themselves too. The edges of the binder and the inspector can
