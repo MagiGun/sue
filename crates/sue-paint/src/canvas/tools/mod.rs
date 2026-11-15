@@ -149,6 +149,7 @@ impl SuePaint {
                 self.trace_drag(pos, viewport, size);
             }
             Some(Gesture::Move { .. }) => self.move_drag(pos, viewport, size, cx),
+            Some(Gesture::Keyed { .. }) => self.keyed_drag(pos, viewport, size, cx),
         }
     }
 
@@ -248,6 +249,7 @@ impl SuePaint {
             }
             gesture @ Gesture::Lasso { .. } => self.lasso_release(gesture, size),
             gesture @ Gesture::Move { .. } => self.move_release(gesture, cx),
+            gesture @ Gesture::Keyed { .. } => self.keyed_release(gesture, cx),
             Gesture::Pan { .. }
             | Gesture::Rotate { .. }
             | Gesture::Pick { .. }

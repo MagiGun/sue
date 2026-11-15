@@ -37,6 +37,9 @@ impl SuePaint {
             self.three_press(press, cx);
         } else if self.camera_folder(&cx.world.arena).is_some() {
             self.camera_press(press, cx);
+        } else if self.keyed_box(&cx.world.arena).is_some() {
+            // A layer whose keyframes are on: its box's handles key it.
+            self.keyed_press(press, cx);
         } else {
             // Object: click a vector line to pick it (Shift adds or
             // takes away), drag to move what is picked.
