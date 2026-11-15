@@ -11,7 +11,7 @@ use egui::{
 
 use crate::Theme;
 use crate::icons::{self, Icon, IconStyle};
-use crate::ui::{Density, Elevation, Radius, Space, TextRole, focus_ring, motion};
+use crate::ui::{Density, Elevation, Radius, Space, TextRole, Tip, focus_ring, motion, tooltip};
 
 /// The color `t` of the way from `from` to `to`.
 fn blend(from: Color32, to: Color32, t: f32) -> Color32 {
@@ -385,13 +385,14 @@ pub(super) fn studio_card(
 
 /// A button of Your work, `size` big: an icon on a badge, a name and a
 /// line under it (a count). `attention` draws the strong outline; `tip`
-/// is its tooltip (its name, and its key when it has one).
+/// is its tooltip (its name, its key when it has one, and a line of
+/// help), which a long press shows on a touch screen.
 pub(super) fn work_button(
     ui: &mut Ui,
     size: Vec2,
     (icon, name, detail): (Icon, &str, &str),
     attention: bool,
-    tip: &str,
+    tip: &Tip<'_>,
     salt: &str,
     theme: &Theme,
 ) -> Response {
@@ -431,7 +432,7 @@ pub(super) fn work_button(
     text.galley(pos2(left, top), title, theme.text);
     text.galley(pos2(left, below), line, soft);
     focus_ring(ui, &response, theme.radius(Radius::Lg), theme);
-    response.on_hover_text(tip)
+    tooltip(response, tip, theme)
 }
 
 /// A section's heading across `width`, with an optional quiet link at its

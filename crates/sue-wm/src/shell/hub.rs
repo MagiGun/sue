@@ -4,8 +4,8 @@
 //! (Sue Paint's materials). Home has a card per studio, New and Open, the
 //! work to jump back into (on a first run, kinds of work that start with
 //! one click and what is good to know) and the buttons of Your work,
-//! which open Files already sorted; Files is the shared browser of [`crate::files`] over
-//! the work of every studio, kept work included.
+//! which open Files already sorted; Files is the shared browser of
+//! [`crate::files`] over the work of every studio, kept work included.
 //!
 //! Layout by room, sizes by touch: under [`NARROW`] points the rail turns
 //! into a tab bar and the cards into rows, on any device; a touch layout

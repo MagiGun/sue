@@ -14,7 +14,7 @@ use super::kit::{self, Studio};
 use super::{HubAct, HubButton, WorkShelf};
 use crate::files::{Item, Type, texture_key};
 use crate::icons::Icon;
-use crate::ui::{Density, ListRow, Space, TextRole, Thumbnail, ThumbnailCard};
+use crate::ui::{Density, ListRow, Space, TextRole, Thumbnail, ThumbnailCard, Tip};
 use crate::{AppletId, AppletRole, ItemState, MenuItem, ShellRequest, Theme};
 
 use super::super::{Shell, ShellIo, pinned, templates};
@@ -402,11 +402,12 @@ impl Shell {
             ui.horizontal(|ui| {
                 for (id, studio, icon, template) in row {
                     let salt = format!("start-{}-{}", id.as_str(), template.key);
-                    let tip = tr!(
+                    let help = tr!(
                         "hub-start-new-tip",
                         kind = template.label.clone(),
                         studio = studio.clone()
                     );
+                    let tip = Tip::new(&template.label).help(&help);
                     let response = kit::work_button(
                         ui,
                         vec2(each, height),
@@ -490,8 +491,8 @@ impl Shell {
                     let salt = format!("{button:?}");
                     // The search's tip names its key too.
                     let tip = match (button, &key) {
-                        (HubButton::FindCommands, Some(key)) => format!("{name} ({key})"),
-                        _ => name.clone(),
+                        (HubButton::FindCommands, Some(key)) => Tip::new(name).shortcut(key),
+                        _ => Tip::new(name),
                     };
                     let response = kit::work_button(
                         ui,
@@ -588,7 +589,7 @@ impl Shell {
                         vec2(each, height),
                         (*icon, name, detail),
                         *attention,
-                        name,
+                        &Tip::new(name),
                         &salt,
                         theme,
                     );
