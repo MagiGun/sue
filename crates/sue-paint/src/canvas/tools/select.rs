@@ -245,3 +245,42 @@ impl SuePaint {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::canvas::fill::tests::{SIZE, picture, selection, sub, with_layers};
+
+    #[test]
+    fn a_rectangle_selection_keeps_its_aspect_and_softens_its_edge() {
+        // FGV-20: Aspect and Anti-aliasing of the Selection area tool.
+        with_layers(vec![(picture(|_, _| false), false)], |paint, _, _| {
+            let mut square = sub(Tool::Select, 0);
+            square.aspect = Aspect::Square;
+            let (from, to) = (Pos2::new(10.0, 5.0), Pos2::new(40.0, 15.0));
+            // The drag's end keeps the square while it is dragged too.
+            assert_eq!(
+                shape_end(Tool::Select, &square, from, to),
+                Pos2::new(40.0, 35.0)
+            );
+            paint.select_box_release(&square, Op::Replace, from, to, SIZE);
+            assert_eq!(selection(paint).bounds(), Some([10, 5, 40, 35]));
+            // Free keeps the drag as it is, with hard edges by default.
+            let free = sub(Tool::Select, 0);
+            paint.select_box_release(&free, Op::Replace, from, to, SIZE);
+            let hard = selection(paint);
+            assert_eq!(hard.bounds(), Some([10, 5, 40, 15]));
+            assert!(hard.mask().iter().all(|value| matches!(value, 0 | 255)));
+            // Strong anti-aliasing softens the edge.
+            let mut soft = free.clone();
+            soft.area_aa = AntiAlias::Strong;
+            paint.select_box_release(&soft, Op::Replace, from, to, SIZE);
+            assert!(
+                selection(paint)
+                    .mask()
+                    .iter()
+                    .any(|value| *value > 0 && *value < 255),
+                "a soft edge"
+            );
+        });
+    }
+}

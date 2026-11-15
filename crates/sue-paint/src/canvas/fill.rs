@@ -446,3 +446,190 @@ impl SuePaint {
     }
 }
 
+#[cfg(test)]
+pub(in crate::canvas) mod tests {
+    //! The canvas side of settings whose controls live in Tool Property
+    //! (P4-2): each test sets the sub tool as its control does and runs
+    //! the tool's own canvas code.
+
+    use super::*;
+    use crate::tools::Tool;
+    use sue_core::{PixelFormat, RasterTile2D};
+
+    pub(in crate::canvas) const SIZE: [u32; 2] = [80, 40];
+
+    /// Sue Paint with a picture of 80 by 40 whose layers, bottom first,
+    /// hold `layers` (pixels, and whether it is a draft layer), the top
+    /// one picked.
+    pub(in crate::canvas) fn with_layers(
+        layers: Vec<(Vec<u8>, bool)>,
+        work: impl FnOnce(&mut SuePaint, &mut AppletContext<'_>, Vec<EntityId>),
+    ) {
+        let mut rice =
+            sue_rice::RiceSchema::parse(sue_rice::DEFAULT_RICE).expect("the shipped settings");
+        sue_wm::register_rice(&mut rice).expect("the shell's settings register");
+        let theme = sue_wm::Theme::from_rice(&rice);
+        let mut world = sue_wm::World {
+            arena: Arena::new(),
+            rice,
+        };
+        let mut history = sue_core::UndoStack::new();
+        let mut typing = sue_wm::Typing::default();
+        let mut requests = Vec::new();
+        let catalog = sue_wm::Catalog::default();
+        let mut textures = sue_platform::NoTextures;
+        let mut transport = sue_wm::Transport::default();
+        let work_list = sue_wm::WorkList::default();
+        let mut transfers = sue_wm::Transfers::default();
+        let mut cx = AppletContext {
+            world: &mut world,
+            history: &mut history,
+            sue_history: None,
+            typing: &mut typing,
+            requests: &mut requests,
+            catalog: &catalog,
+            theme: &theme,
+            textures: &mut textures,
+            audio: None,
+            transport: &mut transport,
+            work: &work_list,
+            transfers: &mut transfers,
+            view: sue_wm::ShellView {
+                form_factor: sue_platform::FormFactor::Desktop,
+                profile: sue_rice::HardwareProfile::Balanced,
+                now: std::time::Instant::now(),
+                dt: 0.0,
+                page: None,
+                reveal: 1.0,
+                interactive: false,
+            },
+        };
+        let (edit, picture) = doc::create(&doc::NewPicture {
+            name: "Fill".to_owned(),
+            width: SIZE[0],
+            height: SIZE[1],
+            ..doc::NewPicture::default()
+        })
+        .expect("a picture");
+        assert!(SuePaint::apply(&mut cx, edit));
+        let mut ids = Vec::new();
+        let mut below = doc::layers(&cx.world.arena, picture)
+            .last()
+            .map(|info| info.id);
+        for (index, (pixels, draft)) in layers.into_iter().enumerate() {
+            let raster =
+                RasterTile2D::from_bytes(SIZE[0], SIZE[1], PixelFormat::Rgba8, pixels).unwrap();
+            let (spawn, id) =
+                doc::add_layer_pixels(&cx.world.arena, picture, below, format!("{index}"), raster)
+                    .unwrap();
+            assert!(SuePaint::apply(&mut cx, spawn));
+            if draft {
+                let mark = sue_core::txn::SetProperty::new(id, sue_model::picture::DRAFT, true);
+                assert!(SuePaint::apply(&mut cx, mark));
+            }
+            below = Some(id);
+            ids.push(id);
+        }
+        let mut paint = SuePaint::default();
+        paint.sync_docs(&cx.world.arena);
+        if let Some(doc) = paint.doc_mut() {
+            doc.layer = ids.last().copied();
+        }
+        work(&mut paint, &mut cx, ids);
+    }
+
+    /// A clear picture of [`SIZE`] with the pixels `ink` says inked black.
+    pub(in crate::canvas) fn picture(ink: impl Fn(u32, u32) -> bool) -> Vec<u8> {
+        let mut out = vec![0_u8; (SIZE[0] * SIZE[1] * 4) as usize];
+        for y in 0..SIZE[1] {
+            for x in 0..SIZE[0] {
+                if ink(x, y) {
+                    out[((y * SIZE[0] + x) * 4 + 3) as usize] = 255;
+                }
+            }
+        }
+        out
+    }
+
+    pub(in crate::canvas) fn selection(paint: &SuePaint) -> Selection {
+        paint
+            .doc()
+            .and_then(|doc| doc.selection.clone())
+            .expect("a selection")
+    }
+
+    pub(in crate::canvas) fn sub(tool: Tool, mode: u8) -> SubTool {
+        SubTool::new(tool, "test", mode, crate::brush::Tip::default())
+    }
+
+    /// The alpha of `layer` at picture pixel `(x, 10)`.
+    fn alpha(cx: &AppletContext<'_>, layer: EntityId, x: u32) -> u8 {
+        doc::raster(&cx.world.arena, layer)
+            .and_then(|raster| {
+                raster
+                    .bytes()
+                    .map(|bytes| bytes[((10 * SIZE[0] + x) * 4 + 3) as usize])
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn auto_select_and_fill_take_every_like_pixel_when_not_connected_only() {
+        // FGV-21, ABV-26, A25V-23: Apply to connected pixels only.
+        let wall = picture(|x, _| (36..45).contains(&x));
+        with_layers(vec![(wall, false)], |paint, cx, ids| {
+            let mut auto = sub(Tool::AutoSelect, 0);
+            paint.auto_select(Pos2::new(10.0, 10.0), &auto, Op::Replace, SIZE, cx);
+            let joined = selection(paint);
+            assert!(joined.at(10, 10) > 0.0 && joined.at(70, 10) == 0.0);
+            auto.connected_only = false;
+            paint.auto_select(Pos2::new(10.0, 10.0), &auto, Op::Replace, SIZE, cx);
+            let every = selection(paint);
+            assert!(every.at(70, 10) > 0.0, "the other side is like it");
+            assert_eq!(
+                every.at(40, 10),
+                0.0,
+                "the wall is not (the area tucks a pixel under it)"
+            );
+            // Fill the same way, as one undo step that undoes whole.
+            if let Some(doc) = paint.doc_mut() {
+                doc.set_selection(None);
+            }
+            let mut fill = sub(Tool::Fill, 0);
+            fill.connected_only = false;
+            let before = doc::raster(&cx.world.arena, ids[0])
+                .and_then(|raster| raster.bytes().map(<[u8]>::to_vec))
+                .unwrap();
+            let depth = cx.history.depth();
+            paint.bucket(&[[10.0, 10.0]], &fill, SIZE, cx);
+            assert_eq!(alpha(cx, ids[0], 10), 255);
+            assert_eq!(alpha(cx, ids[0], 70), 255, "both sides filled");
+            assert_eq!(cx.history.depth(), depth + 1);
+            assert!(cx.history.undo(cx.world).is_ok());
+            let undone = doc::raster(&cx.world.arena, ids[0])
+                .and_then(|raster| raster.bytes().map(<[u8]>::to_vec))
+                .unwrap();
+            assert_eq!(undone, before);
+        });
+    }
+
+    #[test]
+    fn a_fill_that_refers_to_every_layer_leaves_out_the_draft_layers() {
+        // A25-4, FG-25: Refer multiple with its exclusions.
+        let draft_wall = picture(|x, _| x == 40);
+        with_layers(
+            vec![(draft_wall, true), (picture(|_, _| false), false)],
+            |paint, cx, ids| {
+                let mut fill = sub(Tool::Fill, 0).referring(fill::Refer::All);
+                fill.exclude.drafts = false;
+                paint.bucket(&[[10.0, 10.0]], &fill, SIZE, cx);
+                assert_eq!(alpha(cx, ids[1], 10), 255);
+                assert_eq!(alpha(cx, ids[1], 70), 0, "the draft's line holds the fill");
+                assert!(cx.history.undo(cx.world).is_ok());
+                fill.exclude.drafts = true;
+                paint.bucket(&[[10.0, 10.0]], &fill, SIZE, cx);
+                assert_eq!(alpha(cx, ids[1], 70), 255, "left out, it holds nothing");
+            },
+        );
+    }
+}
