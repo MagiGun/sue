@@ -262,6 +262,7 @@ pub struct ListRow<'a> {
     note: Option<&'a str>,
     leading: Leading,
     actions: &'a [RowAction<'a>],
+    mark: Option<Color32>,
     selected: bool,
     enabled: bool,
     width: Option<f32>,
@@ -286,6 +287,7 @@ impl<'a> ListRow<'a> {
             note: None,
             leading: Leading::None,
             actions: &[],
+            mark: None,
             selected: false,
             enabled: true,
             width: None,
@@ -320,6 +322,14 @@ impl<'a> ListRow<'a> {
     /// Small buttons at the end of the row.
     pub const fn actions(mut self, actions: &'a [RowAction<'a>]) -> Self {
         self.actions = actions;
+        self
+    }
+
+    /// A small round mark in `color` at the end of the row, before its
+    /// note and actions: a color the person gave the thing (a label, a
+    /// layer's color). The color is theirs, not the theme's.
+    pub const fn mark(mut self, color: Color32) -> Self {
+        self.mark = Some(color);
         self
     }
 
@@ -486,6 +496,17 @@ impl<'a> ListRow<'a> {
                 } else {
                     gap
                 };
+            if let Some(color) = self.mark {
+                let side = theme.space(Space::S3);
+                let color = if enabled {
+                    color
+                } else {
+                    color.gamma_multiply(DISABLED_PICTURE)
+                };
+                let center = pos2(right - side / 2.0, middle);
+                painter.circle_filled(center, side / 2.0, color);
+                right -= side + pad;
+            }
             if let Some(note) = self.note {
                 let font = theme.text_font(TextRole::Caption);
                 let room = ((right - left) / 2.0).max(0.0);
@@ -921,6 +942,42 @@ mod tests {
                 .all(|shape| matches!(shape, Shape::Noop)),
             "nothing of the row is drawn before its fill"
         );
+    }
+
+    #[test]
+    fn a_mark_sits_at_the_end_and_the_title_stops_before_it() {
+        let mut run = Run::new();
+        let color = Color32::from_rgb(200, 60, 60);
+        let title = "A title long enough to run the whole width of a narrow row";
+        let draw = |ui: &mut Ui, theme: &Theme| {
+            ListRow::new("marked", title)
+                .mark(color)
+                .width(160.0)
+                .show(ui, theme)
+        };
+        let rect = run.frame(Vec::new(), draw).0.response.rect;
+        let output = run.ctx.run_ui(egui::RawInput::default(), |ui| {
+            let theme = Run::new().theme;
+            draw(ui, &theme);
+        });
+        let mut dot = None;
+        let mut text_right = f32::NEG_INFINITY;
+        let mut look = |shape: &Shape| match shape {
+            Shape::Circle(circle) if circle.fill == color => dot = Some(circle.center),
+            Shape::Text(text) => {
+                text_right = text_right.max(text.pos.x + text.galley.size().x);
+            }
+            _ => {}
+        };
+        for clipped in &output.shapes {
+            match &clipped.shape {
+                Shape::Vec(shapes) => shapes.iter().for_each(&mut look),
+                shape => look(shape),
+            }
+        }
+        let dot = dot.expect("the mark is drawn");
+        assert!(rect.contains(dot) && dot.x > rect.center().x, "{dot:?}");
+        assert!(text_right < dot.x, "{text_right} runs into the mark");
     }
 
     #[test]
