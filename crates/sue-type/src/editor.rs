@@ -17,7 +17,8 @@ use egui::text::{CCursor, CharIndex, LayoutJob, TextFormat};
 use egui::{Color32, Event, Id, Key, Modifiers, Pos2, Rect, Sense, Stroke, Ui, Vec2, pos2, vec2};
 use sue_core::{EntityId, Value};
 use sue_model::{TextMarks, mark_kind as kind};
-use sue_wm::{AppletContext, ArenaEdit};
+use sue_wm::ui::{Density, Elevation, Layer, Radius, Space, Tip, tooltip};
+use sue_wm::{AppletContext, ArenaEdit, ItemState, MenuItem};
 
 use crate::caret::{self, CaretGlide, CaretMotion};
 use crate::edit;
@@ -42,6 +43,34 @@ fn take_focus(ctx: &egui::Context, id: Id) {
 /// The radius of a finger selection's handle knob.
 const HANDLE: f32 = 9.0;
 
+/// The commands of the spelling menu: a suggestion (with its index after
+/// the prefix), the grayed row that says there is none, Ignore All and
+/// Add to Dictionary.
+const SPELL_PICK: &str = "sue-type.spell.pick:";
+/// See [`SPELL_PICK`].
+const SPELL_NONE: &str = "sue-type.spell.none";
+/// See [`SPELL_PICK`].
+const SPELL_IGNORE: &str = "sue-type.spell.ignore-all";
+/// See [`SPELL_PICK`].
+const SPELL_LEARN: &str = "sue-type.spell.add-to-dictionary";
+
+/// The rows of the spelling menu for a word that may have meant
+/// `suggestions`.
+fn spelling_items(suggestions: &[String]) -> Vec<MenuItem> {
+    let mut items: Vec<MenuItem> = suggestions
+        .iter()
+        .enumerate()
+        .map(|(index, word)| MenuItem::action(word.clone(), format!("{SPELL_PICK}{index}")))
+        .collect();
+    if items.is_empty() {
+        items.push(MenuItem::action(tr!("no-suggestions"), SPELL_NONE));
+    }
+    items.push(MenuItem::Separator);
+    items.push(MenuItem::action(tr!("ignore-all"), SPELL_IGNORE));
+    items.push(MenuItem::action(tr!("add-to-dictionary"), SPELL_LEARN));
+    items
+}
+
 /// What the bar over a finger's selection does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TouchAction {
@@ -49,6 +78,31 @@ enum TouchAction {
     Copy,
     Paste,
     SelectAll,
+}
+
+impl TouchAction {
+    /// Names its button among the bar's.
+    const fn salt(self) -> &'static str {
+        match self {
+            Self::Cut => "cut",
+            Self::Copy => "copy",
+            Self::Paste => "paste",
+            Self::SelectAll => "select-all",
+        }
+    }
+}
+
+/// The buttons of the bar over a finger's selection, in order: whether
+/// each shows (Cut and Copy need a selection), what it does, its name and
+/// the keys that do the same.
+fn touch_actions(selected: bool) -> [(bool, TouchAction, String, String); 4] {
+    let key = |key: Key| sue_wm::shortcuts::chord_text(Modifiers::COMMAND, key);
+    [
+        (selected, TouchAction::Cut, tr!("cut"), key(Key::X)),
+        (selected, TouchAction::Copy, tr!("copy"), key(Key::C)),
+        (true, TouchAction::Paste, tr!("paste"), key(Key::V)),
+        (true, TouchAction::SelectAll, tr!("select-all"), key(Key::A)),
+    ]
 }
 
 /// A place in the shown documents: which one, and a byte offset in it.
@@ -1333,29 +1387,26 @@ impl Editor {
             .get(range.clone())
             .unwrap_or("")
             .to_owned();
+        let items = spelling_items(&suggestions);
+        let state = |command: &str| ItemState {
+            enabled: command != SPELL_NONE,
+            checked: None,
+        };
+        let picked = sue_wm::ui::menu::context_menu(ui, response, &items, &state, cx.theme);
         let mut pick: Option<String> = None;
         let mut learn = false;
         let mut ignore = false;
-        response.context_menu(|ui| {
-            if suggestions.is_empty() {
-                ui.label(tr!("no-suggestions"));
+        match picked.as_deref() {
+            Some(SPELL_IGNORE) => ignore = true,
+            Some(SPELL_LEARN) => learn = true,
+            Some(command) => {
+                pick = command
+                    .strip_prefix(SPELL_PICK)
+                    .and_then(|index| index.parse::<usize>().ok())
+                    .and_then(|index| suggestions.get(index).cloned());
             }
-            for suggestion in &suggestions {
-                if ui.button(suggestion).clicked() {
-                    pick = Some(suggestion.clone());
-                    ui.close();
-                }
-            }
-            ui.separator();
-            if ui.button(tr!("ignore-all")).clicked() {
-                ignore = true;
-                ui.close();
-            }
-            if ui.button(tr!("add-to-dictionary")).clicked() {
-                learn = true;
-                ui.close();
-            }
-        });
+            None => {}
+        }
         let lower = word.to_lowercase().replace('\u{2019}', "'");
         if ignore {
             self.ignored.insert(lower.clone());
@@ -1366,7 +1417,6 @@ impl Editor {
             self.spell_menu = None;
         }
         let Some(pick) = pick else {
-            let _ = ui;
             return false;
         };
         self.spell_menu = None;
@@ -2203,7 +2253,9 @@ impl Editor {
         if last.bottom() < view.top() || first.top() > view.bottom() {
             return false;
         }
-        let height = 44.0;
+        let theme = cx.theme;
+        let pad = theme.space(Space::S1);
+        let height = Density::Touch.control_height() + pad * 2.0;
         let mut y = first.top() - height - 12.0;
         if y < view.top() + 4.0 {
             y = last.bottom() + HANDLE * 2.0 + 12.0;
@@ -2218,29 +2270,38 @@ impl Editor {
         if !shown {
             ui.ctx().request_repaint();
         }
-        self.bar_rect = egui::Area::new(self.id.with("touch-bar"))
-            .order(egui::Order::Foreground)
+        let id = self.id.with("touch-bar");
+        let frame = egui::Frame::new()
+            .fill(theme.surface(3))
+            .stroke(theme.hairline())
+            .corner_radius(theme.corner(Radius::Xl))
+            .shadow(theme.elevation(Elevation::Floating))
+            .inner_margin(egui::Margin::same(pad.round() as i8));
+        self.bar_rect = egui::Area::new(id)
+            .order(Layer::Popover.order())
             .movable(false)
             .fixed_pos(pos2(x, y))
             .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().button_padding = vec2(10.0, 8.0);
-                        let actions = [
-                            (selected, TouchAction::Cut, tr!("cut")),
-                            (selected, TouchAction::Copy, tr!("copy")),
-                            (true, TouchAction::Paste, tr!("paste")),
-                            (true, TouchAction::SelectAll, tr!("select-all")),
-                        ];
-                        for (shown, action, label) in actions {
-                            // Not focusable: the text keeps the keyboard.
-                            let button = egui::Button::new(label)
-                                .frame(false)
-                                .sense(Sense::CLICK | Sense::HOVER);
-                            if shown && ui.add(button).clicked() {
-                                chosen = Some(action);
+                frame.show(ui, |ui| {
+                    Density::Touch.scope(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = theme.space(Space::S1);
+                            for (shown, action, label, key) in touch_actions(selected) {
+                                if !shown {
+                                    continue;
+                                }
+                                // A click on a button leaves the keyboard
+                                // with the text (egui moves it only to
+                                // fields).
+                                let response = sue_wm::ui::button(action.salt(), &label)
+                                    .ghost()
+                                    .show(ui, theme);
+                                let tip = Tip::new(&label).shortcut(&key);
+                                if tooltip(response, &tip, theme).clicked() {
+                                    chosen = Some(action);
+                                }
                             }
-                        }
+                        });
                     });
                 });
             })
