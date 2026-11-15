@@ -497,7 +497,7 @@ impl SueApplet for SuePaint {
         {
             cx.request(ShellRequest::Open(me_id()));
         }
-        if self.place_picked(&pick.purpose, path, cx) {
+        if self.place_picked(&pick.purpose, path, cx) || self.bar_picked(&pick.purpose, path, cx) {
             return;
         }
         match pick.purpose.as_str() {
@@ -708,6 +708,7 @@ impl SueApplet for SuePaint {
                 true
             }
             place if place.starts_with("materials/") => self.hub.navigate(place),
+            bar if bar.starts_with("bar/") => self.bar_navigate(bar),
             page if page.starts_with("new-canvas") => self.new_canvas.navigate(page),
             // A palette's menu: `dock/menu/<palette key>`; `dock/menu` alone
             // closes it.

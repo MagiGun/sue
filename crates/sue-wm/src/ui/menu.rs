@@ -882,6 +882,9 @@ impl MenuState {
                             if is_sub && item_state.enabled {
                                 if self.path.get(level) != Some(&index) {
                                     self.open_nested(level, index);
+                                    // Opened this frame: drawn this frame too,
+                                    // or the loop of levels shuts it again.
+                                    open_row = Some(row);
                                 }
                             } else {
                                 self.path.truncate(level);
@@ -897,6 +900,7 @@ impl MenuState {
                             }
                             MenuItem::Sub { .. } if item_state.enabled => {
                                 self.open_nested(level, index);
+                                open_row = Some(row);
                             }
                             _ => {}
                         }
@@ -1424,6 +1428,25 @@ mod tests {
         // Escape on the first level closes.
         assert_eq!(rig.frame(&items, vec![key(Key::Escape)]), MenuEvent::Closed);
         assert!(!rig.menu.is_open());
+    }
+
+    #[test]
+    fn the_pointer_on_a_row_opens_its_nested_menu() {
+        let items = vec![
+            MenuItem::action("Copy", "copy"),
+            MenuItem::sub("Export", rows(&["PNG"])),
+        ];
+        let mut rig = Rig::new(vec2(800.0, 600.0), pos2(20.0, 20.0));
+        rig.frames(&items, vec![Vec::new(); 2]);
+        let export = rig.rect_of("Export").unwrap().center();
+        rig.frame(&items, vec![Event::PointerMoved(export)]);
+        rig.frames(&items, vec![Vec::new(); 2]);
+        assert_eq!(rig.menu.path(), [1]);
+        assert!(rig.shows("PNG"), "the nested menu shows");
+        // A click on the row keeps it open.
+        rig.frames(&items, click(export, PointerButton::Primary));
+        assert_eq!(rig.menu.path(), [1]);
+        assert!(rig.shows("PNG"));
     }
 
     #[test]

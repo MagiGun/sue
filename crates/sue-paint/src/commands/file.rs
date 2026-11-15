@@ -475,7 +475,9 @@ fn modifiers(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 
 fn command_bar(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
     paint.panels.command_bar = true;
-    paint.dialog = Some(Dialog::CommandBar(String::new()));
+    paint.dialog = Some(Dialog::CommandBar(crate::dialogs::BarDialog::new(
+        crate::dialogs::BarTarget::CommandBar,
+    )));
 }
 
 /// Manage Fonts: Sue's shared font list, the one every font menu of Sue

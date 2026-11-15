@@ -369,10 +369,10 @@ impl SuePaint {
                         // a color, as in Clip Studio Paint, unless the
                         // Modifier Key Settings give them other tools.
                         PointerButton::Middle => {
-                            self.press_button(Input::Middle, pos, viewport, size, cx);
+                            self.press_mouse_button(Input::Middle, pos, viewport, size, cx);
                         }
                         PointerButton::Secondary => {
-                            self.press_button(Input::Right, pos, viewport, size, cx);
+                            self.press_mouse_button(Input::Right, pos, viewport, size, cx);
                         }
                         _ => {}
                     }

@@ -5,6 +5,7 @@
 
 mod anim;
 mod canvas;
+mod command_bar;
 mod comps;
 mod fill;
 mod filter;
@@ -38,6 +39,7 @@ use story::{page_settings_ui, story_editor_ui, story_info_ui, webtoon_ui};
 use text::text_ui;
 
 pub(crate) use canvas::{CanvasDialog, CanvasProperties, ResolutionDialog};
+pub(crate) use command_bar::{BarDialog, BarTarget};
 pub(crate) use comps::CompsDialog;
 pub(crate) use fill::AdvancedFill;
 pub(crate) use filter::FilterDialog;
@@ -107,8 +109,8 @@ pub(crate) enum Dialog {
     /// Modifier Key Settings: what the keys, the wheel and the buttons do
     /// on the canvas.
     Modifiers(Box<ModifiersDialog>),
-    /// Command Bar Settings.
-    CommandBar(String),
+    /// Command Bar Settings, or Quick Access Settings.
+    CommandBar(BarDialog),
     /// Canvas Properties.
     CanvasProperties(CanvasProperties),
     /// Color Profile Preview Settings: which profile.
@@ -197,7 +199,7 @@ impl Dialog {
             Dialog::Print(_, false) => (tr!("print-settings"), vec2(380.0, 330.0)),
             Dialog::Modifiers(_) => (tr!("modifier-key-settings"), vec2(600.0, 620.0)),
             Dialog::AdvancedFill => (tr!("advanced-fill"), vec2(520.0, 470.0)),
-            Dialog::CommandBar(_) => (tr!("command-bar-settings"), vec2(420.0, 460.0)),
+            Dialog::CommandBar(bar) => (bar.title(), vec2(780.0, 600.0)),
             Dialog::CanvasProperties(_) => (tr!("canvas-properties"), vec2(380.0, 230.0)),
             Dialog::Proof(_) => (tr!("color-profile-preview-settings"), vec2(400.0, 230.0)),
             Dialog::PageSettings(_) => (tr!("change-page-settings"), vec2(400.0, 370.0)),
@@ -399,7 +401,7 @@ impl SuePaint {
             Dialog::Workspaces => self.workspaces_ui(ui, theme),
             Dialog::Print(settings, printing) => print_ui(ui, settings, *printing, theme),
             Dialog::Modifiers(chosen) => modifiers_ui(ui, chosen, theme),
-            Dialog::CommandBar(adding) => self.command_bar_ui(ui, adding, size, theme),
+            Dialog::CommandBar(bar) => self.command_bar_ui(ui, bar, cx, size, theme),
             Dialog::PageSettings(settings) => page_settings_ui(ui, settings, theme),
             Dialog::StoryInfo(info) => story_info_ui(ui, info, theme),
             Dialog::StoryEditor(texts) => story_editor_ui(ui, texts, size, theme),

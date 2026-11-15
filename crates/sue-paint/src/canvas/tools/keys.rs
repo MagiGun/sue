@@ -222,7 +222,7 @@ impl SuePaint {
     /// (`Input::Middle`) at `pos`: the tool it borrows takes the press, as
     /// the Modifier Key Settings say (the Eyedropper and the Hand unless
     /// changed). `false` when it does nothing.
-    pub(in crate::canvas) fn press_button(
+    pub(in crate::canvas) fn press_mouse_button(
         &mut self,
         input: Input,
         pos: Pos2,

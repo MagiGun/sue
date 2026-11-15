@@ -35,9 +35,6 @@ pub enum Icon {
     Undo,
     Redo,
     Clear,
-    ClearOutside,
-    FillSelection,
-    Deselect,
     FlipH,
     FlipV,
     RotateLeft,
@@ -82,10 +79,6 @@ pub enum Icon {
     Navigator,
     /// Growing dots: the brush size.
     BrushSize,
-    /// A magnifier with a line: search.
-    Search,
-    /// A question mark in a ring: help.
-    Help,
     /// A wrench: settings.
     Wrench,
     /// An arrow into a tray: import.
@@ -582,21 +575,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(0.34, 0.34), (0.66, 0.66)]);
             line(&[(0.66, 0.34), (0.34, 0.66)]);
         }
-        Icon::ClearOutside => {
-            dashed_box(0.3, 0.3, 0.7, 0.7);
-            line(&[(0.1, 0.1), (0.24, 0.24)]);
-            line(&[(0.9, 0.1), (0.76, 0.24)]);
-            line(&[(0.1, 0.9), (0.24, 0.76)]);
-            line(&[(0.9, 0.9), (0.76, 0.76)]);
-        }
-        Icon::FillSelection => {
-            dashed_box(0.16, 0.16, 0.84, 0.84);
-            painter.rect_filled(Rect::from_min_max(p(0.3, 0.3), p(0.7, 0.7)), 0.0, color);
-        }
-        Icon::Deselect => {
-            dashed_box(0.16, 0.16, 0.84, 0.84);
-            line(&[(0.1, 0.9), (0.9, 0.1)]);
-        }
         Icon::FlipH => {
             line(&[(0.5, 0.1), (0.5, 0.9)]);
             closed(&[(0.42, 0.24), (0.42, 0.76), (0.12, 0.76)]);
@@ -765,16 +743,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             dot(0.24, 0.62, 0.05);
             dot(0.44, 0.58, 0.08);
             dot(0.7, 0.5, 0.14);
-        }
-        Icon::Search => {
-            circle(0.42, 0.42, 0.24);
-            line(&[(0.6, 0.6), (0.84, 0.84)]);
-        }
-        Icon::Help => {
-            circle(0.5, 0.5, 0.36);
-            curve(0.5, 0.4, 0.12, 180.0, 400.0);
-            line(&[(0.52, 0.52), (0.5, 0.6)]);
-            dot(0.5, 0.7, 0.035);
         }
         Icon::Wrench => {
             curve(0.66, 0.34, 0.18, 60.0, 330.0);
