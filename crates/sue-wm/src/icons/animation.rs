@@ -35,6 +35,30 @@ pub(super) const PAUSE: Art = Art {
     solid: &[],
 };
 
+/// A diamond outline, the mark of a key on the timeline, with a plus at
+/// its lower right: add a keyframe.
+pub(super) const KEYFRAME_ADD: Art = Art {
+    keyline: Keyline::Square,
+    line: &[
+        Part::Stroke("M10 5 L16 11 L10 17 L4 11 Z"),
+        Part::Stroke("M18.25 15.25 V20.25 M15.25 18.25 H20.25"),
+    ],
+    solid: &[],
+};
+
+/// A solid diamond on a track that runs through it: keyframes on.
+const KEY_ON_TRACK: &str = "M12 8 L16 12 L12 16 L8 12 Z";
+
+pub(super) const KEYFRAMES: Art = Art {
+    keyline: Keyline::Wide,
+    line: &[
+        Part::Stroke("M2.75 12 H5 M19 12 H21.25"),
+        Part::Fill(KEY_ON_TRACK),
+        Part::Stroke(KEY_ON_TRACK),
+    ],
+    solid: &[],
+};
+
 /// The two solid triangles of first frame, pointing to the left.
 const TWO_LEFT: &str = "M9.25 12 L14.25 7.5 V16.5 Z M14.25 12 L19.25 7.5 V16.5 Z";
 
