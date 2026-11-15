@@ -460,10 +460,10 @@ fn sue_paint_lasso_fill_close_and_fill_and_copy_stamp_paint() {
         "copy stamp painted {}",
         painted(&runtime) - filled
     );
-    // Polyline and Curve: a click at each corner, a double-click on the
-    // last ends the line.
-    // (Direct draw's sixth and seventh.)
-    for (index, steps) in [(5, 5), (6, 1)] {
+    // Polyline and Continuous Curve: a click at each corner, a
+    // double-click on the last ends the line.
+    // (Direct draw's sixth and eighth.)
+    for (index, steps) in [(5, 5), (7, 2)] {
         let before = painted(&runtime);
         sub(&mut runtime, "tool.figure", steps);
         let base = middle + vec2(-150.0, -150.0 + index as f32 * 20.0);
