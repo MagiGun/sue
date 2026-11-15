@@ -1,12 +1,12 @@
 //! Edit's work on pixels: fills, filters, canvas transforms, clearing,
 //! selections by color, Quick Mask and puppet warp.
 
-use sue_core::txn::{Batch, SetProperty};
+use sue_core::txn::SetProperty;
 use sue_core::{Arena, RasterTile2D};
-use sue_model::picture::{self, LayerKind};
+use sue_model::picture;
 use sue_wm::{AppletContext, ArenaEdit};
 
-use super::{SuePaint, WarpSession, mirror};
+use super::{SuePaint, WarpSession};
 use crate::color;
 use crate::composite::{self, RenderOptions};
 use crate::dialogs::{Dialog, FilterDialog};
@@ -325,7 +325,8 @@ impl SuePaint {
         })
     }
 
-    /// Mirrors (and for 180 degrees, turns) every raster layer.
+    /// Mirrors the canvas (and for 180 degrees, turns it): every layer's
+    /// pixels, masks and vector lines go with it, as one undo step.
     pub(crate) fn transform_canvas(
         &mut self,
         cx: &mut AppletContext<'_>,
@@ -336,42 +337,12 @@ impl SuePaint {
         let Some(picture) = self.picture() else {
             return;
         };
-        let arena = &cx.world.arena;
-        let Some([width, height]) = arena.get_by_id(picture).ok().and_then(picture::size) else {
-            return;
-        };
-        let mut edit = Batch::new(label);
-        for info in doc::layers(arena, picture) {
-            if info.kind != LayerKind::Raster {
-                continue;
+        match doc::flip_canvas(&cx.world.arena, picture, flip_h, flip_v, label) {
+            Ok(edit) if !edit.is_empty() => {
+                Self::apply(cx, edit);
             }
-            let Some(raster) = doc::raster(arena, info.id) else {
-                continue;
-            };
-            let (w, h) = (raster.width(), raster.height());
-            if let Ok(Some(pixels)) = doc::rewrite(arena, info.id, label, |pixels, w, h| {
-                mirror(pixels, w, h, flip_h, flip_v);
-            }) {
-                edit = edit.then(pixels);
-            }
-            let [x, y] = info.style.offset;
-            if flip_h && (x != 0 || w != width) {
-                edit = edit.then(SetProperty::new(
-                    info.id,
-                    picture::X,
-                    i64::from(width) - x - i64::from(w),
-                ));
-            }
-            if flip_v && (y != 0 || h != height) {
-                edit = edit.then(SetProperty::new(
-                    info.id,
-                    picture::Y,
-                    i64::from(height) - y - i64::from(h),
-                ));
-            }
-        }
-        if !edit.is_empty() {
-            Self::apply(cx, edit);
+            Ok(_) => {}
+            Err(error) => cx.fail(error),
         }
     }
 

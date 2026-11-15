@@ -714,3 +714,148 @@ fn sue_paint_liquify_pushes_a_stroke_in_one_undo_step() {
     assert_eq!(ink(&runtime, 640..700), 0, "undo puts it back");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// The whole arena as the file writes it: entities with their ids,
+/// components and properties, and every relation.
+fn arena_bytes(runtime: &Runtime) -> Vec<u8> {
+    let mut out = sue_core::codec::Writer::new();
+    runtime.engine.world.arena.encode(&mut out);
+    out.into_bytes()
+}
+
+#[test]
+fn sue_paint_flips_and_rotate_180_take_masks_and_vector_lines_along() {
+    // A stroke on a raster layer with a mask that hides its left part,
+    // and a stroke on a vector layer above it. Flip Horizontal, Flip
+    // Vertical and Rotate 180 Degrees, run as the menu runs them, show the
+    // picture mirrored (the mask still covers the same part of the
+    // stroke) and mirror the vector line's points; undo and redo are
+    // exact.
+    use sue_core::ReversibleTransaction;
+    let mut driver = PaintDriver::new("paint-flip-masks");
+    let paint = AppletId::new(sue_paint::ID).unwrap();
+    let picture = driver
+        .runtime
+        .applets
+        .get(&paint)
+        .and_then(|applet| applet.focus())
+        .expect("New made a picture");
+    let middle = paint_middle(&driver.runtime);
+    driver.drag(
+        middle - vec2(220.0, 150.0),
+        middle - vec2(60.0, 120.0),
+        egui::PointerButton::Primary,
+    );
+    let raster_layer = sue_paint::doc::layers(&driver.runtime.engine.world.arena, picture)
+        .last()
+        .unwrap()
+        .id;
+    let (mut mask_edit, _) =
+        sue_paint::doc::new_mask(&driver.runtime.engine.world.arena, raster_layer, |x, _| {
+            if x < 500 { 0.0 } else { 1.0 }
+        })
+        .unwrap();
+    mask_edit
+        .apply(&mut driver.runtime.engine.world.arena)
+        .unwrap();
+    driver.command("layer.new.vector");
+    driver.settle(4);
+    let vector = sue_paint::doc::layers(&driver.runtime.engine.world.arena, picture)
+        .last()
+        .unwrap()
+        .id;
+    assert!(sue_paint::vector::is_vector(
+        &driver.runtime.engine.world.arena,
+        vector
+    ));
+    driver.drag(
+        middle + vec2(40.0, 60.0),
+        middle + vec2(160.0, 120.0),
+        egui::PointerButton::Primary,
+    );
+    let points = |runtime: &Runtime| -> Vec<[f32; 2]> {
+        sue_paint::vector::lines(&sue_paint::vector::geometry(
+            &runtime.engine.world.arena,
+            vector,
+        ))
+        .iter()
+        .flat_map(|line| line.samples.iter().map(|sample| sample.at))
+        .collect()
+    };
+    assert!(
+        !points(&driver.runtime).is_empty(),
+        "the vector line is kept"
+    );
+    let shown = |runtime: &Runtime| -> Vec<[u8; 4]> {
+        sue_paint::composite::render(
+            &runtime.engine.world.arena,
+            picture,
+            [0, 0, 1600, 1200],
+            sue_paint::composite::RenderOptions::default(),
+        )
+        .as_chunks::<4>()
+        .0
+        .to_vec()
+    };
+    let before = shown(&driver.runtime);
+    let ink = before.iter().filter(|pixel| pixel[0] < 128).count();
+    assert!(ink > 100, "something is drawn and shown");
+    let line_before = points(&driver.runtime);
+    let [lw, lh] = {
+        let pixels = sue_paint::doc::raster(&driver.runtime.engine.world.arena, vector).unwrap();
+        [pixels.width() as f32, pixels.height() as f32]
+    };
+    for (command, flip_h, flip_v) in [
+        ("canvas.flip_h", true, false),
+        ("canvas.flip_v", false, true),
+        ("canvas.rotate180", true, true),
+    ] {
+        let arena_before = arena_bytes(&driver.runtime);
+        let depth = driver.runtime.engine.history.depth();
+        driver.command(command);
+        driver.settle(4);
+        assert_eq!(
+            driver.runtime.engine.history.depth(),
+            depth + 1,
+            "{command}"
+        );
+        let after = shown(&driver.runtime);
+        let mut wrong = 0;
+        for y in 0..1200_usize {
+            for x in 0..1600_usize {
+                let ox = if flip_h { 1599 - x } else { x };
+                let oy = if flip_v { 1199 - y } else { y };
+                if after[y * 1600 + x] != before[oy * 1600 + ox] {
+                    wrong += 1;
+                }
+            }
+        }
+        assert_eq!(wrong, 0, "{command}: the picture shows mirrored");
+        let want: Vec<[f32; 2]> = line_before
+            .iter()
+            .map(|[x, y]| {
+                [
+                    if flip_h { lw - x } else { *x },
+                    if flip_v { lh - y } else { *y },
+                ]
+            })
+            .collect();
+        assert_eq!(points(&driver.runtime), want, "{command}: the line");
+        let arena_after = arena_bytes(&driver.runtime);
+        driver.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+        driver.settle(2);
+        assert_eq!(
+            arena_bytes(&driver.runtime),
+            arena_before,
+            "{command}: undo"
+        );
+        driver.step(vec![key(
+            egui::Key::Z,
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        )]);
+        driver.settle(2);
+        assert_eq!(arena_bytes(&driver.runtime), arena_after, "{command}: redo");
+        driver.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+        driver.settle(2);
+    }
+}
