@@ -569,7 +569,8 @@ pub struct SubTool {
     /// The shape a selection or figure drag keeps (Aspect).
     pub aspect: Aspect,
     /// The Rotate sub tool turns in steps of this many degrees (Snap
-    /// angle), and Shift snaps by it; 0 turns freely.
+    /// angle), and Shift snaps by it; a Figure or Ruler line runs in
+    /// steps of it (Step of angle); 0 turns and runs freely.
     pub angle_step: f32,
     /// Liquify acts only inside the selection (Only refer to editing
     /// area).

@@ -300,6 +300,7 @@ impl SuePaint {
                 [at.x, at.y]
             }),
             shift: self.modifiers.shift,
+            angle_step: self.toolbox.current().angle_step,
             guides: &guides,
         };
         if let Some(bend) = &self.figure_draft.bend

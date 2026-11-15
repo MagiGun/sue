@@ -153,17 +153,30 @@ pub(crate) fn filled(mode: u8) -> bool {
     matches!(mode, 3 | 4)
 }
 
-/// Where a Figure drag from `from` ends once Shift (`shift`) and the sub
-/// tool's Aspect have their say: a straight line to every 45 degrees, a
-/// box shape square or at its ratio.
+/// The direction `angle` (radians) of a line kept to its steps: every
+/// `step_degrees` when the sub tool has a Step of angle, else every 45
+/// degrees while Shift is held; `None` when it runs freely.
+pub(crate) fn snapped_angle(angle: f32, step_degrees: f32, shift: bool) -> Option<f32> {
+    let step = if step_degrees > 0.0 {
+        step_degrees.to_radians()
+    } else if shift {
+        std::f32::consts::FRAC_PI_4
+    } else {
+        return None;
+    };
+    Some((angle / step).round() * step)
+}
+
+/// Where a Figure drag from `from` ends once Shift (`shift`), the sub
+/// tool's Step of angle and its Aspect have their say: a straight line
+/// to every step (45 degrees with Shift), a box shape square or at its
+/// ratio.
 pub(crate) fn constrained(sub: &SubTool, from: [f32; 2], to: [f32; 2], shift: bool) -> [f32; 2] {
     if sub.mode == 0 || sub.mode == CURVE || sub.mode == POLYLINE {
-        if !shift {
-            return to;
-        }
         let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
-        let step = std::f32::consts::FRAC_PI_4;
-        let angle = (dy.atan2(dx) / step).round() * step;
+        let Some(angle) = snapped_angle(dy.atan2(dx), sub.angle_step, shift) else {
+            return to;
+        };
         let length = dx.hypot(dy);
         return [
             from[0] + angle.cos() * length,
@@ -432,6 +445,8 @@ pub(crate) struct Preview<'a> {
     /// The pointer, in picture pixels.
     pub pointer: Option<[f32; 2]>,
     pub shift: bool,
+    /// The current sub tool's Step of angle, in degrees (0 for none).
+    pub angle_step: f32,
     pub guides: &'a Guides,
 }
 
@@ -498,9 +513,9 @@ impl Preview<'_> {
         let mut ends = handles.to_vec();
         if let (Some(pointer), Some(last)) = (self.pointer, points.last()) {
             let pointer = if mode == POLYLINE {
-                self.guides
-                    .line_end(*last, pointer)
-                    .unwrap_or_else(|| line_constrained(*last, pointer, self.shift))
+                self.guides.line_end(*last, pointer).unwrap_or_else(|| {
+                    line_constrained(*last, pointer, self.angle_step, self.shift)
+                })
             } else {
                 pointer
             };
@@ -521,9 +536,16 @@ impl Preview<'_> {
     }
 }
 
-/// `to` kept to every 45 degrees from `from` while Shift is held.
-pub(crate) fn line_constrained(from: [f32; 2], to: [f32; 2], shift: bool) -> [f32; 2] {
-    let line = SubTool::new(Tool::Figure, "", 0, crate::brush::Tip::default());
+/// `to` kept to every `step_degrees` (Step of angle), or to every 45
+/// degrees while Shift is held, from `from`.
+pub(crate) fn line_constrained(
+    from: [f32; 2],
+    to: [f32; 2],
+    step_degrees: f32,
+    shift: bool,
+) -> [f32; 2] {
+    let mut line = SubTool::new(Tool::Figure, "", 0, crate::brush::Tip::default());
+    line.angle_step = step_degrees;
     constrained(&line, from, to, shift)
 }
 
@@ -736,6 +758,30 @@ mod tests {
             constrained(&sub(1), [0.0, 0.0], [100.0, -40.0], false),
             [100.0, -40.0]
         ));
+    }
+
+    #[test]
+    fn a_step_of_angle_keeps_lines_to_its_steps_without_shift() {
+        // FGV-38: Step of angle at 30 degrees; a drag at about 25 lands
+        // on 30, with or without Shift, and keeps its length.
+        let mut line = sub(0);
+        line.angle_step = 30.0;
+        let to = [
+            100.0 * 25f32.to_radians().cos(),
+            100.0 * 25f32.to_radians().sin(),
+        ];
+        for shift in [false, true] {
+            let end = constrained(&line, [0.0, 0.0], to, shift);
+            let angle = end[1].atan2(end[0]).to_degrees();
+            assert!((angle - 30.0).abs() < 1e-3, "{angle}");
+            assert!((end[0].hypot(end[1]) - 100.0).abs() < 1e-3);
+        }
+        // The polyline's next corner and the Ruler tool keep to it too.
+        let end = line_constrained([0.0, 0.0], to, 30.0, false);
+        assert!((end[1].atan2(end[0]).to_degrees() - 30.0).abs() < 1e-3);
+        assert_eq!(snapped_angle(0.4, 0.0, false), None, "free without either");
+        let shift = snapped_angle(0.4, 0.0, true).unwrap();
+        assert!((shift - std::f32::consts::FRAC_PI_4).abs() < 1e-6);
     }
 
     #[test]

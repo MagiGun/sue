@@ -56,9 +56,9 @@ impl SuePaint {
                 // The next corner follows the ruler the last one is on,
                 // or Shift's 45 degrees.
                 let guides = self.figure_guides(cx);
-                let at = guides
-                    .line_end(last, [p.x, p.y])
-                    .unwrap_or_else(|| line_constrained(last, [p.x, p.y], press.modifiers.shift));
+                let at = guides.line_end(last, [p.x, p.y]).unwrap_or_else(|| {
+                    line_constrained(last, [p.x, p.y], sub.angle_step, press.modifiers.shift)
+                });
                 press.p = pos2(at[0], at[1]);
             }
             self.corners_press(tool, &sub, &press, cx);
