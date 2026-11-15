@@ -17,16 +17,14 @@ use crate::studio::SuePaint;
 use crate::tools::Tool;
 use view::{SCROLLBAR, scrollbar};
 
-mod drag;
 pub(crate) mod engine;
 mod fill;
 mod input;
 mod overlays;
 mod pick;
-mod press;
-mod release;
 mod shape;
 mod status;
+mod tools;
 mod view;
 
 impl SuePaint {

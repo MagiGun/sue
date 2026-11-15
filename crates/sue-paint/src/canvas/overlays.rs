@@ -311,7 +311,7 @@ impl SuePaint {
                     }
                     Tool::Figure | Tool::Frame | Tool::Balloon | Tool::Ruler
                         if (tool == &Tool::Figure
-                            && matches!(sub.mode, 0 | crate::comic::SPEED_LINES))
+                            && matches!(sub.mode, 0 | crate::tools::SPEED_LINES))
                             || (tool != &Tool::Figure && sub.mode == 1)
                             || (tool == &Tool::Balloon
                                 && sub.mode == crate::comic::THOUGHT_TAIL)
@@ -324,7 +324,7 @@ impl SuePaint {
                     }
                     _ if (tool == &Tool::Select && sub.mode == 1)
                         || (tool == &Tool::Figure
-                            && matches!(sub.mode, 2 | 4 | crate::comic::SATURATED_LINES))
+                            && matches!(sub.mode, 2 | 4 | crate::tools::SATURATED_LINES))
                         || (tool == &Tool::Balloon
                             && matches!(
                                 sub.mode,
