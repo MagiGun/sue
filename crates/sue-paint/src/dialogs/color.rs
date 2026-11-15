@@ -242,13 +242,14 @@ fn number(
     let mut wide = f64::from(*value);
     let before = wide;
     ui::form_row(ui, name, theme.space(Space::S5), theme, |ui| {
-        ui::number_field(salt, &mut wide)
+        let field = ui::number_field(salt, &mut wide)
             .range(range)
             .decimals(0)
             .suffix(unit)
             .label(name)
             .width(width)
             .show(ui, theme);
+        ui::tooltip(field, &ui::Tip::new(name), theme);
     });
     if (wide - before).abs() > f64::EPSILON {
         *value = wide as f32;
@@ -521,6 +522,7 @@ impl SuePaint {
                     .label(&tr!("color-set-name"))
                     .width(buttons - gap)
                     .show(ui, theme);
+                let field = ui::tooltip(field, &ui::Tip::new(&tr!("color-set-name")), theme);
                 if field.lost_focus() && sets.rename(*picked, name) {
                     sets.sets[*picked].name.clone_into(name);
                 }
@@ -660,6 +662,7 @@ fn name_ui(ui: &mut Ui, salt: &str, name: &mut String, theme: &Theme) -> Outcome
     let field = ui::text_field(salt, name)
         .label(&tr!("color-set-name"))
         .show(ui, theme);
+    let field = ui::tooltip(field, &ui::Tip::new(&tr!("color-set-name")), theme);
     // The field has the keyboard from the start.
     if !field.has_focus() && ui.memory(|memory| memory.focused().is_none()) {
         field.request_focus();
@@ -732,6 +735,7 @@ fn settings_ui(ui: &mut Ui, settings: &mut ColorSettings, theme: &Theme) -> Outc
                     .label(&tr!("hex"))
                     .width(side - theme.space(Space::S7) - theme.label_gap())
                     .show(ui, theme);
+                let field = ui::tooltip(field, &ui::Tip::new(&tr!("hex")), theme);
                 if field.changed()
                     && let Some(rgb) = color::parse_hex(&settings.hex)
                 {

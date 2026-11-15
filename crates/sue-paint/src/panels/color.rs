@@ -29,12 +29,12 @@ fn slider_row(
 ) -> bool {
     let mut wide = f64::from(*value);
     let label = Density::of(ui).control_height() * LABEL_ROWS;
-    let changed = ui::slider(("sue-paint-color-slider", salt), &mut wide, range)
+    let response = ui::slider(("sue-paint-color-slider", salt), &mut wide, range)
         .label(name)
         .label_width(label)
         .suffix(unit)
-        .show(ui, theme)
-        .changed();
+        .show(ui, theme);
+    let changed = ui::tooltip(response, &ui::Tip::new(name), theme).changed();
     if changed {
         *value = wide as f32;
     }
@@ -109,6 +109,16 @@ impl SuePaint {
             area,
             Id::unique(("sue-paint-color-grid", id)),
             Sense::click(),
+        );
+        ui::focus_ring(ui, &response, theme.radius(Radius::Xs), theme);
+        let name = match id {
+            "intermediate" => tr!("intermediate-color"),
+            _ => tr!("approximate-color"),
+        };
+        let response = ui::tooltip(
+            response,
+            &ui::Tip::new(&name).help(&tr!("click-a-color-to-draw-with-it")),
+            theme,
         );
         let at = response
             .interact_pointer_pos()
@@ -470,6 +480,7 @@ impl SuePaint {
             let response = ui::text_field("sue-paint-color-hex", &mut self.hex)
                 .label(&tr!("hex"))
                 .show(ui, theme);
+            let response = ui::tooltip(response, &ui::Tip::new(&tr!("hex")), theme);
             if response.lost_focus() {
                 match color::parse_hex(&self.hex) {
                     Some(rgb) => self.set_drawing_color(rgb),

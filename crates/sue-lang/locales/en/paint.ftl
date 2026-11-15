@@ -2569,3 +2569,4 @@ corner-bottom-left = Bottom left corner
 corner-bottom-right = Bottom right corner
 color-set-name = Name
 color-current-help = Click to take this color back
+click-a-color-to-draw-with-it = Click a color to draw with it
