@@ -211,6 +211,9 @@ const BINDING_SIZE: egui::Vec2 = vec2(820.0, 560.0);
 const MODIFIERS_SIZE: egui::Vec2 = vec2(600.0, 540.0);
 const COMMAND_BAR_SIZE: egui::Vec2 = vec2(780.0, 540.0);
 const COMMAND_BAR_ROOM: f32 = 13.0;
+/// What a dialog's title and frame took of the fixed sizes dialogs had
+/// before the host sized them by what they hold.
+const TITLE_ROOM: f32 = 64.0;
 
 /// The buttons in a dialog's footer.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -408,7 +411,14 @@ impl Dialog {
             }
             Dialog::Color(color) => {
                 let (title, size) = color.title_and_size();
-                Look::new(title, Width::Points(size.x), Footer::none())
+                let look = Look::new(title, Width::Points(size.x), Footer::none());
+                // Edit Color Sets lays its list out in the room it is
+                // given: it gets its old height, less the title.
+                if matches!(color, ColorDialog::EditSets(..)) {
+                    look.fixed(size.y - TITLE_ROOM)
+                } else {
+                    look
+                }
             }
             Dialog::DeleteFolders(_) => Look::new(
                 tr!("delete-layer-folders"),
