@@ -80,10 +80,18 @@ fn slide(
     if response.changed() {
         *value = wide as f32;
     }
+    // A change while the pointer is held is a drag (of the track or of
+    // the number field); it is kept when the pointer lets go, which
+    // `view3d_properties` sees.
     Slid {
         changed: response.changed(),
-        released: response.drag_stopped() || (response.changed() && !response.dragged()),
+        released: response.drag_stopped() || (response.changed() && !held(ui)),
     }
+}
+
+/// `true` while a pointer button is held anywhere.
+fn held(ui: &Ui) -> bool {
+    ui.input(|input| input.pointer.any_down())
 }
 
 /// A checkbox that says `name`, with a tooltip; `true` when clicked (and
@@ -376,7 +384,10 @@ impl SuePaint {
             }
             self.pending_view3d = Some((layer, view));
         }
-        if slid.released && self.view3d_before.is_some() {
+        // Kept when let go: by a control that says so, or as soon as no
+        // pointer is held any more (a drag that ended outside its
+        // control, a number field dragged).
+        if self.view3d_before.is_some() && (slid.released || !held(ui)) {
             self.view3d_release = true;
         }
     }
@@ -542,8 +553,7 @@ impl SuePaint {
                     place.scale = (percent / 100.0).clamp(*range.start(), *range.end());
                     slid.changed = true;
                 }
-                slid.released |=
-                    response.drag_stopped() || (response.changed() && !response.dragged());
+                slid.released |= response.drag_stopped() || (response.changed() && !held(ui));
                 self.command_icon(
                     ui,
                     theme,
@@ -652,7 +662,7 @@ impl SuePaint {
                 ui,
                 theme,
                 "sue-paint-3d-pitch",
-                &tr!("height-2"),
+                &tr!("camera-height"),
                 &mut view.pitch,
                 -89.0..=89.0,
                 &tr!("deg"),
@@ -908,7 +918,7 @@ impl SuePaint {
             }
             self.pending_pose = Some((layer, next));
         }
-        if released {
+        if self.pose_before.is_some() && (released || !held(ui)) {
             self.pose_release = true;
         }
     }

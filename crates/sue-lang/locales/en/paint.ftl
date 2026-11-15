@@ -2575,3 +2575,4 @@ name-facing-right = Facing right
 name-lying-face-up = Lying face up
 name-lying-face-down = Lying face down
 name-body-shapes = Body shapes
+camera-height = Camera height
