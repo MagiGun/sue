@@ -99,6 +99,11 @@ follow [Semantic Versioning](https://semver.org/).
   and every other layer picked with it, into grays of the same
   brightness in one step, transparency kept; with a selection only the
   selected area.
+- Sue Paint's command palette offers the help pages on the web that the
+  start page's Help button linked to: Basic Tips, Using Sue Paint
+  (Online), Frequently Asked Questions, Contact, and Feedback and
+  Requests. Each opens in your browser, and each can be given a key in
+  Settings.
 
 ### Changed
 
@@ -222,6 +227,8 @@ follow [Semantic Versioning](https://semver.org/).
   you pressed on even when the hand moves quickly, instead of adding a
   second point beside it.
 - The opacity bar's handle shows on light themes too.
+- Sue Paint's Help, Sue Paint Guide and Help, Check for Updates open
+  before a canvas is, instead of staying grayed.
 
 ### Removed
 

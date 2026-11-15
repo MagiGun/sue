@@ -15,6 +15,7 @@ mod paint_brush;
 mod paint_cmd_file;
 mod paint_cmd_edit;
 mod paint_cmd_layer;
+mod paint_cmd_help;
 mod paint_comic;
 mod paint_edit;
 mod paint_files;
