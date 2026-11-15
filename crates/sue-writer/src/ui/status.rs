@@ -361,9 +361,11 @@ impl SueWriter {
         let close = ui
             .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let name = tr!("close");
+                // The key's name as the menus and Settings write it.
+                let keys = sue_platform::NamedKey::Escape.to_string();
                 icon_button("writer-find-close", Icon::Close, &name)
                     .quiet()
-                    .shortcut("Esc")
+                    .shortcut(&keys)
                     .show(ui, theme)
                     .clicked()
             })

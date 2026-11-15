@@ -322,6 +322,9 @@ fn sue_writers_bar_buttons_are_named_and_their_tooltips_show_their_keys() {
     assert!(shown.iter().any(|text| text == "Ctrl+B"), "{shown:?}");
     let shown = bars.hover("Find Next");
     assert!(shown.iter().any(|text| text == "F3"), "{shown:?}");
+    // The find bar's cross names its key as Settings writes it.
+    let shown = bars.hover("Close");
+    assert!(shown.iter().any(|text| text == "Escape"), "{shown:?}");
     // Bold gets another key in Settings; the tooltip says the new one.
     bars.runtime
         .engine
