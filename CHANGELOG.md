@@ -286,6 +286,14 @@ follow [Semantic Versioning](https://semver.org/).
   each part, a head to body ratio that can follow the height,
   Initialize, and Register body shape as material. Each drag is one
   undo step.
+- The Hub's Home on a first run: Start Something New offers each
+  studio's kinds of work, one click from a new file, and Good to Know
+  shows the command search with its key, opening files by dropping
+  them, and Settings, so the page no longer has a blank lower half.
+- Notices stay few: three at most (one on a phone, above the tab bar),
+  with older ones folded behind them under a "2 more" button that
+  unfolds them. They never cover a dialog: they wait under it with
+  their time stopped, and the Hub leaves room to scroll past them.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own

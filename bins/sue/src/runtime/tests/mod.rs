@@ -52,6 +52,7 @@ mod save;
 mod settings;
 mod settings_screens;
 mod shell;
+mod shell_polish;
 mod windows;
 mod writer;
 

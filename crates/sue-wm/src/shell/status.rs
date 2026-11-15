@@ -71,6 +71,44 @@ impl Shell {
         self.toasts.len()
     }
 
+    /// Takes every notice away at once, without a word (scripted runs:
+    /// a tour that shows notices puts the window back as it found it).
+    pub fn clear_notices(&mut self) {
+        self.toasts.clear();
+        self.revealed.clear();
+        self.touch();
+    }
+
+    /// How many notices were folded behind the newest in the last frame
+    /// (the stack shows a few and says how many more there are).
+    #[must_use]
+    pub fn notices_folded(&self) -> usize {
+        self.toasts.folded()
+    }
+
+    /// Where the button that unfolds the notices ("2 more") or folds them
+    /// again was drawn last, while there is one.
+    #[must_use]
+    pub fn notices_fold_rect(&self) -> Option<Rect> {
+        self.toasts.fold_rect()
+    }
+
+    /// The band the notices took in the last frame: from the top of the
+    /// highest to the bottom of their room, across the room. `None` when
+    /// none showed.
+    #[must_use]
+    pub fn notices_area(&self) -> Option<Rect> {
+        self.toasts.area()
+    }
+
+    /// The layer the notices were drawn on in the last frame: under the
+    /// dialogs' while a modal dialog is open, over everything else
+    /// otherwise.
+    #[must_use]
+    pub fn notices_layer(&self) -> Option<egui::LayerId> {
+        self.toasts.layer()
+    }
+
     /// Where the notice of the last saved file and its buttons were drawn
     /// last, while it shows (scripted runs and tests).
     #[must_use]
