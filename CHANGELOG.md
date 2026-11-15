@@ -27,8 +27,8 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint, View, Grid Settings: the grid's gap, divisions and origin,
   saved with the picture; Snap to Grid follows its finest lines.
 - Sue Paint, Convert Layer has an expression color, a blending mode and
-  Keep original layer; Create Perspective Ruler puts the ruler on a new
-  layer (on at first); Expand Selected Area can keep square corners;
+  Keep original layer; Create Perspective Ruler can make a new layer to
+  draw along it on (on at first); Expand Selected Area can keep square corners;
   Text takes the main, the sub or its own color.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
