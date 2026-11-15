@@ -81,16 +81,17 @@ pub use bar_items::bar_button_rect;
 pub use commands::registry;
 pub use launchers::shown_buttons;
 pub use menus::menus;
-pub use studio::{ID, SuePaint, mirror};
+pub use studio::{ID, StrokeSeen, SuePaint, mirror};
 
 use sue_core::EntityId;
 use sue_wm::{AppletContext, ArenaEdit};
 
-use crate::brush::{Stroke, Tip};
+use crate::brush::Tip;
 use crate::doc::NewPicture;
 
-/// Paints a stroke through `points` on `layer` in place and records it in
-/// the global history, the way a pen would.
+/// Paints a stroke through `points` on `layer` with the brush engine and
+/// records it in the global history, the way a pen would: pressing in
+/// and out along the way.
 fn paint_path(
     cx: &mut AppletContext<'_>,
     layer: EntityId,
@@ -99,21 +100,24 @@ fn paint_path(
     points: &[[f32; 2]],
     label: &str,
 ) {
-    let mut stroke = Stroke::new(layer, tip, rgb, false);
-    if let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer) {
-        for (index, point) in points.iter().enumerate() {
-            let t = index as f32 / points.len().max(1) as f32;
-            stroke.to(
-                raster,
-                *point,
-                (t * std::f32::consts::PI).sin().max(0.2),
-                None,
-            );
+    let mut line = crate::vector::figure_engine_line(points, tip, [rgb, rgb], false);
+    if let Some(engine) = line.engine.as_mut() {
+        engine.device = sue_brush::input::Device::Pen;
+        let count = engine.pen.len().max(2) - 1;
+        for (index, part) in engine.pen.iter_mut().enumerate() {
+            let t = index as f32 / count as f32;
+            part.pressure = Some((t * std::f32::consts::PI).sin().max(0.2));
         }
-        stroke.flush(raster, None);
     }
+    let Some(before) = doc::raster(&cx.world.arena, layer).cloned() else {
+        return;
+    };
+    let Some(raster) = doc::raster_mut(&mut cx.world.arena, layer) else {
+        return;
+    };
+    let rects = line.paint_into(raster, false, None);
     if let Some(raster) = doc::raster(&cx.world.arena, layer) {
-        let edit = stroke.finish(raster, label);
+        let edit = crate::brush::engine::edit_between(layer, label, &before, raster, &rects);
         if !edit.is_empty() {
             cx.record(ArenaEdit(edit));
         }

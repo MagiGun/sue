@@ -12,7 +12,9 @@
 use std::sync::Arc;
 
 use sue_brush::input::{Device, Kind, Sample as PenSample, Settings};
+use sue_brush::paint::overflow::Region;
 use sue_brush::paint::{Behaviours, Colors, PaperChoice, Resources, TextureChoice};
+use sue_brush::raster::PixelRect;
 use sue_brush::raster::TipImage;
 use sue_brush::replay::{self, StoredStroke};
 use sue_brush::texture::Paper;
@@ -196,6 +198,31 @@ impl Line {
             stroke.to(raster, sample.at, sample.pressure, None);
         }
         stroke.end(raster, self.finish, None);
+    }
+
+    /// Paints the line onto `raster` (a raster layer: a figure tool's
+    /// line), its transparent pixels kept so with `keep_alpha`, the paint
+    /// only where `clip` lets it land (a selection). Answers the layer
+    /// pixels `[x0, y0, x1, y1]` it may have changed. A line of the legacy
+    /// engine paints as [`Self::paint`] does, and may have changed all of
+    /// them.
+    pub fn paint_into(
+        &self,
+        raster: &mut RasterTile2D,
+        keep_alpha: bool,
+        clip: Option<Arc<Region>>,
+    ) -> Vec<[i32; 4]> {
+        match &self.engine {
+            Some(engine) => engine
+                .paint_with(self, raster, keep_alpha, clip)
+                .into_iter()
+                .map(|r| [r.x0, r.y0, r.x1, r.y1])
+                .collect(),
+            None => {
+                self.paint(raster);
+                vec![[0, 0, raster.width() as i32, raster.height() as i32]]
+            }
+        }
     }
 
     /// The same line along other samples.
@@ -1102,10 +1129,12 @@ impl LineBrush {
             .map(|(_, picture)| picture)
     }
 
-    /// The pictures the brush's tip, dual brush and paper read, decoded.
-    fn decoded(&self) -> Decoded {
+    /// The pictures the brush's tip, dual brush and paper read, decoded,
+    /// as the engine takes them.
+    #[must_use]
+    pub fn resources(&self) -> Resources {
         let behaviours = Behaviours::from_preset(&self.preset);
-        let tips = match &self.preset.tip {
+        let tips: Vec<TipImage> = match &self.preset.tip {
             TipSource::Images { pictures, .. } => pictures
                 .iter()
                 .filter_map(|picture| match picture {
@@ -1115,7 +1144,7 @@ impl LineBrush {
                 .collect(),
             TipSource::Round => Vec::new(),
         };
-        let dual = behaviours
+        let dual: Vec<TipImage> = behaviours
             .dual
             .as_ref()
             .map(|dual| {
@@ -1132,16 +1161,15 @@ impl LineBrush {
                 PaperChoice::Builtin(name) => Paper::builtin(name),
                 PaperChoice::Picture(hash) => self.picture(hash)?.paper(),
             });
-        Decoded { tips, dual, paper }
+        Resources {
+            pictures: tips.into(),
+            dual_pictures: dual.into(),
+            paper: paper.map(Arc::new),
+            overflow: None,
+        }
     }
 }
 
-/// A brush's pictures, decoded for the engine.
-struct Decoded {
-    tips: Vec<TipImage>,
-    dual: Vec<TipImage>,
-    paper: Option<Paper>,
-}
 
 /// What the pen said at one sample of a line of the brush engine.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1343,26 +1371,38 @@ impl EngineLine {
 
     /// Paints `line` onto `raster` again.
     fn paint(&self, line: &Line, raster: &mut RasterTile2D) {
+        let _ = self.paint_with(line, raster, false, None);
+    }
+
+    /// Paints `line` onto `raster` again, its transparent pixels kept so
+    /// with `keep_alpha`, the paint only where `clip` lets it land (a
+    /// selection). Answers the layer pixels it may have changed.
+    fn paint_with(
+        &self,
+        line: &Line,
+        raster: &mut RasterTile2D,
+        keep_alpha: bool,
+        clip: Option<Arc<Region>>,
+    ) -> Vec<PixelRect> {
         let Some(brush) = &self.brush else {
-            return;
+            return Vec::new();
         };
-        let decoded = brush.decoded();
-        let resources = Resources {
-            pictures: &decoded.tips,
-            dual_pictures: &decoded.dual,
-            paper: decoded.paper.as_ref(),
-            overflow: None,
+        let mut resources = brush.resources();
+        resources.overflow = match (resources.overflow.take(), clip) {
+            (Some(own), Some(clip)) => Some(Arc::new(own.and(&clip))),
+            (own, clip) => own.or(clip),
         };
         // A line of an engine this build does not know paints nothing:
         // its version's code paints it.
-        let _ = replay::paint(
+        replay::paint(
             &self.stored(line),
             &brush.preset,
             resources,
             raster,
             [0, 0],
-            false,
-        );
+            keep_alpha,
+        )
+        .unwrap_or_default()
     }
 }
 
@@ -1708,29 +1748,11 @@ fn legacy_step(from: &Sample, to: &Sample) -> f32 {
 /// text read as a preset (`BrushPreset::from_legacy_text`), with its tip
 /// pictures kept by hash.
 fn legacy_brush(tip: &Tip, finish: Finish) -> LineBrush {
-    let mut preset = BrushPreset::from_legacy_text(&tip.to_text());
+    let mut brush = crate::brush::engine::line_brush(tip, None);
     // The finish it was drawn with is the brush's in the engine.
-    preset.input.post_correction = finish.correction;
-    preset.input.flick = finish.flick.is_some();
-    let mut pictures = Vec::new();
-    if let TipSource::Images { pictures: refs, .. } = &mut preset.tip {
-        let count = tip.shape_count.max(1);
-        let mut kept = Vec::new();
-        for id in tip.shape..tip.shape.saturating_add(count) {
-            if let Some(picture) = crate::brush::shape(id)
-                .as_deref()
-                .and_then(BrushPicture::of_shape)
-            {
-                let hash = picture.hash();
-                kept.push(PictureRef::Hash(hash));
-                pictures.push((hash, picture));
-            }
-        }
-        if !kept.is_empty() {
-            *refs = kept;
-        }
-    }
-    LineBrush { preset, pictures }
+    brush.preset.input.post_correction = finish.correction;
+    brush.preset.input.flick = finish.flick.is_some();
+    brush
 }
 
 /// The legacy `line` as a line of the brush engine: its brush read from
@@ -2186,6 +2208,96 @@ pub fn figure_line(points: &[[f32; 2]], tip: Tip, colors: [[f32; 3]; 2], corners
         copies: Vec::new(),
         marks,
         engine: None,
+    }
+}
+
+/// How fast a figure's line is drawn, in layer pixels a second, for
+/// what a brush reads of speed.
+const FIGURE_SPEED: f32 = 1500.0;
+
+/// A figure's `points` (a straight line, a curve, a shape's outline) as a
+/// line of the brush engine, drawn with `tip` in `colors` (main and
+/// sub): pressed evenly, unsteadied by nothing, at an even speed, the
+/// path filled in a few pixels apart so the line runs straight between
+/// its corners. With `corners` each of `points` is a corner of the line
+/// (Correct Line), as [`figure_line`] marks them.
+#[must_use]
+pub fn figure_engine_line(
+    points: &[[f32; 2]],
+    tip: Tip,
+    colors: [[f32; 3]; 2],
+    corners: bool,
+) -> Line {
+    let mut brush = crate::brush::engine::line_brush(&tip, None);
+    brush.preset.input = sue_model::brush::InputSettings {
+        stabilization: 0,
+        ..sue_model::brush::InputSettings::default()
+    };
+    let step = (tip.size * 0.25).clamp(0.5, 2.0);
+    let mut path: Vec<([f32; 2], u8)> = Vec::new();
+    for &point in points {
+        if let Some(&(from, _)) = path.last() {
+            let (dx, dy) = (point[0] - from[0], point[1] - from[1]);
+            let count = ((dx.hypot(dy) / step).ceil() as usize).max(1);
+            for n in 1..count {
+                let t = n as f32 / count as f32;
+                path.push(([from[0] + dx * t, from[1] + dy * t], 0));
+            }
+        }
+        let mark = if corners { CONTROL | CORNER } else { 0 };
+        if path.last().is_none_or(|(at, _)| *at != point) {
+            path.push((point, mark));
+        }
+    }
+    // One sample at least, and a lift where it ends.
+    if path.len() == 1 {
+        path.push(path[0]);
+    }
+    let samples: Vec<Sample> = path
+        .iter()
+        .map(|&(at, _)| Sample {
+            at,
+            pressure: 1.0,
+            speed: 0.0,
+            tilt: 0.0,
+            lean: [0.0, 0.0],
+            width: 1.0,
+            alpha: 1.0,
+        })
+        .collect();
+    let arc = arcs(&samples);
+    let pen = arc
+        .iter()
+        .map(|along| PenPart {
+            time: along / FIGURE_SPEED,
+            pressure: None,
+            tilt: None,
+            twist: None,
+        })
+        .collect();
+    let first = samples[0].at;
+    let seed = u64::from((first[0].to_bits() ^ first[1].to_bits().rotate_left(16)) | 1);
+    Line {
+        marks: if corners {
+            path.iter().map(|&(_, mark)| mark).collect()
+        } else {
+            Vec::new()
+        },
+        samples,
+        tip,
+        colors,
+        finish: Finish::default(),
+        copies: Vec::new(),
+        engine: Some(EngineLine {
+            engine: replay::ENGINE,
+            seed,
+            brush_hash: brush.hash(),
+            brush: Some(Arc::new(brush)),
+            device: Device::Constant(1.0),
+            scale: 1.0,
+            curve: Response::LINEAR,
+            pen,
+        }),
     }
 }
 
@@ -3017,6 +3129,33 @@ mod tests {
                 .chunks(4)
                 .any(|p| p[3] > 0)
         );
+    }
+
+    #[test]
+    fn a_figure_line_of_the_engine_runs_straight_between_its_corners() {
+        let tip = Tip {
+            size: 6.0,
+            ..Tip::default()
+        };
+        let square = [[4.0, 4.0], [36.0, 4.0], [36.0, 36.0], [4.0, 36.0], [4.0, 4.0]];
+        let line = figure_engine_line(&square, tip, [[0.0; 3], [1.0; 3]], true);
+        assert!(line.engine.is_some(), "a line of the engine");
+        let corners = line.marks.iter().filter(|mark| **mark != 0).count();
+        assert_eq!(corners, square.len(), "each point a corner");
+        let picture = render(std::slice::from_ref(&line), 40, 40).unwrap();
+        let bytes = picture.bytes().unwrap();
+        let alpha = |x: usize, y: usize| bytes[(y * 40 + x) * 4 + 3];
+        // The middle of a side is full, and the line does not bow in or
+        // out between two corners.
+        assert!(alpha(20, 4) > 200, "on the side");
+        assert_eq!(alpha(20, 9), 0, "nothing bowed in");
+        assert_eq!(alpha(20, 0), 0, "nothing bowed out");
+        assert_eq!(alpha(20, 20), 0, "the middle stays clear");
+        // It keeps and reads back as a line of the engine.
+        let read = lines(&to_geometry(std::slice::from_ref(&line)));
+        assert!(read[0].engine.is_some());
+        let again = render(&read, 40, 40).unwrap();
+        assert_eq!(again.bytes(), picture.bytes(), "it paints the same again");
     }
 
     #[test]

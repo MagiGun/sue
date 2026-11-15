@@ -299,7 +299,7 @@ pub struct Finish<'a> {
     /// The dual brush's coverage and how it meets the stroke's.
     pub dual: Option<(&'a StrokeBuffer, DualMode)>,
     /// A paper laid once on the whole stroke.
-    pub texture: Option<&'a Texture<'a>>,
+    pub texture: Option<Texture<'a>>,
     /// The region anti-overflow keeps the paint in.
     pub overflow: Option<&'a Region>,
     /// The watercolor edge.
@@ -367,7 +367,7 @@ impl Finish<'_> {
                 *a = dual_mix(mode, *a, d);
             }
         }
-        if let Some(texture) = self.texture {
+        if let Some(texture) = &self.texture {
             for (i, a) in field.alpha.iter_mut().enumerate() {
                 if *a > 0.0 {
                     *a = texture.apply(*a, center(i));
@@ -595,7 +595,7 @@ mod tests {
         let paper = Paper::builtin("grain").expect("grain");
         let texture = Texture::new(&paper, TextureSettings::default());
         let finish = Finish {
-            texture: Some(&texture),
+            texture: Some(texture),
             ..Finish::default()
         };
         let field = finish.coverage(&blob(), WHOLE);

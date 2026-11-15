@@ -293,11 +293,11 @@ impl Owned {
         }
     }
 
-    fn resources(&self) -> Resources<'_> {
+    fn resources(&self) -> Resources {
         Resources {
-            pictures: &self.pictures,
-            dual_pictures: &self.dual,
-            paper: self.paper.as_ref(),
+            pictures: self.pictures.clone().into(),
+            dual_pictures: self.dual.clone().into(),
+            paper: self.paper.clone().map(std::sync::Arc::new),
             overflow: None,
         }
     }

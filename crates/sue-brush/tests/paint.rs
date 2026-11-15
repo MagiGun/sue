@@ -8,6 +8,8 @@
 //! to be looked at (`N:\Sue\plan\v0.0.8\shots\p3-7`). The rows, in
 //! order, are listed in `ROWS`.
 
+use std::sync::Arc;
+
 use sue_brush::buffer::MergeError;
 use sue_brush::input::{Device, Kind, Pipeline, RATE, Sample, Settings};
 use sue_brush::paint::lay::EraseTarget;
@@ -86,15 +88,15 @@ fn airbrush(size: f32, flow: f32) -> BrushPreset {
 }
 
 /// What one stroke is drawn with.
-struct Brush<'a> {
+struct Brush {
     preset: BrushPreset,
     behaviours: Behaviours,
-    resources: Resources<'a>,
+    resources: Resources,
     color: [f32; 3],
     keep_alpha: bool,
 }
 
-impl<'a> Brush<'a> {
+impl Brush {
     fn new(preset: BrushPreset) -> Self {
         Self {
             preset,
@@ -110,7 +112,7 @@ impl<'a> Brush<'a> {
         self
     }
 
-    fn resources(mut self, resources: Resources<'a>) -> Self {
+    fn resources(mut self, resources: Resources) -> Self {
         self.resources = resources;
         self
     }
@@ -125,13 +127,13 @@ impl<'a> Brush<'a> {
 /// few samples a frame, drawing the tail every frame, holding the pen
 /// still for `hold` seconds before the lift, and returns the stroke,
 /// finished, not yet laid.
-fn run<'a>(
-    brush: &Brush<'a>,
+fn run(
+    brush: &Brush,
     samples: &[Sample],
     seed: u64,
     hold: f64,
     layer: &RasterTile2D,
-) -> PaintStroke<'a> {
+) -> PaintStroke {
     let registry = sue_brush::paint::registry();
     let mut settings = Settings::new(Device::Pen);
     settings.seed = seed;
@@ -147,7 +149,7 @@ fn run<'a>(
     let mut stroke = PaintStroke::new(
         &preset,
         &Behaviours::from_preset(&preset),
-        brush.resources,
+        brush.resources.clone(),
         Colors {
             main: brush.color,
             sub: [0.95, 0.9, 0.2],
@@ -180,14 +182,14 @@ fn run<'a>(
 }
 
 /// Draws `samples` with `brush` on `layer`.
-fn draw(layer: &mut RasterTile2D, brush: &Brush<'_>, samples: &[Sample], seed: u64) {
+fn draw(layer: &mut RasterTile2D, brush: &Brush, samples: &[Sample], seed: u64) {
     draw_held(layer, brush, samples, seed, 0.0);
 }
 
 /// [`draw`], holding the pen still for `hold` seconds at the end.
 fn draw_held(
     layer: &mut RasterTile2D,
-    brush: &Brush<'_>,
+    brush: &Brush,
     samples: &[Sample],
     seed: u64,
     hold: f64,
@@ -571,7 +573,7 @@ fn row(name: &str) -> Vec<u8> {
                         },
                     ))
                     .resources(Resources {
-                        paper: Some(paper),
+                        paper: Some(Arc::new(paper.clone())),
                         ..Resources::default()
                     });
                 draw(&mut layer, &brush, &pen(segment(k, 5), 0.8, swell), 4);
@@ -612,7 +614,7 @@ fn row(name: &str) -> Vec<u8> {
                 let brush = Brush::new(pen_preset(40.0, 0.9))
                     .with(textured(named("canvas"), settings))
                     .resources(Resources {
-                        paper: Some(&canvas),
+                        paper: Some(Arc::new(canvas.clone())),
                         ..Resources::default()
                     });
                 draw(&mut layer, &brush, &pen(segment(k, 7), 0.8, swell), 5);
@@ -631,7 +633,7 @@ fn row(name: &str) -> Vec<u8> {
                         },
                     ))
                     .resources(Resources {
-                        paper: Some(&grain),
+                        paper: Some(Arc::new(grain.clone())),
                         ..Resources::default()
                     });
                 let x0 = 60.0 + 620.0 * k as f32;
@@ -742,7 +744,7 @@ fn row(name: &str) -> Vec<u8> {
                 preset.dynamics.clear();
                 let resources = if k == 3 {
                     Resources {
-                        pictures: &tips[1..2],
+                        pictures: Arc::from(&tips[1..2]),
                         ..Resources::default()
                     }
                 } else {
@@ -777,7 +779,7 @@ fn row(name: &str) -> Vec<u8> {
                         ..Behaviours::default()
                     })
                     .resources(Resources {
-                        pictures: &tips,
+                        pictures: Arc::from(&tips[..]),
                         ..Resources::default()
                     })
                     .color([0.2, 0.3, 0.15]);
@@ -805,7 +807,7 @@ fn row(name: &str) -> Vec<u8> {
                         ..Behaviours::default()
                     })
                     .resources(Resources {
-                        dual_pictures: pictures,
+                        dual_pictures: Arc::from(pictures),
                         ..Resources::default()
                     })
                     .color([0.35, 0.1, 0.3]);
@@ -960,13 +962,13 @@ fn row(name: &str) -> Vec<u8> {
                             },
                         ))
                         .resources(Resources {
-                            paper: Some(&canvas),
+                            paper: Some(Arc::new(canvas.clone())),
                             ..Resources::default()
                         });
                 }
                 if *name == "painterly" {
                     brush = brush.resources(Resources {
-                        pictures: &tips[0..1],
+                        pictures: Arc::from(&tips[0..1]),
                         ..Resources::default()
                     });
                 }
@@ -1047,7 +1049,7 @@ fn row(name: &str) -> Vec<u8> {
             let held = Brush::new(pen_preset(30.0, 1.0))
                 .color([0.95, 0.75, 0.2])
                 .resources(Resources {
-                    overflow: Some(&region),
+                    overflow: Some(Arc::new(region.clone())),
                     ..Resources::default()
                 });
             draw(&mut layer, &held, &pen(scribble(810.0), 1.4, |_| 0.9), 24);
@@ -1075,7 +1077,7 @@ fn row(name: &str) -> Vec<u8> {
                 );
                 let brush = Brush::new(preset)
                     .resources(Resources {
-                        pictures: &tips[0..1],
+                        pictures: Arc::from(&tips[0..1]),
                         ..Resources::default()
                     })
                     .color([0.3, 0.2, 0.1]);
@@ -1288,7 +1290,7 @@ fn a_stroke_shows_while_drawing_what_it_lays_on_lift() {
             ..Behaviours::default()
         })
         .resources(Resources {
-            paper: Some(&canvas),
+            paper: Some(Arc::new(canvas.clone())),
             ..Resources::default()
         });
     let layer = clear();
@@ -1508,7 +1510,7 @@ fn anti_overflow_keeps_a_stroke_inside_the_lines() {
     ring(&mut lines);
     let region = Region::enclosing(&lines, [0, 0], [1000, 75], 0.5).expect("a region");
     let brush = Brush::new(pen_preset(30.0, 1.0)).resources(Resources {
-        overflow: Some(&region),
+        overflow: Some(Arc::new(region.clone())),
         ..Resources::default()
     });
     let mut layer = clear();
@@ -1608,7 +1610,7 @@ fn a_wet_stroke_keeps_locked_clear_pixels_clear_and_stays_inside_the_lines() {
         blur: 0.0,
     });
     let brush = Brush::new(wet).color([1.0, 1.0, 1.0]).resources(Resources {
-        overflow: Some(&region),
+        overflow: Some(Arc::new(region.clone())),
         ..Resources::default()
     });
     draw(

@@ -114,14 +114,6 @@ impl SuePaint {
         // A stroke of the new brush engine ends where the pen last was.
         self.engine_settle(cx);
         match self.gesture.take() {
-            Some(Gesture::Stroke { stroke, label, .. }) => {
-                if let Some(raster) = doc::raster(&cx.world.arena, stroke.layer()) {
-                    let edit = stroke.finish(raster, &label);
-                    if !edit.is_empty() {
-                        cx.record(ArenaEdit(edit));
-                    }
-                }
-            }
             Some(Gesture::Move { layers, .. }) => {
                 let mut steps = Batch::new(tr!("move-layer"));
                 for (layer, _, old) in layers {
@@ -207,9 +199,6 @@ impl SuePaint {
         if present {
             self.shown = true;
         }
-        // Masks of older files become the gray masks Sue paints, before
-        // their picture first shows (nothing to undo, nothing unsaved).
-        crate::doc::migrate_masks(&mut cx.world.arena);
         self.sync_docs(&cx.world.arena);
         self.hub
             .forget_old_cache(cx.catalog.folders.get("cache").map(PathBuf::as_path));

@@ -47,6 +47,7 @@ mod record;
 mod stroke;
 
 pub use paint::{ReplayError, paint, painted};
+pub(crate) use paint::{strongest, through};
 pub use record::Recorder;
 pub use stroke::{FORMAT, StoredStroke};
 

@@ -16,7 +16,6 @@ use sue_core::{Arena, EntityId, PixelFormat, RasterTile2D, ReversibleTransaction
 use sue_model::picture::{self, LayerKind};
 use sue_wm::{AppletContext, AppletId, ArenaEdit, Menu, MenuBar};
 
-use crate::brush::{Stabilizer, Stroke};
 use crate::color::{self, History};
 use crate::composite::Compositor;
 use crate::dialogs::Dialog;
@@ -171,37 +170,8 @@ pub(crate) struct Shaping {
 /// What a press on the canvas started.
 #[derive(Debug)]
 pub(crate) enum Gesture {
-    /// A stroke of the new brush engine (`sue_paint.brush_engine`).
+    /// A brush stroke, on the brush engine (`canvas/engine.rs`).
     Engine(Box<crate::canvas::engine::EngineStroke>),
-    /// A brush stroke (`shifted` is the selection moved into the layer's
-    /// pixels when the layer is offset; `trail` the recent raw samples with
-    /// their times, for the pen's speed as it lifts).
-    Stroke {
-        /// Boxed: a tip with its dynamics curves is large.
-        stroke: Box<Stroke>,
-        stabilizer: Stabilizer,
-        offset: [i64; 2],
-        raw: [f32; 2],
-        label: String,
-        shifted: Option<Selection>,
-        trail: Vec<(f64, [f32; 2])>,
-        correction: u32,
-        flick: bool,
-        /// Shift and drag: one straight line, drawn on release.
-        line: bool,
-        /// The ruler the stroke follows.
-        snap: Option<crate::rulers::Snap>,
-        /// On a vector layer: the stroke is kept as a line too.
-        vector: bool,
-        /// Smart Shape: where and since when the pen has rested, and
-        /// whether the stroke already became its shape.
-        rest: Option<(f64, Pos2)>,
-        shaped: bool,
-        /// The shape the stroke became, while the pen is still down: a drag
-        /// then moves a line's far end, or turns and sizes a shape around
-        /// its middle, and lifting the pen keeps what the drag left.
-        shaping: Option<Shaping>,
-    },
     /// The eraser on a vector layer: its pixels and lines from before, the
     /// lines now, and where the eraser last was (layer pixels).
     VectorErase {
@@ -741,10 +711,10 @@ pub struct SuePaint {
     pub(crate) layer_drag: Option<EntityId>,
     /// Playback starts over at the end.
     pub(crate) looping: bool,
+    /// How hard the window's touch presses (its force, through the pen
+    /// pressure curve) while it is down: a stroke drawn from the
+    /// pointer's events alone takes it.
     pub(crate) pressure: Option<f32>,
-    /// The pen's lean (as `sue_platform::stylus::tilt` has it) read with
-    /// this frame's pointer event, until the tip lifts.
-    pub(crate) sample_lean: Option<[f32; 2]>,
     /// The pen pressure curve every tool uses (Pen Pressure Settings).
     pub(crate) pen_curve: sue_model::Response,
     /// The hint about fitting pen pressure was given (once a run).
@@ -882,6 +852,21 @@ pub struct SuePaint {
     pub(crate) screen_pick_asked: Option<bool>,
     /// The gradient sets, read the first time a gradient map opens.
     pub(crate) gradients: crate::dialogs::GradientLibrary,
+    /// The last brush stroke begun: which sub tool, and how the engine
+    /// lays it (see [`SuePaint::last_stroke`]).
+    pub(crate) last_stroke: Option<StrokeSeen>,
+}
+
+/// How the brush engine took a stroke (for the runtime tests).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StrokeSeen {
+    /// The sub tool's name.
+    pub sub: String,
+    /// Laid through its paint behaviours (dabs, mixing, pictures,
+    /// paper), not as a round tip's coverage.
+    pub behaviours: bool,
+    /// Kept as a line of a vector layer.
+    pub vector: bool,
 }
 
 impl Default for SuePaint {
@@ -1007,7 +992,6 @@ impl Default for SuePaint {
             layer_drag: None,
             looping: true,
             pressure: None,
-            sample_lean: None,
             pen_curve: crate::dialogs::DEFAULT_PEN_PRESSURE
                 .parse()
                 .unwrap_or_default(),
@@ -1090,7 +1074,17 @@ impl Default for SuePaint {
             screen_pick: None,
             screen_pick_asked: None,
             gradients: crate::dialogs::GradientLibrary::default(),
+            last_stroke: None,
         }
+    }
+}
+
+impl SuePaint {
+    /// The last brush stroke begun, as the brush engine took it: every
+    /// brush sub tool paints through the engine's worker.
+    #[must_use]
+    pub fn last_stroke(&self) -> Option<&StrokeSeen> {
+        self.last_stroke.as_ref()
     }
 }
 

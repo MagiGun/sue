@@ -147,7 +147,7 @@ impl SuePaint {
     pub(super) fn correct_to(&mut self, local: [f32; 2], cx: &mut AppletContext<'_>) {
         use crate::correct::{self, Widen};
         let sub = self.toolbox.current().clone();
-        let pressure = self.pen_pressure();
+        let pressure = self.pressing_now();
         let Some(Gesture::Correct {
             lines,
             base,

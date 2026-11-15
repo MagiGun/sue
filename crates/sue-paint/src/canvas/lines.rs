@@ -635,7 +635,7 @@ impl SuePaint {
         ];
         let geometry = vector::geometry(arena, info.id);
         let mut lines = vector::lines(&geometry);
-        let mut line = vector::figure_line(&local, tip, colors, corners);
+        let mut line = vector::figure_engine_line(&local, tip, colors, corners);
         if self.vector_magnet {
             let reach = self.magnet_reach(tip.size);
             vector::snap_ends(&mut line, &lines, reach);

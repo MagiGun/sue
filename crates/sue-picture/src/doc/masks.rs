@@ -4,8 +4,10 @@
 //! A mask is an entity of class [`MASK_CLASS`] related to its layer by
 //! [`MASK`]. Its raster is `Gray8`, whose value is the cover: what Sue
 //! makes and paints. Masks of 0.0.75 and of the first 0.0.8 builds are
-//! `Rgba8`, whose alpha is the cover; they become `Gray8` when their
-//! picture opens ([`migrate_masks`]), and every reader goes through
+//! `Rgba8`, whose alpha is the cover; they become `Gray8` as their file
+//! is read ([`migrate_masks`], run on the decoded document before it is
+//! the world's, so it bumps no revision and leaves nothing unsaved), and
+//! every reader goes through
 //! [`cover`], so both show the same until then.
 //!
 //! Where a mask sits: while it is linked to its layer ([`MASK_LINKED`],

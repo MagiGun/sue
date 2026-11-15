@@ -1,27 +1,18 @@
-//! Pointer, pen and touch input: the raw event stream read in order,
-//! pen pressure and lean, and which gesture each event drives.
+//! Pointer, pen and touch input: the raw event stream read in order, and
+//! which gesture each event drives. A brush stroke takes the pen's own
+//! packets from `sue_platform::stylus::take_pen_samples` (see
+//! `canvas/engine.rs`); nothing here reads a global "latest pressure".
 
 use egui::{Event, Key, PointerButton, Pos2, Rect, Response, TouchPhase, Ui};
 use sue_wm::AppletContext;
 
-use super::view::{on_screen, shift_rects};
-use crate::doc;
+use super::view::on_screen;
 use crate::modifier_keys::{Input, Keys};
 use crate::studio::{Gesture, SuePaint};
 use crate::tools::Tool;
-use sue_platform::stylus::SampleKind;
-
-/// How far a pen leaning `lean` (on screen, see
-/// [`sue_platform::stylus::tilt`]) leans, 0 upright to 1 flat (tilt
-/// dynamics). Without a source of tilt (a mouse, Windows Ink, WinTab, the
-/// browser) it reads as an upright pen, 0, so settings that use tilt stay
-/// at their minimum.
-pub(super) fn tilt_of(lean: Option<[f32; 2]>) -> f32 {
-    lean.map_or(0.0, |[x, y]| x.hypot(y).min(1.0))
-}
 
 /// A pen's lean on screen at `at` as a lean in the picture
-/// ([`crate::brush::Sample::lean`]): as long, pointing where that way on
+/// (a sample's tilt): as long, pointing where that way on
 /// screen goes in the picture (`to_picture`), so a turned or mirrored view
 /// turns and mirrors it too. Upright (or unknown), none.
 pub(super) fn lean_in_picture(
@@ -97,15 +88,6 @@ impl SuePaint {
                     if matches!(self.gesture, Some(Gesture::Engine(_))) {
                         self.engine_abandon(cx);
                     }
-                    if let Some(Gesture::Stroke { stroke, offset, .. }) = self.gesture.take()
-                        && let Some(doc) = self.docs.get_mut(self.active)
-                        && let Some(raster) = doc::raster_mut(&mut cx.world.arena, stroke.layer())
-                    {
-                        let layer = stroke.layer();
-                        let rects = shift_rects(&stroke.abandon(raster), offset);
-                        doc.compositor
-                            .refresh_rects(&cx.world.arena, &rects, Some(layer));
-                    }
                     self.gesture = None;
                 }
             }
@@ -146,87 +128,20 @@ impl SuePaint {
         }
     }
 
-    /// How hard the pen presses, through the pen pressure curve: from the
-    /// window's touch events (Windows Ink, macOS, Linux, phones), else from
-    /// a WinTab tablet or a pen in a browser. With neither, a brush stroke
-    /// under way goes on as hard as its last point (a pen whose driver
-    /// said it lifted before the window handed over its last events: never
-    /// full pressure for a stroke's end), and anything else is full (a
-    /// mouse, whose strokes are full from their first point).
-    pub(super) fn pen_pressure(&self) -> f32 {
-        self.pressure
-            .or_else(|| sue_platform::stylus::pressure().map(|raw| self.pen_curve.eval(raw)))
-            .or_else(|| match &self.gesture {
-                Some(Gesture::Stroke { stroke, .. }) => {
-                    stroke.samples().last().map(|sample| sample.pressure)
-                }
-                _ => None,
-            })
+    /// How hard the pen presses now, through the pen pressure curve: its
+    /// latest packet in the stream, else the window's touch (its force),
+    /// else evenly (a mouse). For tools that read the pen as it moves
+    /// (Correct Line's redraw), not for brush strokes, which take every
+    /// packet as it came.
+    pub(super) fn pressing_now(&self) -> f32 {
+        self.pen_stream
+            .iter()
+            .rev()
+            .filter(|sample| sample.source.is_pen())
+            .find_map(|sample| sample.pressure)
+            .map(|raw| self.pen_curve.eval(raw.clamp(0.0, 1.0)))
+            .or(self.pressure)
             .unwrap_or(1.0)
-    }
-
-    /// Tells the brush stroke under way where the button was let go
-    /// (`pos`, on screen): the place its line is finished to, as a move
-    /// there would have set it, without painting a point there. Letting go
-    /// is the end of the line, not one more point of it.
-    fn lift_at(&mut self, pos: Pos2, viewport: Rect, size: [u32; 2]) {
-        let (
-            Some(Gesture::Stroke {
-                offset, raw, snap, ..
-            }),
-            Some(doc),
-        ) = (self.gesture.as_mut(), self.docs.get(self.active))
-        else {
-            return;
-        };
-        let p = doc.view.to_picture(viewport, size, pos);
-        let mut local = [p.x - offset[0] as f32, p.y - offset[1] as f32];
-        if let Some(snap) = snap.as_mut() {
-            // Along a ruler, as a move: only once the pen has shown which
-            // way it goes.
-            match snap.follow(local, 4.0 / doc.view.zoom.max(0.01)) {
-                Some(on) => local = on,
-                None => return,
-            }
-        }
-        *raw = local;
-    }
-
-    /// How far the pen leans at `pos` (0 upright to 1 flat, tilt dynamics)
-    /// and which way in the picture (Turn with pen tilt): from the reading
-    /// that came with this pointer event, else the pen's latest.
-    pub(super) fn pen_lean(&self, pos: Pos2, viewport: Rect, size: [u32; 2]) -> (f32, [f32; 2]) {
-        let lean = self.sample_lean.or_else(sue_platform::stylus::tilt);
-        let way = self.docs.get(self.active).map_or([0.0, 0.0], |doc| {
-            lean_in_picture(lean, pos, |at| doc.view.to_picture(viewport, size, at))
-        });
-        (tilt_of(lean), way)
-    }
-
-    /// Takes the pen's reading for this frame's pointer event of `kind` at
-    /// `pos`, when the next one in `samples` is it: its pressure (through
-    /// the pen pressure curve) and lean count for that event, not the
-    /// frame's last. `true` when there was one.
-    fn take_sample(
-        &mut self,
-        samples: &mut std::collections::VecDeque<sue_platform::stylus::Sample>,
-        kind: sue_platform::stylus::SampleKind,
-        pos: Pos2,
-    ) -> bool {
-        if !samples
-            .front()
-            .is_some_and(|sample| sample.is_for(kind, [pos.x, pos.y]))
-        {
-            return false;
-        }
-        let Some(sample) = samples.pop_front() else {
-            return false;
-        };
-        self.pressure = sample.pressure.map(|raw| self.pen_curve.eval(raw));
-        if sample.tilt.is_some() {
-            self.sample_lean = sample.tilt;
-        }
-        true
     }
 
     /// The first time a pen's pressure shows up while its curve is still
@@ -267,15 +182,8 @@ impl SuePaint {
                 input.pointer.hover_pos().is_none(),
             )
         });
-        // The pen's own reading for each of its pointer events this frame,
-        // where the system's pen comes through Sue (a Wayland tablet), so
-        // each point of a stroke has the pressure and lean it had there.
-        let mut samples = sue_platform::stylus::take_samples();
-        // Every packet of the pen, for a stroke of the new brush engine.
-        self.engine_take_samples();
-        if sue_platform::stylus::pressure().is_some()
-            || samples.iter().any(|sample| sample.pressure.is_some())
-        {
+        // Every packet of the pen, for a stroke of the brush engine.
+        if self.engine_take_samples() {
             self.pen_seen(cx);
         }
         // The pen turned over to its eraser end picks the Eraser, and back
@@ -351,7 +259,6 @@ impl SuePaint {
                     pressed: true,
                     modifiers,
                 } => {
-                    self.take_sample(&mut samples, SampleKind::Press, pos);
                     // Two fingers down are a pinch or a pan, never a stroke.
                     // A pen tapped quickly can come near, touch and go away
                     // within one frame: nothing is hovered by the frame's
@@ -386,7 +293,6 @@ impl SuePaint {
                     }
                 }
                 Event::PointerMoved(pos) => {
-                    self.take_sample(&mut samples, SampleKind::Move, pos);
                     self.clock.0 += f64::from(self.clock.1);
                     self.drag(pos, viewport, size, cx);
                 }
@@ -396,23 +302,11 @@ impl SuePaint {
                     pressed: false,
                     ..
                 } => {
-                    // The tip's release keeps the pressure it had for the
-                    // stroke's end; it goes once this frame is handled.
-                    if self.take_sample(&mut samples, SampleKind::Release, pos)
-                        && button == PointerButton::Primary
-                    {
-                        lifted = true;
-                    }
+                    let _ = button;
                     if matches!(self.gesture, Some(Gesture::Engine(_))) {
-                        // The new engine's stroke ends where the pen last
-                        // was; the release is not a point of it.
+                        // A brush stroke ends where the pen last was; the
+                        // release is not a point of it.
                         self.engine_release(pos, viewport, size, cx);
-                    } else if matches!(self.gesture, Some(Gesture::Stroke { .. })) {
-                        // A brush stroke takes no point from its release:
-                        // the line is finished to where the button was let
-                        // go, at the pressure of its own last point.
-                        self.lift_at(pos, viewport, size);
-                        self.release(viewport, size, cx);
                     } else if self.gesture.is_some() {
                         // Every other gesture ends where it was let go.
                         self.drag(pos, viewport, size, cx);
@@ -424,7 +318,6 @@ impl SuePaint {
         }
         if lifted {
             self.pressure = None;
-            self.sample_lean = None;
         }
         // Two fingers or more move, zoom and turn the view.
         let pinch = ctx
@@ -487,28 +380,7 @@ impl SuePaint {
             self.on_screen = on_screen(&doc.view, viewport, size, ctx.pixels_per_point());
         }
         self.smart_shape(&ctx, viewport, size, cx);
-        let (visible, step) = self.on_screen;
-        // Show what the stroke painted this frame: only the tiles it
-        // changed, over the kept stacks around its layer, at the detail
-        // the screen shows.
-        if let Some(Gesture::Stroke { stroke, offset, .. }) = &mut self.gesture
-            && let Some(doc) = self.docs.get_mut(self.active)
-        {
-            let rects = shift_rects(&stroke.take_dirty_tiles(), *offset);
-            if rects.is_empty() {
-                // The layer was written to without a pixel changing: that
-                // is no reason to recomposite the picture.
-                doc.compositor.accept(&cx.world.arena, stroke.layer());
-            } else {
-                doc.compositor.refresh_view(
-                    &cx.world.arena,
-                    &rects,
-                    Some(stroke.layer()),
-                    visible,
-                    step,
-                );
-            }
-        }
+        let visible = self.on_screen.0;
         // The new engine's stroke: this frame's samples to its worker, and
         // what it laid since the last frame.
         self.engine_frame(viewport, size, cx);

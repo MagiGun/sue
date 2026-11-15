@@ -11,8 +11,7 @@
 //! one outline. Both draw again from their shapes after
 //! every edit, so edits stay sharp.
 
-use crate::brush::{Dynamics, Stroke as BrushStroke, Tip};
-use sue_core::{EntityId, PixelFormat, RasterTile2D};
+use sue_core::{PixelFormat, RasterTile2D};
 
 /// The class of a frame border layer.
 pub const FRAME: &str = "sue.paint.frame";
@@ -556,13 +555,25 @@ fn ink_line(
     rgb: [u8; 3],
     profile: impl Fn(f32) -> f32,
 ) {
-    let tip = Tip {
-        size: width.max(0.5),
-        size_by: Dynamics::pressure(0.0),
-        ..Tip::default()
-    };
+    use sue_brush::input::{Device, Kind, Sample, Settings};
+    use sue_model::brush::{Binding, input, param};
+    let mut preset = sue_model::BrushPreset::new("Pen");
+    preset.set(param::SIZE, width.max(0.5));
+    preset
+        .dynamics
+        .push(Binding::new(param::SIZE, input::PRESSURE).range(0.0, 1.0));
     let color = rgb.map(|value| f32::from(value) / 255.0);
-    let mut stroke = BrushStroke::new(EntityId::new(), tip, color, false);
+    let colors = sue_brush::paint::Colors {
+        main: color,
+        sub: color,
+    };
+    let mut stroke = sue_brush::replay::StoredStroke::new(
+        sue_brush::replay::ENGINE,
+        [0; 32],
+        &Settings::new(Device::Pen),
+        colors,
+        Vec::new(),
+    );
     let length = (to[0] - from[0]).hypot(to[1] - from[1]);
     let steps = (length / 6.0).ceil().max(2.0) as u32;
     for step in 0..=steps {
@@ -571,8 +582,22 @@ fn ink_line(
             from[0] + (to[0] - from[0]) * t,
             from[1] + (to[1] - from[1]) * t,
         ];
-        stroke.to(raster, at, profile(t).clamp(0.0, 1.0), None);
+        let kind = if step == 0 { Kind::Down } else { Kind::Move };
+        stroke.samples.push(
+            Sample::new(kind, at, f64::from(step) / 200.0).pressing(profile(t).clamp(0.0, 1.0)),
+        );
     }
+    stroke
+        .samples
+        .push(Sample::new(Kind::Up, to, f64::from(steps + 1) / 200.0));
+    let _ = sue_brush::replay::paint(
+        &stroke,
+        &preset,
+        sue_brush::paint::Resources::default(),
+        raster,
+        [0, 0],
+        false,
+    );
 }
 
 /// Paints with lines on an RGBA8 buffer through a raster.

@@ -10,6 +10,8 @@
 //! ([`lay_field`]) in the brush's blend mode, behind the layer, or as
 //! an eraser on one layer or on many.
 
+use std::sync::Arc;
+
 use sue_core::RasterTile2D;
 use sue_model::BrushPreset;
 use sue_model::brush::{EngineKind, Spacing};
@@ -24,10 +26,10 @@ use super::plan::{PlanSettings, Planned, Planner, edge_of};
 use super::settings::{Behaviours, DualBrush, TipOrder};
 use super::stamp::{Tips, stamp_coverage};
 use super::wet::{Backdrop, Wet, WetCanvas, blender};
-use crate::buffer::{Combine, MergeError, StrokeBuffer};
+use crate::buffer::{Combine, MergeError, StrokeBuffer, TILE, TileKey};
 use crate::input::StrokePoint;
 use crate::raster::{PixelRect, TipImage};
-use crate::texture::{Paper, Texture};
+use crate::texture::{Paper, Texture, TextureSettings};
 
 /// The colors a stroke paints with.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,17 +42,20 @@ pub struct Colors {
 
 /// What the stroke reads besides its points: the pictures its tips and
 /// its paper come from (decoded by whoever holds the files the preset
-/// names by hash) and the anti-overflow region.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Resources<'a> {
+/// names by hash) and the region the paint is kept in (anti-overflow,
+/// a selection). Shared, so a stroke can own them and move to a worker
+/// thread without copying a picture (Rule 5).
+#[derive(Clone, Debug, Default)]
+pub struct Resources {
     /// The tip's pictures, in the preset's order.
-    pub pictures: &'a [TipImage],
+    pub pictures: Arc<[TipImage]>,
     /// The dual brush's pictures, in its order.
-    pub dual_pictures: &'a [TipImage],
+    pub dual_pictures: Arc<[TipImage]>,
     /// The paper, when the brush is textured.
-    pub paper: Option<&'a Paper>,
-    /// Where anti-overflow keeps the paint.
-    pub overflow: Option<&'a Region>,
+    pub paper: Option<Arc<Paper>>,
+    /// Where the paint may land: anti-overflow's region, a selection, or
+    /// both multiplied.
+    pub overflow: Option<Arc<Region>>,
 }
 
 /// Where a stroke collects its paint.
@@ -71,16 +76,18 @@ struct Dual {
 
 /// One stroke with every paint behaviour.
 #[derive(Clone, Debug)]
-pub struct PaintStroke<'a> {
+pub struct PaintStroke {
     behaviours: Behaviours,
     lay: Lay,
     target: Target,
     planner: Planner,
     dual: Option<Dual>,
-    tips: Tips<'a>,
-    dual_tips: Tips<'a>,
-    texture: Option<Texture<'a>>,
-    overflow: Option<&'a Region>,
+    pictures: Arc<[TipImage]>,
+    dual_pictures: Arc<[TipImage]>,
+    /// The width of a hard round rim's antialiasing.
+    edge: f32,
+    texture: Option<(Arc<Paper>, TextureSettings)>,
+    overflow: Option<Arc<Region>>,
     /// Committed points not yet planned, kept while corners are rounded
     /// (sharp angles off), with the points before them they read.
     waiting: Vec<StrokePoint>,
@@ -89,7 +96,7 @@ pub struct PaintStroke<'a> {
     scratch: Vec<Planned>,
 }
 
-impl<'a> PaintStroke<'a> {
+impl PaintStroke {
     /// A stroke of `preset` with `behaviours`, in `colors`, with chance
     /// from `seed`, whose points carry their extra parameters in the
     /// order of `extra_keys` ([`crate::input::Pipeline::extra_keys`]).
@@ -97,7 +104,7 @@ impl<'a> PaintStroke<'a> {
     pub fn new(
         preset: &BrushPreset,
         behaviours: &Behaviours,
-        resources: Resources<'a>,
+        resources: Resources,
         colors: Colors,
         seed: u64,
         extra_keys: &[String],
@@ -176,7 +183,7 @@ impl<'a> PaintStroke<'a> {
         });
         let edge = edge_of(preset.antialias);
         let texture = match (&behaviours.texture, resources.paper) {
-            (Some(choice), Some(paper)) => Some(Texture::new(paper, choice.settings)),
+            (Some(choice), Some(paper)) => Some((paper, choice.settings)),
             _ => None,
         };
         Self {
@@ -185,14 +192,9 @@ impl<'a> PaintStroke<'a> {
             target,
             planner,
             dual,
-            tips: Tips {
-                pictures: resources.pictures,
-                edge,
-            },
-            dual_tips: Tips {
-                pictures: resources.dual_pictures,
-                edge,
-            },
+            pictures: resources.pictures,
+            dual_pictures: resources.dual_pictures,
+            edge,
             texture,
             overflow: resources.overflow,
             waiting: Vec::new(),
@@ -260,14 +262,23 @@ impl<'a> PaintStroke<'a> {
                 dual.planner
                     .push(&Self::dual_point(&dual.settings, p), &mut marks);
             }
-            stamp_coverage(&mut dual.buffer.committed(), &marks, &self.dual_tips, None);
+            stamp_coverage(&mut dual.buffer.committed(), &marks, &Tips { pictures: &self.dual_pictures, edge: self.edge }, None);
         }
         self.scratch = out;
     }
 
     /// Stamps planned dabs into the committed part or the tail.
     fn stamp(&mut self, tail: bool, dabs: &[Planned], backdrop: Option<&dyn Backdrop>) {
-        let texture = self.texture.as_ref().filter(|t| t.settings().per_dab);
+        let texture = self
+            .texture
+            .as_ref()
+            .filter(|(_, settings)| settings.per_dab)
+            .map(|(paper, settings)| Texture::new(paper, *settings));
+        let texture = texture.as_ref();
+        let tips = Tips {
+            pictures: &self.pictures,
+            edge: self.edge,
+        };
         match &mut self.target {
             Target::Coverage(buffer) => {
                 let mut painter = if tail {
@@ -275,19 +286,19 @@ impl<'a> PaintStroke<'a> {
                 } else {
                     buffer.committed()
                 };
-                stamp_coverage(&mut painter, dabs, &self.tips, texture);
+                stamp_coverage(&mut painter, dabs, &tips, texture);
             }
             Target::Color(buffer) => {
                 if tail {
                     buffer.clear_tail();
                 }
-                buffer.stamp(tail, dabs, &self.tips, texture);
+                buffer.stamp(tail, dabs, &tips, texture);
             }
             Target::Wet(canvas) => {
                 // A wet stroke reads what it laid a moment before, so
                 // only final points paint it.
                 if let (false, Some(backdrop)) = (tail, backdrop) {
-                    canvas.stamp(backdrop, dabs, &self.tips, texture);
+                    canvas.stamp(backdrop, dabs, &tips, texture);
                 }
             }
         }
@@ -376,7 +387,7 @@ impl<'a> PaintStroke<'a> {
             for p in &points {
                 planner.push(&Self::dual_point(&dual.settings, p), &mut marks);
             }
-            stamp_coverage(&mut dual.buffer.tail(), &marks, &self.dual_tips, None);
+            stamp_coverage(&mut dual.buffer.tail(), &marks, &Tips { pictures: &self.dual_pictures, edge: self.edge }, None);
         }
     }
 
@@ -413,8 +424,12 @@ impl<'a> PaintStroke<'a> {
     fn finishing(&self, live: bool) -> Finish<'_> {
         Finish {
             dual: self.dual.as_ref().map(|d| (&d.buffer, d.settings.mode)),
-            texture: self.texture.as_ref().filter(|t| !t.settings().per_dab),
-            overflow: self.overflow,
+            texture: self
+                .texture
+                .as_ref()
+                .filter(|(_, settings)| !settings.per_dab)
+                .map(|(paper, settings)| Texture::new(paper, *settings)),
+            overflow: self.overflow.as_deref(),
             watercolor: self
                 .behaviours
                 .watercolor
@@ -436,19 +451,76 @@ impl<'a> PaintStroke<'a> {
         keep_alpha: bool,
     ) -> Option<[f32; 4]> {
         match &self.target {
-            Target::Wet(canvas) => Some(canvas.laid(backdrop, x, y, self.overflow, keep_alpha)),
+            Target::Wet(canvas) => Some(canvas.laid(backdrop, x, y, self.overflow.as_deref(), keep_alpha)),
             _ => None,
         }
     }
 
-    /// The pixels the stroke spans so far, or `None` when it is empty.
+    /// The tiles whose laid pixels may have changed since the last call,
+    /// in order: those the stroke's dabs (and its dual brush's) touched,
+    /// and around them as far as the shaping of the whole stroke reads
+    /// (a watercolor edge).
+    pub fn take_dirty(&mut self) -> Vec<TileKey> {
+        let mut keys: Vec<TileKey> = match &mut self.target {
+            Target::Coverage(buffer) => buffer.take_dirty(),
+            Target::Color(buffer) => buffer.take_dirty(),
+            Target::Wet(canvas) => canvas.take_dirty(),
+        };
+        if let Some(dual) = &mut self.dual {
+            keys.extend(dual.buffer.take_dirty());
+        }
+        let apron = self.finishing(false).apron();
+        if apron > 0 && !keys.is_empty() {
+            let reach = (apron + TILE - 1) / TILE;
+            let mut grown = Vec::with_capacity(keys.len() * 9);
+            for key in &keys {
+                let [x, y] = key.origin();
+                for dy in -reach..=reach {
+                    for dx in -reach..=reach {
+                        grown.push(TileKey::of_pixel(x + dx * TILE, y + dy * TILE));
+                    }
+                }
+            }
+            keys = grown;
+        }
+        keys.sort_unstable();
+        keys.dedup();
+        keys
+    }
+
+    /// `true` where a mixing stroke changed layer pixel `(x, y)`; for a
+    /// stroke that is not wet, `false`.
+    #[must_use]
+    pub fn wet_touched(&self, x: i32, y: i32) -> bool {
+        match &self.target {
+            Target::Wet(canvas) => canvas.touched(x, y),
+            _ => false,
+        }
+    }
+
+    /// The pixels the stroke spans so far, or `None` when it is empty (a
+    /// mixing stroke: the tiles it changed).
     #[must_use]
     pub fn bounds(&self) -> Option<PixelRect> {
         let apron = self.finishing(false).apron();
         let rect = match &self.target {
             Target::Coverage(buffer) => buffer.bounds(),
             Target::Color(buffer) => buffer.bounds(),
-            Target::Wet(_) => None,
+            Target::Wet(canvas) => canvas.keys().fold(None, |rect: Option<PixelRect>, key| {
+                let [x, y] = key.origin();
+                let tile = PixelRect {
+                    x0: x,
+                    y0: y,
+                    x1: x + TILE,
+                    y1: y + TILE,
+                };
+                Some(rect.map_or(tile, |r| PixelRect {
+                    x0: r.x0.min(tile.x0),
+                    y0: r.y0.min(tile.y0),
+                    x1: r.x1.max(tile.x1),
+                    y1: r.y1.max(tile.y1),
+                }))
+            }),
         }?;
         Some(PixelRect {
             x0: rect.x0 - apron,
@@ -484,7 +556,7 @@ impl<'a> PaintStroke<'a> {
         keep_alpha: bool,
     ) -> Result<Vec<PixelRect>, MergeError> {
         if let Target::Wet(canvas) = &self.target {
-            return canvas.merge(raster, origin, self.overflow, keep_alpha);
+            return canvas.merge(raster, origin, self.overflow.as_deref(), keep_alpha);
         }
         let Some(rect) = self.bounds() else {
             return Ok(Vec::new());
