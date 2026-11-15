@@ -101,6 +101,7 @@ impl SuePaint {
             pins: Vec::new(),
             shown: Vec::new(),
             offset: info.style.offset,
+            label: tr!("puppet-warp-2"),
         });
         cx.notify(tr!("puppet-warp-click-put-pins-drag"));
     }
@@ -146,7 +147,7 @@ impl SuePaint {
         {
             cx.record(ArenaEdit(sue_core::txn::RasterEdit::new(
                 warp.layer,
-                tr!("puppet-warp-2"),
+                warp.label.clone(),
                 vec![patch],
             )));
         }

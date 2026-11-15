@@ -332,6 +332,8 @@ fn mesh(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
         && warp.pins.is_empty()
         && let Some([x0, y0, x1, y1]) = warp.bounds
     {
+        // Its undo step is named as its menu item (H-11).
+        warp.label = tr!("mesh-transformation");
         for row in 0..4 {
             for column in 0..4 {
                 let at = [

@@ -949,6 +949,9 @@ pub(crate) struct WarpSession {
     pub bounds: Option<[u32; 4]>,
     /// The layer's offset in the picture.
     pub offset: [i64; 2],
+    /// The undo step's name: the menu item that started it (Puppet Warp
+    /// or Mesh Transformation).
+    pub label: String,
 }
 
 impl SuePaint {
