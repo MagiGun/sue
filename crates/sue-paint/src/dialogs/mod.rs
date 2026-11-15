@@ -16,6 +16,7 @@ mod comps;
 mod fill;
 mod filter;
 mod frame;
+mod lines_tones;
 mod new;
 mod pressure;
 mod settings;
@@ -32,12 +33,13 @@ use crate::studio::SuePaint;
 
 use anim::{onion_ui, timelapse_ui, timeline_ui};
 use canvas::{
-    canvas_properties_ui, canvas_ui, convert_ui, material_ui, perspective_ui, print_ui, proof_ui,
-    resolution_ui, shape_3d_ui,
+    canvas_properties_ui, canvas_ui, convert_ui, grid_ui, material_ui, perspective_ui, print_ui,
+    proof_ui, resolution_ui, shape_3d_ui,
 };
 use fill::{gamut_ui, select_by_ui};
 use filter::{correction_ui, filter_ui};
 use frame::frame_ui;
+use lines_tones::lines_tones_ui;
 use pressure::pressure_ui;
 use settings::{modifiers_ui, shortcuts_ui, workspace_ui};
 use story::{page_settings_ui, story_editor_ui, story_info_ui, webtoon_ui};
@@ -49,6 +51,7 @@ pub(crate) use canvas::{
 pub(crate) use comps::CompsDialog;
 pub(crate) use fill::AdvancedFill;
 pub(crate) use filter::FilterDialog;
+pub(crate) use lines_tones::LinesTonesDialog;
 #[cfg(test)]
 pub(crate) use new::SIZES;
 pub(crate) use new::{CanvasPreset, NEW_PRESET_TARGET, NewDialog, Project, new_presets};
@@ -133,6 +136,10 @@ pub(crate) enum Dialog {
     Convert(ConvertDialog),
     /// File, Manage Fonts: Sue's shared font list.
     Fonts(sue_wm::fonts::FontManager),
+    /// Convert to Lines and Tones: its settings and live preview.
+    LinesTones(LinesTonesDialog),
+    /// View, Grid Settings: the picture and its grid as set so far.
+    Grid(EntityId, crate::grid::Grid),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -343,6 +350,8 @@ impl Dialog {
                 .room(13.0)
                 .enter_is_the_bodys(),
             Dialog::Convert(_) => Look::new(tr!("convert-layer"), Form, ok()),
+            Dialog::LinesTones(_) => Look::new(tr!("convert-to-lines-and-tones"), Wide, ok()),
+            Dialog::Grid(..) => Look::new(tr!("grid-settings"), Narrow, ok()),
             Dialog::Fonts(_) => Look::new(
                 tr!("manage-fonts"),
                 Width::Points(sue_wm::fonts::MANAGE_SIZE.x),
@@ -486,6 +495,8 @@ impl SuePaint {
             Dialog::Proof(profile) => proof_ui(ui, profile, theme),
             Dialog::CanvasProperties(props) => canvas_properties_ui(ui, props, theme),
             Dialog::Convert(convert) => convert_ui(ui, convert, theme),
+            Dialog::LinesTones(lines) => lines_tones_ui(ui, lines, theme),
+            Dialog::Grid(_, grid) => grid_ui(ui, grid, theme),
             Dialog::Message(_, paragraphs) => message_ui(ui, paragraphs, room, theme),
             Dialog::Gamut(tolerance, all) => gamut_ui(ui, tolerance, all, theme),
             Dialog::Webtoon(height, width) => webtoon_ui(ui, height, width, theme),
@@ -559,6 +570,8 @@ impl SuePaint {
             Dialog::Proof(profile) => self.proof_ok(profile),
             Dialog::CanvasProperties(props) => Self::canvas_properties_ok(cx, &props),
             Dialog::Convert(convert) => self.convert_ok(cx, &convert),
+            Dialog::LinesTones(lines) => self.lines_tones_ok(cx, &lines),
+            Dialog::Grid(picture, grid) => Self::grid_ok(cx, picture, grid),
             Dialog::Webtoon(height, width) => self.ask_export_webtoon(cx, height, width),
             Dialog::Shape3D(kind) => self.shape_3d_ok(cx, kind),
             Dialog::Timeline(fps, length) => self.timeline_ok(cx, fps, length),
@@ -615,6 +628,8 @@ impl SuePaint {
             | Dialog::StoryInfo(_)
             | Dialog::StoryEditor(_)
             | Dialog::Convert(_)
+            | Dialog::LinesTones(_)
+            | Dialog::Grid(..)
             | Dialog::Shortcuts
             | Dialog::Fonts(_) => {}
         }

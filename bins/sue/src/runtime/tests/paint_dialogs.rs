@@ -488,3 +488,192 @@ fn expand_selected_area_offers_round_or_square_corners() {
         "the dialog closed"
     );
 }
+
+/// The selection now, as a mask of coverage, read by converting it to a
+/// selection layer and undoing that again (`None`: nothing selected).
+fn selection(driver: &mut PaintDriver, page: EntityId) -> Option<Vec<u8>> {
+    let depth = driver.runtime.engine.history.depth();
+    let layers: Vec<EntityId> = sue_paint::doc::layers(&driver.runtime.engine.world.arena, page)
+        .into_iter()
+        .map(|info| info.id)
+        .collect();
+    driver.command("select.to_layer");
+    driver.settle(2);
+    if driver.runtime.engine.history.depth() == depth {
+        return None;
+    }
+    let arena = &driver.runtime.engine.world.arena;
+    let made = sue_paint::doc::layers(arena, page)
+        .into_iter()
+        .find(|info| !layers.contains(&info.id))
+        .expect("a selection layer");
+    let mask = sue_paint::doc::raster(arena, made.id)
+        .unwrap()
+        .bytes()
+        .unwrap()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| pixel[3])
+        .collect();
+    walk_to(driver, depth);
+    Some(mask)
+}
+
+/// Expands the selection by its dialog's amount, round or square.
+fn expand(driver: &mut PaintDriver, page: EntityId, corners: &str) -> Vec<u8> {
+    driver.command("select.expand");
+    driver.settle(10);
+    driver.click_text(corners);
+    driver.click_text("OK");
+    driver.settle(6);
+    selection(driver, page).expect("still a selection")
+}
+
+#[test]
+fn expand_with_square_corners_keeps_a_rectangle_square() {
+    // FGV-50: the same rectangle grown round reaches less far into its
+    // corners than grown square.
+    let mut driver = PaintDriver::new("paint-dialogs-expand-square");
+    let page = picture(&driver);
+    // A rectangle inside the canvas: everything, shrunk.
+    let rectangle = |driver: &mut PaintDriver| {
+        driver.command("select.all");
+        driver.settle(2);
+        driver.command("select.shrink");
+        driver.settle(10);
+        driver.click_text("OK");
+        driver.settle(6);
+        selection(driver, page).expect("a rectangle")
+    };
+    let count = |mask: &[u8]| mask.iter().filter(|alpha| **alpha >= 128).count();
+    let shrunk = rectangle(&mut driver);
+    let round = expand(&mut driver, page, "Round corners");
+    assert_eq!(count(&rectangle(&mut driver)), count(&shrunk));
+    let square = expand(&mut driver, page, "Square corners");
+    assert!(count(&round) > count(&shrunk));
+    assert!(
+        count(&square) > count(&round),
+        "square {} against round {}",
+        count(&square),
+        count(&round)
+    );
+}
+
+#[test]
+fn convert_to_lines_and_tones_asks_first_and_shows_the_result_small() {
+    // CTV-1: the dialog with its settings and a live preview; OK converts
+    // as one step, undone and redone exactly.
+    let mut driver = PaintDriver::new("paint-dialogs-lines-tones");
+    let page = picture(&driver);
+    let middle = paint_middle(&driver.runtime);
+    driver.step(vec![key(egui::Key::P, egui::Modifiers::NONE)]);
+    driver.drag(
+        middle - vec2(80.0, 20.0),
+        middle + vec2(80.0, 20.0),
+        egui::PointerButton::Primary,
+    );
+    let before = entities(&driver.runtime);
+    let depth = driver.runtime.engine.history.depth();
+    let layers = sue_paint::doc::layers(&driver.runtime.engine.world.arena, page).len();
+    driver.command("filter.lines_tones");
+    driver.settle(10);
+    for text in ["Extract line", "Tone work", "Edge sensitivity", "Frequency"] {
+        assert!(driver.rect_of(text).is_some(), "{text}: {:?}", driver.texts);
+    }
+    assert!(
+        told(&mut driver, Vec::new())
+            .iter()
+            .any(|(name, _)| name == "Preview"),
+        "the preview is on screen"
+    );
+    assert_eq!(
+        driver.runtime.engine.history.depth(),
+        depth,
+        "nothing changes before OK"
+    );
+    // Lines only: the tones' settings go away with their switch.
+    driver.click_text("Make a layer of tones");
+    assert!(driver.rect_of("Frequency").is_none(), "tones off");
+    driver.click_text("OK");
+    driver.settle(6);
+    let arena = &driver.runtime.engine.world.arena;
+    let now = sue_paint::doc::layers(arena, page);
+    assert_eq!(now.len(), layers + 1, "one layer of lines");
+    assert!(now.iter().any(|info| info.name == "Lines"));
+    assert!(!now.iter().any(|info| info.name == "Tones"));
+    assert_eq!(driver.runtime.engine.history.depth(), depth + 1);
+    undo_pair(&mut driver, &before, depth);
+}
+
+#[test]
+fn grid_settings_belong_to_the_picture() {
+    // FG-38: View, Grid Settings, its gap, divisions and origin, as one
+    // undo step of the picture's history.
+    let mut driver = PaintDriver::new("paint-dialogs-grid");
+    let page = picture(&driver);
+    let before = entities(&driver.runtime);
+    let depth = driver.runtime.engine.history.depth();
+    driver.command("view.grid_settings");
+    driver.settle(10);
+    for text in ["Gap", "Divisions", "Origin"] {
+        assert!(driver.rect_of(text).is_some(), "{text}: {:?}", driver.texts);
+    }
+    click_named(&mut driver, "Divisions");
+    for _ in 0..3 {
+        driver.step(vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)]);
+    }
+    driver.step(vec![key(egui::Key::Tab, egui::Modifiers::NONE)]);
+    driver.click_text("Middle");
+    driver.click_text("OK");
+    driver.settle(6);
+    let grid = sue_paint::grid::Grid::of(&driver.runtime.engine.world.arena, page);
+    assert_eq!(
+        grid,
+        sue_paint::grid::Grid {
+            gap: 64.0,
+            divisions: 4,
+            origin: 1,
+        }
+    );
+    assert_eq!(grid.step(), 16.0, "Snap to Grid follows the finest lines");
+    assert_eq!(driver.runtime.engine.history.depth(), depth + 1);
+    undo_pair(&mut driver, &before, depth);
+    // OK with nothing changed puts nothing on the history.
+    walk_to(&mut driver, depth);
+    driver.command("view.grid_settings");
+    driver.settle(10);
+    driver.click_text("OK");
+    driver.settle(6);
+    assert_eq!(driver.runtime.engine.history.depth(), depth);
+}
+
+#[test]
+fn text_takes_the_main_the_sub_or_its_own_color() {
+    // FGV-39 (the dialog's part): the words' color from the drawing
+    // colors. Bold, italic, underline and strike through are the text
+    // model's (P4-1c).
+    let mut driver = PaintDriver::new("paint-dialogs-text-ink");
+    driver.command("layer.new.text");
+    driver.settle(10);
+    for text in ["Main color", "Sub color", "Own color"] {
+        assert!(driver.rect_of(text).is_some(), "{text}: {:?}", driver.texts);
+    }
+    driver.step(vec![egui::Event::Text("Hi".to_owned())]);
+    driver.click_text("Sub color");
+    driver.click_text("OK");
+    driver.settle(6);
+    let page = picture(&driver);
+    let layer = sue_paint::doc::layers(&driver.runtime.engine.world.arena, page)
+        .into_iter()
+        .find(|info| property(&driver, info.id, "text.content").is_some())
+        .expect("a text layer");
+    let Some(Value::Color(ink)) = property(&driver, layer.id, "text.color") else {
+        panic!("the words have a color");
+    };
+    let rgb = ink.to_space(sue_core::ColorSpace::Srgb).rgb;
+    assert!(
+        rgb.iter().all(|c| *c > 0.99),
+        "the sub color, white: {rgb:?}"
+    );
+}

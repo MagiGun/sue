@@ -45,6 +45,7 @@ mod commands;
 mod dialogs;
 mod dock;
 mod extras;
+pub mod grid;
 pub mod hub;
 mod icons;
 mod launchers;

@@ -688,6 +688,60 @@ fn convert_edit(
     Ok((edit, id))
 }
 
+/// View, Grid Settings: the gap between the main lines, how many parts a
+/// cell is divided into, and where the grid starts.
+pub(super) fn grid_ui(ui: &mut Ui, grid: &mut crate::grid::Grid, theme: &Theme) -> Outcome {
+    form_grid(ui, "sue-paint-grid", theme, |form| {
+        let name = tr!("grid-gap");
+        form.row(&name, |ui| {
+            let px = tr!("px");
+            let mut gap = f64::from(grid.gap);
+            let reads = Reads {
+                range: crate::grid::GAPS,
+                decimals: 0,
+                suffix: &px,
+            };
+            if number(ui, "sue-paint-grid-gap", &mut gap, &reads, &name, theme) {
+                grid.gap = gap as f32;
+            }
+        });
+        let name = tr!("grid-divisions");
+        form.row(&name, |ui| {
+            let mut divisions = f64::from(grid.divisions);
+            let reads = Reads {
+                range: 1.0..=f64::from(crate::grid::MOST_DIVISIONS),
+                decimals: 0,
+                suffix: "",
+            };
+            if number(
+                ui,
+                "sue-paint-grid-divisions",
+                &mut divisions,
+                &reads,
+                &name,
+                theme,
+            ) {
+                grid.divisions = divisions.round() as u32;
+            }
+        });
+        form.row(&tr!("grid-origin"), |ui| {
+            let options = [
+                (0, tr!("grid-origin-top-left")),
+                (1, tr!("grid-origin-center")),
+            ];
+            radios(
+                ui,
+                "sue-paint-grid-origin",
+                &mut grid.origin,
+                &options,
+                theme,
+            );
+        });
+    });
+    note(ui, &tr!("grid-hint"), theme);
+    Outcome::Open
+}
+
 impl SuePaint {
     /// Converts the layer as Convert Layer asks, as one undo step; with
     /// Keep original layer, a copy above it is converted and the layer
@@ -737,6 +791,14 @@ impl SuePaint {
             && let Some(doc) = self.doc_mut()
         {
             doc.layer = Some(*id);
+        }
+    }
+
+    /// Grid Settings' OK: the picture's new grid, as one undo step (none
+    /// when nothing changed).
+    pub(super) fn grid_ok(cx: &mut AppletContext<'_>, picture: EntityId, grid: crate::grid::Grid) {
+        if let Some(edit) = grid.apply(&cx.world.arena, picture) {
+            Self::apply(cx, edit);
         }
     }
 
