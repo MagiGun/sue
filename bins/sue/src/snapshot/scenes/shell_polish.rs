@@ -19,6 +19,7 @@ const NEWS: [&str; 5] = [
 /// behind them; unfolded; waiting under the Settings dialog; and on a
 /// phone, the newest alone over the tab bar. Leaves no notice behind.
 pub(super) fn notices(tour: &mut Tour<'_>) -> Result<(), String> {
+    tour.keep_notices = true;
     for (index, text) in NEWS.iter().enumerate() {
         tour.runtime.shell.notify(*text, index == NEWS.len() - 1);
     }
@@ -46,6 +47,7 @@ pub(super) fn notices(tour: &mut Tour<'_>) -> Result<(), String> {
     }
     tour.camera.size = size;
     tour.runtime.shell.clear_notices();
+    tour.keep_notices = false;
     tour.settle();
     Ok(())
 }

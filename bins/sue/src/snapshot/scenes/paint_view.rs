@@ -60,7 +60,7 @@ pub(super) fn marks(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.paint_command("anim.play");
     let path = tour.dir.join("32c-sue-paint-playback-fps.png");
     tour.camera.shoot_after(&mut tour.runtime, &path, 90)?;
-    tour.written.push(path);
+    tour.taken(path);
     tour.paint_command("anim.play");
     tour.paint_command("view.playback_fps");
     // Back on the fourth frame, where the timeline scene left it.

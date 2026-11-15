@@ -13,8 +13,15 @@ const START: Pos2 = Pos2::new(470.0, 300.0);
 /// through the canvas, so the brush engine paints it. Last in the tour:
 /// its steps stay in Sue Paint's history.
 pub(super) fn pen_stroke(tour: &mut Tour<'_>) -> Result<(), String> {
+    // In the desktop window, whatever size the scene before left, with
+    // Sue Paint's palettes at rest.
+    let size = tour.camera.size;
+    tour.camera.size = tour.desktop;
+    super::paint_at_rest(tour);
     tour.paint_command("layer.new");
-    tour.paint_command("tool.pen");
+    // The G-pen by its own command: Pen's key, pressed on the Pen, goes
+    // on to the next tool of its group.
+    tour.paint_command("subtool.pen.G-pen");
     let button = |at: Pos2, pressed| egui::Event::PointerButton {
         pos: at,
         button: egui::PointerButton::Primary,
@@ -36,5 +43,7 @@ pub(super) fn pen_stroke(tour: &mut Tour<'_>) -> Result<(), String> {
     let last = path[path.len() - 1];
     input.push(vec![button(last, false)]);
     input.push(vec![egui::Event::PointerMoved(last + vec2(0.0, 220.0))]);
-    tour.shoot("08s-sue-paint-pen-stroke")
+    tour.shoot("08s-sue-paint-pen-stroke")?;
+    tour.camera.size = size;
+    Ok(())
 }
