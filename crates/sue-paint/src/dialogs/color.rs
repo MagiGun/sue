@@ -17,13 +17,15 @@ use crate::colorsets::Standard;
 use crate::studio::SuePaint;
 
 /// The Color Settings dialog's size before the screen clamps it.
-const SETTINGS_SIZE: egui::Vec2 = egui::Vec2::new(660.0, 400.0);
+const SETTINGS_SIZE: egui::Vec2 = egui::Vec2::new(680.0, 450.0);
 /// Edit Color Sets' size.
-const SETS_SIZE: egui::Vec2 = egui::Vec2::new(520.0, 420.0);
+const SETS_SIZE: egui::Vec2 = egui::Vec2::new(600.0, 420.0);
 /// The size of the dialogs that ask for a name.
-const NAME_SIZE: egui::Vec2 = egui::Vec2::new(360.0, 150.0);
+const NAME_SIZE: egui::Vec2 = egui::Vec2::new(380.0, 180.0);
 /// How many control heights the Color Settings wheel is across.
 const WHEEL_ROWS: f32 = 8.0;
+/// How many control heights the buttons of Edit Color Sets are wide.
+const BUTTON_ROWS: f32 = 7.5;
 /// How many control heights a number field of Color Settings is wide.
 const FIELD_ROWS: f32 = 2.6;
 
@@ -424,8 +426,15 @@ impl SuePaint {
         *picked = (*picked).min(last);
         let density = Density::of(ui);
         let gap = theme.space(Space::S5);
-        let room = ui.available_size();
-        let buttons = density.control_height() * WHEEL_ROWS / 2.0 + gap;
+        // The room the dialog shows: its body scrolls, so what is left of
+        // the view (not of the endless scrolled content) is what fits.
+        let view = ui.clip_rect();
+        let room = vec2(
+            view.right() - ui.cursor().left(),
+            view.bottom() - ui.cursor().top(),
+        );
+        let buttons = density.control_height() * BUTTON_ROWS + gap;
+        ui.set_max_width(room.x);
         let list_width = (room.x - buttons - gap).max(buttons);
         let footer = density.control_height() + theme.space(Space::S6);
         let list_height = (room.y - footer).max(density.row());
@@ -442,7 +451,11 @@ impl SuePaint {
                 theme.hairline(),
                 egui::StrokeKind::Inside,
             );
-            let mut list = ui.new_child(UiBuilder::new().max_rect(area));
+            let mut list = ui.new_child(
+                UiBuilder::new()
+                    .max_rect(area)
+                    .layout(Layout::top_down(Align::Min)),
+            );
             ui::ScrollView::vertical("sue-paint-edit-sets").show(&mut list, theme, |ui| {
                 let mut rows: Vec<Rect> = Vec::with_capacity(sets.sets.len());
                 let drag_id = Id::unique("sue-paint-edit-sets-drag");
@@ -503,16 +516,14 @@ impl SuePaint {
             // What can be done to the set picked.
             ui.vertical(|ui| {
                 ui.set_width(buttons - gap);
-                ui::form_grid(ui, "sue-paint-edit-sets-form", theme, |form| {
-                    form.row(&tr!("name"), |ui| {
-                        let field = ui::text_field("sue-paint-edit-set-name", name)
-                            .label(&tr!("name"))
-                            .show(ui, theme);
-                        if field.lost_focus() && sets.rename(*picked, name) {
-                            sets.sets[*picked].name.clone_into(name);
-                        }
-                    });
-                });
+                caption(ui, &tr!("color-set-name"), theme);
+                let field = ui::text_field("sue-paint-edit-set-name", name)
+                    .label(&tr!("color-set-name"))
+                    .width(buttons - gap)
+                    .show(ui, theme);
+                if field.lost_focus() && sets.rename(*picked, name) {
+                    sets.sets[*picked].name.clone_into(name);
+                }
                 ui.add_space(theme.space(Space::S4));
                 if ui::button("sue-paint-set-new", &tr!("new-color-set"))
                     .icon(sue_wm::icons::Icon::Plus)
@@ -596,10 +607,14 @@ impl SuePaint {
         } else if down && *picked < last {
             moved = Some((*picked, *picked + 1));
         }
-        if let Some((from, to)) = moved
-            && sets.move_set(from, to)
-        {
-            chosen = Some(to);
+        if let Some((from, to)) = moved {
+            // The name typed so far goes to its set before the sets move,
+            // and the set picked stays picked wherever it lands.
+            sets.rename(*picked, name);
+            if sets.move_set(from, to) {
+                *picked = moved_index(*picked, from, to);
+                chosen = Some(to);
+            }
         }
         if let Some(index) = chosen {
             // The name typed so far goes to the set it was typed for.
@@ -627,16 +642,32 @@ impl SuePaint {
     }
 }
 
+/// Where the item at `index` is after the item at `from` moved to `to`.
+fn moved_index(index: usize, from: usize, to: usize) -> usize {
+    if index == from {
+        to
+    } else if from < index && to >= index {
+        index - 1
+    } else if from > index && to <= index {
+        index + 1
+    } else {
+        index
+    }
+}
+
 /// A dialog that asks for a name.
 fn name_ui(ui: &mut Ui, salt: &str, name: &mut String, theme: &Theme) -> Outcome {
     let field = ui::text_field(salt, name)
-        .label(&tr!("name"))
+        .label(&tr!("color-set-name"))
         .show(ui, theme);
     // The field has the keyboard from the start.
     if !field.has_focus() && ui.memory(|memory| memory.focused().is_none()) {
         field.request_focus();
     }
-    let entered = field.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+    // Enter in the field is OK (the field gives up the keyboard as it
+    // takes the key, so either may be seen this frame).
+    let entered = (field.lost_focus() || field.has_focus())
+        && ui.input(|input| input.key_pressed(Key::Enter));
     let outcome = accept_cancel(ui, &tr!("ok"), theme);
     if entered { Outcome::Ok } else { outcome }
 }
@@ -675,24 +706,25 @@ fn settings_ui(ui: &mut Ui, settings: &mut ColorSettings, theme: &Theme) -> Outc
                     ("now", settings.rgb, tr!("color-new")),
                     ("before", settings.before, tr!("color-current")),
                 ] {
-                    let (rect, response) = ui.allocate_exact_size(vec2(half, tall), Sense::click());
-                    let [r, g, b] = rgb;
-                    sue_wm::swatch(ui, rect, [r, g, b, u8::MAX], theme);
-                    ui::focus_ring(ui, &response, theme.radius(ui::Radius::Xs), theme);
-                    let response =
-                        ui::tooltip(response, &ui::Tip::new(&name).help(&color::hex(rgb)), theme);
-                    if salt == "before" && response.clicked() {
-                        settings.set(settings.before);
-                    }
+                    ui.vertical(|ui| {
+                        let (rect, response) =
+                            ui.allocate_exact_size(vec2(half, tall), Sense::click());
+                        let [r, g, b] = rgb;
+                        sue_wm::swatch(ui, rect, [r, g, b, u8::MAX], theme);
+                        ui::focus_ring(ui, &response, theme.radius(ui::Radius::Xs), theme);
+                        let help = if salt == "before" {
+                            tr!("color-current-help")
+                        } else {
+                            color::hex(rgb)
+                        };
+                        let response =
+                            ui::tooltip(response, &ui::Tip::new(&name).help(&help), theme);
+                        if salt == "before" && response.clicked() {
+                            settings.set(settings.before);
+                        }
+                        caption(ui, &name, theme);
+                    });
                 }
-            });
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = theme.space(Space::S2);
-                ui.set_width(half * 2.0 + theme.space(Space::S2));
-                caption(ui, &tr!("color-new"), theme);
-                let rest = half - ui.min_rect().width();
-                ui.add_space(rest.max(f32::EPSILON));
-                caption(ui, &tr!("color-current"), theme);
             });
             ui.add_space(theme.space(Space::S4));
             ui::form_row(ui, &tr!("hex"), theme.space(Space::S7), theme, |ui| {
@@ -855,5 +887,21 @@ mod tests {
         }
         // Out of sRGB, clipped rather than wrapped.
         assert_eq!(rgb_of_lab([50.0, 127.0, -128.0])[1], 0);
+    }
+
+    #[test]
+    fn a_picked_set_is_followed_through_a_move() {
+        let mut order = vec![0, 1, 2, 3, 4];
+        for (from, to) in [(4, 0), (0, 3), (2, 1), (1, 1)] {
+            for index in 0..order.len() {
+                let item = order[index];
+                let mut moved = order.clone();
+                let one = moved.remove(from);
+                moved.insert(to, one);
+                assert_eq!(moved[moved_index(index, from, to)], item);
+            }
+            let one = order.remove(from);
+            order.insert(to, one);
+        }
     }
 }

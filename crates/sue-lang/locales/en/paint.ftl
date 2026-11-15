@@ -2567,3 +2567,5 @@ corner-top-left = Top left corner
 corner-top-right = Top right corner
 corner-bottom-left = Bottom left corner
 corner-bottom-right = Bottom right corner
+color-set-name = Name
+color-current-help = Click to take this color back
