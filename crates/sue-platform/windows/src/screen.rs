@@ -21,12 +21,14 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CLR_INVALID, CreateSolidBrush, DEFAULT_GUI_FONT, DT_LEFT, DT_NOPREFIX,
+    BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CLR_INVALID, CreateFontW, CreateSolidBrush,
+    DEFAULT_CHARSET, DEFAULT_GUI_FONT, FW_NORMAL, OUT_DEFAULT_PRECIS, DT_LEFT, DT_NOPREFIX,
     DeleteObject, DrawTextW, EndPaint, FillRect, GetDC, GetPixel, GetStockObject, InvalidateRect,
     MONITOR_DEFAULTTONULL, MonitorFromPoint, PAINTSTRUCT, ReleaseDC, SelectObject, SetBkMode,
     SetTextColor, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
@@ -366,8 +368,20 @@ fn run_pick(shared: &Arc<Shared>, hide: bool) {
 
 const CLASS: PCWSTR = w!("SueScreenPick");
 const LABEL_CLASS: PCWSTR = w!("SueScreenPickLabel");
-/// The label's size, in pixels.
+/// The label's size at 96 dots per inch (100 %); [`at_dpi`] scales it
+/// and every place inside it to the screen it is on.
 const LABEL_SIZE: [i32; 2] = [196, 44];
+
+/// `value`, given at 96 dots per inch, at `dpi`.
+fn at_dpi(value: i32, dpi: u32) -> i32 {
+    let dpi = if dpi == 0 { 96 } else { dpi };
+    (value * dpi.min(960) as i32 + 48) / 96
+}
+
+/// The label's size at `dpi`.
+fn label_size(dpi: u32) -> [i32; 2] {
+    LABEL_SIZE.map(|side| at_dpi(side, dpi))
+}
 
 /// Makes the clear window over every screen and brings it to the front.
 #[allow(
@@ -489,15 +503,20 @@ fn follow(x: i32, y: i32, color: [u8; 3]) {
         );
     });
     let [left, top, width, height] = virtual_screen();
-    // Below right of the pointer, kept on the screen.
-    let mut at = [x + 18, y + 22];
-    if at[0] + LABEL_SIZE[0] > left + width {
-        at[0] = x - 18 - LABEL_SIZE[0];
-    }
-    if at[1] + LABEL_SIZE[1] > top + height {
-        at[1] = y - 22 - LABEL_SIZE[1];
-    }
     let label = HWND(label as *mut _);
+    // SAFETY: reads a fact of this thread's live label window: the dots
+    // per inch of the screen it is on (0 on failure, read as 96).
+    let dpi = unsafe { GetDpiForWindow(label) };
+    let size = label_size(dpi);
+    let (gap_x, gap_y) = (at_dpi(18, dpi), at_dpi(22, dpi));
+    // Below right of the pointer, kept on the screen.
+    let mut at = [x + gap_x, y + gap_y];
+    if at[0] + size[0] > left + width {
+        at[0] = x - gap_x - size[0];
+    }
+    if at[1] + size[1] > top + height {
+        at[1] = y - gap_y - size[1];
+    }
     // SAFETY: the label window of this thread, alive until the pick
     // ends; the calls only move it and ask it to draw again.
     unsafe {
@@ -506,8 +525,8 @@ fn follow(x: i32, y: i32, color: [u8; 3]) {
             Some(HWND_TOPMOST),
             at[0],
             at[1],
-            LABEL_SIZE[0],
-            LABEL_SIZE[1],
+            size[0],
+            size[1],
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
         let _ = InvalidateRect(Some(label), None, false);
@@ -531,63 +550,64 @@ unsafe extern "system" fn label_procedure(
     }
     let (mut title, mut values, swatch) = LABEL_TEXT.with(|text| text.borrow().clone());
     let mut paint = PAINTSTRUCT::default();
+    // SAFETY: reads a fact of this live window (0 on failure, read as 96).
+    let dpi = unsafe { GetDpiForWindow(window) };
+    let s = |value: i32| at_dpi(value, dpi);
+    let size = label_size(dpi);
+    let area = |left: i32, top: i32, right: i32, bottom: i32| RECT {
+        left,
+        top,
+        right,
+        bottom,
+    };
     // SAFETY: BeginPaint and EndPaint pair on this window in this
-    // WM_PAINT; every brush made here is deleted after use; the font is
-    // a stock one (never deleted) and the old one is selected back.
+    // WM_PAINT; every brush and the font made here are deleted after
+    // use, and the font that was in the context is selected back first.
     unsafe {
         let dc = BeginPaint(window, &raw mut paint);
         let boxes = [
-            (
-                COLORREF(0x0020_2020),
-                RECT {
-                    left: 0,
-                    top: 0,
-                    right: LABEL_SIZE[0],
-                    bottom: LABEL_SIZE[1],
-                },
-            ),
-            (
-                COLORREF(0x00f0_f0f0),
-                RECT {
-                    left: 6,
-                    top: 6,
-                    right: 38,
-                    bottom: 38,
-                },
-            ),
-            (
-                swatch,
-                RECT {
-                    left: 7,
-                    top: 7,
-                    right: 37,
-                    bottom: 37,
-                },
-            ),
+            (COLORREF(0x0020_2020), area(0, 0, size[0], size[1])),
+            (COLORREF(0x00f0_f0f0), area(s(6), s(6), s(38), s(38))),
+            (swatch, area(s(7), s(7), s(37), s(37))),
         ];
-        for (color, area) in boxes {
+        for (color, rect) in boxes {
             let brush = CreateSolidBrush(color);
-            FillRect(dc, &raw const area, brush);
+            FillRect(dc, &raw const rect, brush);
             let _ = DeleteObject(brush.into());
         }
-        let old = SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
+        // Windows' own interface font, as tall at this screen's scale as
+        // at 100 % (the stock font when it cannot be made).
+        let font = CreateFontW(
+            -s(13),
+            0,
+            0,
+            0,
+            FW_NORMAL.0 as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            0,
+            w!("Segoe UI"),
+        );
+        let old = if font.is_invalid() {
+            SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT))
+        } else {
+            SelectObject(dc, font.into())
+        };
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, COLORREF(0x00f0_f0f0));
-        let mut first = RECT {
-            left: 46,
-            top: 6,
-            right: LABEL_SIZE[0] - 4,
-            bottom: 22,
-        };
+        let mut first = area(s(46), s(5), size[0] - s(4), s(22));
         DrawTextW(dc, &mut title, &raw mut first, DT_LEFT | DT_NOPREFIX);
-        let mut second = RECT {
-            left: 46,
-            top: 22,
-            right: LABEL_SIZE[0] - 4,
-            bottom: 40,
-        };
+        let mut second = area(s(46), s(22), size[0] - s(4), s(40));
         DrawTextW(dc, &mut values, &raw mut second, DT_LEFT | DT_NOPREFIX);
         SelectObject(dc, old);
+        if !font.is_invalid() {
+            let _ = DeleteObject(font.into());
+        }
         let _ = EndPaint(window, &raw const paint);
     }
     LRESULT(0)
@@ -924,6 +944,14 @@ mod tests {
         let [left, top, ..] = virtual_screen();
         assert_eq!(pixel_at(left, top), Err(ScreenError::Capture));
         pretend_capture_fails(false);
+    }
+
+    #[test]
+    fn the_label_grows_with_the_screen_scale() {
+        assert_eq!(label_size(96), LABEL_SIZE);
+        assert_eq!(label_size(0), LABEL_SIZE, "an unknown scale reads as 100 %");
+        assert_eq!(label_size(192), [392, 88]);
+        assert_eq!(at_dpi(6, 144), 9);
     }
 
     #[test]
