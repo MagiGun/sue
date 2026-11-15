@@ -714,7 +714,7 @@ fn sue_paint_timeline_zooms_and_pans_with_the_wheel_and_the_middle_button() {
 
 /// The arena as bytes (entities, ids, relations), to compare before and
 /// after an undo.
-fn arena_bytes(paint: &PaintDriver) -> Vec<u8> {
+pub(super) fn arena_bytes(paint: &PaintDriver) -> Vec<u8> {
     let mut out = sue_core::codec::Writer::new();
     paint.runtime.engine.world.arena.encode(&mut out);
     out.into_bytes()
@@ -2368,11 +2368,27 @@ fn sue_paint_timeline_frames_take_the_keyboard_and_scrub_their_sound() {
     paint.command("anim.next");
     paint.settle(2);
     assert_eq!(loaded(&paint), Some((6_000, 10_000)), "frame 4's sound");
+    // Dragged along the ruler, the frame reached plays its sound.
+    let texts = paint.settle(2);
+    let seven = texts
+        .iter()
+        .find(|(text, rect)| text == "7" && (rect.center().y - one.center().y).abs() < 2.0)
+        .map(|(_, rect)| *rect)
+        .expect("frame 7 on the ruler");
+    paint.drag(one.center(), seven.center(), egui::PointerButton::Primary);
+    let reached: usize = frame_read(&paint.settle(2)).parse().expect("a frame");
+    assert!(reached > 4, "the drag moved the frame: {reached}");
+    let start = (reached - 1) * 2_000;
+    assert_eq!(
+        loaded(&paint),
+        Some((start, start + 4_000)),
+        "frame {reached}'s sound"
+    );
     // Off again: stepping plays nothing new.
     paint.command("anim.audio.scrub");
     paint.command("anim.next");
     paint.settle(2);
-    assert_eq!(loaded(&paint), Some((6_000, 10_000)), "nothing new");
+    assert_eq!(loaded(&paint), Some((start, start + 4_000)), "nothing new");
 }
 
 #[test]

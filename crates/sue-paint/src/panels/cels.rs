@@ -273,6 +273,16 @@ impl SuePaint {
                     .get(table.from, table.kind(), *layer)
                     .is_some()
         });
+        // A held opacity belongs to the entry picked: once another is
+        // picked (or none), it no longer shows anywhere.
+        if self
+            .anim_ui
+            .cels
+            .live
+            .is_some_and(|(table, layer, _)| picked != Some((table, layer)))
+        {
+            self.anim_ui.cels.live = None;
+        }
         let foot_height = if picked.is_some() {
             Density::of(ui).control_height() * 2.0 + theme.space(Space::S2) * 3.0
         } else {

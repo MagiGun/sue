@@ -3,7 +3,7 @@
 //! opacity and color mode, and a layer dragged from the Layer palette to
 //! register it.
 
-use super::paint_anim::{open_picture, press};
+use super::paint_anim::{arena_bytes, open_picture, press};
 use super::*;
 
 /// The cel being drawn: the one the timeline shows on its folder's track
@@ -93,8 +93,10 @@ fn sue_paint_animation_cels_entries_have_an_eye_opacity_and_mode_and_take_a_drop
 
     // Drag to register: Layer 1's row let go over the cel's light table.
     let depth = paint.runtime.engine.history.depth();
+    let before_drop = arena_bytes(&paint);
     paint.drag(row.center(), caption.center(), egui::PointerButton::Primary);
     assert_eq!(on_table(&paint), vec![layer], "registered by the drop");
+    let after_drop = arena_bytes(&paint);
     assert_eq!(
         paint.runtime.engine.history.depth(),
         depth + 1,
@@ -114,10 +116,10 @@ fn sue_paint_animation_cels_entries_have_an_eye_opacity_and_mode_and_take_a_drop
     // Undo and redo the drop: the arena as before, then as after.
     paint.command("edit.undo");
     paint.settle(2);
-    assert!(on_table(&paint).is_empty(), "undone");
+    assert!(arena_bytes(&paint) == before_drop, "undo is exact");
     paint.command("edit.redo");
     paint.settle(4);
-    assert_eq!(on_table(&paint), vec![layer], "redone");
+    assert!(arena_bytes(&paint) == after_drop, "redo is exact");
     // Dropped again: it is on the table once, and says so.
     let depth = paint.runtime.engine.history.depth();
     let caption = in_right_dock(&paint, "Light table of cel 2");
@@ -152,16 +154,20 @@ fn sue_paint_animation_cels_entries_have_an_eye_opacity_and_mode_and_take_a_drop
     let entry = in_cels(&texts, "Layer 1", caption.bottom()).expect("the entry");
     let found = super::paint_anim::tips_along(&mut paint, entry.top(), 846.0, entry.left());
     let eye = super::paint_anim::tip(&found, "Show or Hide on the Light Table");
+    let before_eye = arena_bytes(&paint);
     super::paint_anim::click_at(&mut paint, eye);
     assert!(!shown_entry(&paint).shown, "the eye hides it");
     assert_eq!(traced(&paint), 0, "and the light table leaves it out");
+    let after_eye = arena_bytes(&paint);
     paint.command("edit.undo");
     paint.settle(2);
     assert!(shown_entry(&paint).shown, "undo shows it again");
     assert_eq!(traced(&paint), 1);
+    assert!(arena_bytes(&paint) == before_eye, "undo is exact");
     paint.command("edit.redo");
     paint.settle(2);
     assert!(!shown_entry(&paint).shown, "redo hides it");
+    assert!(arena_bytes(&paint) == after_eye, "redo is exact");
     paint.command("edit.undo");
     paint.settle(2);
 
@@ -197,6 +203,7 @@ fn sue_paint_animation_cels_entries_have_an_eye_opacity_and_mode_and_take_a_drop
     // Dragged along its track, it shows at once and is kept as one step
     // when let go.
     let depth = paint.runtime.engine.history.depth();
+    let before_drag = arena_bytes(&paint);
     let track = egui::Rect::from_min_max(
         Pos2::new(opacity.right() + 12.0, opacity.top()),
         Pos2::new(number.left() - 12.0, opacity.bottom()),
@@ -206,6 +213,7 @@ fn sue_paint_animation_cels_entries_have_an_eye_opacity_and_mode_and_take_a_drop
     paint.drag(from, to, egui::PointerButton::Primary);
     let kept = shown_entry(&paint).opacity;
     assert!(kept > 0.2 && kept < 0.7, "dragged to about 40 %: {kept}");
+    let after_drag = arena_bytes(&paint);
     assert_eq!(
         paint.runtime.engine.history.depth(),
         depth + 1,
@@ -223,9 +231,11 @@ fn sue_paint_animation_cels_entries_have_an_eye_opacity_and_mode_and_take_a_drop
     paint.command("edit.undo");
     paint.settle(2);
     assert!((shown_entry(&paint).opacity - 1.0).abs() < 1e-3, "undone");
+    assert!(arena_bytes(&paint) == before_drag, "undo is exact");
     paint.command("edit.redo");
     paint.settle(2);
     assert!((shown_entry(&paint).opacity - kept).abs() < 1e-3, "redone");
+    assert!(arena_bytes(&paint) == after_drag, "redo is exact");
 
     // The color mode: Own colors, never tinted.
     let texts = paint.settle(2);
@@ -247,6 +257,7 @@ fn sue_paint_animation_cels_entries_have_an_eye_opacity_and_mode_and_take_a_drop
         .next()
         .unwrap_or_else(|| panic!("Own colors in the list: {:?}", paint.texts));
     super::paint_anim::click_at(&mut paint, own.center());
+    let after_mode = arena_bytes(&paint);
     assert_eq!(
         shown_entry(&paint).mode,
         sue_paint::anim::EntryMode::Own,
@@ -260,6 +271,12 @@ fn sue_paint_animation_cels_entries_have_an_eye_opacity_and_mode_and_take_a_drop
         (shown_entry(&paint).opacity - kept).abs() < 1e-3,
         "one step"
     );
+    assert!(arena_bytes(&paint) == after_drag, "undo is exact");
+    paint.command("edit.redo");
+    paint.settle(2);
+    assert!(arena_bytes(&paint) == after_mode, "redo is exact");
+    paint.command("edit.undo");
+    paint.settle(2);
 
     // Its X takes it off, as one step.
     let texts = paint.settle(2);
@@ -267,7 +284,15 @@ fn sue_paint_animation_cels_entries_have_an_eye_opacity_and_mode_and_take_a_drop
         .unwrap_or_else(|| panic!("the entry: {texts:?}"));
     let found = super::paint_anim::tips_along(&mut paint, entry.top(), entry.right(), 1104.0);
     let off = super::paint_anim::tip(&found, "Deregister from the light table");
+    let before_off = arena_bytes(&paint);
     super::paint_anim::click_at(&mut paint, off);
     assert!(on_table(&paint).is_empty(), "taken off");
+    let after_off = arena_bytes(&paint);
+    paint.command("edit.undo");
+    paint.settle(2);
+    assert!(arena_bytes(&paint) == before_off, "undo is exact");
+    paint.command("edit.redo");
+    paint.settle(2);
+    assert!(arena_bytes(&paint) == after_off, "redo is exact");
     press(&mut paint, egui::Key::Escape);
 }
