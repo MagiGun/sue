@@ -37,15 +37,12 @@ impl SuePaint {
             return false;
         };
         heading(ui, &tr!("editing-vector"), theme);
-        // One width for the row labels, so their controls line up.
+        // One width for the color and shape rows' labels, so their
+        // controls line up. Mode keeps its own: its two segments are wide
+        // and would push past a narrow palette.
         let width = label_width(
             ui,
-            &[
-                tr!("mode"),
-                tr!("main-color"),
-                tr!("sub-color"),
-                tr!("brush-shape"),
-            ],
+            &[tr!("main-color"), tr!("sub-color"), tr!("brush-shape")],
             theme,
         );
         let lines = vector::lines(&vector::geometry(arena, layer));
@@ -53,7 +50,7 @@ impl SuePaint {
         // Mode and Adjust line thickness when scaling: how the box works.
         let modes = [tr!("scale"), tr!("free-transform")];
         ui.horizontal(|ui| {
-            row_label(ui, &tr!("mode"), width, theme);
+            ui.label(egui::RichText::new(tr!("mode")).color(theme.muted));
             let strip = segmented(
                 "sue-paint-lines-mode",
                 &modes,
@@ -322,15 +319,12 @@ fn label_width(ui: &Ui, names: &[String], theme: &Theme) -> f32 {
         .fold(0.0, f32::max)
 }
 
-/// A row's label, muted, `width` wide and centred on the row's controls.
+/// A row's label, muted, then room up to `width`, so the row's
+/// controls start where the other rows' do.
 fn row_label(ui: &mut Ui, text: &str, width: f32, theme: &Theme) {
-    let height = ui.spacing().interact_size.y;
-    ui.allocate_ui_with_layout(
-        egui::vec2(width, height),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.set_min_width(width);
-            ui.label(egui::RichText::new(text).color(theme.muted));
-        },
-    );
+    let label = ui.label(egui::RichText::new(text).color(theme.muted));
+    let rest = width - label.rect.width();
+    if rest > 0.0 {
+        ui.add_space(rest);
+    }
 }
