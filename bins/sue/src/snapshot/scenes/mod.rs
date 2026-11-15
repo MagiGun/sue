@@ -66,6 +66,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_dialogs::menu_and_dialogs(tour)?;
     paint_dialogs::pages(tour)?;
     paint_comic::pages(tour)?;
+    paint_comic::frames(tour)?;
     paint_timeline::timeline(tour)?;
     paint_view::marks(tour)?;
     paint_layers::property(tour)?;

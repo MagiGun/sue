@@ -41,6 +41,17 @@ fn page_cell(tour: &mut Tour<'_>, number: usize) -> Result<Pos2, String> {
         .ok_or_else(|| format!("page {number} is not in the Page Manager"))
 }
 
+/// Presses `key` once.
+fn key(tour: &mut Tour<'_>, key: egui::Key) {
+    tour.camera.input.push(vec![egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+}
+
 /// Presses `button` at `at` once, or twice for a double-click.
 fn press(tour: &mut Tour<'_>, at: Pos2, button: egui::PointerButton, times: usize) {
     let event = |pressed| egui::Event::PointerButton {
@@ -68,13 +79,7 @@ pub(super) fn pages(tour: &mut Tour<'_>) -> Result<(), String> {
     let third = page_cell(tour, 3)?;
     press(tour, third, egui::PointerButton::Secondary, 1);
     tour.shoot("11c2-sue-paint-pages-menu")?;
-    tour.camera.input.push(vec![egui::Event::Key {
-        key: egui::Key::Escape,
-        physical_key: None,
-        pressed: true,
-        repeat: false,
-        modifiers: egui::Modifiers::NONE,
-    }]);
+    key(tour, egui::Key::Escape);
     tour.paint_go(&["dialog/close"]);
     tour.paint_command("story.webtoon.right_to_left");
     tour.paint_command("story.manager");
@@ -86,6 +91,28 @@ pub(super) fn pages(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.shoot("11c4-sue-paint-binding-preview")?;
     tour.paint_go(&["dialog/close"]);
     tour.paint_command("story.first");
+    tour.settle();
+    Ok(())
+}
+
+/// 11c5 to 11c7. Frame borders on the first page: a panel picked with
+/// the Object tool, Divide Frame Border Equally, the panel divided (both
+/// halves picked). Both steps are undone after.
+pub(super) fn frames(tour: &mut Tour<'_>) -> Result<(), String> {
+    tour.paint_command("layer.new.frame");
+    tour.settle();
+    key(tour, egui::Key::Enter);
+    tour.settle();
+    key(tour, egui::Key::O);
+    let middle = tour.runtime.shell.page_rect().center() + vec2(8.0, -63.0);
+    press(tour, middle, egui::PointerButton::Primary, 1);
+    tour.shoot("11c5-sue-paint-frame-picked")?;
+    tour.paint_command("layer.frame.divide_equally");
+    tour.shoot("11c6-sue-paint-divide-frame")?;
+    key(tour, egui::Key::Enter);
+    tour.shoot("11c7-sue-paint-frame-divided")?;
+    tour.paint_command("edit.undo");
+    tour.paint_command("edit.undo");
     tour.settle();
     Ok(())
 }

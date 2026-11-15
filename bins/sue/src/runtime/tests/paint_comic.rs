@@ -1006,3 +1006,232 @@ fn binding_preview_opens_at_the_page_turns_and_closes() {
     driver.click_text("Close");
     assert!(driver.rect_of("3D Preview for Binding").is_none());
 }
+
+// ----- Frames and balloons (P4-15) --------------------------------------------
+
+/// The canvas' frame border layer (the topmost) and its panels.
+fn frame_panels(
+    driver: &PaintDriver,
+) -> Option<(sue_core::EntityId, Vec<sue_paint::manga::Panel>)> {
+    let arena = &driver.runtime.engine.world.arena;
+    let picture = shown_page(driver)?;
+    sue_paint::doc::layers(arena, picture)
+        .into_iter()
+        .rev()
+        .find_map(|info| {
+            let entity = arena.get_by_id(info.id).ok()?;
+            (entity.class() == sue_paint::manga::FRAME).then(|| {
+                let panels = entity
+                    .property(sue_paint::manga::PANELS)
+                    .and_then(sue_core::Value::as_str)
+                    .map(sue_paint::manga::decode_panels)
+                    .unwrap_or_default();
+                (info.id, panels)
+            })
+        })
+}
+
+/// The box round a panel: `[left, top, right, bottom]`.
+fn panel_box(panel: &[[f32; 2]]) -> [f32; 4] {
+    panel.iter().fold(
+        [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+        |[x0, y0, x1, y1], p| [x0.min(p[0]), y0.min(p[1]), x1.max(p[0]), y1.max(p[1])],
+    )
+}
+
+/// Picks the Frame Border tool's Rectangle frame and drags one from `a`
+/// to `b` (screen points); the canvas' picture pixels per screen point
+/// and where screen point zero lands, read from the panel it made.
+fn frame_from(driver: &mut PaintDriver, a: Pos2, b: Pos2) -> (egui::Vec2, Pos2) {
+    driver.step(vec![key(egui::Key::U, egui::Modifiers::NONE)]);
+    driver.step(vec![key(egui::Key::U, egui::Modifiers::NONE)]);
+    driver.settle(2);
+    let before = frame_panels(driver).map_or(0, |(_, panels)| panels.len());
+    driver.drag(a, b, egui::PointerButton::Primary);
+    let (_, panels) = frame_panels(driver).expect("a frame border layer");
+    assert_eq!(panels.len(), before + 1, "a rectangle frame");
+    let [x0, y0, x1, y1] = panel_box(panels.last().unwrap());
+    let scale = vec2((x1 - x0) / (b.x - a.x), (y1 - y0) / (b.y - a.y));
+    (scale, Pos2::new(x0 - a.x * scale.x, y0 - a.y * scale.y))
+}
+
+/// FGV-1: Divide Frame Border Equally cuts the panel picked into equal
+/// panels and Combine Frames makes panels picked (Shift adds) one; each
+/// is one undo step that undoes and redoes exactly.
+#[test]
+fn frames_divide_equally_and_combine_as_one_step_each() {
+    let mut driver = PaintDriver::new("frame-commands");
+    let middle = paint_middle(&driver.runtime);
+    let (a, b) = (middle - vec2(150.0, 90.0), middle + vec2(150.0, 90.0));
+    let (scale, zero) = frame_from(&mut driver, a, b);
+    let to_screen = |p: [f32; 2]| Pos2::new((p[0] - zero.x) / scale.x, (p[1] - zero.y) / scale.y);
+    let (layer, panels) = frame_panels(&driver).unwrap();
+    let whole = panel_box(&panels[0]);
+    let text_of = |driver: &PaintDriver| {
+        driver
+            .runtime
+            .engine
+            .world
+            .arena
+            .get_by_id(layer)
+            .ok()
+            .and_then(|entity| {
+                entity
+                    .property(sue_paint::manga::PANELS)
+                    .and_then(sue_core::Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_default()
+    };
+    // The Object tool picks the panel; Divide asks how, then cuts it in
+    // two across.
+    driver.step(vec![key(egui::Key::O, egui::Modifiers::NONE)]);
+    press_at(&mut driver, middle, egui::PointerButton::Primary);
+    let one = text_of(&driver);
+    let depth = driver.runtime.engine.history.depth();
+    driver.command("layer.frame.divide_equally");
+    driver.settle(6);
+    assert!(
+        driver.rect_of("Divide Frame Border Equally").is_some(),
+        "{:?}",
+        driver.texts
+    );
+    driver.click_text("OK");
+    driver.settle(4);
+    let (_, halves) = frame_panels(&driver).unwrap();
+    assert_eq!(halves.len(), 2, "divided in two");
+    let (left, right) = (panel_box(&halves[0]), panel_box(&halves[1]));
+    assert!((left[0] - whole[0]).abs() < 0.5 && (right[2] - whole[2]).abs() < 0.5);
+    assert!(
+        ((left[2] - left[0]) - (right[2] - right[0])).abs() < 0.5,
+        "equal: {left:?} {right:?}"
+    );
+    assert!(right[0] > left[2], "a gutter between: {left:?} {right:?}");
+    assert_eq!(driver.runtime.engine.history.depth(), depth + 1);
+    let two = text_of(&driver);
+    driver.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    driver.settle(4);
+    assert_eq!(text_of(&driver), one, "undone");
+    driver.step(vec![key(egui::Key::Y, egui::Modifiers::COMMAND)]);
+    driver.settle(4);
+    assert_eq!(text_of(&driver), two, "redone");
+    // Click one half, Shift-click the other: Combine makes them one
+    // panel as big as the first.
+    let centre = |b: [f32; 4]| to_screen([(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0]);
+    press_at(&mut driver, centre(left), egui::PointerButton::Primary);
+    let shift = |pressed| egui::Event::PointerButton {
+        pos: centre(right),
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::SHIFT,
+    };
+    driver.step(vec![egui::Event::PointerMoved(centre(right))]);
+    driver.step(vec![shift(true)]);
+    driver.step(vec![shift(false)]);
+    driver.settle(4);
+    let depth = driver.runtime.engine.history.depth();
+    driver.command("layer.frame.combine");
+    driver.settle(4);
+    let (_, combined) = frame_panels(&driver).unwrap();
+    assert_eq!(combined.len(), 1, "combined");
+    let back = panel_box(&combined[0]);
+    for (got, want) in back.iter().zip(whole) {
+        assert!((got - want).abs() < 0.5, "{back:?} {whole:?}");
+    }
+    assert_eq!(driver.runtime.engine.history.depth(), depth + 1);
+    driver.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    driver.settle(4);
+    assert_eq!(text_of(&driver), two, "undone");
+}
+
+/// Full guide 00:41:46: on a story's page a Rectangle frame dragged near
+/// the default border snaps onto it.
+#[test]
+fn rectangle_frames_snap_to_the_page_default_border() {
+    let mut driver = PaintDriver::new("frame-snap");
+    driver.command("story.add");
+    driver.settle(6);
+    let page = shown_page(&driver).unwrap();
+    let middle = paint_middle(&driver.runtime);
+    let (scale, zero) = frame_from(
+        &mut driver,
+        middle - vec2(40.0, 30.0),
+        middle + vec2(40.0, 30.0),
+    );
+    let to_screen = |p: [f32; 2]| Pos2::new((p[0] - zero.x) / scale.x, (p[1] - zero.y) / scale.y);
+    let borders = sue_paint::story::borders(&driver.runtime.engine.world.arena, page)
+        .expect("a story page has borders");
+    let inner = borders.inner;
+    // A few points inside the border's top left corner, to the middle.
+    let start = to_screen([inner[0], inner[1]]) + vec2(5.0, 4.0);
+    driver.drag(
+        start,
+        middle - vec2(60.0, 50.0),
+        egui::PointerButton::Primary,
+    );
+    let (_, panels) = frame_panels(&driver).unwrap();
+    let made = panel_box(panels.last().unwrap());
+    assert!(
+        // Panels are kept to the whole pixel.
+        (made[0] - inner[0]).abs() <= 0.5 && (made[1] - inner[1]).abs() <= 0.5,
+        "snapped onto the default border {inner:?}: {made:?}"
+    );
+    // Far from it, a corner stays where it was let go.
+    let free = panel_box(&panels[panels.len() - 2]);
+    assert!(free[0] > inner[0] + 1.0);
+}
+
+/// FGV-40 and FG-35: a balloon layer draws its balloons with the line in
+/// the drawing color and the inside in the other color, kept on the
+/// layer.
+#[test]
+fn balloons_take_the_drawing_and_the_other_color() {
+    let mut driver = PaintDriver::new("balloon-colors");
+    // Drawing with the sub color (X): the balloon is lined in white and
+    // black inside.
+    driver.command("color.swap");
+    driver.settle(2);
+    driver.step(vec![key(egui::Key::T, egui::Modifiers::NONE)]);
+    driver.step(vec![key(egui::Key::T, egui::Modifiers::NONE)]);
+    driver.settle(2);
+    let middle = paint_middle(&driver.runtime);
+    driver.drag(
+        middle - vec2(60.0, 40.0),
+        middle + vec2(60.0, 40.0),
+        egui::PointerButton::Primary,
+    );
+    let arena = &driver.runtime.engine.world.arena;
+    let picture = shown_page(&driver).unwrap();
+    let balloon = sue_paint::doc::layers(arena, picture)
+        .into_iter()
+        .find_map(|info| {
+            let entity = arena.get_by_id(info.id).ok()?;
+            (entity.class() == sue_paint::manga::BALLOON).then_some(entity)
+        })
+        .expect("a balloon layer");
+    let text = |key| {
+        balloon
+            .property(key)
+            .and_then(sue_core::Value::as_str)
+            .map(str::to_owned)
+    };
+    assert_eq!(text("balloon.line_color").as_deref(), Some("#ffffff"));
+    assert_eq!(text("balloon.fill_color").as_deref(), Some("#000000"));
+    let raster = balloon
+        .component(sue_core::ComponentKind::RasterTile2D)
+        .and_then(|component| component.as_raster())
+        .unwrap();
+    let pixels = raster.bytes().unwrap();
+    let painted: Vec<&[u8; 4]> = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[3] == 255)
+        .collect();
+    assert!(!painted.is_empty());
+    assert!(painted.iter().any(|p| p[..3] == [0, 0, 0]), "black inside");
+    assert!(
+        painted.iter().any(|p| p[..3] == [255, 255, 255]),
+        "white line"
+    );
+}
