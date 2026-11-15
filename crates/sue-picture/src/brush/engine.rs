@@ -31,6 +31,14 @@ pub fn builtin(key: &str, name: &str) -> Option<BrushPreset> {
         .find(|preset| preset.name == name)
 }
 
+/// `true` when `preset` paints as a plain round tip, laid as coverage in
+/// one ink; `false` when the engine lays it through its paint behaviours
+/// (dabs that build up, mixing, pictures, paper, spray, color jitter).
+#[must_use]
+pub fn is_plain(preset: &BrushPreset) -> bool {
+    sue_brush::worker::Brush::new(preset.clone(), [0.0; 3]).is_plain()
+}
+
 /// `preset` with what the legacy text cannot say left out, so two
 /// presets compare by what a tip holds.
 fn as_tip_says(preset: &BrushPreset) -> Vec<u8> {

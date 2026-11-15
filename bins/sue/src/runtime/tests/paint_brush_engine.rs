@@ -187,11 +187,13 @@ fn scatters(preset: &sue_model::BrushPreset) -> bool {
         || preset.extra.iter().any(|(key, _)| key.starts_with("spray"))
 }
 
-/// Every built-in brush sub tool paints a stroke through the brush
-/// engine's worker: the engine took it (`sue_paint::last_stroke`), it
-/// changed the layer, its end is no wider than its body (the owner's
-/// first rule for strokes), undo takes it back exactly and redo lays it
-/// again.
+/// Every built-in brush sub tool paints two strokes through the brush
+/// engine's worker (a swell, and one pressed evenly and lifted while
+/// moving fast): the engine took each (`sue_paint::last_stroke`) and laid
+/// it with the painter its brush needs (coverage for a plain round tip,
+/// the paint behaviours for the rest), it changed the layer, neither of
+/// its ends is wider than its body (the owner's first rule for strokes),
+/// undo takes it back exactly and redo lays it again.
 #[test]
 fn every_built_in_brush_paints_through_the_engine_and_ends_no_wider_than_its_body() {
     let mut driver = PaintDriver::new("paint-every-brush");
@@ -200,7 +202,6 @@ fn every_built_in_brush_paints_through_the_engine_and_ends_no_wider_than_its_bod
     let toolbox = sue_paint::tools::Toolbox::default();
     let mut time = 100.0;
     let mut checked = 0;
-    let mut report = Vec::new();
     for tool in BRUSH_TOOLS {
         let eraser = tool == sue_paint::tools::Tool::Eraser;
         if eraser {
@@ -213,78 +214,96 @@ fn every_built_in_brush_paints_through_the_engine_and_ends_no_wider_than_its_bod
         for sub in toolbox.subs(tool) {
             driver.command(&pick(tool, &sub.name));
             driver.settle(2);
-            let (layer, width, before) = top_layer(&driver);
-            let start = paint_middle(&driver.runtime) - vec2(160.0, 40.0);
-            draw(
-                &mut driver,
-                start,
-                &swell(40, 8.0, 0.7),
-                Route::Pen,
-                0,
-                &mut time,
-            );
-            let seen = sue_paint::last_stroke().expect("a stroke began");
-            assert_eq!(seen.sub, sub.name, "the engine took {}", sub.name);
-            assert!(!seen.vector, "{}: a raster layer", sub.name);
-            let (same, _, after) = top_layer(&driver);
-            assert_eq!(same, layer);
-            assert_ne!(after, before, "{} painted", sub.name);
-            // Only what the stroke changed counts.
-            let changed: Vec<u8> = before
-                .chunks(4)
-                .zip(after.chunks(4))
-                .map(|(a, b)| {
-                    let (a, b) = (amounts(a, eraser)[0], amounts(b, eraser)[0]);
-                    b.saturating_sub(a)
-                })
-                .collect();
-            let line = profile(&changed, width);
-            assert!(line.len() > 30, "{}: the stroke shows: {line:?}", sub.name);
-            let n = line.len();
-            let body = line[n / 10..n * 85 / 100]
-                .iter()
-                .map(|(_, thick)| *thick)
-                .max()
-                .unwrap_or(0);
-            let end = line[n * 85 / 100..]
-                .iter()
-                .map(|(_, thick)| *thick)
-                .max()
-                .unwrap_or(0);
-            report.push(format!(
-                "{} {}: body {body} px, end {end} px, behaviours {}",
-                tool.id(),
-                sub.name,
-                seen.behaviours
-            ));
+            let preset = sue_paint::brush::engine::builtin(tool.id(), &sub.name)
+                .unwrap_or_else(|| panic!("{}: a built-in preset", sub.name));
             // A brush that scatters its tips by chance (stars, spray) has
-            // no edge to its line: a tip that falls at the end may be one
+            // no edge to its line: a tip that falls at an end may be one
             // of the larger ones, never a blob over what the body holds.
-            let scattered = sue_paint::brush::engine::builtin(tool.id(), &sub.name)
-                .is_some_and(|preset| scatters(&preset));
-            let allowed = if scattered {
-                body + body / 6 + 1
-            } else {
-                body + 1
-            };
-            assert!(
-                end <= allowed,
-                "{}: the end ({end} px) is no wider than the body ({body} px)",
-                sub.name
-            );
-            // The undo pair.
-            driver.command("edit.undo");
-            driver.settle(2);
-            assert_eq!(top_layer(&driver).2, before, "{}: undo", sub.name);
-            driver.command("edit.redo");
-            driver.settle(2);
-            assert_eq!(top_layer(&driver).2, after, "{}: redo", sub.name);
-            driver.command("edit.undo");
-            driver.settle(2);
+            let scattered = scatters(&preset);
+            // The brush's size in layer pixels (the view is at 100 %).
+            let tip = preset.value(sue_model::brush::param::SIZE).unwrap_or(0.0);
+            let plain = sue_paint::brush::engine::is_plain(&preset);
+            // A swell (the pen pressing harder and easing off), and the
+            // stroke that made the blob of old: pressed evenly and lifted
+            // while still moving fast.
+            let strokes = [
+                ("swell", swell(40, 8.0, 0.7)),
+                ("lifted moving", vec![(vec2(10.0, 0.0), 0.7); 32]),
+            ];
+            for (kind, legs) in strokes {
+                let (layer, width, before) = top_layer(&driver);
+                let start = paint_middle(&driver.runtime) - vec2(160.0, 40.0);
+                draw(&mut driver, start, &legs, Route::Pen, 0, &mut time);
+                let seen = sue_paint::last_stroke().expect("a stroke began");
+                assert_eq!(seen.sub, sub.name, "the engine took {}", sub.name);
+                assert!(!seen.vector, "{}: a raster layer", sub.name);
+                assert_eq!(
+                    seen.behaviours, !plain,
+                    "{}: laid by the painter its brush needs",
+                    sub.name
+                );
+                let (same, _, after) = top_layer(&driver);
+                assert_eq!(same, layer);
+                assert_ne!(after, before, "{} painted", sub.name);
+                // Only what the stroke changed counts.
+                let changed: Vec<u8> = before
+                    .chunks(4)
+                    .zip(after.chunks(4))
+                    .map(|(a, b)| {
+                        let (a, b) = (amounts(a, eraser)[0], amounts(b, eraser)[0]);
+                        b.saturating_sub(a)
+                    })
+                    .collect();
+                let line = profile(&changed, width);
+                assert!(line.len() > 30, "{}: the stroke shows: {line:?}", sub.name);
+                let n = line.len();
+                let widest = |part: &[(usize, usize)]| {
+                    part.iter().map(|(_, thick)| *thick).max().unwrap_or(0)
+                };
+                let first = widest(&line[..n * 15 / 100]);
+                let body = widest(&line[n * 15 / 100..n * 85 / 100]);
+                let end = widest(&line[n * 85 / 100..]);
+                println!(
+                    "{} {} ({kind}): start {first} px, body {body} px, end {end} px, behaviours {}",
+                    tool.id(),
+                    sub.name,
+                    seen.behaviours
+                );
+                // A scattered brush's tips land by chance: its body need
+                // not hold its largest tip, and two tips may fall in one
+                // column. Its end may hold a tip of the brush's own size, or
+                // a column a sixth more than the body's, never a blob.
+                let allowed = if scattered {
+                    (body + body / 6 + 1).max(tip.ceil() as usize + 1)
+                } else {
+                    body + 1
+                };
+                assert!(
+                    end <= allowed,
+                    "{} ({kind}): the end ({end} px) is no wider than the body ({body} px)",
+                    sub.name
+                );
+                assert!(
+                    first <= allowed,
+                    "{} ({kind}): the start ({first} px) is no wider than the body ({body} px)",
+                    sub.name
+                );
+                if kind == "swell" {
+                    // The undo pair.
+                    driver.command("edit.undo");
+                    driver.settle(2);
+                    assert_eq!(top_layer(&driver).2, before, "{}: undo", sub.name);
+                    driver.command("edit.redo");
+                    driver.settle(2);
+                    assert_eq!(top_layer(&driver).2, after, "{}: redo", sub.name);
+                }
+                driver.command("edit.undo");
+                driver.settle(2);
+                assert_eq!(top_layer(&driver).2, before, "{}: undone", sub.name);
+            }
             checked += 1;
         }
     }
-    println!("{}", report.join("\n"));
     assert!(checked >= 30, "every built-in brush: {checked}");
 }
 
@@ -638,10 +657,11 @@ fn every_brush_sheet() {
     let middle = paint_middle(&driver.runtime);
     let mut time = 1000.0;
     let mut names = Vec::new();
+    // A stroke's cut: its width, height and straight RGB over white.
+    type Cut = (usize, usize, Vec<[u8; 3]>);
     for tool in BRUSH_TOOLS {
         let eraser = tool == sue_paint::tools::Tool::Eraser;
         let mut sheet: Vec<Vec<[u8; 3]>> = Vec::new();
-        let mut sheet_width = 0;
         for sub in toolbox.subs(tool) {
             let clear = top_layer(&driver).2;
             if eraser {
@@ -652,82 +672,47 @@ fn every_brush_sheet() {
             }
             driver.command(&pick(tool, &sub.name));
             driver.settle(2);
-            let (_, width, before) = top_layer(&driver);
-            // Cells as large as the brush needs: four across for a small
-            // one, two for a big one.
             let size = sub.tip.size;
-            let columns = if size > 40.0 { 2 } else { 4 };
-            let cell = vec2(
-                (size * 2.0 + 60.0).max(150.0),
-                (size * 1.1 + 30.0).max(110.0),
-            );
-            let rows = 8 / columns;
-            let origin = middle - vec2(columns as f32 * cell.x * 0.5, rows as f32 * cell.y * 0.5)
-                + vec2(size * 0.6 + 6.0, cell.y * 0.4);
-            let place = |index: usize| {
-                origin
-                    + vec2(
-                        (index % columns) as f32 * cell.x,
-                        (index / columns) as f32 * cell.y,
-                    )
-            };
-            let mut strokes = 0;
-            for (index, (_, legs, rest)) in sheet_rows().into_iter().enumerate() {
-                draw(
-                    &mut driver,
-                    place(index),
-                    &legs,
-                    Route::Pen,
-                    rest,
-                    &mut time,
-                );
-                strokes += 1;
-                let alive = driver
-                    .runtime
-                    .engine
-                    .world
-                    .arena
-                    .iter()
-                    .any(|(_, entity)| sue_model::picture::is_picture(entity));
-                assert!(
-                    alive,
-                    "{} stroke {index} at {:?} (page {:?}) lost the picture",
-                    sub.name,
-                    place(index),
-                    driver.runtime.shell.page_rect()
-                );
-            }
-            // A fast mouse stroke, in the last cell.
-            let at = place(7);
-            let fast: Vec<Leg> = (0..6)
-                .map(|i| (vec2(22.0, 3.0 - 1.5 * i as f32), 1.0))
+            // Every stroke at the middle of the canvas, cut out and
+            // undone, so none lands off the canvas or on another.
+            let mut strokes: Vec<(Vec<Leg>, usize, Route)> = sheet_rows()
+                .into_iter()
+                .map(|(_, legs, rest)| (legs, rest, Route::Pen))
                 .collect();
-            draw(&mut driver, at, &fast, Route::Mouse, 0, &mut time);
-            strokes += 1;
-            let (_, _, after) = top_layer(&driver);
-            let height = after.len() / 4 / width;
-            // The cells, cut from the layer over white.
-            let changed = |x: usize, y: usize| {
-                let i = (y * width + x) * 4;
-                after[i..i + 4] != before[i..i + 4]
-            };
-            let (mut x0, mut y0, mut x1, mut y1) = (width, height, 0, 0);
-            for y in 0..height {
-                for x in 0..width {
-                    if changed(x, y) {
-                        x0 = x0.min(x);
-                        y0 = y0.min(y);
-                        x1 = x1.max(x);
-                        y1 = y1.max(y);
+            strokes.push((
+                (0..6)
+                    .map(|i| (vec2(22.0, 3.0 - 1.5 * i as f32), 1.0))
+                    .collect(),
+                0,
+                Route::Mouse,
+            ));
+            let mut cuts: Vec<Cut> = Vec::new();
+            for (legs, rest, route) in strokes {
+                let (_, width, before) = top_layer(&driver);
+                let start = middle - vec2(80.0, 0.0);
+                draw(&mut driver, start, &legs, route, rest, &mut time);
+                let (_, _, after) = top_layer(&driver);
+                let height = after.len() / 4 / width;
+                // Where the stroke changed the layer, and its margin.
+                let (mut x0, mut y0, mut x1, mut y1) = (width, height, 0, 0);
+                for y in 0..height {
+                    for x in 0..width {
+                        let i = (y * width + x) * 4;
+                        if after[i..i + 4] != before[i..i + 4] {
+                            x0 = x0.min(x);
+                            y0 = y0.min(y);
+                            x1 = x1.max(x);
+                            y1 = y1.max(y);
+                        }
                     }
                 }
-            }
-            if x1 >= x0 && y1 >= y0 {
-                let (x0, y0) = (x0.saturating_sub(8), y0.saturating_sub(8));
-                let (x1, y1) = ((x1 + 8).min(width - 1), (y1 + 8).min(height - 1));
-                for y in y0..=y1 {
-                    let row: Vec<[u8; 3]> = (x0..=x1)
-                        .map(|x| {
+                let margin = 10;
+                let cut = if x1 >= x0 && y1 >= y0 {
+                    let (x0, y0) = (x0.saturating_sub(margin), y0.saturating_sub(margin));
+                    let (x1, y1) = ((x1 + margin).min(width - 1), (y1 + margin).min(height - 1));
+                    let pixels = (y0..=y1)
+                        .flat_map(|y| (x0..=x1).map(move |x| (x, y)))
+                        .map(|(x, y)| {
                             let i = (y * width + x) * 4;
                             let a = u32::from(after[i + 3]);
                             std::array::from_fn(|c| {
@@ -735,25 +720,54 @@ fn every_brush_sheet() {
                             })
                         })
                         .collect();
-                    sheet_width = sheet_width.max(row.len());
-                    sheet.push(row);
+                    (x1 - x0 + 1, y1 - y0 + 1, pixels)
+                } else {
+                    (1, 1, vec![[255, 255, 255]])
+                };
+                cuts.push(cut);
+                if after != before {
+                    driver.command("edit.undo");
+                    driver.settle(1);
                 }
-                // A gray rule between brushes.
-                sheet.push(vec![[200, 200, 200]; x1 - x0 + 1]);
+                assert_eq!(top_layer(&driver).2, before, "{}: undone", sub.name);
             }
-            names.push(format!("{} {}", tool.id(), sub.name));
-            // Back to the clear layer, one step at a time (a stroke that
-            // changed nothing left no step).
-            let _ = strokes;
-            for _ in 0..16 {
-                if top_layer(&driver).2 == clear {
-                    break;
+            // The cuts in rows of four (two for a big brush), each in a
+            // cell as large as the largest.
+            let columns = if size > 40.0 { 2 } else { 4 };
+            let cell_w = cuts.iter().map(|c| c.0).max().unwrap_or(1) + 8;
+            let cell_h = cuts.iter().map(|c| c.1).max().unwrap_or(1) + 8;
+            for row in cuts.chunks(columns) {
+                for y in 0..cell_h {
+                    let mut line = Vec::with_capacity(cell_w * columns);
+                    for (cw, ch, pixels) in row {
+                        for x in 0..cell_w {
+                            let (dx, dy) = ((cell_w - cw) / 2, (cell_h - ch) / 2);
+                            let inside = x >= dx && x < dx + cw && y >= dy && y < dy + ch;
+                            line.push(if inside {
+                                pixels[(y - dy) * cw + (x - dx)]
+                            } else {
+                                [255, 255, 255]
+                            });
+                        }
+                    }
+                    sheet.push(line);
                 }
-                driver.command("edit.undo");
-                driver.settle(1);
+            }
+            // A gray rule between brushes.
+            sheet.push(vec![[200, 200, 200]; cell_w * columns]);
+            names.push(format!("{} {}", tool.id(), sub.name));
+            if eraser {
+                for _ in 0..4 {
+                    if top_layer(&driver).2 == clear {
+                        break;
+                    }
+                    driver.command("edit.undo");
+                    driver.settle(1);
+                }
             }
             assert_eq!(top_layer(&driver).2, clear, "{}: undone", sub.name);
         }
+        let sheet_width = sheet.iter().map(Vec::len).max().unwrap_or(1);
         let height = sheet.len();
         let mut out = Vec::with_capacity(sheet_width * height * 4);
         for row in &sheet {
