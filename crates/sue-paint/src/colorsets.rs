@@ -15,8 +15,9 @@
 //!
 //! A cell is `#rrggbb`, `#rrggbb/name` with the name's `%`, spaces, tabs
 //! and line breaks written as `%25`, `%20`, `%09`, `%0A` and `%0D`, or `-`
-//! for an empty cell. Version 1 (Sue 0.0.75) had no names and no empty
-//! cells, so its lines read the same way.
+//! for an empty cell. A set's name has its `%`, tabs and line breaks
+//! written so too, and its spaces as they are. Version 1 (Sue 0.0.75)
+//! had no names and no empty cells, so its lines read the same way.
 //!
 //! A set is shared as a GIMP palette (`.gpl`), which GIMP, Krita, Inkscape
 //! and most painting programs read: Sue writes the names and marks each
@@ -225,6 +226,23 @@ fn escape(text: &str) -> String {
     out
 }
 
+/// Writes a set's name so that it reads back as what comes before the
+/// tab of its line: only `%`, tabs and line breaks are escaped, so the
+/// file stays easy to read.
+fn escape_name(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '%' => out.push_str("%25"),
+            '\t' => out.push_str("%09"),
+            '\n' => out.push_str("%0A"),
+            '\r' => out.push_str("%0D"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Reads what [`escape`] wrote. A `%` not followed by two hex digits
 /// stays as it is.
 fn unescape(text: &str) -> String {
@@ -300,7 +318,11 @@ pub(crate) fn write(sets: &[ColorSet]) -> String {
                 Some(swatch) => format!("{}/{}", color::hex(swatch.rgb), escape(&swatch.name)),
             })
             .collect();
-        text.push_str(&format!("{}\t{}\n", escape(&set.name), cells.join(" ")));
+        text.push_str(&format!(
+            "{}\t{}\n",
+            escape_name(&set.name),
+            cells.join(" ")
+        ));
     }
     text
 }
