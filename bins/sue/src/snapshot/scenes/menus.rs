@@ -28,7 +28,7 @@ fn typed(text: &str) -> Vec<Event> {
     vec![Event::Text(text.to_owned())]
 }
 
-/// Scenes 29a to 29e, and 33a to 33d.
+/// Scenes 29a to 29e, and 33a to 33e.
 pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     let before = tour.camera.size;
     tour.camera.size = SIZE;
@@ -211,7 +211,7 @@ fn shoot_ui(
     Ok(())
 }
 
-/// Scenes 33a to 33d. Sue Paint's File, Animation, Window and Help menus
+/// Scenes 33a to 33e. Sue Paint's File, Animation, Window and Help menus
 /// in Clip Studio Paint's order, Title Case, with the keys that run them.
 fn clip_studio_order(tour: &mut Tour<'_>) -> Result<(), String> {
     for (menu, name) in [
@@ -225,5 +225,14 @@ fn clip_studio_order(tour: &mut Tour<'_>) -> Result<(), String> {
         tour.camera.input.push(key(Key::Escape));
         tour.settle();
     }
+    // Scene 33e. Window, Canvas: the commands, then the open canvases,
+    // numbered, the current one checked.
+    tour.paint_go(&["menu/Window"]);
+    tour.camera.input.push(key(Key::ArrowDown));
+    tour.camera.input.push(key(Key::ArrowRight));
+    tour.shoot("33e-menu-window-canvas")?;
+    tour.camera.input.push(key(Key::Escape));
+    tour.camera.input.push(key(Key::Escape));
+    tour.settle();
     Ok(())
 }

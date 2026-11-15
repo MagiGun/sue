@@ -219,12 +219,12 @@ pub fn canvas_items(names: &[String]) -> Vec<MenuItem> {
     if !names.is_empty() {
         items.push(SEP);
     }
-    items.extend(
-        names
-            .iter()
-            .enumerate()
-            .map(|(index, name)| named(name, &format!("window.canvas.{index}"))),
-    );
+    items.extend(names.iter().enumerate().map(|(index, name)| {
+        named(
+            &tr!("numbered-canvas", number = index + 1, name = name.as_str()),
+            &format!("window.canvas.{index}"),
+        )
+    }));
     items
 }
 
@@ -1045,8 +1045,9 @@ mod tests {
         let mut menus = menus();
         let two = ["Illustration".to_owned(), "Comic".to_owned()];
         assert!(set_canvases(&mut menus, &two));
-        assert_eq!(label_of(&menus, "window.canvas.0"), Some("Illustration"));
-        assert_eq!(label_of(&menus, "window.canvas.1"), Some("Comic"));
+        // Numbered, so two windows of one canvas read apart.
+        assert_eq!(label_of(&menus, "window.canvas.0"), Some("1 Illustration"));
+        assert_eq!(label_of(&menus, "window.canvas.1"), Some("2 Comic"));
         assert!(
             !set_canvases(&mut menus, &two),
             "the same canvases change nothing"
@@ -1067,6 +1068,47 @@ mod tests {
                 "window.prev_tab"
             ]
         );
+    }
+
+    /// The skeleton every studio shares (D11, [`sue_wm::Skeleton`]) is in
+    /// Sue Paint's menus, each item in its menu. Sue Paint keeps Clip
+    /// Studio Paint's bar (its own menus before View) and names three
+    /// items as Clip Studio does: Export is the export submenus,
+    /// Settings is Preferences and Select All lives in Select.
+    #[test]
+    fn the_menus_hold_the_skeleton_every_studio_shares() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let menus = menus();
+        let in_menu = |title: &str, command: &str| {
+            let menu = menus
+                .iter()
+                .find(|menu| menu.title == title)
+                .unwrap_or_else(|| panic!("no {title} menu"));
+            menu.items
+                .iter()
+                .any(|item| item.commands().contains(&command))
+        };
+        for slot in sue_wm::Slot::ALL {
+            let (title, command) = match (slot, slot.command()) {
+                (sue_wm::Slot::Recent, _) => {
+                    assert!(label_of(&menus, "file.recent.clear").is_some());
+                    continue;
+                }
+                (sue_wm::Slot::Export, _) => ("File", "file.export.png"),
+                (sue_wm::Slot::Settings, _) => ("File", "file.preferences"),
+                (sue_wm::Slot::SelectAll, _) => ("Select", "select.all"),
+                (_, Some(command)) => (
+                    match command.split('.').next() {
+                        Some("file" | "app") => "File",
+                        Some("edit") => "Edit",
+                        _ => "Help",
+                    },
+                    command,
+                ),
+                (_, None) => unreachable!("only Open Recent runs no command"),
+            };
+            assert!(in_menu(title, command), "{slot:?}: {command} in {title}");
+        }
     }
 
     #[test]

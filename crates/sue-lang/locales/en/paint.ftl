@@ -2390,3 +2390,4 @@ ruler-tool = Ruler Tool
 text-tool = Text Tool
 balloon-tool = Balloon Tool
 colors-set-the-main-color-x-switches = The Color Wheel, Color Slider, Color Set, Intermediate and Approximate Color palettes and the Color History all set the main color. X switches between the main and sub color, C paints with the transparent color.
+numbered-canvas = { $number } { $name }
