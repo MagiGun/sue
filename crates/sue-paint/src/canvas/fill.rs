@@ -369,9 +369,29 @@ impl SuePaint {
                 };
                 fill::unpainted(&layer, &reference, size, &lasso)
             } else {
-                let mut enclosed = fill::enclosed(&reference, size, &lasso);
-                // Target color: of the closed areas, only the pixels the
-                // editing layer has in that color fill.
+                // Target color: the lines that close the areas are the
+                // other layers' (so what the editing layer has painted
+                // can be filled again), and of the closed areas only the
+                // pixels the editing layer has in that color fill.
+                let others = (sub.close_target != fill::Target::All)
+                    .then(|| {
+                        fill::reference_in(
+                            &cx.world.arena,
+                            picture_id,
+                            size,
+                            self.layer(),
+                            &[],
+                            fill::Refer::All,
+                            fill::Exclude {
+                                editing: true,
+                                ..fill::Exclude::default()
+                            },
+                            self.frame_view(&cx.world.arena).as_ref(),
+                        )
+                    })
+                    .flatten();
+                let mut enclosed =
+                    fill::enclosed(others.as_ref().unwrap_or(&reference), size, &lasso);
                 if sub.close_target != fill::Target::All {
                     let editing = if target.mask {
                         placed(&cx.world.arena, target.id, target.offset, size)

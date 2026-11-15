@@ -358,9 +358,16 @@ pub(crate) fn stop_ui(
     let mut source = StopColor::ALL
         .iter()
         .position(|kind| *kind == edited.color)
-        .unwrap_or(0) as u8;
-    if choice(ui, "stop-source", &sources, &mut source, theme) {
-        edited.color = StopColor::ALL[usize::from(source).min(StopColor::ALL.len() - 1)];
+        .unwrap_or(0);
+    let from = tr!("stop-color-from");
+    let picked = ui::input::dropdown("sue-paint-stop-source", &mut source, &sources)
+        .label(&from)
+        .width(ui.available_width())
+        .show(ui, theme);
+    let changed = picked.changed();
+    ui::tooltip(picked, &Tip::new(&from), theme);
+    if changed {
+        edited.color = StopColor::ALL[source.min(StopColor::ALL.len() - 1)];
         match edited.color {
             StopColor::Own => {}
             StopColor::Main => edited.rgb = colors[0],
@@ -437,28 +444,6 @@ fn number(
         *value = wide as f32;
     }
     changed
-}
-
-/// A strip of `options`, `chosen` the one that holds.
-fn choice(ui: &mut Ui, salt: &str, options: &[String], chosen: &mut u8, theme: &Theme) -> bool {
-    let answer = ui::segmented(
-        ("sue-paint-filter", salt),
-        options,
-        Some(usize::from(*chosen)),
-    )
-    .show(ui, theme);
-    let name = options
-        .get(usize::from(*chosen))
-        .cloned()
-        .unwrap_or_default();
-    ui::tooltip(answer.response, &Tip::new(&name), theme);
-    match answer.picked {
-        Some(index) if index != usize::from(*chosen) => {
-            *chosen = index as u8;
-            true
-        }
-        _ => false,
-    }
 }
 
 /// A color swatch that opens the color wheel, with its name beside it.
