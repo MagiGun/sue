@@ -298,10 +298,16 @@ impl SuePaint {
                 theme.hairline(),
                 egui::StrokeKind::Inside,
             );
-            if ui
-                .interact(rect, Id::unique(("sue-paint-tile", index)), Sense::click())
-                .clicked()
-            {
+            // A cell is a button that shows its canvas: named for the
+            // keyboard and a screen reader, ringed while it has the keys.
+            let name = self.doc_name(index, cx);
+            let response = ui.interact(rect, Id::unique(("sue-paint-tile", index)), Sense::click());
+            let label = name.clone();
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label.clone())
+            });
+            sue_wm::ui::focus_ring(ui, &response, theme.radius(sue_wm::ui::Radius::Sm), theme);
+            if sue_wm::ui::tooltip(response, &sue_wm::ui::Tip::new(&name), theme).clicked() {
                 pick = Some(index);
             }
         }
