@@ -206,6 +206,29 @@ fn an_abandoned_stroke_leaves_nothing() {
     );
 }
 
+/// Strokes given up while their job runs, each followed at once by the
+/// next stroke, on a pool of two threads: a stroke job waits for its
+/// bands on the same pool, so two such jobs at once could take both
+/// threads and wait for ever. Every stroke here still finishes.
+#[test]
+fn strokes_given_up_mid_job_never_stall_the_pool() {
+    let pool = Arc::new(JobPool::new(2));
+    let brush = black(pen(400.0, 0.0));
+    let samples = wave([0.0, 300.0], [900.0, 340.0], 0.3, 60.0);
+    for round in 0..40 {
+        let mut worker = StrokeWorker::start(Arc::clone(&pool), &brush, Settings::new(Device::Pen));
+        worker.push_all(&samples[..samples.len() / 2]);
+        let _ = worker.poll();
+        if round % 2 == 0 {
+            worker.abandon();
+        } else {
+            drop(worker);
+        }
+    }
+    let stroke = draw(pool, &brush, &samples, 4);
+    assert!(stroke.is_done());
+}
+
 // ---------------------------------------------------------------------
 // The same pixels, however it is laid
 // ---------------------------------------------------------------------

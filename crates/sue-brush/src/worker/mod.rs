@@ -432,8 +432,24 @@ impl StrokeWorker {
     }
 
     /// Gives the stroke up: nothing of it is shown, and nothing reaches a
-    /// layer. A job under way finishes on its own and is dropped.
+    /// layer. A job under way is waited for and dropped (see the `Drop`
+    /// of [`StrokeWorker`]).
     pub fn abandon(self) {
         self.live.end();
+    }
+}
+
+impl Drop for StrokeWorker {
+    /// Waits for the job under way, if any. A stroke's job waits for its
+    /// bands' jobs on the same pool; were a worker dropped with its job
+    /// still running and the next stroke's job started beside it, two
+    /// waiting jobs could hold every thread of a small pool while their
+    /// bands queue behind them, and nothing would ever finish. Waiting
+    /// here keeps one stroke job at a time on the pool. It costs at most
+    /// one update's work, once, when a stroke is given up.
+    fn drop(&mut self) {
+        if let State::Busy(_) = self.state {
+            self.harvest(true);
+        }
     }
 }
