@@ -192,3 +192,46 @@ fn pictures_of_a_view_floating_and_in_its_own_window() {
 fn painter_side() -> usize {
     8192
 }
+
+#[test]
+fn an_open_views_window_sleeps_while_nothing_changes() {
+    let (mut runtime, _root) = runtime("view-sleeps");
+    runtime.shell.set_window_support(WindowSupport::Many);
+    let ctx = egui::Context::default();
+    let mut host = HeadlessWindows::new(&ctx, [1440.0, 900.0], 1.0);
+    let paint = AppletId::new(sue_paint::ID).unwrap();
+    let start = Instant::now();
+    runtime.request(ShellRequest::Open(paint.clone()), &mut NoTextures, start);
+    runtime.request(
+        ShellRequest::OpenView {
+            applet: paint,
+            view: "canvas".to_owned(),
+            title: "Canvas".to_owned(),
+        },
+        &mut NoTextures,
+        start,
+    );
+    // Let Sue settle: its first frames load, lay out and animate.
+    let mut now = start;
+    for _ in 0..120 {
+        now += Duration::from_millis(16);
+        frame(&mut runtime, &mut host, now);
+    }
+    // Nothing happens: the main window's frames change nothing a view
+    // shows, so the view's window is never woken by them.
+    let revision = runtime.revision();
+    for _ in 0..10 {
+        now += Duration::from_millis(16);
+        let specs = runtime.windows();
+        host.main_frame(revision, &specs, |ui| {
+            runtime.ui(ui, &mut NoTextures, now);
+        });
+        assert_eq!(runtime.revision(), revision, "an idle frame changed nothing");
+    }
+    let key = runtime.windows()[0].key.clone();
+    let surface = host.surface_of(&key).unwrap();
+    assert!(
+        !host.due(runtime.revision()).contains(&surface),
+        "the view's window sleeps"
+    );
+}
