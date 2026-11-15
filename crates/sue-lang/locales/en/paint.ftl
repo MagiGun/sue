@@ -2395,3 +2395,5 @@ help-using-sue-paint-online = Using Sue Paint (Online)
 help-faq = Frequently Asked Questions
 help-contact = Contact
 help-feedback-and-requests = Feedback and Requests
+switch-main-and-sub-color = Switch Between Main and Sub Color
+swap-main-and-sub-color-values = Swap main and sub color

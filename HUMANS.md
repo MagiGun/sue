@@ -447,7 +447,7 @@ Once a canvas is open:
   quick flick run out into a fine tail. Watercolor and gouache brushes pick up the color underneath and
   drag it along ("Color mixing"). All of it is in Tool Property.
 - **Colors:** a color wheel, sliders, color sets and the colors you recently
-  painted with. `X` swaps your main and sub color, `C` switches to the
+  painted with. `X` switches between your main and sub color, `C` takes the
   transparent color (brushes then erase); hold `Alt` and click, or
   right-click, to pick a color from the picture. The **Color Set** palette
   has several sets (Default, Grays, Skin Tones, Pastels and your own) in a

@@ -169,7 +169,7 @@ default key, and neither does its opposite number in Sue.
 | Smaller brush preset | [ | [ | yes |
 | Larger brush preset | ] | ] | yes |
 | Switch using layer color | Ctrl+B | Ctrl+B | yes |
-| Swap main and sub color | X | X | yes |
+| Switch between main and sub color | X | X | yes |
 | Switch drawing and transparent color | C | C | yes |
 
 ## Modifier keys, while drawing and on the canvas

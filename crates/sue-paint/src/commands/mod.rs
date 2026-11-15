@@ -86,7 +86,7 @@ impl SuePaint {
         // Words being typed are kept before anything else happens.
         self.finish_typing(cx);
         // A tool's command (from a script or Auto Actions) picks the tool.
-        if command.starts_with("tool.") && self.tool_key(command) {
+        if command.starts_with("tool.") && self.tool_key(command, cx) {
             return;
         }
         // The Window menu hides a tab torn off into a palette of its own.
@@ -177,7 +177,7 @@ impl SuePaint {
             ctx.input_mut(|input| bound.take(input, cx.rice(), KEYS_SECTION, shortcut_table()));
         let registry = crate::commands::registry();
         for name in taken {
-            if self.tool_key(name) {
+            if self.tool_key(name, cx) {
                 continue;
             }
             if registry.has(name) {
