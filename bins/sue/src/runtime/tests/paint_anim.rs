@@ -1201,6 +1201,227 @@ fn sue_paint_timeline_picks_moves_copies_and_pastes_frames_by_drag() {
     }
 }
 
+/// A press and a release of the primary button at `at` with `modifiers`
+/// held.
+fn click_with(paint: &mut PaintDriver, at: Pos2, modifiers: egui::Modifiers) {
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers,
+    };
+    paint.step(vec![
+        egui::Event::ModifiersChanged(modifiers),
+        egui::Event::PointerMoved(at),
+    ]);
+    paint.step(vec![egui::Event::ModifiersChanged(modifiers), button(true)]);
+    paint.step(vec![
+        egui::Event::ModifiersChanged(modifiers),
+        button(false),
+    ]);
+    paint.step(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+    paint.settle(2);
+}
+
+#[test]
+fn sue_paint_timeline_holds_runs_double_clicks_and_thumbnails_by_hand() {
+    // TR-5, A25V-13 (a picked cel's start dragged: the holds around it
+    // change, with a line and the frame it lands on), ABV-12 (Shift and a
+    // click picks a run), AB-25 (a double click on a cell shows the layer
+    // picked there), A25-21 (Thumbnails: None makes the rows one line),
+    // A25-23 (Delete at the top of the right-click menu).
+    let mut paint = PaintDriver::new("paint-timeline-holds");
+    paint.command("anim.timeline.new");
+    paint.settle(2);
+    press(&mut paint, egui::Key::Enter);
+    paint.command("anim.layer.folder");
+    paint.command("anim.cel.new");
+    for _ in 0..3 {
+        paint.command("anim.next");
+    }
+    paint.command("anim.cel.new");
+    let texts = paint.settle(10);
+    let header = timeline_header(&texts);
+    let number = |texts: &[(String, egui::Rect)], name: &str| {
+        texts
+            .iter()
+            .filter(|(text, rect)| {
+                text == name && rect.top() > header.bottom() && rect.left() > 560.0
+            })
+            .map(|(_, rect)| *rect)
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .unwrap_or_else(|| panic!("frame {name} on the ruler: {texts:?}"))
+    };
+    let track_name = |texts: &[(String, egui::Rect)], start: &str| {
+        texts
+            .iter()
+            .find(|(text, rect)| {
+                text.starts_with(start) && rect.top() > header.bottom() && rect.left() < 560.0
+            })
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{start}'s track: {texts:?}"))
+    };
+    let row = track_name(&texts, "Folder 1");
+    let (one, seven) = (number(&texts, "1"), number(&texts, "7"));
+    let step = (seven.left() - one.left()) / 6.0;
+    let cell = |frame: u32| {
+        Pos2::new(
+            one.left() + step * (frame as f32 - 1.0) + step / 2.0,
+            row.center().y + 4.0,
+        )
+    };
+    let shown = |paint: &PaintDriver| {
+        let sequence = timeline_of(paint);
+        let track = sue_paint::anim::folders(&sequence)[0];
+        (0..10)
+            .map(|frame| sue_paint::anim::cel_at(&sequence.tracks[track], sequence.rate, frame))
+            .collect::<Vec<_>>()
+    };
+    let start = shown(&paint);
+    let (first, second) = (start[0].expect("cel 1"), start[3].expect("cel 2"));
+    assert_eq!(
+        start[..4],
+        [Some(first), Some(first), Some(first), Some(second)]
+    );
+
+    // TR-5: cel 2 picked by a click on its first frame (4), then its start
+    // dragged to frame 7: cel 1 holds up to frame 6, as the line showed.
+    click_at(&mut paint, cell(4));
+    let before = arena_bytes(&paint);
+    let depth = paint.runtime.engine.history.depth();
+    let from = cell(4);
+    let to = cell(7);
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    paint.step(vec![egui::Event::PointerMoved(from)]);
+    paint.step(vec![button(from, true)]);
+    let mut label = false;
+    for index in 1..=20 {
+        let at = from + (to - from) * (index as f32 / 20.0);
+        let texts = paint.step(vec![egui::Event::PointerMoved(at)]);
+        // The frame it lands on, under the ruler while dragging.
+        label |= index == 20
+            && texts
+                .iter()
+                .any(|(text, rect)| text == "7" && rect.top() > one.bottom());
+    }
+    paint.step(vec![button(to, false)]);
+    paint.settle(4);
+    assert!(label, "the frame it lands on is named while dragging");
+    let held = shown(&paint);
+    assert_eq!(
+        held[..8],
+        [
+            Some(first),
+            Some(first),
+            Some(first),
+            Some(first),
+            Some(first),
+            Some(first),
+            Some(second),
+            Some(second)
+        ],
+        "cel 1 holds to frame 6, cel 2 starts at 7"
+    );
+    assert_eq!(paint.runtime.engine.history.depth(), depth + 1, "one step");
+    // Dragged back past cel 1's start, it stops on frame 2.
+    paint.drag(cell(7), cell(1), egui::PointerButton::Primary);
+    let shorter = shown(&paint);
+    assert_eq!(shorter[..3], [Some(first), Some(second), Some(second)]);
+    paint.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    paint.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    paint.settle(2);
+    assert!(arena_bytes(&paint) == before, "both drags undo");
+
+    // ABV-12: from frame 1, Shift and a click on frame 3 picks frames 1
+    // to 3; Delete Frames then empties those three.
+    paint.command("anim.first");
+    paint.settle(2);
+    click_at(&mut paint, cell(1));
+    click_with(&mut paint, cell(3), egui::Modifiers::SHIFT);
+    let before = arena_bytes(&paint);
+    paint.command("anim.edit.delete");
+    paint.settle(2);
+    let emptied = shown(&paint);
+    assert_eq!(
+        emptied[..4],
+        [None, None, None, Some(second)],
+        "{emptied:?}"
+    );
+    paint.step(vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+    paint.settle(2);
+    assert!(arena_bytes(&paint) == before, "Delete Frames undoes");
+
+    // AB-25: cel 1 picked (a click on frame 1), a double click on frame 9
+    // (cel 2 held there) shows cel 1 from there.
+    click_at(&mut paint, cell(1));
+    // Long enough apart that the next click is a click of its own.
+    paint.settle(40);
+    let at = cell(9);
+    let press_at = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    paint.step(vec![egui::Event::PointerMoved(at)]);
+    paint.step(vec![press_at(true)]);
+    paint.step(vec![press_at(false)]);
+    paint.step(vec![press_at(true)]);
+    paint.step(vec![press_at(false)]);
+    paint.settle(3);
+    let sequence = timeline_of(&paint);
+    let track = sue_paint::anim::folders(&sequence)[0];
+    assert!(
+        sue_paint::anim::keys(&sequence.tracks[track], sequence.rate).contains(&(8, Some(first))),
+        "a key at frame 9: {:?}",
+        sue_paint::anim::keys(&sequence.tracks[track], sequence.rate)
+    );
+
+    // A25-23: Delete Frames heads the right-click menu of a frame.
+    let at = cell(2);
+    let right = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Secondary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    paint.step(vec![egui::Event::PointerMoved(at)]);
+    paint.step(vec![right(true)]);
+    paint.step(vec![right(false)]);
+    let texts = paint.settle(3);
+    assert!(
+        texts.iter().any(|(text, _)| text == "Delete Frames"),
+        "{texts:?}"
+    );
+    press(&mut paint, egui::Key::Escape);
+
+    // A25-21: with no thumbnails the rows are one line, so the next
+    // track's name comes up closer (with pictures it may be scrolled out of
+    // sight altogether).
+    let gap = |texts: &[(String, egui::Rect)]| {
+        let folder = track_name(texts, "Folder 1").top();
+        texts
+            .iter()
+            .find(|(text, rect)| {
+                text.starts_with("Layer 1") && rect.top() > folder && rect.left() < 560.0
+            })
+            .map(|(_, rect)| rect.top() - folder)
+    };
+    let tall = gap(&paint.settle(3));
+    paint.command("anim.thumbnails.none");
+    let short = gap(&paint.settle(4)).expect("Layer 1's track in sight");
+    assert!(
+        tall.is_none_or(|tall| short < tall * 0.75),
+        "rows shrink without thumbnails: {tall:?} then {short}"
+    );
+    assert!(short < 40.0, "one line a row: {short}");
+}
+
 #[test]
 fn sue_paint_timeline_plays_its_range_reads_in_seconds_and_keeps_labels_and_keys() {
     // AB-13, A25-20, A25V-11, A25-21, TR-6, A25-16, TR-3, AB-1, AB-2.
