@@ -8,11 +8,12 @@
 use std::path::{Path, PathBuf};
 
 /// The audited sub-crates, relative to the repository's root.
-const AUDITED: [&str; 4] = [
+const AUDITED: [&str; 5] = [
     "crates/sue-platform/android",
     "crates/sue-platform/ios",
     "crates/sue-platform/wayland",
     "crates/sue-platform/windows",
+    "crates/sue-platform/winpen",
 ];
 
 fn root() -> PathBuf {
