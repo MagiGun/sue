@@ -340,6 +340,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- With line spacing above single, the highlight on words a comment or
+  a note is on reached far below them, toward the next line, and a
+  selected commented word showed no selection. The highlight now sits
+  on the letters and the selection shows through it.
 - Inserting a table, a table of contents or a picture into rich text,
   and Text to Table, is one step to undo. Undo used to take the table's
   place in the text away first and leave an empty table behind for a
