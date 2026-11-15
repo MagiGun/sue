@@ -603,8 +603,9 @@ fn sue_paint_saves_as_a_project_or_any_picture_type() {
     assert_eq!(runtime.project(), Some(project.as_path()));
     assert!(sue_core::SueFile::from_bytes(&std::fs::read(&project).unwrap()).is_ok());
 
-    // Clip Studio's type writes a .clip with the picture's layers and
-    // Sue's own copy of it, and Save writes that file again from then on.
+    // Clip Studio's type writes a .clip with the picture's layers (and no
+    // hidden copy of the project any more), and Save writes that file
+    // again from then on: the person chose it.
     let clip = root.join("Picture.clip");
     runtime.request(
         ShellRequest::Picked {
@@ -617,7 +618,8 @@ fn sue_paint_saves_as_a_project_or_any_picture_type() {
     step(&mut runtime, Vec::new());
     let read = sue_io::clip::decode_clip(&std::fs::read(&clip).unwrap()).unwrap();
     assert_eq!((read.psd.width, read.psd.height), (1600, 1200));
-    assert!(read.sue.is_some(), "Sue's copy rides along");
+    assert!(read.sue.is_none(), "no hidden copy of the project");
+    assert!(!read.psd.layers.is_empty(), "the layers are in it");
     std::fs::remove_file(&clip).unwrap();
     step(
         &mut runtime,

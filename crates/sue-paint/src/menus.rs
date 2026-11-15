@@ -155,6 +155,7 @@ pub fn menus() -> Vec<Menu> {
                 SEP,
                 item("file.save").key("Ctrl+S"),
                 item("file.save_as"),
+                item("file.export.clip_back"),
                 sub(
                     &tr!("save-duplicate"),
                     vec![

@@ -40,6 +40,10 @@ impl SuePaint {
                 )
             }),
             "file.new_clipboard" => when(self.clipboard.is_some()),
+            "file.export.clip_back" => when(
+                self.picture()
+                    .is_some_and(|picture| self.clip_paths.contains_key(&picture)),
+            ),
             _ => when(has_doc),
         }
     }
@@ -58,17 +62,9 @@ impl SuePaint {
                     self.active = self.active.min(self.docs.len().saturating_sub(1));
                 }
             }
-            "file.save" if crate::clip_io::saves_clip(cx) && self.picture().is_some() => {
-                self.save_clip(cx);
-            }
-            "file.save" => {
-                cx.request(ShellRequest::Command("file.save".to_owned()));
-                self.mark_clean();
-                let at = cx.history.cursor();
-                for doc in &self.docs {
-                    self.saved_at.insert(doc.picture, at);
-                }
-            }
+            // The project, or the file the canvas was opened from.
+            "file.save" => self.save(cx),
+            "file.export.clip_back" => self.export_clip_back(cx),
             "file.revert" => self.revert(cx),
             "file.start_page" => {
                 self.start.forced = true;
@@ -425,4 +421,5 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     c("file.leave", "back-to-the-hub").with(Flags::LEAVES_CANVAS),
     c("app.quit", "quit-sue").with(Flags::LEAVES_CANVAS),
     family("file.recent.open.", "open-recent"),
+    c("file.export.clip_back", "export-back-to-the-same-clip"),
 ];

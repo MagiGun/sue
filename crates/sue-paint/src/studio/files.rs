@@ -140,6 +140,9 @@ impl SuePaint {
         }
         if extension == "clip" {
             if let Some(picture) = self.picture() {
+                // Chosen here: Save exports to it from now on.
+                self.save_targets
+                    .insert(picture, super::saving::SaveTarget::Clip(path.to_path_buf()));
                 self.write_clip(cx, picture, path);
             }
             return;
@@ -181,38 +184,51 @@ impl SuePaint {
         }
     }
 
-    /// Save when Sue Paint saves `.clip` files: the picture's own `.clip`
-    /// again, or Save As for one never saved.
-    pub(crate) fn save_clip(&mut self, cx: &mut AppletContext<'_>) {
+    /// File, Export Back to the Same .clip: the canvas into the `.clip`
+    /// it was opened from or last exported to, in one step; the save
+    /// dialog asks where for a canvas that has none.
+    pub(crate) fn export_clip_back(&mut self, cx: &mut AppletContext<'_>) {
         let Some(picture) = self.picture() else {
             return;
         };
         match self.clip_paths.get(&picture).cloned() {
             Some(path) => self.write_clip(cx, picture, &path),
-            None => self.save_as(cx),
+            None => match crate::clip_io::encode(&cx.world.arena, picture) {
+                Ok(bytes) => self.export_bytes(cx, bytes, "clip"),
+                Err(error) => cx.fail(tr!("export-failed", error = error)),
+            },
         }
     }
 
-    /// Writes `picture` as a `.clip` at `path`, and remembers it there.
+    /// Writes `picture` as a `.clip` at `path`, remembers it there, and
+    /// says what became of layers that did not convert exactly.
     pub(super) fn write_clip(
         &mut self,
         cx: &mut AppletContext<'_>,
         picture: EntityId,
         path: &Path,
     ) {
-        let bytes = match crate::clip_io::encode(&cx.world.arena, picture) {
-            Ok(bytes) => bytes,
+        let (bytes, report) = match crate::clip_io::encode_with_report(&cx.world.arena, picture) {
+            Ok(written) => written,
             Err(error) => {
                 cx.fail(tr!("cannot-save-as", extension = "clip", error = error));
                 return;
             }
         };
         if self.write_export(cx, path, &bytes) {
+            if !report.exact() {
+                cx.notify(tr!(
+                    "clip-report-wrote",
+                    file = file_name(path),
+                    summary = report.summary()
+                ));
+            }
             self.clip_paths.insert(picture, path.to_path_buf());
-            self.saved_at.insert(picture, cx.history.cursor());
-            if let Some(doc) = self.docs.iter().find(|doc| doc.picture == picture) {
-                let (_, _, version) = doc.compositor.display();
-                self.clean.insert(picture, version);
+            if matches!(
+                self.save_targets.get(&picture),
+                Some(super::saving::SaveTarget::Clip(_))
+            ) {
+                self.saved_now(cx, picture);
             }
             cx.request(ShellRequest::Remember {
                 path: path.to_path_buf(),
@@ -382,8 +398,14 @@ impl SuePaint {
                 .entities
                 .iter()
                 .find_map(|entity| entity.component(ComponentKind::RasterTile2D)?.as_raster())
-                .map(to_rgba)
+                .map(|raster| (raster.format(), to_rgba(raster)))
         });
+        // Float pixels come in as an 8-bit copy: Save must not write that
+        // over the file.
+        let format = read
+            .as_ref()
+            .map_or(sue_core::PixelFormat::Rgba8, |(format, _)| *format);
+        let read = read.map(|(_, rgba)| rgba);
         let rgba = match read {
             Some(rgba) => rgba,
             None => sue_io::decode_png(bytes)
@@ -441,6 +463,15 @@ impl SuePaint {
                 if Self::apply(cx, edit) {
                     self.activate(&cx.world.arena, picture_id);
                     self.saved_at.insert(picture_id, cx.history.cursor());
+                    if super::saving::writes_back(path, bytes, format) {
+                        self.opened_from(
+                            picture_id,
+                            super::saving::SaveTarget::Picture {
+                                path: path.to_path_buf(),
+                                merge_ok: false,
+                            },
+                        );
+                    }
                 }
             }
         }
@@ -463,9 +494,11 @@ impl SuePaint {
             .map(|_| ())
     }
 
-    /// Opens a Clip Studio file. One Sue saved comes back whole, from the
-    /// Sue project it carries; any other opens with its layers and folders.
-    /// Save writes the file again.
+    /// Opens a Clip Studio file as a new canvas with its layers, or into
+    /// the current canvas. A file Sue 0.0.75 wrote comes back whole from
+    /// the Sue project it carries, while its layers still match it. Save
+    /// on the new canvas asks once where to go; the status bar says what
+    /// became of layers that did not convert exactly.
     pub(super) fn open_clip(
         &mut self,
         cx: &mut AppletContext<'_>,
@@ -475,22 +508,53 @@ impl SuePaint {
         bytes: &[u8],
         as_layer: bool,
     ) -> Result<(), String> {
-        let clip = sue_io::clip::decode_clip(bytes)
-            .map_err(|error| tr!("cannot-open", file = file, error = error))?;
-        if !as_layer
-            && let Some(sue) = &clip.sue
-            && let Some((edit, picture)) =
-                crate::clip_io::embedded(&cx.world.arena, sue, &tr!("open-3", file = file))
-        {
-            if edit.is_none_or(|edit| Self::apply(cx, edit)) {
-                self.activate(&cx.world.arena, picture);
-                self.saved_at.insert(picture, cx.history.cursor());
-                self.clip_paths.insert(picture, path.to_path_buf());
+        let label = tr!("open-3", file = file);
+        let failed = |error: String| tr!("cannot-open", file = file, error = error);
+        if let Some(picture) = self.picture().filter(|_| as_layer) {
+            let doc = sue_io::clip::read(bytes).map_err(failed)?;
+            let current = self.doc().and_then(|doc| doc.layer);
+            let (edit, report) =
+                crate::clip_io::into_picture(&cx.world.arena, picture, current, &doc, &label)
+                    .map_err(failed)?;
+            if Self::apply(cx, edit) && !report.exact() {
+                cx.notify(tr!(
+                    "clip-report-opened",
+                    file = file,
+                    summary = report.summary()
+                ));
             }
             return Ok(());
         }
-        if let Some(picture) = self.open_layers(cx, name, file, &clip.psd, clip.dpi, as_layer)? {
-            self.clip_paths.insert(picture, path.to_path_buf());
+        let (opened, report) =
+            crate::clip_io::open(&cx.world.arena, bytes, name, &label).map_err(failed)?;
+        let (edit, picture) = match opened {
+            crate::clip_io::Opened::Copy(edit, picture) => (edit, picture),
+            crate::clip_io::Opened::Layers(edit, picture) => (Some(edit), picture),
+        };
+        if edit.is_none_or(|edit| Self::apply(cx, edit)) {
+            self.activate(&cx.world.arena, picture);
+            self.saved_at.insert(picture, cx.history.cursor());
+            self.opened_from(
+                picture,
+                super::saving::SaveTarget::ClipAsk(path.to_path_buf()),
+            );
+            if let Some(top) = doc::layers(&cx.world.arena, picture)
+                .iter()
+                .rev()
+                .find(|info| !doc::is_folder(&cx.world.arena, info.id))
+                .map(|info| info.id)
+                && let Some(doc) = self.doc_mut()
+                && doc.layer.is_none()
+            {
+                doc.layer = Some(top);
+            }
+            if !report.exact() {
+                cx.notify(tr!(
+                    "clip-report-opened",
+                    file = file,
+                    summary = report.summary()
+                ));
+            }
         }
         Ok(())
     }
@@ -825,4 +889,10 @@ pub(super) fn free_path(path: &Path) -> PathBuf {
         .map(|n| path.with_file_name(format!("{stem} ({n}){ext}")))
         .find(|candidate| !sue_platform::fs::exists(candidate))
         .unwrap_or_else(|| path.to_path_buf())
+}
+
+/// The file name of `path`, for messages.
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
 }

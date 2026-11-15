@@ -34,6 +34,7 @@ mod layers;
 mod materials;
 mod media;
 mod rulers;
+mod saving;
 mod three;
 
 /// Fingers on the canvas since the first came down: whether, when they
@@ -427,6 +428,11 @@ pub struct SuePaint {
     /// The `.clip` file each picture was opened from or saved to (Save
     /// writes it again).
     pub(crate) clip_paths: HashMap<EntityId, PathBuf>,
+    /// Where Save writes each canvas that does not go in the project: a
+    /// `.clip` or a flat picture it was opened from.
+    pub(crate) save_targets: HashMap<EntityId, saving::SaveTarget>,
+    /// The question Save is asking, if any.
+    pub(crate) save_ask: Option<saving::SaveAsk>,
     /// The part of the active picture on screen, `[x0, y0, x1, y1]`, and
     /// the picture pixels a side one screen pixel spans there (see
     /// `composite::view_step`), as of the last frame.
@@ -718,6 +724,8 @@ impl Default for SuePaint {
             recent: History::default(),
             saved_at: HashMap::new(),
             clip_paths: HashMap::new(),
+            save_targets: HashMap::new(),
+            save_ask: None,
             on_screen: ([0, 0, u32::MAX, u32::MAX], 1),
             recent_files: Vec::new(),
             recent_seen: None,

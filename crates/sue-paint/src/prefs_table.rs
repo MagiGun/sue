@@ -398,7 +398,7 @@ pub(super) const PAGES: &[Page] = &[
             Group {
                 title: "pref-save",
                 items: &[
-                    Item::Choice { label: "pref-save-format", choices: &[("clip", "pref-clip-studio-paint-clip"), ("sue", "pref-sue-project-sue")], value: "clip", wire: Wire::Text("sue_paint.save_format") },
+                    Item::Choice { label: "pref-save-format", choices: &[("clip", "pref-clip-studio-paint-clip"), ("sue", "pref-sue-project-sue")], value: "sue", wire: Wire::Text("sue_paint.save_format") },
                     Item::Check { label: "pref-save-files-as-a-background-process", on: true, wire: Wire::None },
                     Item::Check { label: "pref-show-save-status-as-pop-up", on: false, wire: Wire::None },
                     Item::Check { label: "pref-use-layer-cache-when-exporting", on: true, wire: Wire::None },
