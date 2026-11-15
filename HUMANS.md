@@ -618,6 +618,10 @@ Once a canvas is open:
   With other layers picked too (Ctrl+click in the Layer palette, or Layer,
   Change Selected Layer, Select All Layers), a tonal correction changes
   them all at once, as one step to undo.
+- **Grayscale** (Edit, Tonal Correction): one click turns the layer, and
+  every other layer picked with it, into grays of the same brightness,
+  transparency kept and, with a selection, only inside it. One step to
+  undo.
 - **Correction layers** (Layer, New Correction Layer): the same corrections
   as a layer that changes everything under it while leaving those layers
   alone. Hide it or lower its opacity to weaken it, and double-click it to

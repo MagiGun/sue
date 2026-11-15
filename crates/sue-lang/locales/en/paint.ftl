@@ -2388,3 +2388,4 @@ show-playback-fps = Show Playback FPS
 toggle-special-ruler-snapping = Toggle Special Ruler Snapping
 switch-special-ruler-snap = Switch Special Ruler Snap
 playback-fps-shown = { $fps } fps
+grayscale = Grayscale
