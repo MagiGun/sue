@@ -11,7 +11,7 @@ use super::super::Tour;
 fn shoot_dialog(tour: &mut Tour<'_>, name: &str) -> Result<(), String> {
     let path = tour.dir.join(format!("{name}.png"));
     tour.camera.shoot_after(&mut tour.runtime, &path, 40)?;
-    tour.written.push(path);
+    tour.taken(path);
     tour.paint_go(&["dialog/close"]);
     tour.settle();
     Ok(())

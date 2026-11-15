@@ -971,6 +971,17 @@ follow [Semantic Versioning](https://semver.org/).
 - A setting whose value is no longer one of its choices (a sound
   device that was unplugged) still opens its list in Settings, so
   another can be picked.
+- Sue Paint's Quick Access, popped out of the palette strip, is as tall
+  as its set when the window has the room, so Set 1's last button
+  (Quick Access Settings) is no longer hidden below its edge; in a
+  shorter window the set scrolls and its scroll bar stays in sight.
+- Sue Paint's Sub Tool list scrolls to the sub tool chosen (by a key, a
+  command or another tool), and its scroll bar shows when the list
+  holds more than fits.
+- The path of a selection being drawn (Lasso, Lasso fill, Shrink
+  selection and polyline selections) is a dark line on a light rim, so
+  it reads on white paper, black ink and every color between, whatever
+  the theme.
 
 ### Removed
 

@@ -83,8 +83,20 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.settle();
 
     // 08ee. A 2D camera folder and its frame, zoomed in a little, with the
-    // Object tool.
+    // Object tool. New Timeline asks for its settings first (P4-7):
+    // Enter takes what its dialog offers, so no dialog is left over the
+    // frame.
+    let depth = tour.runtime.engine.history.depth();
     tour.paint_command("anim.timeline.new");
+    tour.settle();
+    tour.camera.input.push(vec![egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    tour.settle();
     tour.paint_command("anim.layer.camera");
     tour.paint_command("tool.operation");
     tour.settle();
@@ -103,7 +115,12 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.shoot("08ef-sue-paint-light-table-box")?;
     tour.paint_command("anim.light_table.tool");
     tour.paint_command("tool.pen");
-    for _ in 0..5 {
+    // Bounded, so an undo that cannot run (a dialog left open) never
+    // holds the tour in a loop.
+    for _ in 0..32 {
+        if tour.runtime.engine.history.depth() <= depth {
+            break;
+        }
         tour.paint_command("edit.undo");
     }
     tour.settle();

@@ -61,7 +61,7 @@ pub(super) fn questions(tour: &mut Tour<'_>) -> Result<(), String> {
         // pacing does not wait for: let it finish.
         let path = tour.dir.join(format!("{name}.png"));
         tour.camera.shoot_after(&mut tour.runtime, &path, 40)?;
-        tour.written.push(path);
+        tour.taken(path);
         tour.paint_go(&["dialog/close"]);
         tour.settle();
     }

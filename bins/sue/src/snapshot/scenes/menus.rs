@@ -207,7 +207,7 @@ fn shoot_ui(
     let path = tour.dir.join(format!("{name}.png"));
     std::fs::write(&path, encode_png_rgba(size[0], size[1], &pixels)?)
         .map_err(|error| error.to_string())?;
-    tour.written.push(path);
+    tour.taken(path);
     Ok(())
 }
 

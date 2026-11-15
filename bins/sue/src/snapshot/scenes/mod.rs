@@ -5,6 +5,9 @@
 //! it left Sue, so a new scene goes into its area's file and is called
 //! from here at the point where Sue is in the state it needs. A scene
 //! that changes something for its picture puts it back before it returns.
+//! What scenes cannot be trusted to put back is reset here: notices go
+//! after every picture (`Tour::shoot`), and Sue Paint's palettes are put
+//! at rest ([`paint_at_rest`]) where a run of scenes moved them.
 
 mod gallery;
 mod hub;
@@ -100,8 +103,11 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_view::marks(tour)?;
     paint_canvas_chrome::window(tour)?;
     paint_layers::property(tour)?;
+    paint_at_rest(tour);
     paint_color::scenes(tour)?;
     paint_dock::scenes(tour)?;
+    // The floating Color Set palette, rolled up, goes back in the dock.
+    paint_at_rest(tour);
     paint_command_bar::scenes(tour)?;
     paint_extras::scenes(tour)?;
     paint_tools::palettes(tour)?;
@@ -148,8 +154,10 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
         writer_touch::touch(tour, prefix, interface == "phone")?;
     }
 
-    // 24 to 26. Settings shaped to each screen.
+    // 24 to 26. Settings shaped to each screen. The desktop window's
+    // size comes back after its last, small window.
     settings::screens(tour)?;
+    tour.camera.size = tour.desktop;
 
     // 27. The icons: the reference sheet, then every icon.
     icons::contact_sheets(tour)?;
@@ -167,7 +175,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // pixels per point and per density, with the focus ring showing.
     gallery::scenes(tour)?;
     // 35a and 35b. Save's question on a canvas from a .clip and from a
-    // PNG.
+    // PNG, Sue Paint's palettes at rest again after the touch layouts.
+    paint_at_rest(tour);
     paint_saving::questions(tour)?;
     // 36a to 36d. Sue Paint's export settings, Batch Convert Pictures
     // and Export Animation, Audio.
@@ -187,6 +196,17 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
 fn writer_view(tour: &mut Tour<'_>, target: &str, name: &str) -> Result<(), String> {
     tour.writer_go(&["dialog/close", "view/document", target]);
     tour.shoot(name)
+}
+
+/// Puts Sue Paint's palettes at rest: the workspace of the layout style
+/// (no palette floating, rolled up or brought out by an earlier scene,
+/// the Timeline closed), no dialog, menu or popover, and its palettes on
+/// the tabs they open with. Sue Paint comes to the front.
+fn paint_at_rest(tour: &mut Tour<'_>) {
+    tour.paint_go(&["dialog/close", "bar/close", "dock/menu"]);
+    tour.paint_command("window.workspace.reset");
+    tour.paint_go(&["tab/tool/1", "tab/layer/0"]);
+    tour.settle();
 }
 
 /// Goes back to the Hub.

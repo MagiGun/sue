@@ -3,12 +3,14 @@
 
 use super::super::Tour;
 
-/// Scene 08. Sue Paint with a sample illustration.
+/// Scene 08. Sue Paint with a sample illustration. The scene before
+/// left the Hub in front, so Sue Paint is opened on it.
 pub(super) fn sample(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.runtime
         .with_context(&mut tour.camera.painter, tour.camera.now, |cx| {
             sue_paint::sample_picture(cx, 1600, 1200)
         });
+    super::open_paint(tour);
     tour.shoot("08-sue-paint")
 }
 

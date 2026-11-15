@@ -284,6 +284,15 @@ struct Tour<'a> {
     writer: AppletId,
     /// The sample novel, once Sue Writer's first scene has made it.
     novel: Option<EntityId>,
+    /// The size of the desktop window, in points: what a scene that
+    /// shows Sue on a computer is shot at.
+    desktop: [u32; 2],
+    /// Whether the notices on the stack stay after a picture. They go by
+    /// default, so a scene shows only the notices its own steps raised,
+    /// never one an earlier scene left (in Sue they leave after a few
+    /// seconds; the tour's clock barely moves). A scene about notices
+    /// keeps them across its pictures.
+    keep_notices: bool,
 }
 
 impl Tour<'_> {
@@ -291,8 +300,19 @@ impl Tour<'_> {
     fn shoot(&mut self, name: &str) -> Result<(), String> {
         let path = self.dir.join(format!("{name}.png"));
         self.camera.shoot(&mut self.runtime, &path)?;
-        self.written.push(path);
+        self.taken(path);
         Ok(())
+    }
+
+    /// Lists the picture just written at `path`. The notices on the
+    /// stack go with it unless the scene keeps them
+    /// ([`Tour::keep_notices`]), so the next picture shows only what its
+    /// own steps raised.
+    fn taken(&mut self, path: PathBuf) {
+        self.written.push(path);
+        if !self.keep_notices {
+            self.runtime.shell.clear_notices();
+        }
     }
 
     /// Lets the shell come to rest, then writes the picture `name` of
@@ -310,7 +330,7 @@ impl Tour<'_> {
             .paint_drawing(&path, theme.void, |painter, rect| {
                 draw(painter, rect, &theme);
             })?;
-        self.written.push(path);
+        self.taken(path);
         Ok(())
     }
 
@@ -639,6 +659,8 @@ pub fn write_snapshots_with(
         paint: id(sue_paint::ID)?,
         writer: id(sue_writer::ID)?,
         novel: None,
+        desktop: [width, height],
+        keep_notices: false,
     };
     scenes::run(&mut tour)?;
     let Tour {

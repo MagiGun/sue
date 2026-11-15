@@ -65,7 +65,7 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
         if result.is_err() {
             break;
         }
-        tour.written.push(path);
+        tour.taken(path);
     }
 
     // Leave the tour as it was: no focus, no keyboard focus showing, the

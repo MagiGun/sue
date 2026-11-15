@@ -71,43 +71,14 @@ impl SuePaint {
             .iter()
             .map(|slot| self.look_of(slot, cx))
             .collect();
-        let items = self.holder_items(holder).to_vec();
-        // Columns as wide as a name needs, as many as fit; laid out from
-        // the top left of the set, then placed where the set scrolls to.
-        let row = density.row();
-        let least = theme.space(Space::S9) * 4.0;
-        let columns = ((body.width() / least).floor() as usize).max(1);
-        let column = body.width() / columns as f32;
-        let mut places = Vec::with_capacity(items.len());
-        let mut at = 0_usize;
-        let mut y = 0.0;
-        for slot in &items {
-            if slot.item == Item::Separator {
-                if at > 0 {
-                    y += row;
-                    at = 0;
-                }
-                let line = theme.space(Space::S4);
-                places.push(Rect::from_min_size(pos2(0.0, y), vec2(body.width(), line)));
-                y += line;
-                continue;
-            }
-            if at == columns {
-                y += row;
-                at = 0;
-            }
-            places.push(Rect::from_min_size(
-                pos2(column * at as f32, y),
-                vec2(column, row),
-            ));
-            at += 1;
-        }
-        let height = if at > 0 { y + row } else { y };
+        let (places, height) = self.quick_access_places(holder, body.width(), density, theme);
         let background = ui.interact(body, Id::unique("sue-paint-quick-ground"), Sense::click());
         let mut inner = super::child(ui, body, "quick-access-buttons");
-        // A set with more buttons than the palette is high scrolls.
+        // A set with more buttons than the palette is high scrolls, and
+        // then its bar stays in sight, so the buttons below are found.
         let shown = sue_wm::ui::ScrollView::vertical(("sue-paint-quick-set", holder))
             .on(theme.panel)
+            .always_bars(height > body.height() + 0.5)
             .show(&mut inner, theme, |ui| {
                 let (content, _) =
                     ui.allocate_exact_size(vec2(body.width(), height), Sense::hover());
@@ -123,9 +94,9 @@ impl SuePaint {
         if let Some((index, caret)) = clicked {
             self.press_button(holder, index, rects[index], caret, cx);
         }
-        if items.is_empty() {
+        if places.is_empty() {
             inner.painter().text(
-                body.center_top() + egui::Vec2::Y * row,
+                body.center_top() + egui::Vec2::Y * density.row(),
                 egui::Align2::CENTER_CENTER,
                 tr!("quick-access-empty"),
                 theme.text_font(TextRole::Caption),
@@ -135,5 +106,59 @@ impl SuePaint {
         self.bar_menu(&inner, holder, &menu, cx, theme);
         self.bar_drops(&inner, holder, body, &rects, cx, theme);
         self.bar_popovers(&inner, holder, cx, theme);
+    }
+
+    /// Where the buttons of `holder` lie in a set `width` points wide,
+    /// from the set's top left, and how high the set is: columns as wide
+    /// as a name needs, as many as fit, a line across between groups.
+    fn quick_access_places(
+        &self,
+        holder: Holder,
+        width: f32,
+        density: Density,
+        theme: &Theme,
+    ) -> (Vec<Rect>, f32) {
+        let row = density.row();
+        let least = theme.space(Space::S9) * 4.0;
+        let columns = ((width / least).floor() as usize).max(1);
+        let column = width / columns as f32;
+        let items = self.holder_items(holder);
+        let mut places = Vec::with_capacity(items.len());
+        let mut at = 0_usize;
+        let mut y = 0.0;
+        for slot in items {
+            if slot.item == Item::Separator {
+                if at > 0 {
+                    y += row;
+                    at = 0;
+                }
+                let line = theme.space(Space::S4);
+                places.push(Rect::from_min_size(pos2(0.0, y), vec2(width, line)));
+                y += line;
+                continue;
+            }
+            if at == columns {
+                y += row;
+                at = 0;
+            }
+            places.push(Rect::from_min_size(
+                pos2(column * at as f32, y),
+                vec2(column, row),
+            ));
+            at += 1;
+        }
+        let height = if at > 0 { y + row } else { y };
+        (places, height)
+    }
+
+    /// How high Quick Access's body is when it shows the set it shows
+    /// whole, `width` points wide: the sets' tabs and every button (an
+    /// empty set: the room its note takes). The palette that pops out of
+    /// the strip is made this high when the window has the room.
+    pub(crate) fn quick_access_height(&self, width: f32, density: Density, theme: &Theme) -> f32 {
+        let pad = theme.space(Space::S2);
+        let holder = Holder::QuickAccess(self.quick_access.shown);
+        let (_, height) = self.quick_access_places(holder, width - pad * 2.0, density, theme);
+        density.tab_strip() + pad * 2.0 + height.max(density.row() * 2.0)
     }
 }
