@@ -579,6 +579,7 @@ pub fn menus() -> Vec<Menu> {
                         named(&tr!("create-selection"), "select.from_layer"),
                         item("select.add_layer"),
                         item("select.subtract_layer"),
+                        item("layer.selection.overlap"),
                     ],
                 ),
                 item("select.to_layer"),

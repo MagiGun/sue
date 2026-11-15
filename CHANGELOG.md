@@ -31,6 +31,12 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint: Edit, Copy Vectors as SVG puts the lines of the vector
   layer (only the ones the Operation tool picked, when it picked some) on
   the clipboard as SVG code, for any program that draws vectors.
+- Sue Paint: Ctrl+B (Switch Using Layer Color) shows the current
+  layer in its layer color (blue unless Layer Property says otherwise) and
+  back in its own colors on the next press, for tinting a sketch.
+- Sue Paint: Select, Selection from Layer, Select Overlapping Area keeps
+  only the part of the selection where the current layer has something
+  drawn.
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.

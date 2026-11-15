@@ -265,6 +265,11 @@ fn the_shortcuts_keep_the_keys_and_names_they_had() {
         ("layer.select_below", "Alt+[", "Select Layer Below"),
         ("layer.order.up", "Ctrl+]", "Move Up"),
         ("layer.order.down", "Ctrl+[", "Move Down"),
+        (
+            "layer.toggle.layer_color",
+            "Ctrl+B",
+            "Switch Using Layer Color",
+        ),
         ("select.again", "Ctrl+Shift+D", "Reselect"),
         ("select.all", "Ctrl+A", "Select All"),
         ("select.none", "Ctrl+D", "Deselect"),
