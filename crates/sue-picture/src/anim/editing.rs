@@ -479,8 +479,8 @@ fn trimmed(sequence: &Sequence, track: usize, frame: u32, start: bool) -> Option
 /// `sequence` with the keys after `frame` on the tracks `only` (every
 /// track when `None`) moved `by` frames: Insert Frame (`by` above 0) and
 /// Delete Frame (below 0). A key moved onto or before `frame` by a
-/// deletion goes. The clip of a layer track under `frame` grows or
-/// shrinks with it.
+/// deletion goes. On layer and camera tracks the clip showing at
+/// `frame` grows, and deleted frames are cut out of every clip.
 #[must_use]
 pub fn shift_tracks(
     sequence: &Sequence,
@@ -512,24 +512,51 @@ pub fn shift_tracks(
         }
         out.tracks[index] = tidy(&moved, rate, length);
     }
-    let after = Time::from_frames(i64::from(frame), rate);
-    let by_time = Time::from_frames(by, rate);
-    for index in super::setup::layer_tracks(sequence)
-        .into_iter()
-        .filter(|index| picked(*index))
-    {
+    // Layer and camera tracks hold clips with a length: frames inserted
+    // after `frame` lengthen the clip showing there and push the later
+    // ones on; frames deleted (those right after `frame`) are cut out of
+    // every clip, so no clip ever runs into the next.
+    let frame = i64::from(frame);
+    let clip_tracks = (0..sequence.tracks.len()).filter(|index| {
+        let kind = &sequence.tracks[*index].kind;
+        (kind == super::setup::LAYER || kind == super::setup::CAMERA) && picked(*index)
+    });
+    for index in clip_tracks {
         let old = &sequence.tracks[index];
         let mut moved = Track::new(old.name.clone(), old.kind.clone());
         moved.properties = old.properties.clone();
         moved.muted = old.muted;
         moved.locked = old.locked;
         for clip in old.clips() {
+            let (start, end) = (clip.start.frame(rate), clip.end().frame(rate));
+            let (start, end) = if by >= 0 {
+                if start > frame {
+                    (start + by, end + by)
+                } else if end > frame {
+                    (start, end + by)
+                } else {
+                    (start, end)
+                }
+            } else {
+                let (cut_from, cut_to) = (frame + 1, frame + 1 - by);
+                let place = |at: i64| {
+                    if at <= cut_from {
+                        at
+                    } else if at <= cut_to {
+                        cut_from
+                    } else {
+                        at + by
+                    }
+                };
+                (place(start), place(end))
+            };
+            if end <= start {
+                continue;
+            }
             let mut clip = clip.clone();
-            if clip.start > after {
-                clip.start = Time((clip.start + by_time).flicks().max(after.flicks()));
-            } else if clip.end() > after {
-                let one = Time::from_frames(1, rate).flicks();
-                clip.duration = Time((clip.duration + by_time).flicks().max(one));
+            if (start, end) != (clip.start.frame(rate), clip.end().frame(rate)) {
+                clip.start = Time::from_frames(start, rate);
+                clip.duration = Time::from_frames(end - start, rate);
             }
             moved.insert(clip);
         }
@@ -910,6 +937,46 @@ mod tests {
             keys(&back.tracks[0], back.rate),
             keys(&sequence.tracks[0], sequence.rate)
         );
+    }
+
+    #[test]
+    fn insert_and_delete_frame_cut_layer_clips_without_overlap() {
+        use super::super::setup::{LAYER, layer_track};
+        let rate = Rate::new(12, 1);
+        let layer = EntityId::new();
+        let mut track = Track::new("Layer", LAYER);
+        for (start, frames) in [(0, 5), (6, 4)] {
+            track.insert(Clip::new(
+                layer,
+                Time::from_frames(start, rate),
+                Time::from_frames(frames, rate),
+            ));
+        }
+        let mut sequence = Sequence::new(rate, super::super::MIX_RATE);
+        sequence.tracks.push(track);
+        sequence.tracks.push(layer_track("Whole", layer, rate, 10));
+        let spans = |sequence: &Sequence, index: usize| {
+            sequence.tracks[index]
+                .clips()
+                .iter()
+                .map(|clip| (clip.start.frame(rate), clip.end().frame(rate)))
+                .collect::<Vec<_>>()
+        };
+        // Frames 5 to 7 deleted after frame 4: the first clip (0 to 4)
+        // keeps its frames, the second loses 6 and 7 and follows on.
+        let deleted = shift_tracks(&sequence, 4, -3, 7, None);
+        assert_eq!(spans(&deleted, 0), vec![(0, 5), (5, 7)]);
+        assert_eq!(spans(&deleted, 1), vec![(0, 7)], "the timeline's length");
+        // A clip wholly inside the deleted frames goes.
+        let gone = shift_tracks(&sequence, 5, -4, 6, None);
+        assert_eq!(spans(&gone, 0), vec![(0, 5)]);
+        // Inserting lengthens the clip showing at the frame and pushes
+        // the next one on.
+        let inserted = shift_tracks(&sequence, 2, 2, 12, None);
+        assert_eq!(spans(&inserted, 0), vec![(0, 7), (8, 12)]);
+        assert_eq!(spans(&inserted, 1), vec![(0, 12)]);
+        let back = shift_tracks(&inserted, 2, -2, 10, None);
+        assert_eq!(back, sequence, "deleting what was inserted restores it");
     }
 
     #[test]
