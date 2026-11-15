@@ -121,7 +121,7 @@ impl Aspect {
             Self::Canvas => tr!("aspect-same-as-canvas"),
             Self::Wide => tr!("aspect-wide"),
             Self::Tall => tr!("aspect-tall"),
-            Self::Square => tr!("aspect-square"),
+            Self::Square => tr!("timelapse-aspect-square"),
             Self::Portrait => tr!("aspect-portrait"),
             Self::Classic => tr!("aspect-classic"),
         }

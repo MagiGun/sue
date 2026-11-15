@@ -361,7 +361,7 @@ impl TimelapseDialog {
                     export.side = SIDES[chosen];
                 }
             });
-            grid.row(&tr!("aspect-ratio"), |ui| {
+            grid.row(&tr!("timelapse-aspect-ratio"), |ui| {
                 let mut chosen = Aspect::ALL
                     .iter()
                     .position(|aspect| *aspect == export.aspect)
