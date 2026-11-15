@@ -1,28 +1,33 @@
 //! The comments panel.
 
-use egui::{RichText, Ui};
+use egui::{Key, RichText, Ui};
+use sue_wm::icons::Icon;
+use sue_wm::ui::{self, Space, TextRole, Tip};
 use sue_wm::{AppletContext, Theme};
 
 use crate::studio::SueWriter;
 
 use super::After;
+use super::binder::{key_text, keys_of, tool_button};
+
+/// How much of the commented words a thread quotes.
+const QUOTE: usize = 80;
 
 impl SueWriter {
-    /// A text property edited in place, committed when the field lets go.
     /// The comments of what is shown, as threads: the words each is about
     /// (a press selects them), what was said, a reply box, Resolve and
     /// Delete.
     pub(super) fn comments_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>, theme: &Theme) {
         let comments = self.editor.comments();
         if comments.is_empty() {
-            ui.label(
-                RichText::new(tr!("no-comments-select-some-words-choose"))
-                    .size(theme.small_size)
-                    .color(theme.muted),
-            );
+            ui::empty_state("writer-comments-empty", &tr!("no-comments"))
+                .icon(Icon::Comment)
+                .detail(&tr!("comments-empty-detail"))
+                .show(ui, theme);
             return;
         }
         let mut act: Option<After> = None;
+        let gap = theme.space(Space::S3);
         for (doc, range, id) in comments {
             let Some(thread) = sue_model::comments::thread(cx.arena(), id) else {
                 continue;
@@ -37,17 +42,17 @@ impl SueWriter {
                 .and_then(|text| text.get(range.clone()))
                 .unwrap_or("")
                 .chars()
-                .take(80)
+                .take(QUOTE)
                 .collect();
-            egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui::Card::new().padding(Space::S4).show(ui, theme, |ui| {
                 ui.set_width(ui.available_width());
-                let quote = RichText::new(format!("\u{201C}{}\u{201D}", words.trim()))
-                    .italics()
-                    .color(theme.muted);
-                if ui
-                    .add(egui::Label::new(quote).sense(egui::Sense::click()))
-                    .clicked()
-                {
+                // The words it is about: a press selects them in the text.
+                let quote = format!("\u{201C}{}\u{201D}", words.trim());
+                let response = ui::link(("writer-comment-quote", id), &quote)
+                    .role(TextRole::Caption)
+                    .show(ui, theme);
+                let go = tr!("comments-go-to-words");
+                if ui::tooltip(response, &Tip::new(&go), theme).clicked() {
                     let range = range.clone();
                     act = Some(Box::new(move |me: &mut Self, _| {
                         me.editor.select(doc_id, range);
@@ -55,24 +60,31 @@ impl SueWriter {
                     }));
                 }
                 for note in std::iter::once(&thread.first).chain(&thread.replies) {
+                    ui.add_space(gap);
                     ui.label(
                         RichText::new(format!("{}, {}", note.author, note.date))
-                            .size(theme.small_size)
+                            .font(theme.text_font(TextRole::Caption))
+                            .color(theme.text_muted())
                             .strong(),
                     );
-                    ui.label(&note.text);
+                    ui.label(RichText::new(&note.text).color(theme.text));
                 }
+                ui.add_space(gap);
+                let reply = tr!("reply");
                 let draft = self.drafts.entry((id, "reply")).or_default();
-                let response = ui.add(
-                    egui::TextEdit::singleline(draft)
-                        .hint_text(tr!("reply"))
-                        .desired_width(f32::INFINITY),
-                );
-                let send =
-                    response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                let response = ui::text_field(("writer-comment-reply", id), draft)
+                    .hint(&reply)
+                    .label(&reply)
+                    .show(ui, theme);
+                let send = response.lost_focus() && ui.input(|input| input.key_pressed(Key::Enter));
+                ui.add_space(gap);
                 ui.horizontal(|ui| {
-                    if (ui.small_button(tr!("reply")).clicked() || send) && !draft.trim().is_empty()
-                    {
+                    let enter = key_text(Key::Enter);
+                    let pressed = ui::button(("writer-comment-send", id), &reply)
+                        .enabled(!draft.trim().is_empty())
+                        .show(ui, theme);
+                    let pressed = ui::tooltip(pressed, &Tip::new(&reply).shortcut(&enter), theme);
+                    if (pressed.clicked() || send) && !draft.trim().is_empty() {
                         let text = std::mem::take(draft).trim().to_owned();
                         act = Some(Box::new(move |me: &mut Self, cx| me.reply(cx, id, &text)));
                     }
@@ -81,19 +93,39 @@ impl SueWriter {
                     } else {
                         tr!("resolve")
                     };
-                    if ui.small_button(resolve).clicked() {
+                    let keys = keys_of("review.resolve", cx);
+                    let pressed = ui::button(("writer-comment-resolve", id), &resolve)
+                        .ghost()
+                        .icon(Icon::Check)
+                        .show(ui, theme);
+                    if ui::tooltip(pressed, &Tip::new(&resolve).shortcut(&keys), theme).clicked() {
                         act = Some(Box::new(move |me: &mut Self, cx| me.resolve(cx, id)));
                     }
-                    if ui.small_button(tr!("delete")).clicked() {
+                    let delete = tr!("delete");
+                    let keys = keys_of("review.delete_comment", cx);
+                    let pressed = tool_button(
+                        ui,
+                        ("writer-comment-delete", id),
+                        Icon::Delete,
+                        &delete,
+                        &keys,
+                        theme,
+                    );
+                    if pressed.clicked() {
                         act = Some(Box::new(move |me: &mut Self, cx| {
                             me.editor.remove_comment(cx, id);
                         }));
                     }
                 });
             });
-            ui.add_space(6.0);
+            ui.add_space(theme.space(Space::S4));
         }
-        ui.checkbox(&mut self.show_resolved, tr!("show-resolved-comments"));
+        let shown = tr!("show-resolved-comments");
+        let response =
+            ui::checkbox("writer-show-resolved", &shown, self.show_resolved).show(ui, theme);
+        if ui::tooltip(response, &Tip::new(&shown), theme).clicked() {
+            self.show_resolved = !self.show_resolved;
+        }
         if let Some(act) = act {
             act(self, cx);
         }
