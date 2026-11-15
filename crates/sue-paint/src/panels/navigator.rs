@@ -147,6 +147,13 @@ impl SuePaint {
                     Id::unique("sue-paint-navigator"),
                     Sense::click_and_drag(),
                 );
+                let name = tr!("navigator-picture");
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, &name));
+                let response = sue_wm::ui::tooltip(
+                    response,
+                    &Tip::new(&name).help(&tr!("navigator-picture-help")),
+                    theme,
+                );
                 if let Some(pointer) = response.interact_pointer_pos()
                     && (response.dragged() || response.clicked())
                 {
