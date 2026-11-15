@@ -385,6 +385,10 @@ pub fn menus() -> Vec<Menu> {
                         item("file.export.psb"),
                         item("file.export.psd"),
                         item("file.export.jxl"),
+                        item("file.duplicate.gif"),
+                        item("file.duplicate.qoi"),
+                        item("file.duplicate.ico"),
+                        item("file.duplicate.ppm"),
                     ],
                 ),
                 sub(

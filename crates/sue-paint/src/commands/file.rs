@@ -1047,6 +1047,44 @@ mod tests {
     }
 
     #[test]
+    fn save_duplicate_and_export_single_layer_offer_the_same_formats() {
+        // Both write the canvas flattened through the export settings
+        // dialog, so GIF, QOI, ICO and PPM are under both.
+        use sue_wm::MenuItem;
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let menus = crate::menus::menus();
+        let commands_of = |label: &str| -> Vec<String> {
+            let found = menus[0].items.iter().find_map(|item| match item {
+                MenuItem::Sub {
+                    label: found,
+                    items,
+                    ..
+                } if found == label => Some(items),
+                _ => None,
+            });
+            found
+                .unwrap_or_else(|| panic!("{label} is in the File menu"))
+                .iter()
+                .filter_map(|item| match item {
+                    MenuItem::Action { command, .. } => Some(command.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let duplicate = commands_of(&tr!("save-duplicate"));
+        let single = commands_of(&tr!("export-single-layer"));
+        for name in [
+            "file.duplicate.gif",
+            "file.duplicate.qoi",
+            "file.duplicate.ico",
+            "file.duplicate.ppm",
+        ] {
+            assert!(duplicate.iter().any(|found| found == name), "{name}");
+            assert!(single.iter().any(|found| found == name), "{name}");
+        }
+    }
+
+    #[test]
     fn the_flat_exports_write_the_format_their_name_ends_in() {
         for name in [
             "file.export.bmp",
