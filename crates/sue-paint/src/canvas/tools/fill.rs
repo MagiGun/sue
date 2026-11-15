@@ -68,6 +68,10 @@ impl SuePaint {
         let Gesture::Bucket { sub, seeds } = gesture else {
             return;
         };
-        self.bucket(&seeds, &sub, size, cx);
+        if sub.tool == crate::tools::Tool::Gradient {
+            self.contour_fill(&seeds, &sub, size, cx);
+        } else {
+            self.bucket(&seeds, &sub, size, cx);
+        }
     }
 }

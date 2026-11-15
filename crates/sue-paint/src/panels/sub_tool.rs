@@ -490,6 +490,9 @@ impl SuePaint {
         // go.
         let held = inner.ctx().input(|input| input.pointer.any_down());
         self.line_changes(held, cx);
+        // The Gradient tool's sets, and a gradient layer from Tool
+        // Property: shown now, kept when let go.
+        self.gradient_frame(held, cx);
         // A 3D layer's view from Tool Property: shown now, kept when let go.
         if let Some((layer, view)) = self.pending_view3d.take() {
             self.preview_view3d(cx, layer, &view);

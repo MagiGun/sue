@@ -86,6 +86,8 @@ pub struct Exclude {
     pub paper: bool,
     /// Locked layers.
     pub locked: bool,
+    /// The editing layer itself: only the others are looked at.
+    pub editing: bool,
 }
 
 impl Default for Exclude {
@@ -96,6 +98,7 @@ impl Default for Exclude {
             text: false,
             paper: true,
             locked: false,
+            editing: false,
         }
     }
 }
@@ -191,7 +194,8 @@ pub fn referred(
             && ((exclude.drafts && layer.draft)
                 || (exclude.text && layer.text)
                 || (exclude.paper && layer.paper)
-                || (exclude.locked && layer.locked))
+                || (exclude.locked && layer.locked)
+                || (exclude.editing && Some(layer.id) == editing))
     };
     layers
         .iter()
@@ -1613,6 +1617,7 @@ mod tests {
             text: false,
             paper: false,
             locked: false,
+            editing: false,
         };
         let take = |editing: usize, picked: &[EntityId], refer: Refer, exclude: Exclude| {
             referred(&layers, Some(ids[editing]), picked, refer, exclude)
@@ -1668,8 +1673,17 @@ mod tests {
             text: true,
             paper: true,
             locked: true,
+            editing: false,
         };
         assert_eq!(leave(every), [ids[1], ids[5], ids[7], ids[8]]);
+        // Leaving out the editing layer looks only at the others.
+        assert!(
+            !leave(Exclude {
+                editing: true,
+                ..none
+            })
+            .contains(&ids[1])
+        );
         // The editing layer alone ignores the exclusions.
         assert_eq!(take(2, &[], Refer::Editing, every), [ids[2]]);
         // Choices round-trip by name.

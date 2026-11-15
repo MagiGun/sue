@@ -59,7 +59,7 @@ pub(crate) use color::{ColorDialog, ColorTarget, cmyk_of, rgb_of_cmyk};
 pub(crate) use colorize::ColorizeDialog;
 pub(crate) use command_bar::{BarDialog, BarTarget};
 pub(crate) use comps::CompsDialog;
-pub(crate) use fill::AdvancedFill;
+pub(crate) use fill::{AdvancedFill, target_label};
 pub(crate) use filter::FilterDialog;
 pub(crate) use lines_tones::LinesTonesDialog;
 pub(crate) use modifiers::ModifiersDialog;

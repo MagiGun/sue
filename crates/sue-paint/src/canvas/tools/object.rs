@@ -217,6 +217,7 @@ impl SuePaint {
                     text: false,
                     paper: false,
                     locked: false,
+                    editing: false,
                 },
             )
             .contains(&layer);

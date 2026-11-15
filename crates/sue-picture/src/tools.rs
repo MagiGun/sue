@@ -14,13 +14,18 @@
 pub mod layout;
 
 use crate::brush::{AntiAlias, Tip};
-use crate::fill::{Exclude, Refer};
+use crate::fill::{Exclude, Refer, Target};
+use crate::gradient::{Edge, Shape};
+use crate::gradient_map::{GradientMap, StopColor};
 use crate::select::Aspect;
+use sue_model::BlendMode;
 
 /// The Fill tool's Close and fill sub tool's mode.
 pub const CLOSE_AND_FILL: u8 = 3;
 /// The Fill tool's Paint unpainted area sub tool's mode.
 pub const PAINT_UNPAINTED: u8 = 4;
+/// The Gradient tool's Contour line fill sub tools' mode.
+pub const CONTOUR_FILL: u8 = 3;
 /// The Figure tool's Lasso fill sub tool's mode.
 pub const LASSO_FILL: u8 = 7;
 /// The Figure tool's Polyline sub tool's mode.
@@ -350,11 +355,7 @@ impl Tool {
                 // Draw round colored areas: the gaps left in them fill.
                 plain("Paint unpainted area", PAINT_UNPAINTED),
             ],
-            Self::Gradient => vec![
-                plain("Drawing Color to Transparent", 0),
-                plain("Main to Sub Color", 1),
-                plain("Radial", 2),
-            ],
+            Self::Gradient => gradients(),
             Self::Figure => {
                 let line = tip(6.0, |t| {
                     t.size_by.pressure = false;
@@ -501,6 +502,99 @@ impl Tool {
 /// The built-in brushes of `tool` as its sub tools: each preset's name,
 /// tip, stabilization and correction, in the preset list's order. A
 /// decoration's mode is its place in that list.
+/// The Gradient tool's sub tools: Sue's own gradients, then Contour line
+/// fill's. Each holds its stops, shape and edge process; the colors of
+/// its own are Sue's, none taken from another program.
+fn gradients() -> Vec<SubTool> {
+    use crate::gradient_map::Stop;
+    let made = |name: &str, map: GradientMap, shape: Shape, edge: Edge| SubTool {
+        gradient: map,
+        gradient_shape: shape,
+        gradient_edge: edge,
+        ..SubTool::new(Tool::Gradient, name, 0, Tip::default())
+    };
+    let own = |stops: &[Stop]| GradientMap::of(stops).unwrap_or_default();
+    let fade = GradientMap::sourced((StopColor::Drawing, 255), (StopColor::Drawing, 0));
+    let main_sub = GradientMap::sourced((StopColor::Main, 255), (StopColor::Sub, 255));
+    let mut glow = GradientMap::sourced((StopColor::Drawing, 255), (StopColor::Drawing, 0));
+    if let Some(index) = glow.add_at(0.35)
+        && let Some(stop) = glow.stop_mut(index)
+    {
+        stop.color = StopColor::Drawing;
+        stop.alpha = 150;
+    }
+    vec![
+        made(
+            "Drawing Color to Transparent",
+            fade,
+            Shape::Linear,
+            Edge::Extend,
+        ),
+        made("Main to Sub Color", main_sub, Shape::Linear, Edge::Extend),
+        made("Radial", fade, Shape::Circle, Edge::Extend),
+        made("Ellipse", fade, Shape::Ellipse, Edge::Extend),
+        made("Soft Glow", glow, Shape::Circle, Edge::Clip),
+        made("Repeating Bands", main_sub, Shape::Linear, Edge::Mirror),
+        made(
+            "Dusk",
+            own(&[
+                Stop::new(0.0, [24, 20, 60]),
+                Stop::new(0.45, [150, 60, 110]),
+                Stop::new(0.8, [240, 150, 90]),
+                Stop::new(1.0, [255, 236, 190]),
+            ]),
+            Shape::Linear,
+            Edge::Extend,
+        ),
+        made(
+            "Sea",
+            own(&[
+                Stop::new(0.0, [6, 20, 48]),
+                Stop::new(0.55, [30, 110, 160]),
+                Stop::new(1.0, [210, 245, 250]),
+            ]),
+            Shape::Linear,
+            Edge::Extend,
+        ),
+        made(
+            "Forest",
+            own(&[
+                Stop::new(0.0, [10, 28, 20]),
+                Stop::new(0.5, [60, 120, 70]),
+                Stop::new(1.0, [220, 236, 180]),
+            ]),
+            Shape::Linear,
+            Edge::Extend,
+        ),
+        made(
+            "Spectrum",
+            own(&[
+                Stop::new(0.0, [230, 40, 40]),
+                Stop::new(0.2, [240, 200, 40]),
+                Stop::new(0.4, [60, 190, 80]),
+                Stop::new(0.6, [40, 180, 220]),
+                Stop::new(0.8, [70, 70, 220]),
+                Stop::new(1.0, [200, 60, 200]),
+            ]),
+            Shape::Linear,
+            Edge::Extend,
+        ),
+        // Contour line fill: a click in an area lays the gradient from its
+        // outline inward.
+        SubTool {
+            mode: CONTOUR_FILL,
+            tolerance: 0.1,
+            ..made("Contour Fill", fade, Shape::Linear, Edge::Extend)
+        },
+        SubTool {
+            mode: CONTOUR_FILL,
+            tolerance: 0.1,
+            contour_width: 12.0,
+            ..made("Contour Bands", main_sub, Shape::Linear, Edge::Mirror)
+        },
+    ]
+}
+
 fn brushes(tool: Tool) -> Vec<SubTool> {
     let key = match tool {
         Tool::Pen => "pen",
@@ -647,6 +741,31 @@ pub struct SubTool {
     /// The settings, by their stable names, that Tool Property leaves
     /// out (the closed eyes of Sub Tool Detail, which shows every one).
     pub hidden: Vec<String>,
+    /// The Gradient tool's stops ([`GradientMap::with_drawing`] fills in
+    /// the drawing colors as it is laid).
+    pub gradient: GradientMap,
+    /// The Gradient tool's shape.
+    pub gradient_shape: Shape,
+    /// What the Gradient tool does before its start and past its end
+    /// (Edge process).
+    pub gradient_edge: Edge,
+    /// An Ellipse gradient's short axis against its long one.
+    pub gradient_aspect: f32,
+    /// The Gradient tool makes a gradient layer that stays editable
+    /// instead of painting on the editing layer (Where to create).
+    pub new_layer: bool,
+    /// How the Gradient tool's colors mix with the pixels under them
+    /// (Blending mode).
+    pub blend: BlendMode,
+    /// Contour line fill: how many pixels in from the outline the
+    /// gradient reaches its end (0: the middle of the area).
+    pub contour_width: f32,
+    /// Close and fill: which of the closed areas fill, judged on the
+    /// editing layer (Target color).
+    pub close_target: Target,
+    /// A rectangle or ellipse selection turns with the pointer after the
+    /// drag until a click fixes it (Adjust angle after fixed).
+    pub adjust_angle: bool,
 }
 
 impl SubTool {
@@ -693,6 +812,15 @@ impl SubTool {
             move_clicked: false,
             move_select: true,
             hidden: Vec::new(),
+            gradient: GradientMap::sourced((StopColor::Drawing, 255), (StopColor::Drawing, 0)),
+            gradient_shape: Shape::Linear,
+            gradient_edge: Edge::Extend,
+            gradient_aspect: 0.5,
+            new_layer: false,
+            blend: BlendMode::Normal,
+            contour_width: 0.0,
+            close_target: Target::All,
+            adjust_angle: false,
         }
     }
 
@@ -760,6 +888,23 @@ impl SubTool {
             spread: self.spread,
             connected_only: self.connected_only,
             antialias: self.area_aa,
+        }
+    }
+
+    /// The Gradient tool's gradient as it is laid now: the main, sub and
+    /// drawing colors filled in where its stops take them.
+    #[must_use]
+    pub fn gradient_look(
+        &self,
+        main: [u8; 3],
+        sub: [u8; 3],
+        drawing: [u8; 3],
+    ) -> crate::gradient::Look {
+        crate::gradient::Look {
+            map: self.gradient.with_drawing(main, sub, drawing),
+            shape: self.gradient_shape,
+            edge: self.gradient_edge,
+            aspect: self.gradient_aspect.clamp(crate::gradient::MIN_ASPECT, 1.0),
         }
     }
 

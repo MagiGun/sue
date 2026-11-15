@@ -54,6 +54,8 @@ mod three;
 mod vector;
 mod view;
 
+pub(in crate::canvas) use select::{turn_angle, turn_outline};
+
 /// Where a press landed and what came with it, as the tool it goes to
 /// sees it.
 #[derive(Clone, Copy)]
@@ -165,6 +167,7 @@ impl SuePaint {
             Some(Gesture::Scrub { .. }) => self.scrub_drag(pos, viewport, size, cx),
             Some(Gesture::Keyed { .. }) => self.keyed_drag(pos, viewport, size, cx),
             Some(Gesture::Lines(_)) => self.lines_drag(pos, viewport, size, cx),
+            Some(Gesture::GradientLine { .. }) => self.gradient_line_drag(pos, viewport, size),
         }
     }
 
@@ -289,6 +292,7 @@ impl SuePaint {
             gesture @ Gesture::Bucket { .. } => self.bucket_release(gesture, size, cx),
             gesture @ Gesture::ShrinkLasso { .. } => self.shrink_release(gesture, size, cx),
             Gesture::Lines(gesture) => self.lines_release(*gesture, cx),
+            gesture @ Gesture::GradientLine { .. } => self.gradient_line_release(gesture, cx),
         }
     }
 }

@@ -158,16 +158,22 @@ impl SuePaint {
                 let (min, max) = (from.min(*to), from.max(*to));
                 match tool {
                     Tool::Gradient => {
-                        painter.line_segment(
-                            [screen([from.x, from.y]), screen([to.x, to.y])],
-                            outline,
+                        // The line as it will be laid (its Step of angle
+                        // kept), and a circle or ellipse its rings reach.
+                        let end = super::shape::line_constrained(
+                            [from.x, from.y],
+                            [to.x, to.y],
+                            sub.angle_step,
+                            self.modifiers.shift,
                         );
-                        painter.circle_stroke(
-                            screen([from.x, from.y]),
-                            marks::knob(theme),
-                            outline,
+                        gradient_marks(
+                            &painter,
+                            &screen,
+                            [[from.x, from.y], end],
+                            sub.gradient_shape,
+                            sub.gradient_aspect,
+                            theme,
                         );
-                        painter.circle_stroke(screen([to.x, to.y]), marks::knob(theme), outline);
                     }
                     Tool::Figure | Tool::Frame | Tool::Balloon | Tool::Ruler
                         if (tool == &Tool::Figure
@@ -227,6 +233,49 @@ impl SuePaint {
                 // Two tones, so the path reads on light and dark drawing.
                 let path = points.iter().copied().map(screen).collect::<Vec<_>>();
                 marks::guide(&painter, path, false, theme);
+            }
+            Some(Gesture::GradientLine { layer, line, .. }) => {
+                let (shape, aspect) = cx.world.arena.get_by_id(*layer).map_or(
+                    (crate::gradient::Shape::Linear, 0.5),
+                    |entity| {
+                        let look = doc::Gradient::of(entity).look;
+                        (look.shape, look.aspect)
+                    },
+                );
+                gradient_marks(&painter, &screen, *line, shape, aspect, theme);
+            }
+            None if self.toolbox.tool() == Tool::Gradient
+                && self.toolbox.current().mode != crate::tools::CONTOUR_FILL =>
+            {
+                // A gradient layer under the Gradient tool shows its line,
+                // whose ends can be dragged.
+                if let Some(gradient) = doc
+                    .layer
+                    .and_then(|layer| cx.world.arena.get_by_id(layer).ok())
+                    .filter(|entity| entity.class() == doc::GRADIENT_LAYER)
+                    .map(doc::Gradient::of)
+                {
+                    gradient_marks(
+                        &painter,
+                        &screen,
+                        gradient.line,
+                        gradient.look.shape,
+                        gradient.look.aspect,
+                        theme,
+                    );
+                }
+            }
+            None if self.select_turn.is_some() => {
+                // A selection waiting for its angle turns with the
+                // pointer.
+                if let (Some(turn), Some(pointer)) = (&self.select_turn, figure.pointer) {
+                    let angle = super::tools::turn_angle(turn, pointer);
+                    let path = super::tools::turn_outline(turn, angle)
+                        .into_iter()
+                        .map(screen)
+                        .collect::<Vec<_>>();
+                    marks::guide(&painter, path, true, theme);
+                }
             }
             Some(Gesture::Comic(edit)) => {
                 for outline in edit.outlines() {
@@ -865,4 +914,42 @@ fn camera_marks(
             theme,
         );
     }
+}
+
+/// A gradient's line on the canvas, from `line`'s start (a pivot) to its
+/// end (a handle), with the circle or ellipse a round shape reaches at
+/// its end shown faintly; `screen` maps picture pixels to the screen.
+fn gradient_marks(
+    painter: &egui::Painter,
+    screen: &dyn Fn([f32; 2]) -> Pos2,
+    line: [[f32; 2]; 2],
+    shape: crate::gradient::Shape,
+    aspect: f32,
+    theme: &Theme,
+) {
+    let [from, to] = line;
+    let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
+    let length = dx.hypot(dy);
+    if length >= 1.0 && shape != crate::gradient::Shape::Linear {
+        let short = if shape == crate::gradient::Shape::Ellipse {
+            length * aspect.clamp(crate::gradient::MIN_ASPECT, 1.0)
+        } else {
+            length
+        };
+        let (cos, sin) = (dx / length, dy / length);
+        let ring = (0..96)
+            .map(|step| {
+                let t = step as f32 / 96.0 * std::f32::consts::TAU;
+                let (along, across) = (length * t.cos(), short * t.sin());
+                screen([
+                    from[0] + along * cos - across * sin,
+                    from[1] + along * sin + across * cos,
+                ])
+            })
+            .collect::<Vec<_>>();
+        marks::faint(painter, ring, true, theme);
+    }
+    marks::guide(painter, vec![screen(from), screen(to)], false, theme);
+    marks::pivot(painter, screen(from), false, theme);
+    marks::handle(painter, screen(to), false, theme);
 }

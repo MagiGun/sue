@@ -405,6 +405,38 @@ pub(crate) enum Gesture {
     /// A loop picking vector lines, the picked lines' box dragged, or
     /// the Vector eraser over several layers (`canvas/lines.rs`).
     Lines(Box<crate::canvas::lines::LinesGesture>),
+    /// The Gradient tool on a gradient layer: one end of its line moved
+    /// (`end` 0 the start, 1 the end), the other kept (picture pixels).
+    GradientLine {
+        layer: EntityId,
+        line: [[f32; 2]; 2],
+        end: usize,
+    },
+}
+
+/// The Gradient tool's work between frames.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct GradientWork {
+    /// The stop the Tool Property bar edits.
+    pub stop: usize,
+    /// A gradient layer's new gradient from Tool Property, shown on the
+    /// next frame.
+    pub pending: Option<(EntityId, doc::Gradient)>,
+    /// A gradient layer shown changed while a control is held, and its
+    /// gradient from before: kept as one undo step when let go.
+    pub preview: Option<(EntityId, doc::Gradient)>,
+}
+
+/// A rectangle or ellipse selection waiting for its angle (Adjust angle
+/// after fixed): dragged from `from` to `to` (picture pixels) on
+/// `picture`, combined as `op` when a click fixes it.
+#[derive(Clone, Debug)]
+pub(crate) struct SelectTurn {
+    pub picture: EntityId,
+    pub sub: Box<crate::tools::SubTool>,
+    pub op: Op,
+    pub from: Pos2,
+    pub to: Pos2,
 }
 
 /// Which palettes show.
@@ -882,6 +914,12 @@ pub struct SuePaint {
     pub(crate) screen_pick_asked: Option<bool>,
     /// The gradient sets, read the first time a gradient map opens.
     pub(crate) gradients: crate::dialogs::GradientLibrary,
+    /// The Gradient tool's bar, and a gradient layer changed from Tool
+    /// Property (`canvas/tools/gradient.rs`).
+    pub(crate) gradient_work: GradientWork,
+    /// A rectangle or ellipse selection dragged out with Adjust angle
+    /// after fixed, turning with the pointer until a click fixes it.
+    pub(crate) select_turn: Option<SelectTurn>,
 }
 
 impl Default for SuePaint {
@@ -1090,6 +1128,8 @@ impl Default for SuePaint {
             screen_pick: None,
             screen_pick_asked: None,
             gradients: crate::dialogs::GradientLibrary::default(),
+            gradient_work: GradientWork::default(),
+            select_turn: None,
         }
     }
 }

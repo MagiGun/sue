@@ -2,7 +2,7 @@
 //! its item looks.
 
 use sue_core::txn::SetProperty;
-use sue_core::{Arena, EntityId, PixelFormat, RasterTile2D, ReversibleTransaction};
+use sue_core::{Arena, EntityId, ReversibleTransaction};
 use sue_model::picture::{self, LayerKind};
 use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
@@ -1072,8 +1072,10 @@ fn flatten(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     merge_all(paint, cx, true);
 }
 
-/// A layer the size of the canvas with the drawing color at the top
-/// fading into the second color at the bottom.
+/// Layer, New Layer, Gradient: a gradient layer over the whole canvas,
+/// the main color at the top fading into the sub color at the bottom.
+/// It stays a gradient: the Gradient or Object tool changes its line,
+/// stops, shape and edge later.
 fn new_gradient(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     let Some(picture) = paint.picture() else {
         return;
@@ -1082,35 +1084,18 @@ fn new_gradient(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     let Some([width, height]) = arena.get_by_id(picture).ok().and_then(picture::size) else {
         return;
     };
-    let (from, to) = (paint.main, paint.sub);
-    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-    for y in 0..height {
-        let t = if height > 1 {
-            y as f32 / (height - 1) as f32
-        } else {
-            0.0
-        };
-        let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8;
-        let row = [
-            mix(from[0], to[0]),
-            mix(from[1], to[1]),
-            mix(from[2], to[2]),
-            255,
-        ];
-        for _ in 0..width {
-            pixels.extend_from_slice(&row);
-        }
-    }
-    let Ok(raster) = RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels) else {
-        return;
+    let middle = width as f32 / 2.0;
+    let gradient = doc::Gradient {
+        line: [[middle, 0.0], [middle, height as f32]],
+        look: crate::gradient::Look {
+            map: crate::gradient_map::GradientMap::two(paint.main, paint.sub),
+            ..crate::gradient::Look::default()
+        },
     };
-    match doc::add_layer_pixels(arena, picture, paint.layer(), tr!("gradient"), raster) {
-        Ok((spawn, id)) => {
-            let edit = doc::Edit::new(tr!("new-gradient-layer")).then(spawn);
-            apply_and_pick(paint, cx, edit, id);
-        }
-        Err(error) => cx.fail(error),
-    }
+    let (spawn, id) =
+        doc::new_gradient_layer(arena, picture, paint.layer(), &tr!("gradient"), gradient);
+    let edit = doc::Edit::new(tr!("new-gradient-layer")).then(spawn);
+    apply_and_pick(paint, cx, edit, id);
 }
 
 /// The picked layers and the current one merged into one.
