@@ -1,4 +1,15 @@
-//! The Timeline palette.
+//! The Timeline palette, and Sue Paint's side of animation (Clip Studio
+//! Paint's Animation menu and Timeline palette): making timelines,
+//! folders and cels, stepping and playing frames, onion skin, and
+//! exporting an animated GIF or a sequence of pictures.
+
+mod export;
+mod exposure;
+mod playback;
+mod tracks;
+mod view;
+
+pub(crate) use view::TimelineView;
 
 use egui::{Rect, Ui, pos2, vec2};
 use sue_wm::{AppletContext, Theme};
@@ -6,6 +17,8 @@ use sue_wm::{AppletContext, Theme};
 use crate::icons::Icon;
 use crate::panels::header;
 use crate::studio::SuePaint;
+
+pub(crate) type Edit = sue_core::txn::Batch<sue_core::Arena>;
 
 impl SuePaint {
     pub(crate) fn timeline_panel(

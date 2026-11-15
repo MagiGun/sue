@@ -18,7 +18,7 @@ mod layer_property;
 mod material;
 mod navigator;
 mod sub_tool;
-mod timeline;
+pub(crate) mod timeline;
 mod tool;
 mod tool_property;
 

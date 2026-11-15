@@ -13,7 +13,7 @@ use sue_wm::{AppletContext, Call, Command, Facts, FilePick, Flags, ItemState, Sh
 
 use super::{doc_open, flag};
 use crate::anim;
-use crate::anim_ui::Edit;
+use crate::panels::timeline::Edit;
 use crate::studio::SuePaint;
 
 /// Where an Animation command acts: the open picture, its timeline with
