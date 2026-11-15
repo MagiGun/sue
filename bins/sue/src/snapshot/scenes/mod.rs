@@ -23,6 +23,7 @@ mod paint_touch;
 mod paint_view;
 mod settings;
 mod shell;
+mod shell_polish;
 mod ui_buttons;
 mod ui_dialogs;
 mod ui_export;
@@ -43,6 +44,8 @@ use super::Tour;
 pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 00 to 03. The Hub and what the shell lays over it.
     hub::opening(tour)?;
+    // 00n to 00q. Notices: folded, unfolded, under a dialog, on a phone.
+    shell_polish::notices(tour)?;
     shell::sue_menu(tour)?;
     shell::command_palette(tour)?;
 

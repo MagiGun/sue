@@ -38,6 +38,7 @@ mod paint_window;
 mod save;
 mod settings;
 mod shell;
+mod shell_polish;
 mod windows;
 mod writer;
 
