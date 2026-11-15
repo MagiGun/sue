@@ -111,18 +111,47 @@ fn check(
     response.clicked()
 }
 
-/// A drag button: an icon button that drags what it names while the
-/// pointer holds it, and steps it with the arrow keys while it has focus
-/// (Clip Studio Paint's camera and object buttons above the model).
-fn drag_button(ui: &mut Ui, theme: &Theme, salt: &'static str, icon: Icon, name: &str) -> Dragged {
-    let size = Vec2::splat(Density::of(ui).icon_button());
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+/// One drag button of a [`drag_row`]: its id, icon, the word it shows
+/// and the sentence its tooltip says.
+struct DragSpec {
+    salt: &'static str,
+    icon: Icon,
+    label: String,
+    name: String,
+}
+
+/// Three drag buttons side by side, sharing the row's width, each with
+/// its icon and a word (what each one does reads at a glance; the
+/// tooltip says it in full).
+fn drag_row(ui: &mut Ui, theme: &Theme, specs: [DragSpec; 3]) -> [Dragged; 3] {
+    let gap = ui.spacing().item_spacing.x;
+    let height = Density::of(ui).control_height();
+    let width = ((ui.available_width() - gap * 2.0) / 3.0).max(height);
+    let (row, _) = ui.allocate_exact_size(vec2(width * 3.0 + gap * 2.0, height), Sense::hover());
+    let mut at = 0.0;
+    specs.map(|spec| {
+        let rect = Rect::from_min_size(pos2(row.left() + at, row.top()), vec2(width, height));
+        at += width + gap;
+        drag_button(ui, theme, rect, &spec)
+    })
+}
+
+/// A drag button at `rect`: drags what it names while the pointer holds
+/// it, and steps it with the arrow keys while it has focus (Clip Studio
+/// Paint's camera and object buttons above the model).
+fn drag_button(ui: &mut Ui, theme: &Theme, rect: Rect, spec: &DragSpec) -> Dragged {
+    let salt = spec.salt;
     // The drag is sensed under the button, which takes the clicks, the
     // focus and the hover on top of it.
     let drag = ui.interact(rect, ui.scope_id().with((salt, "drag")), Sense::drag());
-    let button = ui::icon_button(salt, icon, name)
-        .selected(drag.dragged())
+    let button = ui::toggle_button(salt, &spec.label, drag.dragged())
+        .icon(spec.icon)
         .show_at(ui, rect, theme);
+    let button = ui::tooltip(
+        button,
+        &Tip::new(&spec.name).help(&tr!("drag-a-button-or-use-arrow-keys")),
+        theme,
+    );
     let mut delta = if drag.dragged() {
         drag.drag_delta()
     } else {
@@ -409,33 +438,30 @@ impl SuePaint {
     ) -> Slid {
         let mut slid = Slid::default();
         ui::section(ui, theme, &tr!("section-object-3d"), |ui| {
-            let (move_by, turn_by, slide_by) = ui
-                .horizontal(|ui| {
-                    (
-                        drag_button(
-                            ui,
-                            theme,
-                            "sue-paint-3d-move",
-                            Icon::ToolMoveLayer,
-                            &tr!("move-object"),
-                        ),
-                        drag_button(
-                            ui,
-                            theme,
-                            "sue-paint-3d-turn",
-                            Icon::RotateRight,
-                            &tr!("turn-object"),
-                        ),
-                        drag_button(
-                            ui,
-                            theme,
-                            "sue-paint-3d-slide",
-                            Icon::ArrowDown,
-                            &tr!("slide-object"),
-                        ),
-                    )
-                })
-                .inner;
+            let [move_by, turn_by, slide_by] = drag_row(
+                ui,
+                theme,
+                [
+                    DragSpec {
+                        salt: "sue-paint-3d-move",
+                        icon: Icon::ToolMoveLayer,
+                        label: tr!("drag-move"),
+                        name: tr!("move-object"),
+                    },
+                    DragSpec {
+                        salt: "sue-paint-3d-turn",
+                        icon: Icon::RotateRight,
+                        label: tr!("drag-rotate"),
+                        name: tr!("turn-object"),
+                    },
+                    DragSpec {
+                        salt: "sue-paint-3d-slide",
+                        icon: Icon::SnapGrid,
+                        label: tr!("drag-slide"),
+                        name: tr!("slide-object"),
+                    },
+                ],
+            );
             // Across the screen and up, or across and away along the
             // ground: the camera's right, and its forward flattened.
             let yaw = view.yaw.to_radians();
@@ -583,33 +609,30 @@ impl SuePaint {
     ) -> Slid {
         let mut slid = Slid::default();
         ui::section(ui, theme, &tr!("section-camera"), |ui| {
-            let (turn, pan, zoom) = ui
-                .horizontal(|ui| {
-                    (
-                        drag_button(
-                            ui,
-                            theme,
-                            "sue-paint-3d-orbit",
-                            Icon::ToolRotateView,
-                            &tr!("turn-camera"),
-                        ),
-                        drag_button(
-                            ui,
-                            theme,
-                            "sue-paint-3d-pan",
-                            Icon::ToolHand,
-                            &tr!("pan-camera"),
-                        ),
-                        drag_button(
-                            ui,
-                            theme,
-                            "sue-paint-3d-zoom",
-                            Icon::ToolZoom,
-                            &tr!("zoom-camera"),
-                        ),
-                    )
-                })
-                .inner;
+            let [turn, pan, zoom] = drag_row(
+                ui,
+                theme,
+                [
+                    DragSpec {
+                        salt: "sue-paint-3d-orbit",
+                        icon: Icon::ToolRotateView,
+                        label: tr!("drag-orbit"),
+                        name: tr!("turn-camera"),
+                    },
+                    DragSpec {
+                        salt: "sue-paint-3d-pan",
+                        icon: Icon::ToolHand,
+                        label: tr!("drag-pan"),
+                        name: tr!("pan-camera"),
+                    },
+                    DragSpec {
+                        salt: "sue-paint-3d-zoom",
+                        icon: Icon::ToolZoom,
+                        label: tr!("drag-zoom"),
+                        name: tr!("zoom-camera"),
+                    },
+                ],
+            );
             // As the canvas drags them (canvas/drag.rs, Gesture::Orbit).
             if turn.delta != Vec2::ZERO {
                 view.yaw = wrap(view.yaw - turn.delta.x * 0.4);
@@ -1187,10 +1210,9 @@ fn outline_rows(ui: &mut Ui, theme: &Theme, view: &mut crate::three::View3D) -> 
                 );
                 let response = ui.color_edit_button_srgb(&mut view.line_color);
                 let response = ui::tooltip(response, &Tip::new(&tr!("line-color")), theme);
-                if response.changed() {
-                    slid.changed = true;
-                    slid.released = true;
-                }
+                // Kept when the pointer lets go of the picker (see
+                // `view3d_properties`), so dragging in it is one step.
+                slid.changed |= response.changed();
             });
             slid |= slide(
                 ui,

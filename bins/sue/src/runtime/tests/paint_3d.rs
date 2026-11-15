@@ -100,6 +100,13 @@ fn control(paint: &mut PaintDriver, name: &str) -> egui::Rect {
         // A slider and its number field share a name: the track is the
         // slider.
         let mut same: Vec<_> = told.iter().filter(|(label, ..)| label == name).collect();
+        // The one nearest Tool Property's tab when others share the name
+        // (the canvas's own bars name a Zoom too).
+        let tab = paint.rect_of("Tool Property").expect("the Tool Property tab");
+        same.sort_by(|(_, _, a), (_, _, b)| {
+            let far = |rect: &egui::Rect| (rect.center().x - tab.center().x).abs();
+            far(a).total_cmp(&far(b))
+        });
         same.sort_by_key(|(_, role, _)| *role != egui::accesskit::Role::Slider);
         let found = same.first().map(|(_, _, rect)| *rect).unwrap_or_else(|| {
             panic!(
@@ -311,8 +318,8 @@ fn sue_paint_3d_tool_property_has_the_object_camera_light_outline_and_body_rows(
         "Put on the ground",
         "Initialize",
         "Register body shape",
-        "Muscle",
-        "Less",
+        "More muscle",
+        "Less muscle",
         "Thin",
         "Fat",
     ] {
@@ -321,12 +328,12 @@ fn sue_paint_3d_tool_property_has_the_object_camera_light_outline_and_body_rows(
     // The controls without words of their own are named for screen
     // readers and in their tooltips.
     for name in [
-        "Move the object",
-        "Turn the object",
-        "Move the object along the ground",
-        "Turn the camera",
-        "Move the camera",
-        "Bring the camera nearer or further",
+        "Move",
+        "Rotate",
+        "Slide",
+        "Orbit",
+        "Pan",
+        "Zoom",
         "Body shape chart",
         "Reset angle",
         "Reset position",
@@ -355,7 +362,7 @@ fn sue_paint_3d_camera_buttons_turn_move_and_zoom_as_one_step_each() {
         &mut paint,
         layer,
         "turn the camera",
-        |paint| drag_control(paint, "Turn the camera", vec2(50.0, 0.0)),
+        |paint| drag_control(paint, "Orbit", vec2(50.0, 0.0)),
         |paint| {
             assert!(
                 (view(paint).yaw - (start.yaw - 20.0)).abs() < 1.0,
@@ -369,7 +376,7 @@ fn sue_paint_3d_camera_buttons_turn_move_and_zoom_as_one_step_each() {
         &mut paint,
         layer,
         "move the camera",
-        |paint| drag_control(paint, "Move the camera", vec2(60.0, 0.0)),
+        |paint| drag_control(paint, "Pan", vec2(60.0, 0.0)),
         |paint| {
             assert!(
                 view(paint).pan[0] < start.pan[0] - 0.1,
@@ -384,11 +391,7 @@ fn sue_paint_3d_camera_buttons_turn_move_and_zoom_as_one_step_each() {
         layer,
         "bring the camera nearer",
         |paint| {
-            drag_control(
-                paint,
-                "Bring the camera nearer or further",
-                vec2(0.0, -80.0),
-            )
+            drag_control(paint, "Zoom", vec2(0.0, -80.0))
         },
         |paint| assert!(view(paint).distance < start.distance * 0.8),
     );
@@ -411,14 +414,14 @@ fn sue_paint_3d_object_buttons_move_turn_and_slide_it_as_one_step_each() {
         &mut paint,
         layer,
         "move the object",
-        |paint| drag_control(paint, "Move the object", vec2(0.0, -60.0)),
+        |paint| drag_control(paint, "Move", vec2(0.0, -60.0)),
         |paint| assert!(place(paint).position[1] > 0.2, "up: {:?}", place(paint)),
     );
     one_step(
         &mut paint,
         layer,
         "turn the object",
-        |paint| drag_control(paint, "Turn the object", vec2(60.0, 0.0)),
+        |paint| drag_control(paint, "Rotate", vec2(60.0, 0.0)),
         |paint| assert!(place(paint).turn[0] > 20.0, "{:?}", place(paint)),
     );
     let before = place(&paint);
@@ -426,7 +429,7 @@ fn sue_paint_3d_object_buttons_move_turn_and_slide_it_as_one_step_each() {
         &mut paint,
         layer,
         "slide the object",
-        |paint| drag_control(paint, "Move the object along the ground", vec2(0.0, -60.0)),
+        |paint| drag_control(paint, "Slide", vec2(0.0, -60.0)),
         |paint| {
             let now = place(paint);
             assert_eq!(now.position[1], before.position[1], "on the ground's plane");
@@ -463,6 +466,23 @@ fn sue_paint_3d_figure_body_type_chart_and_ratio_shape_it_as_one_step_each() {
         "body shape chart",
         |paint| drag_control(paint, "Body shape chart", vec2(40.0, 0.0)),
         |paint| assert!(body(paint).shape.0[0][0] > 0.2, "{:?}", body(paint).shape),
+    );
+    // The body part list: Arms picked, the chart shapes the arms alone.
+    click_control(&mut paint, "Body part");
+    paint.click_text("Arms");
+    paint.settle(4);
+    let whole = body(&paint).shape.0[0];
+    one_step(
+        &mut paint,
+        layer,
+        "arms on the chart",
+        |paint| drag_control(paint, "Body shape chart", vec2(0.0, -40.0)),
+        |paint| {
+            let shape = body(paint).shape;
+            assert!(shape.0[3][1] > 0.2, "more muscle on the arms: {shape:?}");
+            assert_eq!(shape.0[0], whole, "the full body stays");
+            assert_eq!(shape.0[4], [0.0, 0.0], "the legs stay");
+        },
     );
     // Adjust head to body ratio with height: on, then a shorter figure
     // has a smaller ratio.

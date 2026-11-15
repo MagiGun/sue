@@ -456,6 +456,7 @@ The order of work is the plan at the end.
 | Body types, body shape chart per body part, head to body ratio following the height | Tool Property, Body shape | done | Male and female; thin to fat and less to more muscle for the full body, head, upper body, arms and legs |
 | Register body shape as material, Initialize | Tool Property | done | Body shape materials (`.body`, docs/body-shape-files.md) beside pose materials |
 | Object list of several objects on one 3D layer | Tool Property | missing | One object per 3D layer |
+| Display settings for editing | Tool Property | missing | Clip Studio's draw quality while a 3D object is edited; Sue Paint draws the model at full quality on every frame of a drag, so there is nothing to lower yet |
 | Hand pose on the figure itself, poses dragged onto the model, the 3D object launcher | 3D | missing | Hands are their own 3D layer; poses go on by Paste from the Material palette |
 | Characters with physics, 3D backgrounds, motion materials | Materials | missing | Later (risk R6: Sue's own materials only) |
 | Batch texture export (EX) | File > Export | missing | |
