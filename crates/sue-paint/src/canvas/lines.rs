@@ -148,6 +148,30 @@ fn drag_corners(
     *to = vector::corners([left, top, right, bottom]);
 }
 
+/// How far the corner `handle` (0 to 3, from the top left round) of the
+/// box `from` (`[left, top, right, bottom]`) moves when it is dragged by
+/// `by` with Shift: as far as keeps the box in proportion, along the
+/// side the pointer moved it most. A side with no length (one level
+/// line) has no proportion to keep, so the other side alone says it.
+fn in_proportion(from: [f32; 4], handle: usize, by: [f32; 2]) -> [f32; 2] {
+    let (w, h) = (from[2] - from[0], from[3] - from[1]);
+    let s = match handle {
+        0 => [-1.0, -1.0],
+        1 => [1.0, -1.0],
+        2 => [1.0, 1.0],
+        _ => [-1.0, 1.0],
+    };
+    let part = |length: f32, by: f32| (length > f32::EPSILON).then(|| (length + by) / length);
+    let grow = match (part(w, by[0] * s[0]), part(h, by[1] * s[1])) {
+        (Some(x), Some(y)) if (x - 1.0).abs() >= (y - 1.0).abs() => x,
+        (Some(_), Some(y)) => y,
+        (Some(x), None) => x,
+        (None, Some(y)) => y,
+        (None, None) => 1.0,
+    };
+    [(grow - 1.0) * w * s[0], (grow - 1.0) * h * s[1]]
+}
+
 /// The eight handles of a box with corners `quad`: its corners, then the
 /// middles of its edges from the top round.
 fn handles(quad: &[[f32; 2]; 4]) -> [[f32; 2]; 8] {
@@ -300,17 +324,7 @@ impl SuePaint {
                 let from = vector::corners(drag.from);
                 // Shift keeps a corner's box in proportion while scaling.
                 let by = if shift && !drag.free && drag.handle < 4 {
-                    let (w, h) = (drag.from[2] - drag.from[0], drag.from[3] - drag.from[1]);
-                    let sign = |corner: usize| match corner {
-                        0 => [-1.0, -1.0],
-                        1 => [1.0, -1.0],
-                        2 => [1.0, 1.0],
-                        _ => [-1.0, 1.0],
-                    };
-                    let s = sign(drag.handle);
-                    let grow = ((w + by[0] * s[0]) / w.max(f32::EPSILON))
-                        .max((h + by[1] * s[1]) / h.max(f32::EPSILON));
-                    [(grow - 1.0) * w * s[0], (grow - 1.0) * h * s[1]]
+                    in_proportion(drag.from, drag.handle, by)
                 } else {
                     by
                 };
@@ -913,5 +927,32 @@ mod tests {
         drag_corners(&mut to, &from, 5, [4.0, 9.0], true);
         assert_eq!(to, [[0.0, 0.0], [14.0, 0.0], [14.0, 10.0], [0.0, 10.0]]);
         assert_eq!(handles(&from)[5], [10.0, 5.0]);
+    }
+
+    #[test]
+    fn shift_keeps_the_box_in_proportion_and_a_level_line_level() {
+        // A 20 by 10 box, its bottom right corner pulled 10 right and 1
+        // down: the larger pull wins, both sides grow by half.
+        assert_eq!(
+            in_proportion([0.0, 0.0, 20.0, 10.0], 2, [10.0, 1.0]),
+            [10.0, 5.0]
+        );
+        // Pulled in on one side and out a little on the other: it
+        // shrinks, as the pointer mostly says.
+        assert_eq!(
+            in_proportion([0.0, 0.0, 20.0, 10.0], 2, [-10.0, 1.0]),
+            [-10.0, -5.0]
+        );
+        // One level line has no height: it only grows along its length,
+        // never into a huge jump.
+        let level = in_proportion([0.0, 5.0, 20.0, 5.0], 1, [4.0, -3.0]);
+        assert!(
+            (level[0] - 4.0).abs() < 1e-4 && level[1] == 0.0,
+            "{level:?}"
+        );
+        assert_eq!(
+            in_proportion([3.0, 3.0, 3.0, 3.0], 0, [5.0, 5.0]),
+            [0.0, 0.0]
+        );
     }
 }
