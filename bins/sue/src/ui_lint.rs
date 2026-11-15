@@ -145,7 +145,7 @@ const AREAS: [Area; 6] = [
     },
     Area {
         folder: "crates/sue-paint/src/canvas",
-        baseline: Counts::new([2, 2, 15, 2, 19, 9, 2]),
+        baseline: Counts::new([2, 2, 14, 2, 19, 9, 2]),
     },
     Area {
         folder: "crates/sue-paint/src/dialogs",

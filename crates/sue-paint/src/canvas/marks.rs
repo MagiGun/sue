@@ -125,9 +125,9 @@ pub(crate) fn faint(painter: &Painter, points: Vec<Pos2>, closed: bool, theme: &
     }
 }
 
-/// A line of a mesh laid over the picture (puppet warp's): the theme's
-/// selection tint, quieter than a guide, so the drawing under it still
-/// reads.
+/// A line of a mesh laid over the picture (puppet warp's): one thin line
+/// in the theme's border color, quieter than a guide, so the drawing under
+/// it still reads.
 pub(crate) fn mesh(painter: &Painter, points: Vec<Pos2>, theme: &Theme) {
     painter.add(Shape::closed_line(
         points,

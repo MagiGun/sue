@@ -170,11 +170,9 @@ impl SuePaint {
                 | Gesture::Outline { points, .. }
                 | Gesture::LassoFill { points, .. },
             ) => {
+                // Two tones, so the path reads on light and dark drawing.
                 let path = points.iter().copied().map(screen).collect::<Vec<_>>();
-                painter.add(Shape::line(
-                    path,
-                    Stroke::new(marks::hair(theme), theme.border_active),
-                ));
+                marks::guide(&painter, path, false, theme);
             }
             Some(Gesture::Comic(edit)) => {
                 for outline in edit.outlines() {
@@ -197,21 +195,22 @@ impl SuePaint {
             }
             let curve = self.polyline_for == Some((Tool::Balloon, crate::comic::CURVE_BALLOON))
                 && points.len() >= 3;
-            let stroke = Stroke::new(marks::hair(theme), theme.border_active);
             if curve {
                 let path = crate::manga::smooth_closed(&points, 10)
                     .into_iter()
                     .map(screen)
                     .collect();
-                painter.add(Shape::closed_line(path, stroke));
+                marks::guide(&painter, path, true, theme);
             } else {
-                painter.add(Shape::line(
+                marks::guide(
+                    &painter,
                     points.iter().copied().map(screen).collect(),
-                    stroke,
-                ));
+                    false,
+                    theme,
+                );
             }
             for corner in &self.polyline {
-                painter.circle_stroke(screen(*corner), marks::knob_small(theme), stroke);
+                marks::dot(&painter, screen(*corner), false, theme);
             }
         }
         // The Object tool on effect lines: their handles.
@@ -486,7 +485,8 @@ impl SuePaint {
                 || (tool == Tool::CorrectLine && matches!(mode, 2 | 3 | 4 | 6)))
             && let Some(pointer) = self.pointer
         {
-            let radius = (self.toolbox.current().tip.size * 0.5 * view.zoom).max(1.5);
+            let radius =
+                (self.toolbox.current().tip.size * 0.5 * view.zoom).max(marks::speck_mid(theme));
             // Preferences, Cursor: the brush's outline, a crosshair or a dot.
             let shape = cx
                 .rice()
@@ -649,7 +649,7 @@ fn ruler_overlay(
         if let Some(at) = rulers.eye_handle(size) {
             painter.rect_stroke(
                 Rect::from_center_size(screen(at), Vec2::splat(marks::square(theme))),
-                0.0,
+                egui::CornerRadius::ZERO,
                 Stroke::new(marks::firm(theme), special),
                 egui::StrokeKind::Middle,
             );
