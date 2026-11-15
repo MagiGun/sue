@@ -76,6 +76,42 @@ fn step_held(paint: &mut PaintDriver, mut events: Vec<egui::Event>, held: Modifi
         .drop_without_applying_deltas();
 }
 
+/// One frame with `events` and `held` keys down: the lines it draws, as
+/// screen points (paths and segments, polylines of two or more points).
+fn step_lines(
+    paint: &mut PaintDriver,
+    mut events: Vec<egui::Event>,
+    held: Modifiers,
+) -> Vec<Vec<Pos2>> {
+    events.insert(0, egui::Event::ModifiersChanged(held));
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+        events,
+        time: Some(paint.ctx.input(|input| input.time) + 0.016),
+        ..egui::RawInput::default()
+    };
+    paint.now += Duration::from_millis(16);
+    let runtime = &mut paint.runtime;
+    let now = paint.now;
+    let output = paint
+        .ctx
+        .run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+    let mut lines = Vec::new();
+    fn look(shape: &egui::Shape, lines: &mut Vec<Vec<Pos2>>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| look(shape, lines)),
+            egui::Shape::Path(path) => lines.push(path.points.clone()),
+            egui::Shape::LineSegment { points, .. } => lines.push(points.to_vec()),
+            _ => {}
+        }
+    }
+    for clipped in &output.shapes {
+        look(&clipped.shape, &mut lines);
+    }
+    output.drop_without_applying_deltas();
+    lines
+}
+
 fn button(pos: Pos2, pressed: bool, held: Modifiers) -> egui::Event {
     egui::Event::PointerButton {
         pos,
@@ -435,4 +471,97 @@ fn sue_paint_figures_on_a_vector_layer_stay_vector_lines() {
     paint.step(vec![key(egui::Key::Z, Modifiers::COMMAND)]);
     paint.settle(2);
     assert!(lines(&paint).is_empty(), "undone");
+}
+
+#[test]
+fn sue_paint_bezier_preview_runs_to_the_anchor_being_dragged_out() {
+    // A25V-14, FGV-35: while a Bezier Curve anchor is dragged out, the
+    // preview runs to that anchor (where the line will go), not to the
+    // pointer pulling its handle.
+    let mut paint = PaintDriver::new("paint-figure-bezier-preview");
+    figure(&mut paint, "Bezier Curve");
+    let middle = paint_middle(&paint.runtime);
+    let first = middle + vec2(-150.0, 0.0);
+    drag_held(&mut paint, first, first + vec2(0.0, -60.0), Modifiers::NONE);
+    let anchor = middle + vec2(100.0, 0.0);
+    let pulled = anchor + vec2(60.0, 80.0);
+    step_held(
+        &mut paint,
+        vec![egui::Event::PointerMoved(anchor)],
+        Modifiers::NONE,
+    );
+    step_held(
+        &mut paint,
+        vec![button(anchor, true, Modifiers::NONE)],
+        Modifiers::NONE,
+    );
+    let mut lines = Vec::new();
+    for index in 1..=8 {
+        let at = anchor + (pulled - anchor) * (index as f32 / 8.0);
+        lines = step_lines(
+            &mut paint,
+            vec![egui::Event::PointerMoved(at)],
+            Modifiers::NONE,
+        );
+    }
+    // The curve so far: a long path from the first anchor.
+    let curves: Vec<&Vec<Pos2>> = lines
+        .iter()
+        .filter(|line| line.len() >= 10 && line[0].distance(first) < 3.0)
+        .collect();
+    assert!(!curves.is_empty(), "the curve is previewed");
+    for curve in &curves {
+        let end = *curve.last().unwrap();
+        assert!(
+            end.distance(anchor) < 3.0,
+            "it runs to the anchor {anchor:?}, not the pointer {pulled:?}: {end:?}"
+        );
+    }
+    step_held(
+        &mut paint,
+        vec![button(pulled, false, Modifiers::NONE)],
+        Modifiers::NONE,
+    );
+    // A double-click on it ends the line, and it lands where the
+    // preview went.
+    click(&mut paint, anchor);
+    let [left, _, right, _] = bounds(&ink(&paint));
+    assert!(right > left + 100, "drawn: {left} to {right}");
+}
+
+#[test]
+fn sue_paint_ruler_preview_keeps_to_shift_45_degrees() {
+    // A25-25 for the Ruler tool: what the drag shows with Shift is the
+    // ruler laid, kept to 45 degrees.
+    let mut paint = PaintDriver::new("paint-figure-ruler-shift");
+    paint.command("tool.pick.ruler");
+    paint.settle(4);
+    paint.click_text("Linear Ruler");
+    paint.settle(2);
+    let middle = paint_middle(&paint.runtime);
+    let (from, to) = (middle + vec2(-100.0, 0.0), middle + vec2(100.0, 60.0));
+    let shift = Modifiers::SHIFT;
+    step_held(&mut paint, vec![egui::Event::PointerMoved(from)], shift);
+    step_held(&mut paint, vec![button(from, true, shift)], shift);
+    let mut lines = Vec::new();
+    for index in 1..=8 {
+        let at = from + (to - from) * (index as f32 / 8.0);
+        lines = step_lines(&mut paint, vec![egui::Event::PointerMoved(at)], shift);
+    }
+    let preview = lines
+        .iter()
+        .find(|line| line.len() == 2 && line[0].distance(from) < 1.0)
+        .expect("the ruler is previewed");
+    let along = preview[1] - preview[0];
+    assert!(
+        along.y.abs() < 1.0 && along.x > 150.0,
+        "kept level by Shift: {along:?}"
+    );
+    step_held(&mut paint, vec![button(to, false, shift)], shift);
+    step_held(&mut paint, Vec::new(), shift);
+    let linear = sue_paint::rulers::Rulers::of(&paint.runtime.engine.world.arena, picture(&paint))
+        .linear
+        .expect("a linear ruler laid");
+    let (a, b) = (linear[0], linear[1]);
+    assert!((b[1] - a[1]).abs() < 1.0, "laid level as shown: {linear:?}");
 }

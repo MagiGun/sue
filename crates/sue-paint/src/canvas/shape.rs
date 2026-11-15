@@ -433,6 +433,10 @@ pub(crate) fn corner_line(
     }
 }
 
+/// A Bezier Curve press that moves less than this (picture pixels)
+/// before it lets go is a click: an anchor without handles.
+pub(crate) const BEZIER_CLICK: f32 = 2.0;
+
 /// The radius of the rings marking a Figure's corners, ends and
 /// handles on screen, as the other tools' corners are marked.
 const HANDLE: f32 = 3.5;
@@ -454,19 +458,44 @@ pub(crate) struct Preview<'a> {
 /// tools' previews.
 const LINE: f32 = 1.0;
 
+/// How much wider than the preview line its dark halo is, on screen.
+const HALO: f32 = 2.0;
+
+/// How dark the halo under a preview line is, 0 to 255.
+const HALO_ALPHA: u8 = 110;
+
 impl Preview<'_> {
     /// The preview line in `color`.
     pub(crate) fn line_of(color: egui::Color32) -> Stroke {
         Stroke::new(LINE, color)
     }
 
+    /// The preview line over a dark halo, so it reads on white paper and
+    /// on dark ink alike (as the selection's edge does).
     fn line(&self, points: &[[f32; 2]], closed: bool) {
         let path: Vec<Pos2> = points.iter().map(|p| (self.screen)(*p)).collect();
-        self.painter.add(if closed {
-            Shape::closed_line(path, self.stroke)
-        } else {
-            Shape::line(path, self.stroke)
-        });
+        let halo = Stroke::new(
+            self.stroke.width + HALO,
+            egui::Color32::from_black_alpha(HALO_ALPHA),
+        );
+        for stroke in [halo, self.stroke] {
+            self.painter.add(if closed {
+                Shape::closed_line(path.clone(), stroke)
+            } else {
+                Shape::line(path.clone(), stroke)
+            });
+        }
+    }
+
+    /// A ring marking a corner, end or handle at `at` (picture pixels).
+    fn ring(&self, at: [f32; 2]) {
+        let center = (self.screen)(at);
+        let halo = Stroke::new(
+            self.stroke.width + HALO,
+            egui::Color32::from_black_alpha(HALO_ALPHA),
+        );
+        self.painter.circle_stroke(center, HANDLE, halo);
+        self.painter.circle_stroke(center, HANDLE, self.stroke);
     }
 
     /// A Figure drag from `from` to `to` (not the effect lines).
@@ -482,8 +511,7 @@ impl Preview<'_> {
                 let mirror = [2.0 * a[0] - b[0], 2.0 * a[1] - b[1]];
                 self.line(&[mirror, b], false);
                 for end in [mirror, b] {
-                    self.painter
-                        .circle_stroke((self.screen)(end), HANDLE, self.stroke);
+                    self.ring(end);
                 }
             }
             _ => {
@@ -500,18 +528,31 @@ impl Preview<'_> {
             (bend.from[1] + bend.to[1]) / 2.0,
         ]);
         self.line(&bent(bend.from, bend.to, through), false);
-        for end in [bend.from, bend.to] {
-            self.painter
-                .circle_stroke((self.screen)(end), HANDLE, self.stroke);
+        // The two ends, and the point the line will pass through.
+        for end in [bend.from, bend.to, through] {
+            self.ring(end);
         }
     }
 
     /// Corners clicked out with the Figure tool's `mode`, and the line on
-    /// to the pointer.
-    pub(crate) fn corners(&self, mode: u8, points: &[[f32; 2]], handles: &[[f32; 2]]) {
+    /// to the pointer. `pending` is a Bezier Curve anchor being laid by a
+    /// drag (the anchor, then where its handle is pulled to): the line
+    /// runs to that anchor, as it will once the drag lets go.
+    pub(crate) fn corners(
+        &self,
+        mode: u8,
+        points: &[[f32; 2]],
+        handles: &[[f32; 2]],
+        pending: Option<([f32; 2], [f32; 2])>,
+    ) {
         let mut line = points.to_vec();
         let mut ends = handles.to_vec();
-        if let (Some(pointer), Some(last)) = (self.pointer, points.last()) {
+        if let Some((anchor, pulled)) = pending {
+            let near = (pulled[0] - anchor[0]).hypot(pulled[1] - anchor[1]) < BEZIER_CLICK;
+            ends.resize(points.len(), [f32::NAN; 2]);
+            ends.push(if near { anchor } else { pulled });
+            line.push(anchor);
+        } else if let (Some(pointer), Some(last)) = (self.pointer, points.last()) {
             let pointer = if mode == POLYLINE {
                 self.guides.line_end(*last, pointer).unwrap_or_else(|| {
                     line_constrained(*last, pointer, self.angle_step, self.shift)
@@ -530,8 +571,7 @@ impl Preview<'_> {
             .collect();
         self.line(&corner_line(mode, &line, &handles, false), false);
         for corner in points {
-            self.painter
-                .circle_stroke((self.screen)(*corner), HANDLE, self.stroke);
+            self.ring(*corner);
         }
     }
 }

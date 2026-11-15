@@ -10,7 +10,9 @@ use sue_wm::AppletContext;
 
 use super::Press;
 use super::corners::clicks_corners;
-use crate::canvas::shape::{Bend, Guides, bent, corner_line, filled, line_constrained, outline};
+use crate::canvas::shape::{
+    BEZIER_CLICK, Bend, Guides, bent, corner_line, filled, line_constrained, outline,
+};
 use crate::manga;
 use crate::studio::{Gesture, SuePaint};
 use crate::tools::{BEZIER_CURVE, CURVE, POLYLINE, SATURATED_LINES, SPEED_LINES, SubTool, Tool};
@@ -173,7 +175,11 @@ impl SuePaint {
             BEZIER_CURVE => {
                 // A new anchor, and the handle its drag pulled out (none
                 // for a click).
-                let handle = if from.distance(to) < 2.0 { from } else { to };
+                let handle = if from.distance(to) < BEZIER_CLICK {
+                    from
+                } else {
+                    to
+                };
                 self.polyline.push([from.x, from.y]);
                 self.figure_draft.handles.push([handle.x, handle.y]);
             }
