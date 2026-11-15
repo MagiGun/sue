@@ -101,19 +101,18 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
     ) {
         use crate::rulers::{self, Rulers, Special};
-        use std::f32::consts::{FRAC_PI_2, FRAC_PI_4};
+        use std::f32::consts::FRAC_PI_2;
         let Some(picture) = self.picture() else {
             return;
         };
         let (dx, dy) = (to.x - from.x, to.y - from.y);
         let length = dx.hypot(dy);
         let dragged = length >= 4.0;
-        // Shift keeps the line to every 45 degrees (Snap angle).
-        let angle = if self.modifiers.shift {
-            (dy.atan2(dx) / FRAC_PI_4).round() * FRAC_PI_4
-        } else {
-            dy.atan2(dx)
-        };
+        // The sub tool's Step of angle, or Shift's 45 degrees, keeps
+        // the line to its steps.
+        let angle =
+            crate::canvas::shape::snapped_angle(dy.atan2(dx), sub.angle_step, self.modifiers.shift)
+                .unwrap_or_else(|| dy.atan2(dx));
         let end = [from.x + angle.cos() * length, from.y + angle.sin() * length];
         let (key, text, label) = match sub.mode {
             7 => {

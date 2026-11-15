@@ -289,8 +289,35 @@ impl SuePaint {
                 }
             }
         }
+        // The Figure tool's shapes and lines under way (canvas/shape.rs).
+        let guides = super::shape::Guides::of(&cx.world.arena, doc);
+        let figure = super::shape::Preview {
+            painter: &painter,
+            screen: &screen,
+            stroke: super::shape::Preview::line_of(theme.border_active),
+            pointer: self.pointer.map(|at| {
+                let at = view.to_picture(viewport, size, at);
+                [at.x, at.y]
+            }),
+            shift: self.modifiers.shift,
+            angle_step: self.toolbox.current().angle_step,
+            guides: &guides,
+        };
+        if let Some(bend) = &self.figure_draft.bend
+            && self.toolbox.tool() == Tool::Figure
+            && bend.picture == doc.picture
+        {
+            figure.bend(bend);
+        }
         // What a drag is drawing.
         match &self.gesture {
+            Some(Gesture::Shape {
+                tool: Tool::Figure,
+                sub,
+                from,
+                to,
+                ..
+            }) => figure.drag(sub, *from, *to),
             Some(Gesture::Shape {
                 tool,
                 sub,
@@ -317,10 +344,20 @@ impl SuePaint {
                                 && sub.mode == crate::comic::THOUGHT_TAIL)
                             || tool == &Tool::Ruler =>
                     {
-                        painter.line_segment(
-                            [screen([from.x, from.y]), screen([to.x, to.y])],
-                            outline,
-                        );
+                        // A ruler (not the figure ruler) keeps to its
+                        // Step of angle, or Shift's 45 degrees, as it
+                        // will be laid (canvas/tools/ruler.rs).
+                        let end = if tool == &Tool::Ruler && sub.mode != 7 {
+                            super::shape::line_constrained(
+                                [from.x, from.y],
+                                [to.x, to.y],
+                                sub.angle_step,
+                                self.modifiers.shift,
+                            )
+                        } else {
+                            [to.x, to.y]
+                        };
+                        painter.line_segment([screen([from.x, from.y]), screen(end)], outline);
                     }
                     _ if (tool == &Tool::Select && sub.mode == 1)
                         || (tool == &Tool::Figure
@@ -370,7 +407,25 @@ impl SuePaint {
         }
         // Corners being clicked out, and the line on to the pointer; a
         // curve balloon shows its curve.
-        if !self.polyline.is_empty() {
+        if let Some((Tool::Figure, mode)) = self.polyline_for
+            && !self.polyline.is_empty()
+        {
+            // A Bezier Curve anchor being dragged out: the line runs to
+            // it, not to the pointer pulling its handle.
+            let pending = match &self.gesture {
+                Some(Gesture::Shape {
+                    tool: Tool::Figure,
+                    sub,
+                    from,
+                    to,
+                    ..
+                }) if sub.mode == crate::tools::BEZIER_CURVE => {
+                    Some(([from.x, from.y], [to.x, to.y]))
+                }
+                _ => None,
+            };
+            figure.corners(mode, &self.polyline, &self.figure_draft.handles, pending);
+        } else if !self.polyline.is_empty() {
             let mut points = self.polyline.clone();
             if let Some(hover) = response.hover_pos() {
                 let at = view.to_picture(viewport, size, hover);

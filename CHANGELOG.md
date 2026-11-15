@@ -22,6 +22,18 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint: rectangle and ellipse selections keep the sub tool's
   Aspect while you drag, and selection shapes soften their edge by its
   Anti-aliasing.
+- Sue Paint, Figure tool: Continuous Curve, Bezier Curve and Polygon in
+  Direct draw. Curve now works as in Clip Studio Paint: drag from start
+  to end, let go, move the pointer to bend the line, click to set it
+  (the old click-by-click curve is Continuous Curve). Bezier Curve: a
+  click lays a point, a drag pulls out its handles; click the first
+  point to close, double-click the last to end. Shift keeps straight
+  lines to every 45 degrees and rectangles, ellipses and polygons
+  square or round. With the rulers shown, a straight line follows the
+  ruler it starts on and a rectangle, ellipse or polygon lies in the
+  perspective ruler's plane. A figure on a vector layer stays a vector
+  line. Saturated and speed lines land on a layer named after their
+  sub tool.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
@@ -370,6 +382,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 - Sue Paint: Auto Select with a selection already there is no longer
   cut down to that selection.
+- Sue Paint, Ruler tool: with Shift held, the line shown while dragging
+  a ruler now keeps to 45 degrees, as the ruler it lays does.
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
   the update. It now takes the theme as it ships; colors you picked

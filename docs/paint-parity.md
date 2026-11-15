@@ -378,7 +378,7 @@ The order of work is the plan at the end.
 | Auto Select (magic wand) | Tool | done | Looks at reference layers only when set |
 | Shrink selection | Selection area tool | done | The seventh sub tool: a lasso whose selection shrinks to the drawing inside it, keeping the holes it closes in |
 | Gradient tool | Tool | partial | Gradient layers exist; verify the tool's dials |
-| Figure tool (rectangle, ellipse, polygon, polyline) | Tool | done | Straight line, rectangle, ellipse, filled shapes, Lasso fill, Polyline and Curve (a click at each corner; a double-click ends it, the first corner closes it) |
+| Figure tool (rectangle, ellipse, polygon, polyline) | Tool | done | Straight line, rectangle, ellipse, filled shapes, polygon (corners and roundness of corner), Polyline and Continuous Curve (a click at each corner; a double-click ends it, the first corner closes it), Curve (drag the ends, move to bend, click), Bezier Curve (click or drag out handles). Shift: 45 degrees, square, circle. Follows the rulers and the perspective ruler's plane; on a vector layer a vector line. Line or fill as one setting is not yet (filled shapes are sub tools of their own) |
 | Smart Shape (5.0) | Drawing with any tool | done | Hold the pen still: a line, arc, ellipse, circle or polygon; on or off per sub tool |
 | Text tool | Tool | done | |
 | Ruler tools | Tool | done | |

@@ -288,7 +288,8 @@ impl Perspective {
     }
 
     /// The directions a line through `at` can run.
-    fn directions(&self, at: [f32; 2]) -> Vec<[f32; 2]> {
+    #[must_use]
+    pub fn directions(&self, at: [f32; 2]) -> Vec<[f32; 2]> {
         let mut out: Vec<[f32; 2]> = self
             .points
             .iter()

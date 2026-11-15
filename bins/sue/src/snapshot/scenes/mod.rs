@@ -14,6 +14,7 @@ mod paint_canvas;
 mod paint_color;
 mod paint_dialogs;
 mod paint_dock;
+mod paint_figure;
 mod paint_fill;
 mod paint_layers;
 mod paint_saving;
@@ -61,6 +62,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_layers::first_tab(tour);
     paint_canvas::launchers(tour)?;
     paint_dialogs::galleries(tour)?;
+    // Before 08o, whose own steps then replace this scene's undone ones
+    // in History, so the scenes after see what they saw before it.
+    paint_figure::tool(tour)?;
     paint_canvas::figure(tour)?;
     paint_fill::shrink_selection(tour)?;
     shell::sue_menu_in_paint(tour)?;
