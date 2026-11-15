@@ -505,7 +505,6 @@ pub(super) fn picture_quad(texture: egui::TextureId, corners: [Pos2; 4], opacity
     Shape::mesh(mesh)
 }
 
-
 /// The part of a picture of `size` that `view` shows in `viewport`, as
 /// `[x0, y0, x1, y1]` (with a pixel to spare), and how many picture pixels
 /// a side a screen pixel spans there.

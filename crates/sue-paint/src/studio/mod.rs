@@ -852,9 +852,6 @@ pub struct SuePaint {
     pub(crate) screen_pick_asked: Option<bool>,
     /// The gradient sets, read the first time a gradient map opens.
     pub(crate) gradients: crate::dialogs::GradientLibrary,
-    /// The last brush stroke begun: which sub tool, and how the engine
-    /// lays it (see [`SuePaint::last_stroke`]).
-    pub(crate) last_stroke: Option<StrokeSeen>,
 }
 
 /// How the brush engine took a stroke (for the runtime tests).
@@ -1074,18 +1071,28 @@ impl Default for SuePaint {
             screen_pick: None,
             screen_pick_asked: None,
             gradients: crate::dialogs::GradientLibrary::default(),
-            last_stroke: None,
         }
     }
 }
 
-impl SuePaint {
-    /// The last brush stroke begun, as the brush engine took it: every
-    /// brush sub tool paints through the engine's worker.
-    #[must_use]
-    pub fn last_stroke(&self) -> Option<&StrokeSeen> {
-        self.last_stroke.as_ref()
-    }
+thread_local! {
+    /// The last brush stroke begun on this thread (the one that runs the
+    /// studio's frames).
+    static LAST_STROKE: std::cell::RefCell<Option<StrokeSeen>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Notes `seen` as the last brush stroke begun on this thread.
+pub(crate) fn saw_stroke(seen: StrokeSeen) {
+    LAST_STROKE.with(|last| *last.borrow_mut() = Some(seen));
+}
+
+/// The last brush stroke begun on this thread, as the brush engine took
+/// it (for the runtime tests: every brush sub tool paints through the
+/// engine's worker).
+#[must_use]
+pub fn last_stroke() -> Option<StrokeSeen> {
+    LAST_STROKE.with(|last| last.borrow().clone())
 }
 
 impl std::fmt::Debug for SuePaint {

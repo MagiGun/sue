@@ -93,6 +93,11 @@ impl Shaper {
         &self.committed
     }
 
+    /// The newest point taken so far, pending or committed.
+    pub fn last(&self) -> Option<&StrokePoint> {
+        self.pending.last().or_else(|| self.committed.last())
+    }
+
     /// Notes a point's speed while the starting time lasts.
     fn measure(&mut self, point: &StrokePoint) {
         if self.start_speed.is_some() {

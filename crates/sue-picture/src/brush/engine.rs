@@ -212,7 +212,9 @@ mod tests {
         let mut tip = Tip::from_text(&sue_brush::presets::legacy_text(&base));
         tip.size *= 2.0;
         let preset = preset_of(&tip, Some(&base));
-        assert!((preset.value(sue_model::brush::param::SIZE).unwrap_or(0.0) - tip.size).abs() < 1e-3);
+        assert!(
+            (preset.value(sue_model::brush::param::SIZE).unwrap_or(0.0) - tip.size).abs() < 1e-3
+        );
         for (key, bytes) in &base.extra {
             if !key.starts_with(BrushPreset::LEGACY) {
                 assert_eq!(preset.extra(key), Some(bytes.as_slice()), "{key} kept");

@@ -13,6 +13,7 @@ mod paint_3d;
 mod paint_anim;
 mod paint_basics;
 mod paint_brush;
+mod paint_brush_engine;
 mod paint_canvas_chrome;
 mod paint_canvas_keys;
 mod paint_cmd_anim;

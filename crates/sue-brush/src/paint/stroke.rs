@@ -28,7 +28,7 @@ use super::stamp::{Tips, stamp_coverage};
 use super::wet::{Backdrop, Wet, WetCanvas, blender};
 use crate::buffer::{Combine, MergeError, StrokeBuffer, TILE, TileKey};
 use crate::input::StrokePoint;
-use crate::raster::{PixelRect, TipImage};
+use crate::raster::{Disc, PixelRect, Ribbon, RibbonPoint, TipImage};
 use crate::texture::{Paper, Texture, TextureSettings};
 
 /// The colors a stroke paints with.
@@ -66,6 +66,40 @@ enum Target {
     Wet(WetCanvas),
 }
 
+/// A ribbon's path so far: one tip picture bent along the whole stroke.
+#[derive(Clone, Debug, Default)]
+struct RibbonPath {
+    /// The committed points, as the ribbon reads them.
+    points: Vec<RibbonPoint>,
+    /// How many of the segments between them are laid.
+    laid: usize,
+    /// The widest the ribbon has been, in pixels.
+    widest: f32,
+    /// The brush's own size: the ribbon's picture repeats by it, so the
+    /// repeat does not change as the pen presses harder.
+    size: f32,
+}
+
+impl RibbonPath {
+    /// How much arc length a piece reads on either side of what it lays,
+    /// so pieces meet without a seam (see [`Ribbon`]).
+    fn context(&self) -> f32 {
+        2.0 * self.widest + 2.0
+    }
+
+    /// The ribbon's point for stroke point `p`.
+    fn point(p: &StrokePoint) -> RibbonPoint {
+        RibbonPoint {
+            disc: Disc {
+                at: p.pos,
+                radius: (p.size * 0.5).max(0.0),
+                strength: (p.opacity * p.flow).clamp(0.0, 1.0),
+            },
+            arc: p.arc,
+        }
+    }
+}
+
 /// The dual brush's mask and its own plan.
 #[derive(Clone, Debug)]
 struct Dual {
@@ -94,6 +128,9 @@ pub struct PaintStroke {
     /// How many of `waiting` at its start are context only.
     context: usize,
     scratch: Vec<Planned>,
+    /// A ribbon brush (its tip bent along the stroke), when the stroke
+    /// is one.
+    ribbon: Option<RibbonPath>,
 }
 
 impl PaintStroke {
@@ -192,14 +229,23 @@ impl PaintStroke {
             target,
             planner,
             dual,
+            waiting: Vec::new(),
+            context: 0,
+            scratch: Vec::new(),
+            ribbon: (preset.engine == EngineKind::Ribbon && !resources.pictures.is_empty()).then(
+                || RibbonPath {
+                    size: super::settings::registry()
+                        .value(preset, sue_model::brush::param::SIZE)
+                        .filter(|size| size.is_finite() && *size > 0.0)
+                        .unwrap_or(10.0),
+                    ..RibbonPath::default()
+                },
+            ),
             pictures: resources.pictures,
             dual_pictures: resources.dual_pictures,
             edge,
             texture,
             overflow: resources.overflow,
-            waiting: Vec::new(),
-            context: 0,
-            scratch: Vec::new(),
         }
     }
 
@@ -262,7 +308,15 @@ impl PaintStroke {
                 dual.planner
                     .push(&Self::dual_point(&dual.settings, p), &mut marks);
             }
-            stamp_coverage(&mut dual.buffer.committed(), &marks, &Tips { pictures: &self.dual_pictures, edge: self.edge }, None);
+            stamp_coverage(
+                &mut dual.buffer.committed(),
+                &marks,
+                &Tips {
+                    pictures: &self.dual_pictures,
+                    edge: self.edge,
+                },
+                None,
+            );
         }
         self.scratch = out;
     }
@@ -304,6 +358,96 @@ impl PaintStroke {
         }
     }
 
+    /// The ribbon's picture and how often it repeats along the line, for
+    /// a ribbon `width` pixels wide.
+    fn ribbon_tile(pictures: &[TipImage], width: f32) -> Option<(&TipImage, f32)> {
+        let image = pictures.first()?;
+        let tile = width * image.width() as f32 / image.height().max(1) as f32;
+        Some((image, tile.max(1.0)))
+    }
+
+    /// Lays the ribbon along committed `points`: the segments that lie a
+    /// context's length before the newest point (all of them `at_end`),
+    /// each piece reading its neighbours, so the pieces meet without a
+    /// seam.
+    fn ribbon_commit(&mut self, points: &[StrokePoint], at_end: bool) {
+        let Some(mut path) = self.ribbon.take() else {
+            return;
+        };
+        for p in points {
+            path.widest = path.widest.max(p.size);
+            path.points.push(RibbonPath::point(p));
+        }
+        let count = path.points.len();
+        if count >= 2 {
+            let context = path.context();
+            let newest = path.points[count - 1].arc;
+            // Segment `i` is laid once the line has gone a context past
+            // its end.
+            let ready = if at_end {
+                count - 1
+            } else {
+                (path.laid..count - 1)
+                    .take_while(|&i| path.points[i + 1].arc + context <= newest)
+                    .count()
+                    + path.laid
+            };
+            if ready > path.laid {
+                let from = path.points[..path.laid]
+                    .iter()
+                    .rposition(|p| p.arc + context < path.points[path.laid].arc)
+                    .unwrap_or(0);
+                if let (Some((image, tile)), Target::Coverage(buffer)) = (
+                    Self::ribbon_tile(&self.pictures, path.size),
+                    &mut self.target,
+                ) {
+                    let ribbon = Ribbon::new(&path.points[from..], image, tile)
+                        .painting(path.laid - from..ready - from);
+                    buffer.committed().ribbon(&ribbon);
+                }
+                path.laid = ready;
+            }
+        }
+        self.ribbon = Some(path);
+    }
+
+    /// Draws the ribbon's provisional part: what is not laid yet, then
+    /// `tail`.
+    fn ribbon_tail(&mut self, tail: &[StrokePoint]) {
+        let Some(path) = self.ribbon.take() else {
+            return;
+        };
+        let mut points: Vec<RibbonPoint> = Vec::new();
+        let context = path.context();
+        let from = path
+            .points
+            .iter()
+            .rposition(|p| {
+                path.points
+                    .get(path.laid)
+                    .is_some_and(|laid| p.arc + context < laid.arc)
+            })
+            .unwrap_or(0);
+        points.extend_from_slice(&path.points[from..]);
+        for p in tail {
+            points.push(RibbonPath::point(p));
+        }
+        if let Target::Coverage(buffer) = &mut self.target {
+            buffer.clear_tail();
+        }
+        if points.len() >= 2
+            && let (Some((image, tile)), Target::Coverage(buffer)) = (
+                Self::ribbon_tile(&self.pictures, path.size),
+                &mut self.target,
+            )
+        {
+            let start = path.laid.saturating_sub(from);
+            let ribbon = Ribbon::new(&points, image, tile).painting(start..points.len() - 1);
+            buffer.tail().ribbon(&ribbon);
+        }
+        self.ribbon = Some(path);
+    }
+
     /// The window of arc length corners are rounded over, at most.
     fn window(points: &[StrokePoint]) -> f32 {
         points
@@ -316,6 +460,10 @@ impl PaintStroke {
     /// pipeline committed since the last call, in order). A wet stroke
     /// reads the picture from `backdrop`, a snapshot of the layer.
     pub fn commit(&mut self, points: &[StrokePoint], backdrop: Option<&dyn Backdrop>) {
+        if self.ribbon.is_some() {
+            self.ribbon_commit(points, false);
+            return;
+        }
         if self.behaviours.sharp_angles {
             self.lay_down(points, backdrop);
             return;
@@ -364,6 +512,10 @@ impl PaintStroke {
         if self.is_wet() {
             return;
         }
+        if self.ribbon.is_some() {
+            self.ribbon_tail(tail);
+            return;
+        }
         let mut planner = self.planner.clone();
         let mut points: Vec<StrokePoint> = Vec::new();
         if self.behaviours.sharp_angles {
@@ -387,7 +539,15 @@ impl PaintStroke {
             for p in &points {
                 planner.push(&Self::dual_point(&dual.settings, p), &mut marks);
             }
-            stamp_coverage(&mut dual.buffer.tail(), &marks, &Tips { pictures: &self.dual_pictures, edge: self.edge }, None);
+            stamp_coverage(
+                &mut dual.buffer.tail(),
+                &marks,
+                &Tips {
+                    pictures: &self.dual_pictures,
+                    edge: self.edge,
+                },
+                None,
+            );
         }
     }
 
@@ -406,6 +566,9 @@ impl PaintStroke {
     /// would leave the provisional end (and, building up, paint twice)
     /// where the final one lies.
     pub fn finish(&mut self, backdrop: Option<&dyn Backdrop>) {
+        if self.ribbon.is_some() {
+            self.ribbon_commit(&[], true);
+        }
         let end = self.waiting.len();
         self.flush(end, backdrop);
         self.waiting.clear();
@@ -451,7 +614,9 @@ impl PaintStroke {
         keep_alpha: bool,
     ) -> Option<[f32; 4]> {
         match &self.target {
-            Target::Wet(canvas) => Some(canvas.laid(backdrop, x, y, self.overflow.as_deref(), keep_alpha)),
+            Target::Wet(canvas) => {
+                Some(canvas.laid(backdrop, x, y, self.overflow.as_deref(), keep_alpha))
+            }
             _ => None,
         }
     }

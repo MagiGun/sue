@@ -113,22 +113,17 @@ impl SuePaint {
     pub(super) fn settle(&mut self, cx: &mut AppletContext<'_>) {
         // A stroke of the new brush engine ends where the pen last was.
         self.engine_settle(cx);
-        match self.gesture.take() {
-            Some(Gesture::Move { layers, .. }) => {
-                let mut steps = Batch::new(tr!("move-layer"));
-                for (layer, _, old) in layers {
-                    for (key, before) in
-                        [(picture::X, old[0].clone()), (picture::Y, old[1].clone())]
-                    {
-                        steps = steps.then(match before {
-                            Some(value) => SetProperty::new(layer, key, value),
-                            None => SetProperty::remove(layer, key),
-                        });
-                    }
+        if let Some(Gesture::Move { layers, .. }) = self.gesture.take() {
+            let mut steps = Batch::new(tr!("move-layer"));
+            for (layer, _, old) in layers {
+                for (key, before) in [(picture::X, old[0].clone()), (picture::Y, old[1].clone())] {
+                    steps = steps.then(match before {
+                        Some(value) => SetProperty::new(layer, key, value),
+                        None => SetProperty::remove(layer, key),
+                    });
                 }
-                cx.record(ArenaEdit(steps));
             }
-            _ => {}
+            cx.record(ArenaEdit(steps));
         }
         if let Some(live) = self.live.take() {
             let label = cx

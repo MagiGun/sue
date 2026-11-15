@@ -3414,3 +3414,4 @@ artistic-line-opacity = Line Opacity
 stop-main-color = Main Color
 stop-sub-color = Sub Color
 filter-color = Color
+layer-takes-no-strokes = { $name } holds pixels the brush cannot paint on

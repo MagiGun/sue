@@ -1068,11 +1068,11 @@ impl Runtime {
         self.typing.flush(&mut self.engine.history);
         self.transport
             .set_playing(false, self.engine.audio.as_deref_mut());
-        if let Err(error) = self.engine.world.load_file_with(
-            &file,
-            &sue_model::registry(),
-            &mut migrate_on_load,
-        ) {
+        if let Err(error) =
+            self.engine
+                .world
+                .load_file_with(&file, &sue_model::registry(), &mut migrate_on_load)
+        {
             self.shell.notify(
                 tr!("cannot-recover", title = kept.title(), error = error),
                 true,

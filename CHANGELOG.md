@@ -505,6 +505,24 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint: every brush now paints with the new brush engine: the
+  airbrushes, the watercolor and oil brushes that mix with the picture,
+  the textured pencils, the sprays and every Decoration brush, not only
+  the pens. What you see while drawing is what stays, symmetry's copies,
+  the selection and locked transparent pixels included, and Undo takes a
+  stroke back exactly. The figure tools and the focus and speed lines
+  paint with it too.
+- Sue Paint: a new line on a vector layer is kept as a line of the brush
+  engine, so it paints again to the very pixels it was drawn with when
+  the layer is redrawn.
+- Sue Paint: ribbon brushes (Film strip, Rope, Checkered band, Stitched
+  ribbon, Lace ribbon) bend one band along the whole stroke again.
+- Sue Paint: Flick into a point carries a quick stroke on along the way
+  the line was going and narrows it smoothly to a point, for a pen and a
+  mouse alike; a straight line or a line along a ruler does not flick.
+- Sue Paint: post correction smooths a shaky line more at its higher
+  levels, and still keeps its corners and its ends where they were.
+- Sue Paint: a pen's tilt turns and mirrors with the view.
 - Sue Paint paints with its new brush engine. Every brush whose tip is
   round (the pens, the pencils, the hard eraser and more) draws through
   it, on a layer, on a layer's mask, inside a selection, with Lock
@@ -761,6 +779,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint: a fast mouse stroke no longer ends in a small kink at its
+  tip, and a flick no longer bends off the way the stroke was going.
+- Sue Paint: masks of older files become gray masks as the file opens,
+  once, instead of being looked at every frame; the picture stays as
+  unchanged as it was saved.
 - A dialog keeps its place while what it holds grows or shrinks: a
   row added to a list no longer moves the buttons under the pointer.
   Dialogs that drew their own OK and Cancel (Gradient Map, Color

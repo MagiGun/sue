@@ -141,15 +141,19 @@ impl Brush {
     }
 }
 
+/// A round tip's stroke: its pipeline, its swept shapes and its bands.
+#[derive(Debug)]
+struct RoundStroke {
+    pipeline: Pipeline,
+    round: Round,
+    bands: Bands,
+}
+
 /// How a stroke lays its paint.
 #[derive(Debug)]
 enum Painting {
     /// A swept round tip, as coverage of one ink, on the pool's threads.
-    Round {
-        pipeline: Pipeline,
-        round: Round,
-        bands: Bands,
-    },
+    Round(Box<RoundStroke>),
     /// Every paint behaviour (see [`paint`]).
     Paint(Box<Painter>),
 }
@@ -187,11 +191,11 @@ impl Stroke {
             } else {
                 Combine::Max
             };
-            Painting::Round {
+            Painting::Round(Box::new(RoundStroke {
                 pipeline: Pipeline::new(&brush.preset, &brush.registry, settings),
                 round: Round::new(&brush.preset, &brush.registry),
                 bands: Bands::new(combine, bands),
-            }
+            }))
         } else {
             Painting::Paint(Box::new(Painter::new(
                 &brush.preset,
@@ -237,7 +241,7 @@ impl Stroke {
     #[must_use]
     pub fn counters(&self) -> Counters {
         match &self.painting {
-            Painting::Round { bands, .. } => bands.counters(),
+            Painting::Round(stroke) => stroke.bands.counters(),
             Painting::Paint(_) => Counters::default(),
         }
     }
@@ -247,7 +251,7 @@ impl Stroke {
     #[must_use]
     pub fn coverage(&self, x: i32, y: i32) -> u16 {
         match &self.painting {
-            Painting::Round { bands, .. } => bands.coverage(x, y),
+            Painting::Round(stroke) => stroke.bands.coverage(x, y),
             Painting::Paint(_) => 0,
         }
     }
@@ -274,11 +278,12 @@ impl Stroke {
             return Ok(());
         }
         match &mut self.painting {
-            Painting::Round {
-                pipeline,
-                round,
-                bands,
-            } => {
+            Painting::Round(stroke) => {
+                let RoundStroke {
+                    pipeline,
+                    round,
+                    bands,
+                } = &mut **stroke;
                 let mut work = Work::default();
                 let mut reach = 0;
                 while let Some(sample) = queue.pop_front() {
@@ -351,11 +356,12 @@ impl Stroke {
             return Ok(());
         }
         match &mut self.painting {
-            Painting::Round {
-                pipeline,
-                round,
-                bands,
-            } => {
+            Painting::Round(stroke) => {
+                let RoundStroke {
+                    pipeline,
+                    round,
+                    bands,
+                } = &mut **stroke;
                 let work = Work {
                     committed: round.tail(&pipeline.tail()),
                     tail: Some(Vec::new()),
@@ -392,7 +398,7 @@ impl Stroke {
     #[must_use]
     pub fn bounds(&self) -> Option<PixelRect> {
         match &self.painting {
-            Painting::Round { bands, .. } => bands.bounds(),
+            Painting::Round(stroke) => stroke.bands.bounds(),
             Painting::Paint(painter) => painter.bounds(),
         }
     }
@@ -413,7 +419,7 @@ impl Stroke {
         label: &str,
     ) -> Result<RasterEdit, MergeError> {
         let bands = match &self.painting {
-            Painting::Round { bands, .. } => bands,
+            Painting::Round(stroke) => &stroke.bands,
             Painting::Paint(painter) => return painter.commit(raster, origin, layer, label),
         };
         let (width, height) = (raster.width() as i32, raster.height() as i32);

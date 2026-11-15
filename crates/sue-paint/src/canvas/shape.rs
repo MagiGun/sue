@@ -749,7 +749,12 @@ impl SuePaint {
                 .iter()
                 .map(|r| {
                     let at = |v: i32, by: i64| (i64::from(v) + by).max(0) as u32;
-                    [at(r[0], offset[0]), at(r[1], offset[1]), at(r[2], offset[0]), at(r[3], offset[1])]
+                    [
+                        at(r[0], offset[0]),
+                        at(r[1], offset[1]),
+                        at(r[2], offset[0]),
+                        at(r[3], offset[1]),
+                    ]
                 })
                 .collect();
             doc.compositor
@@ -792,9 +797,11 @@ fn selection_region(selection: &crate::select::Selection) -> sue_brush::paint::o
         x1: x1 as i32,
         y1: y1 as i32,
     };
-    sue_brush::paint::overflow::Region::from_cover(rect, |x, y| match (u32::try_from(x), u32::try_from(y)) {
-        (Ok(x), Ok(y)) => selection.at(x, y),
-        _ => 0.0,
+    sue_brush::paint::overflow::Region::from_cover(rect, |x, y| {
+        match (u32::try_from(x), u32::try_from(y)) {
+            (Ok(x), Ok(y)) => selection.at(x, y),
+            _ => 0.0,
+        }
     })
 }
 

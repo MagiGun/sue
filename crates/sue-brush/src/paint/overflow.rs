@@ -131,7 +131,11 @@ impl Region {
         for y in rect.y0..rect.y0 + h {
             for x in rect.x0..rect.x0 + w {
                 let c = cover(x, y);
-                mask.push(if c.is_finite() { c.clamp(0.0, 1.0) } else { 0.0 });
+                mask.push(if c.is_finite() {
+                    c.clamp(0.0, 1.0)
+                } else {
+                    0.0
+                });
             }
         }
         Self { rect, mask }

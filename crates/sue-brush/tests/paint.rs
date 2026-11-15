@@ -187,13 +187,7 @@ fn draw(layer: &mut RasterTile2D, brush: &Brush, samples: &[Sample], seed: u64) 
 }
 
 /// [`draw`], holding the pen still for `hold` seconds at the end.
-fn draw_held(
-    layer: &mut RasterTile2D,
-    brush: &Brush,
-    samples: &[Sample],
-    seed: u64,
-    hold: f64,
-) {
+fn draw_held(layer: &mut RasterTile2D, brush: &Brush, samples: &[Sample], seed: u64, hold: f64) {
     let snapshot = layer.clone();
     let stroke = run(brush, samples, seed, hold, &snapshot);
     stroke.merge(layer, [0, 0], brush.keep_alpha).expect("laid");

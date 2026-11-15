@@ -1170,7 +1170,6 @@ impl LineBrush {
     }
 }
 
-
 /// What the pen said at one sample of a line of the brush engine.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PenPart {
@@ -3137,7 +3136,13 @@ mod tests {
             size: 6.0,
             ..Tip::default()
         };
-        let square = [[4.0, 4.0], [36.0, 4.0], [36.0, 36.0], [4.0, 36.0], [4.0, 4.0]];
+        let square = [
+            [4.0, 4.0],
+            [36.0, 4.0],
+            [36.0, 36.0],
+            [4.0, 36.0],
+            [4.0, 4.0],
+        ];
         let line = figure_engine_line(&square, tip, [[0.0; 3], [1.0; 3]], true);
         assert!(line.engine.is_some(), "a line of the engine");
         let corners = line.marks.iter().filter(|mark| **mark != 0).count();

@@ -148,7 +148,8 @@ impl Painter {
     /// Takes one sample. Answers about how many pixels of work it was.
     pub(crate) fn push(&mut self, sample: Sample) -> u64 {
         let snapshot = Arc::clone(&self.snapshot);
-        let backdrop: Option<&dyn Backdrop> = self.wet.then_some(snapshot.as_ref() as &dyn Backdrop);
+        let backdrop: Option<&dyn Backdrop> =
+            self.wet.then_some(snapshot.as_ref() as &dyn Backdrop);
         let mut work = 0_u64;
         for copy in &mut self.copies {
             let sample = copy
@@ -199,7 +200,8 @@ impl Painter {
             return;
         }
         let snapshot = Arc::clone(&self.snapshot);
-        let backdrop: Option<&dyn Backdrop> = self.wet.then_some(snapshot.as_ref() as &dyn Backdrop);
+        let backdrop: Option<&dyn Backdrop> =
+            self.wet.then_some(snapshot.as_ref() as &dyn Backdrop);
         for copy in &mut self.copies {
             // What the pipeline still holds becomes final.
             let tail = copy.pipeline.tail();

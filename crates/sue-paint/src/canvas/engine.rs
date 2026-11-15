@@ -39,8 +39,8 @@ use std::sync::Arc;
 
 use egui::{Modifiers, Pos2, Rect};
 use sue_brush::input::{Device, Kind, Sample, Settings};
-use sue_brush::paint::overflow::Region;
 use sue_brush::paint::Colors;
+use sue_brush::paint::overflow::Region;
 use sue_brush::raster::PixelRect;
 use sue_brush::replay::{self, Recorder};
 use sue_brush::worker::{Brush, Canvas, LiveView, StrokeWorker};
@@ -55,9 +55,9 @@ use super::lay::{Lay, Target};
 use crate::brush::{SAME, Tip};
 use crate::doc;
 use crate::rulers::Snap;
-use crate::vector::LineBrush;
 use crate::studio::{Gesture, Shaping, SuePaint};
 use crate::tools::{SubTool, Tool};
+use crate::vector::LineBrush;
 
 /// How many of the pen's samples wait at most for a stroke to begin.
 const PENDING: usize = 4096;
@@ -65,9 +65,6 @@ const PENDING: usize = 4096;
 /// How far from the press a stream sample may be to be the press, in
 /// screen points.
 const NEAR: f32 = 24.0;
-
-/// A flick: how fast the pen must leave, in screen points a second.
-const FLICK_SPEED: f32 = 700.0;
 
 /// One copy of a stroke: the stroke itself, or one of symmetry's.
 #[derive(Debug)]
@@ -131,8 +128,6 @@ pub(crate) struct EngineStroke {
     line: bool,
     /// Post correction, 0 for none.
     correction: u32,
-    /// A quick lift runs out into a point.
-    flick: bool,
     /// Smart Shape is on for this sub tool.
     smart: bool,
     /// Smart Shape: where and since when the pen has rested.
@@ -301,8 +296,8 @@ impl EngineStroke {
     }
 
     /// The pen lifted at `at` (the stroke's pixels) at device time `time`:
-    /// Shift's line is drawn to it, a flick runs out past it, and the lift
-    /// is given.
+    /// Shift's line is drawn to it, and the lift is given (a quick lift
+    /// flicks into a point in the engine, as the brush says).
     fn lift(&mut self, at: [f32; 2], time: f64) {
         if self.lifted {
             return;
@@ -315,29 +310,16 @@ impl EngineStroke {
             self.send(Sample::new(Kind::Up, end, time));
             return;
         }
-        let mut end = at;
-        if self.line {
-            // Shift's line: from the press straight to the lift.
+        let end = at;
+        if self.line || at != self.last.pos {
+            // Shift's line: from the press straight to the lift; else the
+            // pen went on to where it was let go (a pointer let go past
+            // its last move).
             let mut last = self.last;
             last.kind = Kind::Move;
             last.pos = at;
             last.time = time;
             self.send(last);
-        } else if self.flick && !self.snapped() {
-            let run_out = self.run_out(at, time);
-            if let Some(far) = run_out.last() {
-                // A quick lift: to where it let go, then on into a point.
-                let mut last = self.last;
-                last.kind = Kind::Move;
-                last.pos = at;
-                last.time = time;
-                end = far.pos;
-                self.send(last);
-                self.last = last;
-                for sample in run_out {
-                    self.send(sample);
-                }
-            }
         }
         let time = self.raw.last().map_or(time, |sample| sample.time.max(time));
         self.send(Sample::new(Kind::Up, end, time));
@@ -346,77 +328,6 @@ impl EngineStroke {
     /// `true` once the stroke is on a ruler or grid line.
     fn snapped(&self) -> bool {
         self.snap.as_ref().is_some_and(Snap::chosen)
-    }
-
-    /// How fast the pen left, in the stroke's pixels a second, over its
-    /// last few hundredths of a second, and which way the line was going
-    /// as it ended: along its last stretch (a few pixels, or a brush
-    /// wide), so a run out carries the line on and does not bend off it
-    /// toward where the pen was a while before.
-    fn velocity(&self) -> Option<[f32; 2]> {
-        let moves: Vec<&Sample> = self
-            .raw
-            .iter()
-            .filter(|sample| sample.kind != Kind::Up)
-            .collect();
-        let end = **moves.last()?;
-        let start = moves
-            .iter()
-            .find(|sample| end.time - sample.time <= 0.05)?;
-        let seconds = (end.time - start.time) as f32;
-        if seconds <= 0.004 {
-            return None;
-        }
-        let speed = (end.pos[0] - start.pos[0]).hypot(end.pos[1] - start.pos[1]) / seconds;
-        // The way: from the last sample at least a stretch back.
-        let stretch = (self.size() * 0.75).clamp(4.0, 24.0);
-        let from = moves
-            .iter()
-            .rev()
-            .find(|sample| {
-                (end.pos[0] - sample.pos[0]).hypot(end.pos[1] - sample.pos[1]) >= stretch
-            })
-            .map_or(start.pos, |sample| sample.pos);
-        let (dx, dy) = (end.pos[0] - from[0], end.pos[1] - from[1]);
-        let length = dx.hypot(dy);
-        (length > 1e-3).then(|| [dx / length * speed, dy / length * speed])
-    }
-
-    /// A flick: the samples that carry a quick lift at `at` (device time
-    /// `time`) on along the pen's way, pressing less and less to nothing,
-    /// so the line runs out into a point. None for a slow lift.
-    fn run_out(&self, at: [f32; 2], time: f64) -> Vec<Sample> {
-        let Some(velocity) = self.velocity() else {
-            return Vec::new();
-        };
-        let speed = velocity[0].hypot(velocity[1]);
-        if speed * self.zoom < FLICK_SPEED {
-            return Vec::new();
-        }
-        let size = self.size();
-        let reach = (speed * 0.02).min(size * 4.0 + 16.0).min(120.0);
-        let way = [velocity[0] / speed, velocity[1] / speed];
-        let mut last = self.last;
-        last.pos = at;
-        last.time = time;
-        let pressure = last.pressure.unwrap_or(1.0);
-        let steps = (reach / 2.0).ceil().max(1.0) as usize;
-        (1..=steps)
-            .map(|step| {
-                let t = step as f32 / steps as f32;
-                let mut sample = last;
-                sample.kind = Kind::Move;
-                sample.pos = [
-                    last.pos[0] + way[0] * reach * t,
-                    last.pos[1] + way[1] * reach * t,
-                ];
-                // The pressure eases off to nothing along the run out.
-                sample.time = last.time + f64::from(reach * t / speed);
-                let left = 1.0 - t;
-                sample.pressure = Some(pressure * left * left.sqrt());
-                sample
-            })
-            .collect()
     }
 
     /// The brush's size in layer pixels.
@@ -455,7 +366,7 @@ pub(crate) fn corrected(samples: &[Sample], level: u32, size: f32) -> Vec<Sample
         }
         along.push(total);
     }
-    let sigma = level.min(10) as f32 * 0.5 * (size * 0.12).max(1.0);
+    let sigma = level.min(10) as f32 * 1.2 * (size * 0.12).max(1.0);
     // Corners: the line turns more than about 65 degrees between arms a
     // brush wide on either side.
     let arm = size.max(6.0);
@@ -650,10 +561,7 @@ impl SuePaint {
             crate::color::unit(self.drawing_color())
         };
         let other = crate::color::unit(if self.sub_active { self.main } else { self.sub });
-        let line_brush = Arc::new(line_brush);
-        let brush = Brush::new(line_brush.preset.clone(), main)
-            .with(crate::brush::engine::resources(&line_brush), other);
-        let eraser = brush.preset.erase;
+        let eraser = line_brush.preset.erase;
         let local = self.layer_point(pos, viewport, size, offset);
         // The picture's rulers, in the stroke's pixels.
         let rulers = if doc.show_rulers {
@@ -704,6 +612,15 @@ impl SuePaint {
                 })
                 .flatten()
         });
+        // Preferences, Tools: Shift draws a straight line.
+        let shift_line =
+            modifiers.shift && cx.rice().get_bool("sue_paint.shift_line").unwrap_or(true);
+        // A straight line, or one along a ruler, does not flick.
+        let mut line_brush = line_brush;
+        line_brush.preset.input.flick &= !shift_line && snap.is_none();
+        let line_brush = Arc::new(line_brush);
+        let brush = Brush::new(line_brush.preset.clone(), main)
+            .with(crate::brush::engine::resources(&line_brush), other);
         // The layer's transparent pixels locked: paint only where it has
         // some (an eraser still erases). A vector line keeps its own.
         let lock = mask.is_none() && info.alpha_locked && !eraser && !vector;
@@ -717,9 +634,9 @@ impl SuePaint {
         let (lay, canvas) = if behaviours {
             // One worker lays every copy, keeps the locked pixels and the
             // selection, on a snapshot of the layer.
-            let region = clip.as_ref().map(|(selection, offset)| {
-                Arc::new(selection_region(selection, *offset))
-            });
+            let region = clip
+                .as_ref()
+                .map(|(selection, offset)| Arc::new(selection_region(selection, *offset)));
             let canvas = Canvas {
                 snapshot: doc::raster(arena, target).cloned(),
                 keep_alpha: lock,
@@ -739,10 +656,7 @@ impl SuePaint {
         } else {
             let targets = vec![Target::new(target, [0, 0], lock)];
             let direct = mask.is_some() || clip.is_some() || lock || transforms.len() > 1;
-            (
-                direct.then(|| Lay::new(brush.ink(), clip, targets)),
-                None,
-            )
+            (direct.then(|| Lay::new(brush.ink(), clip, targets)), None)
         };
         let (brush, canvas) = match canvas {
             Some((canvas, brush)) => (brush, Some(canvas)),
@@ -825,10 +739,8 @@ impl SuePaint {
             lifted: false,
             snap,
             zoom,
-            // Preferences, Tools: Shift draws a straight line.
-            line: modifiers.shift && cx.rice().get_bool("sue_paint.shift_line").unwrap_or(true),
+            line: shift_line,
             correction: sub.correction,
-            flick: sub.flick,
             smart: sub.smart_shape,
             rest: None,
             shaping: None,
@@ -844,7 +756,7 @@ impl SuePaint {
             );
             doc.compositor.set_live(&cx.world.arena, Some(shown));
         }
-        self.last_stroke = Some(crate::studio::StrokeSeen {
+        crate::studio::saw_stroke(crate::studio::StrokeSeen {
             sub: sub.name.clone(),
             behaviours,
             vector,
@@ -1261,6 +1173,11 @@ impl SuePaint {
             })
             .unwrap_or(pen);
         let pivot = crate::smart::pivot(&path);
+        // A shape ends where it is drawn to: it does not flick.
+        stroke.brush.preset.input.flick = false;
+        if let Some(keep) = stroke.keep.as_mut() {
+            Arc::make_mut(&mut keep.brush).preset.input.flick = false;
+        }
         let samples = shape_samples(stroke, &path);
         let Some(Gesture::Engine(mut stroke)) = self.gesture.take() else {
             return;
@@ -1280,7 +1197,9 @@ impl SuePaint {
 /// is picture pixel `offset` paint, in the stroke's pixels.
 fn selection_region(selection: &crate::select::Selection, offset: [i64; 2]) -> Region {
     let [x0, y0, x1, y1] = selection.bounds().unwrap_or([0, 0, 0, 0]);
-    let shift = |v: u32, by: i64| (i64::from(v) - by).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+    let shift = |v: u32, by: i64| {
+        (i64::from(v) - by).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
+    };
     let rect = PixelRect {
         x0: shift(x0, offset[0]),
         y0: shift(y0, offset[1]),
