@@ -99,6 +99,8 @@ pub(crate) struct Extras {
     pub bank_thumbs: crate::panels::item_bank::Thumbs,
     /// The frame the Item Bank was last drawn in.
     pub bank_drawn: Option<u64>,
+    /// Whether the current layer has pixels, as of its id and revision.
+    pub layer_drawn: std::cell::Cell<Option<(sue_core::EntityId, u64, bool)>>,
     /// The Material palette's view: its folder, search, size and picks.
     pub material: crate::panels::MaterialView,
     /// The library keys of the favorite materials, as of the last frame

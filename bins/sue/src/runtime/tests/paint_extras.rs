@@ -516,9 +516,9 @@ fn recording_keeps_commands_from_menus_keys_and_filters() {
 
 #[test]
 fn item_bank_pictures_drag_onto_the_canvas_as_one_undo_step() {
-    // FG-31: a picture put in the bank's folder, and the current layer
-    // kept as a picture, show in the bank; one dragged onto the canvas
-    // lands on a new layer, one undo step.
+    // FG-31: a picture put in the bank's folder shows in the bank; one
+    // dragged onto the canvas lands on a new layer, one undo step. Keep
+    // Current Layer as Picture is grayed while the layer is empty.
     let mut kept = Kept::new("extras-item-bank");
     let folder = kept
         .driver
@@ -537,6 +537,12 @@ fn item_bank_pictures_drag_onto_the_canvas_as_one_undo_step() {
     kept.driver.command("item_bank.keep_layer");
     kept.settle(2);
     kept.show("item_bank");
+    assert!(
+        !kept
+            .node("Keep Current Layer as Picture", Some(Role::Button))
+            .enabled,
+        "nothing drawn on the layer yet"
+    );
     assert!(
         kept.data("item_bank.txt").lines().count() >= 1,
         "the sub tool is kept"

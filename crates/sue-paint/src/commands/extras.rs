@@ -164,11 +164,7 @@ fn bank_keep_layer(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>
 }
 
 fn bank_layer_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
-    when(
-        paint
-            .layer_info(facts.arena)
-            .is_some_and(|info| crate::doc::raster(facts.arena, info.id).is_some()),
-    )
+    when(paint.layer_has_pixels(facts.arena))
 }
 
 // ----- Auto Action -------------------------------------------------------------

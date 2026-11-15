@@ -194,6 +194,28 @@ impl SuePaint {
         }
     }
 
+    /// Whether the current layer is a raster layer with something drawn
+    /// on it (what Keep Current Layer as Picture needs). Worked out once
+    /// per change of the layer.
+    pub(crate) fn layer_has_pixels(&self, arena: &sue_core::Arena) -> bool {
+        let Some(info) = self.layer_info(arena) else {
+            return false;
+        };
+        if let Some((id, revision, drawn)) = self.extras.layer_drawn.get()
+            && id == info.id
+            && revision == info.revision
+        {
+            return drawn;
+        }
+        let drawn = crate::doc::raster(arena, info.id)
+            .and_then(RasterTile2D::bytes)
+            .is_some_and(|bytes| bytes.iter().skip(3).step_by(4).any(|alpha| *alpha > 0));
+        self.extras
+            .layer_drawn
+            .set(Some((info.id, info.revision, drawn)));
+        drawn
+    }
+
     /// Keeps the current raster layer as an Item Bank picture.
     pub(crate) fn bank_keep_layer(&mut self, cx: &mut AppletContext<'_>) {
         let arena = &cx.world.arena;
