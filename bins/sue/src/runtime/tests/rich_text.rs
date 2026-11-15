@@ -96,6 +96,54 @@ fn section_of(text: &egui::epaint::TextShape, words: &str) -> egui::TextFormat {
         .unwrap_or_else(|| panic!("a section holds {words:?}"))
 }
 
+/// Which line a tracked change draws through its words.
+#[derive(Clone, Copy, Debug)]
+enum Line {
+    /// Below the baseline.
+    Under,
+    /// Above it, through the small letters.
+    Strike,
+}
+
+/// `true` when `text` draws `line` in `color` through the row that holds
+/// `words`: either as a solid rect the layout put into the row's mesh on
+/// the letters (wide line spacing), or as egui's own line, which its
+/// section then names.
+fn drawn_line(text: &egui::epaint::TextShape, words: &str, line: Line, color: egui::Color32) -> bool {
+    let format = section_of(text, words);
+    let named = match line {
+        Line::Under => format.underline,
+        Line::Strike => format.strikethrough,
+    };
+    if named.width > 0.0 {
+        return true;
+    }
+    let galley = &text.galley;
+    let Some(start) = galley.job.text.find(words) else {
+        return false;
+    };
+    let char_index = galley.job.text[..start].chars().count();
+    let place = galley.layout_from_cursor(CCursor {
+        index: CharIndex(char_index),
+        prefer_next_row: true,
+    });
+    let Some(placed) = galley.rows.get(place.row) else {
+        return false;
+    };
+    let Some(glyph) = placed.row.glyphs.get(place.column.0) else {
+        return false;
+    };
+    let base = glyph.pos.y;
+    placed.row.visuals.mesh.vertices.iter().any(|vertex| {
+        vertex.color == color
+            && vertex.uv == egui::epaint::WHITE_UV
+            && match line {
+                Line::Under => vertex.pos.y > base - 1.0,
+                Line::Strike => vertex.pos.y < base - 1.0,
+            }
+    })
+}
+
 /// The first document of the arena: its text and marks.
 fn document(runtime: &Runtime) -> (String, sue_model::TextMarks) {
     runtime
@@ -296,13 +344,13 @@ fn rich_text_marks_come_from_the_theme_and_the_spelling_menu_picks_with_undo() {
     let inserted = section_of(&text, "down");
     assert_eq!(inserted.color, marks.inserted, "inserted text");
     assert!(
-        inserted.underline.width > 0.0,
+        drawn_line(&text, "down", Line::Under, marks.inserted),
         "inserted text is underlined"
     );
     let deleted = section_of(&text, "T");
     assert_eq!(deleted.color, marks.deleted, "deleted text");
     assert!(
-        deleted.strikethrough.width > 0.0,
+        drawn_line(&text, "T", Line::Strike, marks.deleted),
         "deleted text is struck through"
     );
     let commented = text
