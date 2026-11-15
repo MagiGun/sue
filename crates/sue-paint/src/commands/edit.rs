@@ -11,7 +11,6 @@ use sue_model::picture::{self, LayerKind};
 use sue_wm::{AppletContext, Call, Command, Facts, Flags, ItemState};
 
 use super::{Basis, when};
-use crate::color;
 use crate::dialogs::Dialog;
 use crate::doc;
 use crate::filters::Filter;
@@ -232,35 +231,60 @@ fn smart_smoothing(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>
     paint.filter_dialog(cx, Filter::SmartSmooth { strength: 0.5 });
 }
 
-/// Fill: the selection (or the whole layer) in the drawing color.
+/// Fill: the selection (or the whole layer) in the drawing color, on
+/// the layer or, while it is edited, on its mask (where the transparent
+/// color hides and any other shows).
 fn fill(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    let rgb = color::unit(paint.drawing_color());
+    let target = match paint.area_target(&cx.world.arena) {
+        Ok(target) => target,
+        Err(error) => {
+            cx.fail(error);
+            return;
+        }
+    };
     let Some(selection) = paint.selection_or_all(&cx.world.arena) else {
         return;
     };
     let size = selection.size();
-    let alpha_lock = paint
-        .layer_info(&cx.world.arena)
-        .is_some_and(|info| info.alpha_locked);
-    let offset = paint
-        .layer_info(&cx.world.arena)
-        .map_or([0, 0], |info| info.style.offset);
     let mask: Vec<u8> = (0..size[1])
         .flat_map(|y| (0..size[0]).map(move |x| (x, y)))
         .map(|(x, y)| (selection.at(x, y) * 255.0).round() as u8)
         .collect();
-    paint.rewrite(cx, &tr!("fill"), |pixels, width, height| {
-        crate::fill::paint_mask(
-            pixels,
-            [width, height],
-            offset,
-            &mask,
-            size,
-            rgb,
-            1.0,
-            alpha_lock,
-        );
-    });
+    let label = tr!("fill");
+    match crate::doc::rewrite(
+        &cx.world.arena,
+        target.id,
+        &label,
+        |pixels, width, height| match target.color {
+            Some(rgb) => crate::fill::paint_mask(
+                pixels,
+                [width, height],
+                target.offset,
+                &mask,
+                size,
+                rgb,
+                1.0,
+                target.alpha_lock,
+            ),
+            None => crate::fill::paint_blended(
+                pixels,
+                [width, height],
+                target.offset,
+                &mask,
+                size,
+                None,
+                1.0,
+                sue_model::BlendMode::Normal,
+                target.alpha_lock,
+            ),
+        },
+    ) {
+        Ok(Some(edit)) => {
+            SuePaint::apply(cx, edit);
+        }
+        Ok(None) => cx.notify(tr!("nothing-changed", label = label)),
+        Err(error) => cx.fail(error),
+    }
 }
 
 fn advanced_fill(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
