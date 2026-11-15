@@ -110,24 +110,6 @@ pub(super) fn icon(
     response
 }
 
-/// A thumb-sized button with a drawn icon at `rect` (a phone's top bar).
-pub(super) fn thumb(
-    ui: &mut Ui,
-    rect: Rect,
-    on: bool,
-    enabled: bool,
-    theme: &Theme,
-    draw: impl FnOnce(&Painter, Rect, Color32),
-) -> egui::Response {
-    let sense = if enabled { TOOL } else { Sense::hover() };
-    let id = ui
-        .scope_id()
-        .with(("writer-thumb", rect.min.x as i32, rect.min.y as i32));
-    let response = ui.interact(rect, id, sense);
-    paint_button(ui, rect, &response, on, enabled, theme, draw);
-    response
-}
-
 fn paint_button(
     ui: &Ui,
     rect: Rect,
@@ -160,18 +142,6 @@ fn paint_button(
     );
 }
 
-/// Three lines: the menus.
-pub(super) fn menu_icon(painter: &Painter, rect: Rect, color: Color32) {
-    let stroke = Stroke::new(1.8, color);
-    for index in 0..3 {
-        let y = rect.top() + 3.0 + index as f32 * (rect.height() - 6.0) / 2.0;
-        painter.line_segment(
-            [pos2(rect.left() + 1.0, y), pos2(rect.right() - 1.0, y)],
-            stroke,
-        );
-    }
-}
-
 /// A curved arrow back (undo) or forward (redo).
 pub(super) fn undo_icon(painter: &Painter, rect: Rect, color: Color32, redo: bool) {
     let stroke = Stroke::new(1.6, color);
@@ -196,16 +166,6 @@ pub(super) fn undo_icon(painter: &Painter, rect: Rect, color: Color32, redo: boo
     let side = if redo { -1.0 } else { 1.0 };
     painter.line_segment([tip, tip + vec2(-3.5 * side, -4.0)], stroke);
     painter.line_segment([tip, tip + vec2(4.0 * side, -2.5)], stroke);
-}
-
-/// A magnifying glass: Find.
-pub(super) fn find_icon(painter: &Painter, rect: Rect, color: Color32) {
-    let stroke = Stroke::new(1.6, color);
-    let center = rect.center() - vec2(2.0, 2.0);
-    let radius = rect.width() * 0.3;
-    painter.circle_stroke(center, radius, stroke);
-    let start = center + vec2(1.0, 1.0) * radius * std::f32::consts::FRAC_1_SQRT_2;
-    painter.line_segment([start, rect.right_bottom() - vec2(1.0, 1.0)], stroke);
 }
 
 pub(super) fn align_icon(painter: &Painter, rect: Rect, color: Color32, align: sue_type::Align) {
@@ -263,81 +223,6 @@ pub(super) fn indent_icon(painter: &Painter, rect: Rect, color: Color32, more: b
         color,
         Stroke::NONE,
     ));
-}
-
-/// A speech bubble: the comments.
-pub(super) fn comment_icon(painter: &Painter, rect: Rect, color: Color32) {
-    let bubble = Rect::from_min_max(
-        rect.min,
-        pos2(rect.right(), rect.bottom() - rect.height() * 0.25),
-    );
-    painter.rect_stroke(
-        bubble.shrink(0.5),
-        2.0,
-        Stroke::new(1.2, color),
-        StrokeKind::Inside,
-    );
-    let foot = bubble.left() + bubble.width() * 0.3;
-    painter.line_segment(
-        [pos2(foot, bubble.bottom()), pos2(foot - 1.0, rect.bottom())],
-        Stroke::new(1.2, color),
-    );
-    painter.line_segment(
-        [
-            pos2(foot - 1.0, rect.bottom()),
-            pos2(foot + rect.width() * 0.25, bubble.bottom()),
-        ],
-        Stroke::new(1.2, color),
-    );
-}
-
-/// A page with an arrow out of it: save as PDF.
-pub(super) fn export_icon(painter: &Painter, rect: Rect, color: Color32) {
-    let stroke = Stroke::new(1.2, color);
-    let tray = rect.shrink2(vec2(1.0, 0.5));
-    let mid = tray.center().x;
-    painter.line_segment(
-        [
-            pos2(tray.left(), tray.center().y),
-            pos2(tray.left(), tray.bottom()),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            pos2(tray.left(), tray.bottom()),
-            pos2(tray.right(), tray.bottom()),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            pos2(tray.right(), tray.bottom()),
-            pos2(tray.right(), tray.center().y),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [pos2(mid, tray.bottom() - 3.0), pos2(mid, tray.top())],
-        stroke,
-    );
-    painter.line_segment(
-        [pos2(mid - 3.0, tray.top() + 3.0), pos2(mid, tray.top())],
-        stroke,
-    );
-    painter.line_segment(
-        [pos2(mid + 3.0, tray.top() + 3.0), pos2(mid, tray.top())],
-        stroke,
-    );
-}
-
-/// A grid: a table.
-pub(super) fn table_icon(painter: &Painter, rect: Rect, color: Color32) {
-    let stroke = Stroke::new(1.2, color);
-    let grid = rect.shrink(1.0);
-    painter.rect_stroke(grid, 1.0, stroke, StrokeKind::Inside);
-    painter.hline(grid.x_range(), grid.center().y, stroke);
-    painter.vline(grid.center().x, grid.y_range(), stroke);
 }
 
 pub(super) fn page_icon(painter: &Painter, rect: Rect, color: Color32, empty: bool) {
