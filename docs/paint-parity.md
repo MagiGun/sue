@@ -41,7 +41,7 @@ rows are at the end.
 | Rulers and symmetry | 7 | 1 | 0 | 94 |
 | Comics: frames, balloons and webtoons | 11 | 0 | 0 | 100 |
 | Story: multi-page works (EX) | 6 | 5 | 2 | 65 |
-| Animation | 15 | 1 | 0 | 97 |
+| Animation | 21 | 1 | 0 | 98 |
 | Tools and drawing | 36 | 8 | 1 | 89 |
 | Text | 6 | 3 | 1 | 75 |
 | Vector | 6 | 2 | 0 | 88 |
@@ -130,13 +130,13 @@ The order of work is the plan at the end.
 | --- | --- | --- | --- |
 | Export single layer: BMP, JPEG, PNG, TIFF, Targa, WebP, PSB, PSD | File > Export (Single Layer) | done | JPEG XL too |
 | Export animation: image sequence | File > Export animation > Image sequence | done | |
-| Export animation: Animated GIF | File > Export animation > Animated GIf | done | |
-| Export animation: movie | File > Export animation > Movie | done | Verify the sound track rides along |
+| Export animation: Animated GIF | File > Export animation > Animated GIf | done | Its settings first: size, loop count, frames |
+| Export animation: movie | File > Export animation > Movie | done | MP4 (H.264 and AAC, through Windows' own encoder) with the timeline's sound; Motion JPEG AVI where Windows has no encoder; size, frame rate, quality, 2D camera, frames |
 | Export animation: Animated sticker (APNG) | File > Export animation | done | Loops forever; other viewers show the first frame |
 | Export animation: Animated WebP | File > Export animation | done | Lossless frames, looping |
 | Export animation: OpenToonz Scene File | File > Export animation | missing | |
 | Export animation: Exposure sheet | File > Export animation | done | As CSV: frames down, folders across |
-| Export animation cels | File > Export animation > Export animation cels | done | Every cel as its own picture |
+| Export animation cels | File > Export animation > Export animation cels | done | Every cel as its own picture, a folder for each animation folder |
 | Export multiple pages: PDF (EX) | File > Export multiple pages > .pdf | done | A book of every page, manga read right to left |
 | Export multiple pages: EPUB (EX) | File > Export multiple pages > Export EPUB data | done | |
 | Batch export of pages (EX) | File > Export multiple pages > Batch export | partial | Export All Pages saves every page; Clip Studio's dialog sets format and layer comps per page |
@@ -350,12 +350,18 @@ The order of work is the plan at the end.
 | Light Table and Register Selected Layer | Animation > Light Table | done | Trace from other layers |
 | Animation Cels palette's light table: general light table, register file, Light table tool, reset position, opacity | Animation Cels palette | done | Moving a traced layer never moves the layer itself |
 | Play, Stop, Loop, Move Frame | Animation > Playback | done | |
-| Timeline palette as Clip Studio's | Palette | done | Cels as pictures, every other second lighter, the current frame a red bar |
+| Timeline palette as Clip Studio's | Palette | done | Cels as pictures in six sizes or none, every other second lighter, the current frame a bar with its number, the ruler's seconds and division lines, a track for every layer in the Layer palette's order |
 | Timeline navigation: the wheel zooms around the pointer, Shift and the wheel pan, Alt and the wheel scroll the tracks, Space or the middle button and a drag pan, scrollbars | Timeline palette | done | The eye beside each animation folder shows and hides the same folder as the Layer palette's |
 | Animation Cels palette | Palette | done | |
 | Sound on the timeline | Animation, File > Import > Audio | done | Plays along, drag to move, right-click to mute or delete |
 | Exposure sheet (EX) | Animation | done | Animation > Timeline > Exposure Sheet: cels, blanks and holds, set by clicking |
 | Camera track depth (easing curves between keys) | Timeline palette | partial | Keys glide; easing to verify |
+| New Timeline and Change Settings dialogs, several timelines | Animation > Timeline | done | Name, frame rate, playback time and range, scene, shot, division line; a picker left of the ruler |
+| Editing the timeline: pick, drag, move, Cut, Copy, Paste, Delete | Timeline palette | done | A click picks a cel, a drag picks a box, Shift and a click a run; a drag moves what is picked; Paste lands at the frame shown |
+| Clips: Split, Merge, first and last displayed frame | Timeline palette right click | done | |
+| Playback range, timeline labels, track labels | Timeline palette | done | Drag the range's ends on the ruler |
+| Layer keyframes from the timeline: Smooth, Linear, Hold | Timeline palette | done | The three marks read apart without color |
+| Insert Frame dialog, Audio Clip Settings | Animation > Edit Track, Timeline palette | done | Number of frames, Selected layers only, Split clip; a sound's volume, cuts and fades |
 
 ## Tools and drawing
 
