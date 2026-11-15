@@ -45,6 +45,7 @@ mod commands;
 mod dialogs;
 mod dock;
 mod extras;
+mod gradient_bar;
 pub mod grid;
 pub mod hub;
 mod icons;
