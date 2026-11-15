@@ -555,3 +555,42 @@ fn fill_and_auto_select_show_their_area_and_reference_rows() {
         );
     }
 }
+
+#[test]
+fn a_sub_tool_is_reordered_in_its_list_and_moved_onto_a_group_tab() {
+    let mut driver = PaintDriver::new("paint-tools-sub-reorder");
+    driver.settle(4);
+    // Let go on the top of the G-pen row: the Turnip pen goes first.
+    let turnip = widget(&mut driver, "Turnip pen").expect("Turnip pen in the list");
+    let gpen = widget(&mut driver, "G-pen").expect("G-pen in the list");
+    assert!(turnip.top() > gpen.top(), "the Turnip pen starts lower");
+    let to = egui::pos2(gpen.center().x, gpen.top() + 2.0);
+    driver.drag(turnip.center(), to, egui::PointerButton::Primary);
+    let turnip = widget(&mut driver, "Turnip pen").expect("Turnip pen still listed");
+    let gpen = widget(&mut driver, "G-pen").expect("G-pen still listed");
+    assert!(
+        turnip.top() < gpen.top(),
+        "the Turnip pen is above the G-pen now"
+    );
+    // Let go on the Marker tab: it leaves the Pen group for that one.
+    let marker = widget(&mut driver, "Marker").expect("the Marker group's tab");
+    driver.drag(
+        turnip.center(),
+        marker.center(),
+        egui::PointerButton::Primary,
+    );
+    click_widget(&mut driver, "Pen");
+    assert!(
+        widget(&mut driver, "G-pen").is_some(),
+        "the Pen group is shown"
+    );
+    assert!(
+        widget(&mut driver, "Turnip pen").is_none(),
+        "the Turnip pen left the Pen group"
+    );
+    click_widget(&mut driver, "Marker");
+    assert!(
+        widget(&mut driver, "Turnip pen").is_some(),
+        "the Turnip pen is in the Marker group"
+    );
+}
