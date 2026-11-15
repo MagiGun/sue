@@ -532,11 +532,11 @@ fn folder_sheet() {
         };
         let (edit, _) = doc::new_material_layer(&arena, picture, None, "Checks", image, place);
         history.apply(&mut arena, edit).unwrap();
-        let gradient = doc::Gradient {
-            line: [[60.0, 60.0], [60.0, 110.0]],
-            colors: [[1.0, 0.8, 0.4, 0.9], [1.0, 0.8, 0.4, 0.0]],
-            radial: true,
-        };
+        let gradient = doc::Gradient::two(
+            [[60.0, 60.0], [60.0, 110.0]],
+            [[1.0, 0.8, 0.4, 0.9], [1.0, 0.8, 0.4, 0.0]],
+            true,
+        );
         let (edit, glow) = doc::new_gradient_layer(&arena, picture, None, "Glow", gradient);
         history.apply(&mut arena, edit).unwrap();
         set(&mut arena, &mut history, glow, picture::BLEND, "glow-dodge");

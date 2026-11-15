@@ -1411,7 +1411,7 @@ fn gradient_ui(ui: &mut Ui, map: &mut GradientMap, params: &mut Params<'_>, them
         let ui = &mut columns[1];
         stop = stop.min(map.stops().len().saturating_sub(1));
         gradient_bar(ui, map, &mut stop, theme);
-        stop_ui(ui, map, &mut stop, colors, theme);
+        stop_ui(ui, map, &mut stop, [colors[0], colors[1], colors[0]], theme);
         heading(ui, &tr!("mixing-rate"), theme);
         let side = Density::of(ui).control_height() * 4.0;
         curve_ui(ui, "gradient-mix", &mut map.mix, side, theme);

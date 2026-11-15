@@ -444,11 +444,11 @@ fn masks_and_live_layers_follow_the_canvas_size_and_resolution() {
     fill(&mut arena, first, [0, 0, 0, 255]);
     let (edit, _) = new_mask(&arena, first, |x, _| if x < 2 { 1.0 } else { 0.0 }).unwrap();
     history.apply(&mut arena, edit).unwrap();
-    let gradient = Gradient {
-        line: [[0.0, 0.0], [4.0, 0.0]],
-        colors: [[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]],
-        radial: false,
-    };
+    let gradient = Gradient::two(
+        [[0.0, 0.0], [4.0, 0.0]],
+        [[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]],
+        false,
+    );
     let (edit, live) = new_gradient_layer(&arena, picture, None, "Grad", gradient);
     history.apply(&mut arena, edit).unwrap();
     history

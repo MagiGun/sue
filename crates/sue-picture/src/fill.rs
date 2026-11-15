@@ -742,49 +742,35 @@ pub fn gradient(
     selection: Option<&Selection>,
     alpha_lock: bool,
 ) {
-    let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
-    let length_sq = (dx * dx + dy * dy).max(1e-6);
-    for y in 0..layer_size[1] {
-        for x in 0..layer_size[0] {
-            let (px, py) = (
-                (i64::from(x) + offset[0]) as f32 + 0.5,
-                (i64::from(y) + offset[1]) as f32 + 0.5,
-            );
-            let cover = match selection {
-                Some(selection) if px >= 0.0 && py >= 0.0 => selection.at(px as u32, py as u32),
-                Some(_) => 0.0,
-                None => 1.0,
-            };
-            if cover <= 0.0 {
-                continue;
-            }
-            let t = if radial {
-                (((px - from[0]).powi(2) + (py - from[1]).powi(2)) / length_sq).sqrt()
-            } else {
-                ((px - from[0]) * dx + (py - from[1]) * dy) / length_sq
-            }
-            .clamp(0.0, 1.0);
-            let mut color = [0.0; 4];
-            for channel in 0..4 {
-                color[channel] = start[channel] + (end[channel] - start[channel]) * t;
-            }
-            color[3] *= cover;
-            let at = ((y * layer_size[0] + x) * 4) as usize;
-            let old = crate::doc::unit(&pixels[at..at + 4]);
-            let out = if alpha_lock {
-                let amount = color[3];
-                [
-                    old[0] + (color[0] - old[0]) * amount,
-                    old[1] + (color[1] - old[1]) * amount,
-                    old[2] + (color[2] - old[2]) * amount,
-                    old[3],
-                ]
-            } else {
-                sue_model::BlendMode::Normal.composite(old, color)
-            };
-            pixels[at..at + 4].copy_from_slice(&crate::doc::bytes(out));
-        }
-    }
+    let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let stop = |at: f32, [r, g, b, a]: [f32; 4]| crate::gradient_map::Stop {
+        at,
+        rgb: [byte(r), byte(g), byte(b)],
+        alpha: byte(a),
+        color: crate::gradient_map::StopColor::Own,
+    };
+    let look = crate::gradient::Look {
+        map: crate::gradient_map::GradientMap::of(&[stop(0.0, start), stop(1.0, end)])
+            .unwrap_or_default(),
+        shape: if radial {
+            crate::gradient::Shape::Circle
+        } else {
+            crate::gradient::Shape::Linear
+        },
+        ..crate::gradient::Look::default()
+    };
+    crate::gradient::lay(
+        pixels,
+        layer_size,
+        offset,
+        [from, to],
+        &look,
+        &crate::gradient::Lay {
+            selection,
+            alpha_lock,
+            ..crate::gradient::Lay::default()
+        },
+    );
 }
 
 /// Which colors Advanced Fill (and its Target color) fills.

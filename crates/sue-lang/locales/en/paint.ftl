@@ -3413,4 +3413,5 @@ colorize-needs-hints = Paint a stroke of each color on the hint layer first.
 artistic-line-opacity = Line Opacity
 stop-main-color = Main Color
 stop-sub-color = Sub Color
+stop-drawing-color = Drawing Color
 filter-color = Color

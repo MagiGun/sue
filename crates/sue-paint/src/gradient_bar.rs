@@ -323,12 +323,13 @@ pub(crate) fn gradient_bar(ui: &mut Ui, map: &mut GradientMap, stop: &mut usize,
 }
 
 /// The stop being edited: its place, where its color comes from, its
-/// color and opacity, and Delete.
+/// color and opacity, and Delete. `colors` are the main, sub and drawing
+/// colors a stop takes when it follows one.
 pub(crate) fn stop_ui(
     ui: &mut Ui,
     map: &mut GradientMap,
     stop: &mut usize,
-    colors: [[u8; 3]; 2],
+    colors: [[u8; 3]; 3],
     theme: &Theme,
 ) {
     let count = map.stops().len();
@@ -352,17 +353,19 @@ pub(crate) fn stop_ui(
         tr!("stop-own-color"),
         tr!("stop-main-color"),
         tr!("stop-sub-color"),
+        tr!("stop-drawing-color"),
     ];
     let mut source = StopColor::ALL
         .iter()
         .position(|kind| *kind == edited.color)
         .unwrap_or(0) as u8;
     if choice(ui, "stop-source", &sources, &mut source, theme) {
-        edited.color = StopColor::ALL[usize::from(source.min(2))];
+        edited.color = StopColor::ALL[usize::from(source).min(StopColor::ALL.len() - 1)];
         match edited.color {
             StopColor::Own => {}
             StopColor::Main => edited.rgb = colors[0],
             StopColor::Sub => edited.rgb = colors[1],
+            StopColor::Drawing => edited.rgb = colors[2],
         }
     }
     ui.add_enabled_ui(edited.color == StopColor::Own, |ui| {

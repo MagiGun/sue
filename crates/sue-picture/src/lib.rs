@@ -45,6 +45,7 @@ pub mod effects;
 pub mod figure;
 pub mod fill;
 pub mod filters;
+pub mod gradient;
 pub mod gradient_map;
 pub mod manga;
 pub mod print;
