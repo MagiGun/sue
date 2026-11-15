@@ -976,6 +976,74 @@ fn sue_paint_vector_eraser_goes_over_every_picked_vector_layer() {
     for layer in &layers {
         assert!(lines_on(&d, *layer).is_empty());
     }
+    // A tap, not a drag, erases where it lands too: on the upper line
+    // only, the lower one stays.
+    d.command("edit.undo");
+    d.settle(2);
+    let tap = middle + vec2(0.0, -30.0);
+    d.drag(tap, tap, egui::PointerButton::Primary);
+    assert!(lines_on(&d, layers[0]).is_empty(), "the tapped line goes");
+    assert_eq!(lines_on(&d, layers[1]), before[1].0, "the other stays");
+    d.command("edit.undo");
+    d.settle(2);
+    assert_eq!(lines_on(&d, layers[0]), before[0].0, "undo brings it back");
+}
+
+/// FGV-29, Vector magnet on pen strokes: with the pen on a vector
+/// layer, a line drawn to end a couple of points from another line's
+/// end stops near it with the magnet off, and goes exactly onto it with
+/// the magnet on, its pixels painted again in the same step; one undo
+/// takes the whole stroke back.
+#[test]
+fn sue_paint_vector_magnet_joins_a_pen_line_to_a_near_end() {
+    let mut d = PaintDriver::new("paint-vector-magnet-pen");
+    d.command("layer.new.vector");
+    d.settle(2);
+    let layer = top_layer(&d);
+    let middle = d.runtime.shell.page_rect().center();
+    d.step(vec![key(egui::Key::P, egui::Modifiers::NONE)]);
+    let start = middle + vec2(-100.0, -40.0);
+    d.drag(
+        start,
+        start + vec2(200.0, 0.0),
+        egui::PointerButton::Primary,
+    );
+    let first = lines_on(&d, layer);
+    assert_eq!(first.len(), 1);
+    let target = first[0].samples[0].at;
+    let gap = |line: &sue_paint::vector::Line| {
+        let end = line.samples.last().unwrap().at;
+        (end[0] - target[0]).hypot(end[1] - target[1])
+    };
+    // Magnet off: the end stays where the pen let go, a little apart.
+    let near = start + vec2(2.0, 2.0);
+    d.drag(near + vec2(0.0, 120.0), near, egui::PointerButton::Primary);
+    let apart = lines_on(&d, layer);
+    assert_eq!(apart.len(), 2);
+    assert!(gap(&apart[1]) > 0.5, "apart: {}", gap(&apart[1]));
+    d.command("edit.undo");
+    d.settle(2);
+    assert_eq!(lines_on(&d, layer), first);
+    // Magnet on, from Tool Property: the same stroke joins the end.
+    d.click_text("Tool Property");
+    d.click_text("Vector magnet");
+    let before = (lines_on(&d, layer), inked(&d, layer));
+    d.drag(near + vec2(0.0, 120.0), near, egui::PointerButton::Primary);
+    let joined = lines_on(&d, layer);
+    assert_eq!(joined.len(), 2);
+    assert!(gap(&joined[1]) < 0.01, "joined: {}", gap(&joined[1]));
+    assert_eq!(joined[0], first[0], "the other line stays");
+    // The pixels are the lines': painting the layer again from them
+    // gives the same picture.
+    let raster = sue_paint::doc::raster(&d.runtime.engine.world.arena, layer).unwrap();
+    let again = sue_paint::vector::render(&joined, raster.width(), raster.height()).unwrap();
+    assert_eq!(
+        raster.bytes(),
+        again.bytes(),
+        "pixels follow the joined line"
+    );
+    let after = (joined, inked(&d, layer));
+    undo_pair(&mut d, layer, &before, &after);
 }
 
 /// Layer, Update Lines to New Brush Engine (the action P3-8 left as a
