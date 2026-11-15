@@ -72,7 +72,7 @@ impl SuePaint {
         let sub = self.toolbox.current_mut();
         match tool {
             tool if tool.paints() => {
-                if tool == Tool::Figure {
+                if matches!(tool, Tool::Pen | Tool::Pencil | Tool::Brush | Tool::Figure) {
                     self.magnet_row(ui, theme);
                 }
                 let sub = self.toolbox.current_mut();

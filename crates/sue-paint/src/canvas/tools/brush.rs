@@ -450,16 +450,17 @@ impl SuePaint {
                 match kept {
                     Some(kept) => {
                         // The line stays on the vector layer, in
-                        // the same undo step as its pixels.
+                        // the same undo step as its pixels; Vector
+                        // magnet joins its ends to the ends near them.
                         let old = crate::vector::geometry(&cx.world.arena, layer);
-                        let mut lines = crate::vector::lines(&old);
-                        lines.push(kept);
+                        let lines = crate::vector::lines(&old);
+                        let (lines, pixels) = self.magnet_stroke(cx, layer, kept, lines, edit);
                         let edit = crate::vector::keep(
                             &mut cx.world.arena,
                             layer,
                             old,
                             &lines,
-                            Some(edit),
+                            pixels,
                             &label,
                         );
                         cx.record(ArenaEdit(edit));
