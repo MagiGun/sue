@@ -1,7 +1,9 @@
 //! The brush tools on the canvas (Pen, Pencil, Brush, Airbrush, Eraser
 //! and Decoration): a stroke from press to release, with the rulers and
 //! grid it snaps to, symmetry, the selection it stays inside, Smart
-//! Shape, post correction and flick.
+//! Shape, post correction and flick. A stroke the brush engine can draw
+//! goes to it (`canvas/engine.rs`); this file keeps the legacy engine's
+//! strokes for the rest.
 
 use egui::{Pos2, Rect};
 use sue_wm::{AppletContext, ArenaEdit};
@@ -18,7 +20,7 @@ impl SuePaint {
     /// A brush tool pressed: a stroke begins.
     pub(super) fn brush_press(
         &mut self,
-        tool: Tool,
+        _tool: Tool,
         press: &Press,
         sub: SubTool,
         cx: &mut AppletContext<'_>,
@@ -31,11 +33,22 @@ impl SuePaint {
             size,
             ..
         } = *press;
-        // The round pen and the pencil of the new brush engine, when it is
-        // on and can draw this stroke (canvas/engine.rs).
-        if matches!(tool, Tool::Pen | Tool::Pencil)
-            && self.engine_press(pos, &sub, modifiers, viewport, size, cx)
+        // A layer whose keyframes are on moves as its keys say: it takes
+        // no strokes (the Layer palette shows its pen locked).
+        if let Some(info) = self.layer_info(&cx.world.arena)
+            && cx
+                .world
+                .arena
+                .get_by_id(info.id)
+                .is_ok_and(crate::anim::motion::keyframes_on)
         {
+            cx.fail(tr!("keyframes-on-no-drawing", name = info.name));
+            return;
+        }
+        // The brush engine draws every stroke it can (canvas/engine.rs);
+        // the rest (a tip that dabs, a vector layer's lines) the legacy
+        // engine does.
+        if self.engine_press(pos, &sub, modifiers, viewport, size, cx) {
             return;
         }
         let Some(doc) = self.docs.get(self.active) else {
@@ -244,6 +257,10 @@ impl SuePaint {
                 input.pointer.primary_down(),
             )
         });
+        if matches!(self.gesture, Some(Gesture::Engine(_))) {
+            self.engine_smart(ctx, cx);
+            return;
+        }
         let Some(Gesture::Stroke {
             stroke,
             raw,

@@ -2519,3 +2519,6 @@ ruler-show-in-same-folder = Show in same folder
 ruler-show-when-editing-target = Show only when editing target
 moves-picture-across-stroke = Moves the picture sideways across the stroke
 copies-picture-from-source = Copies the picture from where Alt and click set, as you paint
+
+# P4-1a: brush tools on the new engine
+keyframes-on-no-drawing = { $name } has keyframes on, so it moves as its keys say and takes no strokes. Turn off Enable Keyframes on This Layer to draw on it.

@@ -177,6 +177,21 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint paints with its new brush engine. Every brush whose tip is
+  round (the pens, the pencils, the hard eraser and more) draws through
+  it, on a layer, on a layer's mask, inside a selection, with Lock
+  Transparent Pixels, with the symmetrical ruler, along rulers and the
+  grid, as Shift's straight line, with flicks, post correction and Smart
+  Shape. A stroke ends as thin as the pen ended it, never with a blob,
+  and what shows while drawing is what stays. The `brush_engine` setting
+  is gone. Brushes that dab (build-up, mixing, picture tips) and the
+  lines of vector layers still draw as before.
+- Layer masks hold gray pixels now: a new mask is gray, and a mask made
+  by an older Sue turns gray when its picture opens, showing the same and
+  leaving the picture unchanged (nothing to undo, nothing to save).
+- The Blend tool works on a layer's mask while Edit Mask is on, so a
+  mask's edge can be softened with Blur.
+
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait
@@ -330,6 +345,10 @@ follow [Semantic Versioning](https://semver.org/).
   crash in the middle loses at most the last change kept.
 
 ### Fixed
+
+- A layer with keyframes on no longer takes brush strokes it would lose:
+  Sue Paint says why and paints nothing.
+- Exporting a PSD reads a layer mask wherever it sits, also a gray one.
 
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after

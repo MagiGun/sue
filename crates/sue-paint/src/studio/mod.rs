@@ -292,6 +292,9 @@ pub(crate) enum Gesture {
         since: f32,
         offset: [i64; 2],
         label: String,
+        /// On a gray mask (`layer` is the mask): its values as RGBA that
+        /// the blend dabs work on, `before` being its gray bytes.
+        work: Option<Vec<u8>>,
     },
     /// Dragging a transform handle: what it grabbed, where (layer pixels),
     /// and the box as it was.

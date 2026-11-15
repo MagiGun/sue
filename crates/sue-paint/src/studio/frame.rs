@@ -203,6 +203,9 @@ impl SuePaint {
         if present {
             self.shown = true;
         }
+        // Masks of older files become the gray masks Sue paints, before
+        // their picture first shows (nothing to undo, nothing unsaved).
+        crate::doc::migrate_masks(&mut cx.world.arena);
         self.sync_docs(&cx.world.arena);
         self.hub
             .forget_old_cache(cx.catalog.folders.get("cache").map(PathBuf::as_path));

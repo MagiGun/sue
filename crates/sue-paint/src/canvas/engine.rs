@@ -1,27 +1,32 @@
-//! The new brush engine on the canvas, behind the hidden setting
-//! `sue_paint.brush_engine = "new"` (D2 of the 0.0.8 plan): the round pen
-//! and the pencil sub tools draw through `sue_brush::worker`, so the
-//! owner can draw with the engine before every tool moves onto it.
+//! The brush engine (`sue_brush::worker`) on the canvas: what Sue Paint
+//! paints with (D2 of the 0.0.8 plan).
 //!
 //! The canvas only queues samples. Every packet of the pen's stream
 //! (`sue_platform::stylus::take_pen_samples`: a WinTab packet, a Windows
 //! Ink touch, a mouse move) goes to the stroke's worker with its own
-//! place, time and pressure, mapped into the layer's pixels; the worker
-//! lays them on the shared pool, and the compositor shows the stroke over
-//! its layer until the lift merges it in as one undo step. The window's
-//! release is not a point of the line: it ends the stroke where the pen
-//! last was.
+//! place, time and pressure, mapped into the pixels of the raster the
+//! stroke paints; the worker lays them on the shared pool. Where no sample
+//! of the stream belongs to the stroke (a script driving the studio with
+//! pointer events alone), the pointer's events are its samples. The
+//! window's release is not a point of the line: it ends the stroke where
+//! the pen last was.
 //!
-//! Where no sample of the stream belongs to the stroke (a script driving
-//! the studio with pointer events alone), the pointer's events are its
-//! samples, pressing as hard as the pen pressure Sue Paint reads.
+//! A plain stroke is shown by the compositor over its layer until the lift
+//! merges it in as one undo step. A stroke on a layer mask, inside a
+//! selection, on a layer with locked transparent pixels, with symmetry's
+//! copies is laid straight into its rasters
+//! frame by frame instead ([`super::lay`]), so it shows as it will stay.
 //!
-//! A stroke the new engine cannot draw yet goes to the legacy engine as
-//! before: a selection, a locked or masked layer, a vector layer, the
-//! rulers and grid snapping, Shift's straight line, a sub tool that dabs
-//! (build-up, mixing, pictures). Paper grain, Smart Shape, post
-//! correction and flicks are not drawn by the new engine yet (P3-7 and
-//! P4-1a).
+//! What the canvas adds to the samples: the rulers and the grid it snaps
+//! to, Shift's straight line, a flick's run out (more samples past the
+//! pen, pressing less and less), post correction (the samples smoothed
+//! and the stroke drawn again from them) and Smart Shape (the stroke drawn
+//! again as the shape it was meant to be).
+//!
+//! The brushes it cannot draw yet go to the legacy engine
+//! (`sue_picture::brush::legacy`, kept for replaying old lines): a tip
+//! that dabs (build-up, mixing, pictures) and the lines of a vector layer
+//! (P4-14 moves those).
 
 use std::sync::Arc;
 
@@ -29,17 +34,17 @@ use egui::{Modifiers, Pos2, Rect};
 use sue_brush::input::{Device, Kind, Sample, Settings};
 use sue_brush::worker::{Brush, LiveView, StrokeWorker};
 use sue_core::EntityId;
+use sue_core::txn::Batch;
 use sue_model::BrushPreset;
-use sue_model::brush::{EngineKind, TipSource};
+use sue_model::brush::{EngineKind, TipSource, param};
 use sue_platform::stylus::{PenKind, PenSample, PenSource};
 use sue_wm::{AppletContext, ArenaEdit};
 
+use super::lay::{Lay, Target};
 use crate::doc;
-use crate::studio::{Gesture, SuePaint};
+use crate::rulers::Snap;
+use crate::studio::{Gesture, Shaping, SuePaint};
 use crate::tools::{SubTool, Tool};
-
-/// The rice key that picks the engine: `legacy` (the default) or `new`.
-pub(crate) const ENGINE_KEY: &str = "sue_paint.brush_engine";
 
 /// How many of the pen's samples wait at most for a stroke to begin.
 const PENDING: usize = 4096;
@@ -48,38 +53,85 @@ const PENDING: usize = 4096;
 /// screen points.
 const NEAR: f32 = 24.0;
 
-/// A stroke of the new engine under way.
+/// A flick: how fast the pen must leave, in screen points a second.
+const FLICK_SPEED: f32 = 700.0;
+
+/// One copy of a stroke: the stroke itself, or one of symmetry's.
 #[derive(Debug)]
-pub(crate) struct EngineStroke {
+struct Copy {
     worker: StrokeWorker,
     live: Arc<LiveView>,
+}
+
+/// A stroke of the engine under way.
+#[derive(Debug)]
+pub(crate) struct EngineStroke {
+    copies: Vec<Copy>,
+    brush: Brush,
+    settings: Settings,
+    /// Symmetry: each copy's map from the stroke's pixels to where it
+    /// paints (the first copy is the stroke as drawn).
+    transforms: Vec<[f32; 6]>,
+    /// The layer.
     layer: EntityId,
-    /// The layer's place in the picture.
+    /// The raster the stroke is drawn on: the layer's, or its mask's.
+    target: EntityId,
+    /// Where the stroke's pixel `(0, 0)` is in the picture.
     offset: [i64; 2],
+    /// Laid straight into the rasters (see the module), or `None` when
+    /// the compositor shows it until the lift.
+    lay: Option<Lay>,
     label: String,
     eraser: bool,
     /// The stream source whose samples are the stroke's; `None` when the
     /// pointer's events are.
     source: Option<PenSource>,
-    /// The last sample given to the worker.
+    /// The last sample seen, in the stroke's pixels (after snapping).
     last: Sample,
+    /// Every sample given to the worker, for drawing the stroke again.
+    raw: Vec<Sample>,
     /// The lift has been given.
     lifted: bool,
+    /// The ruler or grid line the stroke follows.
+    snap: Option<Snap>,
+    /// Screen points per layer pixel.
+    zoom: f32,
+    /// Shift: one straight line from the press, drawn on release.
+    line: bool,
+    /// Post correction, 0 for none.
+    correction: u32,
+    /// A quick lift runs out into a point.
+    flick: bool,
+    /// Smart Shape is on for this sub tool.
+    smart: bool,
+    /// Smart Shape: where and since when the pen has rested.
+    rest: Option<(f64, Pos2)>,
+    /// The shape the stroke became, while the pen is still down.
+    shaping: Option<Shaping>,
 }
 
-/// The brush a sub tool's tip makes, when the new engine draws it: a
-/// swept round tip.
-fn preset_of(sub: &SubTool, eraser: bool) -> Option<BrushPreset> {
-    if !matches!(sub.tool, Tool::Pen | Tool::Pencil) {
+/// The brush a sub tool's tip makes, when the engine can draw it: a swept
+/// round tip. On a mask (`round`) every brush is drawn as its round tip,
+/// since a mask holds only how much shows.
+pub(crate) fn preset_of(sub: &SubTool, eraser: bool, round: bool) -> Option<BrushPreset> {
+    if !sub.tool.paints() {
         return None;
     }
     let mut preset = BrushPreset::from_legacy_text(&sub.tip.to_text());
-    let round = preset.engine == EngineKind::Stroke
+    let plain = preset.engine == EngineKind::Stroke
         && matches!(preset.tip, TipSource::Round)
         && preset.mix.is_none()
+        && preset.texture.is_none()
         && !preset.build_up;
-    if !round {
+    if !plain && !round {
         return None;
+    }
+    if round {
+        preset.engine = EngineKind::Stroke;
+        preset.tip = TipSource::Round;
+        preset.mix = None;
+        preset.texture = None;
+        preset.build_up = false;
     }
     preset.input.stabilization = sub.stabilization;
     preset.input.by_speed = sub.adjust_by_speed;
@@ -87,18 +139,295 @@ fn preset_of(sub: &SubTool, eraser: bool) -> Option<BrushPreset> {
     Some(preset)
 }
 
-impl SuePaint {
-    /// `true` when the new brush engine draws (`sue_paint.brush_engine`).
-    pub(super) fn engine_on(cx: &AppletContext<'_>) -> bool {
-        cx.rice().get_str(ENGINE_KEY) == Some("new")
+impl EngineStroke {
+    /// The workers for every copy of `brush` drawn as `settings` say.
+    fn start(brush: &Brush, settings: Settings, transforms: &[[f32; 6]]) -> Vec<Copy> {
+        let pool = crate::composite::share_brush_pool();
+        transforms
+            .iter()
+            .map(|m| {
+                let mut settings = settings;
+                settings.to_layer = [[m[0], m[1], m[4]], [m[2], m[3], m[5]]];
+                let worker = StrokeWorker::start(Arc::clone(&pool), brush, settings);
+                let live = worker.live();
+                Copy { worker, live }
+            })
+            .collect()
     }
 
-    /// Takes this frame's pen samples from the stream and keeps those
-    /// since the latest touch down, for a stroke that starts with it.
-    pub(super) fn engine_take_samples(&mut self, cx: &AppletContext<'_>) {
-        if !Self::engine_on(cx) {
+    /// The live views of every copy.
+    fn lives(&self) -> Vec<Arc<LiveView>> {
+        self.copies
+            .iter()
+            .map(|copy| Arc::clone(&copy.live))
+            .collect()
+    }
+
+    /// Gives `sample` to every copy.
+    fn send(&mut self, sample: Sample) {
+        for copy in &mut self.copies {
+            copy.worker.push(sample);
+        }
+        self.raw.push(sample);
+        if sample.kind == Kind::Up {
+            self.lifted = true;
+        }
+    }
+
+    /// One sample of the pen, in the stroke's pixels: snapped to its ruler,
+    /// held back for Shift's line and for a stroke that became its shape,
+    /// and given to the workers.
+    fn feed(&mut self, mut sample: Sample) {
+        if self.lifted {
             return;
         }
+        if let Some(snap) = self.snap.as_mut() {
+            match snap.follow(sample.pos, 4.0 / self.zoom.max(0.01)) {
+                Some(on) => sample.pos = on,
+                // Following a ruler: nothing is drawn until the pen shows
+                // which way it goes.
+                None if sample.kind == Kind::Move => return,
+                None => {}
+            }
+        }
+        if sample.kind == Kind::Up {
+            self.lift(sample.pos, sample.time);
+            return;
+        }
+        if sample.pressure.is_none() {
+            sample.pressure = self.last.pressure;
+        }
+        self.last = sample;
+        if sample.kind == Kind::Move && (self.line || self.shaping.is_some()) {
+            // A straight line waits for the release; a stroke that
+            // became its shape stays it.
+            return;
+        }
+        self.send(sample);
+    }
+
+    /// The pen lifted at `at` (the stroke's pixels) at device time `time`:
+    /// Shift's line is drawn to it, a flick runs out past it, and the lift
+    /// is given.
+    fn lift(&mut self, at: [f32; 2], time: f64) {
+        if self.lifted {
+            return;
+        }
+        let time = time.max(self.last.time);
+        if self.shaping.is_some() {
+            // The shape ends where it is drawn to (the shape as the pen
+            // last dragged it).
+            let end = self.raw.last().map_or(at, |sample| sample.pos);
+            self.send(Sample::new(Kind::Up, end, time));
+            return;
+        }
+        let mut end = at;
+        if self.line {
+            // Shift's line: from the press straight to the lift.
+            let mut last = self.last;
+            last.kind = Kind::Move;
+            last.pos = at;
+            last.time = time;
+            self.send(last);
+        } else if self.flick && !self.snapped() {
+            let run_out = self.run_out(at, time);
+            if let Some(far) = run_out.last() {
+                // A quick lift: to where it let go, then on into a point.
+                let mut last = self.last;
+                last.kind = Kind::Move;
+                last.pos = at;
+                last.time = time;
+                end = far.pos;
+                self.send(last);
+                self.last = last;
+                for sample in run_out {
+                    self.send(sample);
+                }
+            }
+        }
+        let time = self.raw.last().map_or(time, |sample| sample.time.max(time));
+        self.send(Sample::new(Kind::Up, end, time));
+    }
+
+    /// `true` once the stroke is on a ruler or grid line.
+    fn snapped(&self) -> bool {
+        self.snap.as_ref().is_some_and(Snap::chosen)
+    }
+
+    /// The pen's velocity over its last few hundredths of a second, in
+    /// the stroke's pixels a second.
+    fn velocity(&self) -> Option<[f32; 2]> {
+        let end = self
+            .raw
+            .iter()
+            .rev()
+            .find(|sample| sample.kind != Kind::Up)?;
+        let start = self
+            .raw
+            .iter()
+            .find(|sample| end.time - sample.time <= 0.05)?;
+        let seconds = (end.time - start.time) as f32;
+        (seconds > 0.004).then(|| {
+            [
+                (end.pos[0] - start.pos[0]) / seconds,
+                (end.pos[1] - start.pos[1]) / seconds,
+            ]
+        })
+    }
+
+    /// A flick: the samples that carry a quick lift at `at` (device time
+    /// `time`) on along the pen's way, pressing less and less to nothing,
+    /// so the line runs out into a point. None for a slow lift.
+    fn run_out(&self, at: [f32; 2], time: f64) -> Vec<Sample> {
+        let Some(velocity) = self.velocity() else {
+            return Vec::new();
+        };
+        let speed = velocity[0].hypot(velocity[1]);
+        if speed * self.zoom < FLICK_SPEED {
+            return Vec::new();
+        }
+        let size = self.size();
+        let reach = (speed * 0.02).min(size * 4.0 + 16.0).min(120.0);
+        let way = [velocity[0] / speed, velocity[1] / speed];
+        let mut last = self.last;
+        last.pos = at;
+        last.time = time;
+        let pressure = last.pressure.unwrap_or(1.0);
+        let steps = (reach / 2.0).ceil().max(1.0) as usize;
+        (1..=steps)
+            .map(|step| {
+                let t = step as f32 / steps as f32;
+                let mut sample = last;
+                sample.kind = Kind::Move;
+                sample.pos = [
+                    last.pos[0] + way[0] * reach * t,
+                    last.pos[1] + way[1] * reach * t,
+                ];
+                sample.time = last.time + f64::from(reach * t / speed);
+                sample.pressure = Some(pressure * (1.0 - t));
+                sample
+            })
+            .collect()
+    }
+
+    /// The brush's size in layer pixels.
+    fn size(&self) -> f32 {
+        self.brush
+            .preset
+            .value(param::SIZE)
+            .unwrap_or(10.0)
+            .max(0.5)
+    }
+
+    /// The samples smoothed by post correction, `level` 1 to 10 (see
+    /// [`corrected`]).
+    fn corrected(&self) -> Vec<Sample> {
+        corrected(&self.raw, self.correction, self.size())
+    }
+}
+
+/// Post correction: `samples` (a whole stroke, its lift last) with their
+/// places smoothed along the line, as much as `level` (1 to 10) says for
+/// a brush `size` wide. Its ends and its sharp corners stay where they
+/// are, so a corner is not rounded off and the line is not pulled in at
+/// its ends; pressure and time stay with each sample.
+pub(crate) fn corrected(samples: &[Sample], level: u32, size: f32) -> Vec<Sample> {
+    let count = samples.len();
+    if level == 0 || count < 5 {
+        return samples.to_vec();
+    }
+    // How far along the line each sample is.
+    let mut along = Vec::with_capacity(count);
+    let mut total = 0.0_f32;
+    for (i, sample) in samples.iter().enumerate() {
+        if i > 0 {
+            let p = samples[i - 1].pos;
+            total += (sample.pos[0] - p[0]).hypot(sample.pos[1] - p[1]);
+        }
+        along.push(total);
+    }
+    let sigma = level.min(10) as f32 * 0.5 * (size * 0.12).max(1.0);
+    // Corners: the line turns more than about 65 degrees between arms a
+    // brush wide on either side.
+    let arm = size.max(6.0);
+    let place_at = |s: f32| -> [f32; 2] {
+        let i = along.partition_point(|&a| a < s).min(count - 1);
+        samples[i].pos
+    };
+    let turn = |i: usize| -> f32 {
+        let (s, b) = (along[i], samples[i].pos);
+        if s < arm || total - s < arm {
+            return 0.0;
+        }
+        let (a, c) = (place_at(s - arm), place_at(s + arm));
+        let (u, v) = ([b[0] - a[0], b[1] - a[1]], [c[0] - b[0], c[1] - b[1]]);
+        let (lu, lv) = (u[0].hypot(u[1]), v[0].hypot(v[1]));
+        if lu < 1e-3 || lv < 1e-3 {
+            return 0.0;
+        }
+        ((u[0] * v[0] + u[1] * v[1]) / (lu * lv))
+            .clamp(-1.0, 1.0)
+            .acos()
+    };
+    let turns: Vec<f32> = (0..count).map(turn).collect();
+    let mut anchors = vec![0.0, total];
+    for i in 0..count {
+        if turns[i] > 1.13 {
+            let (s, t) = (along[i], turns[i]);
+            let sharpest = (0..count)
+                .filter(|&j| (along[j] - s).abs() <= arm)
+                .all(|j| turns[j] <= t);
+            if sharpest {
+                anchors.push(s);
+            }
+        }
+    }
+    let mut out = samples.to_vec();
+    for i in 0..count {
+        let s = along[i];
+        // As close to an anchor as a third of the way to it: an anchor
+        // stays put, and nothing is pulled across it.
+        let near = anchors
+            .iter()
+            .map(|a| (a - s).abs())
+            .fold(f32::INFINITY, f32::min);
+        let local = sigma.min(near / 3.0);
+        if local < 0.05 || samples[i].kind == Kind::Up {
+            continue;
+        }
+        let (mut sum, mut weight) = ([0.0_f32; 2], 0.0_f32);
+        for (j, sample) in samples.iter().enumerate() {
+            let d = along[j] - s;
+            if d.abs() > local * 3.0 {
+                continue;
+            }
+            let w = (-(d * d) / (2.0 * local * local)).exp();
+            sum[0] += sample.pos[0] * w;
+            sum[1] += sample.pos[1] * w;
+            weight += w;
+        }
+        if weight > 0.0 {
+            out[i].pos = [sum[0] / weight, sum[1] / weight];
+        }
+    }
+    // The lift ends where the line now does.
+    let end = out
+        .iter()
+        .rev()
+        .find(|sample| sample.kind != Kind::Up)
+        .map(|sample| sample.pos);
+    if let (Some(pos), Some(last)) = (end, out.last_mut())
+        && last.kind == Kind::Up
+    {
+        last.pos = pos;
+    }
+    out
+}
+
+impl SuePaint {
+    /// Takes this frame's pen samples from the stream and keeps those
+    /// since the latest touch down, for a stroke that starts with it.
+    pub(super) fn engine_take_samples(&mut self) {
         for sample in sue_platform::stylus::take_pen_samples() {
             if sample.kind == PenKind::Down && !matches!(self.gesture, Some(Gesture::Engine(_))) {
                 self.pen_stream.clear();
@@ -109,7 +438,8 @@ impl SuePaint {
         }
     }
 
-    /// Where screen point `pos` is in the active layer's pixels.
+    /// Where screen point `pos` is in pixels that sit at `offset` in the
+    /// picture.
     fn layer_point(&self, pos: Pos2, viewport: Rect, size: [u32; 2], offset: [i64; 2]) -> [f32; 2] {
         let Some(doc) = self.docs.get(self.active) else {
             return [pos.x, pos.y];
@@ -147,8 +477,9 @@ impl SuePaint {
         }
     }
 
-    /// Starts a stroke of the new engine for `sub` at `pos`, when it is
-    /// on and can draw this stroke. `true` when it did.
+    /// Starts a stroke of the engine for `sub` at `pos`, when it can draw
+    /// this stroke. `true` when it did; `false` leaves the stroke to the
+    /// legacy engine.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn engine_press(
         &mut self,
@@ -159,12 +490,6 @@ impl SuePaint {
         size: [u32; 2],
         cx: &mut AppletContext<'_>,
     ) -> bool {
-        if !Self::engine_on(cx) || modifiers.shift || self.snap_grid {
-            return false;
-        }
-        let Some(preset) = preset_of(sub, self.transparent) else {
-            return false;
-        };
         let Some(doc) = self.docs.get(self.active) else {
             return false;
         };
@@ -172,20 +497,92 @@ impl SuePaint {
             return false;
         };
         let arena = &cx.world.arena;
-        let rulers = crate::rulers::Rulers::of(arena, doc.picture);
-        if doc.selection.is_some()
-            || doc.mask_edit
-            || info.alpha_locked
-            || crate::vector::is_vector(arena, info.id)
-            || (doc.show_rulers && doc.ruler_on && !rulers.is_empty())
-            || doc::raster(arena, info.id).is_none_or(|raster| raster.bytes().is_none())
-        {
+        if crate::vector::is_vector(arena, info.id) {
+            return false;
+        }
+        // Editing the mask: the pen shows the layer, the eraser hides it,
+        // in the mask's own pixels where the mask sits.
+        let mask = doc
+            .mask_edit
+            .then(|| doc::mask_of(arena, info.id))
+            .flatten()
+            .zip(doc::mask_offset(arena, info.id));
+        let Some(preset) = preset_of(sub, self.transparent, mask.is_some()) else {
+            return false;
+        };
+        let (target, offset) = mask.unwrap_or((info.id, info.style.offset));
+        let fits = doc::raster(arena, target).is_some_and(|raster| {
+            raster.bytes().is_some()
+                && match raster.format() {
+                    sue_core::PixelFormat::Rgba8 => true,
+                    sue_core::PixelFormat::Gray8 => mask.is_some(),
+                    sue_core::PixelFormat::RgbaF32 => false,
+                }
+        });
+        if !fits {
             return false;
         }
         let zoom = doc.view.zoom;
-        let offset = info.style.offset;
-        let color = crate::color::unit(self.drawing_color());
+        let color = if mask.is_some() {
+            [1.0; 3]
+        } else {
+            crate::color::unit(self.drawing_color())
+        };
         let brush = Brush::new(preset, color);
+        let eraser = brush.preset.erase;
+        let local = self.layer_point(pos, viewport, size, offset);
+        // The picture's rulers, in the stroke's pixels.
+        let rulers = if doc.show_rulers {
+            crate::rulers::Rulers::of(arena, doc.picture)
+                .shifted([-(offset[0] as f32), -(offset[1] as f32)])
+        } else {
+            crate::rulers::Rulers::default()
+        };
+        // Snap to Special Ruler, and the picture's own switch.
+        let special = doc.ruler_on && crate::commands::special_snaps(arena, doc.picture);
+        let mut transforms = vec![[1.0, 0.0, 0.0, 1.0, 0.0, 0.0]];
+        if let Some((center, angle)) = rulers.symmetry.filter(|_| special)
+            && let Some(ruler) = self
+                .toolbox
+                .subs(Tool::Ruler)
+                .iter()
+                .find(|sub| sub.mode == 0)
+        {
+            // The symmetrical ruler: a copy through every line.
+            transforms = crate::brush::symmetry(
+                center,
+                angle,
+                crate::rulers::turns(ruler.lines, ruler.mirror),
+                ruler.mirror,
+            );
+        }
+        // A stroke that starts near a ruler goes onto it.
+        let snap = Snap::begin(
+            &rulers,
+            local,
+            doc.snap_ruler,
+            special,
+            24.0 / zoom.max(0.01),
+        )
+        .or_else(|| {
+            self.snap_grid
+                .then(|| {
+                    Snap::grid(
+                        local,
+                        [offset[0] as f32, offset[1] as f32],
+                        64.0,
+                        12.0 / zoom.max(0.01),
+                    )
+                })
+                .flatten()
+        });
+        // The layer's transparent pixels locked: paint only where it has
+        // some (an eraser still erases).
+        let lock = mask.is_none() && info.alpha_locked && !eraser;
+        let targets = vec![Target::new(target, [0, 0], lock)];
+        let clip = doc.selection.clone().map(|selection| (selection, offset));
+        let direct = mask.is_some() || clip.is_some() || lock || transforms.len() > 1;
+        let lay = direct.then(|| Lay::new(brush.ink(), clip, targets));
         // The press is the stream's latest touch down near it, with the
         // samples after it; else the pointer's events are the samples.
         let down = self.pen_stream.iter().rposition(|sample| {
@@ -217,41 +614,57 @@ impl SuePaint {
             None => {
                 // The pen pressure Sue Paint reads is through the curve
                 // already.
-                let at = self.layer_point(pos, viewport, size, offset);
-                first.push(Sample::new(Kind::Down, at, self.clock.0).pressing(self.pen_pressure()));
+                first.push(
+                    Sample::new(Kind::Down, local, self.clock.0).pressing(self.pen_pressure()),
+                );
                 None
             }
         };
         settings.seed = self.clock.0.to_bits();
-        let pool = crate::composite::share_brush_pool();
-        let mut worker = StrokeWorker::start(pool, &brush, settings);
-        let live = worker.live();
-        let lifted = first.iter().any(|sample| sample.kind == Kind::Up);
-        let last = *first
-            .last()
-            .unwrap_or(&Sample::new(Kind::Down, [0.0, 0.0], 0.0));
-        worker.push_all(&first);
-        if let Some(doc) = self.docs.get_mut(self.active) {
-            let shown: Arc<dyn crate::composite::LiveStroke> =
-                Arc::new(crate::composite::BrushLive::new(info.id, Arc::clone(&live)));
+        let copies = EngineStroke::start(&brush, settings, &transforms);
+        let mut stroke = EngineStroke {
+            copies,
+            brush,
+            settings,
+            transforms,
+            layer: info.id,
+            target,
+            offset,
+            lay,
+            label: crate::localize(&sub.name),
+            eraser,
+            source,
+            last: Sample::new(Kind::Down, local, self.clock.0),
+            raw: Vec::new(),
+            lifted: false,
+            snap,
+            zoom,
+            // Preferences, Tools: Shift draws a straight line.
+            line: modifiers.shift && cx.rice().get_bool("sue_paint.shift_line").unwrap_or(true),
+            correction: sub.correction,
+            flick: sub.flick,
+            smart: sub.smart_shape,
+            rest: None,
+            shaping: None,
+        };
+        for sample in first {
+            stroke.feed(sample);
+        }
+        if stroke.lay.is_none()
+            && let Some(doc) = self.docs.get_mut(self.active)
+        {
+            let shown: Arc<dyn crate::composite::LiveStroke> = Arc::new(
+                crate::composite::BrushLive::new(info.id, Arc::clone(&stroke.copies[0].live)),
+            );
             doc.compositor.set_live(&cx.world.arena, Some(shown));
         }
-        self.gesture = Some(Gesture::Engine(Box::new(EngineStroke {
-            worker,
-            live,
-            layer: info.id,
-            offset,
-            label: crate::localize(&sub.name),
-            eraser: brush.preset.erase,
-            source,
-            last,
-            lifted,
-        })));
+        self.gesture = Some(Gesture::Engine(Box::new(stroke)));
         true
     }
 
     /// The pointer moved to `pos` during a stroke drawn from the
-    /// pointer's events: one more sample.
+    /// pointer's events: one more sample (or, past a ruler's choosing,
+    /// where the pen is for Shift's line and Smart Shape).
     pub(super) fn engine_drag(&mut self, pos: Pos2, viewport: Rect, size: [u32; 2]) {
         let pressure = self.pen_pressure();
         let time = self.clock.0;
@@ -264,8 +677,7 @@ impl SuePaint {
         let at = self.layer_point(pos, viewport, size, stroke.offset);
         let sample = Sample::new(Kind::Move, at, time).pressing(pressure);
         if let Some(Gesture::Engine(stroke)) = &mut self.gesture {
-            stroke.worker.push(sample);
-            stroke.last = sample;
+            stroke.feed(sample);
         }
     }
 
@@ -287,29 +699,39 @@ impl SuePaint {
             return;
         };
         for sample in samples {
-            if stroke.lifted {
-                break;
-            }
-            stroke.worker.push(sample);
-            stroke.last = sample;
-            stroke.lifted = sample.kind == Kind::Up;
+            stroke.feed(sample);
         }
     }
 
-    /// Once a frame: the frame's samples to the worker, and what it laid
-    /// since the last frame shown.
-    pub(super) fn engine_frame(&mut self, viewport: Rect, size: [u32; 2], cx: &AppletContext<'_>) {
+    /// Once a frame: the frame's samples to the workers, and what they
+    /// laid since the last frame shown.
+    pub(super) fn engine_frame(
+        &mut self,
+        viewport: Rect,
+        size: [u32; 2],
+        cx: &mut AppletContext<'_>,
+    ) {
         self.engine_feed(viewport, size);
         let (visible, step) = self.on_screen;
         let Some(Gesture::Engine(stroke)) = &mut self.gesture else {
             return;
         };
-        let dirty = stroke.worker.poll();
-        let (layer, offset) = (stroke.layer, stroke.offset);
+        let mut dirty: Vec<_> = stroke
+            .copies
+            .iter_mut()
+            .flat_map(|copy| copy.worker.poll())
+            .collect();
         if dirty.is_empty() {
             return;
         }
-        let rects = tile_rects(dirty.iter().map(|key| key.origin()), offset);
+        dirty.sort_unstable();
+        dirty.dedup();
+        let (layer, offset) = (stroke.layer, stroke.offset);
+        let lives = stroke.lives();
+        let rects = match stroke.lay.as_mut() {
+            Some(lay) => lay.lay(&mut cx.world.arena, &dirty, &lives, offset),
+            None => tile_rects(dirty.iter().map(|key| key.origin()), offset),
+        };
         if let Some(doc) = self.docs.get_mut(self.active) {
             doc.compositor
                 .refresh_view(&cx.world.arena, &rects, Some(layer), visible, step);
@@ -332,46 +754,132 @@ impl SuePaint {
         if !stroke.lifted {
             // A lift says only where the line ends: where the pen was
             // last seen, or for pointer events where the button went.
-            let at = match stroke.source {
+            let mut at = match stroke.source {
                 Some(_) => stroke.last.pos,
                 None => self.layer_point(pos, viewport, size, stroke.offset),
             };
+            if let Some(snap) = stroke.snap.as_mut() {
+                at = snap
+                    .follow(at, 4.0 / stroke.zoom.max(0.01))
+                    .unwrap_or(stroke.last.pos);
+            }
             let time = stroke.last.time.max(self.clock.0);
-            stroke.worker.push(Sample::new(Kind::Up, at, time));
+            stroke.lift(at, time);
+        }
+        // Post correction: the stroke drawn again from its samples,
+        // smoothed. Not for a straight line, a line on a ruler, or a
+        // stroke that became its shape.
+        if stroke.correction > 0 && !stroke.line && !stroke.snapped() && stroke.shaping.is_none() {
+            let samples = stroke.corrected();
+            self.engine_redraw(&mut stroke, samples, cx);
         }
         self.engine_end(*stroke, cx);
+    }
+
+    /// Draws `stroke` again from `samples` alone: what it showed or laid
+    /// so far is taken back first.
+    fn engine_redraw(
+        &mut self,
+        stroke: &mut EngineStroke,
+        samples: Vec<Sample>,
+        cx: &mut AppletContext<'_>,
+    ) {
+        let (visible, step) = self.on_screen;
+        let plain = stroke.lay.is_none();
+        let mut rects = Vec::new();
+        if let Some(lay) = stroke.lay.as_mut() {
+            rects = lay.restore(&mut cx.world.arena, stroke.offset);
+        } else if let Some(doc) = self.docs.get_mut(self.active) {
+            // Let go while it still says what it covered, so that is shown
+            // again from the layer.
+            doc.compositor.set_live(&cx.world.arena, None);
+        }
+        let fresh = EngineStroke::start(&stroke.brush, stroke.settings, &stroke.transforms);
+        for old in std::mem::replace(&mut stroke.copies, fresh) {
+            old.worker.abandon();
+        }
+        stroke.raw.clear();
+        stroke.lifted = false;
+        for sample in samples {
+            stroke.send(sample);
+        }
+        if let Some(doc) = self.docs.get_mut(self.active) {
+            if plain {
+                let shown: Arc<dyn crate::composite::LiveStroke> =
+                    Arc::new(crate::composite::BrushLive::new(
+                        stroke.layer,
+                        Arc::clone(&stroke.copies[0].live),
+                    ));
+                doc.compositor.set_live(&cx.world.arena, Some(shown));
+            } else if !rects.is_empty() {
+                doc.compositor.refresh_view(
+                    &cx.world.arena,
+                    &rects,
+                    Some(stroke.layer),
+                    visible,
+                    step,
+                );
+            }
+        }
     }
 
     /// Finishes `stroke` and records it.
     pub(crate) fn engine_end(&mut self, stroke: EngineStroke, cx: &mut AppletContext<'_>) {
         let EngineStroke {
-            worker,
-            live,
+            copies,
             layer,
+            target,
             offset,
+            lay,
             label,
             eraser,
             ..
         } = stroke;
-        let finished = worker.finish();
-        let edit = finished.as_ref().and_then(|finished| {
-            let raster = doc::raster_mut(&mut cx.world.arena, layer)?;
-            finished.commit(raster, [0, 0], layer, &label).ok()
-        });
-        // The stroke is in the layer now (or lost): nothing more is shown
-        // of it, and what it changed is shown from the layer.
-        live.end();
+        let lives: Vec<Arc<LiveView>> = copies.iter().map(|copy| Arc::clone(&copy.live)).collect();
+        let mut finished = Vec::new();
+        for copy in copies {
+            finished.push(copy.worker.finish());
+        }
         let (visible, step) = self.on_screen;
+        let (edits, rects) = match lay {
+            Some(mut lay) => {
+                // The last of what the workers laid, then what changed.
+                let mut keys: Vec<_> = finished
+                    .iter_mut()
+                    .flatten()
+                    .flat_map(sue_brush::worker::Stroke::take_dirty)
+                    .collect();
+                keys.sort_unstable();
+                keys.dedup();
+                let rects = lay.lay(&mut cx.world.arena, &keys, &lives, offset);
+                (lay.edits(&cx.world.arena, &label), rects)
+            }
+            None => {
+                let edit = finished
+                    .first()
+                    .and_then(Option::as_ref)
+                    .and_then(|finished| {
+                        let raster = doc::raster_mut(&mut cx.world.arena, target)?;
+                        finished.commit(raster, [0, 0], target, &label).ok()
+                    });
+                let rects = edit.as_ref().map_or_else(Vec::new, |edit| {
+                    tile_rects(
+                        edit.patches()
+                            .iter()
+                            .map(|patch| [patch.x as i32, patch.y as i32]),
+                        offset,
+                    )
+                });
+                (edit.into_iter().collect(), rects)
+            }
+        };
+        // The stroke is in its rasters now (or lost): nothing more is
+        // shown of it, and what it changed is shown from them.
+        for live in &lives {
+            live.end();
+        }
         if let Some(doc) = self.docs.get_mut(self.active) {
             doc.compositor.set_live(&cx.world.arena, None);
-            let rects = edit.as_ref().map_or_else(Vec::new, |edit| {
-                tile_rects(
-                    edit.patches()
-                        .iter()
-                        .map(|patch| [patch.x as i32, patch.y as i32]),
-                    offset,
-                )
-            });
             if rects.is_empty() {
                 doc.compositor.accept(&cx.world.arena, layer);
             } else {
@@ -379,25 +887,51 @@ impl SuePaint {
                     .refresh_view(&cx.world.arena, &rects, Some(layer), visible, step);
             }
         }
-        if let Some(edit) = edit.filter(|edit| !edit.is_empty()) {
-            cx.record(ArenaEdit(edit));
-            if !eraser {
-                self.recent.push(self.drawing_color());
+        let mut edits: Vec<_> = edits.into_iter().filter(|edit| !edit.is_empty()).collect();
+        if edits.is_empty() {
+            return;
+        }
+        if edits.len() == 1 {
+            cx.record(ArenaEdit(edits.remove(0)));
+        } else {
+            let mut batch = Batch::new(label);
+            for edit in edits {
+                batch = batch.then(edit);
             }
+            cx.record(ArenaEdit(batch));
+        }
+        if !eraser {
+            self.recent.push(self.drawing_color());
         }
     }
 
     /// Gives the stroke under way up: nothing of it stays.
-    pub(super) fn engine_abandon(&mut self, cx: &AppletContext<'_>) {
-        let Some(Gesture::Engine(stroke)) = self.gesture.take() else {
+    pub(super) fn engine_abandon(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(Gesture::Engine(mut stroke)) = self.gesture.take() else {
             return;
         };
+        let (visible, step) = self.on_screen;
+        let rects = stroke
+            .lay
+            .as_mut()
+            .map(|lay| lay.restore(&mut cx.world.arena, stroke.offset));
         // Let go while it still says what it covered, so that is shown
         // again from the layer.
         if let Some(doc) = self.docs.get_mut(self.active) {
             doc.compositor.set_live(&cx.world.arena, None);
+            if let Some(rects) = rects.filter(|rects| !rects.is_empty()) {
+                doc.compositor.refresh_view(
+                    &cx.world.arena,
+                    &rects,
+                    Some(stroke.layer),
+                    visible,
+                    step,
+                );
+            }
         }
-        stroke.worker.abandon();
+        for copy in stroke.copies {
+            copy.worker.abandon();
+        }
     }
 
     /// Settles a stroke under way when the studio closes: it ends where
@@ -407,11 +941,126 @@ impl SuePaint {
             return;
         };
         if !stroke.lifted {
-            let up = Sample::new(Kind::Up, stroke.last.pos, stroke.last.time);
-            stroke.worker.push(up);
+            let (at, time) = (stroke.last.pos, stroke.last.time);
+            stroke.lift(at, time);
         }
         self.engine_end(*stroke, cx);
     }
+
+    /// Smart Shape for a stroke of the engine: while its pen rests in one
+    /// place long enough, the stroke is drawn again as the clean shape it
+    /// was meant to be, which then follows the pen until it lifts.
+    pub(crate) fn engine_smart(&mut self, ctx: &egui::Context, cx: &mut AppletContext<'_>) {
+        let (now, pointer, down) = ctx.input(|input| {
+            (
+                input.time,
+                input.pointer.latest_pos(),
+                input.pointer.primary_down(),
+            )
+        });
+        let Some(Gesture::Engine(stroke)) = self.gesture.as_mut() else {
+            return;
+        };
+        let (Some(pointer), true) = (pointer, down) else {
+            return;
+        };
+        if !stroke.smart || stroke.line || stroke.snap.is_some() || stroke.lifted {
+            return;
+        }
+        let pen = stroke.last.pos;
+        if let Some(shaping) = stroke.shaping.as_mut() {
+            // A shape already made follows the pen: a line's far end, or
+            // the shape turned and sized around its middle (always from
+            // the shape as it was made, the pen's way since carried over
+            // it).
+            if (pen[0] - shaping.at[0]).hypot(pen[1] - shaping.at[1]) < 0.5 {
+                return;
+            }
+            let moved = crate::smart::dragged(&shaping.path, shaping.pivot, shaping.reference, pen);
+            shaping.at = pen;
+            let samples = shape_samples(stroke, &moved);
+            let Some(Gesture::Engine(mut stroke)) = self.gesture.take() else {
+                return;
+            };
+            self.engine_redraw(&mut stroke, samples, cx);
+            self.gesture = Some(Gesture::Engine(stroke));
+            return;
+        }
+        match stroke.rest {
+            Some((since, at)) if at.distance(pointer) <= crate::smart::HOLD_REACH => {
+                let waited = now - since;
+                if waited < crate::smart::HOLD_SECONDS {
+                    ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                        crate::smart::HOLD_SECONDS - waited,
+                    ));
+                    return;
+                }
+            }
+            _ => {
+                stroke.rest = Some((now, pointer));
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                    crate::smart::HOLD_SECONDS,
+                ));
+                return;
+            }
+        }
+        // Rested long enough: the shape, if the stroke makes one.
+        let points: Vec<[f32; 2]> = stroke.raw.iter().map(|sample| sample.pos).collect();
+        let step = (stroke.size() * 0.25).clamp(0.75, 4.0);
+        let Some(path) = crate::smart::recognize(&points, step) else {
+            // No shape fits (yet): the stroke carries on as drawn.
+            stroke.rest = Some((now, pointer));
+            return;
+        };
+        let reference = path
+            .iter()
+            .copied()
+            .min_by(|a, b| {
+                let from = |p: &[f32; 2]| (p[0] - pen[0]).hypot(p[1] - pen[1]);
+                from(a).total_cmp(&from(b))
+            })
+            .unwrap_or(pen);
+        let pivot = crate::smart::pivot(&path);
+        let samples = shape_samples(stroke, &path);
+        let Some(Gesture::Engine(mut stroke)) = self.gesture.take() else {
+            return;
+        };
+        self.engine_redraw(&mut stroke, samples, cx);
+        stroke.shaping = Some(Shaping {
+            pivot,
+            reference,
+            at: pen,
+            path,
+        });
+        self.gesture = Some(Gesture::Engine(stroke));
+    }
+}
+
+/// A shape's `path` as the samples of a stroke: pressed as the stroke
+/// was in its middle, over the time the stroke took.
+fn shape_samples(stroke: &EngineStroke, path: &[[f32; 2]]) -> Vec<Sample> {
+    let mut pressures: Vec<f32> = stroke
+        .raw
+        .iter()
+        .filter_map(|sample| sample.pressure)
+        .collect();
+    pressures.sort_by(f32::total_cmp);
+    let pressure = pressures.get(pressures.len() / 2).copied();
+    let start = stroke
+        .raw
+        .first()
+        .map_or(stroke.last.time, |sample| sample.time);
+    let span = (stroke.last.time - start).max(0.05);
+    let count = path.len().max(2) - 1;
+    path.iter()
+        .enumerate()
+        .map(|(i, &pos)| {
+            let kind = if i == 0 { Kind::Down } else { Kind::Move };
+            let mut sample = Sample::new(kind, pos, start + span * i as f64 / count as f64);
+            sample.pressure = pressure;
+            sample
+        })
+        .collect()
 }
 
 /// The picture rectangles of the tiles at layer pixels `origins` (a
@@ -428,4 +1077,92 @@ fn tile_rects(origins: impl Iterator<Item = [i32; 2]>, offset: [i64; 2]) -> Vec<
             (rect[0] < rect[2] && rect[1] < rect[3]).then_some(rect)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A line along x with a wobble, lifted at its end.
+    fn wobbly(count: usize) -> Vec<Sample> {
+        let mut samples: Vec<Sample> = (0..count)
+            .map(|i| {
+                let kind = if i == 0 { Kind::Down } else { Kind::Move };
+                let y = if i % 2 == 0 { 2.0 } else { -2.0 };
+                Sample::new(kind, [i as f32 * 3.0, y], i as f64 / 200.0).pressing(0.5)
+            })
+            .collect();
+        let last = *samples.last().unwrap();
+        samples.push(Sample::new(Kind::Up, last.pos, last.time + 0.005));
+        samples
+    }
+
+    #[test]
+    fn post_correction_smooths_the_middle_and_keeps_the_ends() {
+        let samples = wobbly(60);
+        let smooth = corrected(&samples, 10, 40.0);
+        assert_eq!(smooth.len(), samples.len());
+        assert_eq!(smooth[0].pos, samples[0].pos, "the start stays");
+        assert_eq!(smooth[59].pos, samples[59].pos, "the end stays");
+        let wobble = |s: &[Sample]| s[20..40].iter().map(|p| p.pos[1].abs()).fold(0.0, f32::max);
+        assert!(
+            wobble(&smooth) < wobble(&samples) * 0.5,
+            "the wobble is gone"
+        );
+        assert_eq!(
+            smooth.last().unwrap().pos,
+            smooth[59].pos,
+            "the lift ends there"
+        );
+        for (a, b) in smooth.iter().zip(&samples) {
+            assert_eq!((a.time, a.pressure, a.kind), (b.time, b.pressure, b.kind));
+        }
+        assert_eq!(corrected(&samples, 0, 8.0), samples, "level 0 is none");
+    }
+
+    #[test]
+    fn post_correction_keeps_a_corner_sharp() {
+        // Right 120 px, then down 120 px.
+        let mut samples = Vec::new();
+        for i in 0..=40 {
+            samples.push([i as f32 * 3.0, 0.0]);
+        }
+        for i in 1..=40 {
+            samples.push([120.0, i as f32 * 3.0]);
+        }
+        let samples: Vec<Sample> = samples
+            .iter()
+            .enumerate()
+            .map(|(i, &pos)| {
+                let kind = if i == 0 { Kind::Down } else { Kind::Move };
+                Sample::new(kind, pos, i as f64 / 200.0).pressing(0.5)
+            })
+            .collect();
+        let smooth = corrected(&samples, 10, 8.0);
+        let corner = smooth[40].pos;
+        assert!(
+            (corner[0] - 120.0).abs() < 0.5 && corner[1].abs() < 0.5,
+            "the corner stays: {corner:?}"
+        );
+    }
+
+    #[test]
+    fn a_mask_draws_every_brush_as_its_round_tip() {
+        let mut toolbox = crate::tools::Toolbox::default();
+        toolbox.pick(Tool::Pen);
+        let pen = toolbox.current().clone();
+        assert!(preset_of(&pen, false, false).is_some(), "a pen is round");
+        let airbrush = toolbox
+            .subs(Tool::Airbrush)
+            .iter()
+            .find(|sub| preset_of(sub, false, false).is_none())
+            .cloned();
+        if let Some(airbrush) = airbrush {
+            let round = preset_of(&airbrush, false, true).expect("round on a mask");
+            assert_eq!(round.tip, TipSource::Round);
+            assert!(!round.build_up && round.mix.is_none());
+        }
+        let eraser = preset_of(&pen, true, false).unwrap();
+        assert!(eraser.erase, "the transparent color erases");
+    }
 }
