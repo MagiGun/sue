@@ -228,6 +228,29 @@ fn new_frame(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
     paint.dialog = Some(Dialog::Frame(crate::comic::FrameSpec::default()));
 }
 
+/// Divide Frame Border Equally: asks how to cut the panel picked.
+fn divide_frame(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.ask_divide_frame(cx);
+}
+
+/// Combine Frames: the panels picked become one.
+fn combine_frames(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.combine_frames(cx);
+}
+
+/// Divide Frame Border Equally works with one panel picked on a frame
+/// border layer, Combine Frames with two or more.
+fn frame_picked_state(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    let picked = paint
+        .picked_panels(facts.arena)
+        .map_or(0, |(_, picked)| picked.len());
+    when(if call.name == "layer.frame.combine" {
+        picked >= 2
+    } else {
+        picked == 1
+    })
+}
+
 fn new_balloon(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.add_balloon_layer(cx);
 }
@@ -1252,6 +1275,18 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         circle_ruler,
     )
     .icon("tool-ruler"),
+    // Ruler/Frame's frame commands (FGV-1), on the panels the Object
+    // tool picked.
+    c(
+        "layer.frame.divide_equally",
+        "divide-frame-border-equally-ellipsis",
+        divide_frame,
+    )
+    .icon("tool-frame")
+    .state(frame_picked_state),
+    c("layer.frame.combine", "combine-frames", combine_frames)
+        .icon("tool-frame")
+        .state(frame_picked_state),
     c("layer.toggle.visible", "show-layer", toggle_visible)
         .icon("eye")
         .state(visible_state),

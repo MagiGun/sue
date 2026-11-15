@@ -121,6 +121,8 @@ pub(crate) enum Dialog {
     Convert(sue_core::EntityId, u8, String),
     /// File, Manage Fonts: Sue's shared font list.
     Fonts(sue_wm::fonts::FontManager),
+    /// Layer, Ruler/Frame, Divide Frame Border Equally.
+    DivideFrame(crate::comic::DivideSpec),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -182,6 +184,7 @@ impl Dialog {
             ),
             Dialog::Gamut(..) => (tr!("select-color-gamut"), vec2(340.0, 170.0)),
             Dialog::Webtoon(..) => (tr!("export-webtoon"), vec2(340.0, 170.0)),
+            Dialog::DivideFrame(_) => (tr!("divide-frame-border-equally"), vec2(360.0, 290.0)),
             Dialog::Timeline(..) => (tr!("edit-timeline"), vec2(320.0, 150.0)),
             Dialog::Shape3D(_) => (tr!("new-3d-layer"), vec2(300.0, 230.0)),
             Dialog::Workspace(_) => (tr!("register-workspace"), vec2(340.0, 140.0)),
@@ -403,6 +406,7 @@ impl SuePaint {
             Dialog::Message(_, paragraphs) => message_ui(ui, paragraphs, size, theme),
             Dialog::Gamut(tolerance, all) => gamut_ui(ui, tolerance, all, theme),
             Dialog::Webtoon(height, width) => webtoon_ui(ui, height, width, theme),
+            Dialog::DivideFrame(spec) => crate::comic::divide_frame_ui(ui, spec, theme),
             Dialog::Timeline(fps, length) => timeline_ui(ui, fps, length, theme),
             Dialog::Shape3D(kind) => shape_3d_ui(ui, kind, theme),
             Dialog::Material(name) => material_ui(ui, name, theme),
@@ -464,6 +468,7 @@ impl SuePaint {
             Dialog::CanvasProperties(props) => Self::canvas_properties_ok(cx, &props),
             Dialog::Convert(layer, kind, name) => self.convert_ok(cx, layer, kind, &name),
             Dialog::Webtoon(height, width) => self.ask_export_webtoon(cx, height, width),
+            Dialog::DivideFrame(spec) => self.divide_frame_ok(cx, &spec),
             Dialog::Shape3D(kind) => self.shape_3d_ok(cx, kind),
             Dialog::Timeline(fps, length) => self.timeline_ok(cx, fps, length),
             Dialog::Onion(onion) => self.onion_ok(cx, &onion),
@@ -507,6 +512,7 @@ impl SuePaint {
             | Dialog::SelectBy(..)
             | Dialog::Gamut(..)
             | Dialog::Webtoon(..)
+            | Dialog::DivideFrame(_)
             | Dialog::Timeline(..)
             | Dialog::Shape3D(_)
             | Dialog::Workspace(_)

@@ -99,6 +99,7 @@ impl SuePaint {
         self.tone_overlay(ui, viewport, size, cx);
         self.page_frames(ui, viewport, size, cx, theme);
         self.overlays(ui, viewport, size, &response, cx, theme);
+        self.comic_overlay(ui, viewport, size, cx, theme);
         self.view_marks(ui, viewport, size, cx, theme);
         self.typing_ui(ui, viewport, size, cx);
         self.warp_ui(ui, viewport, size, cx, theme);

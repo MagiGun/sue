@@ -29,7 +29,7 @@ impl SuePaint {
             // Frame borders and effect lines: their panels, corners and
             // ends move.
             let reach = 10.0 / doc.view.zoom.max(0.01);
-            self.gesture = self.comic_object_at(p, reach, &cx.world.arena);
+            self.gesture = self.comic_object_at(p, reach, modifiers.shift, &cx.world.arena);
         } else if self
             .layer()
             .is_some_and(|layer| crate::three::is_3d(&cx.world.arena, layer))
