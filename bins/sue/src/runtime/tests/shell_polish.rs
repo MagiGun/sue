@@ -28,6 +28,19 @@ fn starts(runtime: &Runtime) -> Vec<(String, String, egui::Rect)> {
         .collect()
 }
 
+/// One frame 16 ms after the last one, with `events`.
+fn step(runtime: &mut Runtime, ctx: &egui::Context, size: egui::Vec2, events: Vec<egui::Event>) {
+    let time = ctx.input(|input| input.time) + 0.016;
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, size)),
+        time: Some(time),
+        events,
+        ..egui::RawInput::default()
+    };
+    ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, Instant::now()))
+        .drop_without_applying_deltas();
+}
+
 /// One frame `seconds` after the last one, with no input.
 fn later(runtime: &mut Runtime, ctx: &egui::Context, size: egui::Vec2, seconds: f64) {
     let time = ctx.input(|input| input.time) + seconds;
@@ -280,6 +293,60 @@ fn on_a_phone_one_notice_shows_above_the_tab_bar() {
     assert!(
         area.height() < page.height() / 5.0,
         "a small band: {area:?} of {page:?}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn on_a_phone_home_scrolls_clear_of_the_notice() {
+    let (mut runtime, root) = runtime("polish-phone-clear");
+    runtime
+        .engine
+        .world
+        .rice
+        .set(
+            sue_wm::INTERFACE_KEY,
+            sue_rice::RiceValue::Text("phone".to_owned()),
+        )
+        .unwrap();
+    let ctx = egui::Context::default();
+    let phone = vec2(430.0, 932.0);
+    let start = Instant::now();
+    frames(&mut runtime, &ctx, phone, start, |_| Vec::new());
+    runtime.shell.notify("Saved Picture.png", false);
+    runtime.shell.notify("Copied two layers", false);
+    frames(&mut runtime, &ctx, phone, start, |_| Vec::new());
+    let area = runtime.shell.notices_area().expect("the notice shows");
+    // The wheel down over the page, far past its end.
+    let over = runtime.shell.page_rect().center();
+    let wheel = vec![
+        egui::Event::PointerMoved(over),
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -2_000.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: egui::Modifiers::NONE,
+        },
+    ];
+    // Half a second of frames, well inside the notices' time.
+    for frame in 0..30 {
+        let events = if frame % 10 == 0 {
+            wheel.clone()
+        } else {
+            Vec::new()
+        };
+        step(&mut runtime, &ctx, phone, events);
+    }
+    assert_eq!(runtime.shell.notices(), 2, "still showing");
+    // The last thing on Home, Good to Know's last tile, ends above the
+    // notice and its fold button: nothing has to stay under them.
+    let last = button(&runtime, &HubButton::MakeItYours).expect("on Home");
+    let area_now = runtime.shell.notices_area().expect("still shows");
+    assert_eq!(area_now, area, "the stack stays put while the page moves");
+    assert!(
+        last.bottom() <= area.top() + 0.5,
+        "{last:?} ends above the notices at {area:?}"
     );
     let _ = std::fs::remove_dir_all(&root);
 }
