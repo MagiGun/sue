@@ -482,21 +482,39 @@ impl DockPanel for Palette {
 
 /// A small button of the dock's chrome at `rect` (the bars that hide,
 /// fold and open a side or a row): the shared icon button, with its
-/// focus ring and its name on hover. `true` when clicked.
+/// focus ring and its name on hover. `name` says which one it is, such
+/// as `close-side-left`: where it was drawn is kept with the frame's
+/// pass under [`chrome_id`], for what points at it (a test, a tour).
+/// `true` when clicked.
 fn chrome_button(
     ui: &mut Ui,
     rect: Rect,
     icon: WmIcon,
-    id: impl egui::AsIdSalt,
+    name: &str,
     tip: &str,
     theme: &Theme,
 ) -> bool {
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.data_mut(|data| data.insert_temp(chrome_id(name), (pass, rect)));
     Density::Compact.scope(ui, |ui| {
-        sue_wm::ui::icon_button(id, icon, tip)
+        sue_wm::ui::icon_button(("sue-paint-chrome", name), icon, tip)
             .quiet()
             .show_at(ui, rect, theme)
             .clicked()
     })
+}
+
+/// Where [`chrome_button`] keeps where it drew the button `name`.
+fn chrome_id(name: &str) -> Id {
+    Id::unique(("sue-paint-chrome-place", name))
+}
+
+/// A side's word in the names of [`chrome_button`]s.
+fn side_word(side: Side) -> &'static str {
+    match side {
+        Side::Left => "left",
+        Side::Right => "right",
+    }
 }
 
 /// What a floating palette's header buttons asked for.
@@ -1227,8 +1245,8 @@ impl SuePaint {
             } else {
                 WmIcon::ChevronsLeft
             };
-            let id = ("sue-paint-open-side", *side == Side::Left);
-            if chrome_button(ui, top, icon, id, &tr!("show-palettes"), theme) {
+            let name = format!("open-side-{}", side_word(*side));
+            if chrome_button(ui, top, icon, &name, &tr!("show-palettes"), theme) {
                 self.dock.hidden[side.index()] = false;
             }
         }
@@ -1261,13 +1279,13 @@ impl SuePaint {
                 Side::Right => (bar.right() - 16.0, bar.right() - 32.0),
             };
             let close = Rect::from_min_size(pos2(close_at, bar.top()), vec2(16.0, COLUMN_BAR));
-            let close_id = ("sue-paint-close-side", side == Side::Left);
+            let close_id = format!("close-side-{}", side_word(side));
             let away = if side == Side::Left {
                 WmIcon::ChevronsLeft
             } else {
                 WmIcon::ChevronsRight
             };
-            if chrome_button(ui, close, away, close_id, &tr!("hide-palettes"), theme) {
+            if chrome_button(ui, close, away, &close_id, &tr!("hide-palettes"), theme) {
                 self.dock.hidden[side.index()] = true;
                 self.dock.popped = None;
             }
@@ -1297,8 +1315,8 @@ impl SuePaint {
             } else {
                 WmIcon::ChevronRight
             };
-            let fold_id = ("sue-paint-fold-side", side == Side::Left);
-            if chrome_button(ui, fold, icon, fold_id, &tip, theme) {
+            let fold_id = format!("fold-side-{}", side_word(side));
+            if chrome_button(ui, fold, icon, &fold_id, &tip, theme) {
                 self.dock.folded[side.index()] = !folded;
                 self.dock.popped = None;
             }
@@ -1518,14 +1536,14 @@ impl SuePaint {
         for (row, bar) in &laid.row_handles {
             ui.painter().rect_filled(*bar, 0.0, theme.panel);
             let at = Rect::from_center_size(bar.center(), vec2(24.0, bar.height()));
-            let id = ("sue-paint-open-row", row.index());
+            let name = format!("open-row-{}", row.index());
             // Pointing in: the row comes back.
             let icon = if *row == Row::Top {
                 WmIcon::ChevronDown
             } else {
                 WmIcon::ChevronUp
             };
-            if chrome_button(ui, at, icon, id, &tr!("show-palettes"), theme) {
+            if chrome_button(ui, at, icon, &name, &tr!("show-palettes"), theme) {
                 self.dock.row_hidden[row.index()] = false;
             }
         }
@@ -1536,25 +1554,11 @@ impl SuePaint {
                 Rect::from_min_size(pos2(row.right() - 40.0, row.top() + 6.0), vec2(16.0, 16.0));
             let close = fold.translate(vec2(18.0, 0.0));
             let tip = tr!("fold-column-into-icons");
-            if chrome_button(
-                ui,
-                fold,
-                WmIcon::ChevronDown,
-                "sue-paint-fold-bottom",
-                &tip,
-                theme,
-            ) {
+            if chrome_button(ui, fold, WmIcon::ChevronDown, "fold-bottom", &tip, theme) {
                 self.dock.row_folded[Row::Bottom.index()] = true;
             }
             let tip = tr!("hide-palettes");
-            if chrome_button(
-                ui,
-                close,
-                WmIcon::Close,
-                "sue-paint-close-bottom",
-                &tip,
-                theme,
-            ) {
+            if chrome_button(ui, close, WmIcon::Close, "close-bottom", &tip, theme) {
                 self.dock.row_hidden[Row::Bottom.index()] = true;
             }
         }
