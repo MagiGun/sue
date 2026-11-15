@@ -593,6 +593,23 @@ impl SuePaint {
         command
     }
 
+    /// The gradient layer Tool Property edits instead of the sub tool:
+    /// the current layer, when it is one and the Gradient tool (but for
+    /// Contour line fill) or the Object tool is on.
+    pub(crate) fn edited_gradient_layer(
+        &self,
+        arena: &sue_core::Arena,
+    ) -> Option<sue_core::EntityId> {
+        let tool = self.toolbox.tool();
+        let edits = tool == Tool::Operation
+            || (tool == Tool::Gradient
+                && self.toolbox.current().mode != crate::tools::CONTOUR_FILL);
+        if !edits {
+            return None;
+        }
+        self.gradient_layer(arena).map(|(layer, _)| layer)
+    }
+
     /// The settings of the current sub tool, and a command they ask for:
     /// Tool Property's body.
     pub(super) fn tool_properties(
@@ -628,9 +645,7 @@ impl SuePaint {
         }
         // The Gradient or Object tool on a gradient layer: its gradient,
         // which stays editable.
-        if matches!(tool, Tool::Gradient | Tool::Operation)
-            && (tool == Tool::Operation
-                || self.toolbox.current().mode != crate::tools::CONTOUR_FILL)
+        if self.edited_gradient_layer(arena).is_some()
             && let Some((layer, mut gradient)) = self.gradient_layer(arena)
         {
             ui.spacing_mut().item_spacing.y = theme.space(Space::S3);
