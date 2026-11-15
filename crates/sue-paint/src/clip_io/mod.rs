@@ -155,40 +155,35 @@ pub fn embedded(arena: &Arena, sue: &[u8], label: &str) -> Option<(Option<Edit>,
     Some((Some(edit), picture))
 }
 
-/// `layers` drawn on a canvas of `width` by `height`, one picture per
-/// pixel layer (clear pixels keep no color), and the folders' style.
-fn drawn(width: u32, height: u32, layers: &[PsdLayer]) -> Vec<(String, Vec<u8>)> {
-    layers
-        .iter()
-        .map(|layer| {
-            let style = format!(
-                "{:?} {} {} {} {} {:?}",
-                layer.kind, layer.name, layer.opacity, layer.visible, layer.clip, layer.blend
-            );
-            let mut canvas = Vec::new();
-            if layer.kind == PsdKind::Pixels {
-                canvas = vec![0_u8; width as usize * height as usize * 4];
-                for y in 0..layer.height {
-                    for x in 0..layer.width {
-                        let (cx, cy) = (
-                            i64::from(layer.left) + i64::from(x),
-                            i64::from(layer.top) + i64::from(y),
-                        );
-                        if cx < 0 || cy < 0 || cx >= i64::from(width) || cy >= i64::from(height) {
-                            continue;
-                        }
-                        let from = (y as usize * layer.width as usize + x as usize) * 4;
-                        let pixel = &layer.pixels[from..from + 4];
-                        if pixel[3] > 0 {
-                            let to = (cy as usize * width as usize + cx as usize) * 4;
-                            canvas[to..to + 4].copy_from_slice(pixel);
-                        }
-                    }
+/// `layer` drawn on a canvas of `width` by `height` (clear pixels keep no
+/// color; folders draw nothing), with its style in words.
+fn drawn(width: u32, height: u32, layer: &PsdLayer) -> (String, Vec<u8>) {
+    let style = format!(
+        "{:?} {} {} {} {} {:?}",
+        layer.kind, layer.name, layer.opacity, layer.visible, layer.clip, layer.blend
+    );
+    let mut canvas = Vec::new();
+    if layer.kind == PsdKind::Pixels {
+        canvas = vec![0_u8; width as usize * height as usize * 4];
+        for y in 0..layer.height {
+            for x in 0..layer.width {
+                let (cx, cy) = (
+                    i64::from(layer.left) + i64::from(x),
+                    i64::from(layer.top) + i64::from(y),
+                );
+                if cx < 0 || cy < 0 || cx >= i64::from(width) || cy >= i64::from(height) {
+                    continue;
+                }
+                let from = (y as usize * layer.width as usize + x as usize) * 4;
+                let pixel = &layer.pixels[from..from + 4];
+                if pixel[3] > 0 {
+                    let to = (cy as usize * width as usize + cx as usize) * 4;
+                    canvas[to..to + 4].copy_from_slice(pixel);
                 }
             }
-            (style, canvas)
-        })
-        .collect()
+        }
+    }
+    (style, canvas)
 }
 
 /// Whether a `.clip` Sue 0.0.75 wrote still holds what its copy of
@@ -210,8 +205,15 @@ fn copy_matches(bytes: &[u8], sue: &[u8]) -> bool {
         return false;
     };
     let Psd { width, height, .. } = clip.psd;
+    // One layer of each at a time: a large canvas of many layers must
+    // not need all of them drawn at once.
     [written.width, written.height] == [width, height]
-        && drawn(width, height, &written.layers) == drawn(width, height, &clip.psd.layers)
+        && written.layers.len() == clip.psd.layers.len()
+        && written
+            .layers
+            .iter()
+            .zip(&clip.psd.layers)
+            .all(|(ours, theirs)| drawn(width, height, ours) == drawn(width, height, theirs))
 }
 
 /// What opening a `.clip` makes.
