@@ -645,6 +645,7 @@ pub struct IconButton<'a> {
     on: Option<bool>,
     enabled: bool,
     quiet: bool,
+    shortcut: Option<&'a str>,
 }
 
 /// A ghost button that shows `icon`. `name` says what it does: it is
@@ -659,10 +660,11 @@ pub fn icon_button(salt: impl AsIdSalt, icon: Icon, name: &str) -> IconButton<'_
         on: None,
         enabled: true,
         quiet: false,
+        shortcut: None,
     }
 }
 
-impl IconButton<'_> {
+impl<'a> IconButton<'a> {
     /// Makes it a button of `kind`.
     pub fn kind(mut self, kind: ButtonKind) -> Self {
         self.kind = kind;
@@ -687,6 +689,14 @@ impl IconButton<'_> {
     /// is on should be the one that is seen.
     pub fn quiet(mut self) -> Self {
         self.quiet = true;
+        self
+    }
+
+    /// Shows its name in Sue's tooltip with `keys`, the keys that run
+    /// it (empty: it has none), which a touch screen also opens with a
+    /// long press.
+    pub fn shortcut(mut self, keys: &'a str) -> Self {
+        self.shortcut = Some(keys);
         self
     }
 
@@ -717,6 +727,12 @@ impl IconButton<'_> {
         });
         if name.is_empty() {
             response
+        } else if let Some(keys) = self.shortcut {
+            super::tooltip::tooltip(
+                response,
+                &super::tooltip::Tip::new(name).shortcut(keys),
+                theme,
+            )
         } else {
             response.on_hover_text(name)
         }
