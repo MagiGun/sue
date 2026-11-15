@@ -331,6 +331,106 @@ fn an_opacity_that_follows_pressure_fades_without_steps() {
     assert!(row[row.len() - 1] - row[0] > 40, "it fades: {row:?}");
 }
 
+/// How the pen leaves the tablet at the end of a straight line.
+#[derive(Clone, Copy, Debug)]
+enum Lift {
+    /// A mouse, pressing fully all along.
+    Mouse,
+    /// The pressure falls from 0.5 to 0.05 over the last 40 ms.
+    Ramp,
+    /// Lifted while still pressing 0.5.
+    Abrupt,
+    /// The driver stops sending pressure for the last packets.
+    Silent,
+}
+
+/// The owner's first complaint: a line that ends in a blob. A straight
+/// line through the worker, for every way of lifting, stabilized or not,
+/// with and without an end taper: no column near the end, live before
+/// the lift or merged after it, is wider than the line's body.
+#[test]
+fn no_stroke_ends_wider_than_its_body() {
+    let (width, height) = (560_u32, 120_u32);
+    for lift in [Lift::Mouse, Lift::Ramp, Lift::Abrupt, Lift::Silent] {
+        for stabilization in [0, 20, 60] {
+            for end_taper in [0.0, 40.0] {
+                let mut preset = pen(16.0, 1.0);
+                preset.input.stabilization = stabilization;
+                preset.taper = Taper {
+                    end: end_taper,
+                    mode: TaperMode::Length,
+                    ..Taper::default()
+                };
+                let count = 120;
+                let mut samples: Vec<Sample> = (0..=count)
+                    .map(|i| {
+                        let s = f64::from(i) / f64::from(count);
+                        let kind = if i == 0 { Kind::Down } else { Kind::Move };
+                        let sample = Sample::new(
+                            kind,
+                            [40.0 + 460.0 * s as f32, 60.0],
+                            1.0 + f64::from(i) / RATE,
+                        );
+                        let last = s > 1.0 - 8.0 / f64::from(count);
+                        match lift {
+                            Lift::Mouse => sample.pressing(1.0),
+                            Lift::Ramp if last => {
+                                let t =
+                                    (s - (1.0 - 8.0 / f64::from(count))) * f64::from(count) / 8.0;
+                                sample.pressing((0.5 - 0.45 * t) as f32)
+                            }
+                            Lift::Silent if last => sample,
+                            _ => sample.pressing(if s < 0.05 { 0.1 + 8.0 * s as f32 } else { 0.5 }),
+                        }
+                    })
+                    .collect();
+                let last = *samples.last().unwrap();
+                samples.push(Sample::new(Kind::Up, last.pos, last.time + 1.0 / RATE));
+                let device = if matches!(lift, Lift::Mouse) {
+                    Device::MOUSE
+                } else {
+                    Device::Pen
+                };
+                let brush = black(preset);
+                let mut worker =
+                    StrokeWorker::start(Arc::new(JobPool::new(2)), &brush, Settings::new(device));
+                let (body, up) = samples.split_at(samples.len() - 1);
+                for frame in body.chunks(3) {
+                    worker.push_all(frame);
+                    let _ = worker.poll();
+                }
+                while worker.is_busy() || worker.waiting() > 0 {
+                    std::thread::yield_now();
+                    let _ = worker.poll();
+                }
+                let live = worker.live();
+                let columns = |at: &dyn Fn(i32, i32) -> u16| -> Vec<u32> {
+                    (0..width as i32)
+                        .map(|x| (0..height as i32).filter(|&y| at(x, y) >= 32_768).count() as u32)
+                        .collect()
+                };
+                let shown = columns(&|x, y| live.coverage(i64::from(x), i64::from(y)));
+                worker.push_all(up);
+                let stroke = worker.finish().unwrap();
+                let merged = columns(&|x, y| stroke.coverage(x, y));
+                let what =
+                    format!("{lift:?}, stabilization {stabilization}, end taper {end_taper}");
+                for (name, widths) in [("live", &shown), ("merged", &merged)] {
+                    let mut body: Vec<u32> = widths[150..350].to_vec();
+                    body.sort_unstable();
+                    let body = body[body.len() / 2];
+                    assert!(body >= 6, "{what}, {name}: a body {body} wide");
+                    let end = widths[350..].iter().copied().max().unwrap_or(0);
+                    assert!(
+                        end <= body + 1,
+                        "{what}, {name}: the end is {end} px wide, the body {body}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------
 // Time
 // ---------------------------------------------------------------------
@@ -411,7 +511,10 @@ fn one_slice_on_the_interface_thread_stays_in_its_budget() {
         let start = Instant::now();
         let _ = worker.poll();
         times.push(start.elapsed());
-        let now = worker.counters().expect("an inline pool keeps the stroke").pixels;
+        let now = worker
+            .counters()
+            .expect("an inline pool keeps the stroke")
+            .pixels;
         most = most.max(now - laid);
         laid = now;
         assert!(times.len() < 1_000, "the slices make progress");
