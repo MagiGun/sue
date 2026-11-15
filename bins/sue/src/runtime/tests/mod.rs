@@ -39,6 +39,41 @@ mod writer;
 
 pub(crate) fn runtime(tag: &str) -> (Runtime, PathBuf) {
     let (host, root) = temp_host(tag);
+    // Sue Paint's palettes as 0.0.75 laid them out by default (the
+    // Timeline open under the canvas, Tool Sliders docked), kept as a
+    // person's layout: the tests that draw at places on the canvas were
+    // written for that canvas, and it is read as any layout kept then.
+    // `fresh_runtime` starts from the layout style's own arrangement.
+    let paint = root.join("data").join("paint");
+    sue_platform::fs::create_dir_all(&paint).unwrap();
+    sue_platform::fs::write(paint.join("layout.txt"), LAYOUT_0_0_75).unwrap();
+    let runtime = Runtime::new(Engine::boot(&host).unwrap()).unwrap();
+    (runtime, root)
+}
+
+/// The palette layout Sue Paint 0.0.75 started with, as it kept it.
+pub(crate) const LAYOUT_0_0_75: &str = "column left 46 1:tool
+column left 236 0.44:sub_tool 0.3:color 0.26:color_set
+column left 86 1:brush_size
+column right 300 0.42:navigator 0.58:layer
+top 38 1:command_bar
+bottom 160 1:timeline
+icon material
+icon layer_property
+icon animation_cels
+icon history
+icon sub_view
+icon auto_action
+icon item_bank
+icon info
+panels 1111111111
+menus 1
+";
+
+/// [`runtime`] with no layout kept: Sue Paint lays its palettes out as
+/// its layout style does.
+pub(crate) fn fresh_runtime(tag: &str) -> (Runtime, PathBuf) {
+    let (host, root) = temp_host(tag);
     let runtime = Runtime::new(Engine::boot(&host).unwrap()).unwrap();
     (runtime, root)
 }
@@ -209,7 +244,17 @@ pub(crate) struct PaintDriver {
 
 impl PaintDriver {
     pub(crate) fn new(tag: &str) -> Self {
-        let (mut runtime, root) = runtime(tag);
+        let (runtime, root) = runtime(tag);
+        Self::with(runtime, root)
+    }
+
+    /// [`Self::new`] with no palette layout kept: the layout style's own.
+    pub(crate) fn fresh(tag: &str) -> Self {
+        let (runtime, root) = fresh_runtime(tag);
+        Self::with(runtime, root)
+    }
+
+    fn with(mut runtime: Runtime, root: PathBuf) -> Self {
         let ctx = egui::Context::default();
         let now = Instant::now();
         runtime.request(

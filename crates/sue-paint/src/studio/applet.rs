@@ -699,6 +699,18 @@ impl SueApplet for SuePaint {
             }
             place if place.starts_with("materials/") => self.hub.navigate(place),
             page if page.starts_with("new-canvas") => self.new_canvas.navigate(page),
+            // A palette's menu: `dock/menu/<palette key>`; `dock/menu` alone
+            // closes it.
+            menu if menu.starts_with("dock/menu") => {
+                use sue_wm::dock::DockPanel;
+                let key = menu.strip_prefix("dock/menu/").unwrap_or("");
+                self.dock.menu = crate::dock::Palette::named(key);
+                self.dock.popped = None;
+                if let Some(palette) = self.dock.menu {
+                    self.dock.choose(palette);
+                }
+                true
+            }
             // A palette's tab: `tab/<palette>/<index>`.
             tab if tab.starts_with("tab/") => {
                 let mut parts = tab["tab/".len()..].split('/');

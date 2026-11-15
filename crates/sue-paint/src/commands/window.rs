@@ -961,13 +961,22 @@ mod tests {
         with_context(|cx| {
             for name in PALETTE_COMMANDS {
                 let palette = Palette::of_window_command(name).expect(name);
-                // Every palette starts shown in the default arrangement.
-                assert!(checked(&paint, cx, name), "{name} starts shown");
+                // Open palettes start checked; the strip's icons and the
+                // folded Timeline do not, and their item opens them.
+                let before = checked(&paint, cx, name);
+                assert_eq!(
+                    before,
+                    paint.dock.is_open(palette) && palette != Palette::Timeline
+                );
                 registry().run(&mut paint, cx, name);
-                assert!(!checked(&paint, cx, name), "{name}: hidden");
-                assert!(!paint.palette_showing(palette), "{name}");
+                assert_eq!(checked(&paint, cx, name), !before, "{name}");
                 registry().run(&mut paint, cx, name);
-                assert!(checked(&paint, cx, name), "{name}: shown again");
+                assert_eq!(checked(&paint, cx, name), before, "{name}: and back");
+                if !before {
+                    registry().run(&mut paint, cx, name);
+                }
+                assert!(checked(&paint, cx, name), "{name}: shown");
+                assert!(paint.palette_showing(palette), "{name}");
                 assert!(paint.dock.has(palette), "{name}: as itself");
             }
             // No palette shows in two places: each one is in the dock
@@ -1001,9 +1010,14 @@ mod tests {
             registry().run(&mut paint, cx, "window.info");
             assert!(paint.dock.find(Palette::Info).is_some(), "back in its tabs");
             // Material, an icon in the strip, opens beside the strip.
-            paint.close_palette(Palette::Material);
             registry().run(&mut paint, cx, "window.material");
             assert_eq!(paint.dock.popped, Some(Palette::Material));
+            assert!(checked(&paint, cx, "window.material"));
+            // The folded Timeline: its item opens the row.
+            assert!(!checked(&paint, cx, "window.timeline"));
+            registry().run(&mut paint, cx, "window.timeline");
+            assert!(!paint.dock.row_folded[1]);
+            assert!(checked(&paint, cx, "window.timeline"));
         });
     }
 

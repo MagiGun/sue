@@ -22,6 +22,7 @@ use crate::icons::Icon;
 use crate::panels::icon_button;
 use crate::studio::{Panels, SuePaint};
 
+use sue_wm::dock::Row;
 pub(crate) use sue_wm::dock::Side;
 
 /// Where every palette is.
@@ -127,7 +128,9 @@ pub(crate) fn classic_layout() -> Dock {
                 Group::one(Palette::BrushGrid, 0.16),
                 tabs(&COLOR_PALETTES, 0.3),
             ],
-            width: 250.0,
+            // Wide enough for the six color tabs; the canvas starts where
+            // it did before the styles.
+            width: 322.0,
         },
     ];
     dock.right = vec![Column {
@@ -302,6 +305,30 @@ impl Palette {
         })
     }
 
+    /// The palette's own commands, at the top of its menu (the menu at the
+    /// top left of its header), before where it docks and "Hide X
+    /// Palette". Each palette's owner fills in its own list.
+    pub fn menu_commands(self) -> &'static [&'static str] {
+        match self {
+            Self::Layer => &[
+                "layer.new",
+                "layer.new.vector",
+                "layer.new.folder",
+                "layer.duplicate",
+                "layer.delete",
+                "layer.rename",
+                "layer.properties",
+            ],
+            Self::Timeline => &[
+                "anim.timeline.edit",
+                "anim.onion",
+                "anim.onion_settings",
+                "anim.loop",
+            ],
+            _ => &[],
+        }
+    }
+
     /// The palette whose tab this one was in Sue Paint 0.0.75, before
     /// every palette was one of its own; a layout kept then that lacks it
     /// gets it back as a tab beside its host, where it showed.
@@ -448,8 +475,50 @@ fn arrows(
     response.clicked()
 }
 
+/// One or two small arrows in `rect` pointing down (`down`) or up, as
+/// Clip Studio Paint's arrows of a row. `true` when clicked.
+fn vertical_arrows(
+    ui: &mut Ui,
+    rect: Rect,
+    count: usize,
+    down: bool,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    tip: &str,
+    theme: &Theme,
+) -> bool {
+    let response = ui
+        .interact(rect, Id::unique(id), Sense::click())
+        .on_hover_text(tip);
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, theme.hover);
+    }
+    let color = if response.hovered() {
+        theme.text
+    } else {
+        theme.muted
+    };
+    let point = if down { 1.0 } else { -1.0 };
+    let c = rect.center();
+    let offsets: &[f32] = if count == 2 { &[-2.0, 2.0] } else { &[0.0] };
+    for offset in offsets {
+        let y = c.y + offset;
+        ui.painter().add(egui::Shape::line(
+            vec![
+                pos2(c.x - 3.0, y - 1.5 * point),
+                pos2(c.x, y + 1.5 * point),
+                pos2(c.x + 3.0, y - 1.5 * point),
+            ],
+            Stroke::new(1.0, color),
+        ));
+    }
+    response.clicked()
+}
+
+/// Where the strip's right-click menu is open (the clicked icon's corner).
+const STRIP_MENU: &str = "sue-paint-strip-menu";
+
 /// Where people grab a palette drawn in `body` to drag it: its title bar,
-/// clear of its menu button. The command bar, and the tool palette along a
+/// clear of its menu button at the left. The command bar, and the tool palette along a
 /// row, have a grip at their left end instead; a tool palette in a column
 /// is grabbed by the bar above it (`above`, its column's), or its top.
 fn title_bar(palette: Palette, body: Rect, above: Option<Rect>) -> Rect {
@@ -458,7 +527,10 @@ fn title_bar(palette: Palette, body: Rect, above: Option<Rect>) -> Rect {
     } else if palette.fixed_width().is_some() {
         above.unwrap_or_else(|| Rect::from_min_size(body.min, vec2(body.width(), 8.0)))
     } else {
-        Rect::from_min_size(body.min, vec2((body.width() - 26.0).max(0.0), 28.0))
+        Rect::from_min_size(
+            body.min + vec2(26.0, 0.0),
+            vec2((body.width() - 26.0).max(0.0), 28.0),
+        )
     }
 }
 
@@ -506,6 +578,9 @@ impl SuePaint {
         theme: &Theme,
     ) {
         ui.painter().rect_filled(rect, 0.0, theme.panel);
+        // Its header leaves room at the left for its menu button.
+        let inset = Id::unique(crate::panels::MENU_INSET);
+        ui.ctx().data_mut(|data| data.insert_temp(inset, 26.0_f32));
         match palette {
             Palette::CommandBar => self.command_bar(ui, rect, cx, theme),
             Palette::Tools => self.tool_strip(ui, rect, cx, theme),
@@ -518,15 +593,19 @@ impl SuePaint {
             Palette::Timeline => self.timeline_panel(ui, rect, cx, theme),
             other => self.single_palette(ui, other, rect, cx, theme),
         }
+        ui.ctx().data_mut(|data| data.remove::<f32>(inset));
     }
 
-    /// A palette's menu button, at its header's right end, and its menu.
+    /// A palette's menu button, at the top left of its header as in Clip
+    /// Studio Paint, and its menu: the palette's own commands
+    /// ([`Palette::menu_commands`]), where it docks and floats, and
+    /// "Hide X Palette" last.
     fn palette_menu(
         &mut self,
         ui: &mut Ui,
         palette: Palette,
         rect: Rect,
-        floating: bool,
+        cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
         let button = if palette.sideways(rect) {
@@ -543,10 +622,7 @@ impl SuePaint {
                 vec2(18.0, 18.0),
             )
         } else {
-            Rect::from_min_size(
-                pos2(rect.right() - 22.0, rect.top() + 3.0),
-                vec2(18.0, 18.0),
-            )
+            Rect::from_min_size(pos2(rect.left() + 4.0, rect.top() + 5.0), vec2(18.0, 18.0))
         };
         let open = self.dock.menu == Some(palette);
         if icon_button(
@@ -555,7 +631,7 @@ impl SuePaint {
             Icon::Menu,
             true,
             open,
-            &tr!("dock-float-or-collapse", title = palette.title()),
+            &tr!("palette-menu-of", title = palette.title()),
             theme,
         ) {
             self.dock.menu = if open { None } else { Some(palette) };
@@ -565,19 +641,58 @@ impl SuePaint {
         }
         let place = self.dock.find(palette).map(|(holder, _)| holder);
         let side = self.dock.side_of(palette);
+        let floating = self
+            .dock
+            .floating
+            .iter()
+            .any(|(found, _)| *found == palette);
         // A window of its own needs Sue's own windows (not on a phone).
         let can_pop_out = !ui.ctx().embed_viewports();
         let popped_out = self.dock.windows.iter().any(|(found, _)| *found == palette);
+        let registry = crate::commands::registry();
+        let facts = sue_wm::Facts::of(cx);
+        let own: Vec<(String, &'static str, sue_wm::ItemState)> = palette
+            .menu_commands()
+            .iter()
+            .map(|command| {
+                let label = registry
+                    .label(command)
+                    .unwrap_or_else(|| (*command).to_owned());
+                (label, *command, self.state(command, &facts))
+            })
+            .collect();
         let mut chosen: Option<&str> = None;
+        let mut run: Option<&'static str> = None;
+        let at = if button.left() < rect.center().x {
+            pos2(button.left(), button.bottom() + 2.0)
+        } else {
+            pos2(button.right() - 190.0, button.bottom() + 2.0)
+        };
         let shown = egui::Area::new(Id::unique(("sue-paint-dock-menu", palette.key())))
             .order(Order::Tooltip)
             .fade_in(false)
-            .fixed_pos(pos2(button.right() - 170.0, button.bottom() + 2.0).max(pos2(4.0, 4.0)))
+            .fixed_pos(at.max(pos2(4.0, 4.0)))
             .show(ui.ctx(), |ui| {
                 sue_wm::widgets::window_frame(theme)
                     .inner_margin(egui::Margin::same(6))
                     .show(ui, |ui| {
-                        ui.set_min_width(158.0);
+                        ui.set_min_width(178.0);
+                        for (label, command, state) in &own {
+                            let entry = egui::Button::new(label.as_str())
+                                .selected(state.checked == Some(true))
+                                .frame(false);
+                            if ui.add_enabled(state.enabled, entry).clicked() {
+                                run = Some(command);
+                            }
+                        }
+                        if !own.is_empty() {
+                            ui.separator();
+                        }
+                        ui.label(
+                            egui::RichText::new(tr!("palette-docking"))
+                                .size(theme.small_size)
+                                .color(theme.muted),
+                        );
                         let mut item = |ui: &mut Ui, label: &str, key: &'static str| {
                             if ui.add(egui::Button::new(label).frame(false)).clicked() {
                                 chosen = Some(key);
@@ -606,7 +721,8 @@ impl SuePaint {
                         if !self.dock.iconized.contains(&palette) {
                             item(ui, &tr!("collapse-to-an-icon"), "icon");
                         }
-                        item(ui, &tr!("close"), "close");
+                        ui.separator();
+                        item(ui, &tr!("hide-palette", title = palette.title()), "close");
                     });
             });
         let inside = shown.response.rect;
@@ -638,8 +754,11 @@ impl SuePaint {
             Some("close") => self.close_palette(palette),
             _ => {}
         }
-        if chosen.is_some() || outside {
+        if chosen.is_some() || run.is_some() || outside {
             self.dock.menu = None;
+        }
+        if let Some(command) = run {
+            self.run(command, cx);
         }
     }
 
@@ -676,10 +795,17 @@ impl SuePaint {
         }
     }
 
-    /// `true` while `palette` shows: its switch is on and the dock has it
-    /// (docked, floating, in a window or as an icon in the strip).
+    /// `true` while `palette` shows: its switch is on and it is open
+    /// (docked in a row or column that is not folded, floating, in a
+    /// window) or opened beside the strip. Only an icon, it is not.
     pub(crate) fn palette_showing(&self, palette: Palette) -> bool {
-        palette.shown(&self.panels) && self.dock.has(palette)
+        let folded_row = match self.dock.find(palette) {
+            Some((Holder::Top, _)) => self.dock.row_folded[Row::Top.index()],
+            Some((Holder::Bottom, _)) => self.dock.row_folded[Row::Bottom.index()],
+            _ => false,
+        };
+        palette.shown(&self.panels)
+            && ((self.dock.is_open(palette) && !folded_row) || self.dock.popped == Some(palette))
     }
 
     /// Shows `palette` as the Window menu does: its switch on, at the
@@ -698,6 +824,12 @@ impl SuePaint {
         self.dock.choose(palette);
         if self.dock.iconized.contains(&palette) {
             self.dock.popped = Some(palette);
+        }
+        // In a row folded into icons: the row opens.
+        match self.dock.find(palette) {
+            Some((Holder::Top, _)) => self.dock.row_folded[Row::Top.index()] = false,
+            Some((Holder::Bottom, _)) => self.dock.row_folded[Row::Bottom.index()] = false,
+            _ => {}
         }
     }
 
@@ -920,7 +1052,7 @@ impl SuePaint {
         }
         if self.ready {
             for group in &laid.groups {
-                self.palette_menu(ui, group.active, group.body, false, theme);
+                self.palette_menu(ui, group.active, group.body, cx, theme);
             }
             self.dock.splitters(ui, &laid, theme);
         }
@@ -931,6 +1063,7 @@ impl SuePaint {
             self.strip_ui(ui, strip, Side::Left, &laid.left_icons, cx, theme);
         }
         self.side_arrows(ui, &laid, theme);
+        self.row_strips(ui, &laid, theme);
         if self.ready {
             self.floating_ui(ui, body, &shown, cx, theme);
             self.dock
@@ -1070,7 +1203,21 @@ impl SuePaint {
             ) {
                 self.dock.popped = if open { None } else { Some(*palette) };
             }
+            // Right-click: Display palette as tab, or as pop-up.
+            let right_clicked = ui.input(|input| {
+                input.pointer.secondary_clicked()
+                    && input
+                        .pointer
+                        .interact_pos()
+                        .is_some_and(|point| rect.contains(point))
+            });
+            if right_clicked {
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(Id::unique(STRIP_MENU), rect.left_bottom());
+                });
+            }
         }
+        self.strip_mode_menu(ui, theme);
         let Some(palette) = self
             .dock
             .popped
@@ -1100,7 +1247,7 @@ impl SuePaint {
                     .grip(ui, title_bar(palette, rect, None), palette, "popped");
                 self.draw_palette(ui, palette, rect, cx, theme);
                 grip_dots(ui, palette, rect, theme);
-                self.palette_menu(ui, palette, rect, false, theme);
+                self.palette_menu(ui, palette, rect, cx, theme);
                 rect
             });
         let inside = area.inner;
@@ -1111,8 +1258,132 @@ impl SuePaint {
                     .interact_pos()
                     .is_some_and(|point| !inside.contains(point) && !strip.contains(point))
         });
-        if clicked_outside && self.dock.menu.is_none() && !self.dock.dragging() {
+        // Displayed as a tab, it stays until its icon is clicked again.
+        if clicked_outside
+            && !self.strip_as_tab
+            && self.dock.menu.is_none()
+            && !self.dock.dragging()
+        {
             self.dock.popped = None;
+        }
+    }
+
+    /// The menu a right-click on a strip icon opens: Display palette as
+    /// tab (it stays open beside the strip) or as pop-up (a click
+    /// elsewhere closes it), for every icon of the strip.
+    fn strip_mode_menu(&mut self, ui: &mut Ui, theme: &Theme) {
+        let id = Id::unique(STRIP_MENU);
+        let Some(at) = ui.ctx().data(|data| data.get_temp::<Pos2>(id)) else {
+            return;
+        };
+        let mut chosen = None;
+        let shown = egui::Area::new(Id::unique("sue-paint-strip-menu"))
+            .order(Order::Tooltip)
+            .fade_in(false)
+            .fixed_pos(pos2(at.x - 200.0, at.y).max(pos2(4.0, 4.0)))
+            .show(ui.ctx(), |ui| {
+                sue_wm::widgets::window_frame(theme)
+                    .inner_margin(egui::Margin::same(6))
+                    .show(ui, |ui| {
+                        ui.set_min_width(190.0);
+                        for (label, as_tab) in [
+                            (tr!("display-palette-as-tab"), true),
+                            (tr!("display-palette-as-pop-up"), false),
+                        ] {
+                            let entry = egui::Button::new(label)
+                                .selected(self.strip_as_tab == as_tab)
+                                .frame(false);
+                            if ui.add(entry).clicked() {
+                                chosen = Some(as_tab);
+                            }
+                        }
+                    });
+            });
+        let inside = shown.response.rect;
+        let outside = ui.input(|input| {
+            input.pointer.primary_pressed()
+                && input
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|point| !inside.contains(point))
+        });
+        if let Some(as_tab) = chosen {
+            self.strip_as_tab = as_tab;
+        }
+        if chosen.is_some() || outside {
+            ui.ctx().data_mut(|data| data.remove::<Pos2>(id));
+        }
+    }
+
+    /// The top and bottom rows folded into icons (the Timeline under the
+    /// canvas, as Clip Studio Paint starts), closed rows' thin bars, and
+    /// the arrows of an open bottom row: one folds it into icons, two
+    /// close it.
+    fn row_strips(&mut self, ui: &mut Ui, laid: &Laid, theme: &Theme) {
+        for (row, strip) in [
+            (Row::Top, laid.top_strip.as_ref()),
+            (Row::Bottom, laid.bottom_strip.as_ref()),
+        ] {
+            let Some(strip) = strip else {
+                continue;
+            };
+            let rect = strip.rect;
+            ui.painter().rect_filled(rect, 0.0, theme.panel);
+            let edge = if row == Row::Bottom {
+                rect.top()
+            } else {
+                rect.bottom()
+            };
+            ui.painter().hline(rect.x_range(), edge, theme.hairline());
+            let mut x = rect.left() + 6.0;
+            for group in &strip.groups {
+                for palette in group {
+                    let icon =
+                        Rect::from_min_size(pos2(x, rect.center().y - 13.0), vec2(26.0, 26.0));
+                    x += 30.0;
+                    if self.ready {
+                        self.dock.grip(ui, icon, *palette, "row-icon");
+                    }
+                    if icon_button(
+                        ui,
+                        icon,
+                        palette.icon(),
+                        true,
+                        false,
+                        &palette.title(),
+                        theme,
+                    ) {
+                        // The row opens on that palette.
+                        self.dock.row_folded[row.index()] = false;
+                        self.dock.choose(*palette);
+                    }
+                }
+                x += 6.0;
+            }
+        }
+        for (row, bar) in &laid.row_handles {
+            ui.painter().rect_filled(*bar, 0.0, theme.panel);
+            let at = Rect::from_center_size(bar.center(), vec2(24.0, bar.height()));
+            let id = ("sue-paint-open-row", row.index());
+            let down = *row == Row::Top;
+            if vertical_arrows(ui, at, 2, down, id, &tr!("show-palettes"), theme) {
+                self.dock.row_hidden[row.index()] = false;
+            }
+        }
+        // An open bottom row folds into icons, or closes, from the right end
+        // of its header.
+        if let Some(row) = laid.bottom {
+            let fold =
+                Rect::from_min_size(pos2(row.right() - 40.0, row.top() + 6.0), vec2(16.0, 16.0));
+            let close = fold.translate(vec2(18.0, 0.0));
+            let tip = tr!("fold-column-into-icons");
+            if vertical_arrows(ui, fold, 1, true, "sue-paint-fold-bottom", &tip, theme) {
+                self.dock.row_folded[Row::Bottom.index()] = true;
+            }
+            let tip = tr!("hide-palettes");
+            if vertical_arrows(ui, close, 2, true, "sue-paint-close-bottom", &tip, theme) {
+                self.dock.row_hidden[Row::Bottom.index()] = true;
+            }
         }
     }
 
@@ -1154,7 +1425,9 @@ impl SuePaint {
                 .default_rect(rect)
                 .constrain_to(body)
                 .resizable(true)
-                .collapsible(false)
+                // Rolled up by a double-click on its title, or its arrow
+                // (Clip Studio Paint's Minimize).
+                .collapsible(true)
                 .title_bar(true)
                 .min_size(vec2(
                     palette.min_width().min(180.0),
@@ -1169,6 +1442,8 @@ impl SuePaint {
                         .grip(ui, title_bar(palette, area, None), palette, "floating");
                     self.draw_palette(ui, palette, area, cx, theme);
                     grip_dots(ui, palette, area, theme);
+                    // A floating palette has its menu too.
+                    self.palette_menu(ui, palette, area, cx, theme);
                     // Back into a column, from inside its window.
                     let back = Rect::from_min_size(
                         pos2(area.right() - 22.0, area.top() + 3.0),
@@ -1188,7 +1463,10 @@ impl SuePaint {
                         None
                     }
                 });
-            if let Some(inner) = &window {
+            // Kept while unrolled: a rolled-up window keeps its size.
+            if let Some(inner) = &window
+                && inner.inner.is_some()
+            {
                 self.keep_window(palette, inner.response.rect);
             }
             let redock = window
@@ -1335,7 +1613,7 @@ mod tests {
         let bar = laid.top.unwrap();
         assert_eq!((bar.width(), bar.height()), (1600.0, 38.0));
         assert_eq!(laid.center.top(), 38.0);
-        assert_eq!(laid.center.left(), 46.0 + 250.0);
+        assert_eq!(laid.center.left(), 46.0 + 322.0);
         assert_eq!(laid.center.right(), 1600.0 - 300.0 - STRIP);
         // Sub Tool, Tool Property and Brush Size are three palettes
         // stacked in one column, over the six color palettes as tabs.
