@@ -71,6 +71,14 @@ follow [Semantic Versioning](https://semver.org/).
   forgets files that are gone. Over the Hub the top bar has a search
   field for commands and buttons for Transfers and Settings; the arrow
   keys walk the Hub.
+- Sue Paint opens on its canvas. With no canvas open it keeps its menus
+  and palettes and shows New and Open where the canvas goes; on a phone
+  or tablet New opens the New canvas page. Its materials are the Hub's
+  **Materials** place, whose menu finds them again, draws their pictures
+  again and shows or moves their folder. File, Back to the Hub (and the
+  back arrow on a phone) goes to the Hub, where your work is in Files.
+  The Help menu now also links to the basic tips, this guide online,
+  questions and answers, contact and feedback.
 - The start pages draw Sue's icons and have rounded corners.
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an
@@ -175,6 +183,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+- Sue Paint's own start page (Draw, Projects, Manage Materials, Data
+  Transfers, Help and Settings, and its phone and tablet tabs), and File,
+  Start Page. Everything on it lives on: your work in the Hub's Files,
+  the materials in its Materials place, Transfers in the Hub's top bar,
+  Help in Sue Paint's Help menu, and its settings in Settings, Sue Paint.
 - **Browse Assets** is gone from Sue Paint's start page, on computers,
   phones and tablets, with everything that read another company's
   material site. Sue Paint no longer goes online for materials at all,
