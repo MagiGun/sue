@@ -795,6 +795,17 @@ impl SuePaint {
                     } else if drop_here {
                         painter.hline(full.x_range(), full.top(), theme.selected_stroke());
                     }
+                    // The row is a control of its own: Tab reaches it,
+                    // Space or Enter picks it, and it is read by its name.
+                    response.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::Role::ListItem,
+                            true,
+                            chosen || also,
+                            &info.name,
+                        )
+                    });
+                    sue_wm::ui::focus_ring(ui, &response, theme.radius(Radius::Xs), theme);
                     let mid = full.center().y;
                     let cell = metrics.icon + metrics.pad;
                     // The palette color: the eye's and the box's cells
@@ -988,7 +999,7 @@ impl SuePaint {
                         }
                         let mask_rect = Rect::from_min_size(
                             pos2(link.right() + metrics.gap, thumb.top()),
-                            egui::Vec2::new(metrics.thumb.y * 0.75, metrics.thumb.y),
+                            metrics.thumb,
                         );
                         let revision = arena.get_by_id(mask).map_or(0, sue_core::Entity::revision);
                         self.layer_thumbnail(ui, mask_rect, mask, revision, cx, theme);
@@ -1012,6 +1023,15 @@ impl SuePaint {
                             Id::unique(("sue-paint-mask", info.id.to_u128())),
                             Sense::click(),
                         );
+                        mask_response.widget_info(|| {
+                            egui::WidgetInfo::selected(
+                                egui::Role::Button,
+                                true,
+                                editing,
+                                &mask_name,
+                            )
+                        });
+                        sue_wm::ui::focus_ring(ui, &mask_response, theme.radius(Radius::Xs), theme);
                         if tooltip(mask_response, &Tip::new(&mask_name), theme).clicked() {
                             events.mask = Some(info.id);
                         }
