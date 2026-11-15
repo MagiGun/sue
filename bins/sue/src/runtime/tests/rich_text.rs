@@ -109,7 +109,12 @@ enum Line {
 /// `words`: either as a solid rect the layout put into the row's mesh on
 /// the letters (wide line spacing), or as egui's own line, which its
 /// section then names.
-fn drawn_line(text: &egui::epaint::TextShape, words: &str, line: Line, color: egui::Color32) -> bool {
+fn drawn_line(
+    text: &egui::epaint::TextShape,
+    words: &str,
+    line: Line,
+    color: egui::Color32,
+) -> bool {
     let format = section_of(text, words);
     let named = match line {
         Line::Under => format.underline,
@@ -481,5 +486,109 @@ fn rich_text_touch_bar_buttons_name_their_keys() {
         }
     }
     assert!(tip, "Copy's tip names Ctrl+C");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The arena as bytes (every entity, id and relation, never revisions),
+/// to compare before and after.
+fn arena_bytes(runtime: &Runtime) -> Vec<u8> {
+    let mut out = sue_core::codec::Writer::new();
+    runtime.engine.world.arena.encode(&mut out);
+    out.into_bytes()
+}
+
+#[test]
+fn rich_text_tables_go_in_and_come_out_as_one_undo_step() {
+    let (mut runtime, root) = runtime("rich-text-embeds");
+    let ctx = egui::Context::default();
+    let size = vec2(1440.0, 900.0);
+    let start = Instant::now();
+    frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+    let writer = AppletId::new(sue_writer::ID).unwrap();
+    runtime.request(
+        ShellRequest::Create {
+            applet: writer.clone(),
+            key: "blank".to_owned(),
+        },
+        &mut NoTextures,
+        start,
+    );
+    frames(&mut runtime, &ctx, size, start, |frame| {
+        if frame == 1 {
+            vec![egui::Event::Text("The start\nNight, Oil".to_owned())]
+        } else {
+            Vec::new()
+        }
+    });
+    let command = |runtime: &mut Runtime, command: &str| {
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: writer.clone(),
+                command: command.to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+    };
+    let undo = |runtime: &mut Runtime, redo: bool| {
+        let pressed = if redo {
+            key(egui::Key::Y, egui::Modifiers::COMMAND)
+        } else {
+            key(egui::Key::Z, egui::Modifiers::COMMAND)
+        };
+        let mut pressed = Some(pressed);
+        frames(runtime, &ctx, size, start, |frame| {
+            if frame == 1 {
+                pressed.take().into_iter().collect()
+            } else {
+                Vec::new()
+            }
+        });
+    };
+    let tables = |runtime: &Runtime| {
+        runtime
+            .engine
+            .world
+            .arena
+            .iter()
+            .filter(|(_, entity)| entity.ext::<sue_model::Table>().is_some())
+            .count()
+    };
+    // Text to Table and a new table, each one step: one undo takes the
+    // table, its place in the text and its mark away together, ids
+    // included; one redo brings all of it back.
+    for (name, how) in [
+        ("text to table", "table.from_text"),
+        ("insert table", "table.insert.3x2"),
+    ] {
+        runtime.typing.flush(&mut runtime.engine.history);
+        let before = arena_bytes(&runtime);
+        let had = tables(&runtime);
+        command(&mut runtime, how);
+        frames(&mut runtime, &ctx, size, start, |_| Vec::new());
+        runtime.typing.flush(&mut runtime.engine.history);
+        let after = arena_bytes(&runtime);
+        assert_eq!(tables(&runtime), had + 1, "{name} made a table");
+        assert!(
+            document(&runtime).0.contains(sue_model::OBJECT),
+            "{name} put the table in the text"
+        );
+        undo(&mut runtime, false);
+        assert!(
+            arena_bytes(&runtime) == before,
+            "one undo takes back {name}"
+        );
+        undo(&mut runtime, true);
+        assert!(
+            arena_bytes(&runtime) == after,
+            "one redo brings back {name}"
+        );
+        // Out of the table, at the end of the text, for the next one.
+        frames(&mut runtime, &ctx, size, start, |frame| match frame {
+            1 => vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+            2 => vec![key(egui::Key::End, egui::Modifiers::COMMAND)],
+            _ => Vec::new(),
+        });
+    }
     let _ = std::fs::remove_dir_all(&root);
 }
