@@ -920,3 +920,39 @@ fn every_input_fits_its_density_and_the_review_sheets_draw() {
         assert!(!page.name().is_empty());
     }
 }
+
+// ----- The picker box -----------------------------------------------------------
+
+/// Draws a picker box showing "Georgia", open while `open`.
+fn font_box(ui: &mut Ui, theme: &Theme, open: bool) -> Response {
+    picker_box(ui, "font", "Georgia", "Font", open, 160.0, theme)
+}
+
+#[test]
+fn a_picker_box_is_clicked_named_and_says_what_it_shows() {
+    let mut harness = Harness::new();
+    let response = harness.frame(vec![], |ui, theme| font_box(ui, theme, false));
+    assert_eq!(response.rect.width(), 160.0);
+    let at = response.rect.center();
+    let response = harness.click(at, |ui, theme| font_box(ui, theme, false));
+    assert!(response.clicked(), "a click reaches the caller");
+    let response = harness.frame(vec![], |ui, theme| font_box(ui, theme, true));
+    assert!(response.has_focus(), "a click gives it the keys");
+    let response = harness.key(Key::Enter, |ui, theme| font_box(ui, theme, false));
+    assert!(
+        response.clicked(),
+        "Enter while it holds focus opens it too"
+    );
+    harness.ctx.enable_accesskit();
+    let (_, output) = harness.frame_output(vec![], |ui, theme| font_box(ui, theme, true));
+    let node = output
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| update.nodes.iter())
+        .map(|(_, node)| node)
+        .find(|node| node.label() == Some("Font"))
+        .expect("the box is named");
+    assert_eq!(node.role(), egui::accesskit::Role::ComboBox);
+    assert_eq!(node.value(), Some("Georgia"));
+}

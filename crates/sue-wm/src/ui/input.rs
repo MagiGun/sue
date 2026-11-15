@@ -1712,6 +1712,55 @@ impl<'a, S: AsRef<str>> Dropdown<'a, S> {
     }
 }
 
+/// A box that looks like a [`dropdown`] showing `text`, `width` wide, for
+/// a choice whose list the caller draws itself (a font list with a search
+/// field, in a [`popover`](super::popover) under the box). `label` is the
+/// name assistive technology reads out and the tooltip shows; `open`
+/// turns its chevron up while the caller's list shows. A click, or Enter
+/// or Space while it holds focus, is the response's `clicked()`.
+pub fn picker_box(
+    ui: &mut Ui,
+    salt: impl AsIdSalt,
+    text: &str,
+    label: &str,
+    open: bool,
+    width: f32,
+    theme: &Theme,
+) -> Response {
+    let density = Density::of(ui);
+    let id = control_id(ui, IdSalt::new(salt));
+    let enabled = ui.is_enabled();
+    let rect = ui.allocate_space(vec2(width, density.control_height())).1;
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let response = ui
+        .interact(hit_rect(rect, density.min_hit()), id, sense)
+        .with_new_rect(rect);
+    if enabled && response.clicked_by(egui::PointerButton::Primary) {
+        // A click gives it focus, so the keys reach the caller's list and
+        // focus comes back here when it closes (no ring shows for a click).
+        ui.memory_mut(|memory| memory.request_focus(id));
+    }
+    let look = Look::of(ui, &response, enabled, open);
+    let flip = motion::timed(ui.ctx(), id.with("sue-chevron"), open, motion::Pace::Fast);
+    paint_dropdown(ui.painter(), rect, theme, density, text, look, flip);
+    let (name, shown) = (label.to_owned(), text.to_owned());
+    response.widget_info(|| {
+        let mut info = WidgetInfo::labeled(Role::ComboBox, enabled, &name);
+        info.current_text_value = Some(shown.clone());
+        info.selected = Some(open);
+        info
+    });
+    if label.is_empty() || open {
+        response
+    } else {
+        response.on_hover_text(label)
+    }
+}
+
 /// `true` when `focused` is one of the `count` rows of the list of `id`.
 fn is_row(id: Id, focused: Id, count: usize) -> bool {
     (0..count).any(|index| row_id(id, index) == focused)
