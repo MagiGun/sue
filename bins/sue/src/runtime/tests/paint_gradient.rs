@@ -668,10 +668,46 @@ fn sue_paint_fill_refers_to_the_layers_refer_multiple_names() {
     canvas.click_row("Leave out draft layers");
     assert!(bounded(&mut canvas));
     // The editing layer left out: only the others are looked at, so the
-    // ring (on another layer) still bounds, and nothing on the editing
-    // layer does.
+    // ring (on another layer) still bounds.
     canvas.click_row("Leave out the editing layer");
     assert!(bounded(&mut canvas), "the ring is on another layer");
+}
+
+#[test]
+fn sue_paint_fill_leaves_out_the_editing_layer() {
+    // A25V-23, A25-4: the fifth of the Exclude row. The ring is on the
+    // editing layer and the other layer is empty: looked at, the ring
+    // bounds the fill; left out, nothing does.
+    let mut canvas = Canvas::new("paint-fill-exclude-editing");
+    let middle = canvas.middle();
+    canvas.ring(middle, 60.0);
+    let ring_layer = canvas.top();
+    canvas.command("layer.new");
+    canvas.command("layer.select_below");
+    canvas.sub("tool.pick.fill", 1);
+    canvas.tool_property();
+    canvas.click_row("Refer multiple");
+    canvas.choose("Refer", "All layers");
+    let area = canvas.area();
+    let ring = canvas.bytes(ring_layer);
+    let lines = canvas.painted(ring_layer);
+    let depth = canvas.depth();
+    canvas.click(middle);
+    assert_eq!(canvas.depth(), depth + 1, "the fill is on the ring's layer");
+    let inside = canvas.painted(ring_layer) - lines;
+    assert!(
+        inside > 1_000 && inside < area / 4,
+        "the ring on the editing layer bounds it: {inside}"
+    );
+    canvas.undo();
+    assert_eq!(canvas.bytes(ring_layer), ring);
+    canvas.click_row("Leave out the editing layer");
+    canvas.click(middle);
+    let inside = canvas.painted(ring_layer) - lines;
+    assert!(
+        inside > area / 2,
+        "left out, the ring bounds nothing: {inside}"
+    );
 }
 
 #[test]
@@ -846,24 +882,36 @@ fn sue_paint_gradient_blends_by_its_mode_and_draws_nothing_past_its_end() {
     // Main to Sub Color: black to white.
     canvas.sub("tool.pick.gradient", 1);
     canvas.tool_property();
-    canvas.choose("Blending mode", "Multiply");
+    // Normal first: black to white across the middle.
     let depth = canvas.depth();
-    canvas.drag(middle - vec2(60.0, 0.0), middle + vec2(60.0, 0.0));
-    let lightest_channel = canvas
-        .bytes(layer)
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .map(|pixel| pixel[0].max(pixel[1]).max(pixel[2]))
-        .max()
-        .unwrap_or(0);
+    let (from, to) = (middle - vec2(60.0, 0.0), middle + vec2(60.0, 0.0));
+    canvas.drag(from, to);
+    assert_eq!(canvas.depth(), depth + 1, "the gradient was laid");
+    let width = sue_paint::doc::raster(canvas.arena(), layer)
+        .unwrap()
+        .width() as usize;
+    let height = canvas.bytes(layer).len() / 4 / width;
+    let centre = |canvas: &Canvas| {
+        let bytes = canvas.bytes(layer);
+        let at = ((height / 2) * width + width / 2) * 4;
+        i32::from(bytes[at])
+    };
+    let normal = centre(&canvas);
     assert!(
-        lightest_channel <= 1,
-        "white multiplied on black stays black: {lightest_channel}"
+        (normal - 128).abs() < 24,
+        "half gray in the middle: {normal}"
     );
-    if canvas.depth() > depth {
-        canvas.undo();
-    }
+    // Multiply, the other way: the middle is gray times gray.
+    canvas.choose("Blending mode", "Multiply");
+    canvas.drag(to, from);
+    assert_eq!(canvas.depth(), depth + 2, "multiplied on");
+    let multiplied = centre(&canvas);
+    assert!(
+        (multiplied - normal * normal / 255).abs() < 16,
+        "gray times gray: {multiplied} from {normal}"
+    );
+    canvas.undo();
+    canvas.undo();
     assert_eq!(canvas.bytes(layer), black);
     canvas.choose("Blending mode", "Normal");
     canvas.drag(middle - vec2(60.0, 0.0), middle + vec2(60.0, 0.0));
@@ -886,4 +934,112 @@ fn sue_paint_gradient_blends_by_its_mode_and_draws_nothing_past_its_end() {
         to_the_end * 4 < all_the_way,
         "only up to the end: {to_the_end} against {all_the_way}"
     );
+}
+
+#[test]
+fn sue_paint_gradient_layer_keeps_its_colors_and_its_lock() {
+    // FG-22: a live gradient layer keeps the colors it was made with
+    // (switching the drawing color must not change it or add an undo
+    // step), and a locked one takes no change from the canvas or Tool
+    // Property.
+    let mut canvas = Canvas::new("paint-gradient-keeps");
+    let middle = canvas.middle();
+    // Drawing Color to Transparent, made as a gradient layer.
+    canvas.sub("tool.pick.gradient", 0);
+    canvas.tool_property();
+    canvas.choose("Where to create", "New gradient layer");
+    canvas.drag(middle - vec2(80.0, 0.0), middle + vec2(80.0, 0.0));
+    let layer = canvas.top();
+    let made = canvas.entity(layer);
+    assert_eq!(made.class(), sue_paint::doc::GRADIENT_LAYER);
+    // The layer is current and Tool Property shows its gradient.
+    let depth = canvas.depth();
+    canvas.command("color.swap");
+    canvas.settle(6);
+    assert_eq!(canvas.depth(), depth, "no step from a color switch");
+    assert_eq!(canvas.entity(layer), made, "the layer keeps its colors");
+    canvas.command("color.swap");
+    canvas.settle(2);
+    // Locked: a drag on the canvas and Tool Property leave it alone.
+    canvas.command("layer.toggle.lock");
+    let locked = canvas.entity(layer);
+    let depth = canvas.depth();
+    canvas.drag(middle + vec2(80.0, 0.0), middle + vec2(80.0, 90.0));
+    let shape = canvas.reveal("Shape");
+    let circle = canvas
+        .widgets("Circle")
+        .into_iter()
+        .find(|rect| (rect.center().y - shape.center().y).abs() < shape.height());
+    if let Some(circle) = circle {
+        canvas.click(circle.center());
+    }
+    canvas.settle(4);
+    assert_eq!(canvas.depth(), depth, "a locked layer takes no step");
+    assert_eq!(canvas.entity(layer), locked, "and does not change");
+}
+
+#[test]
+fn sue_paint_new_gradient_layer_is_masked_to_the_selection() {
+    // FGV-34: Where to create, New gradient layer, with a selection: the
+    // layer comes with a mask of the selection, all in one undo step.
+    let mut canvas = Canvas::new("paint-gradient-masked");
+    let middle = canvas.middle();
+    canvas.sub("tool.selection", 0);
+    canvas.drag(middle - vec2(60.0, 40.0), middle + vec2(60.0, 40.0));
+    canvas.sub("tool.pick.gradient", 1);
+    canvas.tool_property();
+    canvas.choose("Where to create", "New gradient layer");
+    let before = canvas.layers();
+    let depth = canvas.depth();
+    canvas.drag(middle - vec2(100.0, 0.0), middle + vec2(100.0, 0.0));
+    assert_eq!(canvas.depth(), depth + 1, "one undo step");
+    let layer = canvas.top();
+    assert_eq!(canvas.entity(layer).class(), sue_paint::doc::GRADIENT_LAYER);
+    let mask = sue_paint::doc::mask_of(canvas.arena(), layer).expect("a mask");
+    let shown = canvas.painted(mask);
+    assert!(
+        shown > 1_000 && shown < canvas.area() / 4,
+        "the mask shows the selection only: {shown}"
+    );
+    canvas.undo();
+    assert_eq!(canvas.layers(), before);
+    assert!(canvas.arena().get_by_id(mask).is_err(), "the mask goes too");
+    canvas.redo();
+    assert_eq!(sue_paint::doc::mask_of(canvas.arena(), layer), Some(mask));
+}
+
+#[test]
+fn sue_paint_turning_selection_keeps_straight_on_enter_and_drops_on_escape() {
+    // FGV-20: Adjust angle after fixed, Enter and Esc.
+    let mut canvas = Canvas::new("paint-selection-turn-keys");
+    let middle = canvas.middle();
+    canvas.command("layer.new");
+    let layer = canvas.top();
+    canvas.sub("tool.selection", 0);
+    canvas.tool_property();
+    canvas.drag(middle - vec2(50.0, 50.0), middle + vec2(50.0, 50.0));
+    canvas.command("edit.fill");
+    let straight = canvas.bounds(layer).expect("filled");
+    canvas.undo();
+    canvas.command("select.none");
+    canvas.click_row("Adjust angle after fixed");
+    // Enter: kept as it was dragged, however the pointer moved.
+    canvas.drag(middle - vec2(50.0, 50.0), middle + vec2(50.0, 50.0));
+    canvas.frame(vec![egui::Event::PointerMoved(middle + vec2(0.0, 70.0))]);
+    canvas.frame(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    canvas.settle(2);
+    canvas.command("edit.fill");
+    assert_eq!(
+        canvas.bounds(layer),
+        Some(straight),
+        "Enter keeps it straight"
+    );
+    canvas.undo();
+    canvas.command("select.none");
+    // Esc: dropped, so there is no selection and Fill fills everything.
+    canvas.drag(middle - vec2(50.0, 50.0), middle + vec2(50.0, 50.0));
+    canvas.frame(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    canvas.settle(2);
+    canvas.command("edit.fill");
+    assert_eq!(canvas.painted(layer), canvas.area(), "Esc drops it");
 }
