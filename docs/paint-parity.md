@@ -148,7 +148,7 @@ The order of work is the plan at the end.
 | Export vectors | File > Special Export | done | Visible vector layers as SVG, each line an outline as wide as drawn |
 | Export layer comp (EX) | File > Special Export | done | Layer, Layer Comps keeps named sets of visibility, opacity and blend; each exports as its own picture |
 | Record timelapse | File > Timelapse > Record timelapse | done | A picture of the canvas after every change |
-| Export timelapse (video or GIF) | File > Timelapse > Export timelapse | done | Fitted to a length you choose; Clip Studio's presets run to 300 seconds |
+| Export timelapse (video or GIF) | File > Timelapse > Export timelapse | done | MP4, AVI or GIF, fitted to a length you choose; Clip Studio's presets run to 300 seconds. Aspect ratio, a preview that plays, and progress with Cancel while it runs in the background (CTV-7) |
 
 ## File: import, batch and scanning
 

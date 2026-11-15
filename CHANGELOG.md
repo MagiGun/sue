@@ -13,6 +13,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: movie, image sequence, animated GIF, PNG and WebP, cels and
+  timelapse exports run in the background. The window keeps drawing and
+  you can keep painting; a notice shows how far the export is, with a
+  Cancel button that leaves no file behind, and when it is done offers
+  Show in Folder. The export is of the picture as it was when it began.
+- Sue Paint: Export Timelapse plays a preview of the video before you
+  choose a file, takes an aspect ratio (the canvas's, 16:9, 9:16, 1:1,
+  4:5 or 4:3, the drawing fitted on white) and writes MP4 where Windows
+  has an encoder.
 - Sue Paint: drag the Fill tool across a picture to fill every area the
   drag crosses that is like the one it started in, as one undo step; the
   lines it crosses on the way stay as they are.

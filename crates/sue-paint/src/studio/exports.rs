@@ -136,8 +136,9 @@ impl Steps<'_> {
 /// file is let go or it is cancelled.
 static HELD: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
-/// Holds every export to `path` just before it writes (`hold`), or lets
-/// it go; scripted runs and tests use it to see an export while it runs.
+/// Holds every export to `path`, or into the folder `path` and those in
+/// it, just before it writes (`hold`), or lets it go; scripted runs and
+/// tests use it to see an export while it runs.
 #[doc(hidden)]
 pub fn hold_exports_to(path: &Path, hold: bool) {
     let mut held = HELD.lock().unwrap_or_else(PoisonError::into_inner);
@@ -156,7 +157,7 @@ pub(crate) fn before_writing(path: &Path, steps: Steps<'_>) -> Result<(), String
         HELD.lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
-            .any(|kept| kept == path)
+            .any(|kept| path.starts_with(kept))
     };
     while steps.0.is_some() && held() && steps.go_on().is_ok() {
         std::thread::sleep(std::time::Duration::from_millis(2));

@@ -199,7 +199,7 @@ pub fn shown(count: usize, step: usize) -> usize {
         return 0;
     }
     let step = step.max(1);
-    count.div_ceil(step) + usize::from((count - 1) % step != 0)
+    count.div_ceil(step) + usize::from(!(count - 1).is_multiple_of(step))
 }
 
 /// Which kept frames a timelapse video shows, how big and how fast: what

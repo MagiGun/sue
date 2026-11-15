@@ -834,6 +834,13 @@ impl SueApplet for SuePaint {
                 self.sheet = Some(crate::phone::Sheet::Layers);
                 true
             }
+            // Export Timelapse in a wide shape (the snapshot tour).
+            "dialog/timelapse-wide" => {
+                if let Some(Dialog::Timelapse(dialog)) = self.dialog.as_mut() {
+                    dialog.export.aspect = crate::timelapse::Aspect::Wide;
+                }
+                true
+            }
             "dialog/close" => {
                 self.dialog = None;
                 self.save_ask = None;

@@ -1591,6 +1591,17 @@ the shell every `ShellRequest::Saved`, and an applet runs a long transfer
 with `AppletContext::transfers.spawn`, a `JobPool` job reporting progress
 that the runtime polls every 100 ms while one runs. `clear_completed`
 forgets the finished ones. The Hub shows it in its Transfers popup.
+Work a person waits for (an export) is spawned with
+`spawn_noticed`: while it runs the shell keeps a notice for it with a
+progress bar (`Toast::progress`, moved on in place with
+`Toasts::set_progress`) and a Cancel button that cancels the job;
+closing the notice only hides it. `claim_written` keeps the Saved notice
+of such a file from listing it twice. Sue Paint's exports
+(`sue-paint/src/studio/exports.rs`) run this way on a clone of the arena
+taken when they start, so nothing drawn meanwhile reaches them; a file
+is written whole only after the last frame is made, and the files of a
+sequence wait under hidden temporary names (`Staged`) that a cancel
+takes away.
 
 **Start pages** (`sue_wm::start`). Shared widgets for the page a studio
 opens on: a rail of large buttons with labels (`rail`, the first round),

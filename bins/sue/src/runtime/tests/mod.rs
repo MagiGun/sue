@@ -37,6 +37,7 @@ mod paint_fill;
 mod paint_filter;
 mod paint_handles;
 mod paint_hub;
+mod paint_jobs;
 mod paint_layers;
 mod paint_menus;
 mod paint_palettes;

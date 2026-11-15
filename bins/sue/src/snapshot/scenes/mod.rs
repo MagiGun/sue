@@ -25,6 +25,7 @@ mod paint_figure;
 mod paint_fill;
 mod paint_filters;
 mod paint_handles;
+mod paint_jobs;
 mod paint_layers;
 mod paint_modifiers;
 mod paint_saving;
@@ -97,6 +98,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_comic::frames(tour)?;
     paint_filters::dialogs(tour)?;
     paint_timeline::timeline(tour)?;
+    // 11j1 to 11j3. Exports in the background, and Export Timelapse.
+    paint_jobs::exports(tour)?;
     paint_view::marks(tour)?;
     paint_canvas_chrome::window(tour)?;
     paint_layers::property(tour)?;
