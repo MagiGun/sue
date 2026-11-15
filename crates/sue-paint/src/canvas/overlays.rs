@@ -351,7 +351,8 @@ impl SuePaint {
             Some(
                 Gesture::Lasso { points, .. }
                 | Gesture::Outline { points, .. }
-                | Gesture::LassoFill { points, .. },
+                | Gesture::LassoFill { points, .. }
+                | Gesture::ShrinkLasso { points, .. },
             ) => {
                 let path = points.iter().copied().map(screen).collect::<Vec<_>>();
                 painter.add(Shape::line(path, Stroke::new(1.0, theme.border_active)));

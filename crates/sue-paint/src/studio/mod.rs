@@ -353,6 +353,19 @@ pub(crate) enum Gesture {
     },
     /// Picking colors while the button is down.
     Pick { mode: u8 },
+    /// The Fill tool pressed and dragged: every area the drag crosses
+    /// fills on release, as one undo step (`seeds` in picture pixels).
+    Bucket {
+        sub: Box<crate::tools::SubTool>,
+        seeds: Vec<[f32; 2]>,
+    },
+    /// Shrink selection: a lasso whose selection shrinks to what is drawn
+    /// inside it.
+    ShrinkLasso {
+        sub: Box<crate::tools::SubTool>,
+        op: Op,
+        points: Vec<[f32; 2]>,
+    },
 }
 
 /// Which palettes show.

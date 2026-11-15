@@ -13,6 +13,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: drag the Fill tool across a picture to fill every area the
+  drag crosses that is like the one it started in, as one undo step; the
+  lines it crosses on the way stay as they are.
+- Sue Paint: Shrink selection, the Selection area tool's seventh sub
+  tool: draw round a drawing and the selection shrinks to the drawing,
+  with the holes it closes in. Its path shows while you draw it.
+- Sue Paint: rectangle and ellipse selections keep the sub tool's
+  Aspect while you drag, and selection shapes soften their edge by its
+  Anti-aliasing.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
@@ -192,6 +201,15 @@ follow [Semantic Versioning](https://semver.org/).
 - The Blend tool works on a layer's mask while Edit Mask is on, so a
   mask's edge can be softened with Blur.
 
+- Sue Paint: in an animation, Fill, Close and fill, Auto Select and
+  Shrink selection look only at the cels of the frame shown, and a
+  folder set as the reference layer (an animation folder, say) is what
+  they refer to as the reference.
+- Sue Paint: while a layer's mask is edited, Fill, Close and fill,
+  lasso fill, Gradient and Edit, Fill write to the mask: any color shows
+  the layer, the transparent color hides it.
+- Sue Paint: Fill, Gradient and Edit, Fill with the transparent color
+  clear what they cover instead of painting the drawing color.
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait
@@ -350,6 +368,8 @@ follow [Semantic Versioning](https://semver.org/).
   would lose: Sue Paint says why and paints nothing.
 - Exporting a PSD reads a layer mask wherever it sits, also a gray one.
 
+- Sue Paint: Auto Select with a selection already there is no longer
+  cut down to that selection.
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
   the update. It now takes the theme as it ships; colors you picked

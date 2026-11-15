@@ -2522,3 +2522,5 @@ copies-picture-from-source = Copies the picture from where Alt and click set, as
 
 # P4-1a: brush tools on the new engine
 keyframes-on-no-drawing = { $name } has keyframes on, so it moves as its keys say and takes no strokes. Turn off Enable Keyframes on This Layer to draw on it.
+# P4-1b: selection, fill, gradient on the canvas
+name-shrink-selection = Shrink selection

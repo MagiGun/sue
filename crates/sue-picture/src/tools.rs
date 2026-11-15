@@ -296,6 +296,8 @@ impl Tool {
                     5,
                     tip(20.0, |t| t.size_by.pressure = false),
                 ),
+                // A lasso whose selection shrinks to what is drawn in it.
+                plain("Shrink selection", crate::select::SHRINK_SELECTION),
             ],
             // Clip Studio Paint's three: the editing layer, every layer,
             // and the reference layers.
