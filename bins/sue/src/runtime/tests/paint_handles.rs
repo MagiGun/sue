@@ -377,7 +377,7 @@ fn sue_paint_mesh_transformation_bends_by_a_lattice_point() {
     // and down in the bar), a point bends what is near it, OK and Cancel.
     let mut driver = PaintDriver::new("paint-mesh");
     let (rect, from, to) = box_to_transform(&mut driver, "edit.transform.mesh");
-    for name in ["Points across", "Points down", "OK", "Cancel"] {
+    for name in ["Across", "Down", "OK", "Cancel"] {
         assert!(
             driver.texts.iter().any(|(text, _)| text == name),
             "{name} is on the bar: {:?}",
