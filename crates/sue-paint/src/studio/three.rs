@@ -253,6 +253,9 @@ impl SuePaint {
                 properties.set(key, value);
             }
         }
+        if let Some(draft) = self.three_draft.as_mut() {
+            draft.shown = shown_now(&cx.world.arena, layer, draft.model);
+        }
         let Some(drawn) = crate::three::buffers_of(&cx.world.arena, layer, view, size)
             .and_then(|buffers| crate::three::draw(&buffers, view))
         else {
@@ -273,15 +276,20 @@ impl SuePaint {
 
     /// Keeps 3D layer `layer` and its model as they are now, before a drag
     /// changes them in place, unless a drag of the same layer already did.
+    ///
+    /// A draft left by a drag that never ended (a gesture taken away, a
+    /// second finger) is dropped when anything has changed the layer or
+    /// its model since that drag last showed them (an undo, a command),
+    /// so a drag never records against a state that is gone.
     fn begin_draft(&mut self, arena: &sue_core::Arena, layer: EntityId) {
-        if self
-            .three_draft
-            .as_ref()
-            .is_some_and(|draft| draft.layer == layer)
-        {
+        let model = crate::three::model_of(arena, layer);
+        if self.three_draft.as_ref().is_some_and(|draft| {
+            draft.layer == layer
+                && draft.model == model
+                && draft.shown == shown_now(arena, layer, model)
+        }) {
             return;
         }
-        let model = crate::three::model_of(arena, layer);
         self.three_draft = Some(Draft3d {
             layer,
             model,
@@ -293,6 +301,7 @@ impl SuePaint {
                 .and_then(|raster| raster.bytes())
                 .map(<[u8]>::to_vec)
                 .unwrap_or_default(),
+            shown: shown_now(arena, layer, model),
         });
     }
 
@@ -780,6 +789,26 @@ pub(crate) struct Draft3d {
     layer_props: Vec<(&'static str, Option<Value>)>,
     model_props: Vec<(&'static str, Option<Value>)>,
     pixels: Vec<u8>,
+    /// The properties as the drag last showed them, to tell a draft whose
+    /// drag never ended from one still going.
+    shown: Shown,
+}
+
+/// A 3D layer's view properties and its model's, as [`snapshot`] reads
+/// them.
+type Shown = (
+    Vec<(&'static str, Option<Value>)>,
+    Vec<(&'static str, Option<Value>)>,
+);
+
+/// What [`Draft3d::shown`] compares: layer `layer` and model `model` now.
+fn shown_now(arena: &sue_core::Arena, layer: EntityId, model: Option<EntityId>) -> Shown {
+    (
+        snapshot(arena, layer, &view_keys()),
+        model
+            .map(|model| snapshot(arena, model, &MODEL_KEYS))
+            .unwrap_or_default(),
+    )
 }
 
 /// The properties of a figure's body shape.
