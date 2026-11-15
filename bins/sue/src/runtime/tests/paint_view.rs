@@ -40,7 +40,7 @@ fn sue_paint_runs_every_view_command() {
         .filter(|command| command.group == "view")
         .map(|command| command.name)
         .collect();
-    assert_eq!(names.len(), 42, "{names:?}");
+    assert_eq!(names.len(), 43, "{names:?}");
     let paper = |runtime: &Runtime| {
         sue_paint::doc::layers(&runtime.engine.world.arena, picture)
             .into_iter()
@@ -71,7 +71,7 @@ fn sue_paint_runs_every_view_command() {
         // Snapping, which a picture without a special ruler grays).
         let steps = usize::from(*name == "view.paper");
         assert_eq!(runtime.engine.history.depth(), depth + steps, "{name}");
-        // Esc closes what opened (Preview Settings).
+        // Esc closes what opened (Preview Settings, Grid Settings).
         frame_with(
             &mut runtime,
             &ctx,

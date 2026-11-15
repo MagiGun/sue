@@ -85,10 +85,9 @@ fn canvas(tag: &str) -> (PaintDriver, EntityId) {
 
 /// The commands of the group that run at once; the others open a
 /// dialog.
-const AT_ONCE: [&str; 9] = [
+const AT_ONCE: [&str; 8] = [
     "filter.invert",
     "filter.grayscale",
-    "filter.lines_tones",
     "filter.blur",
     "filter.blur_strong",
     "filter.smooth",
