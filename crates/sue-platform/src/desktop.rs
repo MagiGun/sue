@@ -793,12 +793,21 @@ impl DesktopHost {
                 // and time, which winit's event does not keep when one
                 // message stands for several packets.
                 #[cfg(target_os = "windows")]
+                let history = sue_winpen::pen_history(touch.id as u32);
+                // A touch with Windows Ink pen packets is the pen; one
+                // without is a finger.
+                #[cfg(target_os = "windows")]
+                if phase == egui::TouchPhase::Start {
+                    let pen = !history.is_empty();
+                    crate::stylus::real(|stream| stream.mark_touch(touch.id, pen));
+                }
+                #[cfg(target_os = "windows")]
                 if let Ok(origin) = self.window.inner_position()
                     && let Some(packet) = self.ink.take(
                         touch.id,
                         [touch.location.x, touch.location.y],
                         [origin.x, origin.y],
-                        sue_winpen::pen_history(touch.id as u32),
+                        history,
                         now,
                     )
                 {
