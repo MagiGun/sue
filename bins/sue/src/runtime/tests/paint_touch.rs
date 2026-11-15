@@ -466,7 +466,11 @@ fn a_t_key_runs_the_command_chosen_for_it_and_undo_takes_it_back() {
     tablet.tap(&sue_lang::text("paint", "undo"));
     assert_eq!(layer_count(&tablet.runtime), before, "Undo took it back");
     tablet.tap(&sue_lang::text("paint", "redo"));
-    assert_eq!(layer_count(&tablet.runtime), before + 1, "Redo made it again");
+    assert_eq!(
+        layer_count(&tablet.runtime),
+        before + 1,
+        "Redo made it again"
+    );
 }
 
 // FG-36 (01:04:28, 01:06:57): the finger button and the timelapse on
