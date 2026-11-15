@@ -371,15 +371,9 @@ fn ok_and_undo_pair(
     result
 }
 
-#[test]
-fn level_correction_changes_one_channel_alone() {
-    // H-1: Level Correction has RGB, Red, Green and Blue.
-    let (mut driver, layer) = canvas("paint-filter-levels");
-    let before = pixels_of(&driver, layer);
-    let from = standing(&driver);
-    driver.command("filter.levels");
-    driver.settle(4);
-    shows_all(&driver, &["RGB", "Red", "Green", "Blue", "Gamma"]);
+/// On an open Level Correction: Red, then a click near the start of
+/// the output Highlight's track, which pulls red's white far down.
+fn pull_red_highlight_down(driver: &mut PaintDriver) {
     driver.click_text("Red");
     // The output's Highlight is the lower of the two: a click near the
     // start of its track pulls red's white far down.
@@ -411,6 +405,18 @@ fn level_correction_changes_one_channel_alone() {
     driver.step(vec![press(true)]);
     driver.step(vec![press(false)]);
     driver.settle(4);
+}
+
+#[test]
+fn level_correction_changes_one_channel_alone() {
+    // H-1: Level Correction has RGB, Red, Green and Blue.
+    let (mut driver, layer) = canvas("paint-filter-levels");
+    let before = pixels_of(&driver, layer);
+    let from = standing(&driver);
+    driver.command("filter.levels");
+    driver.settle(4);
+    shows_all(&driver, &["RGB", "Red", "Green", "Blue", "Gamma"]);
+    pull_red_highlight_down(&mut driver);
     let after = ok_and_undo_pair(&mut driver, layer, &from);
     let (mut darker, mut same) = (0, true);
     for (old, new) in before
@@ -422,6 +428,64 @@ fn level_correction_changes_one_channel_alone() {
         if old[3] == 0 {
             continue;
         }
+        if new[0] < old[0] {
+            darker += 1;
+        }
+        same &= new[1] == old[1] && new[2] == old[2];
+    }
+    assert!(darker > 1000, "red pulled down: {darker}");
+    assert!(same, "green and blue untouched");
+}
+
+#[test]
+fn a_level_correction_layer_changes_one_channel_alone() {
+    // H-1: the channels work on a correction layer too, and its stored
+    // text keeps them.
+    let (mut driver, _) = canvas("paint-filter-levels-layer");
+    let shown = |driver: &PaintDriver| -> Vec<u8> {
+        let picture = picture(driver);
+        sue_paint::composite::render(
+            &driver.runtime.engine.world.arena,
+            picture,
+            [0, 0, 1600, 1200],
+            sue_paint::composite::RenderOptions::default(),
+        )
+    };
+    let before = shown(&driver);
+    driver.command("layer.correction.levels");
+    driver.settle(4);
+    shows_all(&driver, &["RGB", "Red", "Green", "Blue"]);
+    pull_red_highlight_down(&mut driver);
+    let base = driver.runtime.engine.history.depth();
+    driver.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    assert_eq!(driver.runtime.engine.history.depth(), base + 1, "one step");
+    let arena = &driver.runtime.engine.world.arena;
+    let stored: Vec<String> = sue_paint::doc::layers(arena, picture(&driver))
+        .iter()
+        .filter_map(|info| {
+            arena
+                .get_by_id(info.id)
+                .ok()?
+                .property(sue_paint::doc::CORRECTION_FILTER)?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect();
+    assert!(
+        stored
+            .iter()
+            .any(|text| text.starts_with("levels:") && text.contains('|')),
+        "the channels are kept: {stored:?}"
+    );
+    let after = shown(&driver);
+    let (mut darker, mut same) = (0, true);
+    for (old, new) in before
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(after.as_chunks::<4>().0)
+    {
         if new[0] < old[0] {
             darker += 1;
         }
@@ -493,7 +557,11 @@ fn a_click_on_the_gradient_bar_adds_a_stop_and_delete_takes_it_away() {
             .map(|(text, _)| text.clone())
             .collect()
     };
-    assert!(field(&driver).contains(&"0".to_owned()), "{:?}", field(&driver));
+    assert!(
+        field(&driver).contains(&"0".to_owned()),
+        "{:?}",
+        field(&driver)
+    );
     // The bar lies over the stop's settings, in the same column.
     let at = egui::pos2(position.left() + 90.0, position.top() - 52.0);
     let press = |pressed| egui::Event::PointerButton {
