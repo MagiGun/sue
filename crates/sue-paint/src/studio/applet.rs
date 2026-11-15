@@ -49,7 +49,7 @@ impl SuePaint {
                 "Borders of chosen and focused controls",
             ),
             color("text", "#e6e6e6", "Primary text and active icons"),
-            color("muted", "#a4a4a4", "Secondary text"),
+            color("muted", "#c4c4c4", "Secondary text"),
             color("selection", "#6a6a6a", "Text selection highlight"),
             color("selection_text", "#ffffff", "Text inside a selection"),
             color("grid", "#474747", "Grids and rulers"),

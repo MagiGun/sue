@@ -628,6 +628,42 @@ mod tests {
         assert_eq!(schema.get("colors.muted").unwrap().to_string(), "#777777");
     }
 
+    /// Sue Paint's Custom colors start as the Gray theme. Before format 7
+    /// they started as the old Gray, with its hard to read secondary text;
+    /// a file that never changed them takes Gray's as it ships now, and a
+    /// color someone picked stays.
+    #[test]
+    fn sue_paints_custom_colors_leave_the_old_gray() {
+        let gray = crate::builtin_presets()
+            .into_iter()
+            .find(|preset| preset.id == "gray")
+            .unwrap();
+        let now = RiceSchema::parse(DEFAULT_RICE).unwrap();
+        for (path, value) in &gray.values {
+            let own = path.replace("colors.", "sue_paint_colors.");
+            assert_eq!(now.get(&own).as_ref(), Some(value), "{own} starts as Gray");
+        }
+        let old = RiceSchema::parse(V6).unwrap();
+        assert_eq!(
+            old.get("sue_paint_colors.muted").unwrap().to_string(),
+            "#a4a4a4"
+        );
+        let migration = migrate(V6).unwrap().unwrap();
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert_eq!(
+            schema.get("sue_paint_colors.muted").unwrap().to_string(),
+            "#c4c4c4"
+        );
+        let picked = V6.replacen("muted = \"#a4a4a4\"", "muted = \"#b5b5b5\"", 1);
+        assert_ne!(picked, V6);
+        let migration = migrate(&picked).unwrap().unwrap();
+        let schema = RiceSchema::parse(&migration.text).unwrap();
+        assert_eq!(
+            schema.get("sue_paint_colors.muted").unwrap().to_string(),
+            "#b5b5b5"
+        );
+    }
+
     #[test]
     fn unreadable_files_are_errors() {
         assert!(migrate("[broken\n").is_err());
