@@ -590,6 +590,9 @@ pub struct SubTool {
     /// Holding the pen still at a stroke's end makes it a clean shape
     /// (Smart Shape).
     pub smart_shape: bool,
+    /// The settings, by their stable names, that Tool Property leaves
+    /// out (the closed eyes of Sub Tool Detail, which shows every one).
+    pub hidden: Vec<String>,
 }
 
 impl SubTool {
@@ -629,6 +632,7 @@ impl SubTool {
             leading: 0.0,
             justify: 0,
             smart_shape: true,
+            hidden: Vec::new(),
         }
     }
 
@@ -1164,6 +1168,35 @@ impl Toolbox {
         self.slots.insert(to, slot);
         self.current = moved_index(current, from, to);
         true
+    }
+
+    /// Takes entry `slot` off the tool palette with its sub tools (Delete
+    /// Tool). The last entry stays; the current one moves to a neighbour.
+    pub fn remove_slot(&mut self, slot: usize) -> Option<ToolSlot> {
+        if slot >= self.slots.len() || self.slots.len() <= 1 {
+            return None;
+        }
+        let removed = self.slots.remove(slot);
+        if self.current > slot || self.current >= self.slots.len() {
+            self.current = self.current.saturating_sub(1);
+        }
+        Some(removed)
+    }
+
+    /// Puts `entry` on the tool palette at place `at` (clamped), as a
+    /// removed one comes back (Add Tool from Default, undoing Delete
+    /// Tool). Returns its place; the current entry stays current.
+    pub fn insert_slot(&mut self, at: usize, mut entry: ToolSlot) -> usize {
+        if entry.subs.is_empty() {
+            return self.current;
+        }
+        entry.settle();
+        let at = at.min(self.slots.len());
+        self.slots.insert(at, entry);
+        if self.current >= at && self.slots.len() > 1 {
+            self.current += 1;
+        }
+        at
     }
 
     /// Renames entry `slot`.
@@ -2023,5 +2056,38 @@ mod tests {
         toolbox.pick(Tool::Fill);
         toolbox.pick(Tool::Pen);
         assert_eq!(toolbox.current_slot(), home);
+    }
+
+    #[test]
+    fn a_removed_tool_comes_back_where_it_was() {
+        let mut toolbox = Toolbox::default();
+        let fill = slot_named(&toolbox, "Fill");
+        toolbox.pick(Tool::Pen);
+        let pen = toolbox.current_slot();
+        let before = toolbox.clone();
+        let removed = toolbox.remove_slot(fill).unwrap();
+        assert_eq!(removed.name, "Fill");
+        assert_eq!(toolbox.slots().len(), before.slots().len() - 1);
+        assert_eq!(toolbox.current_entry().name, "Pen", "the Pen stays out");
+        assert_eq!(toolbox.insert_slot(fill, removed), fill);
+        assert_eq!(toolbox, before);
+        assert_eq!(toolbox.current_slot(), pen);
+        // The current entry going leaves a neighbour current.
+        toolbox.pick_slot(fill);
+        toolbox.remove_slot(fill).unwrap();
+        assert!(toolbox.current_slot() < toolbox.slots().len());
+        // The last entry stays.
+        let mut one = Toolbox::default();
+        while one.slots().len() > 1 {
+            one.remove_slot(0).unwrap();
+        }
+        assert!(one.remove_slot(0).is_none());
+    }
+
+    #[test]
+    fn a_new_sub_tool_hides_nothing_in_tool_property() {
+        for slot in Toolbox::default().slots() {
+            assert!(slot.subs().iter().all(|sub| sub.hidden.is_empty()));
+        }
     }
 }
