@@ -216,6 +216,19 @@ mod language_tests {
                 .iter()
                 .map(|kind| kind.name.clone()),
         );
+        // The 3D object's angles, the body types and the body parts of
+        // the body shape chart.
+        names.extend(
+            crate::three::ANGLES
+                .iter()
+                .map(|(name, _)| (*name).to_owned()),
+        );
+        names.extend(
+            crate::figure::Build::ALL
+                .iter()
+                .map(|build| build.name().to_owned()),
+        );
+        names.extend(crate::figure::PARTS.iter().map(|part| (*part).to_owned()));
         let templates = crate::templates::CanvasTemplates::builtin();
         names.extend(templates.categories().iter().map(|(_, name)| name.clone()));
         names.extend(

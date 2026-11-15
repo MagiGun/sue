@@ -1,6 +1,8 @@
 //! The 3D drawing figure's commands, run from its tool property: a
 //! preset pose, Flip pose, Reset pose, Register pose as material and the
-//! two scanners that pose a figure or a hand from a photo.
+//! two scanners that pose a figure or a hand from a photo; the 3D
+//! object's Put on the ground, its resets and preset angles; and the
+//! body shape's Initialize and Register body shape as material.
 //!
 //! Every entry has its own `run` and `state`, its label key in
 //! `paint.ftl`, its icon from `sue_wm::icons` and its flags. None ships
@@ -20,13 +22,20 @@ use crate::studio::SuePaint;
 /// its photo. A test holds it to the flags of the table, which Auto
 /// Actions read.
 #[cfg_attr(not(test), allow(dead_code))]
-pub(super) const RECORDABLE: [&str; 6] = [
+pub(super) const RECORDABLE: [&str; 13] = [
     "figure.register_pose",
     "figure.pose_scanner",
     "figure.hand_scanner",
     "figure.flip",
     "figure.reset",
     "figure.preset.",
+    "figure.object.ground",
+    "figure.object.reset_position",
+    "figure.object.reset_angle",
+    "figure.object.reset_scale",
+    "figure.object.angle.",
+    "figure.body.initialize",
+    "figure.body.register",
 ];
 
 /// The group's commands that leave the canvas (quit, print or open a
@@ -69,6 +78,85 @@ fn preset(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
             .filter(|index| *index < body.presets().len())
             .map(|index| body.preset(index))
     });
+}
+
+/// Put on the ground: the current 3D layer's object lowered or lifted so
+/// it stands on the ground.
+fn ground(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.ground_object(cx);
+}
+
+/// Reset position: the current 3D layer's object back where it was made.
+fn reset_position(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.place_object(cx, &tr!("reset-position"), |now, _| {
+        Some(crate::three::Placement {
+            position: [0.0; 3],
+            ..now
+        })
+    });
+}
+
+/// Reset angle: the current 3D layer's object turned back as made.
+fn reset_angle(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.place_object(cx, &tr!("reset-angle"), |now, _| {
+        Some(crate::three::Placement {
+            turn: [0.0; 3],
+            ..now
+        })
+    });
+}
+
+/// Reset scale: the current 3D layer's object back to its size as made.
+fn reset_scale(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.place_object(cx, &tr!("reset-scale"), |now, _| {
+        Some(crate::three::Placement { scale: 1.0, ..now })
+    });
+}
+
+/// `figure.object.angle.<n>`: the current 3D layer's object turned to
+/// angle `n` of [`crate::three::ANGLES`].
+fn angle(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let Some((_, turn)) = call
+        .arg
+        .parse::<usize>()
+        .ok()
+        .and_then(|index| crate::three::ANGLES.get(index))
+    else {
+        return;
+    };
+    paint.place_object(cx, &tr!("object-angle"), |now, _| {
+        Some(crate::three::Placement { turn: *turn, ..now })
+    });
+}
+
+/// Initialize: the figure's body shape back as Sue Paint makes it.
+fn initialize_body(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.shape_figure(cx, &tr!("initialize-body-shape"), |now| {
+        Some(now.initialized())
+    });
+}
+
+/// Register body shape as material: the figure's body shape kept in the
+/// materials folder.
+fn register_body(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.register_body_shape(cx);
+}
+
+/// Works while the current layer is a 3D layer with an object.
+fn on_object(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    super::when(paint.object_3d(facts.arena).is_some())
+}
+
+/// `figure.object.angle.<n>` works while the current layer is a 3D layer
+/// and there is an angle `n`.
+fn on_angle(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    super::when(
+        paint.object_3d(facts.arena).is_some()
+            && call
+                .arg
+                .parse::<usize>()
+                .is_ok_and(|index| index < crate::three::ANGLES.len()),
+    )
 }
 
 /// The body of the drawing figure, hand or head on the current layer.
@@ -191,6 +279,56 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         on_preset,
     )
     .with(Flags::FAMILY.with(Flags::HIDDEN)),
+    c(
+        "figure.object.ground",
+        "put-on-ground",
+        Icon::ArrowDown,
+        ground,
+        on_object,
+    ),
+    c(
+        "figure.object.reset_position",
+        "reset-position",
+        Icon::Reset,
+        reset_position,
+        on_object,
+    ),
+    c(
+        "figure.object.reset_angle",
+        "reset-angle",
+        Icon::Reset,
+        reset_angle,
+        on_object,
+    ),
+    c(
+        "figure.object.reset_scale",
+        "reset-scale",
+        Icon::Reset,
+        reset_scale,
+        on_object,
+    ),
+    c(
+        "figure.object.angle.",
+        "object-angles",
+        Icon::RotateRight,
+        angle,
+        on_angle,
+    )
+    .with(Flags::FAMILY.with(Flags::HIDDEN)),
+    c(
+        "figure.body.initialize",
+        "initialize-body-shape",
+        Icon::Reset,
+        initialize_body,
+        on_body,
+    ),
+    c(
+        "figure.body.register",
+        "register-body-shape-as-material",
+        Icon::MaterialPose,
+        register_body,
+        on_body,
+    ),
 ];
 
 #[cfg(test)]
@@ -245,6 +383,6 @@ mod tests {
             .filter(|command| command.is_family())
             .map(|command| command.name)
             .collect();
-        assert_eq!(family, ["figure.preset."]);
+        assert_eq!(family, ["figure.preset.", "figure.object.angle."]);
     }
 }
