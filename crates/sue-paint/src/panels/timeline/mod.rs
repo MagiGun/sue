@@ -14,6 +14,7 @@ mod playback;
 mod tracks;
 mod view;
 
+pub(crate) use bar::icon;
 pub(crate) use edit::Action;
 pub(crate) use view::TimelineView;
 
@@ -216,7 +217,8 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
-        ui.painter().rect_filled(rect, 0.0, theme.panel);
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::ZERO, theme.panel);
         ui.painter()
             .hline(rect.x_range(), rect.top(), theme.hairline());
         let (body, _) = header(

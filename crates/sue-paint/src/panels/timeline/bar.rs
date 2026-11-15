@@ -18,14 +18,14 @@ use crate::studio::SuePaint;
 type Button = Option<(&'static str, &'static str, bool)>;
 
 /// An icon of the shared set by its stable name.
-pub(super) fn icon(name: &str) -> Icon {
+pub(crate) fn icon(name: &str) -> Icon {
     Icon::from_name(name).unwrap_or(Icon::More)
 }
 
 impl SuePaint {
     /// The name a button shows on hover: the command's label and the keys
     /// that run it.
-    pub(super) fn button_name(&self, cx: &AppletContext<'_>, command: &str) -> String {
+    pub(crate) fn button_name(&self, cx: &AppletContext<'_>, command: &str) -> String {
         let label = crate::commands::registry()
             .label(command)
             .unwrap_or_else(|| command.to_owned())

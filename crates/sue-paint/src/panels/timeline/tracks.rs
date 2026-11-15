@@ -5,7 +5,9 @@
 //! drag or Shift and a click; what is picked moves by a drag; a right
 //! click opens the commands for that frame.
 
-use egui::{Align2, CornerRadius, CursorIcon, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use egui::{
+    Align2, CornerRadius, CursorIcon, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2,
+};
 use sue_core::EntityId;
 use sue_model::{Sequence, Track};
 use sue_wm::MenuItem;
@@ -105,12 +107,8 @@ fn keyed(track: &Track) -> Option<EntityId> {
 /// a square, so the three read apart without color.
 fn key_mark(painter: &egui::Painter, at: Pos2, size: f32, ease: Ease, ink: egui::Color32) {
     let half = size / 2.0;
-    let diamond = vec![
-        at + vec2(0.0, -half),
-        at + vec2(half, 0.0),
-        at + vec2(0.0, half),
-        at + vec2(-half, 0.0),
-    ];
+    let (across, down) = (Vec2::X * half, Vec2::Y * half);
+    let diamond = vec![at - down, at + across, at + down, at - across];
     let width = size / 6.0;
     let pen = Stroke::new(width, ink);
     match ease {
@@ -132,7 +130,7 @@ impl SuePaint {
     /// The picture of `id` in `rect` (kept to its aspect, over the
     /// checkerboard of clear), from the same thumbnails the layer palette
     /// keeps.
-    fn cel_thumb(
+    pub(crate) fn cel_thumb(
         &mut self,
         painter: &egui::Painter,
         rect: Rect,
@@ -380,6 +378,13 @@ impl SuePaint {
             keyed(track).and_then(|layer| stack.iter().position(|id| *id == layer))
         });
         let ruler = row_size * 1.5;
+        let ruler_half = ruler / 2.0;
+        // The shape of the cels' pictures: the canvas's, kept in reason.
+        let aspect = arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(sue_model::picture::size)
+            .map_or(1.0, |[w, h]| (w as f32 / h.max(1) as f32).clamp(0.5, 2.5));
         let frames_area = Rect::from_min_max(pos2(names.right(), area.top()), area.max);
         let content = ruler + layout.last().map_or(0.0, |row| row.top + row.height);
         let mut step = self.timeline_view.step(frames_area.width(), length);
@@ -802,9 +807,11 @@ impl SuePaint {
             if let Some(cel) = cel_now
                 && thumb_height > 0.0
             {
+                // The cel's picture keeps the canvas's shape.
+                let height = thumb_height - pad;
                 let rect = Rect::from_min_size(
                     pos2(kind_rect.left(), top + row_size),
-                    vec2(thumb_height * 1.4, thumb_height - pad),
+                    vec2(height * aspect, height),
                 )
                 .intersect(rows_area);
                 self.cel_thumb(&names_painter, rect, cel, cx, theme);
@@ -1027,7 +1034,7 @@ impl SuePaint {
                 if response.dragged() {
                     // The frame it would start on.
                     cells_painter.text(
-                        bar.right_center() + vec2(pad, 0.0),
+                        bar.right_center() + Vec2::X * pad,
                         Align2::LEFT_CENTER,
                         self.anim_ui.unit.show(shown_at.max(0) as u32, fps),
                         font.clone(),
@@ -1223,11 +1230,14 @@ impl SuePaint {
         // number in the head.
         let current = Rect::from_min_size(
             pos2(column(frame), half_ruler),
-            vec2(step.max(pad / 2.0), frames_area.bottom() - half_ruler),
+            vec2(step.max(half_pad), frames_area.bottom() - half_ruler),
         );
-        let head = Rect::from_min_size(
+        let head = Rect::from_min_max(
             current.min,
-            vec2(current.width().max(row_size), ruler / 2.0),
+            pos2(
+                current.left() + current.width().max(row_size),
+                half_ruler + ruler_half,
+            ),
         );
         painter.rect_filled(
             Rect::from_min_size(current.min, vec2(thick, current.height())),

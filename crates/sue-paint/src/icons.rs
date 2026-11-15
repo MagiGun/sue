@@ -96,12 +96,8 @@ pub enum Icon {
     List,
     /// A sheet in a frame: a cel.
     Cel,
-    /// Two overlapping sheets: onion skin.
-    Onion,
     /// A pencil over a line: edit.
     Edit,
-    /// A minus: take away or collapse.
-    Minus,
     /// Brush strokes in a stack: the sub tools.
     SubTool,
     /// Sliders: a tool's settings.
@@ -134,14 +130,6 @@ pub enum Icon {
     NewMask,
     /// A mask pressed onto a sheet: apply the mask.
     ApplyMask,
-    /// Arrows up and down past each other: reverse the order.
-    Reverse,
-    /// A sheet over a half shaded one: which layers the opacity sets.
-    OpacityTarget,
-    /// A sheet over a glowing box: the light table.
-    LightTable,
-    /// A disc half filled: one color for all.
-    ColorMode,
     /// A shape with a ring around it: the border effect.
     BorderEffect,
     /// A sheet with a flower: an illustration.
@@ -794,10 +782,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             closed(&[(0.16, 0.16), (0.84, 0.16), (0.84, 0.84), (0.16, 0.84)]);
             closed(&[(0.3, 0.3), (0.7, 0.3), (0.7, 0.7), (0.3, 0.7)]);
         }
-        Icon::Onion => {
-            closed(&[(0.14, 0.14), (0.62, 0.14), (0.62, 0.62), (0.14, 0.62)]);
-            closed(&[(0.38, 0.38), (0.86, 0.38), (0.86, 0.86), (0.38, 0.86)]);
-        }
         Icon::Edit => {
             closed(&[
                 (0.62, 0.16),
@@ -808,7 +792,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             ]);
             line(&[(0.16, 0.88), (0.84, 0.88)]);
         }
-        Icon::Minus => line(&[(0.22, 0.5), (0.78, 0.5)]),
         Icon::SubTool => {
             for (y, w) in [(0.28, 0.5), (0.5, 0.62), (0.72, 0.44)] {
                 painter.add(Shape::line(
@@ -952,30 +935,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(0.5, 0.1), (0.5, 0.3)]);
             filled(&[(0.38, 0.24), (0.62, 0.24), (0.5, 0.36)]);
         }
-        Icon::Reverse => {
-            line(&[(0.34, 0.84), (0.34, 0.2)]);
-            filled(&[(0.2, 0.3), (0.48, 0.3), (0.34, 0.12)]);
-            line(&[(0.66, 0.16), (0.66, 0.8)]);
-            filled(&[(0.52, 0.7), (0.8, 0.7), (0.66, 0.88)]);
-        }
-        Icon::OpacityTarget => {
-            boxed(
-                Rect::from_min_max(p(0.34, 0.34), p(0.86, 0.86)),
-                side * 0.03,
-            );
-            filled(&[(0.34, 0.34), (0.86, 0.34), (0.34, 0.86)]);
-            boxed(
-                Rect::from_min_max(p(0.14, 0.14), p(0.62, 0.62)),
-                side * 0.03,
-            );
-        }
-        Icon::LightTable => {
-            closed(&[(0.12, 0.62), (0.88, 0.62), (0.88, 0.86), (0.12, 0.86)]);
-            closed(&[(0.26, 0.14), (0.74, 0.14), (0.74, 0.5), (0.26, 0.5)]);
-            for x in [0.3, 0.5, 0.7] {
-                line(&[(x, 0.54), (x, 0.6)]);
-            }
-        }
         Icon::ProjectIllustration => {
             closed(&[(0.2, 0.1), (0.68, 0.1), (0.8, 0.22), (0.8, 0.9), (0.2, 0.9)]);
             for angle in [0.0_f32, 72.0, 144.0, 216.0, 288.0] {
@@ -1066,14 +1025,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 side * 0.03,
                 color,
             );
-        }
-        Icon::ColorMode => {
-            circle(0.5, 0.5, 0.34);
-            painter.add(Shape::convex_polygon(
-                arc(p(0.5, 0.5), 0.34 * side, 90.0, 270.0),
-                color,
-                Stroke::NONE,
-            ));
         }
     }
 }

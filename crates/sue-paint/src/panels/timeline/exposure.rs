@@ -70,7 +70,10 @@ impl SuePaint {
             .show(ui, |ui| {
                 egui::Grid::new("sue-paint-exposure-sheet")
                     .striped(true)
-                    .spacing(egui::vec2(10.0, 2.0))
+                    .spacing(egui::vec2(
+                        theme.space(sue_wm::ui::Space::S5),
+                        theme.space(sue_wm::ui::Space::S1),
+                    ))
                     .show(ui, |ui| {
                         ui.label(RichText::new(tr!("frame")).color(theme.muted));
                         for track in &folders {
