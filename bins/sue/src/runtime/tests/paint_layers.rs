@@ -575,3 +575,922 @@ fn sue_paint_folders_are_units_for_new_layer_and_duplicate() {
     assert_eq!(stack(&runtime), before);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+// ----- The Layer palette (P4-5) --------------------------------------------
+
+/// What one frame told assistive technology about a control: its name,
+/// where it is, whether it is grayed and whether it is on.
+#[derive(Clone, Debug)]
+struct Told {
+    name: String,
+    rect: egui::Rect,
+    disabled: bool,
+    on: Option<bool>,
+}
+
+impl PaintDriver {
+    /// One frame with `events` and `modifiers` held, read for its
+    /// controls as well as its texts.
+    fn look_with(&mut self, events: Vec<egui::Event>, modifiers: egui::Modifiers) -> Vec<Told> {
+        self.ctx.enable_accesskit();
+        let mut events = events;
+        events.insert(0, egui::Event::ModifiersChanged(modifiers));
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+            events,
+            time: Some(self.ctx.input(|input| input.time) + 0.016),
+            ..egui::RawInput::default()
+        };
+        self.now += Duration::from_millis(16);
+        let runtime = &mut self.runtime;
+        let now = self.now;
+        let output = self
+            .ctx
+            .run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+        self.texts = text_rects(&output);
+        let told = output
+            .platform_output
+            .accesskit_update
+            .iter()
+            .flat_map(|update| update.nodes.iter())
+            .filter_map(|(_, node)| {
+                let name = node.label()?.to_owned();
+                let bounds = node.bounds()?;
+                Some(Told {
+                    name,
+                    rect: egui::Rect::from_min_max(
+                        Pos2::new(bounds.x0 as f32, bounds.y0 as f32),
+                        Pos2::new(bounds.x1 as f32, bounds.y1 as f32),
+                    ),
+                    disabled: node.is_disabled(),
+                    on: node
+                        .toggled()
+                        .map(|toggled| toggled == egui::accesskit::Toggled::True),
+                })
+            })
+            .collect();
+        output.drop_without_applying_deltas();
+        told
+    }
+
+    /// The control named `name` as a fresh frame tells it.
+    fn control(&mut self, name: &str) -> Told {
+        let told = self.look_with(Vec::new(), egui::Modifiers::NONE);
+        told.iter()
+            .find(|told| told.name == name)
+            .cloned()
+            .unwrap_or_else(|| {
+                panic!(
+                    "{name:?} is told: {:?}",
+                    told.iter().map(|told| &told.name).collect::<Vec<_>>()
+                )
+            })
+    }
+
+    /// A press and release of `button` at `at` with `modifiers` held, then
+    /// a few frames.
+    fn press(&mut self, at: Pos2, button: egui::PointerButton, modifiers: egui::Modifiers) {
+        let event = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button,
+            pressed,
+            modifiers,
+        };
+        self.look_with(vec![egui::Event::PointerMoved(at)], modifiers);
+        self.look_with(vec![event(true)], modifiers);
+        self.look_with(vec![event(false)], modifiers);
+        // The keys are let go again before the frames after.
+        self.look_with(Vec::new(), egui::Modifiers::NONE);
+        self.settle(4);
+    }
+
+    /// A click on the control named `name`.
+    fn click_control(&mut self, name: &str) {
+        let at = self.control(name).rect.center();
+        self.press(at, egui::PointerButton::Primary, egui::Modifiers::NONE);
+    }
+
+    fn picture(&self) -> sue_core::EntityId {
+        self.runtime
+            .applets
+            .get(&AppletId::new(sue_paint::ID).unwrap())
+            .and_then(|applet| applet.focus())
+            .expect("a canvas")
+    }
+
+    fn stack(&self) -> Vec<sue_core::EntityId> {
+        sue_paint::doc::layers(&self.runtime.engine.world.arena, self.picture())
+            .into_iter()
+            .map(|info| info.id)
+            .collect()
+    }
+
+    fn name_of(&self, id: sue_core::EntityId) -> String {
+        self.runtime
+            .engine
+            .world
+            .arena
+            .get_by_id(id)
+            .map(|entity| entity.name().to_owned())
+            .unwrap_or_default()
+    }
+
+    fn flag(&self, id: sue_core::EntityId, key: &str) -> Option<bool> {
+        self.runtime
+            .engine
+            .world
+            .arena
+            .get_by_id(id)
+            .ok()
+            .and_then(|entity| entity.property(key))
+            .and_then(sue_core::Value::as_bool)
+    }
+
+    fn visible(&self, id: sue_core::EntityId) -> bool {
+        sue_paint::doc::layers(&self.runtime.engine.world.arena, self.picture())
+            .iter()
+            .find(|info| info.id == id)
+            .is_some_and(|info| info.style.visible)
+    }
+
+    /// Where the row of the layer named `name` is: its name drawn in the
+    /// Layer palette's list, found where the last frame drew it.
+    fn row(&mut self, name: &str) -> egui::Rect {
+        self.settle(2);
+        self.rect_of(name)
+            .unwrap_or_else(|| panic!("{name:?} is in the list: {:?}", self.texts))
+    }
+
+    /// Undoes back to `depth` and checks the arena is `before`.
+    fn undo_to(&mut self, depth: usize, before: &Content) {
+        while self.runtime.engine.history.depth() > depth {
+            self.command("edit.undo");
+            self.settle(2);
+        }
+        assert_eq!(
+            &content(&self.runtime.engine.world.arena),
+            before,
+            "undo is exact"
+        );
+    }
+}
+
+/// The arena, comparable: every entity and every relation.
+type Content = (
+    std::collections::BTreeMap<sue_core::EntityId, sue_core::Entity>,
+    Vec<String>,
+);
+
+fn content(arena: &sue_core::Arena) -> Content {
+    let mut relations: Vec<String> = arena
+        .relations()
+        .iter()
+        .map(|relation| format!("{relation:?}"))
+        .collect();
+    relations.sort();
+    (
+        arena
+            .iter()
+            .map(|(_, entity)| (entity.id(), entity.clone()))
+            .collect(),
+        relations,
+    )
+}
+
+/// The do, undo, redo of rule 7 around `act`.
+fn undo_pair(driver: &mut PaintDriver, act: impl FnOnce(&mut PaintDriver)) {
+    let before = content(&driver.runtime.engine.world.arena);
+    let depth = driver.runtime.engine.history.depth();
+    act(driver);
+    driver.settle(2);
+    let end = driver.runtime.engine.history.depth();
+    assert!(end > depth, "a step was made");
+    let after = content(&driver.runtime.engine.world.arena);
+    assert_ne!(before, after, "it changed the picture");
+    driver.undo_to(depth, &before);
+    for _ in depth..end {
+        driver.command("edit.redo");
+        driver.settle(2);
+    }
+    assert_eq!(
+        content(&driver.runtime.engine.world.arena),
+        after,
+        "redo is exact"
+    );
+}
+
+/// The texts the last frame drew.
+fn said(driver: &PaintDriver) -> Vec<String> {
+    driver.texts.iter().map(|(text, _)| text.clone()).collect()
+}
+
+#[test]
+fn layer_palette_buttons_are_commands_named_with_their_keys_and_reasons() {
+    let mut driver = PaintDriver::new("paint-layer-buttons");
+    // Every button tells its name; New Raster Layer runs its command.
+    let before = driver.stack().len();
+    driver.click_control("Raster Layer");
+    assert_eq!(driver.stack().len(), before + 1, "a new raster layer");
+    // On the first layer over the paper, Merge with Layer Below is grayed,
+    // and resting on it says why and which key it has.
+    driver.command("layer.select_below");
+    driver.settle(2);
+    let merge = driver.control("Merge with Layer Below");
+    assert!(merge.disabled, "the paper is no raster layer to merge into");
+    driver.step(vec![egui::Event::PointerMoved(merge.rect.center())]);
+    driver.settle(60);
+    let said = said(&driver);
+    assert!(
+        said.iter()
+            .any(|text| text == "There is no raster layer right below it")
+            && said.iter().any(|text| text == "Ctrl+E"),
+        "{said:?}"
+    );
+    // A switch tells whether it is on.
+    driver.click_control("Lock Layer");
+    assert_eq!(driver.control("Lock Layer").on, Some(true));
+}
+
+#[test]
+fn a_folder_takes_merge_and_masks_and_its_blend_list_starts_with_through() {
+    let mut driver = PaintDriver::new("paint-layer-folder-h4");
+    // A filled layer, and over it a folder around a new layer.
+    driver.command("edit.fill");
+    driver.command("layer.new");
+    driver.settle(2);
+    driver.command("layer.folder_insert");
+    driver.settle(3);
+    // H-4: with the folder current, these work (and are not grayed).
+    for name in ["Mask Outside Selection", "Merge with Layer Below"] {
+        assert!(!driver.control(name).disabled, "{name} works on a folder");
+    }
+    // A folder with no mode stored reads Through.
+    let folder = *driver.stack().last().unwrap();
+    driver.settle(2);
+    assert!(
+        said(&driver).iter().any(|text| text == "100 % Through"),
+        "{:?}",
+        said(&driver)
+    );
+    // Its blend list is the folder's: Through first, then the modes of a
+    // layer in Clip Studio Paint's order, ending in Brightness.
+    let blend = driver.control("Blending mode");
+    driver.press(
+        blend.rect.center(),
+        egui::PointerButton::Primary,
+        egui::Modifiers::NONE,
+    );
+    let order = said(&driver);
+    let at = |name: &str| {
+        order
+            .iter()
+            .position(|text| text == name)
+            .unwrap_or(usize::MAX)
+    };
+    assert!(at("Through") < at("Normal"), "{order:?}");
+    assert!(at("Exclusion") < at("Darker Color"), "{order:?}");
+    assert!(at("Hard Light") < at("Difference"), "{order:?}");
+    assert!(at("Brightness") < usize::MAX, "{order:?}");
+    // Multiply, one step that undoes.
+    undo_pair(&mut driver, |driver| {
+        driver.click_text("Multiply");
+    });
+    assert_eq!(
+        sue_paint::doc::folder_blend(&driver.runtime.engine.world.arena, folder),
+        sue_model::BlendMode::Multiply
+    );
+    // Merge Selected Layers on the folder alone bakes it into a layer.
+    undo_pair(&mut driver, |driver| driver.command("layer.merge_selected"));
+    let top = *driver.stack().last().unwrap();
+    assert!(!sue_paint::doc::is_folder(
+        &driver.runtime.engine.world.arena,
+        top
+    ));
+}
+
+#[test]
+fn the_wheel_over_the_blend_list_steps_the_mode_and_shows_it() {
+    let mut driver = PaintDriver::new("paint-layer-wheel");
+    let layer = *driver.stack().last().unwrap();
+    let blend = driver.control("Blending mode").rect.center();
+    driver.step(vec![egui::Event::PointerMoved(blend)]);
+    driver.settle(40);
+    driver.step(vec![egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: vec2(0.0, -1.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+    }]);
+    driver.settle(3);
+    let style = sue_paint::doc::layers(&driver.runtime.engine.world.arena, driver.picture())
+        .into_iter()
+        .find(|info| info.id == layer)
+        .unwrap()
+        .style;
+    assert_eq!(style.blend, sue_model::BlendMode::Darken, "one step down");
+    driver.settle(2);
+    assert!(said(&driver).iter().any(|text| text == "100 % Darken"));
+}
+
+#[test]
+fn the_mask_link_unlinks_and_links_back_as_steps() {
+    let mut driver = PaintDriver::new("paint-layer-mask-link");
+    let layer = *driver.stack().last().unwrap();
+    driver.command("layer.mask.outside");
+    driver.settle(3);
+    let linked = |driver: &PaintDriver| {
+        sue_paint::doc::mask_linked(&driver.runtime.engine.world.arena, layer)
+    };
+    assert!(linked(&driver));
+    undo_pair(&mut driver, |driver| {
+        driver.click_control("Unlink Mask from Layer");
+    });
+    assert!(!linked(&driver));
+    let at = sue_paint::doc::mask_offset(&driver.runtime.engine.world.arena, layer);
+    driver.click_control("Link Mask to Layer");
+    assert!(linked(&driver));
+    assert_eq!(
+        sue_paint::doc::mask_offset(&driver.runtime.engine.world.arena, layer),
+        at,
+        "the mask stays where it is on the canvas"
+    );
+}
+
+#[test]
+fn boxes_and_shift_pick_several_and_lock_hide_and_delete_take_them_all() {
+    let mut driver = PaintDriver::new("paint-layer-pick");
+    driver.command("layer.new");
+    driver.command("layer.new");
+    driver.settle(3);
+    let [_, first, second, third] = driver.stack()[..] else {
+        panic!("paper and three layers");
+    };
+    // The box of the first layer picks it beside the current (third).
+    let name = format!("Pick {} with the others", driver.name_of(first));
+    driver.click_control(&name);
+    undo_pair(&mut driver, |driver| driver.click_control("Lock Layer"));
+    let locked = |driver: &PaintDriver, id| driver.flag(id, sue_model::picture::LOCKED);
+    assert_eq!(locked(&driver, first), Some(true));
+    assert_eq!(locked(&driver, third), Some(true));
+    assert_ne!(locked(&driver, second), Some(true));
+    driver.click_control("Lock Layer");
+    // Shift+click on the first row: the range from the third down.
+    let row = driver.row(&driver.name_of(first));
+    driver.press(
+        row.center(),
+        egui::PointerButton::Primary,
+        egui::Modifiers::SHIFT,
+    );
+    undo_pair(&mut driver, |driver| {
+        driver.command("layer.toggle.visible");
+    });
+    for id in [first, second, third] {
+        assert!(!driver.visible(id), "every picked layer hides");
+    }
+    // Delete Layer takes all three as one step.
+    undo_pair(&mut driver, |driver| driver.click_control("Delete Layer"));
+    assert_eq!(driver.stack().len(), 1, "only the paper");
+}
+
+#[test]
+fn deleting_a_folder_asks_first_until_told_not_to() {
+    let mut driver = PaintDriver::new("paint-layer-ask");
+    driver.command("layer.new.folder");
+    driver.settle(3);
+    let before = driver.stack().len();
+    driver.command("layer.delete");
+    driver.settle(4);
+    assert!(
+        said(&driver)
+            .iter()
+            .any(|text| text.starts_with("Delete the picked layer folders")),
+        "{:?}",
+        said(&driver)
+    );
+    assert_eq!(driver.stack().len(), before, "nothing went yet");
+    driver.click_text("Do not show again");
+    driver.click_text("Delete");
+    assert_eq!(driver.stack().len(), before - 1);
+    // Asked no more.
+    driver.command("layer.new.folder");
+    driver.settle(3);
+    driver.command("layer.delete");
+    driver.settle(4);
+    assert_eq!(driver.stack().len(), before - 1);
+}
+
+#[test]
+fn palette_colors_go_on_every_picked_layer_from_the_palette_and_menus() {
+    let mut driver = PaintDriver::new("paint-layer-colors");
+    driver.command("layer.new");
+    driver.command("layer.select_all");
+    driver.settle(3);
+    let picked = driver.stack()[1..].to_vec();
+    undo_pair(&mut driver, |driver| {
+        driver.click_control("Change Palette Color");
+        driver.click_control("Red");
+    });
+    for id in &picked {
+        assert_eq!(
+            sue_paint::doc::palette_color(&driver.runtime.engine.world.arena, *id),
+            sue_paint::doc::named_palette_color("red")
+        );
+    }
+    driver.command("layer.palette_color.none");
+    driver.settle(2);
+    assert_eq!(
+        sue_paint::doc::palette_color(&driver.runtime.engine.world.arena, picked[0]),
+        None
+    );
+}
+
+#[test]
+fn a_right_click_on_a_layer_opens_its_own_short_list() {
+    let mut driver = PaintDriver::new("paint-layer-menu");
+    let layer = *driver.stack().last().unwrap();
+    let row = driver.row(&driver.name_of(layer));
+    driver.press(
+        row.center(),
+        egui::PointerButton::Secondary,
+        egui::Modifiers::NONE,
+    );
+    let said = said(&driver);
+    for item in [
+        "New Raster Layer",
+        "Create Folder and Insert Layer",
+        "Change Palette Color",
+        "Merge Selected Layers",
+        "Flatten Image",
+    ] {
+        assert!(said.iter().any(|text| text == item), "{item} in {said:?}");
+    }
+    assert!(
+        !said.iter().any(|text| text == "Layer Comps..."),
+        "the whole Layer menu does not open"
+    );
+}
+
+#[test]
+fn a_layer_dragged_onto_new_layer_copies_and_onto_new_folder_wraps() {
+    let mut driver = PaintDriver::new("paint-layer-drag");
+    let layer = *driver.stack().last().unwrap();
+    let name = driver.name_of(layer);
+    let count = driver.stack().len();
+    let row = driver.row(&name);
+    let new = driver.control("Raster Layer").rect.center();
+    driver.drag(row.center(), new, egui::PointerButton::Primary);
+    assert_eq!(driver.stack().len(), count + 1, "copied");
+    let folder = driver.control("New Layer Folder").rect.center();
+    let row = driver.row(&name);
+    driver.drag(row.center(), folder, egui::PointerButton::Primary);
+    let arena = &driver.runtime.engine.world.arena;
+    let around = sue_paint::doc::folder_of(arena, layer).expect("in a new folder");
+    assert!(sue_paint::doc::is_folder(arena, around));
+}
+
+#[test]
+fn ctrl_click_on_a_thumbnail_selects_what_the_layer_holds() {
+    let mut driver = PaintDriver::new("paint-layer-thumb");
+    driver.command("edit.fill");
+    driver.settle(2);
+    let layer = *driver.stack().last().unwrap();
+    // Nothing is selected yet, so Deselect is grayed.
+    let grayed = driver.look_with(Vec::new(), egui::Modifiers::NONE);
+    assert!(!grayed.iter().any(|told| told.name == "Deselect (Ctrl+D)"));
+    let row = driver.row(&driver.name_of(layer));
+    // The thumbnail sits just left of the name.
+    let thumb = row.left_center() - vec2(24.0, 0.0);
+    driver.press(
+        thumb,
+        egui::PointerButton::Primary,
+        egui::Modifiers::COMMAND,
+    );
+    // The layer's pixels became the selection: Deselect works now.
+    assert!(
+        !driver.control("Deselect (Ctrl+D)").disabled,
+        "there is a selection"
+    );
+}
+
+/// Applies `edit` as Sue would, one step on the history.
+fn apply(driver: &mut PaintDriver, edit: sue_paint::doc::Edit) {
+    let engine = &mut driver.runtime.engine;
+    engine
+        .history
+        .apply(&mut engine.world, sue_wm::ArenaEdit(edit))
+        .expect("the edit applies");
+    driver.settle(2);
+}
+
+/// The names the controls and marks of a fresh frame tell.
+fn marks(driver: &mut PaintDriver) -> Vec<String> {
+    driver
+        .look_with(Vec::new(), egui::Modifiers::NONE)
+        .into_iter()
+        .map(|told| told.name)
+        .collect()
+}
+
+#[test]
+fn rows_mark_locks_drafts_effects_keyframes_and_both_layer_colors() {
+    let mut driver = PaintDriver::new("paint-layer-marks");
+    driver.command("edit.fill");
+    let layer = *driver.stack().last().unwrap();
+    let names = [
+        "Locked: it takes no change",
+        "Draft layer: exports leave it out",
+        "Keyframes on: drawing on it waits until they are off",
+    ];
+    let before = marks(&mut driver);
+    for name in names {
+        assert!(!before.iter().any(|told| told == name), "{name} not yet");
+    }
+    let count = |told: &[String], name: &str| told.iter().filter(|told| *told == name).count();
+    let effects_before = (
+        count(&before, "Border effect is on"),
+        count(&before, "Tone is on"),
+    );
+    driver.command("layer.toggle.lock");
+    driver.command("layer.toggle.draft");
+    apply(
+        &mut driver,
+        sue_paint::doc::set(layer, sue_paint::effects::BORDER, true),
+    );
+    apply(
+        &mut driver,
+        sue_paint::doc::set(layer, sue_paint::effects::TONE, true),
+    );
+    apply(
+        &mut driver,
+        sue_paint::anim::motion::enable_keyframes(layer, true),
+    );
+    let after = marks(&mut driver);
+    for name in names {
+        assert!(after.iter().any(|told| told == name), "{name} in {after:?}");
+    }
+    assert_eq!(
+        (
+            count(&after, "Border effect is on"),
+            count(&after, "Tone is on")
+        ),
+        (effects_before.0 + 1, effects_before.1 + 1),
+        "a badge each"
+    );
+    // The lock is the last mark, at the right end of the row (A25V-5).
+    let told = driver.look_with(Vec::new(), egui::Modifiers::NONE);
+    let lock = told.iter().find(|told| told.name == names[0]).unwrap().rect;
+    let row = driver.row(&driver.name_of(layer));
+    assert!(lock.left() > row.right(), "the lock is right of the name");
+    for other in told.iter().filter(|told| {
+        told.name != names[0] && (told.rect.center().y - lock.center().y).abs() < 1.0
+    }) {
+        if other.rect.left() > row.right() {
+            assert!(
+                other.rect.right() <= lock.left(),
+                "{other:?} left of the lock"
+            );
+        }
+    }
+    // A folder with a layer color and a sub color shows both chips.
+    driver.command("layer.new.folder");
+    driver.settle(2);
+    let folder = *driver.stack().last().unwrap();
+    driver.command("layer.toggle.layer_color");
+    apply(
+        &mut driver,
+        sue_paint::doc::set(
+            folder,
+            sue_paint::effects::COLOR_SUB,
+            sue_core::Color::srgb8(0, 0, 200),
+        ),
+    );
+    let chips = marks(&mut driver);
+    for name in ["Layer color is on", "Sub color of the layer color"] {
+        assert!(chips.iter().any(|told| told == name), "{name} in {chips:?}");
+    }
+}
+
+#[test]
+fn picked_layers_go_into_one_folder_and_drag_together() {
+    let mut driver = PaintDriver::new("paint-layer-several");
+    driver.command("layer.new");
+    driver.command("layer.new");
+    driver.command("layer.new");
+    driver.settle(3);
+    let [_, first, second, third, fourth] = driver.stack()[..] else {
+        panic!("paper and four layers");
+    };
+    // The fourth is current; Shift+click on the third picks the two.
+    let row = driver.row(&driver.name_of(third));
+    driver.press(
+        row.center(),
+        egui::PointerButton::Primary,
+        egui::Modifiers::SHIFT,
+    );
+    // Dragged together onto the first layer: both land right above it, in
+    // their order, as one step.
+    let row = driver.row(&driver.name_of(fourth));
+    let onto = driver.row(&driver.name_of(first));
+    undo_pair(&mut driver, |driver| {
+        driver.drag(row.center(), onto.center(), egui::PointerButton::Primary);
+    });
+    let stack = driver.stack();
+    assert_eq!(stack[1..], [first, third, fourth, second], "{stack:?}");
+    // Create Folder and Insert Layer takes both.
+    undo_pair(&mut driver, |driver| driver.command("layer.folder_insert"));
+    let arena = &driver.runtime.engine.world.arena;
+    let folder = sue_paint::doc::folder_of(arena, third).expect("in a folder");
+    assert_eq!(sue_paint::doc::folder_of(arena, fourth), Some(folder));
+    assert_eq!(sue_paint::doc::folder_of(arena, first), None);
+}
+
+#[test]
+fn the_right_click_list_makes_every_kind_of_layer() {
+    let mut driver = PaintDriver::new("paint-layer-new-kinds");
+    let layer = *driver.stack().last().unwrap();
+    let row = driver.row(&driver.name_of(layer));
+    driver.press(
+        row.center(),
+        egui::PointerButton::Secondary,
+        egui::Modifiers::NONE,
+    );
+    let at = driver
+        .rect_of("New Layer")
+        .expect("New Layer in the list")
+        .center();
+    driver.step(vec![egui::Event::PointerMoved(at)]);
+    driver.settle(20);
+    let said = said(&driver);
+    for item in [
+        "Vector Layer",
+        "Gradient...",
+        "Fill",
+        "Tone...",
+        "3D Layer",
+        "Frame Border Folder...",
+    ] {
+        assert!(said.iter().any(|text| text == item), "{item} in {said:?}");
+    }
+}
+
+#[test]
+fn the_ruler_button_lists_where_rulers_show() {
+    let mut driver = PaintDriver::new("paint-layer-ruler");
+    driver.click_control("Set Showing Area of Ruler");
+    let said = said(&driver);
+    let ranges: Vec<String> = sue_paint::rulers::ShowRange::ALL
+        .iter()
+        .map(|range| range.label())
+        .collect();
+    for range in &ranges {
+        assert!(said.iter().any(|text| text == range), "{range} in {said:?}");
+    }
+    undo_pair(&mut driver, |driver| {
+        driver.click_text(&ranges[1]);
+    });
+}
+
+#[test]
+fn an_animation_folder_names_its_cel_and_a_cel_click_moves_the_playhead() {
+    let mut driver = PaintDriver::new("paint-layer-cels");
+    driver.command("anim.timeline.new");
+    driver.command("anim.cel.new");
+    for _ in 0..3 {
+        driver.command("anim.next");
+    }
+    driver.command("anim.cel.new");
+    driver.settle(4);
+    let arena = &driver.runtime.engine.world.arena;
+    let picture = driver.picture();
+    let folder = sue_paint::doc::layers(arena, picture)
+        .into_iter()
+        .map(|info| info.id)
+        .find(|id| sue_paint::anim::is_animation_folder(arena, *id))
+        .expect("an animation folder");
+    let cels: Vec<sue_core::EntityId> = sue_paint::doc::layers(arena, picture)
+        .into_iter()
+        .map(|info| info.id)
+        .filter(|id| sue_paint::doc::folder_of(arena, *id) == Some(folder))
+        .collect();
+    let [first, second] = cels[..] else {
+        panic!("two cels: {cels:?}");
+    };
+    let (folder_name, first_name, second_name) = (
+        driver.name_of(folder),
+        driver.name_of(first),
+        driver.name_of(second),
+    );
+    driver.settle(2);
+    // The playhead is on the second cel: the folder's row names it.
+    let shows = |cel: &str| format!("{folder_name} : {cel}");
+    assert!(
+        driver.rect_of(&shows(&second_name)).is_some(),
+        "{:?}",
+        said(&driver)
+    );
+    // A click on the first cel's row: the playhead goes where it starts.
+    let row = driver.row(&first_name);
+    driver.press(
+        row.center(),
+        egui::PointerButton::Primary,
+        egui::Modifiers::NONE,
+    );
+    driver.settle(2);
+    assert!(
+        driver.rect_of(&shows(&first_name)).is_some(),
+        "{:?}",
+        said(&driver)
+    );
+}
+
+#[test]
+fn the_edge_color_bar_opens_the_color_settings() {
+    let mut driver = PaintDriver::new("paint-layer-edge-color");
+    driver.command("edit.fill");
+    let layer = *driver.stack().last().unwrap();
+    apply(
+        &mut driver,
+        sue_paint::doc::set(layer, sue_paint::effects::BORDER, true),
+    );
+    driver.command("layer.properties");
+    driver.settle(3);
+    let edge = driver
+        .rect_of("Edge color")
+        .expect("Edge color in Layer Property");
+    let told = driver.look_with(Vec::new(), egui::Modifiers::NONE);
+    let bar = told
+        .iter()
+        .filter(|told| {
+            told.name == "Pick a color" && (told.rect.center().y - edge.center().y).abs() < 12.0
+        })
+        .map(|told| told.rect)
+        .next()
+        .expect("the edge color bar");
+    let before = said(&driver).len();
+    driver.press(
+        bar.center(),
+        egui::PointerButton::Primary,
+        egui::Modifiers::NONE,
+    );
+    driver.settle(20);
+    assert!(
+        said(&driver).len() > before,
+        "the color settings opened: {:?}",
+        said(&driver)
+    );
+}
+
+#[test]
+fn search_layer_shows_what_it_finds_and_two_panes_list_twice() {
+    let mut driver = PaintDriver::new("paint-layer-search");
+    driver.command("layer.new.folder");
+    driver.settle(3);
+    let folder = *driver.stack().last().unwrap();
+    let folder_name = driver.name_of(folder);
+    driver.click_control("Search Layer");
+    // Raster layer: the folder leaves the list.
+    let kind = driver.control("Kind of layer");
+    driver.press(
+        kind.rect.center(),
+        egui::PointerButton::Primary,
+        egui::Modifiers::NONE,
+    );
+    driver.click_text("Raster layer");
+    driver.settle(2);
+    assert!(
+        driver.rect_of(&folder_name).is_none(),
+        "{:?}",
+        said(&driver)
+    );
+    driver.click_control("Search Layer");
+    driver.settle(2);
+    assert!(driver.rect_of(&folder_name).is_some());
+    driver.click_control("Split Layer List");
+    driver.settle(2);
+    let shown = driver
+        .texts
+        .iter()
+        .filter(|(text, _)| *text == folder_name)
+        .count();
+    assert_eq!(shown, 2, "both panes list it");
+}
+
+#[test]
+fn paste_with_a_layer_in_a_folder_picked_lands_right_above_it_there() {
+    let mut driver = PaintDriver::new("paint-layer-paste");
+    driver.command("edit.fill");
+    driver.command("edit.copy");
+    driver.command("layer.folder_insert");
+    driver.settle(3);
+    let [_, layer, folder] = driver.stack()[..] else {
+        panic!("paper, layer, folder");
+    };
+    driver.command("layer.select_below");
+    driver.settle(2);
+    undo_pair(&mut driver, |driver| driver.command("edit.paste"));
+    let stack = driver.stack();
+    assert_eq!(stack.len(), 4);
+    assert_eq!((stack[1], stack[3]), (layer, folder));
+    assert_eq!(
+        sue_paint::doc::folder_of(&driver.runtime.engine.world.arena, stack[2]),
+        Some(folder)
+    );
+}
+
+#[test]
+fn simple_tone_settings_make_a_layer_of_tone() {
+    let mut driver = PaintDriver::new("paint-layer-tone");
+    let count = driver.stack().len();
+    driver.command("layer.new.tone");
+    driver.settle(4);
+    assert!(
+        said(&driver)
+            .iter()
+            .any(|text| text == "Simple Tone Settings"),
+        "{:?}",
+        said(&driver)
+    );
+    undo_pair(&mut driver, |driver| {
+        driver.click_text("OK");
+    });
+    assert_eq!(driver.stack().len(), count + 1);
+    let tone = *driver.stack().last().unwrap();
+    assert_eq!(driver.flag(tone, sue_paint::effects::TONE), Some(true));
+}
+
+#[test]
+fn layer_property_sets_border_aliasing_monochrome_inks_and_tone_options() {
+    let mut driver = PaintDriver::new("paint-layer-property");
+    driver.command("edit.fill");
+    let layer = *driver.stack().last().unwrap();
+    driver.command("layer.properties");
+    driver.settle(3);
+    driver.click_control("Border effect");
+    undo_pair(&mut driver, |driver| {
+        driver.click_control("Anti-aliasing on border effect");
+    });
+    assert_eq!(
+        driver.flag(layer, sue_paint::effects::BORDER_AA),
+        Some(false)
+    );
+    driver.click_control("Tone");
+    undo_pair(&mut driver, |driver| {
+        driver.click_control("Reflect layer opacity");
+    });
+    assert_eq!(
+        driver.flag(layer, sue_paint::effects::TONE_REFLECT_OPACITY),
+        Some(true)
+    );
+    // The two effects off again, so the expression color is in sight.
+    driver.click_control("Tone");
+    driver.click_control("Border effect");
+    let choice = driver.control("Expression color");
+    driver.press(
+        choice.rect.center(),
+        egui::PointerButton::Primary,
+        egui::Modifiers::NONE,
+    );
+    driver.click_text("Monochrome");
+    undo_pair(&mut driver, |driver| driver.click_control("White"));
+    assert_eq!(
+        driver.flag(layer, sue_paint::effects::MONO_WHITE),
+        Some(false)
+    );
+    undo_pair(&mut driver, |driver| {
+        driver.click_control("Apply Expression Color of Preview");
+    });
+}
+
+#[test]
+fn tone_takes_a_density_source_a_dot_shape_and_a_dot_position() {
+    let mut driver = PaintDriver::new("paint-layer-tone-options");
+    driver.command("edit.fill");
+    let layer = *driver.stack().last().unwrap();
+    driver.command("layer.properties");
+    driver.settle(3);
+    driver.click_control("Tone");
+    for name in ["Density source", "Dot shape", "Posterization"] {
+        assert!(!driver.control(name).disabled, "{name} is there");
+    }
+    assert!(said(&driver).iter().any(|text| text == "Dot position"));
+    let shape = driver.control("Dot shape").rect.center();
+    driver.press(shape, egui::PointerButton::Primary, egui::Modifiers::NONE);
+    undo_pair(&mut driver, |driver| {
+        driver.click_text("Noise");
+    });
+    let arena = &driver.runtime.engine.world.arena;
+    let entity = arena.get_by_id(layer).unwrap();
+    assert!(entity.property(sue_paint::effects::TONE_SHAPE).is_some());
+}
+
+#[test]
+fn the_layer_color_button_switches_the_layer_color() {
+    let mut driver = PaintDriver::new("paint-layer-color-button");
+    let layer = *driver.stack().last().unwrap();
+    undo_pair(&mut driver, |driver| {
+        driver.click_control("Switch Using Layer Color");
+    });
+    assert_eq!(driver.flag(layer, sue_paint::effects::COLOR), Some(true));
+    assert_eq!(driver.control("Switch Using Layer Color").on, Some(true));
+}
