@@ -137,9 +137,13 @@ fn preferences_open_sue_paints_page_of_settings() {
     let mut paint = PaintDriver::new("settings-preferences");
     paint.command("file.preferences");
     paint.settle(8);
-    for title in ["Sue Paint", "NEW CANVAS", "PEN AND TOOLS", "Resolution"] {
+    for title in ["Sue Paint", "NEW CANVAS", "Resolution"] {
         assert!(paint.shows(title), "{title}: {:?}", paint.texts);
     }
+    // The rows of Sue's shared controls are taller: the next group waits
+    // a little further down.
+    paint.scroll_settings(300.0);
+    assert!(paint.shows("PEN AND TOOLS"), "{:?}", paint.texts);
     // Clip Studio's name for the cursor option finds Sue's.
     paint.filter("", "Brush-type cursor");
     assert!(paint.shows("Brush cursor"), "{:?}", paint.texts);

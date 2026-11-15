@@ -138,7 +138,7 @@ struct Area {
 /// P2-3 had made every folder: the same numbers. Every area is held. For
 /// comparison, `code-ui-polish.md` 2.1 counted these files at 823b060
 /// with a coarser rule (six columns, `vec2` positions included).
-const AREAS: [Area; 9] = [
+const AREAS: [Area; 11] = [
     Area {
         folder: "crates/sue-paint/src/panels",
         baseline: Counts::new([5, 9, 24, 5, 59, 9, 7]),
@@ -175,6 +175,15 @@ const AREAS: [Area; 9] = [
     },
     Area {
         folder: "crates/sue-paint/src/studio_mode",
+        baseline: Counts::new([0, 0, 0, 0, 0, 0, 0]),
+    },
+    // Settings and the update window (P4-18), taken in at zero.
+    Area {
+        folder: "bins/sue/src/settings",
+        baseline: Counts::new([0, 0, 0, 0, 0, 0, 0]),
+    },
+    Area {
+        folder: "bins/sue/src/update",
         baseline: Counts::new([0, 0, 0, 0, 0, 0, 0]),
     },
 ];
@@ -259,7 +268,10 @@ const INTERFACE: [&str; 5] = [
 /// Settings, the anchor dots of Change Canvas Size, the emoji of the two
 /// studios' manifests and Settings' gear, and in Sue Writer the label
 /// dots, the outliner's tick and the find bar's arrows and cross.
-const GLYPH_BASELINE: [u32; 5] = [1, 2, 6, 0, 1];
+///
+/// P4-18 took the last of `bins/sue/src` (the cross of a key chip and
+/// the arrows of Settings on a phone) to icons.
+const GLYPH_BASELINE: [u32; 5] = [1, 2, 6, 0, 0];
 
 /// Characters that are text where they stand, not icons: a file or a
 /// folder from the repository root, the character (`None` for every

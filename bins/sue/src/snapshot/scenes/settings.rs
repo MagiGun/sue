@@ -142,11 +142,14 @@ pub(super) fn desktop(tour: &mut Tour<'_>) -> Result<(), String> {
         return Err("Install from Folder asked for no folder".to_owned());
     }
     tour.settle();
-    let sues_own = sue_lang::text("settings", "icons-sues-own");
-    scroll_to(tour, &sues_own)?;
+    // The pack's card, with its own icons as its preview, chosen.
+    scroll_to(tour, "Snapshot Shapes")?;
     click(tour, "Snapshot Shapes")?;
     tour.settle();
     tour.shoot("04h-settings-icon-pack")?;
+    let sues_own = sue_lang::text("settings", "icons-sues-own");
+    scroll(tour, -4000.0);
+    scroll_to(tour, &sues_own)?;
     click(tour, &sues_own)?;
     tour.settle();
     // File, Preferences in Sue Paint opens this page.
@@ -169,6 +172,62 @@ pub(super) fn desktop(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.shoot("05-settings-general")?;
     tour.runtime.shell.close_window();
     tour.runtime.shell.dismiss_overlays();
+    updates(tour)
+}
+
+/// 05a to 05c. The update card with a newer release and its notes, the
+/// notes read whole in a dialog, and a check that failed. No network:
+/// the release is made here.
+fn updates(tour: &mut Tour<'_>) -> Result<(), String> {
+    let release = sue_platform::update::Release {
+        tag: "v9.9.9".to_owned(),
+        name: "Sue 9.9.9".to_owned(),
+        notes: [
+            "## What is new",
+            "",
+            "- Settings and the update window on Sue's own controls.",
+            "- Icon packs show their own icons on their cards.",
+            "  - Optional filled twins are no longer counted as problems.",
+            "",
+            "### Fixed",
+            "",
+            "A **long** line of notes wraps inside the card, and `code` reads plainly;",
+            "[the page](https://example.com) reads as its words.",
+        ]
+        .join("\n"),
+        page: "https://example.com/releases/v9.9.9".to_owned(),
+        assets: Vec::new(),
+    };
+    tour.runtime.updater_mut().offer(release);
+    tour.settle();
+    tour.shoot("05a-update-available")?;
+    let notes = sue_lang::text("sue", "update-release-notes");
+    let at = texts(tour)
+        .into_iter()
+        .find(|(text, _)| *text == notes)
+        .map(|(_, rect)| rect.center())
+        .ok_or("the update card has no Release Notes button")?;
+    tour.camera.click(at);
+    tour.settle();
+    tour.shoot("05b-release-notes")?;
+    tour.camera.input.push(vec![egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    tour.settle();
+    tour.runtime
+        .updater_mut()
+        .fail("The releases could not be reached (no network).".to_owned());
+    tour.settle();
+    tour.shoot("05c-update-failed")?;
+    let close = sue_lang::text("sue", "update-close");
+    if let Some((_, rect)) = texts(tour).into_iter().find(|(text, _)| *text == close) {
+        tour.camera.click(rect.center());
+    }
+    tour.settle();
     Ok(())
 }
 

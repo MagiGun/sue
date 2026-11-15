@@ -9,11 +9,13 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use egui::{Align2, Id, Order, RichText, ScrollArea, Sense, vec2};
+use egui::{Align2, Id, Label, RichText, Sense, Vec2, vec2};
 use sue_core::SUE_VERSION;
 use sue_platform::PlatformPaths;
 use sue_platform::update::{self, Download, Install, Job, Plan, Release};
-use sue_wm::{Theme, widgets};
+use sue_wm::Theme;
+use sue_wm::icons::Icon;
+use sue_wm::ui::{self, Answer, Dialog, Elevation, Layer, ScrollView, Space, TextRole, Tip};
 
 use crate::util::human_bytes;
 
@@ -130,6 +132,23 @@ impl Updater {
         }
         let _ = sue_platform::write_atomic(&self.stamp, now.to_string().as_bytes());
         self.check(true);
+    }
+
+    /// Shows `release` as the newer one, as a check that found it would,
+    /// without asking the network: for tests and the snapshot tour.
+    pub(crate) fn offer(&mut self, release: Release) {
+        let plan = update::plan(&release, &self.install, std::env::consts::ARCH);
+        self.state = State::Available { release, plan };
+        self.shown = true;
+    }
+
+    /// Shows a check that could not reach the releases, with `error`.
+    pub(crate) fn fail(&mut self, error: String) {
+        self.state = State::Failed {
+            release: None,
+            error,
+        };
+        self.shown = true;
     }
 
     /// Asks for the latest release. A quiet check (at startup) shows the
@@ -353,38 +372,41 @@ impl Updater {
         let mut close = false;
         let mut press = Press::default();
         let screen = ctx.content_rect();
-        // On a phone a sheet across the bottom, on a computer a window in
-        // the corner.
-        let phone = screen.width() < 560.0;
+        let edge = theme.space(Space::S6);
+        // On a phone a card across the bottom, on a computer a card in
+        // the corner, above the status bar.
+        let phone = screen.width() < theme.space(Space::S9) * 14.0;
         let width = if phone {
-            screen.width() - 24.0
+            screen.width() - edge * 2.0
         } else {
-            (screen.width() - 32.0).clamp(200.0, 380.0) + 32.0
+            (screen.width() - edge * 2.0)
+                .clamp(theme.space(Space::S9) * 6.0, theme.space(Space::S9) * 10.5)
         };
+        let lift = theme.space(Space::S9) + theme.space(Space::S4);
         let (pivot, at) = if phone {
             (
                 Align2::CENTER_BOTTOM,
-                screen.center_bottom() - vec2(0.0, 24.0),
+                screen.center_bottom() - Vec2::Y * edge,
             )
         } else {
             (
                 Align2::RIGHT_BOTTOM,
-                screen.right_bottom() - vec2(16.0, 48.0),
+                screen.right_bottom() - vec2(edge, lift),
             )
         };
         egui::Area::new(Id::unique("sue-update"))
-            .order(Order::Foreground)
+            .order(Layer::Toast.order())
             .pivot(pivot)
             .fixed_pos(at)
             .show(ctx, |ui| {
-                widgets::window_frame(theme).show(ui, |ui| {
-                    egui::Frame::new()
-                        .inner_margin(egui::Margin::same(16))
-                        .show(ui, |ui| {
-                            ui.set_width(width - 32.0);
-                            self.body(ui, theme, &mut action, &mut close, &mut press);
-                        });
-                });
+                ui::Card::new()
+                    .surface(3)
+                    .elevation(Elevation::Floating)
+                    .padding(Space::S6)
+                    .show(ui, theme, |ui| {
+                        ui.set_width(width - theme.space(Space::S6) * 2.0);
+                        self.body(ui, theme, &mut action, &mut close, &mut press);
+                    });
             });
         if press.download {
             self.start_download();
@@ -412,24 +434,6 @@ impl Updater {
         close: &mut bool,
         press: &mut Press,
     ) {
-        // Release Notes: the whole notes, read in Sue.
-        let read = |ui: &mut egui::Ui, release: &Release, press: &mut Press| {
-            if !release.notes.trim().is_empty()
-                && widgets::pill_button(ui, &tr!("update-release-notes"), false, theme).clicked()
-            {
-                press.read = Some(release.clone());
-            }
-        };
-        let heading = |ui: &mut egui::Ui, text: String| {
-            ui.label(
-                RichText::new(text)
-                    .size(theme.heading_size)
-                    .color(theme.text),
-            );
-        };
-        let muted = |ui: &mut egui::Ui, text: String| {
-            ui.label(RichText::new(text).color(theme.muted));
-        };
         let page = |release: Option<&Release>| {
             release.map_or_else(
                 || update::LATEST_RELEASE_PAGE.to_owned(),
@@ -439,42 +443,72 @@ impl Updater {
         match &self.state {
             State::Idle => {}
             State::Checking { .. } => {
-                heading(ui, tr!("checking-for-updates"));
-                muted(ui, tr!("update-current-version", version = SUE_VERSION));
-                ui.add_space(theme.padding);
-                if widgets::pill_button(ui, &tr!("update-hide"), false, theme).clicked() {
+                ui.horizontal(|ui| {
+                    ui::spinner()
+                        .label(&tr!("checking-for-updates"))
+                        .show(ui, theme);
+                    heading(ui, theme, &tr!("checking-for-updates"));
+                });
+                muted(
+                    ui,
+                    theme,
+                    &tr!("update-current-version", version = SUE_VERSION),
+                );
+                ui.add_space(theme.space(Space::S4));
+                if button(
+                    ui,
+                    theme,
+                    "sue-update-hide",
+                    &tr!("update-hide"),
+                    Look::Quiet,
+                ) {
                     *close = true;
                 }
             }
             State::UpToDate(release) => {
-                heading(ui, tr!("sue-is-up-to-date"));
+                heading(ui, theme, &tr!("sue-is-up-to-date"));
                 muted(
                     ui,
-                    if self.install == Install::Browser {
+                    theme,
+                    &if self.install == Install::Browser {
                         tr!("update-browser-is-newest")
                     } else {
                         tr!("update-current-version", version = SUE_VERSION)
                     },
                 );
-                ui.add_space(theme.padding);
+                ui.add_space(theme.space(Space::S4));
                 ui.horizontal_wrapped(|ui| {
-                    if let Some(release) = release {
-                        read(ui, release, press);
-                    }
-                    if widgets::pill_button(ui, &tr!("update-close"), false, theme).clicked() {
+                    if button(
+                        ui,
+                        theme,
+                        "sue-update-close",
+                        &tr!("update-close"),
+                        Look::Main,
+                    ) {
                         *close = true;
+                    }
+                    if let Some(release) = release {
+                        read_button(ui, theme, release, press);
                     }
                 });
             }
             State::Available { release, plan } => {
-                heading(ui, tr!("update-available", version = release.version()));
-                muted(ui, tr!("update-current-version", version = SUE_VERSION));
+                heading(
+                    ui,
+                    theme,
+                    &tr!("update-available", version = release.version()),
+                );
+                muted(
+                    ui,
+                    theme,
+                    &tr!("update-current-version", version = SUE_VERSION),
+                );
                 notes(ui, theme, release);
                 if let Plan::Command(command) = plan {
-                    muted(ui, tr!("update-run-command"));
-                    ui.label(RichText::new(command).monospace().color(theme.text));
+                    muted(ui, theme, &tr!("update-run-command"));
+                    code(ui, theme, command);
                 }
-                ui.add_space(theme.padding);
+                ui.add_space(theme.space(Space::S4));
                 ui.horizontal_wrapped(|ui| {
                     let primary = match plan {
                         Plan::Run(_) if self.install == Install::WindowsSetup => {
@@ -486,25 +520,41 @@ impl Updater {
                         Plan::Command(_) | Plan::Page | Plan::Current => None,
                     };
                     if let Some(label) = primary
-                        && widgets::pill_button(ui, &label, true, theme).clicked()
+                        && button(ui, theme, "sue-update-install", &label, Look::Main)
                     {
                         press.download = true;
                     }
-                    read(ui, release, press);
                     if let Plan::Command(command) = plan
-                        && widgets::pill_button(ui, &tr!("update-copy-command"), true, theme)
-                            .clicked()
+                        && button(
+                            ui,
+                            theme,
+                            "sue-update-copy",
+                            &tr!("update-copy-command"),
+                            Look::Main,
+                        )
                     {
                         *action = Some(Action::Copy(command.clone()));
                     }
                     // Where Sue updates in place, the page is not needed.
                     if matches!(plan, Plan::Page | Plan::Current)
-                        && widgets::pill_button(ui, &tr!("update-release-page"), true, theme)
-                            .clicked()
+                        && button(
+                            ui,
+                            theme,
+                            "sue-update-page",
+                            &tr!("update-release-page"),
+                            Look::Main,
+                        )
                     {
                         *action = Some(Action::OpenUrl(release.page.clone()));
                     }
-                    if widgets::pill_button(ui, &tr!("update-later"), false, theme).clicked() {
+                    read_button(ui, theme, release, press);
+                    if button(
+                        ui,
+                        theme,
+                        "sue-update-later",
+                        &tr!("update-later"),
+                        Look::Quiet,
+                    ) {
                         *close = true;
                     }
                 });
@@ -512,12 +562,24 @@ impl Updater {
             State::Downloading {
                 release, download, ..
             } => {
-                heading(ui, tr!("update-downloading", version = release.version()));
+                heading(
+                    ui,
+                    theme,
+                    &tr!("update-downloading", version = release.version()),
+                );
                 let (received, total) = download.progress();
-                progress(ui, theme, received, total);
+                ui.add_space(theme.space(Space::S2));
+                let bar = if total > 0 {
+                    ui::progress_bar((received as f32 / total as f32).clamp(0.0, 1.0))
+                } else {
+                    ui::ProgressBar::indeterminate()
+                };
+                let said = tr!("update-downloading", version = release.version());
+                bar.label(&said).show(ui, theme);
                 muted(
                     ui,
-                    if total > 0 {
+                    theme,
+                    &if total > 0 {
                         tr!(
                             "update-progress",
                             received = human_bytes(received),
@@ -527,8 +589,14 @@ impl Updater {
                         human_bytes(received)
                     },
                 );
-                ui.add_space(theme.padding);
-                if widgets::pill_button(ui, &tr!("update-hide"), false, theme).clicked() {
+                ui.add_space(theme.space(Space::S4));
+                if button(
+                    ui,
+                    theme,
+                    "sue-update-hide",
+                    &tr!("update-hide"),
+                    Look::Quiet,
+                ) {
                     *close = true;
                 }
             }
@@ -538,57 +606,181 @@ impl Updater {
                 command,
                 again,
             } => {
-                heading(ui, tr!("update-available", version = release.version()));
-                muted(ui, note.clone());
+                heading(
+                    ui,
+                    theme,
+                    &tr!("update-available", version = release.version()),
+                );
+                muted(ui, theme, note);
                 if let Some(command) = command {
-                    ui.label(RichText::new(command).monospace().color(theme.text));
+                    code(ui, theme, command);
                 }
-                ui.add_space(theme.padding);
+                ui.add_space(theme.space(Space::S4));
                 ui.horizontal_wrapped(|ui| {
                     if again.is_some()
-                        && widgets::pill_button(ui, &tr!("update-install"), true, theme).clicked()
+                        && button(
+                            ui,
+                            theme,
+                            "sue-update-again",
+                            &tr!("update-install"),
+                            Look::Main,
+                        )
                     {
                         press.again = true;
                     }
                     if let Some(command) = command
-                        && widgets::pill_button(ui, &tr!("update-copy-command"), true, theme)
-                            .clicked()
+                        && button(
+                            ui,
+                            theme,
+                            "sue-update-copy",
+                            &tr!("update-copy-command"),
+                            Look::Main,
+                        )
                     {
                         *action = Some(Action::Copy(command.clone()));
                     }
-                    read(ui, release, press);
                     if self.install == Install::MacApp
-                        && widgets::pill_button(ui, &tr!("update-quit-sue"), true, theme).clicked()
+                        && button(
+                            ui,
+                            theme,
+                            "sue-update-quit",
+                            &tr!("update-quit-sue"),
+                            Look::Main,
+                        )
                     {
                         *action = Some(Action::Quit);
                     }
-                    if widgets::pill_button(ui, &tr!("update-close"), false, theme).clicked() {
+                    read_button(ui, theme, release, press);
+                    if button(
+                        ui,
+                        theme,
+                        "sue-update-close",
+                        &tr!("update-close"),
+                        Look::Quiet,
+                    ) {
                         *close = true;
                     }
                 });
             }
             State::Failed { release, error } => {
-                heading(ui, tr!("update-failed"));
-                muted(ui, error.clone());
-                ui.add_space(theme.padding);
+                ui.horizontal(|ui| {
+                    let side = theme.text_size(TextRole::Heading);
+                    let (mark, _) = ui.allocate_exact_size(Vec2::splat(side), Sense::hover());
+                    sue_wm::icons::paint(ui.painter(), mark, Icon::Warning, theme.text);
+                    heading(ui, theme, &tr!("update-failed"));
+                });
+                muted(ui, theme, error);
+                ui.add_space(theme.space(Space::S4));
                 ui.horizontal_wrapped(|ui| {
-                    if widgets::pill_button(ui, &tr!("update-try-again"), true, theme).clicked() {
+                    if button(
+                        ui,
+                        theme,
+                        "sue-update-retry",
+                        &tr!("update-try-again"),
+                        Look::Main,
+                    ) {
                         *action = Some(Action::CheckAgain);
                     }
                     if let Some(release) = release {
-                        read(ui, release, press);
+                        read_button(ui, theme, release, press);
                     }
-                    if widgets::pill_button(ui, &tr!("update-release-page"), false, theme).clicked()
-                    {
+                    if button(
+                        ui,
+                        theme,
+                        "sue-update-page",
+                        &tr!("update-release-page"),
+                        Look::Plain,
+                    ) {
                         *action = Some(Action::OpenUrl(page(release.as_ref())));
                     }
-                    if widgets::pill_button(ui, &tr!("update-close"), false, theme).clicked() {
+                    if button(
+                        ui,
+                        theme,
+                        "sue-update-close",
+                        &tr!("update-close"),
+                        Look::Quiet,
+                    ) {
                         *close = true;
                     }
                 });
             }
         }
     }
+}
+
+/// How a button of the update window looks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Look {
+    /// What the window is there for.
+    Main,
+    /// Another answer.
+    Plain,
+    /// Away for now.
+    Quiet,
+}
+
+/// A button of the update window, with its name and what it does as its
+/// tooltip; `true` when pressed.
+fn button(ui: &mut egui::Ui, theme: &Theme, salt: &str, label: &str, look: Look) -> bool {
+    let button = ui::button(salt, label);
+    let button = match look {
+        Look::Main => button.primary(),
+        Look::Plain => button,
+        Look::Quiet => button.ghost(),
+    };
+    let response = button.show(ui, theme);
+    ui::tooltip(response, &Tip::new(label), theme).clicked()
+}
+
+/// Release Notes: the whole notes, read in Sue (when there are any).
+fn read_button(ui: &mut egui::Ui, theme: &Theme, release: &Release, press: &mut Press) {
+    if !release.notes.trim().is_empty()
+        && button(
+            ui,
+            theme,
+            "sue-update-notes",
+            &tr!("update-release-notes"),
+            Look::Plain,
+        )
+    {
+        press.read = Some(release.clone());
+    }
+}
+
+/// The window's title line.
+fn heading(ui: &mut egui::Ui, theme: &Theme, text: &str) {
+    ui.add(
+        Label::new(
+            RichText::new(text)
+                .font(theme.text_font(TextRole::Title))
+                .color(theme.text),
+        )
+        .wrap(),
+    );
+}
+
+/// A line in the secondary text color.
+fn muted(ui: &mut egui::Ui, theme: &Theme, text: &str) {
+    ui.add(
+        Label::new(
+            RichText::new(text)
+                .font(theme.text_font(TextRole::Body))
+                .color(theme.text_muted()),
+        )
+        .wrap(),
+    );
+}
+
+/// A command to type, in the monospace face.
+fn code(ui: &mut egui::Ui, theme: &Theme, text: &str) {
+    ui.add(
+        Label::new(
+            RichText::new(text)
+                .font(theme.text_font(TextRole::Mono))
+                .color(theme.text),
+        )
+        .wrap(),
+    );
 }
 
 /// The release's notes, scrolling when they are long.
@@ -597,15 +789,15 @@ fn notes(ui: &mut egui::Ui, theme: &Theme, release: &Release) {
     if text.is_empty() {
         return;
     }
-    ui.add_space(theme.padding * 0.5);
-    ScrollArea::vertical()
-        .max_height(220.0)
-        .auto_shrink([false, true])
-        .show(ui, |ui| markdown(ui, theme, text));
+    ui.add_space(theme.space(Space::S4));
+    ScrollView::vertical("sue-update-notes")
+        .max_height(theme.space(Space::S9) * 5.5)
+        .auto_shrink(false, true)
+        .show(ui, theme, |ui| markdown(ui, theme, text));
 }
 
-/// A release's whole notes over everything, as a page: the width of a
-/// phone, or a column in the middle of a computer's window.
+/// A release's whole notes over everything, in Sue's dialog: the width of
+/// a phone, or a column in the middle of a computer's window.
 fn read_notes(
     ctx: &egui::Context,
     theme: &Theme,
@@ -614,103 +806,94 @@ fn read_notes(
     action: &mut Option<Action>,
 ) {
     let screen = ctx.content_rect();
-    let phone = screen.width() < 560.0;
-    let size = if phone {
-        screen.size() - vec2(16.0, 48.0)
-    } else {
-        vec2(
-            (screen.width() - 64.0).min(720.0),
-            (screen.height() - 96.0).max(200.0),
-        )
-    };
-    egui::Area::new(Id::unique("sue-release-notes"))
-        .order(Order::Foreground)
-        .pivot(Align2::CENTER_CENTER)
-        .fixed_pos(screen.center())
+    let room = theme.space(Space::S9) * 18.0;
+    let width = (screen.width() - theme.space(Space::S8)).min(room);
+    let height = (screen.height() - theme.space(Space::S9) * 2.5).max(theme.space(Space::S9) * 5.0);
+    let title = tr!("update-notes-title", version = release.version());
+    let shown = Dialog::new("sue-release-notes", &title, theme)
+        .width(width)
+        .height(height)
+        .accept(tr!("update-close"))
+        .extra(tr!("update-release-page"))
+        .scrim_cancels()
         .show(ctx, |ui| {
-            widgets::window_frame(theme).show(ui, |ui| {
-                egui::Frame::new()
-                    .inner_margin(egui::Margin::same(16))
-                    .show(ui, |ui| {
-                        ui.set_width(size.x - 32.0);
-                        ui.set_height(size.y - 32.0);
-                        ui.label(
-                            RichText::new(tr!("update-notes-title", version = release.version()))
-                                .size(theme.heading_size)
-                                .color(theme.text),
-                        );
-                        ui.add_space(theme.padding * 0.5);
-                        let bottom = theme.pill_height + theme.padding * 2.0;
-                        ScrollArea::vertical()
-                            .max_height(ui.available_height() - bottom)
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| markdown(ui, theme, &release.notes));
-                        ui.add_space(theme.padding);
-                        ui.horizontal_wrapped(|ui| {
-                            if widgets::pill_button(ui, &tr!("update-close"), true, theme).clicked()
-                            {
-                                *close = true;
-                            }
-                            if widgets::pill_button(ui, &tr!("update-release-page"), false, theme)
-                                .clicked()
-                            {
-                                *action = Some(Action::OpenUrl(release.page.clone()));
-                            }
-                        });
-                    });
-            });
+            ScrollView::vertical("sue-release-notes-text")
+                .show(ui, theme, |ui| markdown(ui, theme, &release.notes));
         });
+    match shown.answer {
+        Some(Answer::Accept | Answer::Cancel) => *close = true,
+        Some(Answer::Extra) => *action = Some(Action::OpenUrl(release.page.clone())),
+        Some(Answer::Alternate) | None => {}
+    }
 }
 
 /// Release notes as GitHub writes them, read plainly: headings, lists,
 /// paragraphs and code, with the marks of bold, code and links taken off.
 fn markdown(ui: &mut egui::Ui, theme: &Theme, text: &str) {
-    let mut code = false;
+    let mut fenced = false;
     for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("```") {
-            code = !code;
+            fenced = !fenced;
             continue;
         }
-        if code {
-            ui.label(RichText::new(line).monospace().color(theme.text));
+        if fenced {
+            code(ui, theme, line);
             continue;
         }
         if trimmed.is_empty() {
-            ui.add_space(theme.padding * 0.5);
+            ui.add_space(theme.space(Space::S4));
             continue;
         }
         let hashes = trimmed.chars().take_while(|c| *c == '#').count();
         if hashes > 0 && trimmed[hashes..].starts_with(' ') {
-            let size = if hashes <= 2 {
-                theme.heading_size
+            let role = if hashes <= 2 {
+                TextRole::Heading
             } else {
-                theme.ui_size * 1.1
+                TextRole::Title
             };
-            ui.add_space(theme.padding * 0.5);
-            ui.label(
-                RichText::new(plain(trimmed[hashes..].trim()))
-                    .size(size)
-                    .color(theme.text),
+            ui.add_space(theme.space(Space::S4));
+            ui.add(
+                Label::new(
+                    RichText::new(plain(trimmed[hashes..].trim()))
+                        .font(theme.text_font(role))
+                        .color(theme.text),
+                )
+                .wrap(),
             );
             continue;
         }
         let item = ["- ", "* ", "+ "]
             .iter()
             .find_map(|mark| trimmed.strip_prefix(mark));
+        let body = |ui: &mut egui::Ui, words: String| {
+            ui.add(
+                Label::new(
+                    RichText::new(words)
+                        .font(theme.text_font(TextRole::Body))
+                        .color(theme.text),
+                )
+                .wrap(),
+            );
+        };
         if let Some(rest) = item {
-            let indent = (line.len() - line.trim_start().len()) as f32 * 6.0;
+            let depth = (line.len() - line.trim_start().len()) as f32;
             ui.horizontal_top(|ui| {
-                ui.add_space(indent);
-                let (dot, _) = ui.allocate_exact_size(
-                    vec2(theme.ui_size * 0.9, theme.ui_size * 1.3),
-                    Sense::hover(),
+                ui.add_space(depth * theme.space(Space::S3));
+                let size = vec2(
+                    theme.space(Space::S5),
+                    theme.text_size(TextRole::Body) + theme.space(Space::S2),
                 );
-                ui.painter().circle_filled(dot.center(), 2.5, theme.muted);
-                ui.add(egui::Label::new(RichText::new(plain(rest)).color(theme.text)).wrap());
+                let (dot, _) = ui.allocate_exact_size(size, Sense::hover());
+                ui.painter().circle_filled(
+                    dot.center(),
+                    theme.space(Space::S1),
+                    theme.text_muted(),
+                );
+                body(ui, plain(rest));
             });
         } else {
-            ui.add(egui::Label::new(RichText::new(plain(trimmed)).color(theme.text)).wrap());
+            body(ui, plain(trimmed));
         }
     }
 }
@@ -738,19 +921,6 @@ fn plain(text: &str) -> String {
     }
     out.push_str(rest);
     out.replace("**", "").replace('`', "")
-}
-
-/// A thin bar filled as far as the download got.
-fn progress(ui: &mut egui::Ui, theme: &Theme, received: u64, total: u64) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
-    let painter = ui.painter();
-    painter.rect_filled(rect, 3.0, theme.active);
-    if total > 0 {
-        let done = (received as f32 / total as f32).clamp(0.0, 1.0);
-        let mut filled = rect;
-        filled.set_width(rect.width() * done);
-        painter.rect_filled(filled, 3.0, theme.text);
-    }
 }
 
 /// How Sue names itself to GitHub.

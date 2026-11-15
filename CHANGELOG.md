@@ -685,6 +685,16 @@ follow [Semantic Versioning](https://semver.org/).
   settings. Filter, Blur, Smooth is called Smoothing, as in Clip Studio
   Paint, and Mesh Transformation names its step so in History.
 
+- Settings and the update window are drawn with Sue's own controls:
+  switches, dropdowns, sliders beside a field that types the number,
+  search, key chips and buttons that all show where the keyboard is and
+  name themselves (and their keys) when the pointer rests on them. On a
+  phone or a tablet everything is finger sized, and a slider that has
+  little room beside its name goes under it. Release Notes open in Sue's
+  dialog and close with Escape.
+- Settings, Appearance, Icons shows each icon set as a card with its
+  own icons as a preview; choose one with a click or the arrow keys.
+
 ### Fixed
 
 - A layer with keyframes on no longer takes brush or Blend strokes it
@@ -856,6 +866,16 @@ follow [Semantic Versioning](https://semver.org/).
   layer.
 - Sue Paint: OK and Cancel no longer fall off the bottom of the Drop
   Shadow, Focus Lines and Speed Lines dialogs.
+
+- An icon pack that leaves out the optional filled twins (of star,
+  heart, eye and lock) no longer reads "4 things could not be read".
+  Its card says plainly that Sue's own twins show for the on state;
+  only files that really could not be read are counted, and listed on
+  a click. Remove on a pack's card asks again if anything else was
+  pressed after the first click.
+- A setting whose value is no longer one of its choices (a sound
+  device that was unplugged) still opens its list in Settings, so
+  another can be picked.
 
 ### Removed
 

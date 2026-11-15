@@ -42,6 +42,9 @@ my-pack/
   `<name>.solid.svg`. If a pack replaces such an icon but not its twin,
   Sue draws its own twin for the state that is on, and says so in the
   pack's notes, so replace both.
+  A twin is optional: the pack's card in Settings says which twins
+  it leaves out, and does not count them among the files that could
+  not be read.
 - Other files (`thumbs.db`, pictures, folders, links) are left out and
   named in the notes. Only the manifest, the icons and a `LICENSE`,
   `LICENCE`, `COPYING` or `README` file (bare, `.txt` or `.md`) are

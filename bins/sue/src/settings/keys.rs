@@ -15,6 +15,7 @@ macro_rules! tr {
 use egui::{Align, Layout, RichText, Ui};
 use sue_rice::{Keybind, Keybinds, RiceParameter, RiceSchema, RiceValue};
 use sue_wm::shortcuts::{self, Conflict, SparseKeys};
+use sue_wm::ui::Tip;
 use sue_wm::{AppletContext, KeyCommand, KeyGroup, KeyMap};
 
 use super::{Edit, Settings};
@@ -386,12 +387,13 @@ impl Settings {
                         next.remove(index);
                         let (path, value) = shortcuts::bind(rice, &map.section, name, &next);
                         edit = Some(Edit::Set(path, value));
-                    } else if chip
-                        .response
-                        .on_hover_text(tr!("click-then-press-shortcut-put-here"))
-                        .clicked()
-                    {
-                        self.recording = Some((recording_id.clone(), Some(index)));
+                    } else {
+                        let help = tr!("click-then-press-shortcut-put-here");
+                        let shown = chord.to_string();
+                        let tip = Tip::new(&command.label).shortcut(&shown).help(&help);
+                        if sue_wm::ui::tooltip(chip.response, &tip, &theme).clicked() {
+                            self.recording = Some((recording_id.clone(), Some(index)));
+                        }
                     }
                 }
                 if chords.is_empty() && recording.is_none() {
@@ -405,7 +407,10 @@ impl Settings {
             for other in others(resolved, name, chord) {
                 let who = holder_label(&other, map, maps);
                 ui.horizontal_wrapped(|ui| {
-                    let (_, mark) = ui.allocate_space(egui::Vec2::splat(theme.small_size + 2.0));
+                    let (_, mark) = ui.allocate_space(egui::Vec2::splat(
+                        theme.text_size(sue_wm::ui::TextRole::Caption)
+                            + theme.space(sue_wm::ui::Space::S1),
+                    ));
                     sue_wm::icons::paint(
                         ui.painter(),
                         mark,
@@ -426,8 +431,10 @@ impl Settings {
                         chord = chord.to_string(),
                         other = who.as_str()
                     );
+                    let help = tr!("keys-take-from-hint");
                     if sue_wm::ui::button(("sue-key-take", name, who.as_str()), &offer)
                         .ghost()
+                        .hint(&help)
                         .show(ui, &theme)
                         .clicked()
                     {
