@@ -129,7 +129,7 @@ The order of work is the plan at the end.
 
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
-| Export single layer: BMP, JPEG, PNG, TIFF, Targa, WebP, PSB, PSD | File > Export (Single Layer) | done | JPEG XL too |
+| Export single layer: BMP, JPEG, PNG, TIFF, Targa, WebP, PSB, PSD | File > Export (Single Layer) | done | JPEG XL, GIF, QOI, ICO and PPM too; a flat picture goes through the export settings first |
 | Export settings before a flat export | the export settings dialog | done | Format, output size in six ways, resampling, color or grays, background, JPEG quality, JPEG XL effort; the next export starts from the last one's settings |
 | Export animation: audio | File > Export animation | done | The timeline's sound mixed, as WAV, FLAC or AIFF with bits, sample rate, channels and normalizing; grayed without sound |
 | Export animation: image sequence | File > Export animation > Image sequence | done | |

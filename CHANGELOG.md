@@ -17,8 +17,8 @@ follow [Semantic Versioning](https://semver.org/).
   Save Duplicate) shows the export settings first: format, output size,
   resampling, color or grays, background, quality and effort. The next
   export starts where the last one left them.
-- Sue Paint, File, Save Duplicate also writes GIF, QOI, ICO and PPM, and
-  Save As offers Photoshop Big Document and Photoshop Document with their
+- Sue Paint, File, Save Duplicate and Export (Single Layer) also write
+  GIF, QOI, ICO and PPM, and Save As offers Photoshop Big Document and Photoshop Document with their
   layers.
 - Sue Paint, File, Batch Convert Pictures: turn a folder of pictures into
   another type in the background, with a status per file, an output
