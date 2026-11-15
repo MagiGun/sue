@@ -329,6 +329,16 @@ follow [Semantic Versioning](https://semver.org/).
   stroke takes a moment instead of writing the whole picture again. A
   crash in the middle loses at most the last change kept.
 
+- Settings and the update window are drawn with Sue's own controls:
+  switches, dropdowns, sliders beside a field that types the number,
+  search, key chips and buttons that all show where the keyboard is and
+  name themselves (and their keys) when the pointer rests on them. On a
+  phone or a tablet everything is finger sized, and a slider that has
+  little room beside its name goes under it. Release Notes open in Sue's
+  dialog and close with Escape.
+- Settings, Appearance, Icons shows each icon set as a card with its
+  own icons as a preview; choose one with a click or the arrow keys.
+
 ### Fixed
 
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
@@ -454,6 +464,12 @@ follow [Semantic Versioning](https://semver.org/).
 - Add Page, Insert Page and Duplicate Page on a picture that is no story
   yet are one undo step: one Ctrl+Z leaves the picture as it was,
   instead of a story of one page.
+
+- An icon pack that leaves out the optional filled twins (of star,
+  heart, eye and lock) no longer reads "4 things could not be read".
+  Its card says plainly that Sue's own twins show for the on state;
+  only files that really could not be read are counted, and listed on
+  a click.
 
 ### Removed
 
