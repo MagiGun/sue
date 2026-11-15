@@ -160,6 +160,13 @@ pub(crate) fn page(title: &str) -> SettingsPage {
 /// Sue Paint's keyboard shortcuts, grouped as its menus are, then the
 /// tools and the commands no menu shows.
 pub(crate) fn keymap(title: &str) -> KeyMap {
+    let mut map = studio_keymap(title);
+    map.groups.push(sub_tool_keys());
+    map
+}
+
+/// The key map of the registry's commands, grouped as the menus are.
+fn studio_keymap(title: &str) -> KeyMap {
     let registry = crate::commands::registry();
     let table: &[Shortcut] = crate::commands::shortcut_table();
     KeyMap::from_menus(
@@ -175,6 +182,35 @@ pub(crate) fn keymap(title: &str) -> KeyMap {
             _ => tr!("keys-group-other"),
         },
     )
+}
+
+/// The key map's group of sub tools: every sub tool of the tool palette
+/// as Sue Paint brings it, in its order, none with a key until someone
+/// gives one.
+fn sub_tool_keys() -> sue_wm::KeyGroup {
+    let toolbox = crate::tools::Toolbox::default();
+    let mut commands: Vec<sue_wm::KeyCommand> = Vec::new();
+    for slot in toolbox.slots() {
+        for sub in slot.subs() {
+            let command = crate::commands::subtool::command_name(sub.tool, &sub.name);
+            if commands.iter().any(|known| known.command == command) {
+                continue;
+            }
+            commands.push(sue_wm::KeyCommand {
+                command,
+                label: format!(
+                    "{}: {}",
+                    crate::localize(&slot.name),
+                    crate::localize(&sub.name)
+                ),
+                defaults: sue_rice::Keybinds::default(),
+            });
+        }
+    }
+    sue_wm::KeyGroup {
+        title: tr!("keys-group-sub-tools"),
+        commands,
+    }
 }
 
 /// What the drop-downs of the page offer: each Studio Mode key runs one

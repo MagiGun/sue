@@ -13,6 +13,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: every sub tool can be given a key of its own in Settings,
+  Keyboard Shortcuts, Sub Tools; the key picks the sub tool and its tool.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own

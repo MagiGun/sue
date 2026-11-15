@@ -25,6 +25,7 @@ mod help;
 mod layer;
 mod select;
 mod story;
+pub(crate) mod subtool;
 mod tool;
 mod view;
 mod window;
@@ -60,6 +61,7 @@ pub fn registry() -> &'static CommandRegistry<SuePaint> {
         registry.add(canvas::COMMANDS);
         registry.add(figure::COMMANDS);
         registry.add(tool::COMMANDS);
+        registry.add(subtool::COMMANDS);
         registry
     })
 }
@@ -163,6 +165,12 @@ impl SuePaint {
                 let label = registry.label(name).unwrap_or_else(|| name.to_owned());
                 cx.notify(tr!("not-sue-paint-yet", label = label));
             }
+        }
+        // Keys people gave sub tools, kept with the other keys that ship
+        // without a default.
+        let picked = ctx.input_mut(|input| subtool::take(input, cx.rice()));
+        for name in picked {
+            self.run(&name, cx);
         }
     }
 }

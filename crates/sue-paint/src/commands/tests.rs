@@ -165,6 +165,7 @@ fn every_command_can_be_reached() {
             "figure.flip",
             "figure.reset",
             "figure.preset.",
+            "subtool.",
         ]
     );
 }
