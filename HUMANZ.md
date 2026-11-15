@@ -2081,6 +2081,62 @@ in the compositor, and the picture's signature includes it, so its edits
 recomposite. Strokes go to the mask while it is being edited: the pen
 shows, the eraser hides, one `RasterEdit` each.
 
+**Folders as units (0.0.8).** This adds to the two paragraphs above and
+wins where they differ. A folder is a unit (D18 of the 0.0.8 plan): a new layer made with a
+folder picked goes in it, on top of what it holds, and with a layer in a
+folder picked it goes beside that layer in the folder (`doc::landing`,
+used by every maker); duplicate copies a folder with all it holds, each
+layer with its mask, and an animation folder with its timeline track;
+delete, show, hide, lock, move, merge, rasterize and Create Folder and
+Insert Layer act on every picked layer and on all a picked folder holds
+(`doc/picked.rs`). Each of these is one `Batch` with its undo pair tested.
+
+How a folder composites is its blend mode (`style.blend`). With none
+stored it is `through` (`BlendMode::Through`, what every folder of 0.0.75
+was): its layers mix with what is under the folder, and the folder's
+visibility, opacity and mask pass down to each of them. Any other mode
+makes the compositor gather the folder as one layer (`Source::Group`): its
+layers are composited on their own from nothing, so a correction layer in
+it corrects only the folder and a layer clipped to it clips to all of it,
+and the result is laid on with the folder's mode, opacity, clipping and
+mask. A folder's layer color (and sub color) reaches every layer in it
+that has none. The palette indents members and hides those of closed
+folders; moving a layer past its folder's top or bottom takes it out,
+onto a folder puts it in, and a folder moves with its layers.
+
+**Masks on every layer (0.0.8).** A mask is a raster entity (`sue.paint.layer_mask`) linked
+from its layer by `sue.paint.mask`. Any layer takes one: a raster layer's
+is its size, a folder's, paper's or correction's the picture's. Its cover
+is the alpha of an `Rgba8` mask (what Sue writes, paints and 0.0.75 reads)
+or the value of a `Gray8` one (`doc::cover` reads both). While
+`layer.mask_linked` is on (the default) the mask's own `layer.x` and
+`layer.y` are relative to its layer, so it moves with it; unlinked they are
+picture pixels and the layer moves under it. The picture's signature
+includes masks, so their edits recomposite. Strokes go to the mask while
+it is being edited: the pen shows, the eraser hides, one `RasterEdit` each.
+Canvas size, resolution and quarter turns lay masks out again with their
+layers.
+
+**Live layer kinds.** A fill layer (`sue.paint.fill_layer`, `fill.color`),
+a gradient layer (`sue.paint.gradient_layer`, `gradient.from_x` and
+`from_y`, `to_x` and `to_y`, `start`, `end`, `radial`) and an image
+material layer (`sue.paint.material_layer` with its image entity linked by
+`sue.paint.material_image`; `material.x`, `y`, `scale`, `angle`, `tile`)
+have no pixels of their own: the compositor draws them from these
+properties, so they stay editable. A Sue that does not know the class
+keeps the layer and leaves it out of the picture (Rule 3). Rasterize turns
+any of them, any effect and any folder into a plain raster layer of what it
+showed. A palette color (`layer.palette_color`, six offered by stable name
+in `doc::PALETTE_COLORS`) labels layers and folders and never shows in the
+picture.
+
+**Blend modes.** The 28 modes a layer takes follow Clip Studio Paint's list
+and order (`BlendMode::ALL`); folders take `through` first
+(`BlendMode::FOLDER`). Glow Dodge (`glow-dodge`) and Add (Glow)
+(`add-glow`) mix the backdrop with the layer's color taken by its alpha, so
+soft paint glows brighter where it clips; opaque they equal Color Dodge and
+Add. Luminosity reads Brightness; the stored names never change.
+
 **Canvas.** Change Canvas Size moves every layer by the anchor and cuts or
 widens it to the new canvas, Crop is the same to the selection's bounds,
 and Change Image Resolution resamples every layer (averaged when shrinking,

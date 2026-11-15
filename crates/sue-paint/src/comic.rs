@@ -5,8 +5,8 @@
 //! and the drawing together.
 
 use egui::Pos2;
-use sue_core::txn::{ReplaceComponent, SetProperty, SpawnEntity};
-use sue_core::{CHILD, Entity, EntityId, PixelFormat, RasterTile2D, Relation, Value};
+use sue_core::txn::{ReplaceComponent, SetProperty};
+use sue_core::{Entity, EntityId, PixelFormat, RasterTile2D, Value};
 use sue_model::picture::{self, LayerKind};
 use sue_wm::AppletContext;
 
@@ -209,10 +209,14 @@ impl SuePaint {
             layer = layer.with_property(key, value);
         }
         let id = layer.id();
-        let order = cx.world.arena.relations().next_order(picture, CHILD);
-        let edit = Edit::new(tr!("new", name = name)).then(
-            SpawnEntity::new(layer).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
-        );
+        // Where every new layer goes: in the picked folder, or right
+        // above the picked layer in its folder.
+        let edit = Edit::new(tr!("new", name = name)).then(doc::landed(
+            &cx.world.arena,
+            picture,
+            self.layer(),
+            layer,
+        ));
         if !Self::apply(cx, edit) {
             return None;
         }

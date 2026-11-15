@@ -1,16 +1,14 @@
 //! Making, copying, merging and removing layers: raster, vector, paper,
 //! text and correction layers, and reference layers.
 
-use sue_core::txn::{DespawnEntity, RasterEdit, RasterPatch, SetProperty, SpawnEntity};
+use sue_core::txn::{DespawnEntity, RasterEdit, RasterPatch, SpawnEntity};
 use sue_core::{
     Arena, CHILD, Color, Entity, EntityId, OrderKey, PixelFormat, RasterTile2D, Relation, Value,
 };
 use sue_model::class;
 use sue_model::picture::{self, LayerKind, LayerStyle};
 
-use super::{
-    Edit, LayerInfo, bytes, is_folder, key_above, keys_above, layers, raster, size_of, unit,
-};
+use super::{Edit, MEMBER, bytes, is_folder, landing, layers, raster, size_of, unit};
 use crate::composite::{RenderOptions, render};
 
 // ----- Text layers -------------------------------------------------------------------
@@ -38,11 +36,7 @@ pub fn new_correction(
 ) -> (Edit, EntityId) {
     let correction = Entity::empty(name, CORRECTION).with_property(CORRECTION_FILTER, text);
     let id = correction.id();
-    let order = key_above(arena, picture, layer);
-    let edit = Edit::new(tr!("new", name = name)).then(
-        SpawnEntity::new(correction)
-            .with_relation(Relation::new(picture, CHILD, id).ordered(order)),
-    );
+    let edit = Edit::new(tr!("new", name = name)).then(landed(arena, picture, layer, correction));
     (edit, id)
 }
 
@@ -58,7 +52,43 @@ pub fn add_raster_layer(
     name: String,
     fill: Option<[u8; 4]>,
 ) -> Result<(SpawnEntity, EntityId), String> {
-    add_raster_layer_at(arena, picture, key_above(arena, picture, below), name, fill)
+    let (keys, folder) = landing(arena, picture, below, 1);
+    let (spawn, id) = add_raster_layer_at(
+        arena,
+        picture,
+        keys.into_iter().next().unwrap_or_default(),
+        name,
+        fill,
+    )?;
+    Ok((joined(spawn, folder, id), id))
+}
+
+/// `spawn` (of layer `id`) also putting the layer in `folder`, if any.
+fn joined(spawn: SpawnEntity, folder: Option<EntityId>, id: EntityId) -> SpawnEntity {
+    match folder {
+        Some(folder) => spawn.with_relation(Relation::new(folder, MEMBER, id)),
+        None => spawn,
+    }
+}
+
+/// The spawn of `layer` where a new layer goes with `current` picked (see
+/// [`landing`]): in its place in the stack and in its folder. Every maker
+/// of a new layer spawns it through this.
+#[must_use]
+pub fn landed(
+    arena: &Arena,
+    picture: EntityId,
+    current: Option<EntityId>,
+    layer: Entity,
+) -> SpawnEntity {
+    let (keys, folder) = landing(arena, picture, current, 1);
+    let id = layer.id();
+    let order = keys.into_iter().next().unwrap_or_default();
+    joined(
+        SpawnEntity::new(layer).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
+        folder,
+        id,
+    )
 }
 
 /// A new raster layer at `order` in `picture`'s stack, clear or filled
@@ -110,11 +140,7 @@ pub fn add_layer_pixels(
     }
     let layer = Entity::new(name, raster).with_class(class::LAYER);
     let id = layer.id();
-    let order = key_above(arena, picture, below);
-    Ok((
-        SpawnEntity::new(layer).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
-        id,
-    ))
+    Ok((landed(arena, picture, below, layer), id))
 }
 
 /// New raster layers right above `below` (or at the top), in the order
@@ -130,7 +156,7 @@ pub fn add_layers_pixels(
     layers_in: Vec<(String, RasterTile2D)>,
 ) -> Result<(Vec<SpawnEntity>, Vec<EntityId>), String> {
     let [width, height] = size_of(arena, picture)?;
-    let keys = keys_above(arena, picture, below, layers_in.len());
+    let (keys, folder) = landing(arena, picture, below, layers_in.len());
     let (mut spawns, mut ids) = (Vec::new(), Vec::new());
     for ((name, raster), order) in layers_in.into_iter().zip(keys) {
         if raster.width() != width || raster.height() != height {
@@ -138,9 +164,11 @@ pub fn add_layers_pixels(
         }
         let layer = Entity::new(name, raster).with_class(class::LAYER);
         let id = layer.id();
-        spawns.push(
+        spawns.push(joined(
             SpawnEntity::new(layer).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
-        );
+            folder,
+            id,
+        ));
         ids.push(id);
     }
     Ok((spawns, ids))
@@ -179,86 +207,23 @@ pub fn add_vector_layer(
         .with_class(crate::vector::CLASS)
         .with_ext(sue_model::Geometry::new());
     let id = layer.id();
-    let order = key_above(arena, picture, below);
-    Ok((
-        SpawnEntity::new(layer).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
-        id,
-    ))
+    Ok((landed(arena, picture, below, layer), id))
 }
 
-/// The edit that merges raster `ids` of `picture` into the lowest of them
-/// (Merge Selected Layers): each laid over the one below as its blend
-/// mode and opacity say, hidden ones left out. Returns the merged layer.
+/// The edit that merges the picked `ids` of `picture` (Merge Selected
+/// Layers): what they show together, effects, masks, modes and folders
+/// baked, in the lowest picked raster layer, or with a folder picked in a
+/// new layer in the topmost one's place (see [`super::merge_picked`]).
+/// Hidden layers are left out. Returns the merged layer.
 ///
 /// # Errors
-/// If fewer than two of them are raster layers, or one is locked.
+/// If fewer than two layers and no folder are picked, or one is locked.
 pub fn merge_layers(
     arena: &Arena,
     picture: EntityId,
     ids: &[EntityId],
 ) -> Result<(Edit, EntityId), String> {
-    let [width, height] = size_of(arena, picture)?;
-    let chosen: Vec<LayerInfo> = layers(arena, picture)
-        .into_iter()
-        .filter(|info| {
-            ids.contains(&info.id) && info.kind == LayerKind::Raster && !is_folder(arena, info.id)
-        })
-        .collect();
-    if chosen.len() < 2 {
-        return Err(tr!("pick-two-more-raster-layers-merge"));
-    }
-    if let Some(locked) = chosen.iter().find(|info| info.locked) {
-        return Err(tr!("is-locked", name = locked.name));
-    }
-    let mut color = vec![[0.0_f32; 4]; (width * height) as usize];
-    for info in chosen.iter().filter(|info| info.style.visible) {
-        let Some(raster) = raster(arena, info.id) else {
-            continue;
-        };
-        let (Some(bytes), PixelFormat::Rgba8) = (raster.bytes(), raster.format()) else {
-            continue;
-        };
-        let [ox, oy] = info.style.offset;
-        for y in 0..raster.height() {
-            let ty = i64::from(y) + oy;
-            if ty < 0 || ty >= i64::from(height) {
-                continue;
-            }
-            for x in 0..raster.width() {
-                let tx = i64::from(x) + ox;
-                if tx < 0 || tx >= i64::from(width) {
-                    continue;
-                }
-                let mut source = unit(&bytes[((y * raster.width() + x) * 4) as usize..][..4]);
-                source[3] *= info.style.opacity;
-                let at = (ty as u32 * width + tx as u32) as usize;
-                color[at] = info.style.blend.composite(color[at], source);
-            }
-        }
-    }
-    let pixels: Vec<u8> = color.iter().flat_map(|pixel| self::bytes(*pixel)).collect();
-    let tile = RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels)
-        .map_err(|error| error.to_string())?;
-    let into = chosen[0].id;
-    let mut edit = Edit::new(tr!("merge-selected-layers"))
-        .then(sue_core::txn::ReplaceComponent::new(
-            into,
-            tile,
-            tr!("merge-selected-layers"),
-        ))
-        .then(SetProperty::new(into, picture::X, 0_i64))
-        .then(SetProperty::new(into, picture::Y, 0_i64))
-        .then(SetProperty::new(into, picture::OPACITY, 1.0))
-        .then(SetProperty::new(
-            into,
-            picture::BLEND,
-            sue_model::BlendMode::Normal.name(),
-        ))
-        .then(SetProperty::new(into, picture::VISIBLE, true));
-    for info in &chosen[1..] {
-        edit = edit.then(delete(info.id));
-    }
-    Ok((edit, into))
+    super::merge_picked(arena, picture, ids)
 }
 
 /// A new vector layer right above `below` (or at the top) holding
@@ -280,11 +245,7 @@ pub fn add_vector_lines(
         .with_class(crate::vector::CLASS)
         .with_ext(crate::vector::to_geometry(lines));
     let id = layer.id();
-    let order = key_above(arena, picture, below);
-    Ok((
-        SpawnEntity::new(layer).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
-        id,
-    ))
+    Ok((landed(arena, picture, below, layer), id))
 }
 
 /// A paper layer under every other layer.
@@ -302,7 +263,9 @@ pub fn add_paper(arena: &Arena, picture: EntityId, color: Color) -> (SpawnEntity
     )
 }
 
-/// A copy of `layer` right above it, under a new id.
+/// A copy of `layer` right above it, under a new id, in the folder it is
+/// in and with a copy of its mask; a folder's copy holds copies of all it
+/// holds (see [`super::duplicate_layers`]).
 ///
 /// # Errors
 /// If the layer is gone.
@@ -310,16 +273,10 @@ pub fn duplicate(
     arena: &Arena,
     picture: EntityId,
     layer: EntityId,
-) -> Result<(SpawnEntity, EntityId), String> {
-    let source = arena.get_by_id(layer).map_err(|error| error.to_string())?;
-    let mut copy = source.clone().with_id(EntityId::new());
-    copy.set_name(tr!("copy", source = source.name()));
-    let id = copy.id();
-    let order = key_above(arena, picture, Some(layer));
-    Ok((
-        SpawnEntity::new(copy).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
-        id,
-    ))
+) -> Result<(Edit, EntityId), String> {
+    let (edit, copies) = super::duplicate_layers(arena, picture, &[layer])?;
+    let id = copies.first().copied().ok_or(tr!("layer-not-picture"))?;
+    Ok((edit, id))
 }
 
 /// Removes a layer (undo brings it back in its place).
@@ -343,13 +300,24 @@ pub fn merge_down(
         .iter()
         .position(|info| info.id == layer)
         .ok_or(tr!("layer-not-picture"))?;
-    let below = index
+    // Under a folder is what lies under all it holds.
+    let block = super::with_members(arena, picture, &[layer]);
+    let lowest = stack
+        .iter()
+        .position(|info| block.first() == Some(&info.id))
+        .unwrap_or(index);
+    let below = lowest
         .checked_sub(1)
         .and_then(|at| stack.get(at))
-        .filter(|info| info.kind == LayerKind::Raster)
+        .filter(|info| info.kind == LayerKind::Raster && !is_folder(arena, info.id))
         .ok_or(tr!("there-no-raster-layer-below-merge"))?;
     if below.locked {
         return Err(tr!("is-locked", name = below.name));
+    }
+    if !super::picked::merges_plainly(arena, layer) {
+        // A folder, or a layer with a mask or effects: baked.
+        let edit = super::picked::merge_down_baked(arena, picture, layer, below.id)?;
+        return Ok((edit, below.id));
     }
     let upper = raster(arena, layer).ok_or(tr!("only-raster-layers-merge"))?;
     let lower = raster(arena, below.id).ok_or(tr!("only-raster-layers-merge"))?;

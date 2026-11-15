@@ -479,3 +479,99 @@ fn sue_paint_correction_layers_change_what_is_below_and_cancel_cleanly() {
     assert_eq!(layers(&runtime), before, "cancelled, gone");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn sue_paint_folders_are_units_for_new_layer_and_duplicate() {
+    let (mut runtime, root) = runtime("paint-folder-units");
+    let ctx = egui::Context::default();
+    let start = Instant::now();
+    let mut now = start;
+    runtime.request(
+        ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+        &mut NoTextures,
+        now,
+    );
+    frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+    let paint = AppletId::new(sue_paint::ID).unwrap();
+    let mut step = |runtime: &mut Runtime, events: Vec<egui::Event>| {
+        frame_with(runtime, &ctx, now, events);
+        now += Duration::from_millis(16);
+    };
+    let cmd = egui::Modifiers::COMMAND;
+    step(&mut runtime, vec![key(egui::Key::N, cmd)]);
+    step(
+        &mut runtime,
+        vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+    );
+    step(&mut runtime, Vec::new());
+    let command = |runtime: &mut Runtime, name: &str| {
+        runtime.request(
+            ShellRequest::AppletCommand {
+                applet: paint.clone(),
+                command: name.to_owned(),
+            },
+            &mut NoTextures,
+            start,
+        );
+    };
+    let picture = runtime
+        .applets
+        .get(&paint)
+        .and_then(|applet| applet.focus())
+        .unwrap();
+    let stack = |runtime: &Runtime| -> Vec<sue_core::EntityId> {
+        sue_paint::doc::layers(&runtime.engine.world.arena, picture)
+            .into_iter()
+            .map(|info| info.id)
+            .collect()
+    };
+    let folder_of =
+        |runtime: &Runtime, layer| sue_paint::doc::folder_of(&runtime.engine.world.arena, layer);
+    let first = stack(&runtime)[1];
+    command(&mut runtime, "edit.fill");
+    // What it holds on the clipboard, for Paste below.
+    command(&mut runtime, "edit.copy");
+    // Ctrl+G: the layer in a folder, the folder picked.
+    step(&mut runtime, vec![key(egui::Key::G, cmd)]);
+    let folder = stack(&runtime)[2];
+    assert_eq!(folder_of(&runtime, first), Some(folder));
+    let before = stack(&runtime);
+    let depth = runtime.engine.history.depth();
+    // New Layer with the folder picked: in the folder, on top of it.
+    command(&mut runtime, "layer.new");
+    step(&mut runtime, Vec::new());
+    let made = stack(&runtime)[2];
+    assert_eq!(folder_of(&runtime, made), Some(folder));
+    assert_eq!(stack(&runtime)[1..], [first, made, folder]);
+    // Up to the folder (Alt+]), then Duplicate Layer: the copy holds
+    // copies of both layers.
+    step(
+        &mut runtime,
+        vec![key(egui::Key::CloseBracket, egui::Modifiers::ALT)],
+    );
+    command(&mut runtime, "layer.duplicate");
+    step(&mut runtime, Vec::new());
+    let now_stack = stack(&runtime);
+    assert_eq!(now_stack.len(), 7, "paper, two folders of two layers");
+    let copy = *now_stack.last().unwrap();
+    assert!(sue_paint::doc::is_folder(&runtime.engine.world.arena, copy));
+    assert_eq!(
+        sue_paint::doc::members(&runtime.engine.world.arena, picture, copy).len(),
+        2
+    );
+    // Paste with the copied folder picked: the pasted layer goes in it,
+    // on top of what it holds.
+    command(&mut runtime, "edit.paste");
+    step(&mut runtime, Vec::new());
+    let pasted_stack = stack(&runtime);
+    assert_eq!(pasted_stack.len(), 8);
+    let pasted = pasted_stack[pasted_stack.len() - 2];
+    assert!(!now_stack.contains(&pasted));
+    assert_eq!(folder_of(&runtime, pasted), Some(copy));
+    // Every step undoes, back to the folder as it was.
+    while runtime.engine.history.depth() > depth {
+        step(&mut runtime, vec![key(egui::Key::Z, cmd)]);
+    }
+    assert_eq!(stack(&runtime), before);
+    let _ = std::fs::remove_dir_all(&root);
+}

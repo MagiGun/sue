@@ -409,9 +409,7 @@ impl SuePaint {
             Some(picture) => {
                 let layer = Entity::new(name, rgba).with_class(class::LAYER);
                 let id = layer.id();
-                let order = cx.world.arena.relations().next_order(picture, CHILD);
-                let spawn = SpawnEntity::new(layer)
-                    .with_relation(Relation::new(picture, CHILD, id).ordered(order));
+                let spawn = doc::landed(&cx.world.arena, picture, self.layer(), layer);
                 if Self::apply(cx, spawn)
                     && let Some(doc) = self.doc_mut()
                 {

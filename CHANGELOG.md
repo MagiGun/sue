@@ -77,6 +77,10 @@ follow [Semantic Versioning](https://semver.org/).
   is saved with the comic and undoes like any change; until it is made
   it follows the binding. The Page Manager lays a webtoon's columns out
   by it once its webtoon view arrives.
+- Sue Paint has the Glow Dodge and Add (Glow) blend modes: soft paint
+  in them glows brighter than in Color Dodge and Add, as a rim light
+  wants. The blend mode list follows Clip Studio Paint's order, and
+  Luminosity reads Brightness.
 - `SUE_HOME`: set it to a folder and Sue keeps its settings, data and
   caches there instead of the system's usual places, for a portable copy
   or a test run that leaves your own settings alone.
@@ -195,6 +199,14 @@ follow [Semantic Versioning](https://semver.org/).
 - The question about unsaved work when quitting, and Settings on a
   computer or a tablet, use Sue's own dialog: the same title, close
   button, buttons, `Enter` and `Escape` as every other dialog.
+- In Sue Paint a new layer made (or pasted) with a folder picked goes in
+  that folder, on top of what it holds, and one made with a layer in a
+  folder picked stays in that folder; Duplicate Layer on a folder copies
+  everything in it (an animation folder with its track), and a copied
+  layer keeps a copy of its mask.
+- Merge Down and Merge Selected Layers bake masks and layer effects into
+  the merged pixels, and a folder picked among the layers merges with
+  all it holds.
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an
   empty or single color tile costs a byte, a tile found twice (a duplicated
@@ -294,6 +306,10 @@ follow [Semantic Versioning](https://semver.org/).
   while the sub color was picked.
 - The second line of a file's card no longer runs under its heart and
   details button.
+- Change Canvas Size, Crop and Change Image Resolution in Sue Paint left
+  layer masks at their old size and place.
+- A tone effect in Sue Paint drew a faint dot in every white cell, and
+  dark grays never reached solid black.
 - Instant transitions and Animation speed (Settings, Motion) now reach
   the switches in Settings and on the start pages and everything else
   the interface toolkit animates by itself: they used to keep their own

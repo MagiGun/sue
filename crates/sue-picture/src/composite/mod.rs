@@ -7,6 +7,8 @@
 //! new layer) and only the painted rectangle while a stroke is drawn.
 //! Large areas are split into bands of rows composited on every core.
 
+#[cfg(test)]
+mod folders_tests;
 mod gather;
 mod preview;
 mod rows;
@@ -42,10 +44,28 @@ impl Default for RenderOptions {
     }
 }
 
-/// How many threads big jobs split into: the cores, or `SUE_THREADS` when
-/// set (1 measures what the browser, which has no threads, goes through).
+/// The threads of the job pool compositing shares, once one is shared
+/// (see [`share_pool`]); 0 until then.
+static POOL_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Has compositing (and everything that asks [`workers`]) split big jobs
+/// into no more parts than `pool` has threads, so the brush worker and the
+/// compositor share one set of cores instead of each taking all of them.
+/// A pool without threads ([`sue_core::JobPool::inline`]) makes every
+/// composite run on the calling thread, as the browser must.
+pub fn share_pool(pool: &sue_core::JobPool) {
+    POOL_THREADS.store(pool.threads().max(1), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// How many threads big jobs split into: the shared pool's threads once
+/// one is shared ([`share_pool`]), else `SUE_THREADS` when set (1 measures
+/// what the browser, which has no threads, goes through), else the cores.
 #[must_use]
 pub fn workers() -> usize {
+    let shared = POOL_THREADS.load(std::sync::atomic::Ordering::Relaxed);
+    if shared > 0 {
+        return shared;
+    }
     static COUNT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *COUNT.get_or_init(|| {
         std::env::var("SUE_THREADS")
@@ -56,6 +76,46 @@ pub fn workers() -> usize {
                 std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
             })
     })
+}
+
+/// Runs `work` on each of `items`, split over at most [`workers`] threads
+/// when there is more than one item, and answers the results in the
+/// order of `items`.
+pub fn split<I: Sync, T: Send>(items: &[I], work: impl Fn(&I) -> T + Sync) -> Vec<T> {
+    let threads = workers().min(items.len());
+    if threads <= 1 {
+        return items.iter().map(&work).collect();
+    }
+    let per = items.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        let jobs: Vec<_> = items
+            .chunks(per)
+            .map(|chunk| {
+                let work = &work;
+                scope.spawn(move || chunk.iter().map(work).collect::<Vec<_>>())
+            })
+            .collect();
+        jobs.into_iter()
+            .flat_map(|job| job.join().unwrap_or_default())
+            .collect()
+    })
+}
+
+/// A stroke being painted that is not in its layer's pixels yet: the
+/// brush worker's buffer, shown by the compositor over the layer as it
+/// grows (see [`Compositor::set_live`]) and merged into the layer as one
+/// edit when the pen lifts.
+pub trait LiveStroke: Send + Sync + std::fmt::Debug {
+    /// The layer it is painted on.
+    fn layer(&self) -> EntityId;
+
+    /// The layer pixels `[x0, y0, x1, y1]` it may change, or `None` while
+    /// it changes nothing.
+    fn bounds(&self) -> Option<[i64; 4]>;
+
+    /// The layer's straight RGBA (0 to 1) at layer pixel `(x, y)` with the
+    /// stroke on it, where `under` is the layer's own pixel there.
+    fn over(&self, x: i64, y: i64, under: [f32; 4]) -> [f32; 4];
 }
 
 /// Composites the rectangle `[x0, y0, x1, y1]` of `picture` as straight
@@ -97,6 +157,9 @@ pub struct Compositor {
     pending: std::collections::BTreeSet<(u32, u32)>,
     /// The layer the waiting tiles were painted on.
     pending_layer: Option<EntityId>,
+    /// The stroke being painted, shown over its layer (see
+    /// [`Self::set_live`]).
+    live: Option<std::sync::Arc<dyn LiveStroke>>,
 }
 
 /// Versions come from one count for every compositor, so a texture made
@@ -125,7 +188,52 @@ impl Compositor {
             occupancy: std::collections::HashMap::new(),
             pending: std::collections::BTreeSet::new(),
             pending_layer: None,
+            live: None,
         }
+    }
+
+    /// Shows `live` (a stroke not yet in its layer's pixels) over its
+    /// layer from now on, or stops showing one (`None`: the stroke was
+    /// merged into the layer, or given up). What the old and the new
+    /// stroke cover is composited again at once.
+    pub fn set_live(&mut self, arena: &Arena, live: Option<std::sync::Arc<dyn LiveStroke>>) {
+        let mut rects = Vec::new();
+        for stroke in self.live.iter().chain(live.iter()) {
+            if let Some(rect) = self.live_rect(arena, stroke.as_ref()) {
+                rects.push(rect);
+            }
+        }
+        let painted = live
+            .as_ref()
+            .or(self.live.as_ref())
+            .map(|stroke| stroke.layer());
+        self.live = live;
+        if !rects.is_empty() && self.size != [0, 0] {
+            self.refresh_rects(arena, &rects, painted);
+        }
+    }
+
+    /// The stroke shown over its layer, if one is.
+    #[must_use]
+    pub fn live(&self) -> Option<&std::sync::Arc<dyn LiveStroke>> {
+        self.live.as_ref()
+    }
+
+    /// The picture pixels `stroke` may change, cut to the picture.
+    fn live_rect(&self, arena: &Arena, stroke: &dyn LiveStroke) -> Option<[u32; 4]> {
+        let [x0, y0, x1, y1] = stroke.bounds()?;
+        let offset = arena
+            .get_by_id(stroke.layer())
+            .map(|entity| picture::LayerStyle::of(entity).offset)
+            .unwrap_or_default();
+        let clamp = |value: i64, side: u32| value.clamp(0, i64::from(side)) as u32;
+        let rect = [
+            clamp(x0 + offset[0], self.size[0]),
+            clamp(y0 + offset[1], self.size[1]),
+            clamp(x1 + offset[0], self.size[0]),
+            clamp(y1 + offset[1], self.size[1]),
+        ];
+        (rect[0] < rect[2] && rect[1] < rect[3]).then_some(rect)
     }
 
     /// The picture it shows.
@@ -646,6 +754,82 @@ mod tests {
         let before = signature(&arena, picture);
         paint(&mut arena, layer, 0, 0, [1, 1, 1, 255]);
         assert_ne!(signature(&arena, picture), before);
+    }
+
+    /// A stroke for the tests: opaque red over the layer pixels of `rect`.
+    #[derive(Debug)]
+    struct Red {
+        layer: EntityId,
+        rect: [i64; 4],
+    }
+
+    impl LiveStroke for Red {
+        fn layer(&self) -> EntityId {
+            self.layer
+        }
+
+        fn bounds(&self) -> Option<[i64; 4]> {
+            Some(self.rect)
+        }
+
+        fn over(&self, x: i64, y: i64, under: [f32; 4]) -> [f32; 4] {
+            let [x0, y0, x1, y1] = self.rect;
+            if x >= x0 && x < x1 && y >= y0 && y < y1 {
+                [1.0, 0.0, 0.0, 1.0]
+            } else {
+                under
+            }
+        }
+    }
+
+    #[test]
+    fn a_live_stroke_shows_over_its_layer_until_it_is_let_go() {
+        let (mut arena, picture, layer) = picture();
+        // The layer sits one pixel right: the stroke follows it.
+        SetProperty::new(layer, picture::X, 1_i64)
+            .apply(&mut arena)
+            .unwrap();
+        let mut compositor = Compositor::new(picture);
+        compositor.sync(&arena);
+        let white = compositor.pixel(2, 1).unwrap();
+        assert_eq!(white, [255, 255, 255, 255]);
+        let stroke: std::sync::Arc<dyn LiveStroke> = std::sync::Arc::new(Red {
+            layer,
+            rect: [1, 1, 3, 2],
+        });
+        compositor.set_live(&arena, Some(stroke));
+        assert_eq!(compositor.pixel(2, 1), Some([255, 0, 0, 255]));
+        assert_eq!(compositor.pixel(3, 1), Some([255, 0, 0, 255]));
+        assert_eq!(compositor.pixel(1, 1), Some(white), "left of the stroke");
+        // A refresh of what a stroke changed, and a full one, show it too.
+        compositor.refresh_rects(&arena, &[[0, 0, 8, 4]], Some(layer));
+        assert_eq!(compositor.pixel(2, 1), Some([255, 0, 0, 255]));
+        paint(&mut arena, layer, 6, 3, [0, 0, 0, 255]);
+        assert!(compositor.sync(&arena));
+        assert_eq!(compositor.pixel(3, 1), Some([255, 0, 0, 255]));
+        assert!(compositor.live().is_some());
+        // Given up: the layer as it is shows again, and nothing stays.
+        compositor.set_live(&arena, None);
+        assert_eq!(compositor.pixel(2, 1), Some(white));
+        assert!(compositor.live().is_none());
+        // Exports never show a stroke that is not in the layer.
+        let all = render(&arena, picture, [2, 1, 3, 2], RenderOptions::default());
+        assert_eq!(all, vec![255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn work_is_split_in_order_over_the_shared_threads() {
+        let items: Vec<u32> = (0..100).collect();
+        assert_eq!(
+            split(&items, |item| item * 2),
+            (0..100).map(|item| item * 2).collect::<Vec<_>>()
+        );
+        assert!(split(&[] as &[u32], |item| *item).is_empty());
+        // Sharing a pool of as many threads as compositing takes already
+        // changes nothing for the other tests running beside this one.
+        let pool = sue_core::JobPool::new(workers());
+        share_pool(&pool);
+        assert_eq!(workers(), pool.threads());
     }
 }
 

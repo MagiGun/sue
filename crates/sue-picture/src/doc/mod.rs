@@ -10,25 +10,49 @@
 
 mod convert;
 mod folders;
+mod kinds;
 mod layers;
+mod lines_tones;
 mod masks;
 mod order;
+mod palette;
+mod picked;
+#[cfg(test)]
+mod picked_tests;
 
 pub use convert::{
     fitted, rasterize, resample, resize_canvas, resize_rgba, rotate_canvas, vectorize,
 };
 pub use folders::{
-    MEMBER, OPEN, delete_folder, folder_of, folders_around, is_folder, is_open, members,
-    new_folder, set_folder,
+    MEMBER, OPEN, delete_folder, folder_blend, folder_of, folders_around, is_folder, is_open,
+    members, new_folder, set_folder,
+};
+pub use kinds::{
+    FILL_COLOR, FILL_LAYER, GRADIENT_END, GRADIENT_FROM_X, GRADIENT_FROM_Y, GRADIENT_LAYER,
+    GRADIENT_RADIAL, GRADIENT_START, GRADIENT_TO_X, GRADIENT_TO_Y, Gradient, MATERIAL_ANGLE,
+    MATERIAL_IMAGE, MATERIAL_IMAGE_CLASS, MATERIAL_LAYER, MATERIAL_SCALE, MATERIAL_TILE,
+    MATERIAL_X, MATERIAL_Y, Placement, material_image, new_fill_layer, new_gradient_layer,
+    new_material_layer,
 };
 pub use layers::{
     CORRECTION, CORRECTION_FILTER, REFERENCE, TEXT, add_layer_pixels, add_layers_pixels, add_paper,
     add_raster_layer, add_raster_layer_at, add_vector_layer, add_vector_lines, delete, duplicate,
-    is_reference, merge_down, merge_layers, merge_visible, new_correction, transfer_down,
+    is_reference, landed, merge_down, merge_layers, merge_visible, new_correction, transfer_down,
 };
-pub use masks::{MASK, MASK_CLASS, MASK_ON, apply_mask, delete_mask, mask_of, mask_on, new_mask};
+pub use lines_tones::{LinesAndTones, lines_and_tones};
+pub use masks::{
+    MASK, MASK_CLASS, MASK_LINKED, MASK_ON, apply_mask, cover, delete_mask, mask_linked, mask_of,
+    mask_offset, mask_on, new_mask, set_mask_linked, shown_at,
+};
 pub(crate) use order::key_above;
-pub use order::{key_below, keys_above, move_block, reorder};
+pub use order::{key_below, keys_above, landing, move_block, reorder};
+pub use palette::{
+    PALETTE_COLOR, PALETTE_COLORS, named_palette_color, palette_color, set_palette_color,
+};
+pub use picked::{
+    delete_layers, duplicate_layers, folder_insert, merge_picked, move_layers, outermost,
+    rasterize_any, rasterizes, set_layers, with_members,
+};
 
 use sue_core::txn::{Batch, RasterEdit, RasterPatch, Relate, SetProperty, SpawnEntity};
 use sue_core::{
@@ -262,9 +286,15 @@ pub fn label(key: &str, value: &Value) -> String {
         crate::effects::BORDER => pick(&tr!("border-effect"), &tr!("no-border-effect")),
         crate::effects::BORDER_WIDTH | crate::effects::BORDER_COLOR => tr!("border-effect"),
         crate::effects::TONE => pick(&tr!("tone"), &tr!("no-tone")),
-        crate::effects::TONE_LINES | crate::effects::TONE_ANGLE => tr!("tone"),
+        crate::effects::TONE_LINES
+        | crate::effects::TONE_ANGLE
+        | crate::effects::TONE_SOURCE
+        | crate::effects::TONE_LEVELS
+        | crate::effects::TONE_SHAPE => tr!("tone"),
         crate::effects::COLOR => pick(&tr!("layer-color"), &tr!("no-layer-color")),
-        crate::effects::COLOR_VALUE => tr!("layer-color"),
+        crate::effects::COLOR_VALUE | crate::effects::COLOR_SUB => tr!("layer-color"),
+        PALETTE_COLOR => tr!("change-palette-color"),
+        MASK_LINKED => pick(&tr!("link-mask-to-layer"), &tr!("unlink-mask-from-layer")),
         crate::effects::EXPRESSION | crate::effects::THRESHOLD => tr!("expression-color"),
         REFERENCE => pick(
             &tr!("set-as-reference-layer"),

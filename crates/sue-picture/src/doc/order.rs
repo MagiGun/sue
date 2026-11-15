@@ -129,3 +129,44 @@ pub fn reorder(arena: &Arena, picture: EntityId, layer: EntityId, index: usize) 
         Relation::new(picture, CHILD, layer).ordered(order),
     )))
 }
+
+/// Where `count` new layers go when they are made with `current` picked,
+/// as Clip Studio Paint puts them: bottom first, their order keys and the
+/// folder they join. With a folder picked they go in it, on top of what
+/// it holds; with a layer picked, right above it in the folder it is in;
+/// with nothing picked, on top of the picture outside every folder.
+#[must_use]
+pub fn landing(
+    arena: &Arena,
+    picture: EntityId,
+    current: Option<EntityId>,
+    count: usize,
+) -> (Vec<OrderKey>, Option<EntityId>) {
+    let Some(current) =
+        current.filter(|id| layers(arena, picture).iter().any(|layer| layer.id == *id))
+    else {
+        return (keys_above(arena, picture, None, count), None);
+    };
+    if !super::is_folder(arena, current) {
+        return (
+            keys_above(arena, picture, Some(current), count),
+            super::folder_of(arena, current),
+        );
+    }
+    // Right under the folder's own row: on top of its layers.
+    let mut out = Vec::with_capacity(count);
+    let high = layers(arena, picture)
+        .into_iter()
+        .find(|layer| layer.id == current)
+        .map(|layer| layer.order);
+    let mut low = Some(key_below(arena, picture, current));
+    for _ in 0..count {
+        let key = match (&low, &high) {
+            (Some(low), Some(high)) if low < high => OrderKey::between(Some(low), Some(high)),
+            (low, _) => OrderKey::between(low.as_ref(), None),
+        };
+        out.push(key.clone());
+        low = Some(key);
+    }
+    (out, Some(current))
+}

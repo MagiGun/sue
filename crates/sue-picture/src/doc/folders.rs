@@ -3,7 +3,8 @@
 
 use sue_core::txn::{DespawnEntity, Relate, SpawnEntity, Unrelate};
 use sue_core::{Arena, CHILD, Entity, EntityId, Relation, Value};
-use sue_model::class;
+use sue_model::picture;
+use sue_model::{BlendMode, class};
 
 use super::{Edit, key_above, layers};
 
@@ -52,6 +53,20 @@ pub fn members(arena: &Arena, picture: EntityId, folder: EntityId) -> Vec<Entity
         .collect()
 }
 
+/// How `folder` lays its layers on: the mode stored on it, or
+/// [`BlendMode::Through`] when none is (what every folder of 0.0.75 did:
+/// its layers mixed with what is under the folder). A name from a newer
+/// Sue reads as Normal, as on a layer.
+#[must_use]
+pub fn folder_blend(arena: &Arena, folder: EntityId) -> BlendMode {
+    arena
+        .get_by_id(folder)
+        .ok()
+        .and_then(|entity| entity.property(picture::BLEND))
+        .and_then(Value::as_str)
+        .map_or(BlendMode::Through, BlendMode::from_name_or_normal)
+}
+
 /// `true` if the folder shows its layers in the palette.
 #[must_use]
 pub fn is_open(arena: &Arena, folder: EntityId) -> bool {
@@ -79,14 +94,18 @@ pub fn new_folder(
     let folder =
         Entity::empty(tr!("folder", value = count + 1), class::FOLDER).with_property(OPEN, true);
     let id = folder.id();
+    if !insert {
+        // Where a new layer would go: in the picked folder, or beside the
+        // picked layer in its folder.
+        let edit = Edit::new(tr!("new-layer-folder"))
+            .then(super::layers::landed(arena, picture, layer, folder));
+        return (edit, id);
+    }
     let order = key_above(arena, picture, layer);
-    let mut edit = Edit::new(if insert {
-        tr!("create-folder-and-insert-layer")
-    } else {
-        tr!("new-layer-folder")
-    })
-    .then(SpawnEntity::new(folder).with_relation(Relation::new(picture, CHILD, id).ordered(order)));
-    if let Some(layer) = layer.filter(|_| insert) {
+    let mut edit = Edit::new(tr!("create-folder-and-insert-layer")).then(
+        SpawnEntity::new(folder).with_relation(Relation::new(picture, CHILD, id).ordered(order)),
+    );
+    if let Some(layer) = layer {
         if let Some(outer) = folder_of(arena, layer) {
             // The new folder takes the layer's place in its folder.
             edit = edit
