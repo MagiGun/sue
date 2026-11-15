@@ -589,6 +589,22 @@ pub fn tab_place(ctx: &egui::Context, key: &str) -> Option<Rect> {
         .map(|(_, place)| place)
 }
 
+/// Where the tab named `name` (its palette's name, as its tooltip says
+/// it) is in a dock header, as the last frame drew it: for a test or a
+/// tour that points at a palette by the name it reads, while a folded tab
+/// shows only its icon.
+pub fn tab_place_named(ctx: &egui::Context, name: &str) -> Option<Rect> {
+    let now = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<(u64, Rect)>(tab_name_id(name)))
+        .filter(|(pass, _)| pass + 1 >= now)
+        .map(|(_, place)| place)
+}
+
+/// Where [`tab_place_named`] keeps a tab's place.
+fn tab_name_id(name: &str) -> Id {
+    Id::unique(("sue-dock-tab-named", name))
+}
+
 /// Where [`tab_place`] keeps a tab's place.
 fn tab_place_id(key: &str) -> Id {
     Id::unique(("sue-dock-tab-place", key))
@@ -2040,8 +2056,9 @@ impl<P: DockPanel> DockLayout<P> {
         let places: Vec<(P, Rect)> = group.tabs.iter().copied().zip(output.places).collect();
         let pass = ui.ctx().cumulative_pass_nr();
         ui.data_mut(|data| {
-            for (tab, place) in &places {
+            for ((tab, place), face) in places.iter().zip(&faces) {
                 data.insert_temp(tab_place_id(tab.key()), (pass, *place));
+                data.insert_temp(tab_name_id(&face.name), (pass, *place));
             }
         });
         places
