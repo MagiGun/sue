@@ -184,13 +184,39 @@ enum Scene {
     Menu,
     /// The New dialog open over it.
     Dialog,
+    /// The pencil chosen: Tool Property and Brush Size with a brush's
+    /// controls, its sub tools in Sub Tool.
+    Pencil,
+    /// The Movie Export dialog open over it.
+    Export,
 }
 
-const SCENES: [Scene; 3] = [Scene::Canvas, Scene::Menu, Scene::Dialog];
+/// Which palettes Sue Paint shows.
+#[derive(Clone, Copy, Debug)]
+enum Layout {
+    /// The layout a test runtime keeps: Sub Tool, the color set and
+    /// history, the layer list, the timeline.
+    Kept,
+    /// The layout style's own, as a first start shows it: Tool Property,
+    /// Brush Size, the color wheel, Navigator and Layer Property.
+    Fresh,
+}
 
-/// Sue Paint with a canvas and a timeline.
-fn sue_paint() -> PaintDriver {
-    let mut paint = PaintDriver::new("paint-theme");
+/// Every layout with the scenes looked at in it.
+const LAYOUTS: [(Layout, &[Scene]); 2] = [
+    (
+        Layout::Kept,
+        &[Scene::Canvas, Scene::Menu, Scene::Dialog, Scene::Export],
+    ),
+    (Layout::Fresh, &[Scene::Canvas, Scene::Pencil]),
+];
+
+/// Sue Paint in `layout` with a canvas and a timeline.
+fn sue_paint(layout: Layout) -> PaintDriver {
+    let mut paint = match layout {
+        Layout::Kept => PaintDriver::new("paint-theme"),
+        Layout::Fresh => PaintDriver::fresh("paint-theme-fresh"),
+    };
     paint.new_timeline();
     paint.settle(10);
     paint
@@ -212,6 +238,8 @@ fn wearing(paint: &mut PaintDriver, id: &str, scene: Scene) -> (Painted, sue_wm:
         Scene::Dialog => {
             paint.step(vec![key(egui::Key::N, egui::Modifiers::COMMAND)]);
         }
+        Scene::Pencil => paint.command("tool.pick.pencil"),
+        Scene::Export => paint.command("file.export.movie"),
     }
     paint.settle(40);
     let raw = egui::RawInput {
@@ -228,6 +256,9 @@ fn wearing(paint: &mut PaintDriver, id: &str, scene: Scene) -> (Painted, sue_wm:
     let painted = Painted::of(&output);
     output.drop_without_applying_deltas();
     paint.step(vec![escape()]);
+    if matches!(scene, Scene::Pencil) {
+        paint.command("tool.operation");
+    }
     paint.settle(20);
     let rice = &paint.runtime.engine.world.rice;
     let theme =
@@ -245,9 +276,13 @@ fn grid() -> impl Iterator<Item = Pos2> {
 }
 
 /// The places where `a` and `b` fill Sue Paint's surfaces with the same
-/// color, and that color is a surface color of `presets`. The document is
-/// the same in every preset, so places under a picture, colors no preset
-/// fills a surface with, and chips of black or white ink do not count.
+/// color. The document is the same in every preset, so places under a
+/// picture do not count, and neither do color chips (the color set's
+/// swatches, the main and sub color, the New dialog's paper color),
+/// unless a chip wears a surface color of `presets` other than black or
+/// white ink. Any larger fill counts whatever its color, so a literal
+/// color in place of the theme's (a gray of an old palette table) fails
+/// even when no preset uses it.
 fn same_surfaces(a: &Painted, b: &Painted, presets: &[&str]) -> Vec<String> {
     let chrome: Vec<Color32> = presets.iter().flat_map(|id| surface_colors(id)).collect();
     grid()
@@ -255,8 +290,8 @@ fn same_surfaces(a: &Painted, b: &Painted, presets: &[&str]) -> Vec<String> {
             |at| match (a.fill_under(at, usize::MAX), b.fill_under(at, usize::MAX)) {
                 (Some((area, one)), Some((_, other)))
                     if one == other
-                        && chrome.contains(&one)
-                        && !(INK.contains(&one) && area.chip_sized()) =>
+                        && (!area.chip_sized()
+                            || (chrome.contains(&one) && !INK.contains(&one))) =>
                 {
                     Some(format!("{at:?} {one:?}"))
                 }
@@ -294,52 +329,76 @@ fn hard_to_read(painted: &Painted, theme: &sue_wm::Theme) -> Vec<String> {
 /// used to ship in) in place of the theme's.
 #[test]
 fn no_surface_of_sue_paint_looks_the_same_in_void_and_paper() {
-    let mut paint = sue_paint();
-    for scene in SCENES {
-        let (void, _) = wearing(&mut paint, "void", scene);
-        let (paper, _) = wearing(&mut paint, "paper", scene);
+    for (layout, scenes) in LAYOUTS {
+        let mut paint = sue_paint(layout);
+        for &scene in scenes {
+            let (void, _) = wearing(&mut paint, "void", scene);
+            let (paper, _) = wearing(&mut paint, "paper", scene);
+            showing(&void, layout, scene);
+            let same = same_surfaces(&void, &paper, &["void", "paper", "gray"]);
+            assert!(
+                same.is_empty(),
+                "{layout:?} {scene:?}: {} places are the same in Void and Paper: {same:#?}",
+                same.len()
+            );
+            assert!(void.fills.len() > 100, "{layout:?} {scene:?}");
+        }
+        // The check sees a studio that wears its own colors: Sue Paint
+        // set to Gray looks the same in both.
+        paint
+            .runtime
+            .engine
+            .world
+            .rice
+            .set(
+                "sue_paint.theme",
+                sue_rice::RiceValue::Text("gray".to_owned()),
+            )
+            .unwrap();
+        let (void, _) = wearing(&mut paint, "void", Scene::Canvas);
+        let (paper, _) = wearing(&mut paint, "paper", Scene::Canvas);
         let same = same_surfaces(&void, &paper, &["void", "paper", "gray"]);
-        assert!(
-            same.is_empty(),
-            "{scene:?}: {} places are the same in Void and Paper: {same:#?}",
-            same.len()
-        );
-        // Each scene paints what it should.
-        assert!(void.fills.len() > 100 && void.texts.len() > 20, "{scene:?}");
+        assert!(same.len() > 1000, "{layout:?}: {}", same.len());
     }
-    // The check sees a studio that wears its own colors: Sue Paint set
-    // to Gray looks the same in both.
-    paint
-        .runtime
-        .engine
-        .world
-        .rice
-        .set(
-            "sue_paint.theme",
-            sue_rice::RiceValue::Text("gray".to_owned()),
-        )
-        .unwrap();
-    let (void, _) = wearing(&mut paint, "void", Scene::Canvas);
-    let (paper, _) = wearing(&mut paint, "paper", Scene::Canvas);
-    let same = same_surfaces(&void, &paper, &["void", "paper", "gray"]);
-    assert!(same.len() > 1000, "{}", same.len());
+}
+
+/// Fails unless `painted` shows what `scene` in `layout` is there to
+/// show, so no check passes on a scene that did not open.
+fn showing(painted: &Painted, layout: Layout, scene: Scene) {
+    let words: &[&str] = match (layout, scene) {
+        (Layout::Kept, Scene::Canvas) => &["Sub Tool", "Color Set", "Layer", "Timeline 1"],
+        (Layout::Fresh, Scene::Canvas) => &["Tool Property", "Brush Size", "Layer Property"],
+        (_, Scene::Menu) => &["Save As...", "Quit Sue"],
+        (_, Scene::Dialog) => &["Resolution", "Paper color", "OK"],
+        (_, Scene::Pencil) => &["Mechanical pencil", "Tool Property", "Brush Size"],
+        (_, Scene::Export) => &["Movie Export Settings", "Frame rate", "OK"],
+    };
+    for word in words {
+        assert!(
+            painted.texts.iter().any(|(_, text, _, _)| text == word),
+            "{layout:?} {scene:?} shows {word:?}"
+        );
+    }
 }
 
 /// In every preset Sue ships, Sue Paint's text reads at 4.5 to 1 and its
 /// icons at 3 to 1 against what they lie on.
 #[test]
 fn sue_paints_text_and_icons_read_in_every_preset() {
-    let mut paint = sue_paint();
     let mut found = Vec::new();
-    for preset in sue_rice::builtin_presets() {
-        for scene in SCENES {
-            let (painted, theme) = wearing(&mut paint, &preset.id, scene);
-            assert!(painted.icons.len() > 20, "{scene:?} paints its icons");
-            found.extend(
-                hard_to_read(&painted, &theme)
-                    .into_iter()
-                    .map(|line| format!("{} {scene:?}: {line}", preset.id)),
-            );
+    for (layout, scenes) in LAYOUTS {
+        let mut paint = sue_paint(layout);
+        for preset in sue_rice::builtin_presets() {
+            for &scene in scenes {
+                let (painted, theme) = wearing(&mut paint, &preset.id, scene);
+                showing(&painted, layout, scene);
+                assert!(painted.icons.len() > 20, "{scene:?} paints its icons");
+                found.extend(
+                    hard_to_read(&painted, &theme)
+                        .into_iter()
+                        .map(|line| format!("{} {layout:?} {scene:?}: {line}", preset.id)),
+                );
+            }
         }
     }
     assert!(found.is_empty(), "{found:#?}");
