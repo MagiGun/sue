@@ -61,15 +61,20 @@ pub enum Filter {
         /// How far, pixels.
         distance: f32,
     },
-    /// Radial Blur: spun round the middle.
+    /// Radial Blur: spun round its centre.
     RadialBlur {
         /// How far round, degrees.
         angle: f32,
+        /// The centre, as a share of the layer's width and height (0.5,
+        /// 0.5 is the middle).
+        center: [f32; 2],
     },
-    /// Zoom Blur: streaked toward the middle.
+    /// Zoom Blur: streaked toward its centre.
     ZoomBlur {
         /// How far, 0 to 1 of the way.
         amount: f32,
+        /// The centre, as a share of the layer's width and height.
+        center: [f32; 2],
     },
     /// Smooth: jagged edges softened.
     Smooth,
@@ -127,8 +132,11 @@ pub enum Filter {
     /// Smart Smoothing: jagged, stair-stepped edges of line art made
     /// smooth and anti-aliased, lines kept as thick and as dark.
     SmartSmooth {
-        /// 0 to 1: how far the smoothing reaches.
+        /// 0 to 1: how far the smoothing reaches (Weak, Medium and Strong
+        /// are [`SMART_LEVELS`]).
         strength: f32,
+        /// Specks of a pixel or two cleared first.
+        remove_noise: bool,
     },
     /// Quick Filters and Quick Effects: a one-click look (see
     /// [`crate::quick`]) at a strength.
@@ -199,12 +207,19 @@ pub enum Filter {
         /// 0 to 1.
         amount: f32,
     },
-    /// Perlin Noise: smooth noise in gray.
+    /// Perlin Noise: smooth noise in gray, layers of it each finer than
+    /// the last.
     PerlinNoise {
-        /// How large, pixels.
+        /// How large the coarsest layer is, pixels.
         scale: f32,
         /// How strong the contrast, 0 to 2.
-        contrast: f32,
+        amplitude: f32,
+        /// How much each finer layer keeps of the one before, 0 to 1.
+        attenuation: f32,
+        /// How many layers, 1 to 8.
+        repetition: u32,
+        /// Where the pattern starts, pixels across and down.
+        offset: [f32; 2],
     },
     /// Clouds: smooth noise between two colors.
     Clouds {
@@ -332,6 +347,62 @@ pub enum Filter {
         /// The ink.
         rgb: [u8; 3],
     },
+    /// Gradient Map with stops: brightness picks a color, and an opacity
+    /// that mixes it over the original, from a gradient of stops.
+    Gradient {
+        /// The gradient, with the main and sub colors filled in.
+        map: crate::gradient_map::GradientMap,
+    },
+    /// Level Correction for all channels and for red, green and blue
+    /// alone: each set is input black, white, gamma, output black, white.
+    ChannelLevels {
+        /// RGB first, then red, green and blue.
+        sets: [[f32; 5]; 4],
+        /// The set being edited (0 RGB, then red, green, blue).
+        channel: u8,
+    },
+    /// Curved Surface: the picture as if on a ball or a cylinder, bulged
+    /// out (above 0) or pressed in.
+    CurvedSurface {
+        /// -1 to 1.
+        amount: f32,
+        /// 0 both ways (a ball), 1 across, 2 up and down (a cylinder).
+        axis: u8,
+    },
+    /// Artistic: the picture as a painting, flat colors and drawn lines.
+    Artistic {
+        /// 0 colors and lines, 1 lines only, 2 colors only.
+        process: u8,
+        /// Line thickness, pixels.
+        line_width: f32,
+        /// Line simplicity, 0 (every detail) to 1 (only the big shapes).
+        simplicity: f32,
+        /// Line density, 0 (few) to 1 (many).
+        density: f32,
+        /// Line opacity, 0 to 1.
+        line_opacity: f32,
+        /// Soft line edges.
+        antialias: bool,
+        /// Color blending: how much of the original color stays, 0 to 1.
+        blending: f32,
+        /// Color blur, pixels.
+        color_blur: f32,
+        /// Number of colors a channel, 2 to 32.
+        colors: u32,
+    },
+}
+
+/// Smart Smoothing's three intensities, Weak, Medium and Strong, as the
+/// strength they run at.
+pub const SMART_LEVELS: [f32; 3] = [0.3, 0.6, 1.0];
+
+/// A Level Correction set that changes nothing.
+pub const LEVELS_SAME: [f32; 5] = [0.0, 1.0, 1.0, 0.0, 1.0];
+
+/// One channel's value through a Level Correction set.
+fn level(value: f32, [black, white, gamma, out_black, out_white]: [f32; 5]) -> f32 {
+    let t = ((value - black) / (white - black).max(1e-4)).clamp(0.0, 1.0);
+    out_black + (out_white - out_black) * t.powf(1.0 / gamma.max(0.01))
 }
 
 impl Filter {
@@ -351,7 +422,7 @@ impl Filter {
             Self::MotionBlur { .. } => tr!("motion-blur"),
             Self::RadialBlur { .. } => tr!("radial-blur"),
             Self::ZoomBlur { .. } => tr!("zoom-blur"),
-            Self::Smooth => tr!("smooth"),
+            Self::Smooth => tr!("smoothing"),
             Self::Dust { .. } => tr!("remove-dust"),
             Self::LineWidth { .. } => tr!("line-width"),
             Self::Wave { .. } => tr!("wave"),
@@ -384,6 +455,37 @@ impl Filter {
             Self::FocusLines { .. } => tr!("focus-lines"),
             Self::SpeedLines { .. } => tr!("speed-lines"),
             Self::Tone { .. } => tr!("screentone"),
+            Self::Gradient { .. } => tr!("gradient-map"),
+            Self::ChannelLevels { .. } => tr!("level-correction"),
+            Self::CurvedSurface { .. } => tr!("curved-surface"),
+            Self::Artistic { .. } => tr!("artistic"),
+        }
+    }
+
+    /// The richer form a dialog edits: Level Correction with its channels
+    /// and Gradient Map with stops. Every other filter as it is.
+    #[must_use]
+    pub fn upgraded(self) -> Self {
+        match self {
+            Self::Levels {
+                black,
+                white,
+                gamma,
+                out_black,
+                out_white,
+            } => Self::ChannelLevels {
+                sets: [
+                    [black, white, gamma, out_black, out_white],
+                    LEVELS_SAME,
+                    LEVELS_SAME,
+                    LEVELS_SAME,
+                ],
+                channel: 0,
+            },
+            Self::GradientMap { from, to } => Self::Gradient {
+                map: crate::gradient_map::GradientMap::two(from, to),
+            },
+            other => other,
         }
     }
 
@@ -421,8 +523,8 @@ impl Filter {
                     (x + cos * t * distance / 2.0, y + sin * t * distance / 2.0)
                 });
             }
-            Self::RadialBlur { angle } => {
-                let (cx, cy) = (width as f32 / 2.0, height as f32 / 2.0);
+            Self::RadialBlur { angle, center } => {
+                let (cx, cy) = (width as f32 * center[0], height as f32 * center[1]);
                 let steps = (angle * 2.0).round().clamp(2.0, 64.0) as i32;
                 along(pixels, width, height, steps, |x, y, t| {
                     let (sin, cos) = (angle.to_radians() / 2.0 * t).sin_cos();
@@ -430,8 +532,8 @@ impl Filter {
                     (cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
                 });
             }
-            Self::ZoomBlur { amount } => {
-                let (cx, cy) = (width as f32 / 2.0, height as f32 / 2.0);
+            Self::ZoomBlur { amount, center } => {
+                let (cx, cy) = (width as f32 * center[0], height as f32 * center[1]);
                 along(pixels, width, height, 24, |x, y, t| {
                     let scale = 1.0 - amount.clamp(0.0, 1.0) * 0.5 * (t + 1.0) / 2.0;
                     (cx + (x - cx) * scale, cy + (y - cy) * scale)
@@ -495,7 +597,63 @@ impl Filter {
             }
             Self::Crystallize { size } => crystallize(pixels, width, height, size.max(2)),
             Self::LensBlur { radius } => lens_blur(pixels, width, height, radius.clamp(1, 64)),
-            Self::SmartSmooth { strength } => smart_smooth(pixels, width, height, strength),
+            Self::SmartSmooth {
+                strength,
+                remove_noise,
+            } => {
+                if remove_noise {
+                    crate::correct::remove_dust(pixels, width, height, [0, 0, width, height], 2);
+                }
+                smart_smooth(pixels, width, height, strength);
+            }
+            Self::CurvedSurface { amount, axis } => {
+                let (cx, cy) = (width as f32 / 2.0, height as f32 / 2.0);
+                let (rx, ry) = (cx.max(1.0), cy.max(1.0));
+                let power = 1.0 + amount.clamp(-1.0, 1.0) * 0.8;
+                let bend = |u: f32| u.signum() * u.abs().powf(power);
+                remap(pixels, width, height, |x, y| {
+                    let (u, v) = ((x - cx) / rx, (y - cy) / ry);
+                    match axis {
+                        1 if u.abs() < 1.0 => (cx + bend(u) * rx, y),
+                        2 if v.abs() < 1.0 => (x, cy + bend(v) * ry),
+                        1 | 2 => (x, y),
+                        _ => {
+                            let d = u.hypot(v);
+                            if d >= 1.0 || d <= 1e-6 {
+                                return (x, y);
+                            }
+                            let k = bend(d) / d;
+                            (cx + u * k * rx, cy + v * k * ry)
+                        }
+                    }
+                });
+            }
+            Self::Artistic {
+                process,
+                line_width: thickness,
+                simplicity,
+                density,
+                line_opacity,
+                antialias,
+                blending,
+                color_blur,
+                colors,
+            } => artistic(
+                pixels,
+                width,
+                height,
+                &Artistic {
+                    process,
+                    thickness,
+                    simplicity,
+                    density,
+                    line_opacity,
+                    antialias,
+                    blending,
+                    color_blur,
+                    colors,
+                },
+            ),
             Self::Quick {
                 effect,
                 look,
@@ -697,11 +855,23 @@ impl Filter {
                     }
                 }
             }
-            Self::PerlinNoise { scale, contrast } => {
+            Self::PerlinNoise {
+                scale,
+                amplitude,
+                attenuation,
+                repetition,
+                offset,
+            } => {
+                let scale = scale.max(1.0);
                 for y in 0..height {
                     for x in 0..width {
-                        let n = fbm(x as f32 / scale.max(1.0), y as f32 / scale.max(1.0), 4);
-                        let value = (((n - 0.5) * contrast.max(0.0)) + 0.5).clamp(0.0, 1.0);
+                        let n = layered_noise(
+                            (x as f32 + offset[0]) / scale,
+                            (y as f32 + offset[1]) / scale,
+                            repetition.clamp(1, 8),
+                            attenuation.clamp(0.0, 1.0),
+                        );
+                        let value = (((n - 0.5) * amplitude.max(0.0)) + 0.5).clamp(0.0, 1.0);
                         let byte = (value * 255.0).round() as u8;
                         pixels[((y * width + x) * 4) as usize..][..4]
                             .copy_from_slice(&[byte, byte, byte, 255]);
@@ -871,6 +1041,29 @@ impl Filter {
             Self::Posterize { levels } => format!("posterize:{levels}"),
             Self::Binarize { threshold } => format!("binarize:{threshold}"),
             Self::GradientMap { from, to } => format!("gradient:{},{}", hex(from), hex(to)),
+            // The two-color form keeps the old text, so older Sue reads it.
+            Self::Gradient { map } if map.is_two() => {
+                let stops = map.stops();
+                format!("gradient:{},{}", hex(stops[0].rgb), hex(stops[1].rgb))
+            }
+            Self::Gradient { map } => format!("gradient:{}", map.to_text()),
+            // Only RGB changed: the old text, which older Sue reads.
+            Self::ChannelLevels { sets, .. } if sets[1..].iter().all(|set| *set == LEVELS_SAME) => {
+                let [black, white, gamma, out_black, out_white] = sets[0];
+                format!("levels:{black},{white},{gamma},{out_black},{out_white}")
+            }
+            Self::ChannelLevels { sets, .. } => {
+                let sets: Vec<String> = sets
+                    .iter()
+                    .map(|set| {
+                        set.iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .collect();
+                format!("levels:{}", sets.join("|"))
+            }
             _ => return None,
         })
     }
@@ -888,6 +1081,25 @@ impl Filter {
             let byte = |at: usize| u8::from_str_radix(value.get(at..at + 2)?, 16).ok();
             Some([byte(0)?, byte(2)?, byte(4)?])
         };
+        // The forms that grew: Level Correction with its channels, and
+        // Gradient Map with stops (both hold a `|`).
+        if kind == "levels" && values.contains('|') {
+            let mut sets = [LEVELS_SAME; 4];
+            let mut read = 0;
+            for (set, text) in sets.iter_mut().zip(values.split('|')) {
+                let numbers: Vec<f32> = text
+                    .split(',')
+                    .filter_map(|value| value.trim().parse().ok())
+                    .collect();
+                *set = numbers.as_slice().try_into().ok()?;
+                read += 1;
+            }
+            return (read == 4).then_some(Self::ChannelLevels { sets, channel: 0 });
+        }
+        if kind == "gradient" && values.contains('|') {
+            return crate::gradient_map::GradientMap::from_text(values)
+                .map(|map| Self::Gradient { map });
+        }
         Some(match (kind, numbers.as_slice()) {
             ("brightness", &[brightness, contrast]) => Self::BrightnessContrast {
                 brightness,
@@ -952,6 +1164,7 @@ impl Filter {
             self,
             Self::ToneCurve { .. }
                 | Self::Levels { .. }
+                | Self::ChannelLevels { .. }
                 | Self::Invert
                 | Self::Posterize { .. }
                 | Self::BrightnessContrast { .. }
@@ -1034,6 +1247,21 @@ impl Filter {
                 }
                 out
             }
+            Self::ChannelLevels { sets, .. } => {
+                let all = rgb.map(|value| level(value, sets[0]));
+                [0, 1, 2].map(|channel| level(all[channel], sets[channel + 1]))
+            }
+            Self::Gradient { map } => {
+                let light = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+                let [r, g, b, cover] = map.at(light);
+                [r, g, b]
+                    .into_iter()
+                    .zip(rgb)
+                    .map(|(new, old)| old + (new - old) * cover)
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap_or(rgb)
+            }
             Self::GradientMap { from, to } => {
                 let light = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
                 [0, 1, 2].map(|channel| {
@@ -1077,7 +1305,9 @@ impl Filter {
             | Self::Unsharp { .. }
             | Self::FocusLines { .. }
             | Self::SpeedLines { .. }
-            | Self::Tone { .. } => rgb,
+            | Self::Tone { .. }
+            | Self::CurvedSurface { .. }
+            | Self::Artistic { .. } => rgb,
         };
         [byte(out[0]), byte(out[1]), byte(out[2]), a]
     }
@@ -1223,6 +1453,109 @@ fn fbm(x: f32, y: f32, octaves: u32) -> f32 {
     sum / total
 }
 
+/// Layers of smooth noise for Perlin Noise: `octaves` of them, each twice
+/// as fine as the last and `keep` as strong.
+fn layered_noise(x: f32, y: f32, octaves: u32, keep: f32) -> f32 {
+    let (mut sum, mut weight, mut total, mut scale) = (0.0, 1.0, 0.0, 1.0);
+    for octave in 0..octaves {
+        sum += smooth_noise(x * scale, y * scale, octave) * weight;
+        total += weight;
+        weight *= keep;
+        scale *= 2.0;
+    }
+    if total <= 0.0 { 0.5 } else { sum / total }
+}
+
+/// Artistic's settings, as [`Filter::Artistic`] holds them.
+struct Artistic {
+    process: u8,
+    thickness: f32,
+    simplicity: f32,
+    density: f32,
+    line_opacity: f32,
+    antialias: bool,
+    blending: f32,
+    color_blur: f32,
+    colors: u32,
+}
+
+/// Artistic: flat colors (blurred, then fewer tones, mixed with the
+/// original by `blending`) under drawn lines (Line Extraction's edges,
+/// thickened, their softness and opacity as set).
+fn artistic(pixels: &mut [u8], width: u32, height: u32, settings: &Artistic) {
+    let original = pixels.to_vec();
+    let lines = settings.process != 2;
+    let colors = settings.process != 1;
+    let mut ink = original.clone();
+    if lines {
+        let smooth = 0.6 + settings.simplicity.clamp(0.0, 1.0) * 4.0;
+        extract_lines(
+            &mut ink,
+            width,
+            height,
+            settings.density.clamp(0.0, 1.0),
+            0.0,
+            smooth,
+        );
+        let grow = settings.thickness - 1.0;
+        if grow.abs() > 0.05 {
+            line_width(&mut ink, width, height, grow);
+        }
+        for pixel in ink.as_chunks_mut::<4>().0 {
+            let mut alpha = f32::from(pixel[3]) / 255.0;
+            if !settings.antialias {
+                alpha = if alpha >= 0.5 { 1.0 } else { 0.0 };
+            }
+            pixel[3] = (alpha * settings.line_opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+        }
+    }
+    if colors {
+        if settings.color_blur > 0.05 {
+            blur(pixels, width, height, settings.color_blur);
+        }
+        let steps = settings.colors.clamp(2, 32) as f32 - 1.0;
+        let keep = settings.blending.clamp(0.0, 1.0);
+        for (pixel, old) in pixels
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(original.as_chunks::<4>().0)
+        {
+            for channel in 0..3 {
+                let value = f32::from(pixel[channel]) / 255.0;
+                let flat = (value * steps).round() / steps;
+                let mixed = flat + (f32::from(old[channel]) / 255.0 - flat) * keep;
+                pixel[channel] = (mixed.clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+            pixel[3] = old[3];
+        }
+    } else {
+        // Lines only: on clear.
+        pixels.fill(0);
+    }
+    if lines {
+        for (pixel, line) in pixels
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(ink.as_chunks::<4>().0)
+        {
+            let a = f32::from(line[3]) / 255.0;
+            if a <= 0.0 {
+                continue;
+            }
+            let under = f32::from(pixel[3]) / 255.0;
+            let out = a + under * (1.0 - a);
+            for channel in 0..3 {
+                let mixed =
+                    f32::from(line[channel]) * a + f32::from(pixel[channel]) * under * (1.0 - a);
+                pixel[channel] = (mixed / out.max(1e-6)).round().clamp(0.0, 255.0) as u8;
+            }
+            pixel[3] = (out * 255.0).round() as u8;
+        }
+    }
+}
+
 /// The brightness of each pixel over white, 0 to 1.
 fn luma_over_white(pixels: &[u8]) -> Vec<f32> {
     pixels
@@ -1299,6 +1632,12 @@ fn extract_lines(
 
 /// Three box blurs approximate a gaussian; colors blur premultiplied so
 /// transparent pixels do not darken the edges.
+/// [`blur`] for the rest of the picture engine (Colorize softens with
+/// it).
+pub(crate) fn blur_pixels(pixels: &mut [u8], width: u32, height: u32, radius: f32) {
+    blur(pixels, width, height, radius);
+}
+
 fn blur(pixels: &mut [u8], width: u32, height: u32, radius: f32) {
     let (w, h) = (width as usize, height as usize);
     let mut data: Vec<[f32; 4]> = pixels
@@ -1654,8 +1993,26 @@ mod tests {
             distance: 12.0,
         });
         assert!(gray(&smeared, 24, 20) < 230 && gray(&smeared, 20, 26) > 250);
-        assert!(gray(&run(Filter::RadialBlur { angle: 30.0 }), 20, 20) < 255);
-        assert!(gray(&run(Filter::ZoomBlur { amount: 0.5 }), 20, 20) < 255);
+        assert!(
+            gray(
+                &run(Filter::RadialBlur {
+                    angle: 30.0,
+                    center: [0.5, 0.5]
+                }),
+                20,
+                20
+            ) < 255
+        );
+        assert!(
+            gray(
+                &run(Filter::ZoomBlur {
+                    amount: 0.5,
+                    center: [0.5, 0.5]
+                }),
+                20,
+                20
+            ) < 255
+        );
         assert_ne!(run(Filter::Smooth), dot());
         // Distortions move the dot; Polar there and back is close.
         assert_ne!(
@@ -1708,7 +2065,11 @@ mod tests {
             .iter()
             .map(|p| u32::from(p[3]))
             .sum();
-        Filter::SmartSmooth { strength: 0.5 }.apply(&mut stairs, sw, sh, None, [0, 0]);
+        Filter::SmartSmooth {
+            strength: 0.5,
+            remove_noise: false,
+        }
+        .apply(&mut stairs, sw, sh, None, [0, 0]);
         // Where each row's line starts: four pixel jumps before, at most
         // two after (a smooth diagonal).
         let start =
@@ -1733,7 +2094,11 @@ mod tests {
             let at = ((20 * sw + x) * 4) as usize;
             thin[at..at + 4].copy_from_slice(&[0, 0, 0, 255]);
         }
-        Filter::SmartSmooth { strength: 1.0 }.apply(&mut thin, sw, sh, None, [0, 0]);
+        Filter::SmartSmooth {
+            strength: 1.0,
+            remove_noise: false,
+        }
+        .apply(&mut thin, sw, sh, None, [0, 0]);
         let darkest = thin
             .as_chunks::<4>()
             .0
@@ -1760,7 +2125,10 @@ mod tests {
         // Generators fill the layer.
         let noise = run(Filter::PerlinNoise {
             scale: 8.0,
-            contrast: 1.0,
+            amplitude: 1.0,
+            attenuation: 0.5,
+            repetition: 4,
+            offset: [0.0, 0.0],
         });
         let values: std::collections::HashSet<u8> = noise.chunks(4).map(|p| p[0]).collect();
         assert!(values.len() > 20, "varied");
@@ -2071,5 +2439,253 @@ mod tests {
         assert!(at(&puffed, 21, 21)[0] > 140, "{:?}", at(&puffed, 21, 21));
         assert!(at(&puffed, 38, 38)[0] < 116, "{:?}", at(&puffed, 38, 38));
         assert_eq!(at(&puffed, 2, 2)[3], 0);
+    }
+
+    #[test]
+    fn level_correction_has_its_channels_and_old_text_still_reads() {
+        let old = Filter::from_text("levels:0.1,0.9,1.2,0,1").unwrap();
+        let upgraded = old.upgraded();
+        let Filter::ChannelLevels { sets, .. } = upgraded else {
+            panic!("{upgraded:?}");
+        };
+        assert_eq!(sets[0], [0.1, 0.9, 1.2, 0.0, 1.0]);
+        // Only RGB changed: the old text, which older Sue reads.
+        assert_eq!(
+            upgraded.to_text().as_deref(),
+            Some("levels:0.1,0.9,1.2,0,1")
+        );
+        // Red alone pulled down: the grown text, read back.
+        let mut red = [super::LEVELS_SAME; 4];
+        red[1] = [0.0, 1.0, 1.0, 0.0, 0.5];
+        let filter = Filter::ChannelLevels {
+            sets: red,
+            channel: 1,
+        };
+        let text = filter.to_text().unwrap();
+        assert!(text.contains('|'), "{text}");
+        assert_eq!(
+            Filter::from_text(&text),
+            Some(Filter::ChannelLevels {
+                sets: red,
+                channel: 0
+            })
+        );
+        let mut pixel = vec![200, 200, 200, 255];
+        filter.apply(&mut pixel, 1, 1, None, [0, 0]);
+        assert_eq!(&pixel[..3], &[100, 200, 200], "only red changes");
+        assert!(filter.per_channel());
+        assert_eq!(Filter::from_text("levels:1,2|3"), None);
+    }
+
+    #[test]
+    fn gradient_map_stops_map_brightness_and_mix_by_opacity() {
+        use crate::gradient_map::{GradientMap, Stop};
+        let old = Filter::from_text("gradient:102030,f0e0d0")
+            .unwrap()
+            .upgraded();
+        assert_eq!(old.to_text().as_deref(), Some("gradient:102030,f0e0d0"));
+        let mut map = GradientMap::of(&[
+            Stop::new(0.0, [0, 0, 255]),
+            Stop::new(0.5, [255, 0, 0]),
+            Stop::new(1.0, [255, 255, 0]),
+        ])
+        .unwrap();
+        let filter = Filter::Gradient { map };
+        let text = filter.to_text().unwrap();
+        assert_eq!(Filter::from_text(&text), Some(filter), "{text}");
+        let gray = |value: u8| {
+            let mut pixel = vec![value, value, value, 255];
+            filter.apply(&mut pixel, 1, 1, None, [0, 0]);
+            [pixel[0], pixel[1], pixel[2]]
+        };
+        assert_eq!(gray(0), [0, 0, 255]);
+        assert_eq!(gray(255), [255, 255, 0]);
+        assert_eq!(gray(128)[0], 255, "the middle stop");
+        // A half opaque stop mixes its color over the original.
+        map.stop_mut(0).unwrap().alpha = 128;
+        let half = Filter::Gradient { map };
+        let mut pixel = vec![0, 0, 0, 255];
+        half.apply(&mut pixel, 1, 1, None, [0, 0]);
+        assert_eq!(&pixel[..3], &[0, 0, 128]);
+    }
+
+    #[test]
+    fn radial_and_zoom_blur_turn_round_their_centre() {
+        let (w, h) = (40_u32, 40_u32);
+        let mut dot = vec![0_u8; (w * h * 4) as usize];
+        for y in 4..8 {
+            for x in 18..22 {
+                let at = ((y * w + x) * 4) as usize;
+                dot[at..at + 4].copy_from_slice(&[0, 0, 0, 255]);
+            }
+        }
+        let run = |filter: Filter| {
+            let mut pixels = dot.clone();
+            filter.apply(&mut pixels, w, h, None, [0, 0]);
+            pixels
+        };
+        // A dot at the centre stays a dot; far from it, it smears.
+        let at_dot = run(Filter::RadialBlur {
+            angle: 60.0,
+            center: [0.5, 6.0 / 40.0],
+        });
+        let off = run(Filter::RadialBlur {
+            angle: 60.0,
+            center: [0.5, 0.5],
+        });
+        let alpha = |pixels: &[u8], x: u32, y: u32| pixels[((y * w + x) * 4 + 3) as usize];
+        assert!(alpha(&at_dot, 20, 6) > 200, "{}", alpha(&at_dot, 20, 6));
+        assert!(alpha(&off, 20, 6) < alpha(&at_dot, 20, 6));
+        let zoomed = run(Filter::ZoomBlur {
+            amount: 0.6,
+            center: [0.5, 6.0 / 40.0],
+        });
+        assert!(alpha(&zoomed, 20, 6) > 200);
+    }
+
+    #[test]
+    fn perlin_noise_follows_its_settings() {
+        let (w, h) = (32_u32, 32_u32);
+        let run = |filter: Filter| {
+            let mut pixels = vec![0_u8; (w * h * 4) as usize];
+            filter.apply(&mut pixels, w, h, None, [0, 0]);
+            pixels
+        };
+        let noise = |offset: [f32; 2], repetition: u32, amplitude: f32| Filter::PerlinNoise {
+            scale: 10.0,
+            amplitude,
+            attenuation: 0.5,
+            repetition,
+            offset,
+        };
+        let base = run(noise([0.0, 0.0], 4, 1.0));
+        // An offset of 5 across shows the same pattern 5 pixels on.
+        let moved = run(noise([5.0, 0.0], 4, 1.0));
+        for y in 0..h {
+            for x in 0..w - 5 {
+                let at = |x: u32| ((y * w + x) * 4) as usize;
+                assert_eq!(moved[at(x)], base[at(x + 5)], "{x},{y}");
+            }
+        }
+        // More layers, a rougher pattern; no amplitude, flat gray.
+        assert_ne!(run(noise([0.0, 0.0], 1, 1.0)), base);
+        assert!(
+            run(noise([0.0, 0.0], 4, 0.0))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| pixel[0] == 128)
+        );
+    }
+
+    #[test]
+    fn curved_surface_bulges_the_middle() {
+        let (w, h) = (41_u32, 41_u32);
+        let mut grid = vec![255_u8; (w * h * 4) as usize];
+        // A dark column a little right of the middle.
+        for y in 0..h {
+            let at = ((y * w + 24) * 4) as usize;
+            grid[at..at + 3].fill(0);
+        }
+        let column = |pixels: &[u8]| {
+            (0..w)
+                .min_by_key(|x| pixels[((20 * w + x) * 4) as usize])
+                .unwrap()
+        };
+        for axis in [0, 1] {
+            let mut pixels = grid.clone();
+            Filter::CurvedSurface { amount: 1.0, axis }.apply(&mut pixels, w, h, None, [0, 0]);
+            assert!(column(&pixels) > 24, "bulged out: {}", column(&pixels));
+            let mut pixels = grid.clone();
+            Filter::CurvedSurface { amount: -1.0, axis }.apply(&mut pixels, w, h, None, [0, 0]);
+            assert!(column(&pixels) < 24, "pressed in: {}", column(&pixels));
+        }
+        // Up and down only: a column stays where it is.
+        let mut pixels = grid.clone();
+        Filter::CurvedSurface {
+            amount: 1.0,
+            axis: 2,
+        }
+        .apply(&mut pixels, w, h, None, [0, 0]);
+        assert_eq!(column(&pixels), 24);
+    }
+
+    #[test]
+    fn artistic_flattens_colors_and_draws_lines() {
+        let (w, h) = (48_u32, 48_u32);
+        let mut picture = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                // A smooth ramp with a dark square on it.
+                let inside = (16..32).contains(&x) && (16..32).contains(&y);
+                let value = if inside { 30 } else { (x * 5) as u8 };
+                picture.extend([value, value / 2 + 60, 200, 255]);
+            }
+        }
+        let artistic = |process: u8, colors: u32| Filter::Artistic {
+            process,
+            line_width: 2.0,
+            simplicity: 0.2,
+            density: 0.8,
+            line_opacity: 1.0,
+            antialias: false,
+            blending: 0.0,
+            color_blur: 0.0,
+            colors,
+        };
+        let run = |filter: Filter| {
+            let mut pixels = picture.clone();
+            filter.apply(&mut pixels, w, h, None, [0, 0]);
+            pixels
+        };
+        let tones = |pixels: &[u8]| {
+            let mut seen: Vec<u8> = pixels.as_chunks::<4>().0.iter().map(|p| p[0]).collect();
+            seen.sort_unstable();
+            seen.dedup();
+            seen.len()
+        };
+        // Colors only: few tones, no line.
+        let flat = run(artistic(2, 3));
+        assert!(tones(&flat) <= 3, "{}", tones(&flat));
+        // Lines only: black on clear, round the square.
+        let lines = run(artistic(1, 3));
+        let edge = (12..21)
+            .map(|x| ((24 * w + x) * 4) as usize)
+            .max_by_key(|at| lines[at + 3])
+            .unwrap();
+        assert_eq!(
+            &lines[edge..edge + 4],
+            &[0, 0, 0, 255],
+            "a line at the edge"
+        );
+        let far = ((4 * w + 4) * 4 + 3) as usize;
+        assert_eq!(lines[far], 0, "clear away from it");
+        // Both: lines drawn over the flat colors.
+        let both = run(artistic(0, 3));
+        assert_eq!(&both[edge..edge + 3], &[0, 0, 0]);
+        assert_eq!(both[far], 255);
+    }
+
+    #[test]
+    fn smart_smoothing_can_remove_noise_first() {
+        let (w, h) = (20_u32, 20_u32);
+        let mut specks = vec![0_u8; (w * h * 4) as usize];
+        let at = ((10 * w + 10) * 4) as usize;
+        specks[at..at + 4].copy_from_slice(&[0, 0, 0, 255]);
+        let mut kept = specks.clone();
+        Filter::SmartSmooth {
+            strength: super::SMART_LEVELS[0],
+            remove_noise: true,
+        }
+        .apply(&mut specks, w, h, None, [0, 0]);
+        assert!(specks.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 0));
+        Filter::SmartSmooth {
+            strength: super::SMART_LEVELS[0],
+            remove_noise: false,
+        }
+        .apply(&mut kept, w, h, None, [0, 0]);
+        assert!(kept.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0));
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        assert_eq!(Filter::Smooth.label(), "Smoothing");
     }
 }
