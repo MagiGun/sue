@@ -106,9 +106,17 @@ impl SueWriter {
                 });
             }
             Dialog::Footnote(note) => {
-                note_ui(ui, "writer-footnote", note, &tr!("note-printed-foot"))
+                note_ui(
+                    ui,
+                    "writer-footnote",
+                    note,
+                    &tr!("note-printed-foot"),
+                    theme,
+                );
             }
-            Dialog::Endnote(note) => note_ui(ui, "writer-endnote", note, &tr!("note-printed-end")),
+            Dialog::Endnote(note) => {
+                note_ui(ui, "writer-endnote", note, &tr!("note-printed-end"), theme);
+            }
             Dialog::Table {
                 rows,
                 columns,
@@ -168,11 +176,12 @@ impl SueWriter {
                 ui.add_space(theme.space(Space::S2));
                 let field = ui.add(
                     egui::TextEdit::multiline(text)
+                        .id_salt("writer-comment-text")
                         .desired_rows(NOTE_ROWS)
                         .desired_width(ui.available_width())
                         .hint_text(tr!("your-comment")),
                 );
-                field.request_focus();
+                first_focus(ui, &field);
                 ui::focus_ring(ui, &field, theme.radius(Radius::Md), theme);
                 ui.add_space(theme.space(Space::S2));
                 caption(ui, &tr!("ctrl-enter-adds-the-comment"), theme);
@@ -647,7 +656,7 @@ fn footer<'a>(host: ui::Dialog<'a>, dialog: &Dialog) -> ui::Dialog<'a> {
 }
 
 /// A note's field with the line that says where it is printed.
-fn note_ui(ui: &mut Ui, salt: &str, note: &mut String, about: &str) {
+fn note_ui(ui: &mut Ui, salt: &str, note: &mut String, about: &str, theme: &Theme) {
     ui.label(about);
     let field = ui.add(
         egui::TextEdit::multiline(note)
@@ -655,7 +664,24 @@ fn note_ui(ui: &mut Ui, salt: &str, note: &mut String, about: &str) {
             .desired_rows(NOTE_ROWS)
             .desired_width(ui.available_width()),
     );
-    if ui.memory(|memory| memory.focused().is_none()) {
+    first_focus(ui, &field);
+    ui::focus_ring(ui, &field, theme.radius(Radius::Md), theme);
+}
+
+/// Gives `field` keyboard focus on the frame its dialog first shows, so
+/// the typing goes straight in; after that Tab is free to leave it for
+/// the footer's buttons.
+fn first_focus(ui: &Ui, field: &egui::Response) {
+    // The pass it was last drawn in: a gap means the dialog was closed
+    // in between and has just opened again.
+    let last = field.id.with("sue-drawn-in-pass");
+    let now = ui.ctx().cumulative_pass_nr();
+    let first = ui.data_mut(|data| {
+        let before = data.get_temp::<u64>(last);
+        data.insert_temp(last, now);
+        before.is_none_or(|before| before + 1 < now)
+    });
+    if first {
         field.request_focus();
     }
 }
