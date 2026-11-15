@@ -286,6 +286,7 @@ pub fn canvas_items(names: &[String]) -> Vec<MenuItem> {
         item("window.new"),
         item("window.cascade"),
         item("window.tile"),
+        item("window.float"),
         SEP,
         item("window.next_tab"),
         item("window.prev_tab"),
@@ -1116,8 +1117,9 @@ mod tests {
         );
         assert!(set_canvases(&mut menus, &[]));
         assert_eq!(label_of(&menus, "window.canvas.0"), None);
-        // Clip Studio Paint's order: New Window, Cascade, Tile, then the
-        // next and previous canvas.
+        // Clip Studio Paint's order: New Window, Cascade, Tile, then Sue's
+        // canvas in a window of its own, then the next and previous
+        // canvas.
         let items = canvas_items(&[]);
         let names: Vec<&str> = items.iter().flat_map(MenuItem::commands).collect();
         assert_eq!(
@@ -1126,6 +1128,7 @@ mod tests {
                 "window.new",
                 "window.cascade",
                 "window.tile",
+                "window.float",
                 "window.next_tab",
                 "window.prev_tab"
             ]

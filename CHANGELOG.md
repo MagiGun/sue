@@ -91,6 +91,14 @@ follow [Semantic Versioning](https://semver.org/).
   commands first, under "On the launcher" and "More commands".
 - Sue Paint: the path of the lasso and of the polyline is now
   drawn in two tones, so it reads on white paper and on dark drawing.
+- Sue Paint: drag a canvas tab down out of the tab strip (or use Window,
+  Canvas, Canvas in Its Own Window, the tab's right-click menu or the
+  button at the end of the status strip) to open that canvas in a window
+  of its own, which you can move to another screen. A click in it makes
+  it the canvas you work on; closing it puts the canvas back in the tabs.
+  Tabs can also be dragged along the strip to change their order.
+- Sue Paint: a picture file dropped on the canvas becomes a new layer of
+  that canvas; dropped on the tab strip it opens as a canvas of its own.
 
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
@@ -280,6 +288,13 @@ follow [Semantic Versioning](https://semver.org/).
   the layer, the transparent color hides it.
 - Sue Paint: Fill, Gradient and Edit, Fill with the transparent color
   clear what they cover instead of painting the drawing color.
+- Sue Paint: Window, Canvas, New Window adds the second view as a tab and
+  leaves the canvases tabbed or tiled as they were, as Clip Studio Paint
+  does; it no longer tiles them. The canvas tabs, the status strip and
+  the scroll bars use Sue's own tabs, fields and buttons, with tooltips
+  that name each button and its keys; a scroll bar also moves with the
+  arrow keys once it has the keyboard. A picture open in two tabs no
+  longer shows its second tab as changed.
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait

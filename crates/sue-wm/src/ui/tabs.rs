@@ -25,6 +25,7 @@ use super::focus::{Roving, focus_ring};
 use super::list::{blend, ground, one_line, paint_line, salted, scoped, state_fill, under_pointer};
 use super::motion::{self, Motion, Pace};
 use super::tokens::{Density, Elevation, Radius, Space, TextRole};
+use super::tooltip::{Tip, tooltip};
 use crate::Theme;
 use crate::icons::{self, Icon};
 
@@ -135,6 +136,8 @@ pub struct Tab<'a> {
     label: &'a str,
     icon: Option<Icon>,
     closable: bool,
+    /// Keys that show the tab: with them its tooltip always shows.
+    shortcut: Option<&'a str>,
 }
 
 impl<'a> Tab<'a> {
@@ -147,7 +150,16 @@ impl<'a> Tab<'a> {
             label,
             icon: None,
             closable: false,
+            shortcut: None,
         }
+    }
+
+    /// The keys that show the tab, such as `F7` (empty for none): its
+    /// tooltip then always shows, with its name and those keys, also
+    /// while its name is whole.
+    pub const fn shortcut(mut self, shortcut: &'a str) -> Self {
+        self.shortcut = Some(shortcut);
+        self
     }
 
     /// The picture before its name. A tab with one keeps it when the
@@ -256,6 +268,9 @@ pub struct TabsOutput {
     /// off (into a window of its own, another strip). It is said once per
     /// drag.
     pub torn: Option<(usize, Pos2)>,
+    /// Where each tab was laid out this frame, in the order of the tabs:
+    /// what a caller needs to drop something between them.
+    pub places: Vec<Rect>,
 }
 
 /// What a tab being dragged remembers.
@@ -374,6 +389,7 @@ impl<'a> TabStrip<'a> {
             closed: None,
             moved: None,
             torn: None,
+            places: Vec::new(),
         };
         let widths = self.widths(ui, theme, density);
         let gaps = theme.space(Space::S1) * self.tabs.len().saturating_sub(1) as f32;
@@ -484,7 +500,9 @@ impl<'a> TabStrip<'a> {
                     ),
                 );
             }
-            if !fitted.named || fitted.width + 0.5 < widths[index].full {
+            if let Some(shortcut) = tab.shortcut {
+                tooltip(tab_response, &Tip::new(tab.label).shortcut(shortcut), theme);
+            } else if !fitted.named || fitted.width + 0.5 < widths[index].full {
                 tab_response.on_hover_text(tab.label);
             }
         }
@@ -537,6 +555,7 @@ impl<'a> TabStrip<'a> {
         {
             output.chosen = Some(index);
         }
+        output.places = places;
         output
     }
 
@@ -1061,6 +1080,16 @@ mod tests {
 
     fn closed(seen: &[TabsOutput]) -> Vec<usize> {
         seen.iter().filter_map(|output| output.closed).collect()
+    }
+
+    #[test]
+    fn the_strip_says_where_it_laid_each_tab() {
+        let mut run = Run::new();
+        let order = [0, 1, 2, 3];
+        let (output, rects, _) = run
+            .frame(Vec::new(), |ui, theme| strip(ui, theme, &order, 0, false))
+            .0;
+        assert_eq!(output.places, rects);
     }
 
     #[test]

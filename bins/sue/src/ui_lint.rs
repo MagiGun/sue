@@ -145,7 +145,7 @@ const AREAS: [Area; 6] = [
     },
     Area {
         folder: "crates/sue-paint/src/canvas",
-        baseline: Counts::new([2, 2, 14, 2, 19, 9, 2]),
+        baseline: Counts::new([1, 0, 14, 0, 14, 9, 1]),
     },
     Area {
         folder: "crates/sue-paint/src/dialogs",
@@ -190,6 +190,9 @@ enum Exempt {
 const PICTURE: &[(&str, &str, Exempt)] = &[
     // The picture itself.
     ("crates/sue-paint/src/canvas", "draw_picture", Exempt::All),
+    // The picture's texture on its quad, wherever it is drawn (the
+    // view, the tone mask, the tiled canvases).
+    ("crates/sue-paint/src/canvas", "picture_quad", Exempt::All),
     // What is drawn over it: page frames and marks, grids, selection,
     // handles and rulers. Their colors must read on any picture.
     ("crates/sue-paint/src/canvas", "page_frames", Exempt::Colors),

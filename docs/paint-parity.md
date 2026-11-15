@@ -517,7 +517,7 @@ The order of work is the plan at the end.
 | Auto Action palette (recorded sequences) | Window > Auto Action Palette | partial | Records and plays menu commands; it does not record tool strokes as Clip Studio's can |
 | Item Bank palette | Window > Item Bank | done | Keeps sub tools to add again |
 | Information palette | Window > Information | partial | Canvas size, resolution and physical size; not the cursor position or selection info |
-| Cascade, Tile, New Window | Window > Canvas | partial | Commands exist; verify |
+| Cascade, Tile, New Window | Window > Canvas | done | New Window adds a tab and leaves tiling alone; a canvas can also go into a window of its own (tear its tab off, or Canvas in Its Own Window), on any screen |
 | Interface: Automatic, Desktop, Tablet, Phone | Window > Interface | done | In the Sue menu and Settings, so Window has one layout menu, Layout Style; the command palette finds the choices too |
 | Companion Mode | Window | missing | A phone as a second screen |
 | Dialogs as movable, resizable windows | Dialogs | done | Their own windows, outside Sue's too |

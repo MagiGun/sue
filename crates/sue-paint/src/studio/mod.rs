@@ -112,6 +112,9 @@ pub(crate) struct Doc {
     pub selection: Option<Selection>,
     pub last_selection: Option<Selection>,
     pub edges: Option<Vec<[[f32; 2]; 2]>>,
+    /// The window of its own this canvas shows in, by the number its
+    /// view is named with (`None`: a tab of the canvas column).
+    pub window: Option<u64>,
 }
 
 impl Doc {
@@ -133,6 +136,7 @@ impl Doc {
             selection: None,
             last_selection: None,
             edges: None,
+            window: None,
         }
     }
 
@@ -808,6 +812,9 @@ pub struct SuePaint {
     /// Where the Light table tool's centre of rotation is, from the middle
     /// of its box (picture pixels): it goes along when the box moves.
     pub(crate) light_centre: [f32; 2],
+    /// The canvas chrome between frames: canvases in windows of their
+    /// own, pictures dropped on the canvas, the tab menu.
+    pub(crate) chrome: crate::canvas::Chrome,
 }
 
 impl Default for SuePaint {
@@ -992,6 +999,7 @@ impl Default for SuePaint {
             launcher_set: crate::launchers::LauncherSet::default(),
             transform_prefs: crate::transform_ui::TransformPrefs::default(),
             light_centre: [0.0; 2],
+            chrome: crate::canvas::Chrome::default(),
         }
     }
 }

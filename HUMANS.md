@@ -933,6 +933,15 @@ else, and every stroke can be undone with `Ctrl+Z`. File, **Back to the Hub**
 (or the Sue menu's Hub) leaves Sue Paint; your pictures wait for you there
 the next time you open it.
 
+Each open canvas is a tab over the canvas. Drag a tab along the strip to
+change the order; drag it down out of the strip to give that canvas a
+window of its own, which you can move to another screen (Window, Canvas,
+**Canvas in Its Own Window**, the tab's right-click menu and the button at
+the end of the status strip do the same). Click in that window to work on
+its canvas; close it to put the canvas back in the tabs. Drop a picture
+file on the canvas to add it as a new layer; drop it on the tabs to open
+it as a canvas of its own.
+
 Going in and out is smooth: opening Sue Paint, its page comes in over the Hub
 and the palettes slide in from the edges around the picture. Leaving, they
 slide back out and the Hub comes back. How fast this happens follows the

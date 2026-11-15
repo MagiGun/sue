@@ -23,10 +23,12 @@ pub(super) const RECORDABLE: [&str; 0] = [];
 
 /// The commands of this group that go outside the canvas, so a test that
 /// runs every command on a canvas skips them: New Window opens a second
-/// view and tiles the canvases, and each interface choice changes the
-/// setting `display.interface`, which lays the whole studio out anew.
-pub(super) const LEAVES_CANVAS: [&str; 5] = [
+/// view of the canvas, Canvas in Its Own Window moves the canvas out of
+/// the column, and each interface choice changes the setting
+/// `display.interface`, which lays the whole studio out anew.
+pub(super) const LEAVES_CANVAS: [&str; 6] = [
     "window.new",
+    "window.float",
     "window.interface.auto",
     "window.interface.desktop",
     "window.interface.tablet",
@@ -146,7 +148,8 @@ fn canvas_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemState {
 }
 
 /// New Window: a second view of the current canvas, at its own place
-/// in the tabs, with the canvases tiled.
+/// in the tabs, shown at once; the canvases stay in tabs or tiled as
+/// they were.
 fn new_window(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
     if let Some(doc) = paint.doc() {
         let mut view = Doc::new(doc.picture);
@@ -156,7 +159,21 @@ fn new_window(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
         view.track = doc.track;
         paint.docs.insert(paint.active + 1, view);
         paint.active += 1;
-        paint.tiled = true;
+    }
+}
+
+/// Canvas in Its Own Window: the current canvas moves into a window of
+/// its own, which can go to another screen; run again (or in that
+/// window), it comes back into the tabs.
+fn float(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.toggle_canvas_window(cx);
+}
+
+/// Checked while the current canvas is in a window of its own.
+fn float_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    match paint.doc() {
+        Some(doc) => flag(doc.window.is_some()),
+        None => ItemState::off(),
     }
 }
 
@@ -671,6 +688,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         canvas,
         canvas_state,
     ),
+    c(
+        "window.float",
+        "canvas-in-its-own-window",
+        "external",
+        float,
+        float_state,
+    ),
 ];
 
 #[cfg(test)]
@@ -895,12 +919,20 @@ mod tests {
             assert!(!enabled(&paint, cx, "window.canvas.x"));
             assert_eq!(paint.active, 2);
             // New Window: a second view of the current canvas after it,
-            // the canvases tiled; Cascade puts them back in tabs.
+            // shown as a tab of its own: the canvases are not tiled
+            // (Clip Studio Paint's New Window leaves tiling alone).
             let picture = paint.docs[2].picture;
             registry().run(&mut paint, cx, "window.new");
             assert_eq!(paint.docs.len(), 4);
             assert_eq!(paint.active, 3);
             assert_eq!(paint.docs[3].picture, picture);
+            assert!(!paint.tiled && !checked(&paint, cx, "window.tile"));
+            assert!(!enabled(&paint, cx, "window.cascade"));
+            // Tile, then New Window keeps the canvases tiled; Cascade
+            // puts them back in tabs.
+            registry().run(&mut paint, cx, "window.tile");
+            registry().run(&mut paint, cx, "window.new");
+            assert_eq!(paint.docs.len(), 5);
             assert!(paint.tiled && checked(&paint, cx, "window.tile"));
             assert!(enabled(&paint, cx, "window.cascade"));
             registry().run(&mut paint, cx, "window.cascade");
