@@ -70,9 +70,9 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
         sue_paint::vector::figure_line(&wave, tip, ink, false),
         sue_paint::vector::figure_line(
             &[
-                [w * 0.58, h * 0.28],
-                [w * 0.7, h * 0.28],
-                [w * 0.7, h * 0.4],
+                [w * 0.56, h * 0.36],
+                [w * 0.64, h * 0.36],
+                [w * 0.64, h * 0.46],
             ],
             tip,
             ink,
