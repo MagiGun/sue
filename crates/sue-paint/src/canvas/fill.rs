@@ -700,11 +700,8 @@ pub(in crate::canvas) mod tests {
         // layer with Lock Transparent Pixels.
         let full = picture(|_, _| true);
         with_layers(vec![(full, false)], |paint, cx, ids| {
-            let lock = sue_core::txn::SetProperty::new(
-                ids[0],
-                sue_model::picture::ALPHA_LOCKED,
-                true,
-            );
+            let lock =
+                sue_core::txn::SetProperty::new(ids[0], sue_model::picture::ALPHA_LOCKED, true);
             assert!(SuePaint::apply(cx, lock));
             paint.transparent = true;
             let gradient = sub(Tool::Gradient, 0);
@@ -715,7 +712,11 @@ pub(in crate::canvas) mod tests {
             // Unlocked, it clears from full at the start to none at the end.
             assert!(cx.history.undo(cx.world).is_ok());
             paint.gradient(Pos2::new(0.0, 0.0), Pos2::new(80.0, 0.0), &gradient, cx);
-            assert_eq!(cx.history.depth(), depth, "the gradient took the lock's place");
+            assert_eq!(
+                cx.history.depth(),
+                depth,
+                "the gradient took the lock's place"
+            );
             assert!(alpha(cx, ids[0], 1) < 10);
             assert!(alpha(cx, ids[0], 78) > 245);
         });
