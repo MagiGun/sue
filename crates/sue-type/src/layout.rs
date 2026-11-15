@@ -171,6 +171,10 @@ pub struct PageMarks {
     pub note: Color32,
     /// The shadow under a page in page view.
     pub page_shadow: Shadow,
+    /// The hairline around a page in page view: where the paper and the
+    /// space around it are alike (white paper in a light theme, whose
+    /// shadows are faint), it is what shows the page's edge.
+    pub page_edge: Stroke,
 }
 
 /// How far the selection mixes its color into the paper, at most: less
@@ -217,30 +221,29 @@ impl PageMarks {
         // A role the theme leaves at its text color gives no hue: the
         // page's own ink stands in for it.
         let hue = |role: Color32| (role != theme.text).then_some(role);
-        Self::with(
-            ink,
-            Some(theme.selection),
-            Some(theme.focus()),
-            hue(theme.danger()),
-            hue(theme.info()),
-            hue(theme.warning()),
-            theme.elevation(Elevation::Raised),
-        )
+        Self {
+            page_shadow: theme.elevation(Elevation::Raised),
+            page_edge: theme.hairline(),
+            ..Self::with(
+                ink,
+                Some(theme.selection),
+                Some(theme.focus()),
+                hue(theme.danger()),
+                hue(theme.info()),
+                hue(theme.warning()),
+            )
+        }
     }
 
     /// The marks of a page of `ink` with no theme to ask (tests, and
     /// pages set away from the screen): all from the ink.
     #[must_use]
     pub fn plain(ink: &Ink) -> Self {
-        let shadow = Shadow {
-            offset: [0, 2],
-            blur: 8,
-            spread: 0,
-            color: Color32::from_black_alpha(64),
-        };
-        Self::with(ink, None, None, None, None, None, shadow)
+        Self::with(ink, None, None, None, None, None)
     }
 
+    /// The marks of a page of `ink` from the theme's roles that are
+    /// given, with a plain shadow and edge for the page.
     fn with(
         ink: &Ink,
         selection: Option<Color32>,
@@ -248,7 +251,6 @@ impl PageMarks {
         danger: Option<Color32>,
         info: Option<Color32>,
         warning: Option<Color32>,
-        page_shadow: Shadow,
     ) -> Self {
         let paper = ink.paper;
         let text = ink.text;
@@ -287,7 +289,13 @@ impl PageMarks {
             deleted: danger.map_or(ink.soft, |role| reading(role, text, paper, TEXT_CONTRAST)),
             comment: tint(warning, COMMENT_SHARE, HUED_COMMENT),
             note: tint(info, NOTE_SHARE, HUED_NOTE),
-            page_shadow,
+            page_shadow: Shadow {
+                offset: [0, 2],
+                blur: 8,
+                spread: 0,
+                color: Color32::from_black_alpha(64),
+            },
+            page_edge: Stroke::new(1.0, Color32::from_black_alpha(40)),
         }
     }
 
@@ -1133,6 +1141,8 @@ mod tests {
         // the page.
         assert_eq!(after.page_shadow, theme.elevation(Elevation::Raised));
         assert_eq!(after.page_shadow.blur, 0);
+        // The page's edge is the theme's hairline.
+        assert_eq!(after.page_edge, theme.hairline());
         // A pale focus on white paper is darkened until it reads, and no
         // further.
         theme.border_active = Color32::from_rgb(0xd0, 0xe0, 0xff);

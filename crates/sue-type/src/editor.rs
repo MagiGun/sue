@@ -3157,6 +3157,12 @@ impl Editor {
                         .as_shape(rect, egui::CornerRadius::ZERO),
                 );
                 painter.rect_filled(rect, 0.0, view.ink.paper);
+                painter.rect_stroke(
+                    rect,
+                    0.0,
+                    self.page_marks.page_edge,
+                    egui::StrokeKind::Outside,
+                );
                 let small =
                     egui::FontId::new((9.0 * scale).max(6.0), egui::FontFamily::Proportional);
                 let [margin_top, margin_right, margin_bottom, margin_left] =
