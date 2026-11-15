@@ -843,6 +843,15 @@ Once a canvas is open:
   move, a corner or an edge to scale, the handle on the stalk to turn
   around the centre of rotation, and Alt and drag to put that centre
   somewhere else.
+  The Animation Cels palette lists the cel you are drawing first, then
+  every layer on its light table and on the general one, each as a row
+  with an eye, its picture, its name and how it shows ("100 %  As the
+  light table"). The eye takes a layer off the light table for a while
+  without removing it; click a row and set its own opacity and colors
+  (as the light table, its own colors, or the light table's color) at
+  the palette's foot. Drag a layer from the Layer palette onto the
+  palette to register it there. Window, Animation Cels docks it beside
+  the Layer palette so both stay in sight.
   Each **animation folder** is a folder in the Layer palette, with a
   strip of film for its icon, and its cels sit inside it, indented and
   folded away with it, as in Clip Studio Paint. New Animation Cel puts

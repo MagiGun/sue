@@ -13,6 +13,26 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: the Animation Cels palette lists the cel you draw and each
+  layer on its light table as a row with its own eye, opacity (with the
+  number) and colors, so one reference can be fainter or keep its own
+  colors. Drag a layer from the Layer palette onto the palette to trace
+  from it. Window, Animation Cels docks the palette beside the Layer
+  palette, both in sight.
+- Sue Paint: the Timeline palette's menu has Clip Studio Paint's whole
+  list and order, in submenus, with Go to Previous and Next Timeline and
+  Audio Scrubbing (stepping or dragging through the frames plays each
+  frame's sound).
+- Sue Paint: on the timeline, a folder holding animation folders is a
+  row of its own with them indented under it and a fold arrow; a folder
+  with keyframes shows its keys in a band over its cels, and each key
+  names its frame and easing on hover. Click a frame and the arrow keys,
+  Home and End move through the frames, with the focus ring on the
+  frame shown.
+- Sue Paint: Insert Frame shows the result on the timeline while you
+  set it (Preview on the timeline), and buttons that do not fit a narrow
+  Timeline bar are all under More, Specify Cels included.
+
 - Sue Paint: movie, image sequence, animated GIF, PNG and WebP, cels and
   timelapse exports run in the background. The window keeps drawing and
   you can keep painting; a notice shows how far the export is, with a
