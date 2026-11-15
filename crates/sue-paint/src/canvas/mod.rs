@@ -58,6 +58,13 @@ impl SuePaint {
         if self.tiled && self.docs.len() > 1 {
             viewport = self.tile_others(ui, viewport, cx, theme);
         }
+        // The Page Manager fills the canvas area, or a column of it.
+        let Some(viewport) = self.page_manager_area(ui, viewport, cx, theme) else {
+            if !self.bare {
+                self.status_strip(ui, status, None, theme);
+            }
+            return;
+        };
         self.viewport = viewport;
         ui.painter()
             .rect_filled(viewport, 0.0, theme.void.gamma_multiply(self.cover));

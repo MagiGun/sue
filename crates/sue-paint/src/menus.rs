@@ -400,6 +400,8 @@ pub fn menus() -> Vec<Menu> {
                         item("file.export.batch"),
                         item("file.export.pdf"),
                         item("file.export.epub"),
+                        SEP,
+                        item("story.preview_binding"),
                     ],
                 ),
                 sub(
@@ -579,6 +581,8 @@ pub fn menus() -> Vec<Menu> {
                         item("story.duplicate_page"),
                         item("story.export_page"),
                         item("story.export_pages"),
+                        SEP,
+                        item("story.preview_binding"),
                     ],
                 ),
             ],

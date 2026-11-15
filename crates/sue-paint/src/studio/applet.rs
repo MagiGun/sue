@@ -681,7 +681,13 @@ impl SueApplet for SuePaint {
                 true
             }
             "dialog/pages" => {
-                self.dialog = Some(Dialog::Pages(crate::dialogs::PagesDialog { chosen: 0 }));
+                // The Page Manager is a view of the canvas area now.
+                self.dialog = None;
+                self.page_view = Some(crate::pages::PageView::default());
+                true
+            }
+            "dialog/binding" => {
+                self.dialog = Some(Dialog::Pages(crate::dialogs::PagesDialog::at(0)));
                 true
             }
             "dialog/pressure" => {
@@ -772,6 +778,7 @@ impl SueApplet for SuePaint {
             "dialog/close" => {
                 self.dialog = None;
                 self.save_ask = None;
+                self.page_view = None;
                 self.menubar.close();
                 true
             }

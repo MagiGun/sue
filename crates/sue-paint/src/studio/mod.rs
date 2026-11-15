@@ -738,6 +738,12 @@ pub struct SuePaint {
     /// The pen's samples since its latest touch down, for a stroke of the
     /// new brush engine (see `canvas/engine.rs`).
     pub(crate) pen_stream: Vec<sue_platform::stylus::PenSample>,
+    /// The Page Manager while it shows in the canvas area, filling it or
+    /// docked beside the page (see `pages.rs`).
+    pub(crate) page_view: Option<crate::pages::PageView>,
+    /// The frame border panels the Object tool picked last, by layer
+    /// and index, for Divide Frame Border Equally and Combine Frames.
+    pub(crate) comic_picked: Option<(EntityId, Vec<usize>)>,
 }
 
 impl Default for SuePaint {
@@ -914,6 +920,8 @@ impl Default for SuePaint {
             current_workspace: None,
             kept_styles: Vec::new(),
             pen_stream: Vec::new(),
+            page_view: None,
+            comic_picked: None,
         }
     }
 }

@@ -81,10 +81,25 @@ fn separate_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState
 /// Page Manager, Page Reordering, Open Page and Change Project Settings:
 /// the Page Manager, on the page shown.
 fn manager(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    let chosen = paint
-        .story_here(&cx.world.arena)
-        .map_or(0, |(_, _, index)| index);
-    paint.dialog = Some(Dialog::Pages(PagesDialog { chosen }));
+    paint.open_page_manager(cx);
+}
+
+/// 3D Preview for Binding: the story as a bound book, open at the spread
+/// of the page shown.
+fn preview_binding(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let arena = &cx.world.arena;
+    let Some((story, pages, index)) = paint.story_here(arena) else {
+        return;
+    };
+    let spread = story::spreads_from(
+        pages.len(),
+        story::bound_right(arena, story),
+        story::starts_paired(arena, story),
+    )
+    .iter()
+    .position(|pair| pair.contains(&Some(index)))
+    .unwrap_or(0);
+    paint.dialog = Some(Dialog::Pages(PagesDialog::at(spread)));
 }
 
 /// First, Previous, Next and Last Page.
@@ -545,6 +560,16 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     )
     .state(webtoon_state)
     .with(Flags::PALETTE),
+    // The Page Manager's last item, and File, Export Multiple Pages
+    // (CT-37): the story as a bound book. It changes nothing, so Auto
+    // Actions leave it out.
+    unrecorded(
+        "story.preview_binding",
+        "binding-preview-3d-ellipsis",
+        "book",
+        preview_binding,
+    )
+    .state(in_story),
 ];
 
 #[cfg(test)]
