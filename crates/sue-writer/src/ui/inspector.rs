@@ -205,13 +205,13 @@ impl SueWriter {
             )));
             if !selection.is_empty() {
                 ui.label(muted(tr!(
-                    "selected-words",
-                    value = sue_model::word_count(selection)
+                    "selected-word-count",
+                    words = sue_model::word_count(selection)
                 )));
             }
             ui.label(muted(tr!(
-                "about-minutes-to-read",
-                value = (words / WORDS_PER_MINUTE).max(1)
+                "reading-time",
+                minutes = (words / WORDS_PER_MINUTE).max(1)
             )));
         }
         if in_project {
