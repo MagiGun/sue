@@ -14,10 +14,11 @@ follow [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Sue Paint: drag the Fill tool across a picture to fill every area the
-  drag crosses, as one undo step.
+  drag crosses that is like the one it started in, as one undo step; the
+  lines it crosses on the way stay as they are.
 - Sue Paint: Shrink selection, the Selection area tool's seventh sub
   tool: draw round a drawing and the selection shrinks to the drawing,
-  with the holes it closes in.
+  with the holes it closes in. Its path shows while you draw it.
 - Sue Paint: rectangle and ellipse selections keep the sub tool's
   Aspect while you drag, and selection shapes soften their edge by its
   Anti-aliasing.

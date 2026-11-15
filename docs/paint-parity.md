@@ -374,7 +374,7 @@ The order of work is the plan at the end.
 | Paint unpainted area | Fill tool | done | Inside the lasso, what the layer left unpainted and no line covers fills |
 | Ruby (furigana) | Text tool, Tool Property | done | Over the words, or to their right in vertical text; kept on its words as they change |
 | Lasso fill | Figure tool | done | |
-| Fill bucket: Close gap, Area scaling | Tool | done | Paint stays inside lines with small breaks, no white edge. A drag fills every area it crosses as one step; in an animation it sees only the frame shown; on a mask being edited it shows or hides the layer |
+| Fill bucket: Close gap, Area scaling | Tool | done | Paint stays inside lines with small breaks, no white edge. A drag fills every area it crosses that is like the one it started in, as one step; in an animation it sees only the frame shown; on a mask being edited it shows or hides the layer |
 | Auto Select (magic wand) | Tool | done | Looks at reference layers only when set |
 | Shrink selection | Selection area tool | done | The seventh sub tool: a lasso whose selection shrinks to the drawing inside it, keeping the holes it closes in |
 | Gradient tool | Tool | partial | Gradient layers exist; verify the tool's dials |
