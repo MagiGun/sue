@@ -2360,3 +2360,7 @@ settings-no-command = No command
 keys-group-tools = Tools
 keys-group-colors = Colors
 keys-group-other = Other Commands
+## File menu commands added in 0.0.8 (P3-1, file)
+manage-fonts-ellipsis = Manage Fonts...
+manage-fonts = Manage Fonts
+pose-scanner-from-image-ellipsis = Pose Scanner (Scan Pose from Image)...

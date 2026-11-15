@@ -270,3 +270,15 @@ icon-pack-pack-too-large = The icon pack is too large.
 icon-pack-icon-no-solid = The icon { $name } has no filled twin to replace.
 icon-pack-unusable = The SVG cannot be used. { $why }
 icon-pack-io = A file could not be read or written: { $why }
+
+## Manage Fonts: the shared font library as a list
+search-fonts = Search fonts
+finding-installed-fonts = Finding the fonts installed on this device...
+font-families-count = { $count ->
+    [one] { $count } font family
+   *[other] { $count } font families
+}
+font-sample = The quick brown fox jumps over the lazy dog 0123456789
+font-bundled = Comes with Sue
+font-faces = Faces: { $faces }
+fonts-come-from-the-device = Sue sets text in the fonts installed on this device. A font installed in the system shows here and in every studio.
