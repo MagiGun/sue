@@ -751,11 +751,18 @@ fn sue_paint_floating_palette_moves_rolls_up_and_docks_again() {
     );
     // Rolled up: only its header shows; unrolled: the palette again.
     assert!(paint.rect_of("Default").is_some(), "the palette shows");
+    let close = float_button(&paint, "color_set", 2);
     let at = float_button(&paint, "color_set", 0);
     click(&mut paint, at);
     assert!(
         paint.rect_of("Default").is_none(),
         "rolled up to its header"
+    );
+    // As wide as it was: its buttons stay where they were.
+    let rolled_close = float_button(&paint, "color_set", 2);
+    assert!(
+        (rolled_close - close).length() < 1.0,
+        "{close:?} then {rolled_close:?}"
     );
     let rolled = below(&paint, "Color Set", top).expect("its header stays");
     assert!(

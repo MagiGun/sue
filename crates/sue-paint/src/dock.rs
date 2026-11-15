@@ -847,10 +847,18 @@ impl SuePaint {
             }
         }
         items.push(MenuItem::Separator);
-        items.push(MenuItem::action(
-            tr!("hide-palette", title = palette.title()),
-            format!("{PLACE}close"),
-        ));
+        // With the keys of its Window menu item, which hide it too.
+        let keys = palette
+            .window_command()
+            .map(|command| self.keys_of(command))
+            .unwrap_or_default();
+        items.push(
+            MenuItem::action(
+                tr!("hide-palette", title = palette.title()),
+                format!("{PLACE}close"),
+            )
+            .key(keys),
+        );
         items
     }
 
@@ -1635,9 +1643,11 @@ impl SuePaint {
                 .title_bar(false)
                 .collapsible(false);
             window = if rolled {
-                // As wide as it was: the window's own margins come off.
-                let margins = ui.ctx().global_style().spacing.window_margin.sum().x;
-                window.fixed_size(vec2(rect.width() - margins, TAB_STRIP))
+                // As wide as it was, and as tall as its header and the
+                // window's margins: egui's sizes are the window's outer
+                // ones.
+                let margins = ui.ctx().global_style().spacing.window_margin.sum().y;
+                window.fixed_size(vec2(rect.width(), TAB_STRIP + margins))
             } else {
                 window.resizable(true).min_size(vec2(
                     palette.min_width().min(180.0),
@@ -1656,7 +1666,14 @@ impl SuePaint {
                 } else {
                     Rect::from_min_size(area.min, area.size().max(vec2(40.0, STRIP)))
                 };
+                // No spacing after it: the margin under a rolled up
+                // header is the window's own, as above it.
+                let spacing = ui.spacing().item_spacing;
+                if rolled {
+                    ui.spacing_mut().item_spacing = Vec2::ZERO;
+                }
                 ui.allocate_rect(area, Sense::hover());
+                ui.spacing_mut().item_spacing = spacing;
                 self.floating_palette(ui, palette, area, rolled, cx, theme)
             });
             let action = shown_window
