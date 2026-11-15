@@ -89,13 +89,6 @@ impl SuePaint {
         if command.starts_with("tool.") && self.tool_key(command, cx) {
             return;
         }
-        // The Window menu hides a tab torn off into a palette of its own.
-        if let Some(palette) = crate::dock::Palette::torn_by(command)
-            && self.dock.is_open(palette)
-        {
-            self.close_palette(palette);
-            return;
-        }
         // Studio Mode's keys T1 to T7 run the commands the rice names.
         if let Some(index) = command
             .strip_prefix("touch.custom.")
@@ -124,14 +117,11 @@ impl SuePaint {
         if !registry.has(command) {
             return ItemState::off();
         }
-        // A tab torn off into a palette of its own is shown while it is.
-        if crate::dock::Palette::torn_by(command).is_some_and(|palette| self.dock.is_open(palette))
-        {
-            return ItemState::check(true);
-        }
         registry.state(self, facts, command)
     }
 
+    /// Any palette with a switch of its own shows.
+    #[cfg(test)]
     pub(crate) fn any_panel(&self) -> bool {
         let p = self.panels;
         p.tool

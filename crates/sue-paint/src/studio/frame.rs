@@ -165,12 +165,25 @@ impl SuePaint {
             self.bound.invalidate();
         }
         self.follow_canvases(&cx.world.arena);
+        // Hide All Palettes reads Show All Palettes while they are hidden.
+        let hide_all = if self.hidden_all.is_some() {
+            tr!("show-all-palettes")
+        } else {
+            crate::commands::registry()
+                .label("window.hide_all")
+                .unwrap_or_default()
+        };
+        if crate::menus::set_label(&mut self.menus, "window.hide_all", &hide_all) {
+            self.bound.invalidate();
+        }
         self.bound
             .refresh(&mut self.menus, cx.rice(), KEYS_SECTION, shortcut_table());
     }
 
     pub(super) fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         self.follow_language(cx);
+        // The layout style, changed in Settings, the Window menu or by undo.
+        self.follow_layout_style(cx);
         self.pen_curve = cx
             .rice()
             .get_str(crate::dialogs::PEN_PRESSURE)
@@ -259,15 +272,18 @@ impl SuePaint {
                 if self.desk_dock.is_none() {
                     self.desk_dock = Some(self.dock.clone());
                 }
-                self.dock = crate::dock::Dock::default();
+                self.dock = self.style_layout();
+                // Every palette but the tools and the layers as icons, a
+                // group's tabs sharing one.
                 for palette in [
                     Palette::SubTool,
-                    Palette::BrushSize,
+                    Palette::ToolProperty,
+                    Palette::BrushGrid,
                     Palette::Color,
-                    Palette::ColorSet,
                     Palette::Navigator,
+                    Palette::LayerProperty,
                 ] {
-                    self.dock.iconize(palette);
+                    self.dock.iconize_group(palette);
                 }
             }
             // Back from a tablet: the desktop's layout as it was.

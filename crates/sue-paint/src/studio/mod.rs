@@ -710,6 +710,23 @@ pub struct SuePaint {
     pub(crate) cover: f32,
     /// `true` while the studio is the one the shell shows (not leaving).
     pub(crate) present: bool,
+    /// The id of the layout style in use (`sue_paint.layout_style`, as
+    /// `layout_style::current` reads it), to follow a change made in
+    /// Settings, by the Window menu or by undo.
+    pub(crate) layout_style: &'static str,
+    /// While Hide All Palettes hides them: the palettes and the dock as
+    /// they were, which Show All Palettes puts back exactly.
+    pub(crate) hidden_all: Option<(Panels, crate::dock::Dock)>,
+    /// A collapsed palette opened from the strip stays open as a tab until
+    /// its icon is clicked again (Display palette as tab), instead of
+    /// closing on a click elsewhere (Display palette as pop-up).
+    pub(crate) strip_as_tab: bool,
+    /// The registered workspace last used, checked in Window, Workspace
+    /// and named by Reload.
+    pub(crate) current_workspace: Option<String>,
+    /// Each layout style left this run and its palettes as they were, so
+    /// switching styles and back loses nothing even without a data folder.
+    pub(crate) kept_styles: Vec<(&'static str, Vec<String>)>,
 }
 
 impl Default for SuePaint {
@@ -878,6 +895,11 @@ impl Default for SuePaint {
             ready: true,
             cover: 1.0,
             present: false,
+            layout_style: crate::layout_style::CLASSIC,
+            hidden_all: None,
+            strip_as_tab: false,
+            current_workspace: None,
+            kept_styles: Vec::new(),
         }
     }
 }

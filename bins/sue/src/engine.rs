@@ -653,6 +653,9 @@ impl Engine {
                 );
             }
         }
+        // What the applets offer (Sue Paint's layout styles, the ones not
+        // built yet grayed out).
+        catalog.choices.extend(self.launchpad.setting_choices());
         let mut devices = vec![Choice::new("", tr!("system-default"))];
         devices.extend(
             self.options

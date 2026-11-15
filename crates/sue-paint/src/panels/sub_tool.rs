@@ -159,7 +159,11 @@ impl SuePaint {
                         }
                         if response.clicked() {
                             self.toolbox.pick_sub(tool, index);
-                            self.tool_tab = 1;
+                            // Tool Property is a palette of its own beside
+                            // this one; a phone's sheet goes to its tab.
+                            if self.sheet.is_some() {
+                                self.tool_tab = 1;
+                            }
                         }
                         // Clip Studio Paint's sub tool menu.
                         response.context_menu(|ui| {

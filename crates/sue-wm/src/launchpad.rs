@@ -93,6 +93,16 @@ impl Launchpad {
         declarations
     }
 
+    /// What every applet offers in Settings' drop-downs
+    /// ([`SueApplet::setting_choices`]), as (rice path, choices) pairs.
+    #[must_use]
+    pub fn setting_choices(&self) -> Vec<(String, Vec<crate::Choice>)> {
+        self.registrations
+            .iter()
+            .flat_map(|registration| (registration.factory)().setting_choices())
+            .collect()
+    }
+
     /// One live instance of every applet.
     #[must_use]
     pub fn instantiate(&self) -> Applets {

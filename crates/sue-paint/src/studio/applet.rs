@@ -185,6 +185,18 @@ impl SueApplet for SuePaint {
             )
             .labeled("Rotation step"),
             RiceDeclaration::new(
+                crate::layout_style::KEY,
+                RiceParameter::EnumChoice {
+                    value: crate::layout_style::CLASSIC.to_owned(),
+                    options: crate::layout_style::STYLES
+                        .iter()
+                        .map(|style| style.id.to_owned())
+                        .collect(),
+                },
+                "How Sue Paint's workspace is designed: which palettes there are and where they sit (Window, Layout Style)",
+            )
+            .labeled("Layout Style"),
+            RiceDeclaration::new(
                 crate::extras::REMEMBER_LAYOUT,
                 RiceParameter::Bool { value: true },
                 "Sue Paint opens with its palettes where they were left (Window, Workspace)",
@@ -218,6 +230,13 @@ impl SueApplet for SuePaint {
             shortcut_table(),
         ));
         declarations
+    }
+
+    fn setting_choices(&self) -> Vec<(String, Vec<sue_wm::Choice>)> {
+        vec![(
+            crate::layout_style::KEY.to_owned(),
+            crate::layout_style::choices(),
+        )]
     }
 
     fn page_ui(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
@@ -688,6 +707,24 @@ impl SueApplet for SuePaint {
                 else {
                     return false;
                 };
+                // In the dock every tab is a palette of its own: it shows.
+                use crate::dock::Palette;
+                let own = match (palette, index) {
+                    ("tool", 1) => Some(Palette::ToolProperty),
+                    ("tool", 2) => Some(Palette::BrushGrid),
+                    ("layer", 1) => Some(Palette::LayerProperty),
+                    ("layer", 2) => Some(Palette::History),
+                    ("layer", 3) => Some(Palette::Cels),
+                    ("navigator", 1) => Some(Palette::SubView),
+                    ("color", 1) => Some(Palette::ColorSlider),
+                    ("color", 2) => Some(Palette::Intermediate),
+                    ("color", 3) => Some(Palette::Approximate),
+                    _ => None,
+                };
+                if let Some(own) = own.filter(|_| self.sheet.is_none()) {
+                    self.show_palette(own);
+                    return true;
+                }
                 match palette {
                     "tool" => self.tool_tab = index,
                     "layer" => self.layer_tab = index,

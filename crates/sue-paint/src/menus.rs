@@ -57,21 +57,55 @@ pub fn commands(menus: &[Menu]) -> Vec<(String, String)> {
     out
 }
 
-/// Shows the registered workspaces `names` in Window, Workspace.
-pub fn set_workspaces(menus: &mut [Menu], names: &[String]) {
-    let mut items: Vec<MenuItem> = names
-        .iter()
-        .enumerate()
-        .map(|(index, name)| named(name, &format!("window.workspace.use.{index}")))
-        .collect();
-    if !items.is_empty() {
+/// The items of Window, Workspace in Clip Studio Paint's order: Reset to
+/// Default, Register Workspace, Manage Workspaces, Sue's Use Current
+/// Workspace as Default, Reload with the name of the workspace in use
+/// (`current`), then the workspaces Sue Paint ships and the registered
+/// ones (`names`), the one in use checked by its state.
+#[must_use]
+pub fn workspace_items(names: &[String], current: Option<&str>) -> Vec<MenuItem> {
+    let mut items = vec![
+        item("window.workspace.reset"),
+        item("window.workspace.save"),
+        item("window.workspace.manage"),
+        item("window.workspace.default"),
+        match current {
+            Some(name) => named(
+                &tr!("reload-workspace", name = name),
+                "window.workspace.reload",
+            ),
+            None => item("window.workspace.reload"),
+        },
+        SEP,
+    ];
+    items.extend(crate::extras::PRESETS.iter().map(|preset| {
+        named(
+            &sue_lang::text_or("paint", preset.label, preset.id),
+            &format!("window.workspace.preset.{}", preset.id),
+        )
+    }));
+    if !names.is_empty() {
         items.push(SEP);
     }
-    items.push(item("window.workspace.save"));
-    items.push(item("window.workspace.manage"));
-    items.push(SEP);
-    items.push(item("window.workspace.default"));
-    items.push(item("window.workspace.reset"));
+    items.extend(
+        names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| named(name, &format!("window.workspace.use.{index}"))),
+    );
+    items
+}
+
+/// Shows the registered workspaces `names` in Window, Workspace.
+#[cfg(test)]
+pub fn set_workspaces(menus: &mut [Menu], names: &[String]) {
+    set_workspaces_in_use(menus, names, None);
+}
+
+/// Shows the registered workspaces `names` in Window, Workspace, with
+/// `current` the one in use.
+pub fn set_workspaces_in_use(menus: &mut [Menu], names: &[String], current: Option<&str>) {
+    let items = workspace_items(names, current);
     for menu in menus.iter_mut().filter(|menu| menu.title == tr!("window")) {
         for item in &mut menu.items {
             if let MenuItem::Sub {
@@ -85,6 +119,46 @@ pub fn set_workspaces(menus: &mut [Menu], names: &[String]) {
             }
         }
     }
+}
+
+/// The items of Window, Layout Style: every style of the registry, the
+/// one in use checked and the ones not built yet grayed by their state.
+#[must_use]
+pub fn layout_style_items() -> Vec<MenuItem> {
+    crate::layout_style::STYLES
+        .iter()
+        .map(|style| {
+            named(
+                &crate::layout_style::label(style),
+                &format!("{}{}", crate::layout_style::COMMAND_PREFIX, style.id),
+            )
+        })
+        .collect()
+}
+
+/// Gives the item for `command` the label `label` (Hide All Palettes
+/// reads Show All Palettes while they are hidden); `false` when it
+/// already had it.
+pub fn set_label(menus: &mut [Menu], command: &str, label: &str) -> bool {
+    fn walk(items: &mut [MenuItem], command: &str, label: &str) -> Option<bool> {
+        items.iter_mut().find_map(|item| match item {
+            MenuItem::Action {
+                label: now,
+                command: found,
+                ..
+            } if found == command => {
+                let changed = now != label;
+                label.clone_into(now);
+                Some(changed)
+            }
+            MenuItem::Sub { items, .. } => walk(items, command, label),
+            _ => None,
+        })
+    }
+    menus
+        .iter_mut()
+        .find_map(|menu| walk(&mut menu.items, command, label))
+        .unwrap_or(false)
 }
 
 /// Puts `items` in the Open Recent submenu of `menus`.
@@ -257,33 +331,13 @@ pub fn set_canvases(menus: &mut [Menu], names: &[String]) -> bool {
 pub fn menus() -> Vec<Menu> {
     let mut window = vec![
         sub(&tr!("canvas"), canvas_items(&[])),
-        sub(
-            &tr!("workspace"),
-            vec![
-                item("window.workspace.save"),
-                item("window.workspace.manage"),
-                SEP,
-                item("window.workspace.default"),
-                item("window.workspace.reset"),
-            ],
-        ),
+        sub(&tr!("layout-style"), layout_style_items()),
+        sub(&tr!("workspace"), workspace_items(&[], None)),
     ];
     window.extend(palette_items());
-    window.extend([
-        SEP,
-        item("window.hide_all"),
-        item("window.hide_menus"),
-        SEP,
-        sub(
-            &tr!("interface"),
-            vec![
-                item("window.interface.auto"),
-                item("window.interface.desktop"),
-                item("window.interface.tablet"),
-                item("window.interface.phone"),
-            ],
-        ),
-    ]);
+    // The interface (desktop, tablet, phone) is Sue's, in the Sue menu
+    // and Settings: one "Layout" menu here would sit beside another.
+    window.extend([SEP, item("window.hide_all"), item("window.hide_menus")]);
     vec![
         Menu::new(
             tr!("file"),

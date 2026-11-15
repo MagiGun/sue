@@ -48,6 +48,7 @@ mod extras;
 pub mod hub;
 mod icons;
 mod launchers;
+mod layout_style;
 mod lettering;
 pub mod materials;
 mod menus;

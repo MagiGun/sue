@@ -550,12 +550,12 @@ impl SuePaint {
         selected: u8,
         theme: &Theme,
     ) -> (Rect, u8) {
+        // Every palette is one of its own in the dock, so a palette there
+        // shows only its own tab; a phone's sheet, which shows one palette
+        // at a time, keeps the others as its tabs.
+        let in_sheet = self.sheet.is_some();
         let shown: Vec<usize> = (0..tabs.len())
-            .filter(|at| {
-                !tabs[*at]
-                    .3
-                    .is_some_and(|palette| self.dock.is_open(palette))
-            })
+            .filter(|at| in_sheet || tabs[*at].3.is_none())
             .collect();
         let mut chosen = usize::from(selected);
         if !shown.contains(&chosen) {
