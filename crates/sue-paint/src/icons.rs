@@ -30,20 +30,13 @@ pub enum Icon {
     Balloon,
     CorrectLine,
     New,
-    Open,
     Save,
     Undo,
     Redo,
     Clear,
-    FlipH,
-    FlipV,
-    RotateLeft,
-    RotateRight,
     Reset,
     ZoomIn,
     ZoomOut,
-    Fit,
-    Actual,
     Eye,
     Lock,
     LockAlpha,
@@ -333,15 +326,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(0.5, 0.45), (0.5, 0.69)]);
         }
     };
-    let turn = |left: bool| {
-        if left {
-            curve(0.5, 0.55, 0.28, 200.0, 470.0);
-            filled(&[(0.12, 0.42), (0.34, 0.42), (0.2, 0.6)]);
-        } else {
-            curve(0.5, 0.55, 0.28, -290.0, -20.0);
-            filled(&[(0.88, 0.42), (0.66, 0.42), (0.8, 0.6)]);
-        }
-    };
     let lock = || {
         boxed(
             Rect::from_min_max(p(0.24, 0.45), p(0.76, 0.86)),
@@ -545,7 +529,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             page(false);
             curve(0.5, 0.75, 0.16, 200.0, 340.0);
         }
-        Icon::Open => folder(false),
         Icon::NewFolder => folder(true),
         Icon::Save => {
             closed(&[
@@ -575,40 +558,9 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
             line(&[(0.34, 0.34), (0.66, 0.66)]);
             line(&[(0.66, 0.34), (0.34, 0.66)]);
         }
-        Icon::FlipH => {
-            line(&[(0.5, 0.1), (0.5, 0.9)]);
-            closed(&[(0.42, 0.24), (0.42, 0.76), (0.12, 0.76)]);
-            filled(&[(0.58, 0.24), (0.88, 0.76), (0.58, 0.76)]);
-        }
-        Icon::FlipV => {
-            line(&[(0.1, 0.5), (0.9, 0.5)]);
-            closed(&[(0.24, 0.42), (0.76, 0.42), (0.76, 0.12)]);
-            filled(&[(0.24, 0.58), (0.76, 0.58), (0.76, 0.88)]);
-        }
-        Icon::RotateLeft => turn(true),
-        Icon::RotateRight => turn(false),
         Icon::Reset => {
             curve(0.5, 0.5, 0.3, -60.0, 240.0);
             filled(&[(0.62, 0.16), (0.82, 0.2), (0.7, 0.36)]);
-        }
-        Icon::Fit => {
-            for (a, b, c) in [
-                ((0.14, 0.36), (0.14, 0.14), (0.36, 0.14)),
-                ((0.64, 0.14), (0.86, 0.14), (0.86, 0.36)),
-                ((0.86, 0.64), (0.86, 0.86), (0.64, 0.86)),
-                ((0.36, 0.86), (0.14, 0.86), (0.14, 0.64)),
-            ] {
-                line(&[a, b, c]);
-            }
-        }
-        Icon::Actual => {
-            painter.text(
-                area.center(),
-                egui::Align2::CENTER_CENTER,
-                "1:1",
-                egui::FontId::proportional(side * 0.5),
-                color,
-            );
         }
         Icon::Eye => {
             painter.add(Shape::line(

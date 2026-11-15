@@ -414,7 +414,7 @@ impl SuePaint {
     }
 
     /// The button for `command` as it stands now.
-    fn command_button(
+    fn launcher_button(
         &self,
         command: &str,
         facts: &Facts<'_>,
@@ -469,7 +469,7 @@ impl SuePaint {
                 if item == SEPARATOR {
                     Some(Slot::Separator)
                 } else {
-                    self.command_button(item, &facts, cx).map(Slot::Button)
+                    self.launcher_button(item, &facts, cx).map(Slot::Button)
                 }
             })
             .collect();
@@ -763,7 +763,7 @@ impl SuePaint {
         slots.extend(
             ["anim.light_table.reset", "anim.light_table.tool"]
                 .iter()
-                .filter_map(|command| self.command_button(command, &facts, cx))
+                .filter_map(|command| self.launcher_button(command, &facts, cx))
                 .map(Slot::Button),
         );
         match bar(ui, viewport, &shown, &slots, theme).0.as_deref() {
@@ -1006,7 +1006,7 @@ impl SuePaint {
             "layer.delete",
         ]
         .iter()
-        .filter_map(|command| self.command_button(command, &facts, cx))
+        .filter_map(|command| self.launcher_button(command, &facts, cx))
         .map(Slot::Button)
         .collect();
         if let (Some(command), _) = bar(ui, viewport, &corners, &slots, theme) {

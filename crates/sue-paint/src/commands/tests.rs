@@ -61,7 +61,7 @@ fn every_menu_command_is_registered() {
 /// Animation Cels and light table palettes, and the 3D drawing figure's
 /// tool property, and Quick Access's palette menu. Named one by one, so a command no one can reach cannot
 /// hide behind a prefix.
-const IN_PALETTES: [&str; 19] = [
+const IN_PALETTES: [&str; 58] = [
     "anim.camera.key",
     "anim.camera.unkey",
     "anim.light_table.reverse",
@@ -81,6 +81,45 @@ const IN_PALETTES: [&str; 19] = [
     "window.quick_access.new_set",
     "window.quick_access.delete_set",
     "window.quick_access.settings",
+    "subview.import",
+    "subview.previous",
+    "subview.next",
+    "subview.list",
+    "subview.eyedropper",
+    "subview.flip_h",
+    "subview.flip_v",
+    "subview.fit",
+    "subview.remove",
+    "subview.show_bar",
+    "subview.show_turn",
+    "info.memory",
+    "info.coordinates",
+    "info.length",
+    "info.unit_px",
+    "info.unit_mm",
+    "info.unit_cm",
+    "info.unit_in",
+    "item_bank.keep_sub_tool",
+    "item_bank.add_picture",
+    "item_bank.keep_layer",
+    "auto.record",
+    "auto.play",
+    "auto.new",
+    "auto.delete",
+    "auto.rename",
+    "auto.duplicate",
+    "auto.new_set",
+    "auto.rename_set",
+    "auto.delete_set",
+    "auto.import_set",
+    "auto.export_set",
+    "auto.restore_defaults",
+    "material.paste",
+    "material.favorite",
+    "material.delete",
+    "material.size_small",
+    "material.size_large",
+    "material.size_list",
 ];
 
 /// The palettes' code, which runs those commands by name: every source
@@ -168,6 +207,7 @@ fn every_command_can_be_reached() {
             "figure.flip",
             "figure.reset",
             "figure.preset.",
+            "auto.run.",
         ]
     );
 }

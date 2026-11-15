@@ -2919,6 +2919,7 @@ fn generate_the_paint_folder() {
             "layer.merge_down".to_owned(),
             "view.fit".to_owned(),
         ],
+        ..crate::extras::AutoAction::default()
     });
     // Window, Item Bank: a G-pen made one's own, and a decoration brush.
     let mut pen = sub_tool(Tool::Pen, "G-pen");

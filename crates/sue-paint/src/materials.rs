@@ -496,6 +496,20 @@ pub fn tiled(tile: &RasterTile2D, size: [u32; 2]) -> Option<RasterTile2D> {
 /// # Errors
 /// If it is empty, or will not encode or write.
 pub fn register(folder: &Path, name: &str, tile: &RasterTile2D) -> Result<PathBuf, String> {
+    let png = cut_png(tile)?;
+    let safe = safe_name(name);
+    let dir = folder.join("materials");
+    sue_platform::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let path = dir.join(format!("{safe}.png"));
+    sue_platform::write_atomic(&path, &png).map_err(|error| error.to_string())?;
+    Ok(path)
+}
+
+/// `tile` (RGBA8) cut to what it covers, as a PNG file's bytes.
+///
+/// # Errors
+/// If it is not RGBA8, is empty, or will not encode.
+pub fn cut_png(tile: &RasterTile2D) -> Result<Vec<u8>, String> {
     let bytes = tile
         .bytes()
         .ok_or(tr!("only-rgba-layers-register-as-materials"))?;
@@ -518,13 +532,42 @@ pub fn register(folder: &Path, name: &str, tile: &RasterTile2D) -> Result<PathBu
         let at = ((y * w + min[0]) * 4) as usize;
         cut.extend_from_slice(&bytes[at..at + (cw * 4) as usize]);
     }
-    let png = sue_io::encode_png_rgba(cw, ch, &cut)?;
-    let safe = safe_name(name);
-    let dir = folder.join("materials");
-    sue_platform::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    let path = dir.join(format!("{safe}.png"));
-    sue_platform::write_atomic(&path, &png).map_err(|error| error.to_string())?;
-    Ok(path)
+    sue_io::encode_png_rgba(cw, ch, &cut)
+}
+
+/// `tile` (straight RGBA8) made to fit inside `size` keeping its shape,
+/// never larger than it is, with its middle at the picture point `at`
+/// (in the middle without one), on a clear picture of `size`: what a
+/// picture dropped on the canvas becomes.
+#[must_use]
+pub fn placed(tile: &RasterTile2D, size: [u32; 2], at: Option<[f32; 2]>) -> Option<RasterTile2D> {
+    let middle = fitted(tile, size)?;
+    let Some(at) = at else {
+        return Some(middle);
+    };
+    let bytes = middle.bytes()?;
+    let shift = [
+        (at[0] - size[0] as f32 / 2.0).round() as i64,
+        (at[1] - size[1] as f32 / 2.0).round() as i64,
+    ];
+    let (w, h) = (i64::from(size[0]), i64::from(size[1]));
+    let mut out = vec![0_u8; bytes.len()];
+    for y in 0..h {
+        let from_y = y - shift[1];
+        if !(0..h).contains(&from_y) {
+            continue;
+        }
+        for x in 0..w {
+            let from_x = x - shift[0];
+            if !(0..w).contains(&from_x) {
+                continue;
+            }
+            let to = ((y * w + x) * 4) as usize;
+            let from = ((from_y * w + from_x) * 4) as usize;
+            out[to..to + 4].copy_from_slice(&bytes[from..from + 4]);
+        }
+    }
+    RasterTile2D::from_bytes(size[0], size[1], PixelFormat::Rgba8, out).ok()
 }
 
 /// The class of a material entity in a [`Library`].
@@ -539,6 +582,8 @@ pub const FAVORITE_KEY: &str = "sue_paint.material.favorite";
 pub const USED_KEY: &str = "sue_paint.material.used";
 /// When it was added, in seconds since 1970 (0 for Sue Paint's own).
 pub const ADDED_KEY: &str = "sue_paint.material.added";
+/// The words people tagged it with, separated by commas.
+pub const TAGS_KEY: &str = "sue_paint.material.tags";
 /// The file in the materials location keeping the library's entities.
 const LIBRARY_FILE: &str = "library.sue";
 /// The rice key of the materials location ("" is Sue Paint's folder).
@@ -569,6 +614,8 @@ pub struct Entry {
     pub used: i64,
     /// When it was added (0 for Sue Paint's own).
     pub added: i64,
+    /// The words people tagged it with.
+    pub tags: Vec<String>,
 }
 
 /// Every material found, as entities of an arena of its own: their kind,
@@ -661,6 +708,11 @@ impl Library {
                         .unwrap_or(false),
                     used: int(USED_KEY),
                     added: int(ADDED_KEY),
+                    tags: entity
+                        .property(TAGS_KEY)
+                        .and_then(Value::as_str)
+                        .map(tags_of)
+                        .unwrap_or_default(),
                 })
             })
             .collect()
@@ -693,6 +745,15 @@ impl Library {
             USED_KEY,
             Value::Int(i64::try_from(now).unwrap_or(i64::MAX)),
         )
+    }
+
+    /// Tags `id` with `tags` (words, told apart by commas), and keeps
+    /// them. One step of the library's own history.
+    ///
+    /// # Errors
+    /// If it is not in the library or the library cannot be written.
+    pub fn set_tags(&mut self, id: EntityId, tags: &[String]) -> Result<(), String> {
+        self.set(id, TAGS_KEY, Value::Text(tags.join(", ")))
     }
 
     fn set(&mut self, id: EntityId, key: &str, value: Value) -> Result<(), String> {
@@ -732,6 +793,19 @@ impl Library {
         sue_platform::write_atomic(&folder.join(LIBRARY_FILE), &file.to_bytes())
             .map_err(|error| error.to_string())
     }
+}
+
+/// The tags of a comma separated list: each trimmed, empty ones and
+/// repeats left out.
+#[must_use]
+pub fn tags_of(text: &str) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for tag in text.split(',').map(str::trim).filter(|tag| !tag.is_empty()) {
+        if !tags.iter().any(|known| known.eq_ignore_ascii_case(tag)) {
+            tags.push(tag.to_owned());
+        }
+    }
+    tags
 }
 
 /// Copies the picture file `from` into the materials location as a

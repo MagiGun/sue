@@ -7,18 +7,23 @@
 //! button, the tab header, the flow layout, the wedge and tall sliders,
 //! and a single palette with its torn-off header.
 
+pub(crate) mod auto_action;
 mod brush_size;
 mod cels;
 mod color;
 mod color_set;
 mod command_bar;
 mod history;
+mod info;
+pub(crate) mod item_bank;
 mod layer;
 mod layer_property;
 mod material;
 mod navigator;
 mod quick_access;
+pub(crate) mod run_button;
 mod sub_tool;
+mod sub_view;
 mod timeline;
 mod tool;
 mod tool_property;
@@ -31,9 +36,15 @@ use sue_wm::{AppletContext, Theme};
 use crate::icons::{self, Icon};
 use crate::studio::SuePaint;
 
+pub(crate) use auto_action::MENU_COMMANDS as AUTO_ACTION_COMMANDS;
 pub(crate) use command_bar::icon_picker;
+pub(crate) use info::{InfoOptions, MENU_COMMANDS as INFO_COMMANDS, Unit};
+pub(crate) use item_bank::{MENU_COMMANDS as ITEM_BANK_COMMANDS, bank_pictures};
 pub(crate) use material::material_thumb;
+pub(crate) use material::{MENU_COMMANDS as MATERIAL_COMMANDS, MaterialView, ThumbSize};
+pub(crate) use navigator::MENU_COMMANDS as NAVIGATOR_COMMANDS;
 pub(crate) use quick_access::MENU_COMMANDS as QUICK_ACCESS_COMMANDS;
+pub(crate) use sub_view::MENU_COMMANDS as SUB_VIEW_COMMANDS;
 pub(crate) use tool::{slot_icon, tool_icon};
 
 /// A child `Ui` confined to `rect`.
@@ -302,11 +313,6 @@ impl<'a> Wedge<'a> {
             width,
             theme,
         }
-    }
-
-    pub(crate) fn logarithmic(mut self) -> Self {
-        self.logarithmic = true;
-        self
     }
 
     fn to_unit(&self, value: f32) -> f32 {

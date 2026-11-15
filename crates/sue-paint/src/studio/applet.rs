@@ -233,7 +233,12 @@ impl SueApplet for SuePaint {
     }
 
     fn settings_page(&self) -> Option<SettingsPage> {
-        Some(crate::prefs::page(&self.manifest().title()))
+        let mut page = crate::prefs::page(&self.manifest().title());
+        // Each Auto Action can be given a key too.
+        if let Some(keys) = page.keys.as_mut() {
+            keys.groups.push(self.auto_key_group());
+        }
+        Some(page)
     }
 
     fn setting_choices(&self) -> Vec<(String, Vec<Choice>)> {
@@ -497,7 +502,11 @@ impl SueApplet for SuePaint {
         {
             cx.request(ShellRequest::Open(me_id()));
         }
-        if self.place_picked(&pick.purpose, path, cx) || self.bar_picked(&pick.purpose, path, cx) {
+        if self.place_picked(&pick.purpose, path, cx)
+            || self.bar_picked(&pick.purpose, path, cx)
+            || self.auto_picked(&pick.purpose, path, cx)
+            || self.bank_picked(&pick.purpose, path, cx)
+        {
             return;
         }
         match pick.purpose.as_str() {
@@ -709,6 +718,7 @@ impl SueApplet for SuePaint {
             }
             place if place.starts_with("materials/") => self.hub.navigate(place),
             bar if bar.starts_with("bar/") => self.bar_navigate(bar),
+            extras if extras.starts_with("extras/") => self.extras_navigate(extras),
             page if page.starts_with("new-canvas") => self.new_canvas.navigate(page),
             // A palette's menu: `dock/menu/<palette key>`; `dock/menu` alone
             // closes it.
