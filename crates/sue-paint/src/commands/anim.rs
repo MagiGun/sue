@@ -497,7 +497,7 @@ fn light_tool(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     }
     paint.light_tool = !paint.light_tool;
     if paint.light_tool {
-        cx.notify(tr!("light-table-tool-on"));
+        cx.notify(tr!("light-table-tool-handles"));
     }
 }
 

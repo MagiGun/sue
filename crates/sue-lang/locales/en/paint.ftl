@@ -2532,6 +2532,7 @@ launcher-restore-default = Restore Default
 launcher-on-it = On the launcher
 launcher-to-add = More commands
 cannot-keep-the-selection-launcher = Cannot keep the Selection launcher's buttons: { $error }
+light-table-tool-handles = Light table tool: drag inside the box to move the light table's layers, a corner or an edge to scale them, the top handle to turn them; Alt and drag sets the centre they turn around
 cut-and-paste = Cut and Paste
 copy-and-paste = Copy and Paste
 transform-mode = Transform mode
