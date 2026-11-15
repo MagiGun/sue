@@ -13,6 +13,27 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, Layer palette: every button is a command of the Layer menu
+  with its name and key in the tooltip, and a grayed one says why it
+  cannot run now. A box in each row picks layers to act on together
+  (Ctrl+click and Shift+click pick too), and lock, show, hide, delete and
+  palette color then take every picked layer. Change Palette Color tints
+  rows; a draft layer has a dashed bar; locked layers show a lock at the
+  row's end and layers with a border, tone or layer color show its badge.
+  The ruler button sets where rulers show. Search Layer finds layers by
+  name and kind, and Split Layer List shows the list in two panes. Drag
+  a layer onto New Raster Layer to copy it or onto New Layer Folder to put
+  it in a new folder; Ctrl+click a thumbnail to select what it holds; the
+  link between a layer and its mask can be undone; an animation folder's
+  row names the cel it shows, and a click on a cel moves the playhead
+  there. A right click on a layer opens a short list of its own.
+- Sue Paint, Layer Property: Anti-aliasing on border effect, the tone's
+  density source, posterization, dot shape, Reflect layer opacity and dot
+  position, a sub color for the layer color, and for Monochrome the
+  choice of black, white or both, with Apply Expression Color of Preview.
+- Sue Paint: New Layer, Tone opens Simple Tone Settings (frequency with
+  Clip Studio Paint's presets, density, dot shape, angle) and makes a
+  layer of tone in the selection.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
@@ -331,6 +352,22 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint: a layer folder with no blending mode set shows Through, as
+  it draws, and its blend list offers Through; Layer Comps no longer turn
+  such folders to Normal when shown again (comps kept by older Sue are
+  read the same way).
+- Sue Paint: Merge with Layer Below, Merge Selected Layers, Rasterize and
+  Create Layer Mask work with a folder current instead of doing nothing,
+  and Merge Selected Layers keeps a layer clipped to a layer that was not
+  merged clipped to it.
+- Sue Paint: deleting picked layer folders asks first, with "Do not show
+  again".
+- Sue Paint: picked layers drag together in the Layer palette, and
+  Create Folder and Insert Layer puts every picked layer into one folder.
+  The Layer palette has a Switch Using Layer Color button, and the marks
+  of a row (lock, draft, effects, keyframes, layer colors) say what they
+  are when the pointer rests on them. Layer, Layer Property brings the
+  Layer Property palette forward.
 - A settings file from before 0.0.8 that wore the Graphite, Paper or
   Gray theme kept that theme's old, harder to read secondary text after
   the update. It now takes the theme as it ships; colors you picked
