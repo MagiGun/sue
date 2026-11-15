@@ -56,6 +56,8 @@ pub(crate) struct CelsUi {
     pub drop: Vec<(Rect, Table)>,
     /// Where each table is drawn this frame.
     pub drawn: Vec<(Rect, Table)>,
+    /// How tall the picked entry's settings were drawn last time.
+    pub foot: f32,
 }
 
 impl CelsUi {
@@ -283,8 +285,13 @@ impl SuePaint {
         {
             self.anim_ui.cels.live = None;
         }
+        // The foot holds the picked entry's settings: as tall as they
+        // were drawn last time (their rows' real heights), at least the
+        // two controls and their gaps, so nothing is cut at the bottom.
+        let pad = theme.space(Space::S2);
         let foot_height = if picked.is_some() {
-            Density::of(ui).control_height() * 2.0 + theme.space(Space::S2) * 3.0
+            (Density::of(ui).control_height() * 2.0 + pad * 3.0)
+                .max(self.anim_ui.cels.foot + pad * 2.0)
         } else {
             0.0
         };
@@ -357,13 +364,14 @@ impl SuePaint {
                 .hline(foot.x_range(), foot.top(), theme.hairline());
             let entry = anim::entry(&cx.world.arena, table.from, table.kind(), layer);
             let shown = self.anim_ui.cels.opacity(table, layer, entry.opacity);
-            let mut strip = child(
-                ui,
-                foot.shrink(theme.space(Space::S2)),
-                "cels-entry-settings",
-            );
+            let mut strip = child(ui, foot.shrink(pad), "cels-entry-settings");
             if let Some(set) = self.entry_settings(&mut strip, table, layer, entry, shown, theme) {
                 did = Some((table, layer, Did::Set(set)));
+            }
+            let used = strip.min_rect().height();
+            if (used - self.anim_ui.cels.foot).abs() > 0.5 {
+                self.anim_ui.cels.foot = used;
+                ui.ctx().request_repaint();
             }
         }
         match did {
@@ -531,15 +539,20 @@ impl SuePaint {
         let height = side + theme.space(Space::S2);
         let (rect, response) =
             ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
-        let fill = if picked {
-            Some(theme.fill_selected())
-        } else if response.hovered() {
-            Some(theme.fill_hover())
-        } else {
-            None
-        };
-        if let Some(fill) = fill {
-            ui.painter().rect_filled(rect, CornerRadius::ZERO, fill);
+        // The cel being drawn above has the selected fill; the entry
+        // picked here has the outline of what is chosen, so the two never
+        // read as one, and its caption stays on the panel's own fill.
+        if response.hovered() {
+            ui.painter()
+                .rect_filled(rect, CornerRadius::ZERO, theme.fill_hover());
+        }
+        if picked {
+            ui.painter().rect_stroke(
+                rect.shrink(theme.selected_stroke().width / 2.0),
+                theme.corner(wm_ui::Radius::Xs),
+                theme.selected_stroke(),
+                egui::StrokeKind::Inside,
+            );
         }
         wm_ui::focus_ring(ui, &response, 0.0, theme);
         let mut did = if response.clicked() {
