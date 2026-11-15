@@ -177,9 +177,16 @@ fn every_control_of_settings_shows_a_focus_ring_and_a_tooltip() {
     let mut faults = Vec::new();
     for (page, most) in [
         ("general", 30),
+        ("language", 15),
         ("appearance", 40),
-        (sue_paint::ID, 30),
+        ("display", 20),
+        ("audio", 20),
+        ("files", 20),
         ("keymaps", 20),
+        ("packages", 15),
+        ("advanced", 20),
+        (sue_paint::ID, 30),
+        ("sue-writer", 20),
     ] {
         open(&mut paint, page);
         let (walked, found) = walk(&mut paint, page, most);
@@ -187,6 +194,50 @@ fn every_control_of_settings_shows_a_focus_ring_and_a_tooltip() {
         faults.extend(found);
     }
     assert!(faults.is_empty(), "{}", faults.join("\n"));
+    paint.runtime.shell.close_window();
+}
+
+/// A setting whose value none of its choices names (a sound device that
+/// was unplugged) still shows that value in its dropdown, and the list
+/// still offers the choices to put in its place.
+#[test]
+fn a_value_no_choice_names_stays_in_its_dropdown() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut paint = PaintDriver::new("settings-unknown-choice");
+    let runtime = &mut paint.runtime;
+    runtime
+        .engine
+        .history
+        .apply(
+            &mut runtime.engine.world,
+            RiceEdit(sue_rice::SetRiceValue::new(
+                "audio.output_device",
+                sue_rice::RiceValue::Text("Unplugged Headset".to_owned()),
+            )),
+        )
+        .unwrap();
+    open(&mut paint, "audio");
+    assert!(shows(&paint, "Unplugged Headset"), "{:?}", paint.texts);
+    paint.click_text("Unplugged Headset");
+    paint.settle(10);
+    let default = sue_lang::text("settings", "system-default");
+    assert!(
+        shows(&paint, &default),
+        "the list offers {default}: {:?}",
+        paint.texts
+    );
+    paint.click_text(&default);
+    paint.settle(10);
+    assert_eq!(
+        paint
+            .runtime
+            .engine
+            .world
+            .rice
+            .get_str("audio.output_device"),
+        Some(""),
+        "the choice took the unknown value's place"
+    );
     paint.runtime.shell.close_window();
 }
 

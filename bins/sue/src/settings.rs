@@ -414,18 +414,31 @@ impl Settings {
                 .iter()
                 .filter(|choice| choice.enabled || choice.value == current)
                 .collect();
-            let labels: Vec<&str> = shown.iter().map(|choice| choice.label.as_str()).collect();
-            let Some(mut index) = shown.iter().position(|choice| choice.value == current) else {
-                words(ui, &current, TextRole::Body, false, theme);
-                return None;
-            };
+            let mut labels: Vec<&str> = shown.iter().map(|choice| choice.label.as_str()).collect();
+            // A value none of the choices names (written by an older Sue,
+            // or by hand) stays shown as it is, first, and the list still
+            // offers every choice to put in its place.
+            let unknown = !shown.iter().any(|choice| choice.value == current);
+            if unknown {
+                labels.insert(0, current.as_str());
+            }
+            let offset = usize::from(unknown);
+            let mut index = shown
+                .iter()
+                .position(|choice| choice.value == current)
+                .map_or(0, |found| found + offset);
             let response = ui::dropdown(("sue-choice", entry.path()), &mut index, &labels)
                 .label(&name)
                 .width(self.field)
                 .show(ui, theme);
             let response = ui::tooltip(response, &tip, theme);
-            return (response.changed() && shown[index].enabled)
-                .then(|| Edit::Set(path, RiceValue::Text(shown[index].value.clone())));
+            let picked = index
+                .checked_sub(offset)
+                .and_then(|at| shown.get(at))
+                .filter(|choice| choice.enabled && choice.value != current);
+            return picked
+                .filter(|_| response.changed())
+                .map(|choice| Edit::Set(path, RiceValue::Text(choice.value.clone())));
         }
         match entry.parameter() {
             RiceParameter::Bool { value } => {
