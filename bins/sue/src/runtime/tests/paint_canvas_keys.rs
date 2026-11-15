@@ -142,7 +142,9 @@ fn painted(driver: &PaintDriver, layer: sue_core::EntityId) -> usize {
     raster
         .bytes()
         .unwrap()
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|pixel| pixel[3] > 0)
         .count()
 }
@@ -153,7 +155,9 @@ fn ink(driver: &PaintDriver, layer: sue_core::EntityId) -> u64 {
     raster
         .bytes()
         .unwrap()
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|pixel| u64::from(pixel[3]))
         .sum()
 }
@@ -173,7 +177,7 @@ fn zoom(driver: &PaintDriver) -> f32 {
         .get(&AppletId::new(sue_paint::ID).unwrap())
         .and_then(|applet| applet.window_title(&driver.runtime.engine.world.arena))
         .expect("Sue Paint names its window");
-    let percent = title
+    title
         .split_whitespace()
         .find_map(|word| {
             word.trim_end_matches(')')
@@ -181,8 +185,7 @@ fn zoom(driver: &PaintDriver) -> f32 {
                 .parse::<f32>()
                 .ok()
         })
-        .unwrap_or_else(|| panic!("a zoom in {title:?}"));
-    percent
+        .unwrap_or_else(|| panic!("a zoom in {title:?}"))
 }
 
 /// The view's turn, as the Navigator shows it: the number under its
