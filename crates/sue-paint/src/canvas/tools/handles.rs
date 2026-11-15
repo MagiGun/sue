@@ -210,7 +210,7 @@ impl SuePaint {
                 pose.scale = (pose.scale * by).clamp(0.01, 100.0);
             };
         match *grip {
-            FrameGrip::Inside => {
+            FrameGrip::Inside | FrameGrip::Centre => {
                 let by = constrained([p.x - start[0], p.y - start[1]], shift);
                 pose.position = [base.position[0] + by[0], base.position[1] + by[1]];
             }
@@ -259,9 +259,10 @@ impl SuePaint {
 
     /// The Light table tool pressed at `p` (picture pixels): a corner or
     /// an edge of its box scales the light table's layers, the handle on
-    /// the stalk turns them, anywhere else moves them (Shift and a press
-    /// turns them, as 0.0.75 did). The layers themselves stay as they
-    /// are. `true` when there are layers to move.
+    /// the stalk turns them about the centre of rotation, Alt and a drag
+    /// inside puts that centre where the drag goes, anywhere else moves
+    /// them (Shift and a press turns them, as 0.0.75 did). The layers themselves stay as they are. `true` when
+    /// there are layers to move.
     pub(in crate::canvas) fn light_table_press(
         &mut self,
         p: Pos2,
@@ -284,7 +285,10 @@ impl SuePaint {
         let shown = quad.map(|at| view.to_screen(viewport, size, pos2(at[0], at[1])));
         let (_, stalk) = stalk_of(&shown, crate::canvas::marks::STALK);
         let pos = view.to_screen(viewport, size, p);
+        // A plain press inside moves the layers, as 0.0.75 did, even on
+        // the centre's mark; Alt and a drag puts the centre where it goes.
         let grip = match frame_grip(&shown, stalk, pos, false) {
+            FrameGrip::Inside if modifiers.alt => FrameGrip::Centre,
             FrameGrip::Inside if modifiers.shift => FrameGrip::Turn,
             grip => grip,
         };
@@ -326,9 +330,18 @@ impl SuePaint {
         let p = doc.view.to_picture(viewport, size, pos);
         let size = doc.compositor.display().1;
         let middle = crate::transform::middle(quad);
+        if *grip == FrameGrip::Centre {
+            // The centre goes where the pen is; the layers stay.
+            self.light_centre = [p.x - middle[0], p.y - middle[1]];
+            return;
+        }
+        let about = [
+            middle[0] + self.light_centre[0],
+            middle[1] + self.light_centre[1],
+        ];
         let change = |place: crate::anim::Place| -> crate::anim::Place {
             match *grip {
-                FrameGrip::Inside => {
+                FrameGrip::Inside | FrameGrip::Centre => {
                     let by = constrained([p.x - start.x, p.y - start.y], shift);
                     crate::anim::Place {
                         dx: place.dx + by[0],
@@ -339,8 +352,8 @@ impl SuePaint {
                 FrameGrip::Turn => {
                     let step = if shift { 15_f32.to_radians() } else { 0.0 };
                     let by =
-                        crate::transform::drag_angle(middle, [start.x, start.y], [p.x, p.y], step);
-                    place.then(middle, by.to_degrees(), 1.0, false, size)
+                        crate::transform::drag_angle(about, [start.x, start.y], [p.x, p.y], step);
+                    place.then(about, by.to_degrees(), 1.0, false, size)
                 }
                 FrameGrip::Corner(_) | FrameGrip::Edge(_) => {
                     let Some((held, anchor)) = grip_points(quad, *grip, alt) else {
@@ -365,9 +378,35 @@ impl SuePaint {
 
     /// The light table's layers let go.
     pub(super) fn light_table_release(&mut self, gesture: Gesture, cx: &mut AppletContext<'_>) {
-        let Gesture::LightTable { layers, .. } = gesture else {
+        use crate::transform_ui::FrameGrip;
+        let Gesture::LightTable {
+            layers, grip, quad, ..
+        } = gesture
+        else {
             return;
         };
+        // The centre of rotation: a turn keeps it where it is on the
+        // canvas (the box turned about it), a scale keeps its place in the
+        // box, a move takes it along.
+        let was = crate::transform::middle(&quad);
+        let about = [was[0] + self.light_centre[0], was[1] + self.light_centre[1]];
+        match grip {
+            FrameGrip::Turn => {
+                if let Some((_, now)) = self.light_table_box(&cx.world.arena) {
+                    let now = crate::transform::middle(&now);
+                    self.light_centre = [about[0] - now[0], about[1] - now[1]];
+                }
+            }
+            FrameGrip::Corner(_) | FrameGrip::Edge(_) => {
+                if let Some((layer, before, _)) = layers.first()
+                    && let Ok(entity) = cx.world.arena.get_by_id(*layer)
+                {
+                    let ratio = crate::anim::Place::of(entity).scale / before.scale.max(0.001);
+                    self.light_centre = self.light_centre.map(|value| value * ratio);
+                }
+            }
+            FrameGrip::Inside | FrameGrip::Centre => {}
+        }
         Self::light_table_step(cx, &layers);
     }
 
@@ -590,7 +629,7 @@ impl SuePaint {
         let mut camera = base;
         let center = base.center;
         match grip {
-            FrameGrip::Inside => {
+            FrameGrip::Inside | FrameGrip::Centre => {
                 let by = constrained([p.x - start[0], p.y - start[1]], shift);
                 camera.center = [center[0] + by[0], center[1] + by[1]];
             }

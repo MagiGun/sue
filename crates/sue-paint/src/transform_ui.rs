@@ -1337,6 +1337,8 @@ pub(crate) enum FrameGrip {
     Edge(usize),
     /// The handle on its stalk, or outside it: turns it.
     Turn,
+    /// Its centre of rotation (the light table's): moves that centre.
+    Centre,
 }
 
 /// Where the turning handle of `quad` (screen points) is: from the middle
@@ -1404,7 +1406,7 @@ pub(crate) fn grip_points(
             mid(quad[i % 4], quad[(i + 1) % 4]),
             mid(quad[(i + 2) % 4], quad[(i + 3) % 4]),
         ),
-        FrameGrip::Inside | FrameGrip::Turn => return None,
+        FrameGrip::Inside | FrameGrip::Turn | FrameGrip::Centre => return None,
     };
     Some((held, if from_middle { middle } else { across }))
 }

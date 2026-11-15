@@ -907,6 +907,42 @@ fn sue_paint_light_table_box_scales_turns_and_flips_its_layers() {
     // Reset, from the same launcher: back where it was.
     click_button(&mut driver, "anim.light_table.reset");
     assert!(place(&driver).is_still(), "{:?}", place(&driver));
+    // Alt and a drag puts the centre of rotation on the top left corner,
+    // which changes nothing in the document; a turn then keeps that
+    // corner.
+    let corner = mark(&driver, "light.corner.0");
+    let (before, steps) = (bytes(&driver), depth(&driver));
+    let centre = mark(&driver, "light.centre");
+    drag_with(
+        &mut driver,
+        centre + vec2(6.0, 4.0),
+        corner,
+        egui::Modifiers::ALT,
+    );
+    assert_eq!(bytes(&driver), before, "moving the centre is no edit");
+    assert_eq!(depth(&driver), steps);
+    assert!(mark(&driver, "light.centre").distance(corner) < 2.0);
+    let stalk = mark(&driver, "light.stalk");
+    undo_pair(&mut driver, "Light table turn about the corner", |driver| {
+        drag_with(
+            driver,
+            stalk,
+            stalk + vec2(80.0, 40.0),
+            egui::Modifiers::NONE,
+        );
+    });
+    assert!(place(&driver).degrees.abs() > 10.0, "{:?}", place(&driver));
+    // Turned about it: the corner and the centre stay where they were.
+    let shown = mark(&driver, "light.corner.0");
+    assert!(
+        shown.distance(corner) < 3.0,
+        "the corner stayed: {shown:?} {corner:?}"
+    );
+    let centre = mark(&driver, "light.centre");
+    assert!(
+        centre.distance(corner) < 3.0,
+        "the centre stayed on it: {centre:?} {corner:?}"
+    );
 }
 
 #[test]

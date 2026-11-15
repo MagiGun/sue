@@ -730,12 +730,27 @@ impl SuePaint {
         }
         note_mark(ui.ctx(), "light.stalk", stalk);
         let middle = crate::transform::middle(&quad);
-        marks::pivot(
-            &painter,
-            view.to_screen(viewport, size, pos2(middle[0], middle[1])),
-            false,
-            theme,
+        // Its centre of rotation, which a drag moves (the box's middle at
+        // first, and it goes along when the box moves); while the box turns
+        // it stays where it was.
+        let from = match &self.gesture {
+            Some(crate::studio::Gesture::LightTable {
+                grip: FrameGrip::Turn,
+                quad,
+                ..
+            }) => crate::transform::middle(quad),
+            _ => middle,
+        };
+        let centre = view.to_screen(
+            viewport,
+            size,
+            pos2(
+                from[0] + self.light_centre[0],
+                from[1] + self.light_centre[1],
+            ),
         );
+        marks::pivot(&painter, centre, grip == Some(FrameGrip::Centre), theme);
+        note_mark(ui.ctx(), "light.centre", centre);
         if self.gesture.is_some() {
             return;
         }

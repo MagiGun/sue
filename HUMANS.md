@@ -762,7 +762,11 @@ Once a canvas is open:
   Onion Skin Settings choose how many, their colors and how faint they
   get. The **light table** (Animation, Light Table, or the Animation Cels
   palette) shows other layers under the cel you are drawing, to trace
-  from: pick the layer, then Register Selected Layer.
+  from: pick the layer, then Register Selected Layer. The Light table
+  tool moves what it shows without changing the layers: drag inside to
+  move, a corner or an edge to scale, the handle on the stalk to turn
+  around the centre of rotation, and Alt and drag to put that centre
+  somewhere else.
   Each **animation folder** is a folder in the Layer palette, with a
   strip of film for its icon, and its cels sit inside it, indented and
   folded away with it, as in Clip Studio Paint. New Animation Cel puts

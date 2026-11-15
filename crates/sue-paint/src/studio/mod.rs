@@ -765,6 +765,9 @@ pub struct SuePaint {
     /// How transforms, Mesh Transformation and Puppet warp behave: their
     /// Tool Property, kept between one use and the next.
     pub(crate) transform_prefs: crate::transform_ui::TransformPrefs,
+    /// Where the Light table tool's centre of rotation is, from the middle
+    /// of its box (picture pixels): it goes along when the box moves.
+    pub(crate) light_centre: [f32; 2],
 }
 
 impl Default for SuePaint {
@@ -943,6 +946,7 @@ impl Default for SuePaint {
             pen_stream: Vec::new(),
             launcher_set: crate::launchers::LauncherSet::default(),
             transform_prefs: crate::transform_ui::TransformPrefs::default(),
+            light_centre: [0.0; 2],
         }
     }
 }
