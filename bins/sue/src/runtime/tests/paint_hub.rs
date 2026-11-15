@@ -473,13 +473,13 @@ fn walk(dir: &std::path::Path) -> Vec<String> {
 }
 
 /// What the launcher's Help popup held is in Sue Paint's Help menu: the
-/// tips, the guide online, questions and answers, contact and feedback,
+/// tips, the guide online, frequently asked questions, contact and feedback,
 /// each opening its page.
 #[test]
 fn the_help_menu_opens_what_the_launchers_help_popup_held() {
     let mut paint = PaintDriver::new("paint-help-links");
     paint.click_text("Help");
-    paint.click_text("Questions and Answers");
+    paint.click_text("Frequently Asked Questions");
     assert!(
         notice(&paint).contains("issues?q=label%3Aquestion"),
         "{}",
@@ -507,18 +507,36 @@ fn the_help_menu_opens_what_the_launchers_help_popup_held() {
 #[test]
 fn the_launchers_settings_are_rows_of_sue_paints_settings() {
     let (runtime, root) = runtime("paint-settings-rows");
-    let applet = runtime.applets.get(&paint_id()).unwrap();
-    let keys: Vec<String> = applet
-        .rice_declarations()
-        .into_iter()
-        .map(|declaration| declaration.path)
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let rice = &runtime.engine.world.rice;
+    let pages = crate::settings::all_pages(&runtime.engine.catalog, rice);
+    // Each key is a setting Sue knows, and Settings shows it in the
+    // group named Sue Paint (by the key itself or by its section).
+    let groups: Vec<&sue_wm::SettingsGroup> = pages
+        .iter()
+        .flat_map(|page| &page.groups)
+        .filter(|group| group.title == "Sue Paint")
         .collect();
+    assert!(!groups.is_empty(), "Settings has a Sue Paint group");
     for key in [
         "sue_paint.theme",
         "sue_paint.materials_dir",
         "sue_paint.pen_pressure",
     ] {
-        assert!(keys.iter().any(|known| known == key), "{key}: {keys:?}");
+        let entry = rice
+            .entry(key)
+            .unwrap_or_else(|| panic!("{key} is a setting"));
+        assert!(
+            groups
+                .iter()
+                .flat_map(|group| &group.items)
+                .any(|item| match item {
+                    sue_wm::SettingsItem::Param(path) => path == key,
+                    sue_wm::SettingsItem::Section(section) => section == entry.section(),
+                    _ => false,
+                }),
+            "{key} is a row of Settings, Sue Paint"
+        );
     }
     let _ = std::fs::remove_dir_all(&root);
 }

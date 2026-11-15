@@ -78,7 +78,7 @@ follow [Semantic Versioning](https://semver.org/).
   again and shows or moves their folder. File, Back to the Hub (and the
   back arrow on a phone) goes to the Hub, where your work is in Files.
   The Help menu now also links to the basic tips, this guide online,
-  questions and answers, contact and feedback.
+  frequently asked questions, contact and feedback.
 - The start pages draw Sue's icons and have rounded corners.
 - A Sue project (`.sue`) with pictures is far smaller and the same on
   disk however it is saved: pixels are stored as 256 pixel tiles, an

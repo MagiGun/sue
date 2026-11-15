@@ -349,9 +349,9 @@ its file is, and deletes one you added (click twice). The place's menu
 Sue Paint's Own Folder**. Nothing here goes online.
 
 **Help** in Sue Paint's menu bar links to the basic tips, this guide
-online, questions and answers, contact and feedback on the Sue site and
-GitHub. Sue Paint's colors, where its materials are kept and the pen
-pressure curve are rows of Settings, Sue Paint; Data Transfers is the
+online, frequently asked questions, contact and feedback on the Sue
+site and GitHub. Sue Paint's colors, where its materials are kept and the pen
+pressure curve are rows of Settings, Sue Paint; Transfers is the
 Hub's two arrows in the top bar.
 
 **Saving is Clip Studio's format.** File, Save keeps a picture as a Clip

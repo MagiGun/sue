@@ -96,9 +96,11 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         .with(Flags::PALETTE),
     c("help.updates", "check-for-updates").with(Flags::LEAVES_CANVAS),
     c("help.about", "about-sue-paint"),
-    c("help.tips", "help-basic-tips").with(Flags::LEAVES_CANVAS),
-    c("help.online_guide", "help-online-guide").with(Flags::LEAVES_CANVAS),
-    c("help.faq", "help-faq").with(Flags::LEAVES_CANVAS),
-    c("help.contact", "help-contact").with(Flags::LEAVES_CANVAS),
-    c("help.feedback", "help-feedback").with(Flags::LEAVES_CANVAS),
+    c("help.tips", "help-basic-tips").with(Flags::PALETTE.with(Flags::LEAVES_CANVAS)),
+    c("help.online_guide", "help-using-sue-paint-online")
+        .with(Flags::PALETTE.with(Flags::LEAVES_CANVAS)),
+    c("help.faq", "help-faq").with(Flags::PALETTE.with(Flags::LEAVES_CANVAS)),
+    c("help.contact", "help-contact").with(Flags::PALETTE.with(Flags::LEAVES_CANVAS)),
+    c("help.feedback", "help-feedback-and-requests")
+        .with(Flags::PALETTE.with(Flags::LEAVES_CANVAS)),
 ];
