@@ -13,6 +13,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint on a touch screen: Draw with Fingers (on the top bar in
+  Simple Mode, the command bar in Studio Mode and the More sheet) makes a
+  finger only move the view while the pen draws. Studio Mode's edge key
+  bar swipes in from either edge, see-through at first and pinned beside
+  the canvas on a second swipe, and its command bar records a timelapse.
+  Settings, Sue Paint, Phones and Tablets sets what the two-finger swipe,
+  pinch and rotation do.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
