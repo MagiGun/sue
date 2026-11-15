@@ -8,7 +8,10 @@ use std::path::Path;
 
 use sue_wm::AppletContext;
 
-pub(crate) use crate::panels::auto_action::{AutoAction, AutoActions};
+/// The golden ledger's tests read Auto Actions by this path.
+#[cfg(test)]
+pub(crate) use crate::panels::auto_action::AutoAction;
+pub(crate) use crate::panels::auto_action::AutoActions;
 pub(crate) use crate::panels::item_bank::Item;
 use crate::studio::{Panels, SuePaint};
 
