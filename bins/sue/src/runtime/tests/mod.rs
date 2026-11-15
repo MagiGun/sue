@@ -23,6 +23,7 @@ mod paint_cmd_help;
 mod paint_cmd_layer;
 mod paint_cmd_story;
 mod paint_cmd_tool;
+mod paint_color;
 mod paint_comic;
 mod paint_command_bar;
 mod paint_edit;

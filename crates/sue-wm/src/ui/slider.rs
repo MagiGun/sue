@@ -287,6 +287,39 @@ fn paint_rail(painter: &Painter, track: Rect, from: f32, t: f32, theme: &Theme, 
     }
 }
 
+/// Paints a color slider's track: `stops` spread evenly along it, as
+/// tall as half a handle so the colors read, with a hairline around it.
+/// A disabled one is dimmed.
+fn paint_gradient_rail(
+    painter: &Painter,
+    track: Rect,
+    stops: &[Color32],
+    density: Density,
+    theme: &Theme,
+    look: Look,
+) {
+    let band = Rect::from_center_size(
+        track.center(),
+        vec2(track.width(), (handle(density).y / 2.0).max(track.height())),
+    );
+    let dim = if look.enabled { 1.0 } else { 0.4 };
+    let mut mesh = Mesh::default();
+    let last = (stops.len() - 1) as f32;
+    for (index, stop) in stops.iter().enumerate() {
+        let x = band.left() + band.width() * index as f32 / last;
+        let color = stop.gamma_multiply(dim);
+        mesh.colored_vertex(pos2(x, band.top()), color);
+        mesh.colored_vertex(pos2(x, band.bottom()), color);
+        if index > 0 {
+            let at = u32::try_from(index * 2).unwrap_or(u32::MAX);
+            mesh.add_triangle(at - 2, at - 1, at);
+            mesh.add_triangle(at - 1, at, at + 1);
+        }
+    }
+    painter.add(Shape::mesh(mesh));
+    painter.rect_stroke(band, 0.0, theme.hairline(), StrokeKind::Outside);
+}
+
 /// Paints the upright handle centered on `center`, with a ring of the
 /// panel color that sets it off a lit track, and its focus ring.
 fn paint_handle(painter: &Painter, center: Pos2, density: Density, theme: &Theme, look: Look) {
@@ -365,6 +398,7 @@ pub struct Slider<'a> {
     log: bool,
     enabled: bool,
     width: Option<f32>,
+    gradient: &'a [Color32],
 }
 
 /// A slider that holds `value` inside `range`. `salt` names it among the
@@ -384,6 +418,7 @@ pub fn slider(salt: impl AsIdSalt, value: &mut f64, range: RangeInclusive<f64>) 
         log: false,
         enabled: true,
         width: None,
+        gradient: &[],
     }
 }
 
@@ -453,6 +488,14 @@ impl<'a> Slider<'a> {
     /// as wide as the room it is shown in.
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
+        self
+    }
+
+    /// Paints the track as the colors `stops`, spread evenly from its
+    /// start to its end, instead of the theme's rail: what each place on
+    /// a color slider gives. Two stops at least; fewer leave the rail.
+    pub fn gradient(mut self, stops: &'a [Color32]) -> Self {
+        self.gradient = stops;
         self
     }
 
@@ -549,7 +592,11 @@ impl<'a> Slider<'a> {
             paint_label(painter, label_rect, self.label, theme, look);
         }
         let t = scale.to_unit(*self.value) as f32;
-        paint_rail(painter, track, 0.0, t, theme, look);
+        if self.gradient.len() >= 2 {
+            paint_gradient_rail(painter, track, self.gradient, density, theme, look);
+        } else {
+            paint_rail(painter, track, 0.0, t, theme, look);
+        }
         paint_handle(
             painter,
             pos2(track.left() + t * track.width(), track.center().y),

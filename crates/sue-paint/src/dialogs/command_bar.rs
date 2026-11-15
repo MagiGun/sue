@@ -199,12 +199,10 @@ impl SuePaint {
                     tr!("bar-drawing-color"),
                     Slot::of(Item::Color(self.drawing_color())),
                 ));
-                for (name, colors) in &self.color_sets.sets {
-                    out.extend(
-                        colors
-                            .iter()
-                            .map(|rgb| (name.clone(), Slot::of(Item::Color(*rgb)))),
-                    );
+                for set in &self.color_sets.sets {
+                    out.extend(set.cells.iter().flatten().map(|swatch| {
+                        (set.name.clone(), Slot::of(Item::Color(swatch.rgb)))
+                    }));
                 }
             }
             Category::Options => {

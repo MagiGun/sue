@@ -603,6 +603,7 @@ impl SuePaint {
         if response.clicked() {
             self.transparent = !self.transparent;
         }
+        self.color_circles_double_click(ui, main_at);
     }
 }
 

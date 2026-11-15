@@ -30,7 +30,7 @@ pub(crate) mod tool;
 mod tool_property;
 
 use egui::{
-    Color32, Id, Mesh, Pos2, Rect, RichText, Sense, Shape, Stroke, Ui, UiBuilder, pos2, vec2,
+    Color32, Id, Mesh, Pos2, Rect, Sense, Shape, Stroke, Ui, UiBuilder, pos2, vec2,
 };
 use sue_wm::{AppletContext, Theme};
 
@@ -463,43 +463,6 @@ fn tall_slider(
         .interact_pointer_pos()
         .filter(|_| response.dragged() || response.clicked())?;
     Some(((track.bottom() - pointer.y) / track.height()).clamp(0.0, 1.0))
-}
-
-/// The name at the start of a Tool Property row, as wide as every other
-/// row's so their controls line up.
-fn row_label(ui: &mut Ui, label: &str, theme: &Theme) {
-    ui.add_sized(
-        vec2(78.0, 18.0),
-        egui::Label::new(
-            RichText::new(label)
-                .size(theme.small_size + 0.5)
-                .color(theme.muted),
-        ),
-    );
-}
-
-/// A labelled horizontal slider row.
-fn slider_row(
-    ui: &mut Ui,
-    label: &str,
-    value: &mut f32,
-    range: std::ops::RangeInclusive<f32>,
-    suffix: &str,
-    log: bool,
-    theme: &Theme,
-) -> bool {
-    ui.horizontal(|ui| {
-        row_label(ui, label, theme);
-        ui.spacing_mut().slider_width = (ui.available_width() - 62.0).max(36.0);
-        ui.add(
-            egui::Slider::new(value, range)
-                .logarithmic(log)
-                .max_decimals(if log { 1 } else { 0 })
-                .suffix(suffix),
-        )
-        .changed()
-    })
-    .inner
 }
 
 impl SuePaint {

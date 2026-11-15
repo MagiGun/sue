@@ -76,8 +76,6 @@ pub enum Icon {
     Wrench,
     /// An arrow into a tray: import.
     Import,
-    /// An arrow out of a tray: export.
-    Export,
     /// A plus: add.
     Add,
     /// Two arrows in a circle: replace.
@@ -704,11 +702,6 @@ pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Import => {
             line(&[(0.5, 0.14), (0.5, 0.6)]);
             line(&[(0.32, 0.44), (0.5, 0.62), (0.68, 0.44)]);
-            line(&[(0.16, 0.64), (0.16, 0.84), (0.84, 0.84), (0.84, 0.64)]);
-        }
-        Icon::Export => {
-            line(&[(0.5, 0.62), (0.5, 0.16)]);
-            line(&[(0.32, 0.32), (0.5, 0.14), (0.68, 0.32)]);
             line(&[(0.16, 0.64), (0.16, 0.84), (0.84, 0.84), (0.84, 0.64)]);
         }
         Icon::Add => {

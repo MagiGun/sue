@@ -120,6 +120,33 @@ fn the_keys_move_a_short_slider_that_keeps_no_decimals() {
 // ----- The slider ----------------------------------------------------------------
 
 #[test]
+fn a_color_slider_paints_its_stops_along_the_track_and_still_moves() {
+    let stops = [Color32::RED, Color32::GREEN, Color32::BLUE];
+    let draw = |ui: &mut Ui, theme: &Theme, value: &mut f64| {
+        slider("colors", value, 0.0..=100.0)
+            .name("Colors")
+            .field(false)
+            .gradient(&stops)
+            .show_at(ui, place(), theme)
+    };
+    let mut harness = Harness::new();
+    let mut value = 0.0;
+    let (_, output) = harness.frame_output(vec![], |ui, theme| draw(ui, theme, &mut value));
+    let mut colors = Vec::new();
+    for clipped in &output.shapes {
+        if let Shape::Mesh(mesh) = &clipped.shape {
+            colors.extend(mesh.vertices.iter().map(|vertex| vertex.color));
+        }
+    }
+    for stop in stops {
+        assert!(colors.contains(&stop), "{stop:?} is painted: {colors:?}");
+    }
+    let track = bare_track();
+    harness.click(along(track, 0.5), |ui, theme| draw(ui, theme, &mut value));
+    assert_eq!(value, 50.0, "the track still takes the pointer");
+}
+
+#[test]
 fn a_press_on_the_track_moves_the_value_there_and_a_drag_follows() {
     let mut harness = Harness::new();
     let mut value = 0.0;

@@ -471,7 +471,7 @@ The order of work is the plan at the end.
 | --- | --- | --- | --- |
 | Color Wheel | Palette | done | |
 | Color Slider | Palette | done | |
-| Color Sets: Default, Grays, Skin Tones, Pastels, your own | Palette | done | Import a GIMP palette or a list of color codes, export one |
+| Color Sets: Default, Grays, Skin Tones, Pastels, your own | Palette | done | Named sets and colors, empty cells, rename, reorder, Add Standard Set; import a GIMP palette, a Clip Studio Paint `.cls` or a list of color codes, export a GIMP palette (`docs/paint-color-sets.md`) |
 | Color History | Palette | done | |
 | Intermediate Color | Palette | done | Four colors at its corners |
 | Approximate Color | Palette | done | The shades near your color |

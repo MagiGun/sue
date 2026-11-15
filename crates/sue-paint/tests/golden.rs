@@ -1684,7 +1684,7 @@ fn the_data_folder_of_0_0_75_loads_into_the_studio() {
         .color_sets
         .sets
         .iter()
-        .map(|(name, colors)| (name.as_str(), colors.len()))
+        .map(|set| (set.name.as_str(), set.cells.len()))
         .collect();
     assert_eq!(
         sets[1..],
@@ -1696,14 +1696,16 @@ fn the_data_folder_of_0_0_75_loads_into_the_studio() {
         ]
     );
     assert_eq!(sets[0].0, "Default");
-    assert_eq!(
-        paint.color_sets.sets[0].1[..3],
-        [[0, 0, 0], [255, 255, 255], [240, 60, 90]]
-    );
-    assert_eq!(
-        paint.color_sets.sets[4].1,
-        [[20, 20, 28], [120, 30, 40], [240, 236, 220]]
-    );
+    let colors = |set: usize| -> Vec<[u8; 3]> {
+        paint.color_sets.sets[set]
+            .cells
+            .iter()
+            .flatten()
+            .map(|swatch| swatch.rgb)
+            .collect()
+    };
+    assert_eq!(colors(0)[..3], [[0, 0, 0], [255, 255, 255], [240, 60, 90]]);
+    assert_eq!(colors(4), [[20, 20, 28], [120, 30, 40], [240, 236, 220]]);
     let _ = std::fs::remove_dir_all(&folder);
 }
 
@@ -2967,7 +2969,9 @@ fn generate_the_paint_folder() {
     // A color set of one's own beside Sue's.
     paint.color_sets.add_set(
         "My inks",
-        vec![[20, 20, 28], [120, 30, 40], [240, 236, 220]],
+        [[20, 20, 28], [120, 30, 40], [240, 236, 220]]
+            .map(|rgb| Some(crate::colorsets::Swatch::of(rgb)))
+            .to_vec(),
     );
     with_context(&folder, |cx| {
         paint.save_extras(cx);
