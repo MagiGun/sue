@@ -246,9 +246,15 @@ fn workspace_reload(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>
     paint.reload_workspace();
 }
 
-/// Reload works while a registered workspace is in use.
+/// Reload works while a registered workspace is in use (not one renamed
+/// or deleted in Manage Workspaces since).
 fn workspace_reload_state(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
-    when(paint.current_workspace.is_some())
+    when(
+        paint
+            .current_workspace
+            .as_ref()
+            .is_some_and(|name| paint.workspaces.iter().any(|space| space.name == *name)),
+    )
 }
 
 /// A workspace Sue Paint ships (Illustration, Animation).
@@ -1090,6 +1096,11 @@ mod tests {
             paint.panels.navigator = true;
             registry().run(&mut paint, cx, "window.workspace.reload");
             assert!(!paint.panels.navigator);
+            // Renamed in Manage Workspaces: nothing left to reload.
+            paint.workspaces[0].name = "Inks".to_owned();
+            assert!(!enabled(&paint, cx, "window.workspace.reload"));
+            paint.workspaces[0].name = "Inking".to_owned();
+            assert!(enabled(&paint, cx, "window.workspace.reload"));
             // The Animation preset opens the Timeline with the cels by
             // the layers; Illustration is the style's own arrangement.
             registry().run(&mut paint, cx, "window.workspace.preset.animation");
