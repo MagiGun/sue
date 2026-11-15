@@ -222,8 +222,10 @@ pub fn blend_key(name: &str) -> [u8; 4] {
         "DarkerColor" => b"dkCl",
         "Lighten" => b"lite",
         "Screen" => b"scrn",
-        "ColorDodge" => b"div ",
-        "Add" => b"lddg",
+        // Photoshop has no glow modes: Clip Studio's Glow Dodge and Add
+        // (Glow) go out as the dodge and add they glow beside.
+        "ColorDodge" | "GlowDodge" => b"div ",
+        "Add" | "AddGlow" => b"lddg",
         "LighterColor" => b"lgCl",
         "Overlay" => b"over",
         "SoftLight" => b"sLit",

@@ -734,7 +734,14 @@ mod tests {
     fn blend_names_map_to_photoshop_keys_and_back() {
         for mode in BlendMode::ALL {
             let key = blend_key(&camel(mode.name()));
-            assert_eq!(mode_of(key), mode, "{}", mode.name());
+            // Photoshop has no glow modes; they come back as the mode
+            // they are written as.
+            let back = match mode {
+                BlendMode::GlowDodge => BlendMode::ColorDodge,
+                BlendMode::AddGlow => BlendMode::Add,
+                other => other,
+            };
+            assert_eq!(mode_of(key), back, "{}", mode.name());
         }
         assert_eq!(mode_of(*b"pass"), BlendMode::Normal);
     }
