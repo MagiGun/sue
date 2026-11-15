@@ -69,11 +69,21 @@ impl SuePaint {
         let density = Density::of(ui);
         let row = density.icon_button();
         let gap = theme.space(Space::S2);
-        // Two rows of a value and its wedge, then the buttons in as many
-        // lines as the width takes.
-        let count = ZOOM_COMMANDS.len() + TURN_COMMANDS.len();
+        // Two rows of a value and its wedge, each with its buttons at its
+        // end where they leave the wedge room; the buttons that do not fit
+        // go on lines under both, as many as the width takes.
+        let field = (row * 2.2).round();
+        let fits =
+            |count: usize| body.width() - field - gap - count as f32 * (row + gap) >= row * 1.5;
+        let inline = [fits(ZOOM_COMMANDS.len()), fits(TURN_COMMANDS.len())];
+        let below: Vec<(&str, Icon)> = [&ZOOM_COMMANDS[..], &TURN_COMMANDS[..]]
+            .into_iter()
+            .zip(inline)
+            .filter(|(_, inline)| !inline)
+            .flat_map(|(buttons, _)| buttons.iter().copied())
+            .collect();
         let per_line = ((body.width() + gap) / (row + gap)).floor().max(1.0) as usize;
-        let lines = count.div_ceil(per_line) as f32;
+        let lines = below.len().div_ceil(per_line) as f32;
         let controls = (2.0 + lines) * (row + gap) + gap;
         let thumb_area = Rect::from_min_max(body.min, pos2(body.right(), body.bottom() - controls));
         ui.painter()
@@ -153,13 +163,22 @@ impl SuePaint {
         let zoom = self.doc().map_or(1.0, |doc| doc.view.zoom);
         let rotation = self.doc().map_or(0.0, |doc| doc.view.rotation);
         let has_doc = self.doc().is_some();
-        let field = (row * 2.6).round();
         let top = thumb_area.bottom() + gap;
-        for index in 0..2_usize {
+        for (index, inline_here) in inline.into_iter().enumerate() {
             let y = top + index as f32 * (row + gap);
             let line = Rect::from_min_max(pos2(body.left(), y), pos2(body.right(), y + row));
             let mut inner = child(ui, line, if index == 0 { "nav-zoom" } else { "nav-turn" });
-            let wedge_width = (line.width() - field - gap).max(0.0);
+            let buttons: &[(&str, Icon)] = if index == 0 {
+                &ZOOM_COMMANDS
+            } else {
+                &TURN_COMMANDS
+            };
+            let buttons_width = if inline_here {
+                buttons.len() as f32 * (row + gap)
+            } else {
+                0.0
+            };
+            let wedge_width = (line.width() - field - gap - buttons_width).max(0.0);
             let field_rect = Rect::from_min_size(line.min, vec2(field, row));
             let wedge_rect = Rect::from_min_size(
                 pos2(field_rect.right() + gap, line.top()),
@@ -223,11 +242,19 @@ impl SuePaint {
                     turned = Some(wedged as f32);
                 }
             }
+            if inline_here {
+                let mut x = line.right() - buttons_width + gap;
+                for (command, icon) in buttons {
+                    let rect = Rect::from_min_size(pos2(x, line.top()), vec2(row, row));
+                    self.command_button(&inner, rect, command, *icon, cx, theme);
+                    x += row + gap;
+                }
+            }
         }
         let area = Rect::from_min_max(pos2(body.left(), top + 2.0 * (row + gap)), body.max);
         let buttons = child(ui, area, "nav-buttons");
         let mut at = area.min;
-        for (command, icon) in ZOOM_COMMANDS.iter().chain(TURN_COMMANDS.iter()) {
+        for (command, icon) in &below {
             if at.x + row > area.right() + gap && at.x > area.left() {
                 at = pos2(area.left(), at.y + row + gap);
             }
