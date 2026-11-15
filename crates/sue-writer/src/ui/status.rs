@@ -286,31 +286,37 @@ impl SueWriter {
                 .hint(&hint)
                 .width(line * REPLACE_FIELD)
                 .show(ui, theme);
-            if button("writer-replace-one", &tr!("replace"))
+            let one = tr!("replace");
+            if button("writer-replace-one", &one)
+                .hint(&one)
                 .show(ui, theme)
                 .clicked()
             {
                 action = Some("replace");
             }
-            if button("writer-replace-all", &tr!("replace-all"))
+            let all = tr!("replace-all");
+            if button("writer-replace-all", &all)
+                .hint(&all)
                 .show(ui, theme)
                 .clicked()
             {
                 action = Some("all");
             }
-        } else if button("writer-replace-open", &tr!("replace-ellipsis"))
-            .ghost()
-            .show(ui, theme)
-            .clicked()
-        {
-            find.replacing = true;
+        } else {
+            let open = tr!("replace-ellipsis");
+            if button("writer-replace-open", &open)
+                .ghost()
+                .hint(&open)
+                .show(ui, theme)
+                .clicked()
+            {
+                find.replacing = true;
+            }
         }
         let flip = |ui: &mut Ui, salt: &str, label: String, on: &mut bool, help: Option<String>| {
             let response = checkbox(salt, &label, *on).show(ui, theme);
-            let response = match help {
-                Some(help) => response.on_hover_text(help),
-                None => response,
-            };
+            // The tooltip names the box, and says more where it helps.
+            let response = response.on_hover_text(help.unwrap_or_else(|| label.clone()));
             if response.clicked() {
                 *on = !*on;
             }

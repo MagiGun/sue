@@ -18,6 +18,15 @@ const SIZES: [f32; 15] = [
     8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 32.0, 36.0, 48.0, 72.0,
 ];
 
+/// The font box's width, in control heights.
+const FONT_BOX: f32 = 6.0;
+
+/// How tall the font list may grow, in control heights.
+const FONT_LIST: f32 = 16.0;
+
+/// The font search field's width, in control heights.
+const FONT_SEARCH: f32 = 8.0;
+
 /// The highlight colors, by the name the command takes.
 const HIGHLIGHTS: [&str; 5] = ["yellow", "green", "blue", "pink", "none"];
 
@@ -319,13 +328,13 @@ impl SueWriter {
         let line = Density::of(ui).control_height();
         let font_box = egui::ComboBox::from_id_salt("writer-font")
             .selected_text(font.clone())
-            .width(line * 6.0)
-            .height(line * 16.0)
+            .width(line * FONT_BOX)
+            .height(line * FONT_LIST)
             .show_ui(ui, |ui| {
                 let mut filter: String = ui.data(|data| data.get_temp(font_id)).unwrap_or_default();
                 sue_wm::ui::search_field("writer-font-search", &mut filter)
                     .hint(&tr!("search-fonts"))
-                    .width(line * 8.0)
+                    .width(line * FONT_SEARCH)
                     .show(ui, theme);
                 ui.data_mut(|data| data.insert_temp(font_id, filter.clone()));
                 if !sue_wm::fonts::ready() {
@@ -440,15 +449,23 @@ impl SueWriter {
     }
 }
 
+/// A font list with a search field, sized like the toolbar's (Settings'
+/// fonts). Its tooltip names it.
 pub(super) fn font_picker(ui: &mut Ui, salt: &str, font: &mut String, filter: &mut String) {
-    egui::ComboBox::from_id_salt(salt.to_owned())
+    let line = Density::of(ui).control_height();
+    let font_box = egui::ComboBox::from_id_salt(salt.to_owned())
         .selected_text(font.clone())
-        .height(360.0)
-        .width(180.0)
+        .width(line * FONT_BOX)
+        .height(line * FONT_LIST)
         .show_ui(ui, |ui| {
-            ui.add(egui::TextEdit::singleline(filter).hint_text(tr!("search-fonts")));
+            ui.add(
+                egui::TextEdit::singleline(filter)
+                    .hint_text(tr!("search-fonts"))
+                    .desired_width(line * FONT_SEARCH),
+            );
             if let Some(family) = sue_wm::fonts::list_ui(ui, font, filter) {
                 *font = family;
             }
         });
+    font_box.response.on_hover_text(tr!("font"));
 }
