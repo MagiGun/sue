@@ -163,7 +163,7 @@ impl Making<'_> {
             let raster = RasterTile2D::from_bytes(w, h, PixelFormat::Rgba8, rgba)
                 .map_err(|error| error.to_string())?;
             let name = if layer.name.is_empty() {
-                tr!("layer")
+                tr!("layer-2")
             } else {
                 layer.name.clone()
             };

@@ -524,3 +524,31 @@ fn settings_of_0_0_75_save_a_sue_project_unless_clip_was_chosen() {
     let schema = sue_rice::RiceSchema::parse(&migrated.text).unwrap();
     assert_eq!(schema.get_str(SAVE_FORMAT_KEY), Some("sue"));
 }
+
+/// Writes `.clip` files for the hands-on check in Clip Studio into the
+/// folder `SUE_CLIP_HANDS_ON` names: the test picture, and a generated
+/// document with every raster feature taken through Sue and back.
+#[test]
+#[ignore = "writes files for a person to open in Clip Studio"]
+fn write_files_for_the_hands_on_check() {
+    let Some(dir) = std::env::var_os("SUE_CLIP_HANDS_ON") else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut arena = Arena::new();
+    let picture = a_picture(&mut arena);
+    std::fs::write(
+        dir.join("sue-picture.clip"),
+        encode(&arena, picture).unwrap(),
+    )
+    .unwrap();
+    let mut doc = testkit::raster_subset(600, 400, 11);
+    doc.sue = None;
+    let (arena, picture, _) = opened(&write(&doc).unwrap());
+    std::fs::write(
+        dir.join("raster-subset-through-sue.clip"),
+        encode(&arena, picture).unwrap(),
+    )
+    .unwrap();
+}
