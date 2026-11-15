@@ -469,7 +469,11 @@ follow [Semantic Versioning](https://semver.org/).
   heart, eye and lock) no longer reads "4 things could not be read".
   Its card says plainly that Sue's own twins show for the on state;
   only files that really could not be read are counted, and listed on
-  a click.
+  a click. Remove on a pack's card asks again if anything else was
+  pressed after the first click.
+- A setting whose value is no longer one of its choices (a sound
+  device that was unplugged) still opens its list in Settings, so
+  another can be picked.
 
 ### Removed
 
