@@ -27,7 +27,7 @@ pub(crate) const MODIFIERS: [(&str, &str, &[&str]); 3] = [
 
 /// What the pen and mouse do, for the Keyboard Shortcuts dialog under
 /// the keys Settings has: Clip Studio Paint's gestures.
-pub(crate) const GESTURES: [(&str, &str); 11] = [
+pub(crate) const GESTURES: [(&str, &str); 13] = [
     ("Scroll", "Space+drag, middle drag"),
     ("Rotate the view", "Shift+Space+drag, Shift+wheel"),
     (
@@ -37,6 +37,8 @@ pub(crate) const GESTURES: [(&str, &str); 11] = [
     ("Zoom", "Ctrl+wheel"),
     ("Pick a color", "Alt+click, right-click"),
     ("Pick the layer under the pointer", "Ctrl+Shift+click"),
+    ("Move the layer (Object)", "Ctrl+drag"),
+    ("A tool only while its key is held", "Hold the tool's key"),
     ("Change the brush size", "Ctrl+Alt+drag"),
     ("Straight line", "Shift+drag"),
     (
