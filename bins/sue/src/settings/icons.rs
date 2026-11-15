@@ -238,9 +238,7 @@ fn sheet(ui: &mut Ui, salt: &str, set: &IconSet, icons: &[Icon], theme: &Theme) 
     let density = Density::of(ui);
     let side = density.icon_button();
     let gap = theme.space(Space::S1);
-    let columns = ((ui.available_width() + gap) / (side + gap))
-        .floor()
-        .max(1.0) as usize;
+    let columns = columns_of(ui, theme);
     let mut clicked = None;
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = Vec2::splat(gap);
@@ -528,6 +526,10 @@ impl Settings {
             radios.push(radio);
             ui.add_space(theme.space(Space::S3));
             let id = card.id.to_owned();
+            // Anything else pressed takes back a Remove asked once.
+            if press.choose || press.sheet || press.details || press.picked.is_some() {
+                state.confirm_remove = None;
+            }
             if press.choose {
                 choose = Some((!id.is_empty()).then(|| id.clone()));
             }
