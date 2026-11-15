@@ -244,6 +244,7 @@ impl SuePaint {
             self.new_canvas_ui(ui, full, cx, &theme);
             if self.ready {
                 self.dialog_ui(&ctx, cx, &theme);
+                self.files_ui(&ctx, cx, &theme);
             }
             return;
         }
@@ -258,6 +259,7 @@ impl SuePaint {
         self.body(ui, full, cx, &theme);
         if self.ready {
             self.dialog_ui(&ctx, cx, &theme);
+            self.files_ui(&ctx, cx, &theme);
         }
     }
 

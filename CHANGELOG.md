@@ -13,6 +13,20 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, File: every flat picture export (Export (Single Layer) and
+  Save Duplicate) shows the export settings first: format, output size,
+  resampling, color or grays, background, quality and effort. The next
+  export starts where the last one left them.
+- Sue Paint, File, Save Duplicate also writes GIF, QOI, ICO and PPM, and
+  Save As offers Photoshop Big Document and Photoshop Document with their
+  layers.
+- Sue Paint, File, Batch Convert Pictures: turn a folder of pictures into
+  another type in the background, with a status per file, an output
+  folder, a name pattern, and turn, mirror, brightness, contrast and
+  saturation for every picture.
+- Sue Paint, File, Export Animation, Audio writes the timeline's sound as
+  WAV, FLAC or AIFF, with bits, sample rate, channels and normalizing.
+- Sue Paint, File, Show in Folder shows the canvas's file in Explorer.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own

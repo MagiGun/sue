@@ -738,6 +738,9 @@ pub struct SuePaint {
     /// The pen's samples since its latest touch down, for a stroke of the
     /// new brush engine (see `canvas/engine.rs`).
     pub(crate) pen_stream: Vec<sue_platform::stylus::PenSample>,
+    /// File's export settings dialog, Batch Convert Pictures, and the
+    /// file each canvas was last written to (see `studio/files.rs`).
+    pub(crate) files: files::Files,
 }
 
 impl Default for SuePaint {
@@ -914,6 +917,7 @@ impl Default for SuePaint {
             current_workspace: None,
             kept_styles: Vec::new(),
             pen_stream: Vec::new(),
+            files: files::Files::default(),
         }
     }
 }

@@ -1,5 +1,6 @@
 //! Opening, importing, saving, exporting and printing pictures.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use sue_core::txn::{Batch, SpawnEntity};
@@ -7,36 +8,296 @@ use sue_core::{CHILD, ComponentKind, Entity, EntityId, Properties, RasterTile2D,
 use sue_model::class;
 use sue_model::picture;
 use sue_platform::write_atomic;
+use sue_wm::export::{ExportDialog, ExportPage, PictureSettings, SoundSettings};
+use sue_wm::job_list::{JobList, JobListRequest};
+use sue_wm::ui::Answer;
 use sue_wm::{AppletContext, AppletId, FilePick, FileType, ShellRequest};
 
 use super::{BRUSHES, ID, OPENS, SOUNDS, SuePaint, has_extension, me_id, opens, to_rgba};
 use crate::composite::{self, RenderOptions};
 use crate::doc;
 
+/// What File's exports keep between one export and the next, and the
+/// dialogs they show: the export settings dialog, Batch Convert
+/// Pictures, and the file each canvas was last written to (File, Show
+/// in Folder).
+#[derive(Debug, Default)]
+pub(crate) struct Files {
+    /// The export settings dialog while it is open.
+    pub(crate) export: Option<ExportDialog>,
+    /// The picture page as the last export left it, so the next one
+    /// starts there (this run).
+    picture: Option<PictureSettings>,
+    /// The sound page as the last audio export left it.
+    sound: Option<SoundSettings>,
+    /// Batch Convert Pictures' list, kept while a run goes on after its
+    /// dialog closed.
+    pub(crate) batch: Option<JobList>,
+    /// Batch Convert Pictures' dialog shows.
+    pub(crate) batch_open: bool,
+    /// The file each canvas was last opened from or written to.
+    written: HashMap<EntityId, PathBuf>,
+}
+
+impl Files {
+    /// `true` while one of these dialogs is open, so it owns the keys.
+    pub(crate) fn dialog_open(&self) -> bool {
+        self.export.is_some() || self.batch_open
+    }
+
+    /// Closes the dialogs (a run of the batch list goes on).
+    pub(crate) fn close(&mut self) {
+        self.export = None;
+        self.batch_open = false;
+    }
+}
+
+/// The extensions Batch Convert Pictures takes: the pictures Sue Paint
+/// opens that are flat.
+fn batch_extensions() -> Vec<&'static str> {
+    OPENS
+        .iter()
+        .copied()
+        .filter(|extension| sue_io::picture_ops::reads(Path::new(&format!("a.{extension}"))))
+        .collect()
+}
+
 impl SuePaint {
-    /// Writes the flattened picture as `ext` (png, jpg, jxl, bmp, tif or tga).
+    /// File, Save Duplicate and Export (Single Layer) as `ext`: the
+    /// export settings dialog, for the canvas flattened, with `ext`
+    /// chosen and the rest as the last export left it. Export writes it.
     pub(crate) fn export(&mut self, cx: &mut AppletContext<'_>, ext: &str) {
         let Some(picture) = self.picture() else {
             return;
         };
-        let arena = &cx.world.arena;
-        let options = RenderOptions {
-            paper: true,
-            drafts: false,
-        };
-        let Some(flat) = composite::flatten(arena, picture, options) else {
-            cx.fail(tr!("this-picture-has-no-size"));
+        let size = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(picture::size)
+            .map(|[width, height]| (width, height));
+        let mut settings = self
+            .files
+            .picture
+            .clone()
+            .unwrap_or_else(|| PictureSettings::from_rice(cx.rice()));
+        if !settings.choose_format(ext) {
+            cx.fail(tr!("export-failed", error = ext));
             return;
-        };
-        let bytes = sue_io::encode_as(&flat, ext, jpeg_quality(cx), jxl_effort(cx));
-        let bytes = match bytes {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                cx.fail(tr!("export-failed", error = error));
-                return;
+        }
+        self.files.export = Some(ExportDialog::for_picture(
+            tr!("export-settings"),
+            settings,
+            size,
+        ));
+    }
+
+    /// File, Export Animation, Audio: the sound page of the export
+    /// settings dialog, for the timeline's sound mixed.
+    pub(crate) fn export_audio(&mut self, cx: &mut AppletContext<'_>) {
+        if !self.has_sound(&cx.world.arena) {
+            cx.fail(tr!("no-sound-on-the-timeline"));
+            return;
+        }
+        let settings = self.files.sound.clone().unwrap_or_default();
+        self.files.export = Some(ExportDialog::for_sound(tr!("export-audio"), settings));
+    }
+
+    /// `true` when the timeline of the canvas in front has an audio clip
+    /// on a track that plays.
+    pub(crate) fn has_sound(&self, arena: &sue_core::Arena) -> bool {
+        self.picture()
+            .and_then(|picture| crate::anim::timeline(arena, picture))
+            .is_some_and(|sequence| {
+                crate::anim::audio_tracks(sequence)
+                    .into_iter()
+                    .any(|index| {
+                        let track = &sequence.tracks[index];
+                        !track.muted && !track.clips().is_empty()
+                    })
+            })
+    }
+
+    /// Writes what the export settings dialog was accepted with.
+    fn exported(&mut self, cx: &mut AppletContext<'_>, dialog: &ExportDialog) {
+        let written = match dialog.page {
+            ExportPage::Picture => {
+                self.files.picture = Some(dialog.picture.clone());
+                let Some(picture) = self.picture() else {
+                    return;
+                };
+                let options = RenderOptions {
+                    paper: true,
+                    drafts: false,
+                };
+                let Some(flat) = composite::flatten(&cx.world.arena, picture, options) else {
+                    cx.fail(tr!("this-picture-has-no-size"));
+                    return;
+                };
+                dialog.picture.export(&flat)
+            }
+            ExportPage::Sound => {
+                self.files.sound = Some(dialog.sound.clone());
+                let Some(pcm) = self
+                    .timeline_here(&cx.world.arena)
+                    .and_then(|(_, sequence, _)| crate::anim::mix(&cx.world.arena, &sequence))
+                else {
+                    cx.fail(tr!("no-sound-on-the-timeline"));
+                    return;
+                };
+                dialog.sound.export(&pcm)
             }
         };
-        self.export_bytes(cx, bytes, ext);
+        match written {
+            Ok(bytes) => self.export_bytes(cx, bytes, dialog.extension()),
+            Err(error) => cx.fail(tr!(
+                "export-failed",
+                error = sue_lang::translate("io", &error)
+            )),
+        }
+    }
+
+    /// File, Batch Convert Pictures: its dialog, with the list as it was
+    /// left (a run may still be going).
+    pub(crate) fn batch_convert(&mut self, cx: &AppletContext<'_>) {
+        if self.files.batch.is_none() {
+            self.files.batch = Some(JobList::from_rice(cx.rice()));
+        }
+        self.files.batch_open = true;
+    }
+
+    /// Takes in the batch list's finished conversions; when a run ends,
+    /// says how it went and shows the first result in the file manager
+    /// if the list asks for that.
+    pub(crate) fn poll_batch(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(list) = self.files.batch.as_mut() else {
+            return;
+        };
+        let Some(summary) = list.poll() else {
+            return;
+        };
+        let reveal = list.reveal_after;
+        if summary.done.is_empty() {
+            cx.fail(summary.message());
+        } else {
+            cx.notify(summary.message());
+            if reveal {
+                reveal_file(cx, &summary.done[0]);
+            }
+        }
+    }
+
+    /// File, Show in Folder: the file the canvas in front was last opened
+    /// from or written to, shown in the file manager.
+    pub(crate) fn show_in_folder(&mut self, cx: &mut AppletContext<'_>) {
+        match self.file_of_canvas() {
+            Some(path) => reveal_file(cx, &path),
+            None => cx.fail(tr!("canvas-has-no-file-yet")),
+        }
+    }
+
+    /// The file the canvas in front was last opened from or written to:
+    /// what Show in Folder shows.
+    pub(crate) fn file_of_canvas(&self) -> Option<PathBuf> {
+        let picture = self.picture()?;
+        self.files
+            .written
+            .get(&picture)
+            .map(PathBuf::as_path)
+            .or_else(|| {
+                self.save_targets
+                    .get(&picture)
+                    .map(super::saving::SaveTarget::path)
+            })
+            .or_else(|| self.clip_paths.get(&picture).map(PathBuf::as_path))
+            .map(Path::to_path_buf)
+    }
+
+    /// The export settings dialog and Batch Convert Pictures, over the
+    /// studio, for one frame.
+    pub(super) fn files_ui(
+        &mut self,
+        ctx: &egui::Context,
+        cx: &mut AppletContext<'_>,
+        theme: &sue_wm::Theme,
+    ) {
+        // The tick polls too, while Sue Paint is not shown.
+        self.poll_batch(cx);
+        if let Some(mut dialog) = self.files.export.take() {
+            match dialog.show(ctx, theme) {
+                Some(Answer::Accept) => self.exported(cx, &dialog),
+                Some(_) => match dialog.page {
+                    // What was set is kept for the next export.
+                    ExportPage::Picture => self.files.picture = Some(dialog.picture),
+                    ExportPage::Sound => self.files.sound = Some(dialog.sound),
+                },
+                None => self.files.export = Some(dialog),
+            }
+        }
+        if !self.files.batch_open {
+            return;
+        }
+        let Some(list) = self.files.batch.as_mut() else {
+            self.files.batch_open = false;
+            return;
+        };
+        let (answer, requests) = list.show_dialog(ctx, theme, &tr!("batch-convert-pictures"));
+        if answer == Some(Answer::Cancel) {
+            self.files.batch_open = false;
+        }
+        let start = Some(self.last_dir.clone().unwrap_or_else(|| export_dir(cx)));
+        for request in requests {
+            match request {
+                JobListRequest::AddFiles => cx.request(ShellRequest::PickFile(
+                    FilePick::open(Some(me_id()), "batch-add", &tr!("batch-convert-pictures"))
+                        .extensions(&batch_extensions())
+                        .starting_in(start.clone()),
+                )),
+                JobListRequest::AddFolder => cx.request(ShellRequest::PickFile(
+                    FilePick::open(Some(me_id()), "batch-add", &tr!("batch-convert-pictures"))
+                        .folder()
+                        .starting_in(start.clone()),
+                )),
+                JobListRequest::ChooseFolder => cx.request(ShellRequest::PickFile(
+                    FilePick::open(
+                        Some(me_id()),
+                        "batch-output",
+                        &tr!("batch-convert-pictures"),
+                    )
+                    .folder()
+                    .starting_in(start.clone()),
+                )),
+                JobListRequest::Reveal(path) => reveal_file(cx, &path),
+            }
+        }
+    }
+
+    /// A file or folder the system's dialog chose for Batch Convert
+    /// Pictures: `batch-add` puts it on the list, `batch-output` makes
+    /// it where results go. Returns `false` for other picks.
+    pub(super) fn batch_picked(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        purpose: &str,
+        path: &Path,
+    ) -> bool {
+        let Some(list) = self.files.batch.as_mut() else {
+            return false;
+        };
+        match purpose {
+            "batch-add" => {
+                if list.add_path(path) == 0 {
+                    cx.notify(tr!("no-pictures-in-folder"));
+                }
+            }
+            "batch-output" => list.set_folder(path),
+            _ => return false,
+        }
+        if let Some(dir) = path.parent() {
+            self.last_dir = Some(dir.to_path_buf());
+        }
+        true
     }
 
     /// Layered Photoshop document export (`.psd`, or `.psb` when `big`).
@@ -102,19 +363,8 @@ impl SuePaint {
             .arena
             .get_by_id(picture)
             .map_or_else(|_| tr!("picture"), |entity| entity.name().to_owned());
-        let clip = FileType::new(&tr!("clip-studio-paint-file"), &["clip"]);
-        let sue = FileType::new(&tr!("sue-project"), &["sue"]);
         let saves_clip = crate::clip_io::saves_clip(cx);
-        let mut types = if saves_clip {
-            vec![clip, sue]
-        } else {
-            vec![sue, clip]
-        };
-        types.extend(
-            sue_io::PICTURE_SAVE_TYPES
-                .iter()
-                .map(|(what, extensions)| FileType::new(what, extensions)),
-        );
+        let types = save_as_types(saves_clip);
         let start = self.last_dir.clone().unwrap_or_else(|| export_dir(cx));
         cx.request(ShellRequest::PickFile(
             FilePick::save(
@@ -163,6 +413,24 @@ impl SuePaint {
         let Some(picture) = self.picture() else {
             return;
         };
+        if matches!(extension.as_str(), "psd" | "psb") {
+            // A Photoshop document keeps the layers.
+            let written = crate::psd_io::to_psd(&cx.world.arena, picture)
+                .ok_or_else(|| tr!("this-picture-has-no-size"))
+                .and_then(|psd| sue_io::psd::encode_psd(&psd, extension == "psb"));
+            match written {
+                Ok(bytes) => {
+                    if self.write_export(cx, path, &bytes) {
+                        cx.request(ShellRequest::Remember {
+                            path: path.to_path_buf(),
+                            saved: true,
+                        });
+                    }
+                }
+                Err(error) => cx.fail(tr!("cannot-save-as", extension = extension, error = error)),
+            }
+            return;
+        }
         let options = RenderOptions {
             paper: true,
             drafts: false,
@@ -250,6 +518,9 @@ impl SuePaint {
         }
         match write_atomic(path, bytes) {
             Ok(()) => {
+                if let Some(picture) = self.picture() {
+                    self.files.written.insert(picture, path.to_path_buf());
+                }
                 cx.saved(path, tr!("kib", value = bytes.len().div_ceil(1024)));
                 true
             }
@@ -354,6 +625,9 @@ impl SuePaint {
             Ok(bytes) => match self.open_bytes(cx, path, &bytes, as_layer) {
                 Ok(()) => {
                     if !as_layer {
+                        if let Some(picture) = self.picture() {
+                            self.files.written.insert(picture, path.to_path_buf());
+                        }
                         Self::remember_recent(cx, path);
                     }
                 }
@@ -891,8 +1165,68 @@ pub(super) fn free_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|| path.to_path_buf())
 }
 
+/// What Save As offers to save as, the default first: a `.clip` or a
+/// Sue project (whichever `saves_clip` puts first), every flat picture
+/// format, then the layered Photoshop documents, last as Clip Studio
+/// lists them.
+fn save_as_types(saves_clip: bool) -> Vec<FileType> {
+    let clip = FileType::new(&tr!("clip-studio-paint-file"), &["clip"]);
+    let sue = FileType::new(&tr!("sue-project"), &["sue"]);
+    let mut types = if saves_clip {
+        vec![clip, sue]
+    } else {
+        vec![sue, clip]
+    };
+    types.extend(
+        sue_io::PICTURE_SAVE_TYPES
+            .iter()
+            .map(|(what, extensions)| FileType::new(what, extensions)),
+    );
+    types.extend([
+        FileType::new(&tr!("photoshop-big-document"), &["psb"]),
+        FileType::new(&tr!("photoshop-document"), &["psd"]),
+    ]);
+    types
+}
+
+/// Shows `path` selected in the system's file manager.
+fn reveal_file(cx: &mut AppletContext<'_>, path: &Path) {
+    cx.request(ShellRequest::Command(format!(
+        "reveal-file:{}",
+        path.display()
+    )));
+}
+
 /// The file name of `path`, for messages.
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::save_as_types;
+
+    #[test]
+    fn save_as_offers_every_picture_and_the_photoshop_documents_last() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        for saves_clip in [true, false] {
+            let types = save_as_types(saves_clip);
+            let first = &types[0].extensions[0];
+            assert_eq!(first, if saves_clip { "clip" } else { "sue" });
+            let names: Vec<&str> = types.iter().map(|kind| kind.name.as_str()).collect();
+            assert_eq!(
+                &names[names.len() - 2..],
+                ["Photoshop Big Document", "Photoshop Document"]
+            );
+            for extension in ["png", "jpg", "gif", "qoi", "ico", "ppm", "psd", "psb"] {
+                assert!(
+                    types
+                        .iter()
+                        .any(|kind| kind.extensions.iter().any(|found| found == extension)),
+                    "{extension}"
+                );
+            }
+        }
+    }
 }

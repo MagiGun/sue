@@ -117,8 +117,9 @@ The order of work is the plan at the end.
 | Recent files, Clear Recent Files | File > Recent | done | |
 | Close | File > Close | done | |
 | Save | File > Save | done | Writes the Sue project. A canvas opened from a flat picture saves back in its format, and asks first when layers would be merged, as Clip Studio does; one opened from a .clip asks once whether to export back to it or keep a Sue project beside it. The title names the file Save writes |
-| Save as | File > Save as | done | A Sue project, a Photoshop document or a flat picture |
-| Save Duplicate: BMP, JPEG, PNG, TIFF, Targa, WebP, PSB, PSD | File > Save Duplicate | done | JPEG XL too |
+| Save as | File > Save as | done | A Sue project, a .clip, every flat picture type, then Photoshop Big Document and Photoshop Document with their layers, last as Clip Studio lists them |
+| Save Duplicate: BMP, JPEG, PNG, TIFF, Targa, WebP, PSB, PSD | File > Save Duplicate | done | JPEG XL, GIF, QOI, ICO and PPM too; a flat picture goes through the export settings first |
+| Show in folder | none (Sue's own) | done | File > Show in Folder shows the file the canvas was opened from or last written to; grayed while it has none |
 | Revert | File > Revert | done | Reloads the last saved file, and says so when nothing was saved yet |
 | Manage fonts | File > Manage fonts | missing | Text reads the installed fonts from `sue_wm::fonts`; no manager yet |
 | Connect to smartphone | File > Connect to smartphone | missing | Companion Mode, a phone as a second screen |
@@ -129,6 +130,8 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | Export single layer: BMP, JPEG, PNG, TIFF, Targa, WebP, PSB, PSD | File > Export (Single Layer) | done | JPEG XL too |
+| Export settings before a flat export | the export settings dialog | done | Format, output size in six ways, resampling, color or grays, background, JPEG quality, JPEG XL effort; the next export starts from the last one's settings |
+| Export animation: audio | File > Export animation | done | The timeline's sound mixed, as WAV, FLAC or AIFF with bits, sample rate, channels and normalizing; grayed without sound |
 | Export animation: image sequence | File > Export animation > Image sequence | done | |
 | Export animation: Animated GIF | File > Export animation > Animated GIf | done | |
 | Export animation: movie | File > Export animation > Movie | done | Verify the sound track rides along |
@@ -166,6 +169,7 @@ The order of work is the plan at the end.
 | Scan, Continuous Scan, Select Scan Device | File > Import > Scan | missing | A scanner talks through `sue-platform` |
 | Exposure sheet import | File > Import > Exposure sheet | done | CSV, cels found by layer name |
 | Batch process (EX) | File > Batch process | missing | Run commands on many pages or files at once |
+| Batch convert pictures | none (Sue's own) | done | File > Batch Convert Pictures: picture files to another type in the background, next to each file or into one folder, with a name pattern, and turn, mirror, brightness, contrast and saturation for every picture |
 
 ## Edit: undo, clipboard and fills
 

@@ -2519,3 +2519,17 @@ ruler-show-in-same-folder = Show in same folder
 ruler-show-when-editing-target = Show only when editing target
 moves-picture-across-stroke = Moves the picture sideways across the stroke
 copies-picture-from-source = Copies the picture from where Alt and click set, as you paint
+# Files in Sue Paint (P4-13)
+export-settings = Export Settings
+export-audio = Export Audio
+no-sound-on-the-timeline = The timeline has no sound to export. Import audio first (File, Import, Audio).
+batch-convert-pictures = Batch Convert Pictures
+batch-convert-pictures-ellipsis = Batch Convert Pictures...
+show-in-folder = Show in Folder
+canvas-has-no-file-yet = This canvas has no file yet. Save or export it first.
+photoshop-document = Photoshop Document
+photoshop-big-document = Photoshop Big Document
+gif-gif-ellipsis = {"."}gif (GIF)...
+qoi-qoi-ellipsis = {"."}qoi (QOI)...
+ico-icon-ellipsis = {"."}ico (Icon)...
+ppm-portable-pixmap-ellipsis = {"."}ppm (Portable Pixmap)...
