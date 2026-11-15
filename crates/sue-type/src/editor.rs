@@ -3373,7 +3373,6 @@ impl Editor {
         };
         let body = &text[block.range.clone()];
         let typing = (focused && self.caret.doc == block.doc).then_some(self.caret.offset);
-        let wave = Stroke::new(1.0, self.page_marks.misspelt);
         for range in crate::spell::words(body) {
             let word = &body[range.clone()];
             let at = block.range.start + range.start..block.range.start + range.end;
@@ -3391,28 +3390,39 @@ impl Editor {
             if (from.min.y - to.min.y).abs() > 0.5 {
                 continue;
             }
-            // In the letters' descent below the baseline, as the
-            // underlines are (`layout::lay_out`), not at the bottom of a
-            // line box that wide line spacing stretches toward the next
-            // line.
+            // Under the letters, just below where an underline sits
+            // (`layout::lay_out`), so a misspelled word that is also
+            // underlined (a tracked insertion, say) shows both apart;
+            // sized to the letters, so it grows as the page is zoomed. Not
+            // at the bottom of a line box, which wide line spacing
+            // stretches toward the next line.
             let place = block.galley.layout_from_cursor(cursor(start));
-            let y = block
-                .galley
-                .rows
-                .get(place.row)
-                .and_then(|placed| {
-                    let glyph = placed.row.glyphs.get(place.column.0)?;
-                    let descent = (glyph.font_height - glyph.font_ascent).max(2.0);
-                    Some(placed.pos.y + glyph.pos.y + descent * 0.8)
-                })
-                .map_or(galley_at.y + from.max.y - 1.0, |y| galley_at.y + y);
+            let descent = block.galley.rows.get(place.row).and_then(|placed| {
+                let glyph = placed.row.glyphs.get(place.column.0)?;
+                let descent = (glyph.font_height - glyph.font_ascent).max(2.0);
+                Some((placed.pos.y + glyph.pos.y, descent))
+            });
+            let (top, height, width) = match descent {
+                Some((base, descent)) => {
+                    let underline = base + descent * crate::layout::UNDERLINE_DROP;
+                    let gap = (descent * 0.25).max(1.5);
+                    (
+                        galley_at.y + underline + gap,
+                        (descent * 0.35).max(1.5),
+                        (descent * 0.2).max(1.0),
+                    )
+                }
+                None => (galley_at.y + from.max.y - 2.5, 1.5, 1.0),
+            };
+            let wave = Stroke::new(width, self.page_marks.misspelt);
+            let step = height * 1.4;
             let mut points = Vec::new();
             let mut x = galley_at.x + from.min.x;
             let right = galley_at.x + to.min.x;
             let mut up = false;
             while x < right {
-                points.push(pos2(x, if up { y - 1.5 } else { y }));
-                x += 2.0;
+                points.push(pos2(x, if up { top } else { top + height }));
+                x += step;
                 up = !up;
             }
             if points.len() > 1 {
