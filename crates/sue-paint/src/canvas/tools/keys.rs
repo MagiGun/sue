@@ -168,6 +168,11 @@ impl SuePaint {
                 return None;
             }
             if self.transform.is_some() {
+                // A press on a transform under way is the transform's own,
+                // never Move layer's drag of the selected pixels (that one
+                // starts its transform itself), so its release does not
+                // end the transform.
+                self.move_lift = false;
                 self.transform_press(pos, view, viewport, size);
                 return None;
             }
