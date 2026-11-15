@@ -17,7 +17,6 @@ pub(super) fn timeline(tour: &mut Tour<'_>) -> Result<(), String> {
         "anim.next",
         "anim.next",
         "anim.cel.new",
-        "anim.layer.folder",
         "anim.onion",
     ] {
         tour.paint_command(command);
