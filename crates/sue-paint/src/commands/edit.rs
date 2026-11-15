@@ -351,6 +351,21 @@ fn puppet(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.start_warp(cx);
 }
 
+/// Edit, Pick Screen Color and Hide Windows and Pick Screen Color: the
+/// pick starts on the next frame (it needs the window's context).
+fn screen_color(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    if !sue_platform::screen::available() {
+        cx.notify(tr!("pick-screen-color-unavailable"));
+        return;
+    }
+    paint.screen_pick_asked = Some(call.name == "edit.screen_color_hidden");
+}
+
+/// Works where the system lets Sue read the screen; no canvas needed.
+fn can_read_screen(_: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    when(sue_platform::screen::available())
+}
+
 /// Edit, Align/Distribute: the six alignments, told apart by their
 /// names' last part.
 fn align(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
@@ -731,6 +746,20 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         material_paste,
     )
     .with(Flags::HIDDEN),
+    c(
+        "edit.screen_color",
+        "pick-screen-color-ellipsis",
+        "tool-eyedropper",
+        screen_color,
+    )
+    .state(can_read_screen),
+    c(
+        "edit.screen_color_hidden",
+        "hide-windows-and-pick-screen-color-ellipsis",
+        "tool-eyedropper",
+        screen_color,
+    )
+    .state(can_read_screen),
 ];
 
 #[cfg(test)]

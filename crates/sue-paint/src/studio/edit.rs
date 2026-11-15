@@ -403,4 +403,60 @@ impl SuePaint {
             }
         });
     }
+
+    /// Edit, Pick Screen Color (and, with `hide`, Hide Windows and Pick
+    /// Screen Color): the next click anywhere on any screen, also outside
+    /// Sue, sets the drawing color; a right click or Esc cancels. Where
+    /// the system lets no program read the screen it says so.
+    fn start_screen_pick(&mut self, ctx: &egui::Context, cx: &mut AppletContext<'_>, hide: bool) {
+        if self.screen_pick.is_some() {
+            return;
+        }
+        let title = if hide {
+            tr!("hide-windows-and-pick-screen-color")
+        } else {
+            tr!("pick-screen-color")
+        };
+        let wake = ctx.clone();
+        match sue_platform::screen::ScreenPick::start(
+            hide,
+            title,
+            Box::new(move || wake.request_repaint()),
+        ) {
+            Ok(pick) => {
+                self.screen_pick = Some(pick);
+                cx.notify(tr!("pick-screen-color-hint"));
+            }
+            Err(_) => cx.notify(tr!("pick-screen-color-unavailable")),
+        }
+    }
+
+    /// Follows a screen pick under way, once a frame: the picked color
+    /// becomes the drawing color, as the Eyedropper sets it.
+    pub(crate) fn screen_pick_frame(&mut self, ctx: &egui::Context, cx: &mut AppletContext<'_>) {
+        use sue_platform::screen::PickState;
+        if let Some(hide) = self.screen_pick_asked.take() {
+            self.start_screen_pick(ctx, cx, hide);
+        }
+        let Some(pick) = self.screen_pick.as_ref() else {
+            return;
+        };
+        match pick.state() {
+            PickState::Waiting(_) => {
+                // The picker wakes the frame on each change; this is the
+                // net under it.
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            }
+            PickState::Picked(rgb) => {
+                self.screen_pick = None;
+                self.set_drawing_color(rgb);
+                ctx.request_repaint();
+            }
+            PickState::Cancelled => self.screen_pick = None,
+            PickState::Failed(_) => {
+                self.screen_pick = None;
+                cx.notify(tr!("pick-screen-color-failed"));
+            }
+        }
+    }
 }

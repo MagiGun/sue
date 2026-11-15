@@ -166,6 +166,9 @@ impl Pick {
             title,
             wake,
         });
+        if let Ok(mut latest) = LATEST.lock() {
+            *latest = Some(Arc::downgrade(&shared));
+        }
         let thread = Arc::clone(&shared);
         let spawned = std::thread::Builder::new()
             .name("sue-screen-pick".to_owned())
@@ -195,19 +198,13 @@ impl Pick {
     /// reads that point as it reads a real click.
     #[doc(hidden)]
     pub fn click_at(&self, x: i32, y: i32) {
-        let [left, top, ..] = virtual_screen();
-        let (cx, cy) = (x - left, y - top);
-        let packed = ((cy & 0xffff) << 16) | (cx & 0xffff);
-        self.post(WM_LBUTTONDOWN, 0, packed as isize);
+        self.post(WM_LBUTTONDOWN, 0, client_point(x, y));
     }
 
     /// Acts as the pointer moved to screen point `x`, `y`, for tests.
     #[doc(hidden)]
     pub fn move_to(&self, x: i32, y: i32) {
-        let [left, top, ..] = virtual_screen();
-        let (cx, cy) = (x - left, y - top);
-        let packed = ((cy & 0xffff) << 16) | (cx & 0xffff);
-        self.post(WM_MOUSEMOVE, 0, packed as isize);
+        self.post(WM_MOUSEMOVE, 0, client_point(x, y));
     }
 
     /// Acts as Esc pressed over the picker, for tests.
@@ -223,30 +220,65 @@ impl Pick {
         self.shared.window.load(Ordering::Acquire) != 0
     }
 
-    #[allow(
-        unsafe_code,
-        reason = "posting to the picker's window is a window call with no safe route (standing approval, rule 13)"
-    )]
     fn post(&self, message: u32, wparam: usize, lparam: isize) {
-        let window = self.shared.window.load(Ordering::Acquire);
-        if window == 0 {
-            if message == WM_CLOSE {
-                self.shared.set(PickState::Cancelled);
-            }
-            return;
-        }
-        // SAFETY: PostMessageW only queues a message; a window that was
-        // destroyed meanwhile makes it fail, which is ignored. No pointer
-        // travels in the message.
-        let _ = unsafe {
-            PostMessageW(
-                Some(HWND(window as *mut _)),
-                message,
-                WPARAM(wparam),
-                LPARAM(lparam),
-            )
-        };
+        post(&self.shared, message, wparam, lparam);
     }
+}
+
+/// The latest pick started in this process, for tests that drive Sue's
+/// own command and so hold no [`Pick`] of their own.
+static LATEST: Mutex<Option<std::sync::Weak<Shared>>> = Mutex::new(None);
+
+/// Acts as a click at screen point `x`, `y` on the latest pick still
+/// waiting, for tests; `false` when there is none or its window is not
+/// up yet.
+#[doc(hidden)]
+#[must_use]
+pub fn click_latest(x: i32, y: i32) -> bool {
+    let Some(shared) = LATEST
+        .lock()
+        .ok()
+        .and_then(|latest| latest.as_ref().and_then(std::sync::Weak::upgrade))
+    else {
+        return false;
+    };
+    if shared.window.load(Ordering::Acquire) == 0 {
+        return false;
+    }
+    post(&shared, WM_LBUTTONDOWN, 0, client_point(x, y));
+    true
+}
+
+/// Screen point `x`, `y` as the picker window's packed client point.
+fn client_point(x: i32, y: i32) -> isize {
+    let [left, top, ..] = virtual_screen();
+    let (cx, cy) = (x - left, y - top);
+    (((cy & 0xffff) << 16) | (cx & 0xffff)) as isize
+}
+
+#[allow(
+    unsafe_code,
+    reason = "posting to the picker's window is a window call with no safe route (standing approval, rule 13)"
+)]
+fn post(shared: &Shared, message: u32, wparam: usize, lparam: isize) {
+    let window = shared.window.load(Ordering::Acquire);
+    if window == 0 {
+        if message == WM_CLOSE {
+            shared.set(PickState::Cancelled);
+        }
+        return;
+    }
+    // SAFETY: PostMessageW only queues a message; a window that was
+    // destroyed meanwhile makes it fail, which is ignored. No pointer
+    // travels in the message.
+    let _ = unsafe {
+        PostMessageW(
+            Some(HWND(window as *mut _)),
+            message,
+            WPARAM(wparam),
+            LPARAM(lparam),
+        )
+    };
 }
 
 impl Drop for Pick {

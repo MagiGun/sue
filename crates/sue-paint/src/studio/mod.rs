@@ -738,6 +738,11 @@ pub struct SuePaint {
     /// The pen's samples since its latest touch down, for a stroke of the
     /// new brush engine (see `canvas/engine.rs`).
     pub(crate) pen_stream: Vec<sue_platform::stylus::PenSample>,
+    /// Edit, Pick Screen Color while it waits for the click.
+    pub(crate) screen_pick: Option<sue_platform::screen::ScreenPick>,
+    /// A screen pick asked for by its command, started on the next frame
+    /// (`true` hides Sue's windows while it waits).
+    pub(crate) screen_pick_asked: Option<bool>,
 }
 
 impl Default for SuePaint {
@@ -914,6 +919,8 @@ impl Default for SuePaint {
             current_workspace: None,
             kept_styles: Vec::new(),
             pen_stream: Vec::new(),
+            screen_pick: None,
+            screen_pick_asked: None,
         }
     }
 }

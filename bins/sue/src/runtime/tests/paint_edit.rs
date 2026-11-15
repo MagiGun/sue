@@ -859,3 +859,81 @@ fn sue_paint_flips_and_rotate_180_take_masks_and_vector_lines_along() {
         driver.settle(2);
     }
 }
+
+#[test]
+fn sue_paint_pick_screen_color_sets_the_drawing_color() {
+    // CT-29, FG-30: Edit, Pick Screen Color, run as the menu runs it,
+    // waits for a click anywhere on the screen; the color there becomes
+    // the drawing color, and the next stroke paints in it.
+    let mut driver = PaintDriver::new("paint-screen-color");
+    let state = |name: &str| {
+        sue_paint::registry()
+            .iter()
+            .find(|command| command.name == name)
+            .map(|command| command.label)
+    };
+    assert!(state("edit.screen_color").is_some());
+    assert!(state("edit.screen_color_hidden").is_some());
+    // A place on the screen whose color is neither the drawing color a
+    // fresh studio has (black) nor its sub color, so the pick shows.
+    let at = [[12, 12], [300, 200], [700, 12], [40, 600], [900, 500]]
+        .into_iter()
+        .find(|[x, y]| {
+            sue_platform::screen::pixel_at(*x, *y)
+                .is_ok_and(|color| color != [0, 0, 0] && color != [255, 255, 255])
+        })
+        .unwrap_or([12, 12]);
+    driver.command("edit.screen_color");
+    let mut clicked = false;
+    let mut want = [0_u8; 3];
+    for _ in 0..400 {
+        driver.step(Vec::new());
+        // The picker keeps itself out of what it reads, so the screen's
+        // own color there is what it will pick.
+        if let Ok(color) = sue_platform::screen::pixel_at(at[0], at[1]) {
+            want = color;
+            if sue_platform::screen::click_latest(at[0], at[1]) {
+                clicked = true;
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(clicked, "the picker came up and took the click");
+    // The answer reaches the studio within a few frames.
+    let picture = driver
+        .runtime
+        .applets
+        .get(&AppletId::new(sue_paint::ID).unwrap())
+        .and_then(|applet| applet.focus())
+        .unwrap();
+    let layer = sue_paint::doc::layers(&driver.runtime.engine.world.arena, picture)
+        .last()
+        .unwrap()
+        .id;
+    for _ in 0..60 {
+        driver.step(Vec::new());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let middle = paint_middle(&driver.runtime);
+    driver.drag(
+        middle - vec2(40.0, 0.0),
+        middle + vec2(40.0, 0.0),
+        egui::PointerButton::Primary,
+    );
+    let raster = sue_paint::doc::raster(&driver.runtime.engine.world.arena, layer).unwrap();
+    let bytes = raster.bytes().unwrap();
+    let solid: Vec<[u8; 3]> = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| pixel[3] == 255)
+        .map(|pixel| [pixel[0], pixel[1], pixel[2]])
+        .collect();
+    assert!(!solid.is_empty(), "the stroke painted");
+    assert!(
+        solid.iter().all(|color| *color == want),
+        "the stroke is in the picked color {want:?}: {:?}",
+        &solid[..solid.len().min(4)]
+    );
+}

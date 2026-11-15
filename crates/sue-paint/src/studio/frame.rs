@@ -259,6 +259,7 @@ impl SuePaint {
         if self.ready {
             self.dialog_ui(&ctx, cx, &theme);
         }
+        self.screen_pick_frame(&ctx, cx);
     }
 
     /// Puts the palettes where `form`'s layout wants them, once, when the

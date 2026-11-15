@@ -2519,3 +2519,11 @@ ruler-show-in-same-folder = Show in same folder
 ruler-show-when-editing-target = Show only when editing target
 moves-picture-across-stroke = Moves the picture sideways across the stroke
 copies-picture-from-source = Copies the picture from where Alt and click set, as you paint
+# P4-17: Edit, Pick Screen Color
+pick-screen-color = Pick Screen Color
+pick-screen-color-ellipsis = Pick Screen Color...
+hide-windows-and-pick-screen-color = Hide Windows and Pick Screen Color
+hide-windows-and-pick-screen-color-ellipsis = Hide Windows and Pick Screen Color...
+pick-screen-color-hint = Click anywhere on the screen to take its color. Right click or Esc cancels.
+pick-screen-color-unavailable = This system does not let programs read the screen, so the screen color cannot be picked here.
+pick-screen-color-failed = The screen color could not be read.

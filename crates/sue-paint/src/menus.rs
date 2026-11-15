@@ -539,6 +539,9 @@ pub fn menus() -> Vec<Menu> {
                     &tr!("register-material"),
                     vec![item("edit.material.image"), item("edit.material.tip")],
                 ),
+                SEP,
+                item("edit.screen_color"),
+                item("edit.screen_color_hidden"),
             ],
         ),
         Menu::new(

@@ -150,6 +150,23 @@ impl ScreenPick {
     }
 }
 
+/// Acts as a click at screen point `x`, `y` on the latest pick still
+/// waiting (one Sue's own command started), for tests; `false` when there
+/// is none ready.
+#[doc(hidden)]
+#[must_use]
+pub fn click_latest(x: i32, y: i32) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        sue_windows::screen::click_latest(x, y)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (x, y);
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
