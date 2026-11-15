@@ -1732,6 +1732,30 @@ End while it holds focus, and can map its values by their logarithm.
 `input::sheet` and `slider::sheet` draw all of them in every state for
 review (snapshot scenes 28c to 28g).
 
+**Export settings and the batch list** (`sue_wm::export`,
+`sue_wm::job_list`). Every export of a picture or a sound goes through
+one dialog, `ExportDialog`, with a picture page (`PictureSettings`: the
+format from `sue_io::PICTURE_SAVE_TYPES`, the output size in six ways,
+resampling, color or grays, the background, JPEG quality and JPEG XL
+effort for their formats only, and the note when a format's largest
+side fits the picture, an icon's 256 pixels) and a sound page
+(`SoundSettings`: WAV, FLAC or AIFF, bits, sample rate, channels,
+normalize). The settings are plain values and the work is `sue_io`'s
+pure functions (`picture_ops`, `transform_sound`), so it runs on a
+worker as well; quality and effort start from `io.jpeg_quality` and
+`io.jxl_effort`. `JobList` is the batch list of pictures: files and
+folders added (pictures only, `picture_ops::reads`), one `JobPool` job
+a file with its status, results next to each file or in one folder
+(`io.convert_dir`), a name pattern with `{name}`, keep both or replace
+(never the source, never two results on one name), the phone guard
+that asks for a folder when results would stay in the picker's cache
+(`sue_platform::stays_in_cache`), and the group "Change every picture"
+(turn, mirror, brightness, contrast, saturation). Brightness, contrast
+and saturation have one implementation, `sue_io::picture_ops`
+(`brightness_contrast`, `hue_saturation`), which Sue Paint's
+corrections call too. The list asks its host for the system's dialogs
+(`JobListRequest`). Snapshot scenes 28n to 28r show both.
+
 **Docking** (`sue_wm::dock`). A studio's palettes, as Clip Studio
 Paint's: the studio lists them as a `DockPanel` (a stable key, an optional
 fixed width, a least height, a floating size, whether it stays when its

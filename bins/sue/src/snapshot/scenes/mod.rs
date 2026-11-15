@@ -25,6 +25,7 @@ mod settings;
 mod shell;
 mod ui_buttons;
 mod ui_dialogs;
+mod ui_export;
 mod ui_inputs;
 mod writer_compile;
 mod writer_corkboard;
@@ -124,6 +125,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 31a and 31b. Save's question on a canvas from a .clip and from a
     // PNG.
     paint_saving::questions(tour)?;
+    // 28n to 28r. The export settings dialog and the batch list.
+    ui_export::scenes(tour)?;
     Ok(())
 }
 

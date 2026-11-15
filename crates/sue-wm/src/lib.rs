@@ -35,9 +35,11 @@ mod config;
 pub mod cover;
 pub mod dock;
 mod error;
+pub mod export;
 pub mod files;
 pub mod fonts;
 pub mod icons;
+pub mod job_list;
 pub mod keys;
 mod lang;
 mod launchpad;
@@ -76,6 +78,8 @@ pub use config::{
     CARET_GLIDE_KEY, Keymap, SMOOTH_CARET_KEY, WmConfig, register_rice, rice_declarations,
 };
 pub use error::WmError;
+pub use export::{ExportDialog, ExportPage, PictureSettings, SizeMode, SoundSettings};
+pub use job_list::{JobList, JobListRequest, JobOutput, RunSummary, Start};
 pub use lang::{
     LANGUAGE_KEY, applet_language, applet_language_choices, language_declaration, language_key,
     rice_section, sue_language, sue_language_choices,

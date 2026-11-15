@@ -56,6 +56,18 @@ impl Filter {
     /// Every filter.
     pub const ALL: [Self; 4] = [Self::Lanczos, Self::Bicubic, Self::Bilinear, Self::Nearest];
 
+    /// Its name in English; `sue_lang::translate("io", ...)` gives it in
+    /// the language in use.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Lanczos => "Lanczos (sharpest)",
+            Self::Bicubic => "Bicubic",
+            Self::Bilinear => "Bilinear (soft)",
+            Self::Nearest => "Nearest (pixel art)",
+        }
+    }
+
     fn support(self) -> f32 {
         match self {
             Self::Nearest => 0.5,
@@ -154,10 +166,23 @@ fn listed(extension: &str) -> Option<PictureFormat> {
     PictureFormat::from_extension(&plain(extension))
 }
 
-/// `true` when files of `extension` cannot hold transparency.
-fn flattens(extension: &str) -> bool {
+/// `true` when files of `extension` cannot hold transparency, so an
+/// export lays the picture over its background whatever was chosen.
+#[must_use]
+pub fn flattens(extension: &str) -> bool {
     matches!(plain(extension).as_str(), "jpg" | "jpeg")
         || listed(extension).is_some_and(|format| !format.keeps_alpha())
+}
+
+/// `true` when [`read_picture`] takes a file of this name: its extension
+/// names a picture format Sue reads.
+#[must_use]
+pub fn reads(path: &Path) -> bool {
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "jxl") || listed(&extension).is_some()
 }
 
 /// Reads a picture file's bytes into RGBA8 pixels. The extension of
@@ -391,22 +416,105 @@ fn flip(pixels: &mut [u8], (width, height): (u32, u32), horizontal: bool) {
     }
 }
 
+/// Brightness and contrast of one color (channels 0 to 1), each amount
+/// from -1 to 1: brightness lifts every channel by half its amount,
+/// contrast spreads the channels away from the middle (above 0) or
+/// draws them toward it (below 0). Not clamped.
+///
+/// This is the one implementation in Sue: Sue Paint's Brightness and
+/// Contrast correction and the batch conversion both call it.
+#[must_use]
+pub fn brightness_contrast(rgb: [f32; 3], brightness: f32, contrast: f32) -> [f32; 3] {
+    let gain = if contrast >= 0.0 {
+        1.0 / (1.0 - contrast.min(0.99))
+    } else {
+        1.0 + contrast
+    };
+    rgb.map(|value| (value + brightness * 0.5 - 0.5) * gain + 0.5)
+}
+
+/// A color as hue (0 to 360), saturation and value (0 to 1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hsv {
+    /// Hue in degrees.
+    pub h: f32,
+    /// Saturation.
+    pub s: f32,
+    /// Value.
+    pub v: f32,
+}
+
+impl Hsv {
+    /// The HSV of an sRGB color (0 to 1). Gray keeps hue 0.
+    #[must_use]
+    pub fn from_rgb([r, g, b]: [f32; 3]) -> Self {
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        let delta = max - min;
+        let h = if delta <= 0.0 {
+            0.0
+        } else if max == r {
+            60.0 * ((g - b) / delta).rem_euclid(6.0)
+        } else if max == g {
+            60.0 * ((b - r) / delta + 2.0)
+        } else {
+            60.0 * ((r - g) / delta + 4.0)
+        };
+        Self {
+            h,
+            s: if max <= 0.0 { 0.0 } else { delta / max },
+            v: max,
+        }
+    }
+
+    /// The sRGB color (0 to 1).
+    #[must_use]
+    pub fn to_rgb(self) -> [f32; 3] {
+        let h = self.h.rem_euclid(360.0) / 60.0;
+        let c = self.v * self.s;
+        let x = c * (1.0 - (h % 2.0 - 1.0).abs());
+        let (r, g, b) = match h as u32 {
+            0 => (c, x, 0.0),
+            1 => (x, c, 0.0),
+            2 => (0.0, c, x),
+            3 => (0.0, x, c),
+            4 => (x, 0.0, c),
+            _ => (c, 0.0, x),
+        };
+        let m = self.v - c;
+        [r + m, g + m, b + m]
+    }
+}
+
+/// One color (channels 0 to 1) with its hue turned by `hue` degrees and
+/// its saturation changed by `saturation`, from -1 (gray) to 1 (twice as
+/// saturated, at most full), keeping its value (HSV).
+///
+/// This is the one implementation in Sue: Sue Paint's Hue, Saturation
+/// and Luminosity correction and the batch conversion (with no turn)
+/// both call it.
+#[must_use]
+pub fn hue_saturation(rgb: [f32; 3], hue: f32, saturation: f32) -> [f32; 3] {
+    let mut hsv = Hsv::from_rgb(rgb);
+    hsv.h += hue;
+    hsv.s = (hsv.s * (1.0 + saturation)).clamp(0.0, 1.0);
+    hsv.to_rgb()
+}
+
 /// Brightness, contrast, saturation, grays and flattening, pixel by pixel.
 fn adjust(pixels: &mut [u8], options: &PictureOptions, flatten: bool) {
-    let contrast = (1.0 + options.contrast).max(0.0).powf(2.0);
     for pixel in pixels.as_chunks_mut::<4>().0.iter_mut() {
         let mut rgb = [pixel[0], pixel[1], pixel[2]].map(|value| f32::from(value) / 255.0);
-        for value in &mut rgb {
-            *value = ((*value - 0.5) * contrast + 0.5 + options.brightness * 0.5).clamp(0.0, 1.0);
+        if options.brightness != 0.0 || options.contrast != 0.0 {
+            rgb = brightness_contrast(rgb, options.brightness, options.contrast)
+                .map(|value| value.clamp(0.0, 1.0));
         }
-        let luma = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
-        let saturation = if options.grayscale {
-            0.0
-        } else {
-            1.0 + options.saturation
-        };
-        for value in &mut rgb {
-            *value = (luma + (*value - luma) * saturation).clamp(0.0, 1.0);
+        if options.saturation != 0.0 {
+            rgb = hue_saturation(rgb, 0.0, options.saturation).map(|value| value.clamp(0.0, 1.0));
+        }
+        if options.grayscale {
+            let luma = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+            rgb = [luma.clamp(0.0, 1.0); 3];
         }
         if flatten {
             let alpha = f32::from(pixel[3]) / 255.0;
@@ -563,6 +671,12 @@ mod tests {
     fn pictures_convert_to_every_picture_format() {
         let png = crate::encode_png(&picture(20, 10)).unwrap();
         let source = read_picture(Path::new("card.png"), &png).unwrap();
+        for name in ["card.PNG", "a.jpeg", "b.jxl", "c.webp", "d.tif", "e.pgm"] {
+            assert!(reads(Path::new(name)), "{name}");
+        }
+        for name in ["notes.txt", "song.wav", "picture", "art.clip"] {
+            assert!(!reads(Path::new(name)), "{name}");
+        }
         let options = PictureOptions {
             resize: Resize::Width(10),
             grayscale: true,
@@ -616,7 +730,53 @@ mod tests {
     }
 
     #[test]
+    fn the_shared_adjustments_change_what_they_name() {
+        let color = [0.6_f32, 0.4, 0.2];
+        // Nothing asked changes nothing.
+        for same in [
+            brightness_contrast(color, 0.0, 0.0),
+            hue_saturation(color, 0.0, 0.0),
+        ] {
+            for (a, b) in same.iter().zip(color) {
+                assert!((a - b).abs() < 1e-6, "{same:?}");
+            }
+        }
+        // Brightness lifts every channel by half its amount.
+        let lifted = brightness_contrast(color, 0.5, 0.0);
+        for (a, b) in lifted.iter().zip(color) {
+            assert!((a - b - 0.25).abs() < 1e-6);
+        }
+        // Contrast spreads the channels away from the middle.
+        let strong = brightness_contrast(color, 0.0, 0.5);
+        assert!(strong[0] > color[0] && strong[2] < color[2]);
+        // Saturation -1 is gray at the color's value; the hue stays.
+        assert_eq!(hue_saturation(color, 0.0, -1.0), [0.6; 3]);
+        let rich = Hsv::from_rgb(hue_saturation(color, 0.0, 0.25));
+        let plain = Hsv::from_rgb(color);
+        assert!((rich.h - plain.h).abs() < 1e-3);
+        assert!((rich.s - plain.s * 1.25).abs() < 1e-5);
+        // A turn of 120 degrees moves red to green.
+        let green = hue_saturation([1.0, 0.0, 0.0], 120.0, 0.0);
+        assert!((green[1] - 1.0).abs() < 1e-6 && green[0].abs() < 1e-6);
+        // The batch conversion uses them: a lighter, grayer picture.
+        let tile =
+            RasterTile2D::from_bytes(1, 1, PixelFormat::Rgba8, vec![153, 102, 51, 255]).unwrap();
+        let options = PictureOptions {
+            brightness: 0.2,
+            saturation: -1.0,
+            ..PictureOptions::default()
+        };
+        let out = transform_picture(&tile, &options, "png").unwrap();
+        let expected = hue_saturation(brightness_contrast(color, 0.2, 0.0), 0.0, -1.0)
+            .map(|value| (value.clamp(0.0, 1.0) * 255.0).round() as u8);
+        assert_eq!(&out.bytes().unwrap()[..3], &expected);
+    }
+
+    #[test]
     fn every_text_here_is_in_the_language_database() {
+        for filter in Filter::ALL {
+            assert!(sue_lang::has_english("io", filter.name()), "{filter:?}");
+        }
         for text in [NO_PIXELS, NO_FLOAT, NO_JXL] {
             assert!(sue_lang::has_english("io", text), "{text}");
         }

@@ -1,58 +1,7 @@
 //! Drawing colors: HSV for the color wheel, the default color set and the
 //! recent-color history.
 
-/// A color as hue (0 to 360), saturation and value (0 to 1).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Hsv {
-    /// Hue in degrees.
-    pub h: f32,
-    /// Saturation.
-    pub s: f32,
-    /// Value.
-    pub v: f32,
-}
-
-impl Hsv {
-    /// The HSV of an sRGB color (0 to 1). Gray keeps hue 0.
-    #[must_use]
-    pub fn from_rgb([r, g, b]: [f32; 3]) -> Self {
-        let max = r.max(g).max(b);
-        let min = r.min(g).min(b);
-        let delta = max - min;
-        let h = if delta <= 0.0 {
-            0.0
-        } else if max == r {
-            60.0 * ((g - b) / delta).rem_euclid(6.0)
-        } else if max == g {
-            60.0 * ((b - r) / delta + 2.0)
-        } else {
-            60.0 * ((r - g) / delta + 4.0)
-        };
-        Self {
-            h,
-            s: if max <= 0.0 { 0.0 } else { delta / max },
-            v: max,
-        }
-    }
-
-    /// The sRGB color (0 to 1).
-    #[must_use]
-    pub fn to_rgb(self) -> [f32; 3] {
-        let h = self.h.rem_euclid(360.0) / 60.0;
-        let c = self.v * self.s;
-        let x = c * (1.0 - (h % 2.0 - 1.0).abs());
-        let (r, g, b) = match h as u32 {
-            0 => (c, x, 0.0),
-            1 => (x, c, 0.0),
-            2 => (0.0, c, x),
-            3 => (0.0, x, c),
-            4 => (x, 0.0, c),
-            _ => (c, 0.0, x),
-        };
-        let m = self.v - c;
-        [r + m, g + m, b + m]
-    }
-}
+pub use sue_io::picture_ops::Hsv;
 
 /// sRGB bytes as 0 to 1.
 #[must_use]

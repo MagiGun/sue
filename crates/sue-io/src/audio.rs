@@ -465,6 +465,159 @@ pub fn encode_flac(pcm: &PCMFloat1D, depth: SampleDepth) -> Result<Vec<u8>, Stri
     Ok(bytes)
 }
 
+/// Trimming cut the whole sound away.
+const NO_SOUND_LEFT: &str = "trimming left no sound";
+
+/// Everything an export or a clip's settings can change about a sound.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SoundOptions {
+    /// Samples per second, or `None` to keep them.
+    pub sample_rate: Option<u32>,
+    /// Channels, or `None` to keep them.
+    pub channels: Option<u16>,
+    /// Bits per sample.
+    pub depth: SampleDepth,
+    /// Gain in decibels.
+    pub gain_db: f32,
+    /// Bring the loudest peak to -1 dB (instead of the gain).
+    pub normalize: bool,
+    /// Seconds cut from the start.
+    pub trim_start: f32,
+    /// Seconds cut from the end.
+    pub trim_end: f32,
+    /// Seconds of fade in.
+    pub fade_in: f32,
+    /// Seconds of fade out.
+    pub fade_out: f32,
+}
+
+impl Default for SoundOptions {
+    fn default() -> Self {
+        Self {
+            sample_rate: None,
+            channels: None,
+            depth: SampleDepth::Int16,
+            gain_db: 0.0,
+            normalize: false,
+            trim_start: 0.0,
+            trim_end: 0.0,
+            fade_in: 0.0,
+            fade_out: 0.0,
+        }
+    }
+}
+
+/// Resamples interleaved `samples` of `channels` by `ratio` (new rate over
+/// old rate) with a Lanczos window.
+fn resample(samples: &[f32], channels: usize, ratio: f64) -> Vec<f32> {
+    let channels = channels.max(1);
+    let frames = samples.len() / channels;
+    if frames == 0 || (ratio - 1.0).abs() < 1e-9 {
+        return samples.to_vec();
+    }
+    let out_frames = ((frames as f64) * ratio).round().max(1.0) as usize;
+    let cutoff = ratio.min(1.0);
+    let taps = 8.0 / cutoff;
+    let mut out = Vec::with_capacity(out_frames * channels);
+    for frame in 0..out_frames {
+        let center = frame as f64 / ratio;
+        let first = (center - taps).floor().max(0.0) as usize;
+        let last = ((center + taps).ceil() as usize).min(frames - 1);
+        let mut sums = vec![0.0_f64; channels];
+        let mut total = 0.0;
+        for index in first..=last {
+            let x = (index as f64 - center) * cutoff;
+            let weight = if x.abs() < 1e-9 {
+                1.0
+            } else if x.abs() < 8.0 {
+                let pi = std::f64::consts::PI * x;
+                8.0 * pi.sin() * (pi / 8.0).sin() / (pi * pi)
+            } else {
+                0.0
+            };
+            total += weight;
+            for (channel, sum) in sums.iter_mut().enumerate() {
+                *sum += f64::from(samples[index * channels + channel]) * weight;
+            }
+        }
+        for sum in sums {
+            out.push(if total.abs() > 1e-9 {
+                (sum / total) as f32
+            } else {
+                0.0
+            });
+        }
+    }
+    out
+}
+
+/// Changes a sound as the options say: cuts, channels, sample rate,
+/// loudness and fades, in that order.
+///
+/// # Errors
+/// If the result would hold no sound.
+pub fn transform_sound(pcm: &PCMFloat1D, options: &SoundOptions) -> Result<PCMFloat1D, String> {
+    let rate = pcm.sample_rate().max(1);
+    let channels = usize::from(pcm.channels().max(1));
+    let frames = pcm.frames();
+    // Trim.
+    let start = ((options.trim_start.max(0.0) * rate as f32) as usize).min(frames);
+    let end = frames
+        .saturating_sub((options.trim_end.max(0.0) * rate as f32) as usize)
+        .max(start);
+    let mut samples = pcm.samples()[start * channels..end * channels].to_vec();
+    // Channels.
+    let out_channels = usize::from(options.channels.unwrap_or(pcm.channels()).clamp(1, 8));
+    if out_channels != channels {
+        samples = samples
+            .chunks_exact(channels)
+            .flat_map(|frame| {
+                let mono = frame.iter().sum::<f32>() / channels as f32;
+                (0..out_channels)
+                    .map(|channel| match (channels, out_channels) {
+                        (_, 1) => mono,
+                        (1, _) => frame[0],
+                        _ => frame.get(channel).copied().unwrap_or(mono),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+    }
+    // The sample rate.
+    let out_rate = options.sample_rate.unwrap_or(rate).clamp(1_000, 384_000);
+    let ratio = f64::from(out_rate) / f64::from(rate);
+    samples = resample(&samples, out_channels, ratio);
+    // Loudness.
+    let gain = if options.normalize {
+        let peak = samples
+            .iter()
+            .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
+        if peak > 1e-6 { 0.891 / peak } else { 1.0 }
+    } else {
+        10_f32.powf(options.gain_db / 20.0)
+    };
+    // Fades.
+    let out_frames = samples.len() / out_channels;
+    let fade_in = (options.fade_in.max(0.0) * out_rate as f32) as usize;
+    let fade_out = (options.fade_out.max(0.0) * out_rate as f32) as usize;
+    for (frame, chunk) in samples.chunks_exact_mut(out_channels).enumerate() {
+        let mut level = gain;
+        if fade_in > 0 && frame < fade_in {
+            level *= frame as f32 / fade_in as f32;
+        }
+        if fade_out > 0 && frame + fade_out > out_frames {
+            level *= (out_frames - frame) as f32 / fade_out as f32;
+        }
+        for sample in chunk {
+            *sample = (*sample * level).clamp(-1.0, 1.0);
+        }
+    }
+    if samples.is_empty() {
+        return Err(NO_SOUND_LEFT.to_owned());
+    }
+    PCMFloat1D::new(out_rate, out_channels as u16, samples).map_err(|error| error.to_string())
+}
+
 /// Writes a sound as a file of `extension`: `wav`, `flac` or `aiff`.
 ///
 /// # Errors
@@ -577,5 +730,59 @@ mod tests {
         let (message, bytes) = decode_audio(junk.clone(), None).unwrap_err();
         assert!(!message.is_empty());
         assert_eq!(bytes, junk);
+    }
+
+    #[test]
+    fn sounds_trim_fade_resample_and_change_channels() {
+        let rate = 8_000;
+        let samples: Vec<f32> = (0..rate * 2).flat_map(|_| [0.5_f32, -0.5]).collect();
+        let pcm = PCMFloat1D::new(rate, 2, samples).unwrap();
+        let options = SoundOptions {
+            sample_rate: Some(16_000),
+            channels: Some(1),
+            trim_start: 0.5,
+            fade_out: 0.25,
+            gain_db: -6.0,
+            ..SoundOptions::default()
+        };
+        let out = transform_sound(&pcm, &options).unwrap();
+        assert_eq!((out.sample_rate(), out.channels()), (16_000, 1));
+        assert!((out.duration_seconds() - 1.5).abs() < 0.01);
+        // Left and right cancel in mono.
+        assert!(out.samples()[100].abs() < 1e-3);
+        let loud = transform_sound(
+            &PCMFloat1D::new(rate, 1, vec![0.25; rate as usize]).unwrap(),
+            &SoundOptions {
+                normalize: true,
+                fade_out: 0.1,
+                ..SoundOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            (loud.samples()[10] - 0.891).abs() < 1e-3,
+            "{}",
+            loud.samples()[10]
+        );
+        assert!(loud.samples().last().unwrap().abs() < 0.02, "faded out");
+        for extension in ["wav", "flac", "aiff"] {
+            let bytes = write_sound(&out, extension, SampleDepth::Int16).unwrap();
+            let (back, _) = decode_audio(bytes, Some(extension)).unwrap();
+            assert_eq!(back.pcm.frames(), out.frames(), "{extension}");
+        }
+        assert!(write_sound(&out, "mp3", SampleDepth::Int16).is_err());
+        // Nothing asked for changes nothing; everything cut away is an
+        // error the interface can translate.
+        let same = transform_sound(&pcm, &SoundOptions::default()).unwrap();
+        assert_eq!(same, pcm);
+        let gone = transform_sound(
+            &pcm,
+            &SoundOptions {
+                trim_start: 3.0,
+                ..SoundOptions::default()
+            },
+        );
+        assert_eq!(gone.unwrap_err(), NO_SOUND_LEFT);
+        assert!(sue_lang::has_english("io", NO_SOUND_LEFT));
     }
 }

@@ -320,3 +320,104 @@ hub-search = Search or run a command
 hub-search-files = Search files
 hub-search-hint = Find a command, a setting or a studio (Tab)
 files-transfers = Transfers
+
+## export.rs: the export settings dialog
+
+export-accept = Export
+export-format = Format
+export-output-size = Output size
+export-size-keep = Keep the size
+export-size-scale = Scale
+export-size-width = Width
+export-size-height = Height
+export-size-fit = Fit inside
+export-size-exact = Exact size
+export-px = {" "}px
+export-resampling = Resampling
+export-colors = Colors
+export-colors-color = Color
+export-colors-grays = Grays
+export-background = Background
+export-fill-transparency = Fill transparency
+export-no-transparency = This format holds no transparency, so the background fills it.
+export-quality = Quality
+export-effort = Effort
+export-effort-hint = Higher is smaller and slower
+export-written-at = Written at { $width } by { $height } pixels.
+export-fit-note = { $format } pictures are at most { $max } by { $max } pixels; bigger ones are fitted into that.
+export-bits = Bits
+export-bits-16 = 16-bit (CD)
+export-bits-24 = 24-bit (studio)
+export-bits-float = 32-bit float
+export-sample-rate = Sample rate
+export-rate-keep = Keep the rate
+export-rate-hz = { $rate } Hz
+export-rate-cd = { $rate } Hz (CD)
+export-channels = Channels
+export-channels-keep = Keep the channels
+export-channels-mono = Mono
+export-channels-stereo = Stereo
+export-channels-count = { $count } channels
+export-normalize = Normalize the loudest peak to -1 dB
+
+## job_list.rs: the batch list of Batch Convert Pictures
+
+batch-pictures = Pictures
+batch-add-files = Add Files
+batch-add-folder = Add a Folder
+batch-clear = Clear
+batch-empty = No pictures yet
+batch-empty-detail = Add picture files, or a folder of them, to convert them all at once.
+batch-remove = Take it off the list
+batch-show-in = Show it in { $manager }
+batch-becomes = Waiting: { $format }
+batch-converting = Converting...
+batch-done = Done: { $value } ({ $note })
+batch-failed = Failed: { $why }
+batch-written-note = { $width } by { $height } pixels, { $size }
+batch-size-bytes = { $size } B
+batch-size-kib = { $size } KiB
+batch-size-mib = { $size } MiB
+batch-save-to = Save to
+batch-folder = Folder
+batch-next-to-each = Next to each file
+batch-one-folder = One folder
+batch-chosen-folder = Chosen folder
+batch-change = Change
+batch-picked-copies = Sue works on copies of files you pick one by one, so it first asks which folder the results go to.
+batch-file-name = File name
+batch-pattern-hint = {"{"}name{"}"} is the original's name, as in {"{"}name{"}"}-small
+batch-if-it-exists = If it exists
+batch-keep-both = Keep both
+batch-replace = Replace it
+batch-reveal-after = Show the result in { $manager } when done
+batch-change-every = Change every picture
+batch-turn = Turn
+batch-turn-none = None
+batch-turn-right = 90° right
+batch-turn-half = 180°
+batch-turn-left = 90° left
+batch-mirror = Mirror
+batch-left-to-right = Left to right
+batch-top-to-bottom = Top to bottom
+batch-brightness = Brightness
+batch-contrast = Contrast
+batch-saturation = Saturation
+batch-convert-to = Convert to
+batch-close = Close
+batch-convert = Convert
+batch-convert-count = { $count ->
+    [one] Convert 1 Picture
+   *[other] Convert { $count } Pictures
+}
+batch-nothing-converted = Nothing converted: { $failed } failed
+batch-converted-one = Converted into { $value }
+batch-converted-into = { $count ->
+    [one] 1 picture converted into { $value }
+   *[other] { $count } pictures converted into { $value }
+}
+batch-converted-next-to = { $count ->
+    [one] 1 picture converted next to its file
+   *[other] { $count } pictures converted next to their files
+}
+batch-and-failed = { $text }, { $failed } failed
