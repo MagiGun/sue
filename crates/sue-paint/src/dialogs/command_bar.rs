@@ -200,9 +200,12 @@ impl SuePaint {
                     Slot::of(Item::Color(self.drawing_color())),
                 ));
                 for set in &self.color_sets.sets {
-                    out.extend(set.cells.iter().flatten().map(|swatch| {
-                        (set.name.clone(), Slot::of(Item::Color(swatch.rgb)))
-                    }));
+                    out.extend(
+                        set.cells
+                            .iter()
+                            .flatten()
+                            .map(|swatch| (set.name.clone(), Slot::of(Item::Color(swatch.rgb)))),
+                    );
                 }
             }
             Category::Options => {

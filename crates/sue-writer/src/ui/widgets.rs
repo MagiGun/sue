@@ -14,7 +14,6 @@ use sue_wm::Theme;
 use sue_wm::icons::Icon;
 use sue_wm::ui::icon_button;
 
-
 /// The desk around the pages: the page's color, a step lighter.
 pub(super) fn desk(theme: &Theme) -> Color32 {
     theme.void.lerp_to_gamma(theme.surface(1), DESK_LIFT)

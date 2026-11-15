@@ -308,7 +308,13 @@ fn shape_chart(ui: &mut Ui, theme: &Theme, salt: usize, value: &mut [f32; 2]) ->
 impl SuePaint {
     /// A text button that runs `command`, with a tooltip naming it and its
     /// key as Settings has it.
-    fn three_command_button(&mut self, ui: &mut Ui, theme: &Theme, command: &'static str, name: &str) {
+    fn three_command_button(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        command: &'static str,
+        name: &str,
+    ) {
         let key = self
             .bound
             .first_chord(crate::commands::shortcut_table(), command);
@@ -885,10 +891,20 @@ impl SuePaint {
             // Pose Scanner and Hand Scanner: a photo poses it.
             match body.kind {
                 crate::figure::Kind::Body => {
-                    self.three_command_button(ui, theme, "figure.pose_scanner", &tr!("pose-scanner"));
+                    self.three_command_button(
+                        ui,
+                        theme,
+                        "figure.pose_scanner",
+                        &tr!("pose-scanner"),
+                    );
                 }
                 crate::figure::Kind::Hand => {
-                    self.three_command_button(ui, theme, "figure.hand_scanner", &tr!("hand-scanner"));
+                    self.three_command_button(
+                        ui,
+                        theme,
+                        "figure.hand_scanner",
+                        &tr!("hand-scanner"),
+                    );
                 }
                 crate::figure::Kind::Head => {}
             }

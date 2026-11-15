@@ -24,15 +24,13 @@ mod quick_access;
 pub(crate) mod run_button;
 mod search_layer;
 mod sub_tool;
-mod sub_view;
 pub(crate) mod sub_tool_detail;
+mod sub_view;
 pub(crate) mod timeline;
 pub(crate) mod tool;
 mod tool_property;
 
-use egui::{
-    Color32, Id, Mesh, Pos2, Rect, Sense, Shape, Stroke, Ui, UiBuilder, pos2, vec2,
-};
+use egui::{Color32, Id, Mesh, Pos2, Rect, Sense, Shape, Stroke, Ui, UiBuilder, pos2, vec2};
 use sue_wm::{AppletContext, Theme};
 
 use crate::icons::{self, Icon};
@@ -48,8 +46,8 @@ pub(crate) use material::material_thumb;
 pub(crate) use material::{MENU_COMMANDS as MATERIAL_COMMANDS, MaterialView, ThumbSize};
 pub(crate) use navigator::MENU_COMMANDS as NAVIGATOR_COMMANDS;
 pub(crate) use quick_access::MENU_COMMANDS as QUICK_ACCESS_COMMANDS;
-pub(crate) use sub_view::MENU_COMMANDS as SUB_VIEW_COMMANDS;
 pub(crate) use sub_tool_detail::ToolPalettes;
+pub(crate) use sub_view::MENU_COMMANDS as SUB_VIEW_COMMANDS;
 pub(crate) use tool::{PROPERTY_MENU, SUB_TOOL_MENU, TOOL_MENU, slot_is_liquify};
 
 /// The rice key: the Tool palette shows the main and sub colors under its

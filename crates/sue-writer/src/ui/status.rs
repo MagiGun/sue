@@ -5,8 +5,7 @@ use sue_core::Value;
 use sue_model::manuscript;
 use sue_wm::icons::Icon;
 use sue_wm::ui::{
-    Density, Space, TextRole, button, checkbox, icon_button, search_field, segmented,
-    text_field,
+    Density, Space, TextRole, button, checkbox, icon_button, search_field, segmented, text_field,
 };
 use sue_wm::{AppletContext, Theme};
 
@@ -14,7 +13,6 @@ use crate::project;
 use crate::studio::{SueWriter, View};
 
 use super::widgets::tool;
-
 
 /// The find field's width, in control heights.
 const FIND_FIELD: f32 = 8.0;
@@ -371,4 +369,3 @@ impl SueWriter {
         (action, close)
     }
 }
-

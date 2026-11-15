@@ -21,7 +21,6 @@ const SIZES: [f32; 15] = [
 /// The font box's width, in control heights.
 const FONT_BOX: f32 = 6.0;
 
-
 /// The font search field's width, in control heights.
 const FONT_SEARCH: f32 = 8.0;
 

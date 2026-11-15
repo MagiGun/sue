@@ -54,8 +54,8 @@ use text::text_ui;
 pub(crate) use canvas::{
     CanvasDialog, CanvasProperties, ConvertDialog, PerspectiveDialog, ResolutionDialog,
 };
-pub(crate) use colorize::ColorizeDialog;
 pub(crate) use color::{ColorDialog, ColorTarget, cmyk_of, rgb_of_cmyk};
+pub(crate) use colorize::ColorizeDialog;
 pub(crate) use command_bar::{BarDialog, BarTarget};
 pub(crate) use comps::CompsDialog;
 pub(crate) use fill::AdvancedFill;
