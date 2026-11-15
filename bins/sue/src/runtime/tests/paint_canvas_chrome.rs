@@ -59,7 +59,14 @@ fn view_frame(driver: &mut PaintDriver, key: &str, events: Vec<egui::Event>) -> 
     let raw = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(960.0, 640.0))),
         events,
-        time: Some(driver.ctx.input(|input| input.time) + 0.016),
+        // The window's own clock, which goes on while only it is drawn.
+        time: Some(
+            driver
+                .ctx
+                .input_for(sue_platform::windows::viewport_of(key), |input| input.time)
+                .max(driver.ctx.input(|input| input.time))
+                + 0.016,
+        ),
         ..egui::RawInput::default()
     };
     driver.now += Duration::from_millis(16);
@@ -441,6 +448,79 @@ fn a_picture_dropped_on_the_canvas_becomes_a_layer_and_on_the_tabs_a_canvas() {
     driver.runtime.open_path(&file, &mut NoTextures, driver.now);
     driver.settle(10);
     assert_ne!(current(&driver), opened, "Open makes a canvas");
+}
+
+#[test]
+fn a_picture_dropped_on_a_floating_canvas_becomes_one_layer_of_that_canvas() {
+    let mut driver = PaintDriver::new("chrome-drop-float");
+    let first = current(&driver);
+    let second = second_canvas(&mut driver);
+    let layers = |driver: &PaintDriver, picture| {
+        sue_paint::doc::layers(&driver.runtime.engine.world.arena, picture).len()
+    };
+    let (first_before, second_before) = (layers(&driver, first), layers(&driver, second));
+    // The second canvas floats over the page (Sue has one window here).
+    driver.command("window.float");
+    driver.settle(4);
+    let views = canvas_views(&driver);
+    assert_eq!(views.len(), 1, "{views:?}");
+    let (frame, _) = driver.runtime.shell.view_rects(&views[0]).unwrap();
+    let file = picture_file(&driver.root, "on-the-window.png");
+    main_frame(
+        &mut driver,
+        vec![egui::Event::PointerMoved(frame.center())],
+        &[],
+    );
+    main_frame(&mut driver, Vec::new(), std::slice::from_ref(&file));
+    driver.settle(6);
+    assert_eq!(
+        layers(&driver, second),
+        second_before + 1,
+        "one new layer of the floating canvas"
+    );
+    assert_eq!(
+        layers(&driver, first),
+        first_before,
+        "the column's canvas kept its layers"
+    );
+    assert_eq!(current(&driver), second, "the floating canvas is current");
+}
+
+#[test]
+fn a_canvas_windows_button_puts_it_back_in_the_tabs() {
+    let mut driver = PaintDriver::new("chrome-back");
+    driver.runtime.shell.set_window_support(WindowSupport::Many);
+    let second = second_canvas(&mut driver);
+    driver.command("window.float");
+    driver.settle(3);
+    let view = driver.runtime.windows()[0].key.clone();
+    view_frame(&mut driver, &view, Vec::new());
+    // The button at the end of the window's status strip, which says it
+    // puts the canvas back.
+    let output = view_frame(&mut driver, &view, Vec::new());
+    let strip = text_rects(&output)
+        .into_iter()
+        .find(|(text, _)| text == "%")
+        .map(|(_, rect)| rect)
+        .expect("the window's status strip");
+    let button = egui::pos2(960.0 - 14.0, strip.center().y);
+    view_frame(&mut driver, &view, vec![egui::Event::PointerMoved(button)]);
+    let mut tip = Vec::new();
+    for _ in 0..60 {
+        tip = text_rects(&view_frame(&mut driver, &view, Vec::new()));
+        if tip.iter().any(|(text, _)| text == "Back to the Tabs") {
+            break;
+        }
+    }
+    assert!(
+        tip.iter().any(|(text, _)| text == "Back to the Tabs"),
+        "its tooltip: {tip:?}"
+    );
+    click_in_view(&mut driver, &view, button);
+    driver.settle(3);
+    assert!(driver.runtime.windows().is_empty(), "the window closed");
+    assert!(canvas_views(&driver).is_empty());
+    assert_eq!(current(&driver), second, "back in the tabs, current");
 }
 
 /// Where the last frame of the main window laid the scroll bar `salt`.
