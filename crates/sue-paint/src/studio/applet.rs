@@ -503,10 +503,10 @@ impl SueApplet for SuePaint {
         match pick.purpose.as_str() {
             "new-from-movie" => self.new_from_movie(path, cx),
             "open" => self.open_picked(cx, path, false),
+            // A picture dropped on a canvas becomes its layer.
+            "import" if self.take_canvas_drop(path) => self.open_picked(cx, path, true),
             // A file opened anywhere in Sue that Sue Paint takes itself
             // (see `opens_file`).
-            // A picture dropped on the canvas becomes its layer.
-            "import" if self.take_canvas_drop(path) => self.open_picked(cx, path, true),
             "import" => self.take_file(cx, path),
             "layer" => self.open_picked(cx, path, true),
             "import-layers" => self.open_picked(cx, path, true),
