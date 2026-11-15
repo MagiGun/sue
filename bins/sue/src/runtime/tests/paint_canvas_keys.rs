@@ -687,6 +687,18 @@ fn move_layer_moves_what_is_selected_and_a_folder_whole() {
         "the left half went down"
     );
     assert_eq!(offset(&driver, layer), [0, 0], "the layer itself stays");
+    let history = &driver.runtime.engine.history;
+    assert_eq!(
+        history.label(history.cursor()),
+        Some("Move Layer"),
+        "the undo step is named for the move, not a transform"
+    );
+    // The tool is still Move layer, not a transform left open.
+    let texts = driver.settle(2);
+    assert!(
+        !texts.iter().any(|(text, _)| text == "Scale/Rotate"),
+        "no transform bar is left: {texts:?}"
+    );
     driver.command("edit.undo");
     driver.settle(2);
     assert_eq!(painted(&driver, layer), line, "undo puts it back");

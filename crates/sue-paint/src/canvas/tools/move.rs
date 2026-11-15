@@ -158,8 +158,21 @@ impl SuePaint {
     /// The selected pixels Move layer dragged, let go: kept where they
     /// are as one undo step.
     pub(super) fn move_lift_release(&mut self, cx: &mut AppletContext<'_>) {
-        self.move_lift = false;
+        // The undo step is named for the move while the flag is up.
         self.finish_transform(cx, true);
+        self.move_lift = false;
+    }
+
+    /// The name of the undo step a transform ends in: Move Layer for
+    /// Move layer's drag of the selected pixels, else the transform's.
+    pub(crate) fn transform_label(&self, free: bool) -> String {
+        if self.move_lift {
+            tr!("move-layer")
+        } else if free {
+            tr!("free-transform")
+        } else {
+            tr!("scale-rotate")
+        }
     }
 }
 
