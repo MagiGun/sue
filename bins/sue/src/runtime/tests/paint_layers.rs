@@ -1071,6 +1071,25 @@ fn ctrl_click_on_a_thumbnail_selects_what_the_layer_holds() {
         !driver.control("Deselect (Ctrl+D)").disabled,
         "there is a selection"
     );
+    // A plain click on a thumbnail picks its row, as anywhere on the row:
+    // the paper's box gives way to the pen.
+    let paper = driver.stack()[0];
+    let row = driver.row(&driver.name_of(paper));
+    let names = |driver: &mut PaintDriver| -> Vec<String> {
+        let told = driver.look_with(Vec::new(), egui::Modifiers::NONE);
+        told.into_iter().map(|told| told.name).collect()
+    };
+    let pick_paper = format!("Pick {} with the others", driver.name_of(paper));
+    assert!(names(&mut driver).contains(&pick_paper));
+    driver.press(
+        row.left_center() - vec2(24.0, 0.0),
+        egui::PointerButton::Primary,
+        egui::Modifiers::NONE,
+    );
+    assert!(
+        !names(&mut driver).contains(&pick_paper),
+        "the paper is current"
+    );
 }
 
 /// Applies `edit` as Sue would, one step on the history.

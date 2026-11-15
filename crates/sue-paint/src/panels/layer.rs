@@ -931,13 +931,30 @@ impl SuePaint {
                     } else {
                         self.layer_thumbnail(ui, thumb, info.id, info.revision, cx, theme);
                         left = thumb.right() + metrics.pad;
-                        // Ctrl+click on the thumbnail: Selection from Layer.
+                        // Ctrl+click on the thumbnail: Selection from Layer. It
+                        // takes a click only with Ctrl held, so a plain click
+                        // picks the row as anywhere else on it.
+                        let command = ui.input(|input| input.modifiers.command);
                         let thumb_response = ui.interact(
                             thumb,
                             Id::unique(("sue-paint-thumb", info.id.to_u128())),
-                            Sense::click(),
+                            if command {
+                                Sense::click()
+                            } else {
+                                Sense::hover()
+                            },
                         );
-                        if thumb_response.clicked() && ui.input(|input| input.modifiers.command) {
+                        let select_name = crate::commands::registry()
+                            .label("select.from_layer")
+                            .unwrap_or_default();
+                        if tooltip(
+                            thumb_response,
+                            &Tip::new(&select_name).shortcut(&tr!("ctrl-click")),
+                            theme,
+                        )
+                        .clicked()
+                            && command
+                        {
                             events.select_from = Some(info.id);
                         }
                     }
