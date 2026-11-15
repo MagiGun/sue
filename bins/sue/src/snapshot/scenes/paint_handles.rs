@@ -115,7 +115,12 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.shoot("08ef-sue-paint-light-table-box")?;
     tour.paint_command("anim.light_table.tool");
     tour.paint_command("tool.pen");
-    while tour.runtime.engine.history.depth() > depth {
+    // Bounded, so an undo that cannot run (a dialog left open) never
+    // holds the tour in a loop.
+    for _ in 0..32 {
+        if tour.runtime.engine.history.depth() <= depth {
+            break;
+        }
         tour.paint_command("edit.undo");
     }
     tour.settle();

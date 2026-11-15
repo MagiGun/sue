@@ -6,7 +6,8 @@ use super::super::Tour;
 /// Animation cels tab, as Clip Studio Paint's palette. 11t1 to 11t7. The
 /// timeline's dialogs: Change Settings, Insert Frame, the movie, image
 /// sequence, animated GIF and cels exports, Onion Skin Settings. The
-/// layer palette is left on the cels tab for the scene after.
+/// dialogs show with Sue Paint's palettes at rest and the Timeline open,
+/// as the scenes after need it.
 pub(super) fn timeline(tour: &mut Tour<'_>) -> Result<(), String> {
     for command in [
         // The Timeline starts folded under the canvas: Window, Timeline
@@ -24,6 +25,10 @@ pub(super) fn timeline(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.shoot("11d-sue-paint-timeline")?;
     tour.paint_go(&["tab/layer/3"]);
     tour.shoot("11d2-sue-paint-animation-cels")?;
+    // The cels palette 11d2 brought out goes, so the dialogs after show
+    // over the timeline alone; the Timeline is opened again.
+    super::paint_at_rest(tour);
+    tour.paint_command("window.timeline");
     for (command, name) in [
         ("anim.timeline.settings", "11t1-sue-paint-timeline-settings"),
         ("anim.frame.insert", "11t2-sue-paint-insert-frame"),

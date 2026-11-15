@@ -100,10 +100,6 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_comic::frames(tour)?;
     paint_filters::dialogs(tour)?;
     paint_timeline::timeline(tour)?;
-    // The cels palette 11d2 brought out goes; the timeline the next
-    // scenes are drawn over stays open.
-    paint_at_rest(tour);
-    tour.paint_command("window.timeline");
     paint_view::marks(tour)?;
     paint_canvas_chrome::window(tour)?;
     paint_layers::property(tour)?;

@@ -801,9 +801,7 @@ impl Patch {
     /// # Errors
     /// [`ScreenError::Window`] when the window cannot be made.
     pub fn show(color: [u8; 3], side: i32) -> Result<Self, ScreenError> {
-        let side = side.clamp(16, 2048);
-        let [width, height] = main_screen();
-        let area = [(width - side) / 2, (height - side) / 2, side];
+        let area = patch_area(main_screen(), side);
         let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (ready, wait) = std::sync::mpsc::channel();
         let ended = Arc::clone(&done);
@@ -886,6 +884,16 @@ impl Drop for Patch {
             let _ = thread.join();
         }
     }
+}
+
+/// Where a patch `side` pixels wide lies on a main screen `screen` big:
+/// left, top and its side, kept between 16 pixels and what the screen
+/// holds, in the screen's middle.
+fn patch_area(screen: [i32; 2], side: i32) -> [i32; 3] {
+    let [width, height] = screen;
+    let most = width.min(height).clamp(16, 2048);
+    let side = side.clamp(16, most);
+    [(width - side) / 2, (height - side) / 2, side]
 }
 
 /// The main screen's size in pixels.
@@ -1144,12 +1152,16 @@ mod tests {
 
     #[test]
     fn a_patch_sits_in_the_middle_of_the_main_screen_at_a_size_it_can_hold() {
-        // The side is kept to what a screen can hold.
-        let [width, height] = main_screen();
-        let patch = Patch::show([1, 2, 3], 1).expect("a patch");
-        let [left, top, side] = patch.area();
-        assert_eq!(side, 16);
-        assert_eq!([left, top], [(width - 16) / 2, (height - 16) / 2]);
+        // Reckoned without a window: a second patch on the screen would
+        // lie over the one the pick test reads, which runs meanwhile.
+        assert_eq!(patch_area([1920, 1080], 240), [840, 420, 240]);
+        assert_eq!(patch_area([1920, 1080], 1), [952, 532, 16], "at least 16");
+        assert_eq!(
+            patch_area([800, 600], 5000),
+            [100, 0, 600],
+            "no bigger than the screen"
+        );
+        assert_eq!(patch_area([0, 0], 240), [-8, -8, 16], "no screen: no panic");
     }
 
     #[test]
