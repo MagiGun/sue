@@ -598,16 +598,20 @@ impl SuePaint {
             }
             let target = view.dragging.is_some_and(|from| from != index)
                 && pointer.is_some_and(|at| paper.contains(at));
-            ui.painter().rect_stroke(
-                paper,
-                0.0,
-                if chosen || target {
-                    egui::Stroke::new(2.0, theme.border_active)
-                } else {
-                    theme.hairline()
-                },
-                egui::StrokeKind::Inside,
-            );
+            // The page picked (or the place a dragged page will go) is
+            // ringed outside the paper, where it shows against the void
+            // as well on a white page as on a dark one.
+            if chosen || target {
+                ui.painter().rect_stroke(
+                    paper.expand(2.0),
+                    2.0,
+                    egui::Stroke::new(2.0, theme.border_active),
+                    egui::StrokeKind::Outside,
+                );
+            } else {
+                ui.painter()
+                    .rect_stroke(paper, 0.0, theme.hairline(), egui::StrokeKind::Inside);
+            }
             let open = index == shown.here;
             let number = if open {
                 tr!("open-2", value = index + 1)
@@ -1080,14 +1084,16 @@ impl PageLayout {
         let rows = ((self.height - self.pad) / cell.y).floor().max(1.0) as usize;
         let columns = count.div_ceil(rows) as f32;
         let wide = self.width.max(columns * cell.x + self.pad * 2.0);
+        // The columns stand in the middle of the room, as the spreads do.
+        let edge = (wide - columns * cell.x) / 2.0;
         story::webtoon_slots(count, rows)
             .into_iter()
             .map(|(column, row)| {
                 let column = column as f32;
                 let x = if right_to_left {
-                    wide - self.pad * 2.0 - (column + 1.0) * cell.x
+                    wide - edge - (column + 1.0) * cell.x
                 } else {
-                    self.pad + column * cell.x
+                    edge + column * cell.x
                 };
                 Rect::from_min_size(pos2(x + self.pad, self.pad + row as f32 * cell.y), page)
             })
