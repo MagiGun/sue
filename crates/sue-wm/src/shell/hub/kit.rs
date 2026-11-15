@@ -384,12 +384,14 @@ pub(super) fn studio_card(
 }
 
 /// A button of Your work, `size` big: an icon on a badge, a name and a
-/// line under it (a count). `attention` draws the strong outline.
+/// line under it (a count). `attention` draws the strong outline; `tip`
+/// is its tooltip (its name, and its key when it has one).
 pub(super) fn work_button(
     ui: &mut Ui,
     size: Vec2,
     (icon, name, detail): (Icon, &str, &str),
     attention: bool,
+    tip: &str,
     salt: &str,
     theme: &Theme,
 ) -> Response {
@@ -429,7 +431,7 @@ pub(super) fn work_button(
     text.galley(pos2(left, top), title, theme.text);
     text.galley(pos2(left, below), line, soft);
     focus_ring(ui, &response, theme.radius(Radius::Lg), theme);
-    response.on_hover_text(name)
+    response.on_hover_text(tip)
 }
 
 /// A section's heading across `width`, with an optional quiet link at its

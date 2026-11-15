@@ -2,8 +2,9 @@
 //! them (a tab bar at the bottom when the room is narrow): Home, Files,
 //! then the places applets add through [`crate::SueApplet::hub_places`]
 //! (Sue Paint's materials). Home has a card per studio, New and Open, the
-//! work to jump back into and the buttons of Your work, which open Files
-//! already sorted; Files is the shared browser of [`crate::files`] over
+//! work to jump back into (on a first run, kinds of work that start with
+//! one click and what is good to know) and the buttons of Your work,
+//! which open Files already sorted; Files is the shared browser of [`crate::files`] over
 //! the work of every studio, kept work included.
 //!
 //! Layout by room, sizes by touch: under [`NARROW`] points the rail turns
@@ -118,6 +119,16 @@ pub enum HubButton {
     /// The menu of the Files place: rebuild thumbnails, forget missing
     /// files, clear finished transfers.
     Upkeep,
+    /// A kind of work under Start Something New, which Home shows while
+    /// there is no work to jump back into: the studio that makes it and
+    /// the template's key.
+    Start(AppletId, String),
+    /// Good to Know's Find Any Command: the command palette.
+    FindCommands,
+    /// Good to Know's Open Your Files: the system's open dialog.
+    OpenFiles,
+    /// Good to Know's Make Sue Yours: Settings.
+    MakeItYours,
 }
 
 /// What the Hub was asked to do this frame, done after drawing.

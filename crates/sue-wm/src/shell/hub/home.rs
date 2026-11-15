@@ -1,6 +1,12 @@
 //! The Hub's Home: New and Open, a card per studio (and per tool), the
 //! work to jump back into, and the buttons of Your work, which open the
 //! Files place already sorted.
+//!
+//! With no work to jump back into (a first run), Home does not leave a
+//! blank half page: Start Something New offers the studios' kinds of
+//! work, each one click from a new file, and Good to Know shows three
+//! things worth knowing on day one (the command search, opening files
+//! by dropping them, and Settings), each a button that does it.
 
 use egui::{Align, Layout, Rect, Ui, UiBuilder, Vec2, vec2};
 
@@ -55,12 +61,23 @@ impl Shell {
                 if narrow {
                     self.home_work(&mut column, width, io, theme, narrow, acts);
                     column.add_space(gap);
-                    self.home_jump(&mut column, width, io, theme, narrow, acts);
-                } else {
-                    self.home_jump(&mut column, width, io, theme, narrow, acts);
+                    if !self.home_jump(&mut column, width, io, theme, narrow, acts) {
+                        self.home_start(&mut column, width, io, theme, narrow, acts);
+                        self.home_tips(&mut column, width, theme, narrow, acts);
+                    }
+                } else if self.home_jump(&mut column, width, io, theme, narrow, acts) {
                     self.home_work(&mut column, width, io, theme, narrow, acts);
+                } else {
+                    // A first run: kinds of work to start, Your work, then
+                    // what is good to know.
+                    self.home_start(&mut column, width, io, theme, narrow, acts);
+                    self.home_work(&mut column, width, io, theme, narrow, acts);
+                    column.add_space(gap);
+                    self.home_tips(&mut column, width, theme, narrow, acts);
                 }
-                column.add_space(margin);
+                // Room at the end for the notices, so nothing has to stay
+                // under them: the page scrolls clear of the stack.
+                column.add_space(margin.max(self.toasts.covered()));
                 // The column's height, so the scroll area knows it.
                 let used = column.min_rect();
                 ui.allocate_space(vec2(
@@ -235,7 +252,8 @@ impl Shell {
     }
 
     /// The newest work, as cards with pictures, and All Files. Shown only
-    /// when there is any, so a first run is not a page of empty boxes.
+    /// when there is any, so a first run is not a page of empty boxes;
+    /// returns whether it showed.
     fn home_jump(
         &mut self,
         ui: &mut Ui,
@@ -244,10 +262,10 @@ impl Shell {
         theme: &Theme,
         narrow: bool,
         acts: &mut Vec<HubAct>,
-    ) {
+    ) -> bool {
         let count = self.config.recent_count;
         if count == 0 {
-            return;
+            return false;
         }
         let studios = super::files::studios(io);
         let mut recent: Vec<Item> = crate::files::items(io.work, &studios)
@@ -256,7 +274,7 @@ impl Shell {
             .collect();
         recent.sort_by_key(|item| std::cmp::Reverse(item.when));
         if recent.is_empty() {
-            return;
+            return false;
         }
         let density = Density::of(ui);
         let gap = ui.spacing().item_spacing.x;
@@ -324,6 +342,174 @@ impl Shell {
             });
         }
         ui.add_space(gap);
+        true
+    }
+
+    /// Start Something New: a row per studio of its first kinds of work,
+    /// each a button that makes the file and opens its studio. New has
+    /// them all.
+    fn home_start(
+        &mut self,
+        ui: &mut Ui,
+        width: f32,
+        io: &mut ShellIo<'_>,
+        theme: &Theme,
+        narrow: bool,
+        acts: &mut Vec<HubAct>,
+    ) {
+        // Each studio's kinds of work, in its own order; the one that
+        // asks for a size first stays in New's menu.
+        let mut lists: Vec<(AppletId, String, Icon, Vec<crate::FileTemplate>)> = Vec::new();
+        for (id, template) in templates(io.applets, &io.world.rice) {
+            if template.key == "custom" {
+                continue;
+            }
+            if let Some((.., list)) = lists.iter_mut().find(|(known, ..)| *known == id) {
+                list.push(template);
+                continue;
+            }
+            let Some(manifest) = io.applets.manifest(&id) else {
+                continue;
+            };
+            let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, &id));
+            let (title, icon) = (manifest.title(), manifest.icon);
+            lists.push((id, title, icon, vec![template]));
+        }
+        if lists.is_empty() {
+            return;
+        }
+        let density = Density::of(ui);
+        let gap = ui.spacing().item_spacing.x;
+        kit::heading(ui, width, &tr!("hub-start-new"), None, theme);
+        // A row per studio, in the columns of the studio cards above, so
+        // each row reads as that studio's: its first kinds of work.
+        let (columns, each) = if narrow {
+            (2, ((width - gap) / 2.0).floor())
+        } else {
+            kit::grid(width, theme.space(Space::S9) * 7.0, gap)
+        };
+        let rows: Vec<Vec<(AppletId, String, Icon, crate::FileTemplate)>> = lists
+            .into_iter()
+            .map(|(id, studio, icon, list)| {
+                list.into_iter()
+                    .take(columns)
+                    .map(|template| (id.clone(), studio.clone(), icon, template))
+                    .collect()
+            })
+            .collect();
+        let height = density.icon_button() + theme.space(Space::S5) * 2.0;
+        for row in &rows {
+            ui.horizontal(|ui| {
+                for (id, studio, icon, template) in row {
+                    let salt = format!("start-{}-{}", id.as_str(), template.key);
+                    let tip = tr!(
+                        "hub-start-new-tip",
+                        kind = template.label.clone(),
+                        studio = studio.clone()
+                    );
+                    let response = kit::work_button(
+                        ui,
+                        vec2(each, height),
+                        (*icon, &template.label, studio),
+                        false,
+                        &tip,
+                        &salt,
+                        theme,
+                    );
+                    let button = HubButton::Start(id.clone(), template.key.clone());
+                    self.hub.buttons.push((button, response.rect));
+                    self.hub.walk.push(response.clone());
+                    if response.clicked() {
+                        acts.push(HubAct::Request(ShellRequest::Create {
+                            applet: id.clone(),
+                            key: template.key.clone(),
+                        }));
+                    }
+                }
+            });
+        }
+        ui.add_space(gap);
+    }
+
+    /// Good to Know: the command search (with its key), opening files by
+    /// dropping them, and Settings, each a tile that does it.
+    fn home_tips(
+        &mut self,
+        ui: &mut Ui,
+        width: f32,
+        theme: &Theme,
+        narrow: bool,
+        acts: &mut Vec<HubAct>,
+    ) {
+        let density = Density::of(ui);
+        let gap = ui.spacing().item_spacing.x;
+        kit::heading(ui, width, &tr!("hub-good-to-know"), None, theme);
+        // On the Hub no studio keeps a key for itself.
+        let keymap = &self.config.keymap;
+        let key = Some(Self::shown_key(
+            &[],
+            &[&keymap.command_palette, &keymap.command_palette_alt],
+        ))
+        .filter(|key| !key.is_empty());
+        let search = key.as_ref().map_or_else(
+            || tr!("hub-tip-search-plain"),
+            |key| tr!("hub-tip-search-detail", key = key.clone()),
+        );
+        let tips = [
+            (
+                HubButton::FindCommands,
+                Icon::Search,
+                tr!("hub-tip-search"),
+                search,
+                ShellRequest::Palette,
+            ),
+            (
+                HubButton::OpenFiles,
+                Icon::FileOpen,
+                tr!("hub-tip-open"),
+                tr!("hub-tip-open-detail"),
+                ShellRequest::Command("file.open".to_owned()),
+            ),
+            (
+                HubButton::MakeItYours,
+                Icon::Settings,
+                tr!("hub-tip-yours"),
+                tr!("hub-tip-yours-detail"),
+                ShellRequest::OpenSettings(None),
+            ),
+        ];
+        let (columns, each) = if narrow {
+            (1, width)
+        } else {
+            kit::balanced_grid(width, theme.space(Space::S9) * 5.0, gap, tips.len())
+        };
+        let height = density.icon_button() + theme.space(Space::S5) * 2.0;
+        for row in tips.chunks(columns) {
+            ui.horizontal(|ui| {
+                for (button, icon, name, detail, request) in row {
+                    let salt = format!("{button:?}");
+                    // The search's tip names its key too.
+                    let tip = match (button, &key) {
+                        (HubButton::FindCommands, Some(key)) => format!("{name} ({key})"),
+                        _ => name.clone(),
+                    };
+                    let response = kit::work_button(
+                        ui,
+                        vec2(each, height),
+                        (*icon, name, detail),
+                        false,
+                        &tip,
+                        &salt,
+                        theme,
+                    );
+                    self.hub.buttons.push((button.clone(), response.rect));
+                    self.hub.walk.push(response.clone());
+                    if response.clicked() {
+                        acts.push(HubAct::Request(request.clone()));
+                    }
+                }
+            });
+        }
     }
 
     /// Your work: Recent, Projects, Unsaved work, Favorites and, where
@@ -402,6 +588,7 @@ impl Shell {
                         vec2(each, height),
                         (*icon, name, detail),
                         *attention,
+                        name,
                         &salt,
                         theme,
                     );
