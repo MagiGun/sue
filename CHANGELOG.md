@@ -191,6 +191,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint, Edit, Change Image Resolution resamples with the same
+  bicubic resampler as every export, so a picture made larger keeps
+  crisper edges and one made smaller stays clean at its transparent edges.
 - Settings is regrouped: General (with updates), Language, Appearance,
   Display and Performance, Sound, Files, a page for each studio, Keyboard
   Shortcuts, Extensions and Advanced. Rows most people never need wait

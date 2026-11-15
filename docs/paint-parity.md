@@ -202,7 +202,7 @@ The order of work is the plan at the end.
 | Mesh Transformation | Edit > Transform | partial | Command exists; Clip Studio 5.1 made its points editable |
 | Puppet Warp | Edit > Transform | done | Pins, Alt removes one |
 | Flip Horizontal, Flip Vertical, Rotate 180 (the layer) | Edit > Transform | done | |
-| Change Image Resolution | Edit > Change Image Resolution | done | |
+| Change Image Resolution | Edit > Change Image Resolution | done | Bicubic, through the resampler every export uses |
 | Change Canvas Size | Edit > Change Canvas Size | done | Around a reference point |
 | Change Canvas Height (webtoons) | Edit > Change Canvas Height | partial | It opens Change Canvas Size to do it |
 | Crop | Edit > Crop | done | To the selection |
