@@ -130,7 +130,7 @@ fn story_commands() -> Vec<&'static sue_wm::Command<sue_paint::SuePaint>> {
 fn every_story_command_runs_through_the_registry() {
     let mut driver = PaintDriver::new("paint-cmd-story-all");
     let commands = story_commands();
-    assert_eq!(commands.len(), 22, "the Story group");
+    assert_eq!(commands.len(), 23, "the Story group");
     // Once on a lone picture, once on the middle page of a story of
     // three: nothing says it is missing, and whatever opened closes.
     for round in 0..2 {
@@ -197,7 +197,8 @@ fn story_commands_have_their_icons_and_flags() {
             "story.editor",
             "story.import_text",
             "story.export_page",
-            "story.export_pages"
+            "story.export_pages",
+            "story.preview_binding"
         ]
     );
 }
