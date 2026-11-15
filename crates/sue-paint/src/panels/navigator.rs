@@ -81,14 +81,20 @@ impl SuePaint {
             let p = doc.view.to_picture(viewport, size, corner);
             thumb.min + p.to_vec2() * scale
         });
-        // Clipped: zoomed out, the view is larger than the picture.
-        ui.painter()
-            .with_clip_rect(thumb_area)
-            .add(Shape::closed_line(
-                corners.to_vec(),
-                // Red, as Clip Studio Paint draws the part the canvas shows.
-                Stroke::new(1.5, Color32::from_rgb(220, 40, 40)),
-            ));
+        // Clipped: zoomed out, the view is larger than the picture. The
+        // theme's own frame (rule 10 of the 0.0.8 plan: never Clip Studio
+        // Paint's red): the focus color over a wider line of the shadow
+        // color, so it reads on light and dark pictures alike.
+        let line = theme.selected_stroke();
+        let clipped = ui.painter().with_clip_rect(thumb_area);
+        clipped.add(Shape::closed_line(
+            corners.to_vec(),
+            Stroke::new(line.width + 2.0, theme.shadow),
+        ));
+        clipped.add(Shape::closed_line(
+            corners.to_vec(),
+            Stroke::new(line.width, theme.focus()),
+        ));
         let response = ui.interact(
             thumb_area,
             Id::unique("sue-paint-navigator"),
