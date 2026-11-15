@@ -436,7 +436,7 @@ impl Dialog {
             )
             .fixed(sue_wm::fonts::MANAGE_SIZE.y)
             .enter_is_the_bodys(),
-            Dialog::Colorize(_) => Look::new(tr!("colorize"), Form, ok()),
+            Dialog::Colorize(_) => Look::new(tr!("colorize"), Form, Footer::none()),
             // Its body draws its own OK and Cancel, by its preview.
             Dialog::Correction(_, filter, ..) => Look::new(
                 filter.label(),
