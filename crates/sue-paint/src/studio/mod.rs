@@ -419,6 +419,9 @@ pub struct SuePaint {
     pub(crate) color_sets: crate::colorsets::ColorSets,
     /// The color set's settings menu is open.
     pub(crate) set_menu: bool,
+    /// What the color palettes keep between frames: the Color Slider's
+    /// mode, the Color Set's menu and the swatch being dragged.
+    pub(crate) color_ui: crate::colorsets::ColorUi,
     /// Navigator or Sub View.
     pub(crate) nav_tab: u8,
     /// Each picture's version when last saved or opened, for the tabs'
@@ -899,6 +902,7 @@ impl Default for SuePaint {
             sub_view: crate::subview::SubView::default(),
             color_sets: crate::colorsets::ColorSets::default(),
             set_menu: false,
+            color_ui: crate::colorsets::ColorUi::default(),
             nav_tab: 0,
             clean: HashMap::new(),
             pending_export: None,
