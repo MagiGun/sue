@@ -165,7 +165,7 @@ impl SueWriter {
         };
         let hint = tr!("fit-page-window-show-size");
         let zoom = button("writer-zoom-shown", &label).ghost().hint(&hint);
-        let width = zoom.size(ui.painter(), theme, Density::Compact).x;
+        let width = zoom.size(ui.painter(), theme, Density::of(ui)).x;
         let place = at.take(width);
         if zoom.show_at(ui, place, theme).clicked() {
             run = Some(if self.fit {
@@ -193,7 +193,7 @@ impl SueWriter {
         let options = [tr!("draft"), tr!("page")];
         let chosen = (self.view == View::Document).then_some(usize::from(self.paged));
         let views = segmented("writer-views", &options, chosen);
-        let width = views.size(ui.painter(), theme, Density::Compact).x;
+        let width = views.size(ui.painter(), theme, Density::of(ui)).x;
         let place = at.take(width);
         if let Some(index) = views.show_at(ui, place, theme).picked {
             run = Some(["view.draft", "view.page"][index]);
@@ -253,7 +253,7 @@ impl SueWriter {
         theme: &Theme,
     ) -> (Option<&'static str>, bool) {
         let mut action = None;
-        let line = Density::Compact.control_height();
+        let line = Density::of(ui).control_height();
         let hint = tr!("find");
         let query = search_field("writer-find", &mut find.query)
             .hint(&hint)

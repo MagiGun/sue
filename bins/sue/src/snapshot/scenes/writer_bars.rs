@@ -9,10 +9,12 @@ use super::super::Tour;
 /// Where the next frame draws `text` above `below` (in points), the
 /// leftmost first.
 fn text_above(tour: &mut Tour<'_>, text: &str, below: f32) -> Option<Rect> {
-    let output = tour.camera.frame(&mut tour.runtime);
+    let mut output = tour.camera.frame(&mut tour.runtime);
+    // The frame's new textures are the painter's (a font drawn at a new
+    // size), and none is left in the output when it is dropped.
     tour.camera
         .painter
-        .apply_textures(output.textures_delta.clone());
+        .apply_textures(std::mem::take(&mut output.textures_delta));
     let mut found = Vec::new();
     for clipped in &output.shapes {
         let mut look = |shape: &egui::Shape| {
