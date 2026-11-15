@@ -184,21 +184,18 @@ fn sue_paint_palettes_drag_by_their_title_bars() {
         after.x < 400.0,
         "the Layer palette moved to the left column: {before:?} then {after:?}"
     );
-    // Every other palette drags by its title too, to the other side.
+    // Every other palette drags by its tab too, to the other side: by
+    // its name or, where the names do not fit, by its icon.
     let mut stuck = Vec::new();
-    for name in [
-        "Tool Property",
-        "Color Wheel",
-        "Color Set",
-        "Navigator",
-        "Color Slider",
+    for (name, key) in [
+        ("Tool Property", "tool_property"),
+        ("Color Wheel", "color"),
+        ("Color Set", "color_set"),
+        ("Navigator", "navigator"),
+        ("Color Slider", "color_slider"),
     ] {
-        let Some(from) = texts
-            .iter()
-            .find(|(text, at)| text == name && at.y > 40.0)
-            .map(|(_, at)| *at + vec2(10.0, 6.0))
-        else {
-            stuck.push(format!("{name}: no title drawn"));
+        let Some(from) = sue_wm::dock::tab_place(&ctx, key).map(|place| place.center()) else {
+            stuck.push(format!("{name}: no tab drawn"));
             continue;
         };
         let to = if from.x < 720.0 {
@@ -216,10 +213,7 @@ fn sue_paint_palettes_drag_by_their_title_bars() {
         for _ in 0..10 {
             texts = step(&mut runtime, Vec::new());
         }
-        let moved = texts
-            .iter()
-            .find(|(text, at)| text == name && at.y > 40.0)
-            .map(|(_, at)| *at);
+        let moved = sue_wm::dock::tab_place(&ctx, key).map(|place| place.center());
         if moved.is_none_or(|at| (at.x < 720.0) == (from.x < 720.0)) {
             stuck.push(format!("{name}: {from:?} then {moved:?}"));
         }
@@ -362,13 +356,12 @@ fn sue_paint_tears_a_tab_off_into_a_palette_of_its_own() {
     let texts = paint.settle(1);
     let left = egui::Rect::from_min_max(Pos2::new(0.0, 40.0), Pos2::new(400.0, 900.0));
     let right = egui::Rect::from_min_max(Pos2::new(720.0, 40.0), Pos2::new(1440.0, 900.0));
-    // The color wheel palette's second tab, Color Slider: by its name
-    // when the names fit, else the icon right after the chosen tab.
-    let wheel = text_in(&texts, "Color Wheel", left).expect("the Color Wheel tab");
-    let tab = text_in(&texts, "Color Slider", left).map_or_else(
-        || Pos2::new(wheel.right() + 14.0 + 2.0 + 16.0, wheel.center().y),
-        |rect| rect.center(),
-    );
+    // The color wheel palette's second tab, Color Slider: its name, or
+    // its icon where the names do not fit.
+    let tab = sue_wm::dock::tab_place(&paint.ctx, "color_slider")
+        .expect("the Color Slider tab")
+        .center();
+    assert!(left.contains(tab), "{tab:?}");
     assert!(text_in(&texts, "Color Slider", right).is_none());
     let texts = paint.drag(tab, Pos2::new(1300.0, 700.0), egui::PointerButton::Primary);
     assert!(
@@ -379,8 +372,9 @@ fn sue_paint_tears_a_tab_off_into_a_palette_of_its_own() {
         text_in(&texts, "Color Slider", left).is_none(),
         "and no longer a tab at the left"
     );
+    let wheel = sue_wm::dock::tab_place(&paint.ctx, "color").expect("the Color Wheel tab");
     assert!(
-        text_in(&texts, "Color Wheel", left).is_some(),
+        left.contains(wheel.center()),
         "the color wheel stays where it was"
     );
 }
@@ -408,16 +402,19 @@ fn sue_paint_starts_in_the_clip_studio_style() {
     let property = below(&paint, "Tool Property", top).expect("Tool Property");
     let size = below(&paint, "Brush Size", top).expect("Brush Size");
     assert!(sub.top() < property.top() && property.top() < size.top());
-    for name in [
-        "Color Wheel",
-        "Color Slider",
-        "Color Set",
-        "Intermediate Color",
-        "Approximate Color",
-        "Color History",
+    for key in [
+        "color",
+        "color_slider",
+        "color_set",
+        "intermediate_color",
+        "approximate_color",
+        "color_history",
     ] {
-        let tab = below(&paint, name, size.bottom()).expect(name);
-        assert!(tab.left() < 400.0, "{name} at the left: {tab:?}");
+        let tab = sue_wm::dock::tab_place(&paint.ctx, key).expect(key);
+        assert!(
+            tab.left() < 400.0 && tab.top() > size.bottom(),
+            "{key} at the left: {tab:?}"
+        );
     }
     // Navigator, Layer Property and Layer at the right; the Timeline
     // folded to an icon under the canvas (no palette shows its name).
@@ -511,8 +508,9 @@ fn sue_paint_palette_menu_sits_top_left_and_hides_its_palette() {
     let top = paint.page_top() + 40.0;
     paint.settle(4);
     let title = below(&paint, "Layer Property", top).expect("Layer Property");
-    // The menu button, left of the title, at the header's left end.
-    let button = egui::pos2(title.left() - 48.0, title.center().y);
+    // The menu button, left of the tab, at the header's left end.
+    let tab = sue_wm::dock::tab_place(&paint.ctx, "layer_property").expect("its tab");
+    let button = egui::pos2(tab.left() - 14.0, tab.center().y);
     let press = |pressed| egui::Event::PointerButton {
         pos: button,
         button: egui::PointerButton::Primary,
@@ -537,4 +535,304 @@ fn sue_paint_palette_menu_sits_top_left_and_hides_its_palette() {
     paint.settle(4);
     let back = below(&paint, "Layer Property", top).expect("shown again");
     assert!(back.left() > 1000.0, "at the right again: {back:?}");
+}
+
+/// Every palette that can show in Sue Paint's dock, by key and name.
+const PALETTES: [(&str, &str); 21] = [
+    ("sub_tool", "Sub Tool"),
+    ("tool_property", "Tool Property"),
+    ("brush_grid", "Brush Size"),
+    ("brush_size", "Tool Sliders"),
+    ("color", "Color Wheel"),
+    ("color_slider", "Color Slider"),
+    ("color_set", "Color Set"),
+    ("intermediate_color", "Intermediate Color"),
+    ("approximate_color", "Approximate Color"),
+    ("color_history", "Color History"),
+    ("navigator", "Navigator"),
+    ("sub_view", "Sub View"),
+    ("item_bank", "Item Bank"),
+    ("info", "Information"),
+    ("layer_property", "Layer Property"),
+    ("layer", "Layer"),
+    ("history", "History"),
+    ("auto_action", "Auto Action"),
+    ("animation_cels", "Animation Cels"),
+    ("material", "Material"),
+    ("timeline", "Timeline"),
+];
+
+/// What is wrong with the palettes' names in the dock as `paint` drew
+/// them last: a palette named twice (its tab and a title of its own), a
+/// tab whose name is cut short or runs out of its tab.
+fn name_faults(paint: &PaintDriver) -> Vec<String> {
+    let top = paint.page_top() + 40.0;
+    let mut faults = Vec::new();
+    for (key, name) in PALETTES {
+        let Some(tab) = sue_wm::dock::tab_place(&paint.ctx, key) else {
+            continue;
+        };
+        // Named more than once around its header: the dock's tab and a
+        // title of the palette's own.
+        let drawn: Vec<egui::Rect> = paint
+            .texts
+            .iter()
+            .filter(|(text, rect)| {
+                text == name
+                    && rect.top() >= top
+                    && (rect.center().y - tab.center().y).abs() < tab.height() * 1.5
+                    && (rect.center().x - tab.center().x).abs() < 400.0
+            })
+            .map(|(_, rect)| *rect)
+            .collect();
+        if drawn.len() > 1 {
+            faults.push(format!("{name} is named {} times: {drawn:?}", drawn.len()));
+        }
+        // What the tab shows: its whole name inside it, or its icon alone;
+        // never its name cut short.
+        for (text, rect) in &paint.texts {
+            if !tab.contains(rect.center()) {
+                continue;
+            }
+            let cut = text.ends_with('\u{2026}')
+                || (text != name && !text.is_empty() && name.starts_with(text.as_str()));
+            if cut {
+                faults.push(format!("the {name} tab shows {text:?}"));
+            } else if text == name
+                && (rect.left() < tab.left() - 0.5 || rect.right() > tab.right() + 0.5)
+            {
+                faults.push(format!("{name} runs out of its tab: {rect:?} in {tab:?}"));
+            }
+        }
+    }
+    faults
+}
+
+/// Phase 3 left every palette named twice (the dock's tab strip and the
+/// palette's own header) and the color tabs cut mid-word in a narrow
+/// column ("Color Wh"). Each palette is named once now, by its tab, and
+/// a tab with no room for its name shows its icon, its name on hover.
+#[test]
+fn sue_paint_names_each_palette_once_and_never_cuts_a_name() {
+    for fresh in [true, false] {
+        let mut paint = if fresh {
+            PaintDriver::fresh("paint-names-once")
+        } else {
+            PaintDriver::new("paint-names-once-kept")
+        };
+        paint.step(vec![egui::Event::PointerMoved(egui::pos2(720.0, 400.0))]);
+        paint.settle(4);
+        let faults = name_faults(&paint);
+        assert!(faults.is_empty(), "fresh {fresh}:\n{}", faults.join("\n"));
+        // Every palette of the left column's color group has a tab there.
+        for key in ["color", "color_slider", "color_set"] {
+            let tab = sue_wm::dock::tab_place(&paint.ctx, key)
+                .unwrap_or_else(|| panic!("fresh {fresh}: no {key} tab"));
+            assert!(tab.right() < 400.0, "fresh {fresh}: {key} at {tab:?}");
+        }
+    }
+    // A tab showing its icon alone names its palette on hover.
+    let mut paint = PaintDriver::fresh("paint-names-hover");
+    paint.settle(2);
+    let (tab, name) = PALETTES
+        .iter()
+        .find_map(|(key, name)| {
+            let tab = sue_wm::dock::tab_place(&paint.ctx, key)?;
+            let named = paint
+                .texts
+                .iter()
+                .any(|(text, rect)| text == name && tab.contains(rect.center()));
+            (!named).then_some((tab, *name))
+        })
+        .expect("a narrow column folds some tabs to their icons");
+    paint.step(vec![egui::Event::PointerMoved(tab.center())]);
+    paint.settle(60);
+    assert!(
+        paint
+            .texts
+            .iter()
+            .any(|(text, rect)| text == name && !tab.contains(rect.center())),
+        "hovering the {name} icon shows its name: {:?}",
+        paint.texts
+    );
+}
+
+/// A tab dragged along its header takes another place among the tabs;
+/// the palette that showed still does.
+#[test]
+fn sue_paint_drags_a_tab_to_another_place_in_its_header() {
+    let mut paint = PaintDriver::fresh("paint-tab-order");
+    paint.settle(2);
+    let place = |paint: &PaintDriver, key| {
+        sue_wm::dock::tab_place(&paint.ctx, key).unwrap_or_else(|| panic!("the {key} tab"))
+    };
+    let wheel = place(&paint, "color");
+    let set = place(&paint, "color_set");
+    assert!(wheel.left() < set.left(), "Color Wheel comes first");
+    // Along the header, to the left of the first tab.
+    let to = egui::pos2(wheel.left() + 2.0, wheel.center().y);
+    paint.drag(set.center(), to, egui::PointerButton::Primary);
+    let wheel = place(&paint, "color");
+    let set = place(&paint, "color_set");
+    assert!(
+        set.left() < wheel.left(),
+        "Color Set comes first now: {set:?} {wheel:?}"
+    );
+    assert!(set.right() < 400.0, "in the same header");
+    assert!(
+        text_in(&paint.texts, "Color Wheel", wheel.expand(2.0)).is_some(),
+        "the Color Wheel still shows"
+    );
+}
+
+/// Where the button `index` of a floating palette's header is (roll up,
+/// dock again, close), as the last frame drew it.
+fn float_button(paint: &PaintDriver, key: &str, index: usize) -> Pos2 {
+    paint
+        .ctx
+        .data(|data| {
+            data.get_temp::<egui::Rect>(egui::Id::unique(("sue-paint-float-button", key, index)))
+        })
+        .expect("the header's buttons")
+        .center()
+}
+
+/// A click at `at`, and the frames after.
+fn click(paint: &mut PaintDriver, at: Pos2) {
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    paint.step(vec![egui::Event::PointerMoved(at)]);
+    paint.step(vec![press(true)]);
+    paint.step(vec![press(false)]);
+    paint.settle(4);
+}
+
+/// A floating palette's header is its title bar: its name once, its
+/// menu, and buttons to roll it up, dock it again and close it. Dragged
+/// by its header over the canvas, its window moves.
+#[test]
+fn sue_paint_floating_palette_moves_rolls_up_and_docks_again() {
+    let mut paint = PaintDriver::fresh("paint-float-header");
+    paint.settle(2);
+    let top = paint.page_top() + 40.0;
+    // Color Set shown, then its menu (left of its header), then Float in
+    // a Window.
+    let tab = sue_wm::dock::tab_place(&paint.ctx, "color_set").expect("the Color Set tab");
+    click(&mut paint, tab.center());
+    let first = sue_wm::dock::tab_place(&paint.ctx, "color").expect("the Color Wheel tab");
+    let tab = sue_wm::dock::tab_place(&paint.ctx, "color_set").expect("the Color Set tab");
+    click(
+        &mut paint,
+        egui::pos2(first.left().min(tab.left()) - 14.0, tab.center().y),
+    );
+    paint.click_text("Float in a Window");
+    paint.settle(4);
+    // It floats where it was, its header buttons drawn.
+    let title = below(&paint, "Color Set", top).expect("the floating Color Set");
+    let _ = float_button(&paint, "color_set", 2);
+    let faults = name_faults(&paint);
+    assert!(faults.is_empty(), "{}", faults.join("\n"));
+    // Dragged by its header over the canvas, the window moves with the
+    // pointer.
+    let by = egui::pos2(720.0, 400.0) - title.center();
+    paint.drag(
+        title.center(),
+        title.center() + by,
+        egui::PointerButton::Primary,
+    );
+    let moved = below(&paint, "Color Set", top).expect("still floating");
+    assert!(
+        (moved.center() - (title.center() + by)).length() < 6.0,
+        "{title:?} moved by {by:?} to {moved:?}"
+    );
+    // Rolled up: only its header shows; unrolled: the palette again.
+    assert!(paint.rect_of("Default").is_some(), "the palette shows");
+    let at = float_button(&paint, "color_set", 0);
+    click(&mut paint, at);
+    assert!(
+        paint.rect_of("Default").is_none(),
+        "rolled up to its header"
+    );
+    let rolled = below(&paint, "Color Set", top).expect("its header stays");
+    assert!(
+        (rolled.center() - moved.center()).length() < 2.0,
+        "{moved:?} then {rolled:?}"
+    );
+    let at = float_button(&paint, "color_set", 0);
+    click(&mut paint, at);
+    assert!(paint.rect_of("Default").is_some(), "unrolled");
+    // Docked again, in the column on the side it is nearer.
+    let at = float_button(&paint, "color_set", 1);
+    click(&mut paint, at);
+    let docked = sue_wm::dock::tab_place(&paint.ctx, "color_set").expect("docked");
+    assert!(
+        docked.right() < 400.0 || docked.left() > 1000.0,
+        "docked in a column: {docked:?}"
+    );
+    // Floated again and closed by its X: hidden until the Window menu
+    // shows it again.
+    if let Some(applet) = paint
+        .runtime
+        .applets
+        .get_mut(&AppletId::new(sue_paint::ID).unwrap())
+    {
+        applet.navigate("dock/float/color_set");
+    }
+    paint.settle(4);
+    assert!(below(&paint, "Color Set", top).is_some(), "floating again");
+    let at = float_button(&paint, "color_set", 2);
+    click(&mut paint, at);
+    assert!(below(&paint, "Color Set", top).is_none(), "closed");
+    paint.click_text("Window");
+    paint.click_text("Color Set");
+    paint.settle(2);
+    assert!(below(&paint, "Color Set", top).is_some(), "shown again");
+}
+
+/// Where the dock's chrome button `name` (such as `close-side-left`) was
+/// drawn by the last frame.
+fn chrome_button(paint: &PaintDriver, name: &str) -> egui::Rect {
+    paint
+        .ctx
+        .data(|data| {
+            data.get_temp::<(u64, egui::Rect)>(egui::Id::unique(("sue-paint-chrome-place", name)))
+        })
+        .unwrap_or_else(|| panic!("the {name} button"))
+        .1
+}
+
+/// The buttons at the top of a side are the shared icon buttons: each
+/// names itself on hover, and hiding the side and showing it again
+/// brings its palettes back where they were.
+#[test]
+fn sue_paint_side_buttons_name_themselves_and_hide_and_show_a_side() {
+    let mut paint = PaintDriver::fresh("paint-side-buttons");
+    paint.settle(2);
+    let top = paint.page_top() + 40.0;
+    let before = below(&paint, "Sub Tool", top).expect("Sub Tool at the left");
+    assert!(before.right() < 400.0, "{before:?}");
+    let hide = chrome_button(&paint, "close-side-left");
+    paint.step(vec![egui::Event::PointerMoved(hide.center())]);
+    paint.settle(60);
+    assert!(
+        paint.rect_of("Hide palettes").is_some(),
+        "its name on hover: {:?}",
+        paint.texts
+    );
+    click(&mut paint, hide.center());
+    assert!(
+        below(&paint, "Sub Tool", top).is_none(),
+        "the left side is hidden"
+    );
+    let open = chrome_button(&paint, "open-side-left");
+    click(&mut paint, open.center());
+    let after = below(&paint, "Sub Tool", top).expect("shown again");
+    assert!(
+        (after.center() - before.center()).length() < 2.0,
+        "{before:?} then {after:?}"
+    );
 }
