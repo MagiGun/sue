@@ -56,6 +56,21 @@ fn layer_names(paint: &PaintDriver) -> Vec<String> {
         .collect()
 }
 
+/// Every entity in the arena, ids and content, in id order: what undo
+/// and redo must give back exactly (rule 7).
+fn entities(paint: &PaintDriver) -> Vec<sue_core::Entity> {
+    let mut all: Vec<sue_core::Entity> = paint
+        .runtime
+        .engine
+        .world
+        .arena
+        .iter()
+        .map(|(_, entity)| entity.clone())
+        .collect();
+    all.sort_by_key(sue_core::Entity::id);
+    all
+}
+
 /// The text of Sue's notice, if one shows.
 fn notice(paint: &PaintDriver) -> String {
     paint
@@ -416,6 +431,7 @@ fn a_material_added_in_the_hub_is_listed_pasted_on_the_canvas_and_deleted() {
     assert_eq!(starfish(&paint.root), 2, "a copy in the materials folder");
     // A click with the canvas open puts it on the canvas, in Sue Paint.
     let before = layer_names(&paint);
+    let arena_before = entities(&paint);
     paint.click_text("Starfish");
     paint.settle(80);
     assert_eq!(
@@ -426,13 +442,15 @@ fn a_material_added_in_the_hub_is_listed_pasted_on_the_canvas_and_deleted() {
     let after = layer_names(&paint);
     let count = |names: &[String]| names.iter().filter(|name| *name == "Starfish").count();
     assert_eq!(count(&after), count(&before) + 1, "{after:?}");
-    // One undo step on the canvas's own history.
+    let arena_after = entities(&paint);
+    // One undo step on the canvas's own history gives back the arena as
+    // it was, ids included; redo the arena with the paste.
     paint.command("edit.undo");
     paint.settle(4);
-    assert_eq!(layer_names(&paint), before);
+    assert!(entities(&paint) == arena_before, "undo restores the arena");
     paint.command("edit.redo");
     paint.settle(4);
-    assert_eq!(layer_names(&paint), after);
+    assert!(entities(&paint) == arena_after, "redo restores the paste");
 
     // Its popup: Delete, then Really delete.
     to_materials(&mut paint);
