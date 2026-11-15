@@ -21,6 +21,10 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Writer's corkboard, outliner and inspector: Enter opens the card
   or row that has the keyboard; an empty folder says what to do and
   offers New Document; the synopsis and notes fields grow as you write.
+- Sue Writer's binder: the up and down arrows walk its rows and show
+  each one, and F2 renames a document also after a click has put you
+  in its text. The inspector names its Label and Status lists and shows
+  the label's color.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own
