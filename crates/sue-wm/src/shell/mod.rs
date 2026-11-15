@@ -219,6 +219,9 @@ pub struct Shell {
     /// Quitting: the work not saved that was let go without saving. While
     /// it is `Some`, each other piece of work not saved is asked about.
     quitting: Option<Vec<(AppletId, String)>>,
+    /// Quitting: the person chose Stop and Quit, so the exports still
+    /// running were stopped and are not asked about again.
+    quit_stops_work: bool,
     /// Where the last frame drew the rows (and buttons) of the Hub's lists.
     hub_rows: Vec<(HubRow, Rect)>,
     /// The kept work whose Discard was clicked once and asks again.
@@ -315,6 +318,7 @@ impl Shell {
             window_title: "Sue".to_owned(),
             own_frame: false,
             quitting: None,
+            quit_stops_work: false,
             hub_rows: Vec::new(),
             discard_armed: None,
             booted: false,
@@ -386,6 +390,7 @@ impl Shell {
     pub fn begin_quit(&mut self) {
         if self.quitting.is_none() {
             self.quitting = Some(Vec::new());
+            self.quit_stops_work = false;
         }
         self.touch();
     }

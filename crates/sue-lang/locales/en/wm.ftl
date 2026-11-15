@@ -441,3 +441,8 @@ batch-and-failed = { $text }, { $failed } failed
 exporting-file = Exporting { $name }
 importing-file = Bringing in { $name }
 copying-file = Copying { $name }
+# Quitting while an export runs.
+keep-exporting = Keep Exporting
+stop-and-quit = Stop and Quit
+quit-stops-export = { $name } is still being exported. If Sue quits now, the export stops and nothing of it is written.
+quit-stops-exports = { $count } exports are still running. If Sue quits now, they stop and nothing of them is written.

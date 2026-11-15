@@ -1004,7 +1004,8 @@ Once a canvas is open:
   no file, not even part of one), and the Hub's Transfers list has them
   too. What is exported is the picture as it was when you started the
   export; what you draw meanwhile is not in it. When it is done the
-  notice says where the file went and offers Show in Folder.
+  notice says where the file went and offers Show in Folder. Quitting
+  while one runs asks first: Keep Exporting, or Stop and Quit.
 
 `Ctrl+N` makes a new canvas: pick a preset or a paper size, a unit, a
 resolution and a paper color. `Ctrl+O` opens a PNG, JPEG or JPEG XL picture,

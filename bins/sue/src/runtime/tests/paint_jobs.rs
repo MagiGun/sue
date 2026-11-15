@@ -329,3 +329,53 @@ fn sue_paint_export_timelapse_previews_the_video_and_takes_its_shape() {
     }
 }
 
+#[test]
+fn sue_paint_quitting_while_an_export_runs_asks_and_stopping_writes_nothing() {
+    let mut paint = PaintDriver::new("paint-jobs-quit");
+    walk(&mut paint);
+    let root = paint.root.clone();
+    let gif = root.join("Walk.gif");
+    sue_paint::hold_exports_to(&gif, true);
+    start_export(&mut paint, "file.export.gif", "anim-gif", &gif);
+    frame(&mut paint);
+    let ask = |paint: &mut PaintDriver| {
+        paint.runtime.shell.begin_quit();
+        paint.settle(3);
+        // The work not saved is asked about first.
+        paint.click_text("Do Not Save");
+        paint.settle(3);
+        assert!(
+            paint
+                .texts
+                .iter()
+                .any(|(text, _)| text.starts_with("Walk.gif is still being exported")),
+            "{:?}",
+            paint.texts
+        );
+    };
+    // Keep Exporting: Sue stays open and the export goes on.
+    ask(&mut paint);
+    paint.click_text("Keep Exporting");
+    paint.settle(3);
+    assert!(!paint.runtime.shell.quitting());
+    assert!(!paint.runtime.wants_exit());
+    assert!(paint.runtime.transfers.running() > 0, "it goes on");
+    // Stop and Quit: the export stops, nothing is written, Sue quits.
+    ask(&mut paint);
+    paint.click_text("Stop and Quit");
+    paint.settle(3);
+    assert!(paint.runtime.wants_exit(), "{:?}", paint.texts);
+    while paint.runtime.transfers.poll() {
+        std::thread::yield_now();
+    }
+    sue_paint::hold_exports_to(&gif, false);
+    let last = paint
+        .runtime
+        .transfers
+        .list()
+        .iter()
+        .find(|transfer| transfer.path.as_deref() == Some(gif.as_path()))
+        .map(|transfer| transfer.state.clone());
+    assert_eq!(last, Some(sue_wm::TransferState::Cancelled));
+    assert!(!gif.exists(), "nothing written");
+}
