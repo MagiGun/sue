@@ -7,18 +7,22 @@
 //! button, the tab header, the flow layout, the wedge and tall sliders,
 //! and a single palette with its torn-off header.
 
+pub(crate) mod auto_action;
 mod brush_size;
 mod cels;
 mod color;
 mod color_set;
 mod command_bar;
 mod history;
+mod info;
+pub(crate) mod item_bank;
 mod layer;
 mod layer_property;
 mod material;
 mod navigator;
 mod quick_access;
 mod sub_tool;
+mod sub_view;
 mod timeline;
 mod tool;
 mod tool_property;
