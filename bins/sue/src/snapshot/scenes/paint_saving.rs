@@ -6,8 +6,8 @@ use sue_wm::{FilePick, ShellRequest};
 
 use super::super::Tour;
 
-/// 31a. Save on a canvas opened from a `.clip`: export back, or keep in
-/// a Sue project. 31b. Save on a canvas from a PNG that has two layers by
+/// 35a. Save on a canvas opened from a `.clip`: export back, or keep in
+/// a Sue project. 35b. Save on a canvas from a PNG that has two layers by
 /// then: the layers warning.
 pub(super) fn questions(tour: &mut Tour<'_>) -> Result<(), String> {
     let size = tour.camera.size;
@@ -43,8 +43,8 @@ pub(super) fn questions(tour: &mut Tour<'_>) -> Result<(), String> {
     std::fs::write(&png, sue_io::encode_png(&tile)?).map_err(|error| error.to_string())?;
     let paint = tour.paint.clone();
     for (path, name) in [
-        (&clip, "31a-sue-paint-save-clip"),
-        (&png, "31b-sue-paint-save-merge"),
+        (&clip, "35a-sue-paint-save-clip"),
+        (&png, "35b-sue-paint-save-merge"),
     ] {
         tour.request(ShellRequest::Picked {
             pick: FilePick::open(Some(paint.clone()), "open", "Open"),

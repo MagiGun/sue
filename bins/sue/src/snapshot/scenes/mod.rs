@@ -123,7 +123,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 30. The gallery of the design system: per preset, at 1.5 and 2.0
     // pixels per point and per density, with the focus ring showing.
     gallery::scenes(tour)?;
-    // 31a and 31b. Save's question on a canvas from a .clip and from a
+    // 35a and 35b. Save's question on a canvas from a .clip and from a
     // PNG.
     paint_saving::questions(tour)?;
     // 28n to 28r. The export settings dialog and the batch list.
