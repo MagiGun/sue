@@ -1834,7 +1834,7 @@ fn sue_paint_timeline_menus_insert_frames_and_timelapse_ask_first() {
     ] {
         let at = texts
             .iter()
-            .filter(|(text, rect)| text == name && rect.top() > above && rect.top() < header.top())
+            .filter(|(text, rect)| text == name && rect.top() > above)
             .map(|(_, rect)| *rect)
             .min_by(|a, b| a.top().total_cmp(&b.top()))
             .unwrap_or_else(|| panic!("{name} in the palette's menu, below the last: {texts:?}"));
@@ -1857,7 +1857,6 @@ fn sue_paint_timeline_menus_insert_frames_and_timelapse_ask_first() {
             "Playback Settings",
             &["Playback Starts Here", "Audio Scrubbing", "Loop"][..],
         ),
-        ("Audio", &["Audio Clip Settings..."][..]),
     ] {
         let row = paint
             .texts
@@ -1876,6 +1875,14 @@ fn sue_paint_timeline_menus_insert_frames_and_timelapse_ask_first() {
         }
     }
     // Picking one runs it: the cels' pictures go.
+    let row = paint
+        .texts
+        .iter()
+        .find(|(text, rect)| text == "Thumbnail Size" && rect.top() < header.top())
+        .map(|(_, rect)| *rect)
+        .expect("Thumbnail Size");
+    paint.step(vec![egui::Event::PointerMoved(row.center())]);
+    paint.settle(30);
     paint.click_text("Thumbnails: None");
     paint.settle(2);
     let texts = click_at(&mut paint, menu);
@@ -2068,4 +2075,336 @@ fn sue_paint_timeline_menus_insert_frames_and_timelapse_ask_first() {
     paint.click_text("Delete");
     assert!(!recording(&paint), "stopped");
     assert_eq!(kept(), 0, "the recording was deleted");
+}
+
+/// The bar's readout: the frame shown, as it reads first.
+fn frame_read(texts: &[(String, egui::Rect)]) -> String {
+    texts
+        .iter()
+        .find(|(text, _)| text.contains(" to ") && text.contains("   "))
+        .map(|(text, _)| text.split_whitespace().next().unwrap_or("").to_owned())
+        .unwrap_or_else(|| panic!("the bar's readout: {texts:?}"))
+}
+
+/// Where the timeline's names column drew a name starting with `name`.
+fn track_name(
+    texts: &[(String, egui::Rect)],
+    header: egui::Rect,
+    name: &str,
+) -> Option<egui::Rect> {
+    texts
+        .iter()
+        .filter(|(text, rect)| {
+            text.starts_with(name) && rect.top() > header.bottom() + 20.0 && rect.left() < 580.0
+        })
+        .map(|(_, rect)| *rect)
+        .next()
+}
+
+#[test]
+fn sue_paint_narrow_timeline_bar_keeps_every_button_under_more() {
+    // AB-25: nothing is dropped from a narrow bar; Specify Cels is a
+    // submenu there. TRV-1: Insert Frame previews on the timeline.
+    // ABV-19: the key buttons are named.
+    let mut paint = PaintDriver::new("paint-timeline-more");
+    paint.command("anim.layer.folder");
+    paint.command("anim.cel.new");
+    // The Animation Cels column narrows the canvas and the timeline.
+    paint.command("window.cels");
+    let texts = paint.settle(6);
+    let header = timeline_header(&texts);
+    let bar_y = header.bottom() + 24.0;
+    let found = tips_along(
+        &mut paint,
+        bar_y,
+        header.left() - 60.0,
+        header.left() + 600.0,
+    );
+    let more = tip(&found, "More buttons");
+    let texts = click_at(&mut paint, more);
+    for name in [
+        "Insert Frame",
+        "Delete Frame",
+        "Add Keyframe to Layer",
+        "Enable Keyframes on This Layer",
+        "Enable Onion Skin",
+        "Specify cels: pick a cel of this folder",
+    ] {
+        assert!(
+            texts.iter().any(|(text, _)| text == name),
+            "{name} under More: {texts:?}"
+        );
+    }
+    // Specify Cels opens the folder's cels; Blank from here blanks the
+    // frame shown, as one step.
+    let specify = paint
+        .rect_of("Specify cels: pick a cel of this folder")
+        .expect("Specify Cels");
+    paint.step(vec![egui::Event::PointerMoved(specify.center())]);
+    let texts = paint.settle(30);
+    assert!(
+        texts.iter().any(|(text, _)| text == "Blank from here"),
+        "the folder's cels and a blank: {texts:?}"
+    );
+    let depth = paint.runtime.engine.history.depth();
+    paint.click_text("Blank from here");
+    let sequence = timeline_of(&paint);
+    let track = &sequence.tracks[sue_paint::anim::folders(&sequence)[0]];
+    assert_eq!(
+        sue_paint::anim::cel_at(track, sequence.rate, 0),
+        None,
+        "frame 1 is blank"
+    );
+    assert_eq!(paint.runtime.engine.history.depth(), depth + 1);
+    paint.command("edit.undo");
+    paint.settle(2);
+
+    // Insert Frame from More: the dialog, with Preview on; with Split
+    // clip ticked the timeline already shows the blank key after frame 1
+    // (an "x" on the folder's row) before OK.
+    let texts = click_at(&mut paint, more);
+    let insert = texts
+        .iter()
+        .find(|(text, _)| text == "Insert Frame")
+        .map(|(_, rect)| rect.center())
+        .expect("Insert Frame under More");
+    click_at(&mut paint, insert);
+    let texts = paint.settle(3);
+    assert!(
+        texts
+            .iter()
+            .any(|(text, _)| text == "Preview on the timeline"),
+        "{texts:?}"
+    );
+    let blank_keys = |texts: &[(String, egui::Rect)]| {
+        texts
+            .iter()
+            .filter(|(text, rect)| text == "x" && rect.top() > header.bottom())
+            .count()
+    };
+    assert_eq!(blank_keys(&texts), 0, "no blank key yet");
+    let before = arena_bytes(&paint);
+    paint.click_text("Split clip");
+    let texts = paint.settle(3);
+    assert_eq!(blank_keys(&texts), 1, "previewed: {texts:?}");
+    assert!(arena_bytes(&paint) == before, "a preview changes nothing");
+    // Without Preview the timeline shows what is.
+    paint.click_text("Preview on the timeline");
+    let texts = paint.settle(3);
+    assert_eq!(blank_keys(&texts), 0, "no preview");
+    paint.click_text("Cancel");
+    let texts = paint.settle(3);
+    assert_eq!(blank_keys(&texts), 0, "cancelled: nothing changed");
+    assert!(arena_bytes(&paint) == before);
+}
+
+#[test]
+fn sue_paint_timeline_nests_folders_and_shows_folder_keys_over_the_cels() {
+    // ABV-24: a folder holding an animation folder is its parent row.
+    // ABV-19: a folder's keys in a band over its cels, each named on
+    // hover.
+    let mut paint = PaintDriver::new("paint-timeline-nest");
+    // An animation folder, wrapped in a folder of its own, then a new
+    // timeline that gives each its row.
+    paint.command("anim.layer.folder");
+    paint.settle(2);
+    let arena = &paint.runtime.engine.world.arena;
+    let animation = arena
+        .iter()
+        .find(|(_, entity)| {
+            entity
+                .property("folder.animation")
+                .and_then(sue_core::Value::as_bool)
+                == Some(true)
+        })
+        .map(|(_, entity)| entity.id())
+        .expect("the animation folder");
+    paint.command("layer.folder_insert");
+    paint.settle(2);
+    let arena = &paint.runtime.engine.world.arena;
+    let parent = sue_paint::doc::folder_of(arena, animation).expect("wrapped in a folder");
+    let parent_name = arena.get_by_id(parent).unwrap().name().to_owned();
+    paint.new_timeline();
+    paint.command("anim.thumbnails.none");
+    let texts = paint.settle(4);
+    let header = timeline_header(&texts);
+    let parent_row = track_name(&texts, header, &parent_name)
+        .unwrap_or_else(|| panic!("{parent_name}: {texts:?}"));
+    let child_row =
+        track_name(&texts, header, "Folder 1").unwrap_or_else(|| panic!("Folder 1: {texts:?}"));
+    assert!(
+        child_row.top() > parent_row.top() && child_row.left() > parent_row.left() + 8.0,
+        "indented under its parent: {parent_row:?} {child_row:?}"
+    );
+    // The parent's fold arrow folds its rows, as the Layer palette's.
+    let found = tips_along(
+        &mut paint,
+        parent_row.center().y,
+        header.left() - 60.0,
+        parent_row.left(),
+    );
+    let fold = tip(&found, "Fold or Unfold the Folder");
+    let depth = paint.runtime.engine.history.depth();
+    let texts = click_at(&mut paint, fold);
+    assert!(
+        track_name(&texts, header, "Folder 1").is_none(),
+        "folded: {texts:?}"
+    );
+    assert!(!sue_paint::doc::is_open(
+        &paint.runtime.engine.world.arena,
+        parent
+    ));
+    assert_eq!(paint.runtime.engine.history.depth(), depth + 1);
+    paint.command("edit.undo");
+    let texts = paint.settle(3);
+    let child_row = track_name(&texts, header, "Folder 1").expect("open again");
+
+    // The animation folder picked by its row (its frames are blank):
+    // keyframes on, a key on frame 1, then a cel. The cel's name moves
+    // under the band of keys, and the key is named on hover.
+    click_at(&mut paint, child_row.center());
+    paint.command("anim.keyframes");
+    paint.command("anim.key.layer");
+    paint.command("anim.cel.new");
+    let texts = paint.settle(6);
+    let title = track_name(&texts, header, "Folder 1").expect("the folder's row");
+    let cel = texts
+        .iter()
+        .filter(|(text, rect)| {
+            text == "1"
+                && rect.left() > 580.0
+                && rect.top() >= title.top()
+                && rect.top() < title.top() + 60.0
+        })
+        .map(|(_, rect)| *rect)
+        .next()
+        .unwrap_or_else(|| panic!("cel 1 on its row: {texts:?}"));
+    assert!(
+        cel.center().y > title.center().y + 8.0,
+        "the cel under the band of keys: {title:?} {cel:?}"
+    );
+    let found = tips_along(
+        &mut paint,
+        title.center().y,
+        cel.left() - 6.0,
+        cel.left() + 40.0,
+    );
+    assert!(
+        found
+            .iter()
+            .any(|(text, _)| text.starts_with("Keyframe at frame 1:")),
+        "the key named on hover: {found:?}"
+    );
+}
+
+#[test]
+fn sue_paint_timeline_frames_take_the_keyboard_and_scrub_their_sound() {
+    // Focus rings on the frame cells: a click gives the row's frames the
+    // keyboard; the arrows, Home and End move the frame shown.
+    // ABV-9, A25V-16: Audio Scrubbing plays each frame reached by hand.
+    let mut paint = PaintDriver::new("paint-timeline-keys");
+    paint.command("anim.layer.folder");
+    paint.command("anim.cel.new");
+    let texts = paint.settle(4);
+    let header = timeline_header(&texts);
+    let one = texts
+        .iter()
+        .find(|(text, rect)| text == "1" && rect.top() > header.bottom() && rect.left() > 560.0)
+        .map(|(_, rect)| *rect)
+        .expect("frame 1 on the ruler");
+    let folder = track_name(&texts, header, "Folder 1").expect("the folder's row");
+    click_at(&mut paint, Pos2::new(one.center().x, folder.center().y));
+    assert!(
+        paint.ctx.memory(|memory| memory.focused()).is_some(),
+        "the frames hold the keyboard"
+    );
+    assert_eq!(frame_read(&paint.settle(2)), "1");
+    press(&mut paint, egui::Key::ArrowRight);
+    press(&mut paint, egui::Key::ArrowRight);
+    assert_eq!(frame_read(&paint.settle(2)), "3", "two frames on");
+    press(&mut paint, egui::Key::ArrowLeft);
+    assert_eq!(frame_read(&paint.settle(2)), "2");
+    press(&mut paint, egui::Key::End);
+    assert_eq!(frame_read(&paint.settle(2)), "24", "the last");
+    press(&mut paint, egui::Key::Home);
+    assert_eq!(frame_read(&paint.settle(2)), "1", "the first");
+
+    // A sound, then Audio Scrubbing: each frame stepped to plays its own
+    // sound, one frame long (a twelfth of a second at the least).
+    std::fs::create_dir_all(&paint.root).unwrap();
+    let tone = sue_core::PCMFloat1D::new(48_000, 1, vec![0.2; 96_000]).unwrap();
+    let path = paint.root.join("Tone.wav");
+    std::fs::write(&path, sue_io::encode_wav(&tone)).unwrap();
+    paint.runtime.request(
+        ShellRequest::Picked {
+            pick: FilePick::open(
+                Some(AppletId::new(sue_paint::ID).unwrap()),
+                "anim-audio",
+                "Import Audio",
+            ),
+            path,
+        },
+        &mut NoTextures,
+        paint.now,
+    );
+    paint.settle(2);
+    let loaded = |paint: &PaintDriver| {
+        paint
+            .runtime
+            .transport
+            .clip()
+            .filter(|clip| clip.owner == "sue-paint")
+            .map(|clip| (clip.start, clip.end))
+    };
+    paint.command("anim.next");
+    paint.settle(2);
+    assert_eq!(loaded(&paint), None, "no scrubbing until it is on");
+    paint.command("anim.audio.scrub");
+    paint.command("anim.next");
+    paint.settle(2);
+    // Frame 3 at 24 a second: 2 / 24 s into the 48 kHz mix.
+    assert_eq!(loaded(&paint), Some((4_000, 8_000)), "frame 3's sound");
+    assert!(paint.runtime.transport.is_playing_for("sue-paint"));
+    paint.command("anim.next");
+    paint.settle(2);
+    assert_eq!(loaded(&paint), Some((6_000, 10_000)), "frame 4's sound");
+    // Off again: stepping plays nothing new.
+    paint.command("anim.audio.scrub");
+    paint.command("anim.next");
+    paint.settle(2);
+    assert_eq!(loaded(&paint), Some((6_000, 10_000)), "nothing new");
+}
+
+#[test]
+fn sue_paint_steps_between_timelines_from_the_menu() {
+    // ABV-4, ABV-6: Go to Previous and Next Timeline, grayed past the
+    // ends, each one undo step.
+    let mut paint = PaintDriver::new("paint-timeline-steps");
+    paint.new_timeline();
+    paint.new_timeline();
+    let picture = open_picture(&paint);
+    let shown = |paint: &PaintDriver| {
+        sue_paint::anim::setup::timelines(&paint.runtime.engine.world.arena, picture)
+            .iter()
+            .position(|entry| entry.aside.is_none())
+    };
+    assert_eq!(shown(&paint), Some(1), "the second shows");
+    let depth = paint.runtime.engine.history.depth();
+    paint.command("anim.timeline.next");
+    paint.settle(2);
+    assert_eq!(shown(&paint), Some(1), "none after the last");
+    assert_eq!(paint.runtime.engine.history.depth(), depth);
+    paint.command("anim.timeline.prev");
+    paint.settle(2);
+    assert_eq!(shown(&paint), Some(0), "the first");
+    assert_eq!(paint.runtime.engine.history.depth(), depth + 1);
+    paint.command("edit.undo");
+    paint.settle(2);
+    assert_eq!(shown(&paint), Some(1), "undone");
+    paint.command("edit.redo");
+    paint.settle(2);
+    assert_eq!(shown(&paint), Some(0), "redone");
+    paint.command("anim.timeline.next");
+    paint.settle(2);
+    assert_eq!(shown(&paint), Some(1), "back to the second");
 }
