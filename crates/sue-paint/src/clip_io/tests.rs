@@ -504,3 +504,23 @@ fn what_clip_studio_has_no_layer_for_is_left_out_and_said() {
     let doc = read(&bytes).unwrap();
     assert_eq!(doc.all_layers().len(), 2, "paper and the layer");
 }
+
+#[test]
+fn settings_of_0_0_75_save_a_sue_project_unless_clip_was_chosen() {
+    let old = include_str!("../../../sue-rice/rice/history/v6.suerice");
+    assert!(old.contains("save_format = \"clip\""), "0.0.75's default");
+    let migrated = sue_rice::migrate(old).unwrap().expect("an older format");
+    let schema = sue_rice::RiceSchema::parse(&migrated.text).unwrap();
+    assert_eq!(
+        schema.get_str(SAVE_FORMAT_KEY),
+        Some("sue"),
+        "the old default moves on"
+    );
+    // Someone who had picked Sue projects keeps them; nobody can have
+    // picked .clip in a way that differs from the old default, so the
+    // new default reaches everyone who did not choose.
+    let chosen = old.replace("save_format = \"clip\"", "save_format = \"sue\"");
+    let migrated = sue_rice::migrate(&chosen).unwrap().unwrap();
+    let schema = sue_rice::RiceSchema::parse(&migrated.text).unwrap();
+    assert_eq!(schema.get_str(SAVE_FORMAT_KEY), Some("sue"));
+}

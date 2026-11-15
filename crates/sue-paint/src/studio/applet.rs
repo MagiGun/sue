@@ -710,6 +710,7 @@ impl SueApplet for SuePaint {
             }
             "dialog/close" => {
                 self.dialog = None;
+                self.save_ask = None;
                 self.menubar.close();
                 true
             }
