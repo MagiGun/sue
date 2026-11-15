@@ -890,7 +890,9 @@ pub fn legacy_text(preset: &BrushPreset) -> String {
 fn shortest(guess: f32, rule: impl Fn(f32) -> f32, target: f32) -> f32 {
     (1..=9)
         .map(|digits| {
-            let scale = 10_f64.powi(digits);
+            // Tens multiplied, not the system's powi: the replay scan
+            // keeps system math out of sue-brush.
+            let scale = (0..digits).fold(1.0_f64, |scale, _| scale * 10.0);
             ((f64::from(guess) * scale).round() / scale) as f32
         })
         .find(|candidate| rule(*candidate) == target)
