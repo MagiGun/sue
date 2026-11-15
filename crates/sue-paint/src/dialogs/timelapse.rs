@@ -294,7 +294,10 @@ impl TimelapseDialog {
                 (Icon::Play, tr!("timelapse-play"))
             };
             let enabled = seconds > 0.0;
+            // Framed, so the one control that plays stands out by the
+            // track.
             if wm_ui::icon_button("timelapse-play", icon, &name)
+                .kind(wm_ui::ButtonKind::Secondary)
                 .enabled(enabled)
                 .show(ui, theme)
                 .clicked()

@@ -279,19 +279,16 @@ impl SuePaint {
         ));
     }
 
-    /// Writes the picture to numbered files next to `path`, scaled to the
-    /// webtoon width and cut every webtoon height, top to bottom.
     /// Writes each layer comp of the picture as its own picture beside
-    /// `path`, named `Name-Comp.png` (by `path`'s extension): the comp is
-    /// shown, flattened and put back, so nothing changes.
+    /// `path`, named `Name-Comp.png` (by `path`'s extension), in the
+    /// background: each comp is shown and flattened on a snapshot of the
+    /// document, so the picture being drawn never changes. The files
+    /// appear together when the last is made.
     pub(super) fn export_comps(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
         use sue_core::ReversibleTransaction;
         let Some(picture) = self.picture() else {
             return;
         };
-        if let Some(dir) = path.parent() {
-            self.last_dir = Some(dir.to_path_buf());
-        }
         let extension = path.extension().map_or_else(
             || "png".to_owned(),
             |ext| ext.to_string_lossy().to_ascii_lowercase(),
@@ -311,42 +308,54 @@ impl SuePaint {
             .get_i64("io.jxl_effort")
             .and_then(|value| u8::try_from(value).ok())
             .unwrap_or(7);
-        let options = RenderOptions {
-            paper: true,
-            drafts: false,
-        };
-        let mut written = 0;
-        for comp in crate::comps::read(&cx.world.arena, picture) {
-            let mut shown = crate::comps::apply(&cx.world.arena, picture, &comp, &comp.name);
-            if shown.apply(&mut cx.world.arena).is_err() {
-                continue;
-            }
-            let flat = composite::flatten(&cx.world.arena, picture, options);
-            let _ = shown.revert(&mut cx.world.arena);
-            let Some(flat) = flat else {
-                continue;
-            };
-            let safe: String = comp
-                .name
-                .chars()
-                .map(|ch| if r#"\/:*?"<>|"#.contains(ch) { '_' } else { ch })
+        let comps: Vec<(crate::comps::Comp, PathBuf)> =
+            crate::comps::read(&cx.world.arena, picture)
+                .into_iter()
+                .map(|comp| {
+                    let safe: String = comp
+                        .name
+                        .chars()
+                        .map(|ch| if r#"\/:*?"<>|"#.contains(ch) { '_' } else { ch })
+                        .collect();
+                    let target = dir.join(format!("{stem}-{safe}.{extension}"));
+                    (comp, target)
+                })
                 .collect();
-            let target = dir.join(format!("{stem}-{safe}.{extension}"));
-            match sue_io::encode_as(&flat, &extension, quality, effort)
-                .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
-            {
-                Ok(()) => written += 1,
-                Err(error) => {
-                    cx.fail(tr!("cannot-export", error = error));
-                    return;
+        let Some((_, first)) = comps.first().cloned() else {
+            cx.notify(tr!("exported-pages-to", dir = dir.display(), written = 0));
+            return;
+        };
+        // Shares every raster (D21): a reference count, not a copy.
+        let mut arena = cx.world.arena.clone();
+        let held = first.clone();
+        self.run_export(cx, What::Sequence, &first, move |steps| {
+            let options = RenderOptions {
+                paper: true,
+                drafts: false,
+            };
+            let mut staged = Staged::default();
+            for (index, (comp, target)) in comps.iter().enumerate() {
+                steps.go_on()?;
+                steps.part(index, comps.len(), 0.95);
+                let mut shown = crate::comps::apply(&arena, picture, comp, &comp.name);
+                if shown.apply(&mut arena).is_err() {
+                    continue;
                 }
+                let flat = composite::flatten(&arena, picture, options);
+                let _ = shown.revert(&mut arena);
+                let Some(flat) = flat else {
+                    continue;
+                };
+                let bytes = sue_io::encode_as(&flat, &extension, quality, effort)?;
+                staged.write(target, &bytes)?;
             }
-        }
-        cx.notify(tr!(
-            "exported-pages-to",
-            dir = dir.display(),
-            written = written
-        ));
+            let files = staged.finish(&held, steps)?;
+            Ok(Done {
+                frames: 0,
+                bytes: 0,
+                files,
+            })
+        });
     }
 
     /// Writes the lines of the picture's visible vector layers to `path`
@@ -387,38 +396,29 @@ impl SuePaint {
         }
     }
 
+    /// Writes the picture to numbered files next to `path`, scaled to the
+    /// webtoon width and cut every webtoon height, top to bottom, in the
+    /// background from a snapshot of the document. The files appear
+    /// together when the last is made.
     pub(super) fn export_webtoon(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
         let Some(picture) = self.picture() else {
             return;
         };
-        let Some(flat) = composite::flatten(
-            &cx.world.arena,
-            picture,
-            RenderOptions {
-                paper: true,
-                drafts: false,
-            },
-        ) else {
+        let Some(from) = cx
+            .world
+            .arena
+            .get_by_id(picture)
+            .ok()
+            .and_then(picture::size)
+        else {
             return;
         };
-        if let Some(dir) = path.parent() {
-            self.last_dir = Some(dir.to_path_buf());
-        }
         let (cut, width) = self.webtoon;
-        let from = [flat.width(), flat.height()];
         let to = [
             width,
             ((f64::from(from[1]) * f64::from(width) / f64::from(from[0].max(1))).round() as u32)
                 .max(1),
         ];
-        let Some(bytes) = flat.bytes() else {
-            return;
-        };
-        let scaled = if to == from {
-            bytes.to_vec()
-        } else {
-            doc::resize_rgba(bytes, from, to)
-        };
         let extension = path.extension().map_or_else(
             || "png".to_owned(),
             |ext| ext.to_string_lossy().to_ascii_lowercase(),
@@ -428,35 +428,59 @@ impl SuePaint {
             |stem| stem.to_string_lossy().into_owned(),
         );
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let mut written = 0;
-        let mut top = 0;
-        while top < to[1] {
-            let rows = cut.min(to[1] - top);
-            let start = (top * to[0] * 4) as usize;
-            let piece = scaled[start..start + (rows * to[0] * 4) as usize].to_vec();
-            let Ok(tile) = sue_core::RasterTile2D::from_bytes(
-                to[0],
-                rows,
-                sue_core::PixelFormat::Rgba8,
-                piece,
-            ) else {
-                break;
+        let pieces = to[1].div_ceil(cut.max(1)) as usize;
+        let name = |piece: usize| dir.join(format!("{stem}-{piece:03}.{extension}"));
+        let first = name(1);
+        let targets: Vec<PathBuf> = (1..=pieces).map(name).collect();
+        // Shares every raster (D21): a reference count, not a copy.
+        let arena = cx.world.arena.clone();
+        let held = first.clone();
+        self.run_export(cx, What::Sequence, &first, move |steps| {
+            let flat = composite::flatten(
+                &arena,
+                picture,
+                RenderOptions {
+                    paper: true,
+                    drafts: false,
+                },
+            )
+            .ok_or_else(|| tr!("no-frames"))?;
+            let bytes = flat.bytes().ok_or_else(|| tr!("no-frames"))?;
+            let from = [flat.width(), flat.height()];
+            let scaled = if to == from {
+                bytes.to_vec()
+            } else {
+                doc::resize_rgba(bytes, from, to)
             };
-            written += 1;
-            let target = dir.join(format!("{stem}-{written:03}.{extension}"));
-            if let Err(error) = sue_io::encode_as(&tile, &extension, 92, 7)
-                .and_then(|bytes| write_atomic(&target, &bytes).map_err(|error| error.to_string()))
-            {
-                cx.fail(tr!("cannot-export-piece", written = written, error = error));
-                return;
+            steps.set(0.2);
+            let mut staged = Staged::default();
+            let mut top = 0;
+            for (index, target) in targets.iter().enumerate() {
+                steps.go_on()?;
+                steps.part(index, targets.len(), 0.95);
+                let rows = cut.max(1).min(to[1] - top);
+                let start = (top * to[0] * 4) as usize;
+                let piece = scaled[start..start + (rows * to[0] * 4) as usize].to_vec();
+                let tile = sue_core::RasterTile2D::from_bytes(
+                    to[0],
+                    rows,
+                    sue_core::PixelFormat::Rgba8,
+                    piece,
+                )
+                .map_err(|error| error.to_string())?;
+                let bytes = sue_io::encode_as(&tile, &extension, 92, 7).map_err(|error| {
+                    tr!("cannot-export-piece", written = index + 1, error = error)
+                })?;
+                staged.write(target, &bytes)?;
+                top += rows;
             }
-            top += rows;
-        }
-        cx.notify(tr!(
-            "exported-webtoon-as-pictures-px-wide",
-            value = to[0],
-            written = written
-        ));
+            let files = staged.finish(&held, steps)?;
+            Ok(Done {
+                frames: 0,
+                bytes: 0,
+                files,
+            })
+        });
     }
 
     /// Writes each animation cel as a picture of its own, flattened (a
