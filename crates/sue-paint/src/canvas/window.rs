@@ -33,9 +33,10 @@ pub(crate) struct Chrome {
     /// The canvas the column shows while the current one is in a window
     /// of its own.
     pub(super) main: usize,
-    /// Picture files dropped on the canvas this frame: when they come
-    /// back as files handed to Sue Paint they become layers.
-    drops: Vec<PathBuf>,
+    /// Picture files dropped on a canvas this frame, with that canvas:
+    /// when they come back as files handed to Sue Paint they become its
+    /// layers.
+    drops: Vec<(PathBuf, usize)>,
     /// The right-click menu of a tab: which canvas it is for, where it
     /// opened, and the menu.
     pub(super) tab_menu: Option<(usize, egui::Pos2)>,
@@ -266,6 +267,22 @@ impl SuePaint {
         let kept = (self.hide, self.cover, self.ready, self.viewport);
         (self.hide, self.cover, self.ready) = (0.0, 1.0, true);
         let dropped = dropped_files(ui);
+        // A window that floats over the page is drawn in Sue's main window,
+        // which hands what is dropped on it to Sue Paint by itself: the
+        // window only says the drop was on its canvas, when it was.
+        let floating = ui.ctx().viewport_id() == egui::ViewportId::ROOT;
+        if floating {
+            let over = ui
+                .input(|input| input.pointer.hover_pos())
+                .is_some_and(|at| area.contains(at));
+            if over {
+                for path in dropped.iter().filter(|path| crate::studio::opens(path)) {
+                    self.chrome.drops.retain(|(seen, _)| seen != path);
+                    self.chrome.drops.push((path.clone(), index));
+                }
+            }
+        }
+        let dropped = if floating { Vec::new() } else { dropped };
         self.with_doc(index, area, ui, cx, |paint, ui, cx| {
             paint.canvas_column(ui, area, 0.0, Column::Window, cx, &theme);
             let viewport = paint.viewport;
@@ -370,18 +387,24 @@ impl SuePaint {
             .into_iter()
             .filter(|path| crate::studio::opens(path))
             .collect();
-        if !pictures.is_empty() {
-            self.active = index;
-            self.chrome.drops = pictures;
-        }
+        self.chrome.drops = pictures.into_iter().map(|path| (path, index)).collect();
     }
 
-    /// `true` once for a file that was dropped on the canvas this frame,
-    /// which then becomes a layer rather than a canvas of its own.
+    /// `true` once for a file that was dropped on a canvas this frame,
+    /// which then becomes current and takes the file as a layer rather
+    /// than it opening as a canvas of its own.
     pub(crate) fn take_canvas_drop(&mut self, path: &std::path::Path) -> bool {
-        match self.chrome.drops.iter().position(|dropped| dropped == path) {
+        match self
+            .chrome
+            .drops
+            .iter()
+            .position(|(dropped, _)| dropped == path)
+        {
             Some(at) => {
-                self.chrome.drops.remove(at);
+                let (_, index) = self.chrome.drops.remove(at);
+                if index < self.docs.len() {
+                    self.active = index;
+                }
                 true
             }
             None => false,
