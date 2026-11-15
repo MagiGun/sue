@@ -143,7 +143,6 @@ impl SuePaint {
             Some(Gesture::Transform { .. }) => self.transform_box_drag(pos, viewport, size, cx),
             Some(Gesture::RulerHandle { .. }) => self.ruler_handle_drag(pos, viewport, size, cx),
             Some(Gesture::Pin { .. }) => self.pin_drag(pos, viewport, size, cx),
-            Some(Gesture::Stroke { .. }) => self.stroke_drag(pos, viewport, size, cx),
             Some(Gesture::Pan { .. }) => self.pan_drag(pos),
             Some(Gesture::BrushSize { .. }) => self.brush_size_drag(pos),
             Some(Gesture::Rotate { .. }) => self.rotate_drag(pos, viewport, size),
@@ -225,7 +224,6 @@ impl SuePaint {
             return;
         };
         match gesture {
-            gesture @ Gesture::Stroke { .. } => self.stroke_release(gesture, cx),
             Gesture::Shape {
                 tool,
                 sub,

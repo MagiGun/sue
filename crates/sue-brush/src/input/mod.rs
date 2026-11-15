@@ -43,6 +43,10 @@
 //!    of arc length. The ending is drawn while the pen is still down, on
 //!    the provisional end, so what the artist sees before the lift is
 //!    what stays after it.
+//! 8. **Flick** (`flick.rs`): with the brush's flick on, a pen that
+//!    leaves fast carries the line on along the way the curve was going
+//!    as it ended, narrowing to a point; it takes the place of the lift's
+//!    ramp, so the run out starts as wide as the line was.
 //!
 //! What comes out is in two parts. [`Pipeline::committed`] only grows:
 //! a point there never changes again. [`Pipeline::tail`] is the rest of
@@ -61,6 +65,7 @@
 
 mod curve;
 mod dynamics;
+mod flick;
 mod ingest;
 mod math;
 mod resample;
@@ -265,6 +270,17 @@ pub struct Pipeline {
     curve: Curve,
     dynamics: Dynamics,
     shaper: Shaper,
+    /// The brush flicks into a point when the pen leaves fast.
+    flick: bool,
+    /// Screen points per layer pixel.
+    scale: f32,
+    /// The arc length between two points.
+    step: f32,
+    /// The pen's speed at its latest contacts: device time and layer
+    /// pixels a second, the newest last, over [`flick::WINDOW`].
+    recent: std::collections::VecDeque<(f64, f32)>,
+    /// The pressure of the latest contact.
+    last_pressure: f32,
 }
 
 impl Pipeline {
@@ -296,6 +312,11 @@ impl Pipeline {
             curve: Curve::new(step, curve::knot_spacing(scale)),
             dynamics,
             shaper: Shaper::new(preset.taper, preset.min_width),
+            flick: preset.input.flick,
+            scale,
+            step,
+            recent: std::collections::VecDeque::new(),
+            last_pressure: 0.0,
         }
     }
 
@@ -377,6 +398,15 @@ impl Pipeline {
 
     /// One record of a touching pen, through the stages.
     fn feed(&mut self, record: ingest::Record) {
+        self.recent.push_back((record.time, record.speed));
+        while self
+            .recent
+            .front()
+            .is_some_and(|(time, _)| record.time - time > flick::WINDOW)
+        {
+            self.recent.pop_front();
+        }
+        self.last_pressure = record.pressure;
         let mut bases = Vec::new();
         match &mut self.steady {
             Some((resampler, stabilizer)) => {
@@ -396,6 +426,11 @@ impl Pipeline {
     /// curve finished, everything committed.
     fn finish(&mut self, up: ingest::Record) {
         let mut bases = Vec::new();
+        // A flick: how fast the pen left, if fast enough.
+        let flick = self
+            .flick
+            .then(|| flick::speed(&self.recent, up.time, self.scale))
+            .flatten();
         match &mut self.steady {
             Some((resampler, stabilizer)) => {
                 // The last contact as a tick of its own, then the drain
@@ -416,9 +451,14 @@ impl Pipeline {
                     self.curve.push(steady, &mut bases);
                 }
                 // Then the lift itself, where the drain ended: the ramp
-                // to its pressure.
+                // to its pressure (a flick runs out from the line's own
+                // width instead).
                 let mut up = up;
-                up.pressure = up.pressure.min(cap);
+                up.pressure = if flick.is_some() && cap.is_finite() {
+                    cap
+                } else {
+                    up.pressure.min(cap)
+                };
                 if let Some(end) = stabilizer.peek(None) {
                     up.pos = end.pos;
                 }
@@ -426,13 +466,23 @@ impl Pipeline {
             }
             None => {
                 // The last contact stays on the curve; the ramp runs from
-                // it to the lift.
+                // it to the lift (a flick runs out from the line's own
+                // width instead).
                 self.curve.settle(&mut bases);
+                let mut up = up;
+                if flick.is_some() {
+                    up.pressure = self.last_pressure;
+                }
                 self.curve.push(up, &mut bases);
             }
         }
         self.curve.finish(&mut bases);
-        let points: Vec<StrokePoint> = bases.iter().map(|base| self.dynamics.eval(base)).collect();
+        let mut points: Vec<StrokePoint> =
+            bases.iter().map(|base| self.dynamics.eval(base)).collect();
+        if let Some(speed) = flick {
+            let size = self.dynamics.base_size();
+            flick::run_out(&mut points, self.shaper.last(), speed, size, self.step);
+        }
         self.shaper.finish(&points);
     }
 

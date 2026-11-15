@@ -46,7 +46,7 @@ impl From<MergeError> for ReplayError {
 
 /// `sample` through `copy`: its place, and the way the pen leans and is
 /// turned, turned and mirrored with it.
-fn through(sample: &Sample, copy: &[f32; 6]) -> Sample {
+pub(crate) fn through(sample: &Sample, copy: &[f32; 6]) -> Sample {
     let [a, b, c, d, e, f] = *copy;
     let [x, y] = sample.pos;
     let tilt = sample
@@ -74,13 +74,13 @@ fn through(sample: &Sample, copy: &[f32; 6]) -> Sample {
 ///
 /// # Errors
 /// [`ReplayError::Engine`] for a stroke of another engine version.
-pub fn painted<'a>(
+pub fn painted(
     stroke: &StoredStroke,
     preset: &BrushPreset,
-    resources: Resources<'a>,
+    resources: Resources,
     copy: Option<&[f32; 6]>,
     backdrop: Option<&dyn Backdrop>,
-) -> Result<PaintStroke<'a>, ReplayError> {
+) -> Result<PaintStroke, ReplayError> {
     if stroke.engine != ENGINE {
         return Err(ReplayError::Engine(stroke.engine));
     }
@@ -114,7 +114,7 @@ pub fn painted<'a>(
 /// `fields` laid one over another into one: each pixel takes the most
 /// coverage any of them has there, and with it that one's color, so
 /// copies that overlap never paint twice.
-fn strongest(fields: &[Field]) -> Option<Field> {
+pub(crate) fn strongest(fields: &[Field]) -> Option<Field> {
     let first = fields.first()?;
     let rect = fields.iter().skip(1).fold(first.rect, |r, f| PixelRect {
         x0: r.x0.min(f.rect.x0),
@@ -162,7 +162,7 @@ fn strongest(fields: &[Field]) -> Option<Field> {
 pub fn paint(
     stroke: &StoredStroke,
     preset: &BrushPreset,
-    resources: Resources<'_>,
+    resources: Resources,
     raster: &mut RasterTile2D,
     origin: [i32; 2],
     keep_alpha: bool,
@@ -183,14 +183,14 @@ pub fn paint(
                 raster: &snapshot,
                 origin,
             };
-            let done = painted(stroke, preset, resources, copy, Some(&backdrop))?;
+            let done = painted(stroke, preset, resources.clone(), copy, Some(&backdrop))?;
             changed.extend(done.merge(raster, origin, keep_alpha)?);
         }
         return Ok(changed);
     }
     let strokes = copies
         .into_iter()
-        .map(|copy| painted(stroke, preset, resources, copy, None))
+        .map(|copy| painted(stroke, preset, resources.clone(), copy, None))
         .collect::<Result<Vec<_>, _>>()?;
     if let [only] = strokes.as_slice() {
         return Ok(only.merge(raster, origin, keep_alpha)?);

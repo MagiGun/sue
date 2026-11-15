@@ -2129,3 +2129,4 @@ body-shape = 体型
 head-to-body-ratio = 头身比
 reset-body-shape = 重置体型
 cm = {" "}cm
+layer-takes-no-strokes = { $name } holds pixels the brush cannot paint on

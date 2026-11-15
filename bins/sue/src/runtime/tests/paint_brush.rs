@@ -798,10 +798,11 @@ fn stroke(tag: &str, pressure: f32, lift: Lift) -> Vec<(usize, usize)> {
         paint.step(vec![key(egui::Key::CloseBracket, egui::Modifiers::NONE)]);
     }
     let pen = lift != Lift::Mouse;
-    if pen {
-        stylus::set_for_test(PenSource::WinTab, Some(pressure));
-    }
     let start = paint.middle() - vec2(120.0, 0.0);
+    let mut time = 5.0;
+    if pen {
+        stylus::push_for_test(packet(stylus::PenKind::Down, start, time, Some(pressure)));
+    }
     paint.step(vec![
         egui::Event::PointerMoved(start),
         button(start, true, egui::Modifiers::NONE),
@@ -809,23 +810,27 @@ fn stroke(tag: &str, pressure: f32, lift: Lift) -> Vec<(usize, usize)> {
     let mut at = start;
     for _ in 0..30 {
         at += vec2(8.0, 0.0);
+        time += 0.016;
+        if pen {
+            stylus::push_for_test(packet(stylus::PenKind::Move, at, time, Some(pressure)));
+        }
         paint.step(vec![egui::Event::PointerMoved(at)]);
     }
-    // The tip leaves the tablet: the driver's last packet of this frame
-    // says so before the window's events of the frame are handled.
+    // The tip leaves the tablet: the driver's packet says so in this
+    // frame, or a frame before the window's release.
+    let end = at + vec2(3.0, 0.0);
     if pen {
-        stylus::set_for_test(PenSource::WinTab, None);
+        stylus::push_for_test(packet(stylus::PenKind::Up, end, time + 0.004, None));
     }
     if lift == Lift::FrameLate {
         paint.step(Vec::new());
-        stylus::forget_for_test();
     }
-    let end = at + vec2(3.0, 0.0);
     paint.step(vec![
         egui::Event::PointerMoved(end),
         button(end, false, egui::Modifiers::NONE),
     ]);
     paint.settle(2);
+    stylus::forget_for_test();
     paint.profile()
 }
 
@@ -1046,8 +1051,9 @@ fn stroke_ends_sheet() {
             let pen = route != Lift::Mouse;
             let start = middle + vec2(-330.0 + column as f32 * 195.0, -120.0 + row as f32 * 70.0);
             let first = legs.first().map_or(1.0, |leg| leg.1);
+            let mut time = 10.0 + (row * 3 + column) as f64;
             if pen {
-                stylus::set_for_test(PenSource::WinTab, Some(first));
+                stylus::push_for_test(packet(stylus::PenKind::Down, start, time, Some(first)));
             }
             paint.step(vec![egui::Event::PointerMoved(start)]);
             paint.step(vec![button(start, true, egui::Modifiers::NONE)]);
@@ -1056,20 +1062,20 @@ fn stroke_ends_sheet() {
             for (by, pressure) in &legs {
                 at += *by;
                 step = *by;
+                time += 0.016;
                 if pen {
-                    stylus::set_for_test(PenSource::WinTab, Some(*pressure));
+                    stylus::push_for_test(packet(stylus::PenKind::Move, at, time, Some(*pressure)));
                 }
                 paint.step(vec![egui::Event::PointerMoved(at)]);
             }
+            // The pen leaves the tablet a third of a frame's way on.
+            let end = at + step * 0.35;
             if pen {
-                stylus::set_for_test(PenSource::WinTab, None);
+                stylus::push_for_test(packet(stylus::PenKind::Up, end, time + 0.005, None));
             }
             if route == Lift::FrameLate {
                 paint.step(Vec::new());
-                stylus::forget_for_test();
             }
-            // The pen leaves the tablet a third of a frame's way on.
-            let end = at + step * 0.35;
             paint.step(vec![
                 egui::Event::PointerMoved(end),
                 button(end, false, egui::Modifiers::NONE),
@@ -1559,6 +1565,7 @@ fn sue_paint_a_layer_with_keyframes_on_refuses_strokes() {
 #[test]
 fn sue_paint_old_rgba_masks_become_gray_and_the_picture_stays_clean() {
     let (mut runtime, root) = runtime("paint-engine-old-mask");
+    // A project as an older Sue wrote it: a layer with an RGBA mask.
     let (mut made, picture) = sue_paint::doc::create(&sue_paint::doc::NewPicture {
         name: "Old".to_owned(),
         width: 64,
@@ -1566,11 +1573,14 @@ fn sue_paint_old_rgba_masks_become_gray_and_the_picture_stays_clean() {
         ..sue_paint::doc::NewPicture::default()
     })
     .unwrap();
-    let arena = &mut runtime.engine.world.arena;
-    sue_core::ReversibleTransaction::apply(&mut made, arena).unwrap();
-    let layer = sue_paint::doc::layers(arena, picture).last().unwrap().id;
-    if let Some(bytes) =
-        sue_paint::doc::raster_mut(arena, layer).and_then(sue_core::RasterTile2D::bytes_mut)
+    let mut old_arena = sue_core::Arena::new();
+    sue_core::ReversibleTransaction::apply(&mut made, &mut old_arena).unwrap();
+    let layer = sue_paint::doc::layers(&old_arena, picture)
+        .last()
+        .unwrap()
+        .id;
+    if let Some(bytes) = sue_paint::doc::raster_mut(&mut old_arena, layer)
+        .and_then(sue_core::RasterTile2D::bytes_mut)
     {
         bytes.fill(255);
     }
@@ -1582,8 +1592,8 @@ fn sue_paint_old_rgba_masks_become_gray_and_the_picture_stays_clean() {
     )
     .with_class(sue_paint::doc::MASK_CLASS);
     let mask = old.id();
-    arena.insert(old);
-    arena
+    old_arena.insert(old);
+    old_arena
         .relate(sue_core::Relation::new(layer, sue_paint::doc::MASK, mask))
         .unwrap();
     let looks = |arena: &sue_core::Arena| {
@@ -1594,22 +1604,22 @@ fn sue_paint_old_rgba_masks_become_gray_and_the_picture_stays_clean() {
             sue_paint::composite::RenderOptions::default(),
         )
     };
-    let before = looks(&runtime.engine.world.arena);
+    let before = looks(&old_arena);
+    let mut file = sue_core::SueFile::new();
+    file.set_arena(&old_arena);
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("old.sue");
+    let bytes = file.to_bytes();
+    std::fs::write(&path, &bytes).unwrap();
+    // Opening it turns the mask as the file is read.
+    runtime.open_project(&path, &bytes).unwrap();
     let depth = runtime.engine.history.depth();
-    let ctx = egui::Context::default();
-    let now = Instant::now();
-    runtime.request(
-        ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
-        &mut NoTextures,
-        now,
-    );
-    frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
     let arena = &runtime.engine.world.arena;
     let tile = sue_paint::doc::raster(arena, mask).unwrap();
     assert_eq!(
         tile.format(),
         sue_core::PixelFormat::Gray8,
-        "the mask is gray"
+        "the mask is gray as soon as it is read"
     );
     assert_eq!(
         tile.bytes().unwrap(),
@@ -1622,6 +1632,21 @@ fn sue_paint_old_rgba_masks_become_gray_and_the_picture_stays_clean() {
         "the same mask"
     );
     assert_eq!(looks(arena), before, "the picture looks as it did");
+    // Sue Paint shows it: nothing more is turned, every frame.
+    let ctx = egui::Context::default();
+    let now = Instant::now();
+    runtime.request(
+        ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+        &mut NoTextures,
+        now,
+    );
+    frames(&mut runtime, &ctx, vec2(1440.0, 900.0), now, |_| Vec::new());
+    let arena = &runtime.engine.world.arena;
+    assert_eq!(
+        sue_paint::doc::raster(arena, mask).map(sue_core::RasterTile2D::format),
+        Some(sue_core::PixelFormat::Gray8),
+        "still gray"
+    );
     assert_eq!(runtime.engine.history.depth(), depth, "nothing to undo");
     let unsaved = runtime
         .applets
@@ -1723,21 +1748,36 @@ fn engine_strokes_sheet() {
                     paint.step(vec![button(at, false, egui::Modifiers::NONE)]);
                 }
                 _ => {
+                    // One packet a frame (a pen), or the pointer's events
+                    // alone (a mouse).
                     let pen = column == 1;
+                    time += 0.005;
                     if pen {
-                        stylus::set_for_test(PenSource::WinTab, Some(pressure0));
+                        stylus::push_for_test(packet(
+                            stylus::PenKind::Down,
+                            start,
+                            time,
+                            Some(pressure0),
+                        ));
                     }
                     paint.step(vec![egui::Event::PointerMoved(start)]);
                     paint.step(vec![button(start, true, egui::Modifiers::NONE)]);
                     for (by, pressure) in legs {
                         at += *by;
+                        time += 0.016;
                         if pen {
-                            stylus::set_for_test(PenSource::WinTab, Some(*pressure));
+                            stylus::push_for_test(packet(
+                                stylus::PenKind::Move,
+                                at,
+                                time,
+                                Some(*pressure),
+                            ));
                         }
                         paint.step(vec![egui::Event::PointerMoved(at)]);
                     }
                     if pen {
-                        stylus::set_for_test(PenSource::WinTab, None);
+                        time += 0.004;
+                        stylus::push_for_test(packet(stylus::PenKind::Up, at, time, None));
                     }
                     paint.step(vec![button(at, false, egui::Modifiers::NONE)]);
                     stylus::forget_for_test();

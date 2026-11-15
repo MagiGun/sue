@@ -120,7 +120,41 @@ impl Region {
         Some(Self { rect, mask })
     }
 
-    /// How much of layer pixel `(x, y)` lies in the region, 0 or 1.
+    /// A region over `rect` read from `cover`, how much of each pixel
+    /// lies in it, 0 to 1 (a selection's soft edge): `cover(x, y)` is
+    /// asked once for every layer pixel of `rect`. Outside `rect` nothing
+    /// lies in it.
+    #[must_use]
+    pub fn from_cover(rect: PixelRect, cover: impl Fn(i32, i32) -> f32) -> Self {
+        let (w, h) = ((rect.x1 - rect.x0).max(0), (rect.y1 - rect.y0).max(0));
+        let mut mask = Vec::with_capacity((w * h) as usize);
+        for y in rect.y0..rect.y0 + h {
+            for x in rect.x0..rect.x0 + w {
+                let c = cover(x, y);
+                mask.push(if c.is_finite() {
+                    c.clamp(0.0, 1.0)
+                } else {
+                    0.0
+                });
+            }
+        }
+        Self { rect, mask }
+    }
+
+    /// Where both regions let paint land, each pixel as much as the
+    /// smaller of the two.
+    #[must_use]
+    pub fn and(&self, other: &Self) -> Self {
+        let rect = PixelRect {
+            x0: self.rect.x0.max(other.rect.x0),
+            y0: self.rect.y0.max(other.rect.y0),
+            x1: self.rect.x1.min(other.rect.x1),
+            y1: self.rect.y1.min(other.rect.y1),
+        };
+        Self::from_cover(rect, |x, y| self.at(x, y).min(other.at(x, y)))
+    }
+
+    /// How much of layer pixel `(x, y)` lies in the region, 0 to 1.
     #[must_use]
     pub fn at(&self, x: i32, y: i32) -> f32 {
         let r = self.rect;
@@ -171,6 +205,20 @@ mod tests {
         let outside = Region::enclosing(&ring(), [100, 50], [101, 51], 0.5).expect("a region");
         assert_eq!(outside.at(120, 65), 0.0);
         assert_eq!(outside.at(139, 79), 1.0);
+        // A soft region from a cover, and two regions together.
+        let rect = PixelRect {
+            x0: 100,
+            y0: 50,
+            x1: 140,
+            y1: 80,
+        };
+        let soft = Region::from_cover(rect, |x, _| if x < 120 { 0.5 } else { 1.0 });
+        assert_eq!(soft.at(105, 65), 0.5);
+        assert_eq!(soft.at(99, 65), 0.0);
+        let both = soft.and(&region);
+        assert_eq!(both.at(115, 65), 0.5);
+        assert_eq!(both.at(125, 65), 1.0);
+        assert_eq!(both.at(105, 65), 0.0);
         // On a line: nothing.
         let none = Region::enclosing(&ring(), [100, 50], [110, 65], 0.5).expect("a region");
         assert_eq!(none.count(), 0);

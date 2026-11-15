@@ -12,7 +12,6 @@ use egui::{Painter, Pos2, Shape, Stroke};
 use sue_core::Arena;
 use sue_wm::{AppletContext, ArenaEdit};
 
-use crate::brush::Stroke as BrushStroke;
 use crate::color;
 use crate::doc;
 use crate::fill;
@@ -720,32 +719,47 @@ impl SuePaint {
             mix: 0.0,
             ..sub.tip
         };
-        let mut stroke = BrushStroke::new(info.id, plain, rgb, info.alpha_locked);
-        if let Some(raster) = doc::raster_mut(&mut cx.world.arena, info.id) {
-            for point in points {
-                stroke.to(
-                    raster,
-                    [point[0] - offset[0] as f32, point[1] - offset[1] as f32],
-                    1.0,
-                    shifted.as_ref(),
-                );
-            }
-            stroke.flush(raster, shifted.as_ref());
-        }
-        let kept = vector.then(|| {
-            crate::vector::Line::of(
-                &stroke,
-                stroke.samples().to_vec(),
-                crate::brush::Finish {
-                    correction: 0,
-                    flick: None,
-                },
-            )
-        });
+        let other = color::unit(if self.sub_active { self.main } else { self.sub });
+        let local: Vec<[f32; 2]> = points
+            .iter()
+            .map(|point| [point[0] - offset[0] as f32, point[1] - offset[1] as f32])
+            .collect();
+        // The figure's line on the brush engine (a vector line keeps it).
+        let line = crate::vector::figure_engine_line(&local, plain, [rgb, other], false);
+        // Vector lines are kept whole, not cut by the selection.
+        let clip = shifted
+            .filter(|_| !vector)
+            .map(|selection| std::sync::Arc::new(selection_region(&selection)));
+        let lock = info.alpha_locked && !plain.eraser && !vector;
+        let Some(before) = doc::raster(&cx.world.arena, info.id).cloned() else {
+            return;
+        };
+        let Some(raster) = doc::raster_mut(&mut cx.world.arena, info.id) else {
+            return;
+        };
+        let rects = line.paint_into(raster, lock, clip);
+        let kept = vector.then_some(line);
         let Some(raster) = doc::raster(&cx.world.arena, info.id) else {
             return;
         };
-        let edit = stroke.finish(raster, &sub.name);
+        let edit = crate::brush::engine::edit_between(info.id, &sub.name, &before, raster, &rects);
+        drop(before);
+        if let Some(doc) = self.docs.get_mut(self.active) {
+            let rects: Vec<[u32; 4]> = rects
+                .iter()
+                .map(|r| {
+                    let at = |v: i32, by: i64| (i64::from(v) + by).max(0) as u32;
+                    [
+                        at(r[0], offset[0]),
+                        at(r[1], offset[1]),
+                        at(r[2], offset[0]),
+                        at(r[3], offset[1]),
+                    ]
+                })
+                .collect();
+            doc.compositor
+                .refresh_rects(&cx.world.arena, &rects, Some(info.id));
+        }
         if edit.is_empty() {
             return;
         }
@@ -771,6 +785,24 @@ impl SuePaint {
             }
         }
     }
+}
+
+/// Where `selection` (in the layer's own pixels) lets a figure's line
+/// paint.
+fn selection_region(selection: &crate::select::Selection) -> sue_brush::paint::overflow::Region {
+    let [x0, y0, x1, y1] = selection.bounds().unwrap_or([0, 0, 0, 0]);
+    let rect = sue_brush::raster::PixelRect {
+        x0: x0 as i32,
+        y0: y0 as i32,
+        x1: x1 as i32,
+        y1: y1 as i32,
+    };
+    sue_brush::paint::overflow::Region::from_cover(rect, |x, y| {
+        match (u32::try_from(x), u32::try_from(y)) {
+            (Ok(x), Ok(y)) => selection.at(x, y),
+            _ => 0.0,
+        }
+    })
 }
 
 #[cfg(test)]

@@ -21,12 +21,17 @@
 //! [`StrokeWorker::poll`] lays samples until about [`SLICE_PIXELS`]
 //! pixels of work are done and leaves the rest for the next frame.
 //!
-//! What the worker paints with today is the round tip ([`round`]): the
-//! pens and the pencils. Paint behaviours (mixing, textures, dabs) come
-//! through the same worker as their painters land.
+//! A plain round tip (the pens and the pencils) is laid as coverage of
+//! one ink ([`round`]), split over the pool's threads. Every other brush
+//! (dabs that build up, mixing, picture tips, paper, spray, color
+//! jitter, blend modes, the blend tools) is laid through its paint
+//! behaviours ([`crate::paint::PaintStroke`]), driven as replay drives
+//! them, and shown as the layer's pixels with the stroke laid on them
+//! ([`Canvas`]).
 
 pub mod bands;
 mod live;
+mod paint;
 pub mod round;
 
 use std::collections::VecDeque;
@@ -35,15 +40,18 @@ use std::sync::{Arc, OnceLock};
 use sue_core::txn::{RasterEdit, RasterPatch};
 use sue_core::{EntityId, JobHandle, JobPool, RasterTile2D};
 use sue_model::BrushPreset;
-use sue_model::brush::BrushRegistry;
+use sue_model::brush::{BrushRegistry, EngineKind, TipSource};
 
 use crate::buffer::{Combine, Counters, MergeError, TILE, TileKey};
 use crate::input::{Pipeline, Sample, Settings};
+use crate::paint::{Colors, Resources};
 use crate::raster::PixelRect;
 use crate::raster::kernel::Ink;
 
 use self::bands::{Bands, MOST_BANDS, Work};
 pub use self::live::LiveView;
+pub use self::paint::Canvas;
+use self::paint::Painter;
 use self::round::Round;
 
 /// About how many pixels of work one slice lays on a pool without
@@ -72,6 +80,10 @@ pub struct Brush {
     /// The paint's color, straight sRGB from 0 to 1 (an eraser ignores
     /// it).
     pub color: [f32; 3],
+    /// The sub color, which color jitter pulls toward.
+    pub sub_color: [f32; 3],
+    /// The pictures its tips and paper come from.
+    pub resources: Resources,
 }
 
 impl Brush {
@@ -82,7 +94,36 @@ impl Brush {
             preset,
             registry: BrushRegistry::standard(),
             color,
+            sub_color: color,
+            resources: Resources::default(),
         }
+    }
+
+    /// The same brush reading `resources`, its sub color `sub`.
+    #[must_use]
+    pub fn with(mut self, resources: Resources, sub: [f32; 3]) -> Self {
+        self.resources = resources;
+        self.sub_color = sub;
+        self
+    }
+
+    /// `true` when the brush is a plain swept round tip (the pens and
+    /// pencils), which the worker lays as coverage of one ink; `false`
+    /// for a brush with paint behaviours (dabs that build up, mixing,
+    /// pictures, paper, spray, color jitter, blend modes, the blend
+    /// tools), which it lays through [`crate::paint::PaintStroke`].
+    #[must_use]
+    pub fn is_plain(&self) -> bool {
+        let preset = &self.preset;
+        preset.engine == EngineKind::Stroke
+            && matches!(preset.tip, TipSource::Round)
+            && preset.mix.is_none()
+            && preset.texture.is_none()
+            && !preset.build_up
+            && preset.blend == sue_model::BlendMode::Normal
+            && crate::paint::Behaviours::from_preset(preset) == crate::paint::Behaviours::default()
+            && !crate::paint::color::Jitter::new(preset.color, 0, self.color, self.sub_color)
+                .varies()
     }
 
     /// What its strokes lay on the layer.
@@ -100,12 +141,27 @@ impl Brush {
     }
 }
 
-/// One stroke: its pipeline, its coverage and what is shown of it.
+/// A round tip's stroke: its pipeline, its swept shapes and its bands.
 #[derive(Debug)]
-pub struct Stroke {
+struct RoundStroke {
     pipeline: Pipeline,
     round: Round,
     bands: Bands,
+}
+
+/// How a stroke lays its paint.
+#[derive(Debug)]
+enum Painting {
+    /// A swept round tip, as coverage of one ink, on the pool's threads.
+    Round(Box<RoundStroke>),
+    /// Every paint behaviour (see [`paint`]).
+    Paint(Box<Painter>),
+}
+
+/// One stroke: its pipeline, its coverage and what is shown of it.
+#[derive(Debug)]
+pub struct Stroke {
+    painting: Painting,
     live: Arc<LiveView>,
     /// Tiles laid since the interface last asked.
     dirty: Vec<TileKey>,
@@ -118,19 +174,54 @@ impl Stroke {
     /// `bands` bands (one per thread that may lay it; 1 to 8).
     #[must_use]
     pub fn new(brush: &Brush, settings: Settings, bands: usize) -> Self {
-        let combine = if brush.preset.build_up {
-            Combine::BuildUp
+        Self::on(brush, settings, bands, Canvas::default())
+    }
+
+    /// A stroke of `brush` drawn as `settings` say on `canvas`: a plain
+    /// round tip (with no copies, no locked pixels and no replay) as
+    /// coverage in `bands` bands, any other through its paint
+    /// behaviours.
+    #[must_use]
+    pub fn on(brush: &Brush, settings: Settings, bands: usize, canvas: Canvas) -> Self {
+        let plain =
+            brush.is_plain() && !canvas.replay && canvas.copies.is_empty() && !canvas.keep_alpha;
+        let painting = if plain {
+            let combine = if brush.preset.build_up {
+                Combine::BuildUp
+            } else {
+                Combine::Max
+            };
+            Painting::Round(Box::new(RoundStroke {
+                pipeline: Pipeline::new(&brush.preset, &brush.registry, settings),
+                round: Round::new(&brush.preset, &brush.registry),
+                bands: Bands::new(combine, bands),
+            }))
         } else {
-            Combine::Max
+            Painting::Paint(Box::new(Painter::new(
+                &brush.preset,
+                &brush.resources,
+                Colors {
+                    main: brush.color,
+                    sub: brush.sub_color,
+                },
+                settings,
+                canvas,
+            )))
         };
         Self {
-            pipeline: Pipeline::new(&brush.preset, &brush.registry, settings),
-            round: Round::new(&brush.preset, &brush.registry),
-            bands: Bands::new(combine, bands),
+            painting,
             live: Arc::new(LiveView::new(brush.ink())),
             dirty: Vec::new(),
             closed: false,
         }
+    }
+
+    /// `true` when the stroke lays its paint through its paint
+    /// behaviours ([`crate::paint::PaintStroke`]), not as a round tip's
+    /// coverage.
+    #[must_use]
+    pub const fn paints_behaviours(&self) -> bool {
+        matches!(self.painting, Painting::Paint(_))
     }
 
     /// What the compositor shows of it.
@@ -145,16 +236,24 @@ impl Stroke {
         self.closed
     }
 
-    /// The work laid so far.
+    /// The work laid so far (a round tip's; none is counted for paint
+    /// behaviours).
     #[must_use]
     pub fn counters(&self) -> Counters {
-        self.bands.counters()
+        match &self.painting {
+            Painting::Round(stroke) => stroke.bands.counters(),
+            Painting::Paint(_) => Counters::default(),
+        }
     }
 
-    /// The coverage of layer pixel `(x, y)`, as the merge lays it.
+    /// The coverage of layer pixel `(x, y)`, as the merge lays it (a
+    /// round tip's; 0 for paint behaviours, which show laid pixels).
     #[must_use]
     pub fn coverage(&self, x: i32, y: i32) -> u16 {
-        self.bands.coverage(x, y)
+        match &self.painting {
+            Painting::Round(stroke) => stroke.bands.coverage(x, y),
+            Painting::Paint(_) => 0,
+        }
     }
 
     /// The tiles laid since the last call, in order.
@@ -178,53 +277,130 @@ impl Stroke {
             queue.clear();
             return Ok(());
         }
-        let mut work = Work::default();
-        let mut reach = 0;
-        while let Some(sample) = queue.pop_front() {
-            self.pipeline.push(sample);
-            let before = work.committed.len();
-            self.round
-                .committed(self.pipeline.committed(), &mut work.committed);
-            reach += work.committed[before..]
-                .iter()
-                .map(bands::reach)
-                .sum::<u64>();
-            if self.pipeline.is_done() {
-                self.round.close(&mut work.committed);
-                self.closed = true;
-                queue.clear();
-                break;
+        match &mut self.painting {
+            Painting::Round(stroke) => {
+                let RoundStroke {
+                    pipeline,
+                    round,
+                    bands,
+                } = &mut **stroke;
+                let mut work = Work::default();
+                let mut reach = 0;
+                while let Some(sample) = queue.pop_front() {
+                    pipeline.push(sample);
+                    let before = work.committed.len();
+                    round.committed(pipeline.committed(), &mut work.committed);
+                    reach += work.committed[before..]
+                        .iter()
+                        .map(bands::reach)
+                        .sum::<u64>();
+                    if pipeline.is_done() {
+                        round.close(&mut work.committed);
+                        self.closed = true;
+                        queue.clear();
+                        break;
+                    }
+                    if budget.is_some_and(|budget| reach >= budget) {
+                        break;
+                    }
+                }
+                work.tail = if self.closed {
+                    Some(Vec::new())
+                } else if queue.is_empty() {
+                    Some(round.tail(&pipeline.tail()))
+                } else {
+                    // A slice that leaves samples for the next one: the
+                    // tail is drawn once they are laid, not again for
+                    // every slice of a stall (it is the same size as a
+                    // slice for a big brush).
+                    None
+                };
+                bands.lay(&Arc::new(work), pool)?;
+                if self.closed {
+                    bands.settle();
+                }
+                let dirty = bands.take_dirty();
+                self.live.show(bands, &dirty);
+                self.dirty.extend(dirty);
             }
-            if budget.is_some_and(|budget| reach >= budget) {
-                break;
+            Painting::Paint(painter) => {
+                let mut reach = 0;
+                while let Some(sample) = queue.pop_front() {
+                    reach += painter.push(sample);
+                    if painter.is_closed() {
+                        self.closed = true;
+                        queue.clear();
+                        break;
+                    }
+                    if budget.is_some_and(|budget| reach >= budget) {
+                        break;
+                    }
+                }
+                if !self.closed && queue.is_empty() {
+                    painter.tail();
+                }
+                let dirty = painter.take_dirty();
+                self.live
+                    .show_pixels(painter.laid(&dirty), painter.bounds());
+                self.dirty.extend(dirty);
             }
         }
-        work.tail = if self.closed {
-            Some(Vec::new())
-        } else if queue.is_empty() {
-            Some(self.round.tail(&self.pipeline.tail()))
-        } else {
-            // A slice that leaves samples for the next one: the tail is
-            // drawn once they are laid, not again for every slice of a
-            // stall (it is the same size as a slice for a big brush).
-            None
-        };
-        self.bands.lay(&Arc::new(work), pool)?;
-        if self.closed {
-            self.bands.settle();
-        }
-        let dirty = self.bands.take_dirty();
-        self.live.show(&self.bands, &dirty);
-        self.dirty.extend(dirty);
         self.dirty.sort_unstable();
         self.dirty.dedup();
         Ok(())
     }
 
+    /// The pen never said it lifted: the stroke ends as drawn.
+    fn close(&mut self, pool: Option<&JobPool>) -> Result<(), String> {
+        if self.closed {
+            return Ok(());
+        }
+        match &mut self.painting {
+            Painting::Round(stroke) => {
+                let RoundStroke {
+                    pipeline,
+                    round,
+                    bands,
+                } = &mut **stroke;
+                let work = Work {
+                    committed: round.tail(&pipeline.tail()),
+                    tail: Some(Vec::new()),
+                };
+                bands.lay(&Arc::new(work), pool)?;
+                bands.settle();
+                let dirty = bands.take_dirty();
+                self.live.show(bands, &dirty);
+                self.dirty.extend(dirty);
+            }
+            Painting::Paint(painter) => {
+                painter.close();
+                let dirty = painter.take_dirty();
+                self.live
+                    .show_pixels(painter.laid(&dirty), painter.bounds());
+                self.dirty.extend(dirty);
+            }
+        }
+        self.closed = true;
+        Ok(())
+    }
+
+    /// Lets go of the snapshot of the layer a stroke with paint
+    /// behaviours read (call it once the stroke is finished, before its
+    /// layer is written, so the layer's pixels are not copied for a
+    /// snapshot nobody reads any more). The live view keeps what it shows.
+    pub fn let_go_of_layer(&mut self) {
+        if let Painting::Paint(painter) = &mut self.painting {
+            painter.let_go_of_layer();
+        }
+    }
+
     /// The layer pixels the stroke covers, tile by tile.
     #[must_use]
     pub fn bounds(&self) -> Option<PixelRect> {
-        self.bands.bounds()
+        match &self.painting {
+            Painting::Round(stroke) => stroke.bands.bounds(),
+            Painting::Paint(painter) => painter.bounds(),
+        }
     }
 
     /// Merges the stroke into `raster` (layer `layer`, whose pixel
@@ -242,9 +418,13 @@ impl Stroke {
         layer: EntityId,
         label: &str,
     ) -> Result<RasterEdit, MergeError> {
+        let bands = match &self.painting {
+            Painting::Round(stroke) => &stroke.bands,
+            Painting::Paint(painter) => return painter.commit(raster, origin, layer, label),
+        };
         let (width, height) = (raster.width() as i32, raster.height() as i32);
         let mut rects = Vec::new();
-        for key in self.bands.keys() {
+        for key in bands.keys() {
             let [tx, ty] = key.origin();
             let x0 = (tx - origin[0]).max(0);
             let x1 = (tx + TILE - origin[0]).min(width);
@@ -259,7 +439,7 @@ impl Stroke {
                 rects.push((rect, before));
             }
         }
-        self.bands.merge(raster, origin, self.live.ink())?;
+        bands.merge(raster, origin, self.live.ink())?;
         let patches = rects
             .into_iter()
             .filter_map(|(rect, before)| RasterPatch::capture(raster, rect, before))
@@ -296,8 +476,15 @@ impl StrokeWorker {
     /// `pool`.
     #[must_use]
     pub fn start(pool: Arc<JobPool>, brush: &Brush, settings: Settings) -> Self {
+        Self::start_on(pool, brush, settings, Canvas::default())
+    }
+
+    /// Starts a stroke of `brush`, drawn as `settings` say on `canvas`,
+    /// laid on `pool`.
+    #[must_use]
+    pub fn start_on(pool: Arc<JobPool>, brush: &Brush, settings: Settings, canvas: Canvas) -> Self {
         let bands = pool.threads().clamp(1, MOST_BANDS);
-        let stroke = Stroke::new(brush, settings, bands);
+        let stroke = Stroke::on(brush, settings, bands, canvas);
         Self {
             live: stroke.live(),
             pool,
@@ -432,19 +619,7 @@ impl StrokeWorker {
         };
         let pool = (self.pool.threads() > 0).then_some(self.pool.as_ref());
         stroke.update(&mut self.queue, None, pool).ok()?;
-        if !stroke.closed {
-            // The pen never said it lifted: the stroke ends as drawn.
-            let work = Work {
-                committed: stroke.round.tail(&stroke.pipeline.tail()),
-                tail: Some(Vec::new()),
-            };
-            stroke.bands.lay(&Arc::new(work), pool).ok()?;
-            stroke.bands.settle();
-            stroke.closed = true;
-            let dirty = stroke.bands.take_dirty();
-            stroke.live.show(&stroke.bands, &dirty);
-            stroke.dirty.extend(dirty);
-        }
+        stroke.close(pool).ok()?;
         Some(*stroke)
     }
 

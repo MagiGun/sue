@@ -113,30 +113,17 @@ impl SuePaint {
     pub(super) fn settle(&mut self, cx: &mut AppletContext<'_>) {
         // A stroke of the new brush engine ends where the pen last was.
         self.engine_settle(cx);
-        match self.gesture.take() {
-            Some(Gesture::Stroke { stroke, label, .. }) => {
-                if let Some(raster) = doc::raster(&cx.world.arena, stroke.layer()) {
-                    let edit = stroke.finish(raster, &label);
-                    if !edit.is_empty() {
-                        cx.record(ArenaEdit(edit));
-                    }
+        if let Some(Gesture::Move { layers, .. }) = self.gesture.take() {
+            let mut steps = Batch::new(tr!("move-layer"));
+            for (layer, _, old) in layers {
+                for (key, before) in [(picture::X, old[0].clone()), (picture::Y, old[1].clone())] {
+                    steps = steps.then(match before {
+                        Some(value) => SetProperty::new(layer, key, value),
+                        None => SetProperty::remove(layer, key),
+                    });
                 }
             }
-            Some(Gesture::Move { layers, .. }) => {
-                let mut steps = Batch::new(tr!("move-layer"));
-                for (layer, _, old) in layers {
-                    for (key, before) in
-                        [(picture::X, old[0].clone()), (picture::Y, old[1].clone())]
-                    {
-                        steps = steps.then(match before {
-                            Some(value) => SetProperty::new(layer, key, value),
-                            None => SetProperty::remove(layer, key),
-                        });
-                    }
-                }
-                cx.record(ArenaEdit(steps));
-            }
-            _ => {}
+            cx.record(ArenaEdit(steps));
         }
         if let Some(live) = self.live.take() {
             let label = cx
@@ -207,9 +194,6 @@ impl SuePaint {
         if present {
             self.shown = true;
         }
-        // Masks of older files become the gray masks Sue paints, before
-        // their picture first shows (nothing to undo, nothing unsaved).
-        crate::doc::migrate_masks(&mut cx.world.arena);
         self.sync_docs(&cx.world.arena);
         self.hub
             .forget_old_cache(cx.catalog.folders.get("cache").map(PathBuf::as_path));

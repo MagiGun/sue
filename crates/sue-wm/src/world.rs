@@ -36,7 +36,24 @@ impl World {
         file: &SueFile,
         registry: &ComponentRegistry,
     ) -> Result<(), CodecError> {
+        self.load_file_with(file, registry, &mut |_| {})
+    }
+
+    /// [`Self::load_file`], with `migrate` run on the document as it was
+    /// decoded, before it becomes the world's: the place for a studio's
+    /// migrations on load (old masks to gray ones, say), which leave
+    /// nothing to undo and the document as clean as it was read.
+    ///
+    /// # Errors
+    /// If the file is malformed; the world is unchanged then.
+    pub fn load_file_with(
+        &mut self,
+        file: &SueFile,
+        registry: &ComponentRegistry,
+        migrate: &mut dyn FnMut(&mut Arena),
+    ) -> Result<(), CodecError> {
         let mut loaded = file.arena(registry)?;
+        migrate(&mut loaded);
         let current: Vec<AssetHandle> = self.arena.iter().map(|(handle, _)| handle).collect();
         for handle in current {
             let _ = self.arena.despawn(handle);

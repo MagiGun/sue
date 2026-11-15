@@ -23,7 +23,7 @@
 //! The arithmetic is in premultiplied color, so a dab over clear pixels
 //! drags their clearness along as a finger does.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use sue_core::{PixelFormat, RasterTile2D};
 use sue_model::brush::Mixing;
@@ -229,6 +229,8 @@ pub struct WetCanvas {
     /// Where the last dab fell: a smearing brush pushes by the step from
     /// there.
     last_at: Option<[f32; 2]>,
+    /// The tiles a dab changed since [`Self::take_dirty`] was last asked.
+    dirty: BTreeSet<TileKey>,
 }
 
 impl WetCanvas {
@@ -241,6 +243,7 @@ impl WetCanvas {
             tiles: BTreeMap::new(),
             reservoir: None,
             last_at: None,
+            dirty: BTreeSet::new(),
         }
     }
 
@@ -493,8 +496,33 @@ impl WetCanvas {
                 let i = ((py - oy) * TILE + (px - ox)) as usize;
                 tile.pixels[i * 4..i * 4 + 4].copy_from_slice(&out);
                 tile.touched[i] = true;
+                self.dirty.insert(key);
             }
         }
+    }
+
+    /// The tiles dabs changed since the last call, in order: what is
+    /// shown again.
+    pub fn take_dirty(&mut self) -> Vec<TileKey> {
+        std::mem::take(&mut self.dirty).into_iter().collect()
+    }
+
+    /// `true` where a dab of the stroke changed layer pixel `(x, y)`.
+    #[must_use]
+    pub fn touched(&self, x: i32, y: i32) -> bool {
+        let key = TileKey::of_pixel(x, y);
+        let [ox, oy] = key.origin();
+        self.tiles
+            .get(&key)
+            .is_some_and(|tile| tile.touched[((y - oy) * TILE + (x - ox)) as usize])
+    }
+
+    /// The tiles the stroke changed a pixel of, in order.
+    pub fn keys(&self) -> impl Iterator<Item = TileKey> + '_ {
+        self.tiles
+            .iter()
+            .filter(|(_, tile)| tile.touched.iter().any(|&t| t))
+            .map(|(key, _)| *key)
     }
 
     /// Replaces the pixels the stroke changed in `raster` (whose pixel

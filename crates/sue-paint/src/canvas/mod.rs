@@ -339,7 +339,7 @@ fn status_rect(column: Rect, chrome: f32, slide: f32) -> Rect {
 
 #[cfg(test)]
 mod tests {
-    use super::input::{lean_in_picture, tilt_of};
+    use super::input::lean_in_picture;
     use egui::Pos2;
 
     #[test]
@@ -369,7 +369,5 @@ mod tests {
         // Upright or unknown: no way at all; how far is tilt's.
         assert_eq!(lean_in_picture(None, at, zoomed), [0.0, 0.0]);
         assert_eq!(lean_in_picture(Some([0.0, 0.0]), at, zoomed), [0.0, 0.0]);
-        assert_eq!(tilt_of(None), 0.0);
-        assert!((tilt_of(Some([0.6, 0.8])) - 1.0).abs() < 1e-6);
     }
 }

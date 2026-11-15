@@ -505,22 +505,6 @@ pub(super) fn picture_quad(texture: egui::TextureId, corners: [Pos2; 4], opacity
     Shape::mesh(mesh)
 }
 
-/// Layer rectangles moved by the layer's `offset` onto the picture.
-pub(super) fn shift_rects(rects: &[[u32; 4]], offset: [i64; 2]) -> Vec<[u32; 4]> {
-    let shift = |value: u32, by: i64| (i64::from(value) + by).max(0) as u32;
-    rects
-        .iter()
-        .map(|[x0, y0, x1, y1]| {
-            [
-                shift(*x0, offset[0]),
-                shift(*y0, offset[1]),
-                shift(*x1, offset[0]),
-                shift(*y1, offset[1]),
-            ]
-        })
-        .collect()
-}
-
 /// The part of a picture of `size` that `view` shows in `viewport`, as
 /// `[x0, y0, x1, y1]` (with a pixel to spare), and how many picture pixels
 /// a side a screen pixel spans there.

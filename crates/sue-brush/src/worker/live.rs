@@ -1,4 +1,7 @@
-//! What the compositor shows of a stroke that is not in its layer yet.
+//! What the compositor shows of a stroke that is not in its layer yet:
+//! the coverage of a round tip and the ink it lays, or, for a stroke
+//! with paint behaviours (dabs, mixing, pictures, paper), the layer's
+//! own pixels with the stroke laid on them.
 
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -34,10 +37,15 @@ impl Hasher for KeyHasher {
 }
 
 type Tiles = HashMap<TileKey, Box<[u16]>, BuildHasherDefault<KeyHasher>>;
+type PixelTiles = HashMap<TileKey, Box<[u8]>, BuildHasherDefault<KeyHasher>>;
 
 #[derive(Debug, Default)]
 struct Shown {
     tiles: Tiles,
+    /// A stroke with paint behaviours: the layer's pixels with the stroke
+    /// laid on them, straight RGBA8, tile by tile, exactly as the merge
+    /// lays them.
+    pixels: PixelTiles,
     bounds: Option<PixelRect>,
     ended: bool,
 }
@@ -95,12 +103,66 @@ impl LiveView {
         shown.bounds = bounds;
     }
 
+    /// Takes the laid pixels of tiles: each `(key, pixels)`, where
+    /// `pixels` holds [`AREA`] straight RGBA8 pixels row by row, or `None`
+    /// for a tile that shows the layer as it is again.
+    pub(crate) fn show_pixels(
+        &self,
+        tiles: Vec<(TileKey, Option<Box<[u8]>>)>,
+        bounds: Option<PixelRect>,
+    ) {
+        let mut shown = self.shown.write().unwrap_or_else(PoisonError::into_inner);
+        if shown.ended {
+            return;
+        }
+        for (key, pixels) in tiles {
+            match pixels {
+                Some(pixels) => {
+                    shown.pixels.insert(key, pixels);
+                }
+                None => {
+                    shown.pixels.remove(&key);
+                }
+            }
+        }
+        shown.bounds = bounds;
+    }
+
     /// Stops showing the stroke: from now on it covers nothing.
     pub fn end(&self) {
         let mut shown = self.shown.write().unwrap_or_else(PoisonError::into_inner);
         shown.ended = true;
         shown.tiles.clear();
+        shown.pixels.clear();
         shown.bounds = None;
+    }
+
+    /// `true` when the view shows laid pixels (a stroke with paint
+    /// behaviours), not coverage and one ink.
+    #[must_use]
+    pub fn shows_pixels(&self) -> bool {
+        !self
+            .shown
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pixels
+            .is_empty()
+    }
+
+    /// The laid pixel shown at layer pixel `(x, y)`, straight RGBA8, or
+    /// `None` where the view shows no laid pixels.
+    #[must_use]
+    pub fn pixel(&self, x: i64, y: i64) -> Option<[u8; 4]> {
+        let (Ok(x), Ok(y)) = (i32::try_from(x), i32::try_from(y)) else {
+            return None;
+        };
+        let key = TileKey::of_pixel(x, y);
+        let shown = self.shown.read().unwrap_or_else(PoisonError::into_inner);
+        shown.pixels.get(&key).map(|tile| {
+            let [ox, oy] = key.origin();
+            let i = (((y - oy) * TILE + (x - ox)) * 4) as usize;
+            [tile[i], tile[i + 1], tile[i + 2], tile[i + 3]]
+        })
     }
 
     /// `true` once [`Self::end`] was called.
@@ -158,6 +220,9 @@ impl LiveView {
     /// lays (but for the merge's rounding to the layer's bytes).
     #[must_use]
     pub fn over(&self, x: i64, y: i64, under: [f32; 4]) -> [f32; 4] {
+        if let Some(pixel) = self.pixel(x, y) {
+            return pixel.map(|v| f32::from(v) / 255.0);
+        }
         let coverage = self.coverage(x, y);
         if coverage == 0 {
             return under;

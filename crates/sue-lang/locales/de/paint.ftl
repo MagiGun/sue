@@ -2033,3 +2033,4 @@ body-shape = Körperform
 head-to-body-ratio = Kopf-Körper-Verhältnis
 reset-body-shape = Körperform zurücksetzen
 cm = {" "}cm
+layer-takes-no-strokes = { $name } holds pixels the brush cannot paint on

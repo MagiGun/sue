@@ -1068,7 +1068,11 @@ impl Runtime {
         self.typing.flush(&mut self.engine.history);
         self.transport
             .set_playing(false, self.engine.audio.as_deref_mut());
-        if let Err(error) = self.engine.world.load_file(&file, &sue_model::registry()) {
+        if let Err(error) =
+            self.engine
+                .world
+                .load_file_with(&file, &sue_model::registry(), &mut migrate_on_load)
+        {
             self.shell.notify(
                 tr!("cannot-recover", title = kept.title(), error = error),
                 true,
@@ -1575,7 +1579,7 @@ impl Runtime {
             .set_playing(false, self.engine.audio.as_deref_mut());
         self.engine
             .world
-            .load_file(&file, &sue_model::registry())
+            .load_file_with(&file, &sue_model::registry(), &mut migrate_on_load)
             .map_err(|error| error.to_string())?;
         // Old steps name entities that are gone.
         self.engine.forget_histories();
@@ -1871,3 +1875,10 @@ impl Runtime {
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+/// What the studios turn in a document as it is read, before it is the
+/// world's (nothing to undo, nothing unsaved): Sue Paint's masks of
+/// 0.0.75 and the first 0.0.8 builds become the gray masks it paints.
+fn migrate_on_load(arena: &mut sue_core::Arena) {
+    sue_paint::doc::migrate_masks(arena);
+}
