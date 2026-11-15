@@ -417,8 +417,38 @@ fn sue_paint_mesh_transformation_bends_by_a_lattice_point() {
             driver.texts
         );
     }
+    // A finer lattice: Across stepped up from 4 to 6 with the arrow key
+    // while it is typed in, so 6 by 4 points show.
+    let points = |driver: &PaintDriver| {
+        buttons(driver)
+            .iter()
+            .filter(|(id, _)| id.starts_with("mark.transform.point."))
+            .count()
+    };
+    assert_eq!(points(&driver), 16, "4 by 4 at first");
+    let across = driver.rect_of("Across").expect("Across on the bar");
+    let field = driver
+        .texts
+        .iter()
+        .filter(|(text, rect)| text == "4" && rect.left() > across.right())
+        .map(|(_, rect)| *rect)
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .expect("the Across field");
+    click(&mut driver, field.center(), egui::Modifiers::NONE);
+    driver.step(vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)]);
+    driver.step(vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)]);
+    driver.settle(4);
+    assert_eq!(points(&driver), 24, "6 across, 4 down");
+    // Typing ends; the lattice is laid again over the same box.
+    click(&mut driver, from - vec2(30.0, 30.0), egui::Modifiers::NONE);
+    driver.click_text("Cancel");
+    driver.command("edit.transform.mesh");
+    driver.settle(4);
+    assert_eq!(points(&driver), 24, "the grid chosen last is kept");
+    driver.click_text("Cancel");
     // The bottom right point of the lattice pulled further out.
-    let _ = from;
+    driver.command("edit.transform.mesh");
+    driver.settle(4);
     undo_pair(&mut driver, "Mesh Transformation", |driver| {
         drag_with(driver, to, to + vec2(40.0, 40.0), egui::Modifiers::NONE);
         driver.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);

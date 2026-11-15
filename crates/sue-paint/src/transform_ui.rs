@@ -953,6 +953,11 @@ impl SuePaint {
                 crate::canvas::marks::guide(&painter, line, false, theme);
             }
             for (index, point) in mesh.to.iter().enumerate() {
+                crate::launchers::note_mark(
+                    ui.ctx(),
+                    &format!("transform.point.{index}"),
+                    screen(*point),
+                );
                 crate::canvas::marks::dot(
                     &painter,
                     screen(*point),
