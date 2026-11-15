@@ -14,10 +14,19 @@ use sue_io::clip::{
     ClipDocument, ClipDrawColor, ClipForeign, ClipHead, ClipLayer, ClipMask, ClipRow, ClipShape,
     ClipTable, Columns,
 };
+use sue_io::clip::parts;
 use sue_io::sqlite::Value;
 
-/// The version of both encodings.
-const VERSION: u8 = 1;
+/// The version of both encodings. Version 2 adds, after what version 1
+/// held, the typed parts of `.clip` model P3-18 (a layer's content,
+/// effects, palette color, rulers and thumbnail; the document's comps,
+/// timeline and preview), each in the encoding of `sue_io::clip::parts`.
+const VERSION: u8 = 2;
+
+/// Whether a kept value of `version` is one this build reads.
+const fn reads(version: u8) -> bool {
+    version == 1 || version == VERSION
+}
 
 fn value(out: &mut Writer, value: &Value) {
     match value {
@@ -261,6 +270,40 @@ fn layer_into(out: &mut Writer, layer: &ClipLayer) {
         bitmap(out, &mask.bitmap);
     }
     columns(out, &layer.columns);
+    // Version 2: the typed parts.
+    out.bool(layer.content.is_some());
+    if let Some(content) = &layer.content {
+        out.str(content.kind());
+        out.bytes(&parts::encode_content(content));
+    }
+    option_bytes(out, layer.effects.as_ref().map(parts::encode_effects).as_deref());
+    option_bytes(
+        out,
+        layer.palette_color.map(parts::encode_color).as_deref(),
+    );
+    out.bytes(&parts::encode_rulers(&layer.rulers));
+    option_bytes(out, layer.thumbnail.as_ref().map(parts::encode_picture).as_deref());
+}
+
+/// Reads the typed parts version 2 added after a layer's columns.
+fn read_layer_parts(input: &mut Reader<'_>, layer: &mut ClipLayer) -> Result<(), CodecError> {
+    layer.content = if input.bool()? {
+        let kind = input.str()?;
+        Some(parts::decode_content(&kind, input.bytes()?)?)
+    } else {
+        None
+    };
+    layer.effects = read_option_bytes(input)?
+        .map(|bytes| parts::decode_effects(&bytes))
+        .transpose()?;
+    layer.palette_color = read_option_bytes(input)?
+        .map(|bytes| parts::decode_color(&bytes))
+        .transpose()?;
+    layer.rulers = parts::decode_rulers(input.bytes()?)?;
+    layer.thumbnail = read_option_bytes(input)?
+        .map(|bytes| parts::decode_picture(&bytes))
+        .transpose()?;
+    Ok(())
 }
 
 fn read_layer(input: &mut Reader<'_>) -> Result<ClipLayer, CodecError> {
@@ -321,10 +364,13 @@ pub(super) fn layer_bytes(layer: &ClipLayer) -> Vec<u8> {
 pub(super) fn layer_from(bytes: &[u8]) -> Result<ClipLayer, CodecError> {
     let mut input = Reader::new(bytes);
     let version = input.u8()?;
-    if version != VERSION {
+    if !reads(version) {
         return Err(input.error(format!("kept layer version {version}")));
     }
-    let layer = read_layer(&mut input)?;
+    let mut layer = read_layer(&mut input)?;
+    if version >= 2 {
+        read_layer_parts(&mut input, &mut layer)?;
+    }
     if !input.is_empty() {
         return Err(input.error("bytes after a kept layer"));
     }
@@ -390,6 +436,10 @@ pub(super) fn picture_bytes(doc: &ClipDocument) -> Vec<u8> {
     out.bytes(&foreign.preamble);
     out.bytes(&foreign.foot);
     out.bytes(&foreign.trailing);
+    // Version 2: the document's typed parts.
+    out.bytes(&parts::encode_comps(&doc.comps));
+    option_bytes(&mut out, doc.timeline.as_ref().map(parts::encode_timeline).as_deref());
+    option_bytes(&mut out, doc.preview.as_ref().map(parts::encode_picture).as_deref());
     out.into_bytes()
 }
 
@@ -400,7 +450,7 @@ pub(super) fn picture_bytes(doc: &ClipDocument) -> Vec<u8> {
 pub(super) fn picture_from(bytes: &[u8]) -> Result<ClipDocument, CodecError> {
     let mut input = Reader::new(bytes);
     let version = input.u8()?;
-    if version != VERSION {
+    if !reads(version) {
         return Err(input.error(format!("kept canvas version {version}")));
     }
     let (width, height, dpi) = (input.u32()?, input.u32()?, input.f64()?);
@@ -417,6 +467,9 @@ pub(super) fn picture_from(bytes: &[u8]) -> Result<ClipDocument, CodecError> {
         other => return Err(input.error(format!("unknown head kind {other}"))),
     };
     doc.root = read_layer(&mut input)?;
+    if version >= 2 {
+        read_layer_parts(&mut input, &mut doc.root)?;
+    }
     let mut foreign = ClipForeign::default();
     let count = input.len(3)?;
     for _ in 0..count {
@@ -469,6 +522,15 @@ pub(super) fn picture_from(bytes: &[u8]) -> Result<ClipDocument, CodecError> {
     foreign.preamble = input.bytes()?.to_vec();
     foreign.foot = input.bytes()?.to_vec();
     foreign.trailing = input.bytes()?.to_vec();
+    if version >= 2 {
+        doc.comps = parts::decode_comps(input.bytes()?)?;
+        doc.timeline = read_option_bytes(&mut input)?
+            .map(|bytes| parts::decode_timeline(&bytes))
+            .transpose()?;
+        doc.preview = read_option_bytes(&mut input)?
+            .map(|bytes| parts::decode_picture(&bytes))
+            .transpose()?;
+    }
     if !input.is_empty() {
         return Err(input.error("bytes after a kept canvas"));
     }
@@ -512,10 +574,10 @@ mod tests {
     #[test]
     fn a_newer_version_is_refused() {
         let mut bytes = layer_bytes(&ClipLayer::folder("A"));
-        bytes[0] = 2;
+        bytes[0] = VERSION + 1;
         assert!(layer_from(&bytes).is_err());
         let mut bytes = picture_bytes(&ClipDocument::new(4, 4, 72.0));
-        bytes[0] = 2;
+        bytes[0] = VERSION + 1;
         assert!(picture_from(&bytes).is_err());
     }
 }

@@ -54,7 +54,7 @@ as a little-endian 64-bit number):
 ## What the `.clip` converter keeps
 
 `crates/sue-paint/src/clip_io/keep.rs`. Both encodings start with a
-version byte, 1.
+version byte, 2 (Sue still reads 1, which lacks the typed parts below).
 
 A **layer** (`part` = `layer`) is one row of the `.clip`'s layer tree as
 it was read, without what a folder holds: its `MainId`, name, the type,
@@ -63,6 +63,11 @@ draw color numbers as the file has them, its uuid, Sue's draft and
 reference marks, its pixels and its mask (each with the ids and other
 columns of its mipmap rows, the stored bitmap's id, the attribute and the
 blocks still compressed), and every other column of its row by name.
+Version 2 adds, after the columns, the layer's typed parts in the
+encodings of `sue_io::clip::parts` (`docs/clip-sue-tables.md`): whether
+it has content and, if so, the content's kind and bytes; its effects,
+palette color and thumbnail, each as present-or-not and bytes; and its
+rulers as bytes.
 
 A **picture** (`part` = `picture`) is what belongs to no layer: the
 canvas size and resolution, the canvas row's id and other columns, the
@@ -70,7 +75,10 @@ canvas size and resolution, the canvas row's id and other columns, the
 the reader kept as foreign: the shapes of the tables it reads, whole
 tables it does not read, rows no layer reached, chunks of unknown kinds,
 the extra columns of `ExternalChunk`, the columns of a `SueProject` row,
-and the bytes before, between and after the chunks.
+and the bytes before, between and after the chunks. Version 2 adds the
+root folder's typed parts (as a layer's), and at the end the layer comps
+as bytes, then the timeline and the canvas preview, each as
+present-or-not and bytes.
 
 Values from the database are a kind byte and then the value: 0 null, 1
 whole number (zigzag varint), 2 real (64-bit float), 3 text, 4 bytes.
