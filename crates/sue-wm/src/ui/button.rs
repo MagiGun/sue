@@ -641,6 +641,7 @@ pub struct IconButton<'a> {
     salt: IdSalt,
     icon: Icon,
     name: &'a str,
+    shortcut: &'a str,
     kind: ButtonKind,
     on: Option<bool>,
     enabled: bool,
@@ -655,6 +656,7 @@ pub fn icon_button(salt: impl AsIdSalt, icon: Icon, name: &str) -> IconButton<'_
         salt: IdSalt::new(salt),
         icon,
         name,
+        shortcut: "",
         kind: ButtonKind::Ghost,
         on: None,
         enabled: true,
@@ -662,7 +664,7 @@ pub fn icon_button(salt: impl AsIdSalt, icon: Icon, name: &str) -> IconButton<'_
     }
 }
 
-impl IconButton<'_> {
+impl<'a> IconButton<'a> {
     /// Makes it a button of `kind`.
     pub fn kind(mut self, kind: ButtonKind) -> Self {
         self.kind = kind;
@@ -687,6 +689,14 @@ impl IconButton<'_> {
     /// is on should be the one that is seen.
     pub fn quiet(mut self) -> Self {
         self.quiet = true;
+        self
+    }
+
+    /// The keys that run what it does, such as `Ctrl+B`, shown in its
+    /// tooltip after its name ([`tooltip`](super::tooltip)); empty for
+    /// none.
+    pub fn shortcut(mut self, keys: &'a str) -> Self {
+        self.shortcut = keys;
         self
     }
 
@@ -717,8 +727,11 @@ impl IconButton<'_> {
         });
         if name.is_empty() {
             response
-        } else {
+        } else if self.shortcut.is_empty() {
             response.on_hover_text(name)
+        } else {
+            let tip = super::Tip::new(name).shortcut(self.shortcut);
+            super::tooltip(response, &tip, theme)
         }
     }
 
