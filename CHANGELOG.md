@@ -13,6 +13,16 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, 3D: Tool Property for a 3D layer is laid out in sections
+  (3D object, Camera, Light source, Outline, Body shape, Pose). Drag
+  buttons move, turn and slide the object along the ground and turn,
+  move and zoom the camera; set the object's angle, position and scale
+  with presets, Put on the ground and resets; turn on Manga
+  Perspective. Drawing figures gain male and female body types, a body
+  shape chart (thin to fat, less to more muscle) for the whole body and
+  each part, a head to body ratio that can follow the height,
+  Initialize, and Register body shape as material. Each drag is one
+  undo step.
 - Settings, Appearance, Icons: choose an icon pack, see every icon it
   draws on a sheet, install one from a folder or a .zip, remove one,
   replace single icons with your own SVG files, and export Sue's own

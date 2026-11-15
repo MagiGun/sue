@@ -450,6 +450,14 @@ The order of work is the plan at the end.
 | Painting directly on 3D (5.0, 5.1) | 3D | missing | |
 | VRM import and photorealistic rendering | File > Import | missing | |
 | Height-based fog, Follow camera light (5.0, 5.1) | 3D settings | done | In the 3D layer's Tool Property |
+| Object position, angle and scale with resets, preset angles, Put on the ground | Object tool, Tool Property | done | Kept on the model; buttons in Tool Property move, turn and slide the object along the ground while dragged |
+| Camera buttons: turn, move, zoom | Above the model | partial | As drag buttons in Tool Property (arrow keys too); not drawn on the canvas above the model yet |
+| Manga Perspective | Tool Property | done | On and off with a strength; the middle keeps its size |
+| Body types, body shape chart per body part, head to body ratio following the height | Tool Property, Body shape | done | Male and female; thin to fat and less to more muscle for the full body, head, upper body, arms and legs |
+| Register body shape as material, Initialize | Tool Property | done | Body shape materials (`.body`, docs/body-shape-files.md) beside pose materials |
+| Object list of several objects on one 3D layer | Tool Property | missing | One object per 3D layer |
+| Hand pose on the figure itself, poses dragged onto the model, the 3D object launcher | 3D | missing | Hands are their own 3D layer; poses go on by Paste from the Material palette |
+| Characters with physics, 3D backgrounds, motion materials | Materials | missing | Later (risk R6: Sue's own materials only) |
 | Batch texture export (EX) | File > Export | missing | |
 | FBX import (5.1) | File > Import | missing | |
 
