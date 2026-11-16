@@ -565,8 +565,8 @@ follow [Semantic Versioning](https://semver.org/).
   to a clean point at both ends, with a mouse too; the flat marker and
   calligraphy pen have flat tips; markers lay even, slightly see-through
   ink; the spray lays a puff of fine drops, even with a tap; pointillism
-  lays small dots over a band. A brush you changed keeps its paper and how it mixes when you
-  change its size.
+  lays small dots over a band. A brush you changed keeps its paper and
+  how it mixes when you change its size.
 - Sue Paint wears the theme you pick in Settings, Appearance, as the Hub
   and Sue Writer do: in Paper its menus, command bar, palettes, Tool
   Property, dialogs, canvas surround, timeline and status are light, in
