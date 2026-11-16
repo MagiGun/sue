@@ -11,7 +11,8 @@ use sue_wm::{AppletContext, Theme};
 use crate::studio::SuePaint;
 
 /// The commands of the Information palette's menu.
-pub(crate) const MENU_COMMANDS: [&str; 7] = [
+pub(crate) const MENU_COMMANDS: [&str; 8] = [
+    "info.canvas",
     "info.memory",
     "info.coordinates",
     "info.length",
@@ -69,6 +70,8 @@ impl Unit {
 /// What the Information palette shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct InfoOptions {
+    /// The canvas: its size, print size, layers, zoom and angle.
+    pub canvas: bool,
     /// The memory the picture's pixels take.
     pub memory: bool,
     /// Where the pointer is, and its color.
@@ -82,6 +85,7 @@ pub(crate) struct InfoOptions {
 impl Default for InfoOptions {
     fn default() -> Self {
         Self {
+            canvas: true,
             memory: true,
             coordinates: true,
             length: true,
@@ -97,7 +101,8 @@ impl InfoOptions {
     /// Them as the file's lines (`memory 1`, `unit mm`).
     pub(crate) fn to_text(self) -> String {
         format!(
-            "memory {}\ncoordinates {}\nlength {}\nunit {}\n",
+            "canvas {}\nmemory {}\ncoordinates {}\nlength {}\nunit {}\n",
+            u8::from(self.canvas),
             u8::from(self.memory),
             u8::from(self.coordinates),
             u8::from(self.length),
@@ -114,6 +119,7 @@ impl InfoOptions {
             };
             let on = value.trim() == "1";
             match word {
+                "canvas" => options.canvas = on,
                 "memory" => options.memory = on,
                 "coordinates" => options.coordinates = on,
                 "length" => options.length = on,
@@ -132,6 +138,34 @@ impl InfoOptions {
 /// The memory `bytes` take, as people read it.
 fn megabytes(bytes: usize) -> String {
     sue_lang::number(bytes as f64 / (1024.0 * 1024.0), 1)
+}
+
+/// The canvas's lines: its size, print size, layers, zoom and angle
+/// (`view`).
+fn canvas_lines(
+    lines: &mut Vec<String>,
+    size: [u32; 2],
+    dpi: f64,
+    layers: usize,
+    view: (f32, f32),
+) {
+    lines.push(tr!(
+        "canvas-x-px-dpi",
+        value = size[0],
+        value2 = size[1],
+        dpi = sue_lang::number(dpi, 0)
+    ));
+    lines.push(tr!(
+        "print-size-x-cm",
+        value = sue_lang::number(f64::from(size[0]) / dpi * 2.54, 1),
+        value2 = sue_lang::number(f64::from(size[1]) / dpi * 2.54, 1)
+    ));
+    lines.push(tr!("layers-2", count = layers));
+    lines.push(tr!(
+        "zoom-percent-angle",
+        value = sue_lang::number(f64::from(view.0 * 100.0), 0),
+        rotation = sue_lang::number(f64::from(view.1), 0)
+    ));
 }
 
 impl SuePaint {
@@ -171,24 +205,11 @@ impl SuePaint {
             .and_then(|entity| entity.property(sue_model::picture::DPI))
             .and_then(sue_core::Value::as_f64)
             .unwrap_or(72.0);
-        lines.push(tr!(
-            "canvas-x-px-dpi",
-            value = size[0],
-            value2 = size[1],
-            dpi = sue_lang::number(dpi, 0)
-        ));
-        lines.push(tr!(
-            "print-size-x-cm",
-            value = sue_lang::number(f64::from(size[0]) / dpi * 2.54, 1),
-            value2 = sue_lang::number(f64::from(size[1]) / dpi * 2.54, 1)
-        ));
         let layers = crate::doc::layers(arena, doc.picture);
-        lines.push(tr!("layers-2", count = layers.len()));
-        lines.push(tr!(
-            "zoom-percent-angle",
-            value = sue_lang::number(f64::from(doc.view.zoom * 100.0), 0),
-            rotation = sue_lang::number(f64::from(doc.view.rotation), 0)
-        ));
+        if options.canvas {
+            let view = (doc.view.zoom, doc.view.rotation);
+            canvas_lines(&mut lines, size, dpi, layers.len(), view);
+        }
         if options.memory {
             let bytes: usize = layers
                 .iter()
@@ -285,6 +306,7 @@ mod tests {
     #[test]
     fn information_options_round_trip_as_text() {
         let options = InfoOptions {
+            canvas: false,
             memory: false,
             coordinates: true,
             length: false,
