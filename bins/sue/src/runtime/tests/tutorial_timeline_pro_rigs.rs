@@ -1839,8 +1839,11 @@ fn tf_1058_track_labels_named_with_a_range_on_the_picked_track() {
     click_at(&mut paint, grid.cell(2));
     paint.command("anim.track_note");
     paint.settle(3);
-    fill(&mut paint, "Label name", "Hold");
-    paint.click_text("OK");
+    // The name field has the keys as the dialog opens: typed at once,
+    // Enter keeps it.
+    paint.step(vec![egui::Event::Text("Hold".to_owned())]);
+    press(&mut paint, egui::Key::Enter);
+    paint.settle(2);
     assert_eq!(notes(&paint).len(), 2);
     click_at(&mut paint, grid.cell(5));
     undo_pair(&mut paint, "No Track Label", |paint| {
