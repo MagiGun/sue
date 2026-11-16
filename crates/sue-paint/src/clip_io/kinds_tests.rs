@@ -534,6 +534,54 @@ fn a_rich_picture_through_sue_twice_writes_the_same_file() {
     );
 }
 
+/// A layer changed in Sue is written from Sue's model, but what the
+/// picture's own parts hang on it (the rulers of the layer they belong
+/// to, the cels of an animation folder, the camera of a camera folder)
+/// still goes with it while those parts are unchanged.
+#[test]
+fn a_changed_layer_keeps_the_rulers_and_folders_hung_on_it() {
+    let mut arena = Arena::new();
+    let picture = a_rich_picture(&mut arena);
+    let bytes = encode(&arena, picture).unwrap();
+    let first = read(&bytes).unwrap();
+    let (mut back, again, _) = opened(&bytes);
+    let sequence = anim::timeline(&back, again).unwrap().clone();
+    let folder = anim::track_folder(&sequence.tracks[anim::folders(&sequence)[0]]).unwrap();
+    let camera = named(&back, again, "Camera 1");
+    let hello = named(&back, again, "Hello");
+    for id in [folder, camera, hello] {
+        apply(&mut back, doc::set(id, picture::OPACITY, 0.75));
+    }
+    let (changed, _) = encode_with_report(&back, again).unwrap();
+    let changed = read(&changed).unwrap();
+    assert_eq!(changed.timeline, first.timeline);
+    assert_eq!(changed.comps, first.comps);
+    for (path, layer) in first.paths() {
+        let now = changed.layer_at(&path).unwrap();
+        assert_eq!(now.name, layer.name);
+        assert_eq!(now.rulers, layer.rulers, "{}", layer.name);
+        if matches!(
+            layer.content,
+            Some(ClipContent::AnimationFolder(_) | ClipContent::Camera(_))
+        ) {
+            assert_eq!(now.content, layer.content, "{}", layer.name);
+        }
+    }
+    // And Sue opens it with its rulers, cels and camera.
+    let (reopened, picture_again, report) = opened(&sue_io::clip::write(&changed).unwrap());
+    assert!(
+        !Rulers::of(&reopened, picture_again).is_empty(),
+        "{}",
+        report.summary()
+    );
+    let sequence = anim::timeline(&reopened, picture_again).unwrap();
+    assert_eq!(anim::folders(sequence).len(), 1);
+    assert!(camera::is_camera(
+        &reopened,
+        named(&reopened, picture_again, "Camera 1")
+    ));
+}
+
 #[test]
 fn opening_a_rich_picture_is_one_step_undone_and_redone_whole() {
     let mut arena = Arena::new();

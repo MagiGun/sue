@@ -72,6 +72,8 @@ struct Writing<'a> {
     paths: Vec<(EntityId, ClipLayerPath)>,
     /// Every layer went back exactly as it was read.
     all_kept: bool,
+    /// Where the layers written again from Sue's model went.
+    remade: Vec<ClipLayerPath>,
 }
 
 impl Writing<'_> {
@@ -146,6 +148,7 @@ impl Writing<'_> {
             self.report
                 .lines
                 .push(Line::new(info.name.clone(), outcome).lost(approximated));
+            self.remade.push(path.clone());
             self.paths.push((info.id, path));
             out.push(layer);
         }
@@ -307,6 +310,7 @@ pub fn document(arena: &Arena, picture: EntityId) -> Result<(ClipDocument, Repor
         report: Report::default(),
         paths: Vec::new(),
         all_kept: true,
+        remade: Vec::new(),
     };
     let kept_canvas = kept(entity, "picture");
     let (mut doc, kept_parts) = match kept_canvas
@@ -327,7 +331,11 @@ pub fn document(arena: &Arena, picture: EntityId) -> Result<(ClipDocument, Repor
     // otherwise Sue's model says it.
     let parts = extras::parts(arena, picture, &writing.paths);
     let unchanged = kept_parts == Some(parts.print());
-    if !unchanged {
+    if unchanged {
+        // A layer written again holds none of them: what hangs on it
+        // goes back on it.
+        parts.put_on(&mut doc, &writing.remade);
+    } else {
         writing.report.parts = parts.lines.clone();
         parts.put(&mut doc);
     }

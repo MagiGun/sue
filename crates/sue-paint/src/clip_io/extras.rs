@@ -120,6 +120,27 @@ impl Parts {
         doc.comps = self.comps;
         doc.timeline = self.timeline;
     }
+
+    /// Puts into the layers of `doc` at `remade` (written again from
+    /// Sue's model, so holding nothing of the parts) what the parts hang
+    /// on them: an animation or camera folder's content, the rulers. The
+    /// other layers and the picture's own parts stay as the file held
+    /// them; for parts that did not change since the file was opened.
+    pub fn put_on(self, doc: &mut ClipDocument, remade: &[ClipLayerPath]) {
+        for (path, content) in self.folders {
+            if remade.contains(&path)
+                && let Some(layer) = doc.layer_at_mut(&path)
+            {
+                layer.content = Some(content);
+            }
+        }
+        if let Some((path, rulers)) = self.rulers
+            && remade.contains(&path)
+            && let Some(layer) = doc.layer_at_mut(&path)
+        {
+            layer.rulers = rulers;
+        }
+    }
 }
 
 fn path_print(print: &mut sue_model::foreign::Fingerprint, path: &ClipLayerPath) {
