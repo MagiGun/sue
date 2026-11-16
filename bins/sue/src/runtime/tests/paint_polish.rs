@@ -285,6 +285,50 @@ fn sue_paint_sub_tool_palette_cuts_no_row_in_half() {
     assert!(overflowed > 0, "a tool with more sub tools than show");
 }
 
+#[test]
+fn sue_paint_brush_size_palette_cuts_no_row_in_half() {
+    // The default layout with the pen: Brush Size shows whole rows of
+    // sizes, each dot with its number under it, never a row cut through
+    // at the palette's bottom.
+    let mut paint = PaintDriver::fresh("paint-polish-brush-size");
+    paint.settle(4);
+    paint.command("tool.pick.pen");
+    paint.settle(6);
+    let shapes = clipped_shapes(&mut paint, Vec::new());
+    // The palette's header: the lowest "Brush Size" (Tool Property has a
+    // row of that name above it).
+    let header = shapes
+        .iter()
+        .filter(|(text, _, _)| text == "Brush Size")
+        .map(|(_, rect, _)| *rect)
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the Brush Size palette");
+    // The sizes' numbers: texts that read as a number, drawn in the
+    // palette's body (a clip starting just under its header).
+    let labels: Vec<(String, Rect, Rect)> = shapes
+        .iter()
+        .filter(|(text, rect, clip)| {
+            text.parse::<f32>().is_ok()
+                && (clip.top() - header.bottom()).abs() < 20.0
+                && rect.left() < header.left() + 320.0
+        })
+        .cloned()
+        .collect();
+    assert!(labels.len() >= 8, "a row of sizes at least: {labels:?}");
+    for (text, rect, clip) in &labels {
+        assert!(
+            clip.contains_rect(*rect),
+            "size {text} at {rect:?} is cut by {clip:?}"
+        );
+    }
+    // Every row it starts is full (the eight a row the default width
+    // gives), so no row was left half drawn.
+    let mut rows: Vec<f32> = labels.iter().map(|(_, rect, _)| rect.top()).collect();
+    rows.dedup_by(|a, b| (*a - *b).abs() < 1.0);
+    assert!(rows.len() >= 2, "two rows of sizes: {labels:?}");
+    assert_eq!(labels.len() % rows.len(), 0, "{labels:?}");
+}
+
 /// The frames a second and how many frames the AVI `bytes` says it has.
 fn avi_timing(bytes: &[u8]) -> (f64, u32) {
     let at = bytes

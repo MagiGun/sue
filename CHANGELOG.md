@@ -856,6 +856,8 @@ follow [Semantic Versioning](https://semver.org/).
   the Timeline's frames or another palette under the canvas.
 - Sue Paint: the Sub Tool palette shows whole rows (no row cut in half)
   and opens a little taller.
+- Sue Paint: the Brush Size palette shows whole rows of sizes, never a
+  row of dots cut through at its bottom.
 - Sue Paint, Export Timelapse: Fit to specified length makes a video of
   that length however few strokes were recorded (three strokes fitted
   to 30 seconds made a 4 second video); its last second shows the
