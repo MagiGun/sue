@@ -738,16 +738,84 @@ fn cc_0406_ctrl_plus_and_minus_zoom_and_the_strip_shows_it() {
     );
 }
 
-/// CC 04:37: File, Pen Pressure Settings: draw to adjust, with a graph.
+/// CC 04:37: File, Pen Pressure Settings: a few lines drawn on the pad
+/// with a light pen, Check adjusted settings fits the curve to them, and
+/// OK keeps it for every tool.
 #[test]
 fn cc_0437_pen_pressure_settings_adjust_by_drawing() {
+    use sue_platform::stylus::{self, PenKind, PenSample, PenSource};
     let _english = sue_lang::scope(sue_lang::ENGLISH);
     let mut driver = open("pressure-dialog");
+    let kept = |driver: &PaintDriver| {
+        driver
+            .runtime
+            .engine
+            .world
+            .rice
+            .get_str("sue_paint.pen_pressure")
+            .map(str::to_owned)
+    };
+    let before = kept(&driver);
     run(&mut driver, "file.pressure");
     driver.settle(6);
     assert!(shows(&driver, "Adjust pen pressure"), "{:?}", driver.texts);
-    assert!(shows(&driver, "Check adjusted settings"));
     assert!(shows(&driver, "Show pen pressure graph"));
+    // The pad lies between the Check button and the graph's check box.
+    let check = widget(&mut driver, "Check adjusted settings").expect("the Check button");
+    let graph = widget(&mut driver, "Show pen pressure graph").expect("the graph box");
+    let top = check.bottom() + 12.0;
+    let bottom = graph.top() - 12.0;
+    assert!(bottom > top + 20.0, "a pad: {check:?} {graph:?}");
+    let mut time = driver.ctx.input(|input| input.time) + 1.0;
+    let sample = |kind, pos: Pos2, time, pressure| {
+        let mut sample = PenSample::at(PenSource::WinTab, [pos.x, pos.y], time);
+        sample.kind = kind;
+        sample.pressure = pressure;
+        sample
+    };
+    for row in 0..3 {
+        let y = top + (bottom - top) * (row as f32 + 1.0) / 4.0;
+        let mut at = egui::pos2(check.left() + 20.0, y);
+        stylus::push_for_test(sample(PenKind::Down, at, time, Some(0.3)));
+        driver.step(vec![
+            Event::PointerMoved(at),
+            Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+        ]);
+        for index in 0..14 {
+            at += vec2(12.0, 0.0);
+            time += 0.016;
+            // A light hand: between a fifth and two fifths of the way.
+            let pressure = 0.2 + 0.2 * (index as f32 / 13.0);
+            stylus::push_for_test(sample(PenKind::Move, at, time, Some(pressure)));
+            driver.step(vec![Event::PointerMoved(at)]);
+        }
+        stylus::push_for_test(sample(PenKind::Up, at, time + 0.004, None));
+        driver.step(vec![Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: false,
+            modifiers: Modifiers::NONE,
+        }]);
+        driver.settle(2);
+        time += 0.2;
+    }
+    stylus::forget_for_test();
+    click_widget(&mut driver, "Check adjusted settings");
+    assert!(
+        shows(&driver, "Stronger") && shows(&driver, "Lighter"),
+        "the curve is fitted and can be tried: {:?}",
+        driver.texts
+    );
+    click_widget(&mut driver, "OK");
+    driver.settle(4);
+    let after = kept(&driver);
+    assert!(after.is_some(), "the fitted curve is kept");
+    assert_ne!(after, before, "a light hand gets a new curve");
 }
 
 // ----- Crash Course: the sketch -------------------------------------------------
@@ -1455,6 +1523,45 @@ fn cc_1455_painting_on_the_mask_hides_and_shows() {
     assert!(seen_at(&seen(&driver), out)[0] < 60, "the flat shows there");
 }
 
+/// CC 14:55, the other side (CT-1): while a folder's mask is edited,
+/// the tools that lay pixels in the mask take it, and the ones that work
+/// on a layer's own pixels (a figure, a filter) still say why they
+/// cannot, instead of doing nothing.
+#[test]
+fn cc_1455_tools_that_skip_masks_still_refuse_a_folder() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("mask-refuse");
+    let (_, folder, _) = dragon(&mut driver);
+    let name = arena(&driver).get_by_id(folder).unwrap().name().to_owned();
+    edit_mask(&mut driver, &name);
+    let refusal = format!("{name} is a folder: pick a layer in it to draw on");
+    let message = |driver: &PaintDriver| {
+        driver
+            .runtime
+            .shell
+            .message()
+            .map(|(text, _)| text.to_owned())
+            .unwrap_or_default()
+    };
+    let before = bytes(&driver);
+    sub_tool(&mut driver, Key::U, "Straight Line", "Rectangle");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(150.0, 100.0), m + vec2(250.0, 180.0));
+    assert_eq!(message(&driver), refusal, "the figure says why");
+    assert!(bytes(&driver) == before, "and changes nothing");
+    driver.runtime.shell.dismiss_overlays();
+    run(&mut driver, "filter.grayscale");
+    assert_eq!(message(&driver), refusal, "the filter says why");
+    assert!(bytes(&driver) == before, "and changes nothing");
+    // The pen still draws in the mask.
+    pen(&mut driver);
+    tap(&mut driver, Key::C);
+    let (inside, _) = box_points(&driver);
+    let shown = mask_at(&driver, folder, inside);
+    stroke(&mut driver, m + vec2(-30.0, 0.0), m + vec2(30.0, 0.0));
+    assert!(mask_at(&driver, folder, inside) < shown, "the pen hides");
+}
+
 /// CC 15:16 (CT-2): the Fill tool on the mask fills an area of it, so
 /// the flat shows there.
 #[test]
@@ -1672,6 +1779,44 @@ fn cc_2012_double_click_renames_a_layer() {
     driver.step(vec![Event::Text("Tail".to_owned())]);
     tap(&mut driver, Key::Enter);
     assert_eq!(arena(&driver).get_by_id(layer).unwrap().name(), "Tail");
+}
+
+/// CC 20:12, the other way in: a rename moved to another layer by
+/// Layer, Change Layer Name leaves the first layer's field behind, and
+/// a double click on that layer later still takes the keys.
+#[test]
+fn cc_2012_a_rename_moved_away_does_not_stick() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("rename-moved");
+    run(&mut driver, "layer.new");
+    let first = named(&driver, "Layer 1");
+    let second = named(&driver, "Layer 2");
+    let double_click = |driver: &mut PaintDriver, name: &str| {
+        let at = driver.rect_of(name).unwrap().center();
+        for pressed in [true, false, true, false] {
+            driver.step(vec![
+                Event::PointerMoved(at),
+                Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ]);
+        }
+        driver.settle(4);
+    };
+    double_click(&mut driver, "Layer 1");
+    // The rename moves to the layer above through the menu command.
+    run(&mut driver, "layer.select_above");
+    run(&mut driver, "layer.rename");
+    driver.step(vec![Event::Text("Wings".to_owned())]);
+    tap(&mut driver, Key::Enter);
+    assert_eq!(arena(&driver).get_by_id(second).unwrap().name(), "Wings");
+    double_click(&mut driver, "Layer 1");
+    driver.step(vec![Event::Text("Body".to_owned())]);
+    tap(&mut driver, Key::Enter);
+    assert_eq!(arena(&driver).get_by_id(first).unwrap().name(), "Body");
 }
 
 /// CC 20:42 (and 28:01; CT-5): several layers picked with their boxes,
@@ -3161,14 +3306,12 @@ fn t50_36_preview_for_binding() {
     let mut driver = open("binding");
     run(&mut driver, "story.add");
     run(&mut driver, "story.add");
+    assert!(!shows(&driver, "3D Preview for Binding"));
     run(&mut driver, "story.preview_binding");
     driver.settle(6);
     assert!(
-        driver
-            .texts
-            .iter()
-            .any(|(text, _)| text.contains("Binding")),
-        "{:?}",
+        shows(&driver, "3D Preview for Binding"),
+        "the preview opens: {:?}",
         driver.texts
     );
 }
@@ -3342,6 +3485,41 @@ fn t50_46_units_and_paper_sizes_in_new() {
     for unit in ["cm", "mm", "in", "pt"] {
         assert!(shows(&driver, unit), "{unit}: {:?}", driver.texts);
     }
+    let pt = driver
+        .texts
+        .iter()
+        .filter(|(text, _)| text == "pt")
+        .map(|(_, rect)| *rect)
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("pt in the list");
+    click(&mut driver, pt.center());
+    driver.settle(4);
+    // At 72 dpi a point is a pixel; at 144 dpi the 1,600 pixel width is
+    // 800 points.
+    assert!(shows(&driver, " pt"), "the fields read in pt");
+    assert!(shows(&driver, "1,600.00"), "{:?}", driver.texts);
+    let dpi = driver
+        .texts
+        .iter()
+        .filter(|(text, _)| text == "72")
+        .map(|(_, rect)| *rect)
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .expect("the resolution field");
+    click(&mut driver, dpi.center());
+    type_over(&mut driver, "144");
+    tap(&mut driver, Key::Tab);
+    driver.settle(4);
+    assert!(shows(&driver, "800.00"), "800 pt: {:?}", driver.texts);
+    // A4 is among the paper sizes.
+    let sizes = driver
+        .texts
+        .iter()
+        .filter(|(text, _)| text == "Custom")
+        .map(|(_, rect)| *rect)
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the size list");
+    click(&mut driver, sizes.center());
+    assert!(shows(&driver, "A4"), "A4: {:?}", driver.texts);
 }
 
 /// Tip 48 (12:23): Edit, Convert Brightness to Opacity.
