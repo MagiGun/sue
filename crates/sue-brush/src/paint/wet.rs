@@ -218,6 +218,11 @@ struct WetTile {
     /// The strongest share of paint a dab has laid on each pixel (see
     /// [`WetCanvas::capped`]).
     held: Box<[f32]>,
+    /// For a capped canvas, each pixel as the stroke found it and the
+    /// paint the stroke's dabs have left on it (premultiplied); empty
+    /// otherwise.
+    base: Box<[f32]>,
+    paint: Box<[f32]>,
 }
 
 /// The picture under a wet stroke, as the stroke has left it so far.
@@ -271,6 +276,7 @@ impl WetCanvas {
     /// The premultiplied pixel at layer pixel `(x, y)` as the stroke has
     /// left it, loading its tile from `backdrop` first.
     fn load(&mut self, backdrop: &dyn Backdrop, key: TileKey) -> &mut WetTile {
+        let capped = self.capped;
         self.tiles.entry(key).or_insert_with(|| {
             let [ox, oy] = key.origin();
             let mut pixels = vec![0.0; AREA * 4].into_boxed_slice();
@@ -282,9 +288,11 @@ impl WetCanvas {
                 }
             }
             WetTile {
-                pixels,
                 touched: vec![false; AREA].into_boxed_slice(),
                 held: vec![0.0; AREA].into_boxed_slice(),
+                base: if capped { pixels.clone() } else { Box::new([]) },
+                paint: vec![0.0; if capped { AREA * 4 } else { 0 }].into_boxed_slice(),
+                pixels,
             }
         })
     }
@@ -531,18 +539,34 @@ impl WetCanvas {
                 let capped = self.capped;
                 let tile = self.load(backdrop, key);
                 let i = ((py - oy) * TILE + (px - ox)) as usize;
-                let mut t = c * wet.density;
-                if capped {
-                    // Only what this dab lays beyond the strongest before
-                    // it, as a share of what is left to cover.
+                let t = c * wet.density;
+                let mut out: [f32; 4] = if capped {
+                    // The pixel is the paint over what the stroke found
+                    // there, as strongly as its strongest dab laid it.
+                    // This dab's paint takes over the paint there as
+                    // strongly as it lays beside that strongest one: a
+                    // dab as strong replaces it, the rim of a later dab
+                    // only tints it. So paint does not stack, and the
+                    // first dabs' paint (unmixed yet) does not stay as a
+                    // spot where they were strongest.
                     let held = tile.held[i];
-                    if t <= held {
+                    let now = held.max(t);
+                    if now <= 0.0 {
                         continue;
                     }
-                    tile.held[i] = t;
-                    t = (t - held) / (1.0 - held);
-                }
-                let mut out: [f32; 4] = std::array::from_fn(|k| u[k] + (target[k] - u[k]) * t);
+                    let w = t / now;
+                    let j = i * 4;
+                    let mut laid = [0.0; 4];
+                    for k in 0..4 {
+                        let p = tile.paint[j + k] + (target[k] - tile.paint[j + k]) * w;
+                        tile.paint[j + k] = p;
+                        laid[k] = tile.base[j + k] + (p - tile.base[j + k]) * now;
+                    }
+                    tile.held[i] = now;
+                    laid
+                } else {
+                    std::array::from_fn(|k| u[k] + (target[k] - u[k]) * t)
+                };
                 if let Some(carried) = &smear {
                     let d = carried[y * w + x];
                     out = std::array::from_fn(|k| out[k] + (d[k] - out[k]) * wet.smear);

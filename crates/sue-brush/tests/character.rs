@@ -14,8 +14,8 @@ use sue_core::{PixelFormat, RasterTile2D};
 use sue_model::BrushPreset;
 use sue_model::brush::TipSource;
 
-const W: u32 = 360;
-const H: u32 = 160;
+const W: u32 = 520;
+const H: u32 = 220;
 
 fn preset(id: &str) -> BrushPreset {
     sue_brush::presets::find(id).unwrap_or_else(|| panic!("{id}"))
@@ -25,6 +25,17 @@ fn preset(id: &str) -> BrushPreset {
 /// frames at `pressure` (a mouse when `None`), on a layer filled with
 /// `under`. The layer's pixels after the stroke.
 fn paint(preset: &BrushPreset, pressure: Option<f32>, frames: usize, under: [u8; 4]) -> Vec<u8> {
+    paint_from(preset, pressure, frames, under, [60.0, H as f32 * 0.5])
+}
+
+/// [`paint`], the stroke from `start` and 240 pixels long.
+fn paint_from(
+    preset: &BrushPreset,
+    pressure: Option<f32>,
+    frames: usize,
+    under: [u8; 4],
+    start: [f32; 2],
+) -> Vec<u8> {
     let behaviours = sue_brush::paint::Behaviours::from_preset(preset);
     let paper = behaviours.texture.as_ref().and_then(|t| match &t.paper {
         PaperChoice::Builtin(name) => Paper::builtin(name),
@@ -50,7 +61,8 @@ fn paint(preset: &BrushPreset, pressure: Option<f32>, frames: usize, under: [u8;
         sub: [1.0; 3],
     };
     let mut recorder = Recorder::new(ENGINE, [1; 32], &settings, colors, Vec::new());
-    let (x0, x1, y) = (60.0, 300.0, H as f32 * 0.5);
+    let [x0, y] = start;
+    let x1 = x0 + 240.0;
     let mut time = 10.0;
     recorder.take(Sample {
         pressure,
@@ -135,6 +147,13 @@ fn gouache_covers_as_fully_as_the_pen_presses() {
         light[0] > 50 && light[0] < 120,
         "a light one lays thin paint over it: {light:?}"
     );
+    // Its first dabs, loaded before they pick any gray up, leave no
+    // darker spot where the stroke began: thin paint is even along it.
+    // (Where they land on the tile grid mattered: this start showed it.)
+    let thin = paint_from(&g, Some(0.12), 48, gray, [190.0, 110.0]);
+    let along: Vec<u8> = (176..260).map(|x| at(&thin, x, 110)[0]).collect();
+    let (lo, hi) = (along.iter().min().unwrap(), along.iter().max().unwrap());
+    assert!(hi - lo <= 1, "no spot at the start: {along:?}");
     // Over white paper too, a firm stroke is not see-through.
     let on_clear = at(&paint(&g, Some(0.95), 40, [0; 4]), 180, mid);
     assert!(on_clear[3] > 240, "{on_clear:?}");
