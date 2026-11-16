@@ -967,6 +967,14 @@ pub trait SueApplet: Send {
         Vec::new()
     }
 
+    /// Where on its page the notices (an export's progress among them)
+    /// may sit, as it was drawn last, so they never cover what a person
+    /// works on: Sue Paint's is the canvas's view, above a timeline
+    /// docked under it. `None`: anywhere at the bottom of the page.
+    fn notice_room(&self) -> Option<egui::Rect> {
+        None
+    }
+
     /// Draws the view `view` it opened in a window of its own with
     /// [`ShellRequest::OpenView`]: `ui` covers the window's inside, below
     /// its title bar. Runs in that window's own frames (only those, where

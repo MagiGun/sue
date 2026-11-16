@@ -348,6 +348,13 @@ impl SueApplet for SuePaint {
         self.bound.chords(shortcut_table())
     }
 
+    /// The notices sit on the canvas's view, never on the palettes or the
+    /// timeline docked under it (an export's progress would hide the
+    /// frames being exported).
+    fn notice_room(&self) -> Option<egui::Rect> {
+        (!self.docs.is_empty() && self.viewport.is_positive()).then_some(self.viewport)
+    }
+
     fn unsaved(&self, arena: &sue_core::Arena) -> Vec<(String, String)> {
         self.docs
             .iter()

@@ -61,6 +61,10 @@ pub const PHONE_FRAME_KEY: &str = "display.phone_frame";
 /// How wide the phone-shaped column is, in points (a common phone's).
 const PHONE_FRAME_WIDTH: f32 = 412.0;
 
+/// The least room a studio's own place for the notices must have to be
+/// used (a notice is about this wide, and a couple fit this high).
+const NOTICE_ROOM_LEAST: egui::Vec2 = vec2(280.0, 120.0);
+
 /// A layout as the Sue menu names it.
 fn layout_name(form_factor: FormFactor) -> String {
     match form_factor {
@@ -1137,6 +1141,18 @@ impl Shell {
                 .reduce(f32::min)
         {
             room.max.y = top.max(room.top());
+        }
+        // A studio may keep the notices off its work (Sue Paint: on the
+        // canvas's view, never on a timeline under it), while that room
+        // is big enough to hold one.
+        if !self.hub_open()
+            && let Some((id, _)) = &page
+            && let Some(clear) = io.applets.get(id).and_then(|applet| applet.notice_room())
+        {
+            let inside = clear.intersect(room);
+            if inside.width() >= NOTICE_ROOM_LEAST.x && inside.height() >= NOTICE_ROOM_LEAST.y {
+                room = inside;
+            }
         }
         self.notice_ui(&ctx, room, io, &theme);
         self.palette_ui(&ctx, io, &theme, now);
