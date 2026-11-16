@@ -848,6 +848,9 @@ follow [Semantic Versioning](https://semver.org/).
   dialog and close with Escape.
 - Settings, Appearance, Icons shows each icon set as a card with its
   own icons as a preview; choose one with a click or the arrow keys.
+- Sue Paint, Fill tool: Refer Other Layers starts with draft layers left
+  out, as Clip Studio Paint's does, so color lines on a draft layer stop
+  no fill.
 
 ### Fixed
 
