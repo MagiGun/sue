@@ -175,17 +175,6 @@ fn click_widget(driver: &mut PaintDriver, name: &str) {
     click(driver, rect.center());
 }
 
-/// A click on the widget named `name` with the secondary button.
-fn right_click_widget(driver: &mut PaintDriver, name: &str) {
-    let rect = widget(driver, name).unwrap_or_else(|| panic!("{name:?} is on screen"));
-    click_held(
-        driver,
-        rect.center(),
-        PointerButton::Secondary,
-        Modifiers::NONE,
-    );
-}
-
 /// Whether the last frame drew `text`.
 fn shows(driver: &PaintDriver, text: &str) -> bool {
     driver.texts.iter().any(|(found, _)| found == text)
@@ -350,11 +339,6 @@ fn bytes(driver: &PaintDriver) -> Vec<u8> {
     let mut out = sue_core::codec::Writer::new();
     arena(driver).encode(&mut out);
     out.into_bytes()
-}
-
-/// How deep the history is.
-fn depth(driver: &PaintDriver) -> usize {
-    driver.runtime.engine.history.depth()
 }
 
 /// Rule 7: the last step undone gives `before` back exactly, ids and
@@ -2532,4 +2516,1057 @@ fn tl_0154_the_ellipse_figure_on_a_vector_layer_is_a_line() {
     let lines = lines_on(&driver, layer);
     assert_eq!(lines.len(), 1, "one line");
     assert!(lines[0].samples.len() > 8, "round");
+}
+
+// ----- 50 Quick Tips & Tricks ---------------------------------------------------
+
+/// Clicks the button of command `id` on the launcher shown (the
+/// Selection Launcher under a selection).
+fn launcher(driver: &mut PaintDriver, id: &str) {
+    let shown = sue_paint::shown_buttons(&driver.ctx);
+    let at = shown
+        .iter()
+        .find(|(found, _)| found == id)
+        .unwrap_or_else(|| panic!("{id} on the launcher: {shown:?}"))
+        .1
+        .center();
+    click(driver, at);
+}
+
+/// Whether the control named `name` is ticked, as a fresh frame tells
+/// assistive technology.
+fn ticked(driver: &mut PaintDriver, name: &str) -> Option<bool> {
+    driver.ctx.enable_accesskit();
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
+        time: Some(driver.ctx.input(|input| input.time) + 0.016),
+        ..egui::RawInput::default()
+    };
+    driver.now += Duration::from_millis(16);
+    let runtime = &mut driver.runtime;
+    let now = driver.now;
+    let output = driver
+        .ctx
+        .run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+    let found = output
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| update.nodes.iter())
+        .find(|(_, node)| node.label() == Some(name))
+        .and_then(|(_, node)| node.toggled())
+        .map(|toggled| toggled == egui::accesskit::Toggled::True);
+    output.drop_without_applying_deltas();
+    found
+}
+
+/// Whether the last frame drew any of `texts`.
+fn shows_any(driver: &PaintDriver, texts: &[&str]) -> bool {
+    texts.iter().any(|text| shows(driver, text))
+}
+
+/// Tip 1 (00:26): the Layer palette's button splits the list into two
+/// panes that list the same layers.
+#[test]
+fn t50_01_the_layer_list_splits_into_two_panes() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("split-list");
+    let once = driver.texts.iter().filter(|(t, _)| t == "Layer 1").count();
+    click_widget(&mut driver, "Split Layer List");
+    driver.settle(4);
+    let twice = driver.texts.iter().filter(|(t, _)| t == "Layer 1").count();
+    assert_eq!(twice, once * 2, "{once} to {twice}");
+}
+
+/// Tip 2 (00:42, CT-31): a sub tool on the Command Bar, as a button
+/// that picks it (put there through Command Bar Settings).
+#[test]
+fn t50_02_a_sub_tool_on_the_command_bar() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open_fresh("bar-sub-tool");
+    run(&mut driver, "file.command_bar");
+    driver.settle(8);
+    click_widget(&mut driver, "Category");
+    driver.click_text("Sub Tools");
+    driver.click_text("Search");
+    driver.step(vec![Event::Text("Turnip pen".to_owned())]);
+    driver.settle(3);
+    let entry = driver
+        .texts
+        .iter()
+        .filter(|(text, _)| text == "Turnip pen")
+        .map(|(_, rect)| *rect)
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the entry");
+    click(&mut driver, entry.center());
+    driver.click_text("Add");
+    tap(&mut driver, Key::Escape);
+    driver.runtime.shell.dismiss_overlays();
+    driver.settle(6);
+    let on_bar = widgets(&mut driver)
+        .into_iter()
+        .find(|(name, rect)| name.starts_with("Turnip pen") && rect.top() < 70.0)
+        .map(|(_, rect)| rect)
+        .expect("a Turnip pen button on the bar");
+    pen(&mut driver);
+    click(&mut driver, on_bar.center());
+    let shown = driver
+        .texts
+        .iter()
+        .filter(|(text, _)| text == "Turnip pen")
+        .count();
+    assert!(shown >= 2, "listed and picked: {:?}", driver.texts);
+}
+
+/// Tip 3 (00:53): a 3D drawing figure on the canvas, to pose.
+#[test]
+fn t50_03_a_3d_figure_on_the_canvas() {
+    let mut driver = open("figure-3d");
+    run(&mut driver, "layer.new.figure");
+    let layer = top(&driver);
+    assert!(sue_paint::three::is_3d(arena(&driver), layer), "a 3D layer");
+}
+
+/// Tip 4 (01:00, CTV-1): Convert to Lines and Tones opens its dialog
+/// with the line and tone groups and a preview.
+#[test]
+fn t50_04_convert_to_lines_and_tones_opens_its_dialog() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("lines-tones");
+    ink_line(&mut driver);
+    run(&mut driver, "filter.lines_tones");
+    driver.settle(6);
+    assert!(shows(&driver, "Extract line"), "{:?}", driver.texts);
+    assert!(shows(&driver, "Posterization"));
+    assert!(shows(&driver, "Frequency"));
+}
+
+/// Tip 5 (01:13, CT-35): File, Import, Pose Scanner asks for a photo.
+#[test]
+fn t50_05_file_import_pose_scanner_asks_for_a_photo() {
+    let mut driver = open("pose-scanner");
+    run(&mut driver, "file.import.pose_scanner");
+    driver.settle(4);
+    assert!(driver.runtime.pending_pick().is_some(), "a photo is asked for");
+}
+
+/// Tip 6 (01:31, CTV-2): Layer Property's Border Effect outlines what is
+/// on the layer, with its thickness, edge color and anti-aliasing.
+#[test]
+fn t50_06_border_effect_outlines_the_layer() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("border");
+    ink_line(&mut driver);
+    // What covers the picture without its paper: the line, then the line
+    // and its outline.
+    let covered = |driver: &PaintDriver| {
+        sue_paint::composite::flatten(
+            arena(driver),
+            picture(driver),
+            sue_paint::composite::RenderOptions {
+                paper: false,
+                drafts: true,
+            },
+        )
+        .unwrap()
+        .bytes()
+        .unwrap()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| pixel[3] > 0)
+        .count()
+    };
+    let before = covered(&driver);
+    run(&mut driver, "layer.properties");
+    click_widget(&mut driver, "Border effect");
+    driver.settle(4);
+    for row in ["Edge color", "Anti-aliasing on border effect"] {
+        assert!(shows(&driver, row), "{row}: {:?}", driver.texts);
+    }
+    assert!(covered(&driver) > before, "an outline round the line");
+}
+
+/// Tip 7 (01:50, CT-33, CTV-3): Auto Action records steps and plays
+/// them back.
+#[test]
+fn t50_07_auto_action_records_and_plays() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("auto-action");
+    // A new action records at once; Record (now Stop) ends it.
+    run(&mut driver, "auto.new");
+    run(&mut driver, "layer.new");
+    run(&mut driver, "auto.record");
+    let count = layers(&driver).len();
+    run(&mut driver, "auto.play");
+    driver.settle(6);
+    assert_eq!(layers(&driver).len(), count + 1, "played: a layer more");
+}
+
+/// Tip 8 (02:10, CT-24): a palette color on a layer.
+#[test]
+fn t50_08_a_palette_color_marks_the_layer() {
+    let mut driver = open("palette-color");
+    let layer = top(&driver);
+    let before = bytes(&driver);
+    run(&mut driver, "layer.palette_color.red");
+    assert!(sue_paint::doc::palette_color(arena(&driver), layer).is_some());
+    undo_pair(&mut driver, &before);
+}
+
+/// Tip 9 (02:23): Ctrl+Shift and a click picks the layer under the
+/// pointer.
+#[test]
+fn t50_09_ctrl_shift_click_picks_the_layer_under_the_pointer() {
+    let mut driver = open("pick-layer");
+    let first = ink_line(&mut driver);
+    run(&mut driver, "layer.new");
+    pen(&mut driver);
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-50.0, 80.0), m + vec2(50.0, 80.0));
+    click_held(
+        &mut driver,
+        m,
+        PointerButton::Primary,
+        Modifiers::COMMAND | Modifiers::SHIFT,
+    );
+    // The next stroke goes on the line's layer.
+    let ink = painted(&driver, first);
+    stroke(&mut driver, m + vec2(-50.0, -60.0), m + vec2(50.0, -60.0));
+    assert!(painted(&driver, first) > ink, "the line's layer is picked");
+}
+
+/// Tip 10 (02:35): the Selection Launcher crops to the selection.
+#[test]
+fn t50_10_the_selection_launcher_crops() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("launcher-crop");
+    tap(&mut driver, Key::M);
+    driver.click_text("Rectangle");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-60.0, -40.0), m + vec2(60.0, 40.0));
+    let was = size(&driver);
+    click_widget(&mut driver, "Crop");
+    let now = size(&driver);
+    assert!(now[0] < was[0] && now[1] < was[1], "{was:?} to {now:?}");
+}
+
+/// Tip 11 (02:45): Alt and a click while drawing picks a color.
+#[test]
+fn t50_11_alt_picks_a_color_while_drawing() {
+    let mut driver = open("alt-pen");
+    ink_line(&mut driver);
+    tap(&mut driver, Key::X);
+    let m = middle(&driver);
+    click_held(&mut driver, m, PointerButton::Primary, Modifiers::ALT);
+    run(&mut driver, "layer.new");
+    let layer = top(&driver);
+    stroke(&mut driver, m + vec2(-40.0, 60.0), m + vec2(40.0, 60.0));
+    let p = pixel(&driver, layer, under(&driver, m + vec2(0.0, 60.0)));
+    assert!(p[3] > 0 && p[0] < 60, "black picked: {p:?}");
+}
+
+/// Tip 12 (02:53, CTV-4): the Eyedropper's layer color sub tool picks
+/// from the current layer only.
+#[test]
+fn t50_12_the_eyedropper_picks_from_the_layer_only() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("eyedropper-layer");
+    ink_line(&mut driver);
+    run(&mut driver, "layer.new");
+    tap(&mut driver, Key::I);
+    driver.click_text("Obtain Layer Color");
+    let m = middle(&driver);
+    // On the empty new layer the line below is not picked: the
+    // transparent color is.
+    tap(&mut driver, Key::X);
+    click(&mut driver, m);
+    pen(&mut driver);
+    let layer = top(&driver);
+    stroke(&mut driver, m + vec2(-40.0, 60.0), m + vec2(40.0, 60.0));
+    assert_eq!(painted(&driver, layer), 0, "nothing to paint with");
+}
+
+/// Tip 14 (03:29, CT-34): the Page Manager's right click turns the
+/// webtoon reading direction.
+#[test]
+fn t50_14_the_page_manager_menu_and_webtoon_direction() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("page-manager");
+    run(&mut driver, "story.add");
+    run(&mut driver, "story.add");
+    run(&mut driver, "story.manager");
+    driver.settle(6);
+    let page = driver
+        .texts
+        .iter()
+        .find(|(text, _)| text == "1")
+        .map(|(_, rect)| *rect)
+        .expect("page 1");
+    click_held(
+        &mut driver,
+        page.center() + vec2(0.0, -30.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    );
+    assert!(shows(&driver, "Webtoon Reading Direction"), "{:?}", driver.texts);
+}
+
+/// Tip 15 (03:46): record a timelapse, then export it.
+#[test]
+fn t50_15_a_timelapse_is_recorded_and_exported() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("timelapse");
+    run(&mut driver, "file.timelapse.record");
+    ink_line(&mut driver);
+    run(&mut driver, "file.timelapse.export");
+    driver.settle(8);
+    assert!(shows(&driver, "Export Timelapse"), "{:?}", driver.texts);
+}
+
+/// Tip 16 (04:08, CT-21, CTV-8): New Tone on the Selection Launcher
+/// opens Simple Tone Settings and fills the selection with tone.
+#[test]
+fn t50_16_new_tone_from_the_launcher() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("launcher-tone");
+    tap(&mut driver, Key::M);
+    driver.click_text("Rectangle");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-60.0, -40.0), m + vec2(60.0, 40.0));
+    let count = layers(&driver).len();
+    launcher(&mut driver, "layer.new.tone");
+    driver.settle(4);
+    assert!(shows(&driver, "Simple Tone Settings"), "{:?}", driver.texts);
+    tap(&mut driver, Key::Enter);
+    assert_eq!(layers(&driver).len(), count + 1, "a layer of tone");
+}
+
+/// Tip 17 (04:19, CT-27): the button under the wheel switches between the
+/// HSV square and the HLS triangle.
+#[test]
+fn t50_17_the_wheel_switches_square_and_triangle() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("wheel-shape");
+    click_widget(&mut driver, "Show the HLS triangle");
+    assert!(
+        widget(&mut driver, "Show the HSV square").is_some(),
+        "the button now offers the square"
+    );
+}
+
+/// Tip 18 (04:31, CT-28): a double click on the main color chip opens
+/// Color Settings with the hex code.
+#[test]
+fn t50_18_double_click_on_the_color_opens_color_settings() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("color-settings");
+    let chip = widget(&mut driver, "Main color").expect("the main color").center();
+    for pressed in [true, false, true, false] {
+        driver.step(vec![
+            Event::PointerMoved(chip),
+            Event::PointerButton {
+                pos: chip,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            },
+        ]);
+    }
+    driver.settle(6);
+    assert!(shows(&driver, "Color Settings"), "{:?}", driver.texts);
+    assert!(shows(&driver, "#000000") || shows(&driver, "000000"));
+}
+
+/// Tip 19 (04:42, CT-26): the wheel over the blending mode steps it.
+#[test]
+fn t50_19_the_wheel_over_the_blend_list_steps_it() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("blend-wheel");
+    let layer = top(&driver);
+    let at = widget(&mut driver, "Blending mode").unwrap().center();
+    driver.step(vec![Event::PointerMoved(at)]);
+    driver.settle(40);
+    driver.step(vec![Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: vec2(0.0, -1.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: Modifiers::NONE,
+    }]);
+    driver.settle(3);
+    assert_eq!(style(&driver, layer).blend, sue_model::BlendMode::Darken);
+}
+
+/// Tip 20 (04:56): a reference layer; Fill with Refer Reference Layers
+/// stops at its lines while filling another layer.
+#[test]
+fn t50_20_fill_refers_to_the_reference_layer() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("reference");
+    let lines = line_box(&mut driver, vec2(100.0, 80.0));
+    click_widget(&mut driver, "Set as Reference Layer");
+    assert!(sue_paint::doc::is_reference(arena(&driver), lines));
+    run(&mut driver, "layer.new");
+    let flat = top(&driver);
+    sub_tool(&mut driver, Key::G, "Close and fill", "Refer Other Layers");
+    let m = middle(&driver);
+    click(&mut driver, m);
+    assert!(pixel(&driver, flat, under(&driver, m))[3] > 0, "filled inside");
+    assert_eq!(
+        pixel(&driver, flat, under(&driver, m + vec2(200.0, 150.0)))[3],
+        0,
+        "stopped at the reference lines"
+    );
+}
+
+/// Tip 22 (05:26): the Navigator's button flips the view.
+#[test]
+fn t50_22_the_navigator_flips_the_view() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("navigator-flip");
+    run(&mut driver, "layer.new");
+    let layer = top(&driver);
+    let flip = widgets(&mut driver)
+        .into_iter()
+        .filter(|(name, rect)| name == "Flip Horizontal" && rect.left() > 1000.0)
+        .map(|(_, rect)| rect)
+        .next()
+        .expect("the Navigator's flip");
+    click(&mut driver, flip.center());
+    pen(&mut driver);
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(60.0, 0.0), m + vec2(120.0, 0.0));
+    let (left, right) = painted_sides(&driver, layer);
+    assert!(left > 0 && right == 0, "mirrored: {left} {right}");
+}
+
+/// Tip 24 (05:56, CT-21): Selection Launcher Settings opens, with the
+/// buttons that can be added.
+#[test]
+fn t50_24_selection_launcher_settings() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("launcher-settings");
+    tap(&mut driver, Key::M);
+    driver.click_text("Rectangle");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-60.0, -40.0), m + vec2(60.0, 40.0));
+    let ids: Vec<String> = sue_paint::shown_buttons(&driver.ctx)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    for id in ["edit.cut_paste", "edit.copy_paste", "layer.new.tone"] {
+        assert!(ids.iter().any(|found| found == id), "{id} in {ids:?}");
+    }
+    launcher(&mut driver, "launcher.settings");
+    driver.settle(4);
+    assert!(shows(&driver, "Selection Launcher Settings"), "{:?}", driver.texts);
+}
+
+/// Tip 25 (06:07): Window, Sub View shows reference pictures.
+#[test]
+fn t50_25_window_sub_view() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open_fresh("sub-view");
+    let was = widget(&mut driver, "Sub View").is_some();
+    run(&mut driver, "window.sub_view");
+    if was {
+        run(&mut driver, "window.sub_view");
+    }
+    driver.settle(4);
+    assert!(shows(&driver, "Sub View"), "{:?}", driver.texts);
+}
+
+/// Tip 26 (06:18, CTV-10): Create Perspective Ruler with its three types
+/// and "Create new layer".
+#[test]
+fn t50_26_create_perspective_ruler() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("perspective");
+    run(&mut driver, "layer.ruler.perspective");
+    driver.settle(4);
+    assert!(shows(&driver, "Create new layer"), "{:?}", driver.texts);
+    let count = layers(&driver).len();
+    driver.click_text("OK");
+    driver.settle(4);
+    assert_eq!(layers(&driver).len(), count + 1, "on a new layer");
+}
+
+/// Tip 28 and 44 (06:41, 11:07; CT-30): Sub Tool Detail with its
+/// categories.
+#[test]
+fn t50_28_sub_tool_detail_lists_the_settings() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open_fresh("sub-tool-detail");
+    pen(&mut driver);
+    run(&mut driver, "window.sub_tool_detail");
+    driver.settle(6);
+    assert!(shows(&driver, "Sub Tool Detail"), "{:?}", driver.texts);
+    assert!(shows_any(&driver, &["Brush Size", "Ink"]));
+}
+
+/// Tip 30 (07:05): File, Create New from Clipboard.
+#[test]
+fn t50_30_create_new_from_clipboard() {
+    let mut driver = open("from-clipboard");
+    ink_line(&mut driver);
+    run(&mut driver, "select.all");
+    press(&mut driver, Key::C, Modifiers::COMMAND);
+    let first = picture(&driver);
+    run(&mut driver, "file.new_clipboard");
+    driver.settle(6);
+    assert_ne!(picture(&driver), first, "a new canvas");
+}
+
+/// Tip 32 (07:43): a Tone Curve correction layer.
+#[test]
+fn t50_32_a_tone_curve_correction_layer() {
+    let mut driver = open("tone-curve");
+    let count = layers(&driver).len();
+    run(&mut driver, "layer.correction.curve");
+    tap(&mut driver, Key::Enter);
+    assert_eq!(layers(&driver).len(), count + 1);
+}
+
+/// Tip 33 (07:55, CTV-11): Perlin Noise with its amplitude, attenuation
+/// and repetition.
+#[test]
+fn t50_33_perlin_noise() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("perlin");
+    run(&mut driver, "layer.new");
+    let layer = top(&driver);
+    run(&mut driver, "filter.perlin");
+    driver.settle(4);
+    for row in ["Amplitude", "Attenuation", "Repetition"] {
+        assert!(shows(&driver, row), "{row}: {:?}", driver.texts);
+    }
+    driver.click_text("OK");
+    assert!(painted(&driver, layer) > 0, "noise");
+}
+
+/// Tip 34 (08:14, CTS-2): Onion Skin Settings.
+#[test]
+fn t50_34_onion_skin_settings() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("onion");
+    driver.new_timeline();
+    run(&mut driver, "anim.onion_settings");
+    driver.settle(4);
+    assert!(shows(&driver, "Cels before"), "{:?}", driver.texts);
+    assert!(shows(&driver, "Cels after"));
+}
+
+/// Tip 35 (08:27, CTV-12): Gradient Map with a gradient set.
+#[test]
+fn t50_35_gradient_map_with_sets() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("gradient-map");
+    run(&mut driver, "layer.correction.gradient_map");
+    driver.settle(4);
+    assert!(shows(&driver, "Gradient Set"), "{:?}", driver.texts);
+}
+
+/// Tip 36 (08:46, CT-37): 3D Preview for Binding.
+#[test]
+fn t50_36_preview_for_binding() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("binding");
+    run(&mut driver, "story.add");
+    run(&mut driver, "story.add");
+    run(&mut driver, "story.preview_binding");
+    driver.settle(6);
+    assert!(
+        driver.texts.iter().any(|(text, _)| text.contains("Binding")),
+        "{:?}",
+        driver.texts
+    );
+}
+
+/// Tip 38 (09:19): a tool key held down borrows its tool (E, the
+/// eraser) and lets go of it.
+#[test]
+fn t50_38_a_held_key_borrows_the_eraser() {
+    let mut driver = open("held-e");
+    let layer = ink_line(&mut driver);
+    let line = painted(&driver, layer);
+    let down = |pressed| Event::Key {
+        key: Key::E,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    };
+    driver.step(vec![down(true)]);
+    for _ in 0..40 {
+        driver.step(vec![Event::Key {
+            key: Key::E,
+            physical_key: None,
+            pressed: true,
+            repeat: true,
+            modifiers: Modifiers::NONE,
+        }]);
+    }
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-40.0, 0.0), m + vec2(40.0, 0.0));
+    driver.step(vec![down(false)]);
+    driver.settle(4);
+    assert!(painted(&driver, layer) < line, "erased while held");
+    stroke(&mut driver, m + vec2(-40.0, 40.0), m + vec2(40.0, 40.0));
+    assert!(painted(&driver, layer) > 0, "the pen again");
+}
+
+/// Tip 39 (09:43, CTV-13): Mesh Transformation bends the layer.
+#[test]
+fn t50_39_mesh_transformation_bends_the_layer() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open_fresh("mesh");
+    let layer = ink_line(&mut driver);
+    let before = sue_paint::doc::raster(arena(&driver), layer)
+        .unwrap()
+        .bytes()
+        .unwrap()
+        .to_vec();
+    run(&mut driver, "edit.transform.mesh");
+    driver.settle(4);
+    assert!(shows(&driver, "Keep original image"), "{:?}", driver.texts);
+    let m = middle(&driver);
+    stroke(&mut driver, m, m + vec2(0.0, 40.0));
+    tap(&mut driver, Key::Enter);
+    let after = sue_paint::doc::raster(arena(&driver), layer)
+        .unwrap()
+        .bytes()
+        .unwrap()
+        .to_vec();
+    assert!(after != before, "bent");
+}
+
+/// Tip 40 (09:57): a frame border folder keeps the drawing inside.
+#[test]
+fn t50_40_a_frame_border_keeps_the_drawing_inside() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("frame");
+    run(&mut driver, "layer.new.frame");
+    tap(&mut driver, Key::Enter);
+    driver.settle(4);
+    assert!(
+        layers(&driver).iter().any(|info| {
+            arena(&driver)
+                .get_by_id(info.id)
+                .is_ok_and(|entity| entity.class() == sue_paint::manga::FRAME)
+        }),
+        "a frame border layer"
+    );
+    // A stroke from the canvas's edge to its middle shows only inside
+    // the frame.
+    run(&mut driver, "layer.new");
+    pen(&mut driver);
+    let m = middle(&driver);
+    let [_, h] = size(&driver);
+    let edge = screen_of(&driver, [2.0, h as f32 / 2.0]);
+    stroke(&mut driver, edge, m);
+    let tile = seen(&driver);
+    let p = seen_at(&tile, [2, i64::from(h) / 2]);
+    assert!(p[0] > 200, "outside the frame stays clear: {p:?}");
+}
+
+/// Tip 41 (10:12, CTV-14): a balloon with text inside.
+#[test]
+fn t50_41_a_balloon_holds_text() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("balloon");
+    let count = layers(&driver).len();
+    run(&mut driver, "tool.pick.balloon");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-60.0, -40.0), m + vec2(60.0, 40.0));
+    assert!(layers(&driver).len() > count, "a balloon layer");
+}
+
+/// Tip 42 (10:30, CT-36, CTV-15): Focus Lines and Speed Lines from the
+/// Figure tool, on a new layer named after them.
+#[test]
+fn t50_42_focus_and_speed_lines() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("effect-lines");
+    sub_tool(&mut driver, Key::U, "Straight Line", "Saturated Line");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-80.0, -60.0), m + vec2(80.0, 60.0));
+    // The lines land on a new layer named after the sub tool (CTV-15).
+    assert!(
+        layers(&driver).iter().any(|info| info.name == "Saturated Line"),
+        "{:?}",
+        layers(&driver).iter().map(|i| i.name.clone()).collect::<Vec<_>>()
+    );
+}
+
+/// Tip 45 (11:23, CT-32): a registered canvas preset keeps the
+/// timelapse switch.
+#[test]
+fn t50_45_canvas_presets_keep_every_field() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("presets");
+    press(&mut driver, Key::N, Modifiers::COMMAND);
+    driver.settle(6);
+    assert_eq!(ticked(&mut driver, "Record timelapse"), Some(false));
+    driver.click_text("Record timelapse");
+    driver.click_text("Register preset");
+    let name = driver
+        .texts
+        .iter()
+        .find(|(text, _)| text.ends_with("(1)"))
+        .map(|(text, _)| text.clone())
+        .expect("the new preset's name");
+    driver.click_text("Cancel");
+    press(&mut driver, Key::N, Modifiers::COMMAND);
+    driver.settle(6);
+    assert_eq!(ticked(&mut driver, "Record timelapse"), Some(false));
+    click_widget(&mut driver, "Preset");
+    driver.click_text(&name);
+    assert_eq!(
+        ticked(&mut driver, "Record timelapse"),
+        Some(true),
+        "the preset brought it back"
+    );
+}
+
+/// Tip 46 (11:45): the New dialog's units include pt and paper sizes
+/// such as A4.
+#[test]
+fn t50_46_units_and_paper_sizes_in_new() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("units");
+    press(&mut driver, Key::N, Modifiers::COMMAND);
+    driver.settle(6);
+    let unit = driver
+        .texts
+        .iter()
+        .find(|(text, _)| text == "px")
+        .map(|(_, rect)| *rect)
+        .expect("the unit list");
+    click(&mut driver, unit.center());
+    for unit in ["cm", "mm", "in", "pt"] {
+        assert!(shows(&driver, unit), "{unit}: {:?}", driver.texts);
+    }
+}
+
+/// Tip 48 (12:23): Edit, Convert Brightness to Opacity.
+#[test]
+fn t50_48_convert_brightness_to_opacity() {
+    let mut driver = open("luma-alpha");
+    let layer = top(&driver);
+    run(&mut driver, "edit.fill");
+    tap(&mut driver, Key::X);
+    run(&mut driver, "edit.fill");
+    let before = bytes(&driver);
+    run(&mut driver, "edit.luma_to_alpha");
+    let m = middle(&driver);
+    assert!(pixel(&driver, layer, under(&driver, m))[3] < 20, "white went clear");
+    undo_pair(&mut driver, &before);
+}
+
+/// Tip 49 (12:41): a column folds into icons with its arrow and opens
+/// again; the Window menu hides a palette and brings it back.
+#[test]
+fn t50_49_palettes_fold_and_come_back() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open_fresh("fold");
+    assert!(shows(&driver, "Navigator"));
+    let arrow = widgets(&mut driver)
+        .into_iter()
+        .filter(|(name, _)| name == "Fold this column into icons")
+        .map(|(_, rect)| rect)
+        .max_by(|a, b| a.left().total_cmp(&b.left()))
+        .expect("the fold arrow");
+    click(&mut driver, arrow.center());
+    driver.settle(6);
+    assert!(!shows(&driver, "Navigator"), "folded into icons");
+    let names: Vec<(String, egui::Rect)> = widgets(&mut driver)
+        .into_iter()
+        .filter(|(_, rect)| (rect.center() - arrow.center()).length() < 40.0)
+        .collect();
+    let open_arrow = names
+        .iter()
+        .find(|(name, _)| name == "Open the palettes")
+        .map(|(_, rect)| *rect)
+        .unwrap_or_else(|| panic!("the arrow that opens it: {names:?}"));
+    click(&mut driver, open_arrow.center());
+    driver.settle(6);
+    assert!(shows(&driver, "Navigator"), "open again: {:?}", driver.texts);
+    run(&mut driver, "window.navigator");
+    driver.settle(4);
+    assert!(!shows(&driver, "Navigator"), "hidden");
+    run(&mut driver, "window.navigator");
+    driver.settle(4);
+    assert!(shows(&driver, "Navigator"), "back from the Window menu");
+}
+
+/// Tip 50 (13:04): Register Workspace, and switching back to it.
+#[test]
+fn t50_50_register_a_workspace_and_switch() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open_fresh("workspace");
+    run(&mut driver, "window.workspace.save");
+    driver.settle(4);
+    driver.click_text("Workspace 1");
+    type_over(&mut driver, "Inking");
+    driver.click_text("OK");
+    driver.settle(4);
+    driver.click_text("Window");
+    driver.click_text("Workspace");
+    driver.settle(4);
+    assert!(shows(&driver, "Inking"), "{:?}", driver.texts);
+}
+
+/// The box round what `layer` holds: left, top, right, bottom.
+fn ink_box(driver: &PaintDriver, layer: EntityId) -> Option<[i64; 4]> {
+    let raster = sue_paint::doc::raster(arena(driver), layer)?;
+    let width = raster.width() as i64;
+    let mut found: Option<[i64; 4]> = None;
+    for (index, pixel) in raster.bytes()?.as_chunks::<4>().0.iter().enumerate() {
+        if pixel[3] < 128 {
+            continue;
+        }
+        let (x, y) = (index as i64 % width, index as i64 / width);
+        found = Some(match found {
+            None => [x, y, x, y],
+            Some([l, t, r, b]) => [l.min(x), t.min(y), r.max(x), b.max(y)],
+        });
+    }
+    found
+}
+
+/// Tip 27 (06:34, CT-23): a rectangle drawn with the Figure tool lies in
+/// the perspective ruler's plane: its two sides are not as tall.
+#[test]
+fn t50_27_figures_follow_the_perspective_ruler() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("perspective-figure");
+    run(&mut driver, "layer.ruler.perspective");
+    tap(&mut driver, Key::Enter);
+    driver.settle(4);
+    run(&mut driver, "layer.new");
+    let layer = top(&driver);
+    sub_tool(&mut driver, Key::U, "Straight Line", "Rectangle");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-260.0, -160.0), m + vec2(-100.0, -40.0));
+    let [left, _, right, _] = ink_box(&driver, layer).expect("a rectangle");
+    let column = |x: i64| {
+        let rows: Vec<i64> = (0..i64::from(size(&driver)[1]))
+            .filter(|y| (x - 2..=x + 2).any(|cx| pixel(&driver, layer, [cx, *y])[3] > 128))
+            .collect();
+        rows.last().unwrap_or(&0) - rows.first().unwrap_or(&0)
+    };
+    let (l, r) = (column(left + 1), column(right - 1));
+    assert!(l.abs_diff(r) > 6, "in perspective the sides differ: {l} {r}");
+}
+
+/// Tip 31 (07:20, CT-29): the two screen color commands are the last of
+/// the Edit menu, under Clip Studio Paint's names. Picking itself reads
+/// the real screen (see the acceptance table).
+#[test]
+fn t50_31_the_edit_menu_has_both_screen_color_commands() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("screen-color");
+    driver.click_text("Edit");
+    driver.settle(4);
+    let pick = driver.rect_of("Pick Screen Color...").expect("Pick Screen Color");
+    let hidden = driver
+        .rect_of("Hide Windows and Pick Screen Color...")
+        .expect("the hidden variant");
+    assert!(hidden.top() > pick.top(), "in that order");
+}
+
+/// Tip 44 (11:07, CT-30): in Sub Tool Detail, the eye before a setting
+/// hides it from Tool Property.
+#[test]
+fn t50_44_the_eye_in_sub_tool_detail_hides_a_row() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open_fresh("detail-eye");
+    pen(&mut driver);
+    let property =
+        |driver: &PaintDriver| driver.texts.iter().filter(|(t, r)| t == "Opacity" && r.left() < 360.0).count();
+    let shown = property(&driver);
+    assert!(shown > 0, "Tool Property shows Opacity");
+    click_widget(
+        &mut driver,
+        "Sub Tool Detail: every setting, and which ones Tool Property shows",
+    );
+    driver.settle(4);
+    let detail = widgets(&mut driver)
+        .into_iter()
+        .filter(|(name, _)| name == "Sub Tool Detail")
+        .map(|(_, rect)| rect)
+        .max_by(|a, b| a.area().total_cmp(&b.area()))
+        .expect("Sub Tool Detail");
+    let ink = widgets(&mut driver)
+        .into_iter()
+        .find(|(name, rect)| name == "Ink" && detail.contains(rect.center()))
+        .map(|(_, rect)| rect)
+        .expect("Ink");
+    click(&mut driver, ink.center());
+    let opacity = driver
+        .texts
+        .iter()
+        .filter(|(text, rect)| text == "Opacity" && detail.contains(rect.center()))
+        .map(|(_, rect)| *rect)
+        .next()
+        .expect("Opacity in Sub Tool Detail");
+    let eye = widgets(&mut driver)
+        .into_iter()
+        .filter(|(name, rect)| name == "Hide in Tool Property" && rect.right() <= opacity.left() + 1.0)
+        .map(|(_, rect)| rect)
+        .min_by(|a, b| {
+            (a.center().y - opacity.center().y)
+                .abs()
+                .total_cmp(&(b.center().y - opacity.center().y).abs())
+        })
+        .expect("the eye before Opacity");
+    click(&mut driver, eye.center());
+    driver.runtime.shell.dismiss_overlays();
+    driver.settle(6);
+    assert!(property(&driver) < shown, "Opacity left Tool Property");
+}
+
+/// Tip 47 (12:06): Lasso fill's Tool Property has opacity, anti-aliasing
+/// and stabilization. (Clip Studio Paint's Blending mode row is missing:
+/// a defect in the acceptance table.)
+#[test]
+fn t50_47_lasso_fill_tool_property() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("lasso-fill-rows");
+    sub_tool(&mut driver, Key::G, "Close and fill", "Lasso fill");
+    driver.click_text("Tool Property");
+    driver.settle(4);
+    for row in ["Opacity", "Anti-aliasing", "Stabilization"] {
+        assert!(shows(&driver, row), "{row}: {:?}", driver.texts);
+    }
+}
+
+// ----- 50 tips: the rows the picture added (V-n and L-n) -----------------
+
+/// V-4 (03:05): the Eyedropper's Tool Property has rows of layers to
+/// leave out. A defect: Sue's Eyedropper has the Refer row only.
+#[test]
+#[ignore = "V-4 defect: the Eyedropper has no Reference or Exclude rows (FGV-22)"]
+fn v4_the_eyedropper_has_exclude_rows() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("eyedropper-rows");
+    tap(&mut driver, Key::I);
+    driver.click_text("Obtain Display Color");
+    driver.click_text("Tool Property");
+    driver.settle(4);
+    assert!(
+        driver
+            .texts
+            .iter()
+            .any(|(text, _)| text.starts_with("Leave out")),
+        "{:?}",
+        driver.texts
+    );
+}
+
+/// V-7 (03:50): Export Timelapse offers the size, the length and the
+/// aspect.
+#[test]
+fn v7_export_timelapse_offers_the_aspect() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("timelapse-aspect");
+    run(&mut driver, "file.timelapse.record");
+    ink_line(&mut driver);
+    run(&mut driver, "file.timelapse.export");
+    driver.settle(8);
+    for row in ["Long side:", "Aspect ratio:", "Length:"] {
+        assert!(shows(&driver, row), "{row}: {:?}", driver.texts);
+    }
+}
+
+/// V-13 (09:43): Mesh Transformation's points across and down are set in
+/// Tool Property, beside Keep original image.
+#[test]
+fn v13_mesh_transformation_has_its_point_counts() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open_fresh("mesh-points");
+    ink_line(&mut driver);
+    run(&mut driver, "edit.transform.mesh");
+    driver.settle(4);
+    for row in ["Across", "Down", "Keep original image"] {
+        assert!(shows(&driver, row), "{row}: {:?}", driver.texts);
+    }
+}
+
+/// V-14 (10:10): a balloon's Tool Property has its line color. A
+/// defect: Sue's balloon has its line width and a hint only.
+#[test]
+#[ignore = "V-14 defect: the balloon has no Line color, Fill color or Toning rows (FGV-40)"]
+fn v14_the_balloon_has_its_line_color() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("balloon-rows");
+    run(&mut driver, "tool.pick.balloon");
+    driver.click_text("Tool Property");
+    driver.settle(4);
+    assert!(shows(&driver, "Line color"), "{:?}", driver.texts);
+}
+
+/// V-15 (10:30): the Figure tool's effect lines sit in groups of their
+/// own beside Direct draw.
+#[test]
+fn v15_the_figure_tool_has_its_line_groups() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("figure-groups");
+    sub_tool(&mut driver, Key::U, "Straight Line", "Straight Line");
+    for group in ["Direct draw", "Saturated Line", "Speed Line"] {
+        assert!(shows(&driver, group), "{group}: {:?}", driver.texts);
+    }
+}
+
+/// V-16 (08:06, CCS-6): the blending modes in Clip Studio Paint's order,
+/// ending in Brightness.
+#[test]
+fn v16_the_blend_list_is_in_clip_studio_paints_order() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("blend-order");
+    click_widget(&mut driver, "Blending mode");
+    let order = [
+        "Normal",
+        "Darken",
+        "Multiply",
+        "Color Burn",
+        "Linear Burn",
+        "Subtract",
+        "Lighten",
+        "Screen",
+        "Color Dodge",
+        "Glow Dodge",
+        "Add",
+        "Add (Glow)",
+        "Overlay",
+        "Soft Light",
+        "Hard Light",
+        "Difference",
+        "Vivid Light",
+        "Linear Light",
+        "Pin Light",
+        "Hard Mix",
+        "Exclusion",
+        "Darker Color",
+        "Lighter Color",
+        "Divide",
+        "Hue",
+        "Saturation",
+        "Color",
+        "Brightness",
+    ];
+    let tops: Vec<f32> = order
+        .iter()
+        .map(|name| {
+            driver
+                .texts
+                .iter()
+                .filter(|(text, rect)| text == name && rect.left() > 1100.0 && rect.top() > 480.0)
+                .map(|(_, rect)| rect.top())
+                .next()
+                .unwrap_or_else(|| panic!("{name} in the list"))
+        })
+        .collect();
+    assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "{tops:?}");
 }
