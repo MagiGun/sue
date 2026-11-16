@@ -265,7 +265,9 @@ impl Round {
             .clamp(0.0, 1.0);
         Self {
             edge: edge(preset.antialias),
-            at_least_one: preset.min_width >= 1.0,
+            // With no anti-aliasing a pixel is covered or not: a thin
+            // tip keeps full strength instead of turning to lighter ink.
+            at_least_one: preset.min_width >= 1.0 || matches!(preset.antialias, AntiAlias::None),
             opacity,
             adds_up: preset.build_up,
             runs: Runs::default(),

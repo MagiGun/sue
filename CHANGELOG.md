@@ -856,6 +856,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint, pens with Anti-aliasing None: the thin end of a tapered
+  line is solid pixels too, not a few lighter ones.
+
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its
   tip, and a flick no longer bends off the way the stroke was going.
 - Sue Paint: masks of older files become gray masks as the file opens,
