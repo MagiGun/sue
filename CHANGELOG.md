@@ -1068,6 +1068,8 @@ follow [Semantic Versioning](https://semver.org/).
   the theme.
 - Sue Paint: renaming a layer or an Auto Action ends with Enter, Tab or a
   click elsewhere and keeps the new name (the name typed was lost).
+- Sue Paint: a new animation lists every layer on the timeline, the
+  paper too, so it can be locked or hidden there.
 
 ### Removed
 

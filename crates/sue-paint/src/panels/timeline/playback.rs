@@ -113,6 +113,11 @@ impl SuePaint {
                     doc.track = 0;
                 }
             }
+            // Every other layer (the paper) has a track too, as Clip
+            // Studio Paint's timeline lists every layer.
+            if let Some(tracks) = anim::setup::give_every_layer_a_track(&cx.world.arena, picture) {
+                Self::apply(cx, tracks);
+            }
         }
     }
 
