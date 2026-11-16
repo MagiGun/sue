@@ -11,9 +11,9 @@ use super::*;
 use egui::{Rect, pos2};
 use sue_platform::stylus::{self, PenKind, PenSample, PenSource};
 
-/// One frame with `events`: every piece of text it draws, where, and the
-/// clip it was drawn in.
-fn clipped_texts(paint: &mut PaintDriver, events: Vec<egui::Event>) -> Vec<(String, Rect, Rect)> {
+/// One frame with `events`: every shape it draws (texts by their words,
+/// other shapes by an empty name), where, and the clip it was drawn in.
+fn clipped_shapes(paint: &mut PaintDriver, events: Vec<egui::Event>) -> Vec<(String, Rect, Rect)> {
     let raw = egui::RawInput {
         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 900.0))),
         events,
@@ -27,13 +27,17 @@ fn clipped_texts(paint: &mut PaintDriver, events: Vec<egui::Event>) -> Vec<(Stri
         .run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
     let mut found = Vec::new();
     for clipped in &output.shapes {
-        let mut look = |shape: &egui::Shape| {
-            if let egui::Shape::Text(text) = shape {
-                found.push((
-                    text.galley.text().to_owned(),
-                    Rect::from_min_size(text.pos, text.galley.size()),
-                    clipped.clip_rect,
-                ));
+        let mut look = |shape: &egui::Shape| match shape {
+            egui::Shape::Text(text) => found.push((
+                text.galley.text().to_owned(),
+                Rect::from_min_size(text.pos, text.galley.size()),
+                clipped.clip_rect,
+            )),
+            shape => {
+                let rect = shape.visual_bounding_rect();
+                if rect.is_finite() && rect.is_positive() {
+                    found.push((String::new(), rect, clipped.clip_rect));
+                }
             }
         };
         match &clipped.shape {
@@ -131,6 +135,15 @@ fn sue_paint_timeline_opens_tall_and_keeps_the_height_dragged() {
     );
 }
 
+/// Lets a held export go when dropped.
+struct Release(std::path::PathBuf);
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        sue_paint::hold_export_starts(&self.0, false);
+    }
+}
+
 #[test]
 fn sue_paint_export_notice_never_covers_the_timeline() {
     let mut paint = PaintDriver::new("paint-polish-notice");
@@ -138,8 +151,10 @@ fn sue_paint_export_notice_never_covers_the_timeline() {
     let row = open_timeline(&mut paint);
     let gif = paint.root.join("Walk.gif");
     std::fs::create_dir_all(&paint.root).unwrap();
-    // Held before it writes, so its notice stays while frames are drawn.
+    // Held before it writes, so its notice stays while frames are drawn;
+    // let go however the test ends, so the export never waits forever.
     sue_paint::hold_export_starts(&gif, true);
+    let _release = Release(gif.clone());
     paint.command("file.export.gif");
     paint.settle(3);
     paint.click_text("OK");
@@ -193,6 +208,7 @@ fn sue_paint_sub_tool_palette_cuts_no_row_in_half() {
     let mut paint = PaintDriver::fresh("paint-polish-sub-tools");
     paint.settle(4);
     let mut overflowed = 0;
+    let spacing = paint.ctx.global_style().spacing.item_spacing.y;
     for tool in [
         "tool.pick.pen",
         "tool.pick.pencil",
@@ -207,40 +223,63 @@ fn sue_paint_sub_tool_palette_cuts_no_row_in_half() {
     ] {
         paint.command(tool);
         paint.settle(6);
-        let texts = clipped_texts(&mut paint, Vec::new());
-        let header = texts
+        let shapes = clipped_shapes(&mut paint, Vec::new());
+        let header = shapes
             .iter()
             .find(|(text, _, _)| text == "Sub Tool")
             .map(|(_, rect, _)| *rect)
             .expect("the Sub Tool palette");
-        let next = texts
+        let next = shapes
             .iter()
             .find(|(text, _, _)| text == "Tool Property")
             .map(|(_, rect, _)| *rect)
             .expect("Tool Property under it");
-        let mut add_whole = false;
-        for (text, rect, clip) in &texts {
-            let inside = rect.left() < header.left() + 320.0
-                && rect.top() > header.bottom()
-                && rect.top() < next.top();
-            if !inside || rect.height() < 1.0 {
-                continue;
-            }
-            let shown = rect.intersect(*clip);
-            if shown.height() <= 0.0 {
-                continue;
-            }
-            // Drawn at all: drawn whole.
-            assert!(
-                clip.top() <= rect.top() + 0.5 && rect.bottom() <= clip.bottom() + 0.5,
-                "{tool}: {text:?} at {rect:?} is cut by {clip:?}"
-            );
-            if text == "Add Sub Tool" {
-                add_whole = true;
-            }
+        // The Sub Tool palette's list: the clip its sub tool names are
+        // drawn in, under the group chips.
+        let list = shapes
+            .iter()
+            .filter(|(text, rect, clip)| {
+                !text.is_empty()
+                    && rect.top() > header.bottom()
+                    && rect.top() < next.top()
+                    && rect.left() < header.left() + 320.0
+                    && clip.height() < next.top() - header.bottom() - 30.0
+            })
+            .map(|(_, _, clip)| *clip)
+            .max_by(|a, b| a.top().total_cmp(&b.top()))
+            .unwrap_or_else(|| panic!("{tool}: a list of sub tools"));
+        // The rows' names, top to bottom: one a row, at the same place in
+        // each, so the rows come every `pitch` points from the first.
+        let mut names: Vec<(String, Rect)> = shapes
+            .iter()
+            .filter(|(text, _, clip)| *clip == list && !text.is_empty())
+            .map(|(text, rect, _)| (text.clone(), *rect))
+            .collect();
+        names.sort_by(|a, b| a.1.top().total_cmp(&b.1.top()));
+        assert!(names.len() >= 2, "{tool}: {names:?}");
+        let pitch = names[1].1.top() - names[0].1.top();
+        let last = names.last().map(|(_, rect)| rect.bottom()).unwrap_or(0.0);
+        if last <= list.bottom() + 0.5 {
+            // Everything fits, the Add Sub Tool row too.
+            continue;
         }
-        if !add_whole {
-            overflowed += 1;
+        overflowed += 1;
+        // More rows than fit: the list is as tall as whole rows, the
+        // last one shown ending at its bottom (its height and one gap
+        // between rows make a pitch).
+        let rows = (list.height() + spacing) / pitch;
+        assert!(
+            (rows - rows.round()).abs() < 0.02 && rows.round() >= 1.0,
+            "{tool}: {rows} rows show in {list:?} (a row every {pitch} points)"
+        );
+        // And every name the list draws there is whole.
+        for (text, rect) in &names {
+            if rect.intersects(list) {
+                assert!(
+                    list.top() <= rect.top() + 0.5 && rect.bottom() <= list.bottom() + 0.5,
+                    "{tool}: {text:?} at {rect:?} is cut by {list:?}"
+                );
+            }
         }
     }
     assert!(overflowed > 0, "a tool with more sub tools than show");
