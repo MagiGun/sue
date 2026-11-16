@@ -2048,3 +2048,488 @@ fn cc_2955_export_single_layer_as_png() {
         "the whole picture"
     );
 }
+
+// ----- Crash Course: the rows the picture added (CC-1 to CC-12) --------------
+
+/// CC 00:48 and 01:13 (X-1): Sue Paint opens to its canvas area, never
+/// to a launcher; with no canvas open New sits in the middle and opens
+/// the New dialog.
+#[test]
+fn cc_0048_no_launcher_and_new_in_the_middle_with_no_canvas() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("no-canvas");
+    run(&mut driver, "file.close");
+    driver.settle(20);
+    assert!(shows(&driver, "No canvas is open"), "{:?}", driver.texts);
+    let page = driver.runtime.shell.page_rect();
+    let new = driver.rect_of("New...").expect("New is offered");
+    assert!((new.center().x - page.center().x).abs() < 200.0);
+    driver.click_text("New...");
+    assert!(driver.rect_of("Preset").is_some(), "the New dialog");
+}
+
+/// CC 05:26 (CT-11): sub tools of several tools gathered where one key
+/// reaches them: a pen dragged out onto the Tool palette becomes a tool,
+/// that tool dragged onto the Brush tool's list joins it, and B shows
+/// it among the brushes.
+#[test]
+fn cc_0526_a_pen_moved_into_the_brush_tool_is_reached_by_b() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("groups");
+    pen(&mut driver);
+    let mapping = widget(&mut driver, "Mapping pen").expect("Mapping pen");
+    let eraser = widget(&mut driver, "Eraser (E)").expect("the Eraser tool");
+    let before_eraser = egui::pos2(eraser.center().x, eraser.top() + eraser.height() / 8.0);
+    driver.drag(mapping.center(), before_eraser, PointerButton::Primary);
+    let made = widgets(&mut driver)
+        .into_iter()
+        .filter(|(name, rect)| name == "Mapping pen" && rect.left() < 46.0)
+        .map(|(_, rect)| rect)
+        .next()
+        .expect("a Mapping pen tool on the Tool palette");
+    click_widget(&mut driver, "Brush (B)");
+    let list = widget(&mut driver, "Round watercolor brush").expect("the Brush list");
+    driver.drag(made.center(), list.center(), PointerButton::Primary);
+    driver.settle(4);
+    pen(&mut driver);
+    assert!(
+        widget(&mut driver, "Mapping pen").is_none(),
+        "it left the Pen tool"
+    );
+    sub_tool(
+        &mut driver,
+        Key::B,
+        "Round watercolor brush",
+        "Round watercolor brush",
+    );
+    assert!(
+        widget(&mut driver, "Mapping pen").is_some(),
+        "B reaches it among the brushes: {:?}",
+        driver.texts
+    );
+}
+
+/// CC-2 (13:58): Auto Select has three sub tools: the editing layer,
+/// the other layers, and the reference layers.
+#[test]
+fn cc2_auto_select_has_three_sub_tools() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("auto-select-subs");
+    tap(&mut driver, Key::W);
+    driver.settle(4);
+    for name in [
+        "Refer Only Editing Layer",
+        "Refer Other Layers",
+        "Refer Reference Layers",
+    ] {
+        assert!(shows(&driver, name), "{name}: {:?}", driver.texts);
+    }
+}
+
+/// How many pixels the selection holds, read by turning it into a
+/// selection layer and undoing that.
+fn selected(driver: &mut PaintDriver) -> usize {
+    let count = layers(driver).len();
+    run(driver, "select.to_layer");
+    if layers(driver).len() == count {
+        return 0;
+    }
+    let made = top(driver);
+    let held = painted(driver, made);
+    press(driver, Key::Z, Modifiers::COMMAND);
+    held
+}
+
+/// CC-3 (06:26, 18:05): the Shrink selection sub tool: a loop drawn
+/// round a part of the drawing selects that part only.
+#[test]
+fn cc3_shrink_selection_selects_what_is_drawn_inside() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("shrink-selection");
+    ink_line(&mut driver);
+    tap(&mut driver, Key::M);
+    driver.click_text("Shrink selection");
+    let m = middle(&driver);
+    let ring = [
+        m + vec2(-150.0, -60.0),
+        m + vec2(-10.0, -60.0),
+        m + vec2(-10.0, 60.0),
+        m + vec2(-150.0, 60.0),
+        m + vec2(-150.0, -60.0),
+    ];
+    path_held(&mut driver, &ring, PointerButton::Primary, Modifiers::NONE);
+    let held = selected(&mut driver);
+    let zoomed = zoom(&driver);
+    let ring_area = (140.0 * 120.0 / (zoomed * zoomed)) as usize;
+    assert!(held > 0, "something is selected");
+    assert!(held < ring_area / 3, "only the drawing: {held} of {ring_area}");
+}
+
+/// CC-4 (07:20): Liquify is a tool of its own with one sub tool, its
+/// modes in Tool Property.
+#[test]
+fn cc4_liquify_is_one_tool_with_its_modes() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open_fresh("liquify-modes");
+    click_widget(&mut driver, "Liquify (J)");
+    driver.settle(4);
+    assert!(!shows(&driver, "Blur"), "no Blend list: {:?}", driver.texts);
+    click_widget(&mut driver, "Mode");
+    for name in [
+        "Push",
+        "Expand",
+        "Pinch",
+        "Twirl clockwise",
+        "Twirl counterclockwise",
+        "Push left",
+        "Push right",
+    ] {
+        assert!(shows(&driver, name), "the mode {name}: {:?}", driver.texts);
+    }
+    driver.click_text("Pinch");
+    assert!(shows(&driver, "Pinch"), "picked");
+}
+
+/// CC-6 (22:15): Window, Canvas lists New Window, Cascade, Tiled, then
+/// Next and Previous canvas and the open canvases; Ctrl+Shift+Tab goes
+/// back to the previous canvas.
+#[test]
+fn cc6_window_canvas_lists_the_canvases_and_ctrl_shift_tab_goes_back() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("canvas-menu");
+    let first = picture(&driver);
+    press(&mut driver, Key::N, Modifiers::COMMAND);
+    tap(&mut driver, Key::Enter);
+    driver.settle(10);
+    let second = picture(&driver);
+    assert_ne!(first, second);
+    press(&mut driver, Key::Tab, Modifiers::COMMAND | Modifiers::SHIFT);
+    assert_eq!(picture(&driver), first, "back to the first canvas");
+    driver.click_text("Window");
+    driver.click_text("Canvas");
+    driver.settle(4);
+    let at = |name: &str| driver.rect_of(name).map(|rect| rect.top());
+    let order = [
+        "New Window",
+        "Cascade",
+        "Tile",
+        "Next Canvas",
+        "Previous Canvas",
+    ];
+    let tops: Vec<Option<f32>> = order.iter().map(|name| at(name)).collect();
+    assert!(tops.iter().all(Option::is_some), "{order:?} in {:?}", driver.texts);
+    assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "{tops:?}");
+    let numbered = driver
+        .texts
+        .iter()
+        .filter(|(text, _)| text.starts_with("1 ") || text.starts_with("2 "))
+        .count();
+    assert!(numbered >= 2, "the open canvases: {:?}", driver.texts);
+}
+
+/// CC-9 (28:18): Alt and a click with the Fill tool picks the color
+/// under the pointer.
+#[test]
+fn cc9_alt_picks_a_color_with_the_fill_tool() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("alt-fill");
+    let layer = ink_line(&mut driver);
+    // White to draw with.
+    tap(&mut driver, Key::X);
+    sub_tool(&mut driver, Key::G, "Close and fill", "Refer Only Editing Layer");
+    let m = middle(&driver);
+    click_held(&mut driver, m, PointerButton::Primary, Modifiers::ALT);
+    // The black of the line is the drawing color now: a fill of the
+    // empty area lays black.
+    run(&mut driver, "layer.new");
+    let flat = top(&driver);
+    click(&mut driver, m + vec2(0.0, 80.0));
+    let p = pixel(&driver, flat, under(&driver, m + vec2(0.0, 80.0)));
+    assert!(p[3] > 0 && p[0] < 60, "black was picked: {p:?}");
+    let _ = layer;
+}
+
+/// CC-12 (04:37, 30:05): the File menu in Clip Studio Paint's order:
+/// Export (Single Layer) before Import, the settings together, Manage
+/// Fonts, Pen Pressure Settings, Quit.
+#[test]
+fn cc12_the_file_menu_in_order() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("file-menu");
+    driver.click_text("File");
+    driver.settle(4);
+    let order = [
+        "New...",
+        "Save",
+        "Save As...",
+        "Export (Single Layer)",
+        "Import",
+        "Preferences...",
+        "Shortcut Settings...",
+        "Modifier Key Settings...",
+        "Manage Fonts...",
+        "Pen Pressure Settings...",
+    ];
+    let tops: Vec<Option<f32>> = order
+        .iter()
+        .map(|name| driver.rect_of(name).map(|rect| rect.top()))
+        .collect();
+    assert!(
+        tops.iter().all(Option::is_some),
+        "{order:?}: {tops:?} in {:?}",
+        driver.texts
+    );
+    assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "{tops:?}");
+}
+
+// ----- Things I like about Clip Studio Paint (vector layers) -----------------
+
+/// The vector lines of `layer`.
+fn lines_on(driver: &PaintDriver, layer: EntityId) -> Vec<sue_paint::vector::Line> {
+    sue_paint::vector::lines(&sue_paint::vector::geometry(arena(driver), layer))
+}
+
+/// Where picture point `p` is on screen while the view has not moved.
+fn screen_of(driver: &PaintDriver, p: [f32; 2]) -> Pos2 {
+    let [w, h] = size(driver);
+    let scale = zoom(driver);
+    middle(driver) + vec2(p[0] - w as f32 / 2.0, p[1] - h as f32 / 2.0) * scale
+}
+
+/// A new vector layer and the pen: the layer.
+fn vector_layer(driver: &mut PaintDriver) -> EntityId {
+    run(driver, "layer.new.vector");
+    pen(driver);
+    top(driver)
+}
+
+/// TL 00:21: the Command Bar has Save among its icons.
+#[test]
+fn tl_0021_the_command_bar_has_save() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open_fresh("command-bar-save");
+    // Save is the button right of Open, as in Clip Studio Paint's bar
+    // (it tells assistive technology no name of its own).
+    let open_button = widget(&mut driver, "Open Picture").expect("Open on the bar");
+    let save = open_button.translate(vec2(open_button.width() + 2.0, 0.0));
+    ink_line(&mut driver);
+    click(&mut driver, save.center());
+    assert!(driver.runtime.pending_pick().is_some(), "Save asks where");
+}
+
+/// TL 00:39: a pen on a vector layer keeps the stroke as a line.
+#[test]
+fn tl_0039_a_vector_layer_keeps_strokes_as_lines() {
+    let mut driver = open("vector-draw");
+    let layer = vector_layer(&mut driver);
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-80.0, 0.0), m + vec2(80.0, 0.0));
+    assert_eq!(lines_on(&driver, layer).len(), 1);
+}
+
+/// TL 00:50 (CTS-5): an overshoot erased up to the crossing with the
+/// Vector eraser.
+#[test]
+fn tl_0050_the_vector_eraser_erases_up_to_the_intersection() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("vector-erase");
+    let layer = vector_layer(&mut driver);
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-100.0, 0.0), m + vec2(100.0, 0.0));
+    stroke(&mut driver, m + vec2(0.0, -80.0), m + vec2(0.0, 40.0));
+    assert_eq!(lines_on(&driver, layer).len(), 2);
+    tap(&mut driver, Key::E);
+    driver.click_text("Vector");
+    stroke(&mut driver, m + vec2(-20.0, 30.0), m + vec2(20.0, 30.0));
+    let lines = lines_on(&driver, layer);
+    let [_, y] = under(&driver, m);
+    let lowest = lines
+        .iter()
+        .flat_map(|line| line.samples.iter().map(|sample| sample.at[1]))
+        .fold(f32::MIN, f32::max);
+    assert!(
+        (lowest - y as f32).abs() < 6.0,
+        "the overshoot stops at the crossing: {lowest} against {y}"
+    );
+}
+
+/// TL 01:03: Correct Line's control point drags a short end to meet
+/// the other line.
+#[test]
+fn tl_0103_a_control_point_drags_the_end_to_meet() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("vector-point");
+    let layer = vector_layer(&mut driver);
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-100.0, 0.0), m + vec2(100.0, 0.0));
+    stroke(&mut driver, m + vec2(0.0, -80.0), m + vec2(0.0, -30.0));
+    sub_tool(&mut driver, Key::Y, "Pinch vector line", "Control point");
+    let end = lines_on(&driver, layer)[1].samples.last().unwrap().at;
+    driver.drag(screen_of(&driver, end), m, PointerButton::Primary);
+    let moved = lines_on(&driver, layer)[1].samples.last().unwrap().at;
+    let [_, y] = under(&driver, m);
+    assert!((moved[1] - y as f32).abs() < 4.0, "it reaches: {moved:?}");
+}
+
+/// TL 01:11 (CTL-1): Object, a loop round the lines picks them, and the
+/// box's bottom handle stretches them.
+#[test]
+fn tl_0111_object_loops_lines_and_stretches_them() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("vector-object");
+    let layer = vector_layer(&mut driver);
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-80.0, -40.0), m + vec2(80.0, -40.0));
+    stroke(&mut driver, m + vec2(-80.0, 0.0), m + vec2(80.0, 0.0));
+    let drawn = lines_on(&driver, layer);
+    tap(&mut driver, Key::O);
+    path_held(
+        &mut driver,
+        &[
+            m + vec2(-120.0, -70.0),
+            m + vec2(120.0, -70.0),
+            m + vec2(120.0, 30.0),
+            m + vec2(-120.0, 30.0),
+            m + vec2(-120.0, -68.0),
+        ],
+        PointerButton::Primary,
+        Modifiers::NONE,
+    );
+    let [_, top_y, _, bottom] = sue_paint::vector::bounds(&drawn, &[0, 1]).unwrap();
+    let handle = screen_of(&driver, [size(&driver)[0] as f32 / 2.0, bottom]);
+    driver.drag(handle, handle + vec2(0.0, 40.0), PointerButton::Primary);
+    let now = lines_on(&driver, layer);
+    let [_, new_top, _, new_bottom] = sue_paint::vector::bounds(&now, &[0, 1]).unwrap();
+    assert!((new_top - top_y).abs() < 1.0, "the top stays");
+    assert!(new_bottom > bottom + 20.0, "taller: {bottom} to {new_bottom}");
+}
+
+/// TL 01:20 and 01:32 (CTL-2): the picked lines take a new main color
+/// typed as hex, and a bigger brush size.
+#[test]
+fn tl_0120_picked_lines_take_a_color_and_a_size() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("vector-recolor");
+    let layer = vector_layer(&mut driver);
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-80.0, 0.0), m + vec2(80.0, 0.0));
+    let drawn = lines_on(&driver, layer);
+    tap(&mut driver, Key::O);
+    path_held(
+        &mut driver,
+        &[
+            m + vec2(-120.0, -40.0),
+            m + vec2(120.0, -40.0),
+            m + vec2(120.0, 40.0),
+            m + vec2(-120.0, 40.0),
+            m + vec2(-120.0, -38.0),
+        ],
+        PointerButton::Primary,
+        Modifiers::NONE,
+    );
+    driver.click_text("Tool Property");
+    driver.settle(4);
+    let was = sue_paint::color::hex(sue_paint::color::bytes(drawn[0].colors[0]));
+    driver.click_text(&was);
+    driver.step(vec![key(Key::A, Modifiers::COMMAND)]);
+    driver.step(vec![Event::Text("#141414".to_owned())]);
+    driver.settle(3);
+    tap(&mut driver, Key::Escape);
+    let recolored = lines_on(&driver, layer);
+    assert!(
+        (recolored[0].colors[0][0] - 20.0 / 255.0).abs() < 1e-3,
+        "{:?}",
+        recolored[0].colors
+    );
+    let size_text = sue_wm::ui::input::plain_number(f64::from(drawn[0].tip.size), 1);
+    driver.click_text(&size_text);
+    driver.step(vec![key(Key::A, Modifiers::COMMAND)]);
+    driver.step(vec![Event::Text(format!("{}", drawn[0].tip.size * 2.0))]);
+    tap(&mut driver, Key::Enter);
+    let thick = lines_on(&driver, layer);
+    assert!((thick[0].tip.size - drawn[0].tip.size * 2.0).abs() < 0.05);
+}
+
+/// TL 01:35 (CTS-5): Simplify vector line brushed along a wobbly circle
+/// smooths it toward a clean curve.
+#[test]
+fn tl_0135_simplify_vector_line_smooths_the_wobble() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("vector-simplify");
+    let layer = vector_layer(&mut driver);
+    let m = middle(&driver);
+    let circle: Vec<Pos2> = (0..=48)
+        .map(|step| {
+            let a = step as f32 / 48.0 * std::f32::consts::TAU;
+            let wobble = if step % 2 == 0 { 6.0 } else { -6.0 };
+            m + vec2(a.cos(), a.sin()) * (70.0 + wobble)
+        })
+        .collect();
+    path_held(&mut driver, &circle, PointerButton::Primary, Modifiers::NONE);
+    // How far the line strays from its mean radius, on average.
+    let wobble = |driver: &PaintDriver| {
+        let line = &lines_on(driver, layer)[0];
+        let [w, h] = size(driver);
+        let centre = [w as f32 / 2.0, h as f32 / 2.0];
+        let radii: Vec<f32> = line
+            .samples
+            .iter()
+            .map(|sample| (sample.at[0] - centre[0]).hypot(sample.at[1] - centre[1]))
+            .collect();
+        let mean = radii.iter().sum::<f32>() / radii.len() as f32;
+        radii.iter().map(|r| (r - mean).abs()).sum::<f32>() / radii.len() as f32
+    };
+    let before = wobble(&driver);
+    sub_tool(&mut driver, Key::Y, "Pinch vector line", "Simplify vector line");
+    for _ in 0..10 {
+        tap(&mut driver, Key::CloseBracket);
+    }
+    path_held(&mut driver, &circle, PointerButton::Primary, Modifiers::NONE);
+    let after = wobble(&driver);
+    assert!(after < before * 0.7, "smoother: {before} to {after}");
+}
+
+/// TL 01:46: the open end dragged onto the other end closes the circle.
+#[test]
+fn tl_0146_an_open_end_dragged_onto_the_start_closes_it() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("vector-close");
+    let layer = vector_layer(&mut driver);
+    let m = middle(&driver);
+    let arc: Vec<Pos2> = (0..=40)
+        .map(|step| {
+            let a = step as f32 / 48.0 * std::f32::consts::TAU;
+            m + vec2(a.cos(), a.sin()) * 70.0
+        })
+        .collect();
+    path_held(&mut driver, &arc, PointerButton::Primary, Modifiers::NONE);
+    let line = lines_on(&driver, layer)[0].clone();
+    let (start, end) = (line.samples[0].at, line.samples.last().unwrap().at);
+    sub_tool(&mut driver, Key::Y, "Pinch vector line", "Control point");
+    driver.drag(
+        screen_of(&driver, end),
+        screen_of(&driver, start) + vec2(3.0, 2.0),
+        PointerButton::Primary,
+    );
+    let closed = lines_on(&driver, layer)[0].clone();
+    assert_eq!(
+        closed.samples.last().unwrap().at,
+        closed.samples[0].at,
+        "the ends meet exactly"
+    );
+}
+
+/// TL 01:54 (CT-7, CTL-3): the Ellipse figure on the vector layer is a
+/// vector line drawn with the brush.
+#[test]
+fn tl_0154_the_ellipse_figure_on_a_vector_layer_is_a_line() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("vector-ellipse");
+    let layer = vector_layer(&mut driver);
+    sub_tool(&mut driver, Key::U, "Straight Line", "Ellipse");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-60.0, -40.0), m + vec2(60.0, 40.0));
+    let lines = lines_on(&driver, layer);
+    assert_eq!(lines.len(), 1, "one line");
+    assert!(lines[0].samples.len() > 8, "round");
+}
