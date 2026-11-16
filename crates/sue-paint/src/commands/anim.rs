@@ -732,7 +732,7 @@ fn timeline_switch(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<
 /// Zooms the frames in or out.
 fn zoom(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
     let view = &mut paint.timeline_view;
-    let step = view.step.unwrap_or(15.0);
+    let step = view.step.or(view.fitted).unwrap_or(15.0);
     let factor = if call.name == "anim.zoom_in" {
         1.25
     } else {

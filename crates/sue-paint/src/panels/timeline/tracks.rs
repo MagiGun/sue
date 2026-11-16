@@ -533,6 +533,9 @@ impl SuePaint {
         let frames_area = Rect::from_min_max(pos2(names.right(), area.top()), area.max);
         let content = ruler + layout.last().map_or(0.0, |row| row.top + row.height);
         let mut step = self.timeline_view.step(frames_area.width(), length);
+        if self.timeline_view.step.is_none() {
+            self.timeline_view.fitted = Some(step);
+        }
         // Over the frames, as Clip Studio Paint: the wheel zooms around the
         // pointer, Shift and the wheel pan, Alt and the wheel scroll the
         // tracks, Space and a drag or the middle button pan.
