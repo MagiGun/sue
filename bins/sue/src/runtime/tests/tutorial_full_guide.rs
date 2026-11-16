@@ -43,23 +43,6 @@ fn entity(paint: &PaintDriver, id: sue_core::EntityId) -> &sue_core::Entity {
     paint.runtime.engine.world.arena.get_by_id(id).unwrap()
 }
 
-/// The layer named `name`.
-fn layer_named(paint: &PaintDriver, name: &str) -> sue_core::EntityId {
-    layers(paint)
-        .into_iter()
-        .find(|info| info.name == name)
-        .map(|info| info.id)
-        .unwrap_or_else(|| {
-            panic!(
-                "a layer {name:?} among {:?}",
-                layers(paint)
-                    .iter()
-                    .map(|l| l.name.clone())
-                    .collect::<Vec<_>>()
-            )
-        })
-}
-
 /// What the shell says now, if anything.
 fn said(paint: &PaintDriver) -> String {
     paint
@@ -334,20 +317,6 @@ fn tool_property_rows(paint: &mut PaintDriver) -> Vec<String> {
         .rect_of("Tool Property")
         .expect("the Tool Property tab");
     scroll_all(paint, tab.center() + vec2(0.0, 160.0))
-}
-
-/// Picks `tool` (a `tool.pick.*` or `tool.*` command), then the sub tool
-/// named `sub` in the Sub Tool palette.
-fn pick_sub_tool(paint: &mut PaintDriver, tool: &str, sub: &str) {
-    paint.command(tool);
-    paint.settle(3);
-    paint.settle(2);
-    paint.click_text("Sub Tool");
-    if paint.rect_of(sub).is_none() {
-        // A second group's tab hides it: its name is a tab.
-        paint.settle(2);
-    }
-    paint.click_text(sub);
 }
 
 /// Asserts each of `wanted` is among `seen`.
@@ -885,11 +854,22 @@ fn step_00_10_49_new_tone_layer_asks_frequency_density_and_dot_shape() {
         &["Simple Tone Settings", "Frequency presets", "Dot shape"],
         "Simple Tone Settings",
     );
+    // 00:13:41 the narrator picks a star.
+    click_named(&mut paint, "Dot shape");
+    let star = paint.rect_of("Star").expect("Star among the dot shapes");
+    click_with(&mut paint, star.center(), egui::Modifiers::NONE);
     let before = layers(&paint).len();
-    paint.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    click_named(&mut paint, "OK");
     paint.settle(4);
     assert_eq!(layers(&paint).len(), before + 1);
     let tone = layers(&paint).last().unwrap().id;
+    assert_eq!(
+        entity(&paint, tone)
+            .property(sue_paint::effects::TONE_SHAPE)
+            .and_then(sue_core::Value::as_i64),
+        Some(6),
+        "the star is kept"
+    );
     assert_eq!(
         entity(&paint, tone)
             .property(sue_paint::effects::TONE)
@@ -2593,4 +2573,356 @@ fn step_00_52_25_help_menu() {
     for command in ["help.guide", "help.shortcuts", "help.about"] {
         assert!(commands.iter().any(|found| found == command), "{command}");
     }
+}
+
+// D. Materials.
+
+/// Shows the Material palette; its thumbnails: square buttons larger
+/// than icon buttons.
+fn material_thumbnails(paint: &mut PaintDriver) -> Vec<(String, egui::Rect)> {
+    paint.settle(2);
+    if paint.rect_of("Material").is_none() {
+        paint.command("window.material");
+        paint.settle(4);
+    }
+    paint.click_text("Material");
+    paint.settle(4);
+    step_told(paint, Vec::new())
+        .into_iter()
+        .filter(|(_, role, rect)| {
+            *role == egui::accesskit::Role::Button
+                && rect.width() > 40.0
+                && (rect.width() - rect.height()).abs() < 2.0
+        })
+        .map(|(name, _, rect)| (name, rect))
+        .collect()
+}
+
+#[test]
+fn step_00_52_29_quick_access_palette() {
+    let mut paint = PaintDriver::new("fg-quick-access");
+    paint.command("window.quick_access");
+    paint.settle(6);
+    let seen = names(&mut paint);
+    assert!(seen.iter().any(|name| name == "Quick Access"), "{seen:?}");
+    // FGV-55: its first set holds the video's buttons.
+    for command in [
+        "edit.undo",
+        "edit.redo",
+        "edit.transform.free",
+        "edit.transform.mesh",
+    ] {
+        let label = label_of(command);
+        let label = label.trim_end_matches("...");
+        assert!(
+            seen.iter().any(|name| name == label),
+            "{label:?} in {seen:?}"
+        );
+    }
+}
+
+#[test]
+fn step_00_52_47_material_palette_views_search_tags_and_favorites() {
+    let mut paint = PaintDriver::new("fg-material-palette");
+    let thumbs = material_thumbnails(&mut paint);
+    assert!(thumbs.len() > 4, "Sue Paint's own materials: {thumbs:?}");
+    let seen = names(&mut paint);
+    shows_all(&seen, &["Search names and tags"], "Material");
+    // A material picked shows its tags.
+    let (_, first) = thumbs[0].clone();
+    click_with(&mut paint, first.center(), egui::Modifiers::NONE);
+    let seen = names(&mut paint);
+    shows_all(&seen, &["Tags"], "a picked material");
+    for command in [
+        "material.size_small",
+        "material.size_large",
+        "material.size_list",
+        "material.favorite",
+        "material.paste",
+        "material.delete",
+    ] {
+        label_of(command);
+    }
+}
+
+#[test]
+fn step_00_52_58_a_material_dragged_onto_the_canvas() {
+    let mut paint = PaintDriver::new("fg-material-drag");
+    let thumbs = material_thumbnails(&mut paint);
+    let (_, first) = thumbs.first().cloned().expect("a material");
+    let count = layers(&paint).len();
+    let before = arena_bytes(&paint);
+    let to = middle(&paint);
+    paint.drag(first.center(), to, egui::PointerButton::Primary);
+    assert_eq!(
+        layers(&paint).len(),
+        count + 1,
+        "dropped as a layer: {}",
+        said(&paint)
+    );
+    let dropped = layers(&paint).last().unwrap().id;
+    // 00:53:41 the pattern stays a live material layer, 00:53:54 and
+    // Rasterize makes it pixels to draw on.
+    let arena = &paint.runtime.engine.world.arena;
+    if sue_paint::doc::material_image(arena, dropped).is_some() {
+        paint.command("layer.rasterize");
+        paint.settle(4);
+        let now = layers(&paint).last().unwrap().id;
+        assert!(
+            sue_paint::doc::material_image(&paint.runtime.engine.world.arena, now).is_none(),
+            "rasterized: {}",
+            said(&paint)
+        );
+        undo(&mut paint);
+    }
+    undo(&mut paint);
+    assert!(arena_bytes(&paint) == before);
+}
+
+// E. 3D.
+
+/// Adds a 3D layer with `command` and returns it.
+fn new_3d(paint: &mut PaintDriver, command: &str) -> sue_core::EntityId {
+    paint.command(command);
+    paint.settle(2);
+    if command == "layer.new.3d" {
+        paint.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    }
+    paint.settle(4);
+    let arena = &paint.runtime.engine.world.arena;
+    sue_paint::doc::layers(arena, picture(paint))
+        .into_iter()
+        .rev()
+        .find(|info| sue_paint::three::is_3d(arena, info.id))
+        .map(|info| info.id)
+        .expect("a 3D layer")
+}
+
+#[test]
+fn step_00_54_56_3d_figure_hand_head_and_shapes_as_layers() {
+    let mut paint = PaintDriver::new("fg-3d-layers");
+    for command in [
+        "layer.new.figure",
+        "layer.new.hand",
+        "layer.new.head",
+        "layer.new.3d",
+    ] {
+        let count = layers(&paint).len();
+        new_3d(&mut paint, command);
+        assert_eq!(layers(&paint).len(), count + 1, "{command}");
+    }
+    label_of("file.import.3d");
+}
+
+#[test]
+fn step_00_55_07_body_types_shape_chart_camera_and_object_buttons() {
+    let mut paint = PaintDriver::new("fg-3d-figure");
+    new_3d(&mut paint, "layer.new.figure");
+    paint.command("tool.operation");
+    paint.settle(3);
+    let rows = tool_property_rows(&mut paint);
+    shows_all(
+        &rows,
+        &[
+            "Male",
+            "Female",
+            "Body shape chart",
+            "Head to body ratio",
+            "Adjust head to body ratio with height",
+            "Orbit",
+            "Pan",
+            "Zoom",
+            "Move",
+            "Rotate",
+            "Put on the ground",
+            "Reset angle",
+            "Reset position",
+            "Reset scale",
+            "Object scale",
+            "Register body shape",
+            "Light source",
+            "Outline width",
+            "Manga Perspective",
+        ],
+        "3D figure",
+    );
+}
+
+#[test]
+fn step_00_56_36_pose_flip_reset_register_and_scanner() {
+    let mut paint = PaintDriver::new("fg-3d-pose");
+    let figure = new_3d(&mut paint, "layer.new.figure");
+    let model = |paint: &PaintDriver| {
+        let arena = &paint.runtime.engine.world.arena;
+        let mut out = sue_core::codec::Writer::new();
+        arena
+            .get_by_id(sue_paint::three::model_of(arena, figure).unwrap())
+            .unwrap()
+            .encode(&mut out);
+        out.into_bytes()
+    };
+    let start = model(&paint);
+    paint.command("figure.preset.2");
+    paint.settle(4);
+    let posed = model(&paint);
+    assert_ne!(posed, start, "a preset pose");
+    paint.command("figure.flip");
+    paint.settle(4);
+    assert_ne!(model(&paint), posed, "flipped");
+    paint.command("figure.reset");
+    paint.settle(4);
+    for command in [
+        "figure.register_pose",
+        "figure.body.register",
+        "figure.pose_scanner",
+        "figure.object.reset_scale",
+        "figure.object.reset_angle",
+        "figure.object.ground",
+    ] {
+        label_of(command);
+    }
+}
+
+// F. EX, phone and tablet.
+
+#[test]
+fn step_00_59_52_story_menu_pages_and_the_bound_book() {
+    let mut paint = PaintDriver::new("fg-story");
+    for command in [
+        "story.manager",
+        "story.add",
+        "story.order",
+        "story.preview_binding",
+        "story.page_settings",
+    ] {
+        label_of(command);
+    }
+    paint.command("story.preview_binding");
+    paint.settle(6);
+    assert!(
+        !said(&paint).contains("not in Sue Paint"),
+        "{}",
+        said(&paint)
+    );
+}
+
+#[test]
+fn step_01_02_49_phone_and_tablet_interfaces() {
+    let mut paint = PaintDriver::new("fg-interfaces");
+    for command in [
+        "window.interface.phone",
+        "window.interface.tablet",
+        "window.interface.desktop",
+        "touch.finger_draws",
+        "touch.key_bar",
+    ] {
+        label_of(command);
+    }
+    // 01:04:28 the finger button: fingers only move the view.
+    let before = paint
+        .runtime
+        .engine
+        .world
+        .rice
+        .get_bool(sue_paint::studio_mode::FINGER_KEY);
+    paint.command("touch.finger_draws");
+    paint.settle(2);
+    let after = paint
+        .runtime
+        .engine
+        .world
+        .rice
+        .get_bool(sue_paint::studio_mode::FINGER_KEY);
+    assert_ne!(before, after, "the finger button switches");
+    paint.command("touch.finger_draws");
+    paint.settle(2);
+}
+
+#[test]
+fn step_01_06_57_timelapse_on_the_command_bar() {
+    let mut paint = PaintDriver::new("fg-command-bar");
+    let seen = names(&mut paint);
+    let label = label_of("file.timelapse.record");
+    assert!(
+        seen.iter()
+            .any(|name| *name == label || name.starts_with("Record Timelapse")),
+        "{label:?} on the command bar: {seen:?}"
+    );
+}
+
+// Seen in the video: rows the frames add to the step table.
+
+#[test]
+fn step_00_04_45_fgv_3_a_check_box_in_each_row_picks_several_layers() {
+    let mut paint = PaintDriver::new("fg-row-boxes");
+    inked_layer(&mut paint);
+    let first = layers(&paint)[1].name.clone();
+    let name = format!("Pick {first} with the others");
+    click_named(&mut paint, &name);
+    // Two picked: Merge Selected Layers works on them.
+    let count = layers(&paint).len();
+    undo_pair(
+        &mut paint,
+        "merge the picked",
+        |paint| paint.command("layer.merge_selected"),
+        move |paint| layers(paint).len() == count - 1,
+    );
+}
+
+#[test]
+fn step_00_20_56_fgv_16_auto_action_steps_turn_on_and_off() {
+    let mut paint = PaintDriver::new("fg-auto-steps");
+    paint.command("window.auto_actions");
+    paint.settle(4);
+    paint.click_text("Auto Action");
+    let seen = names(&mut paint);
+    // The set drop-down over the actions.
+    shows_all(&seen, &["Set", "New Clipped Layer"], "Auto Action");
+    for command in [
+        "auto.new_set",
+        "auto.import_set",
+        "auto.export_set",
+        "auto.record",
+    ] {
+        label_of(command);
+    }
+}
+
+#[test]
+fn step_00_40_05_fgv_44_save_duplicate_formats_and_fgv_47_copy_svg() {
+    for command in [
+        "file.duplicate.clip",
+        "file.duplicate.gif",
+        "file.duplicate.qoi",
+        "file.export.vectors",
+        "file.new_clipboard",
+        "file.revert",
+        "edit.copy_svg",
+        "edit.paste_here",
+        "edit.outline_selection",
+    ] {
+        label_of(command);
+    }
+    let mut paint = PaintDriver::new("fg-copy-svg");
+    paint.command("layer.new.vector");
+    paint.settle(4);
+    let at = middle(&paint);
+    paint.command("tool.pen");
+    paint.settle(2);
+    stroke(&mut paint, at - vec2(40.0, 0.0), at + vec2(40.0, 0.0));
+    paint.command("edit.copy_svg");
+    paint.settle(3);
+    assert!(
+        !said(&paint).contains("not in Sue Paint"),
+        "{}",
+        said(&paint)
+    );
+}
+
+#[test]
+fn step_00_52_00_fgv_54_artistic_line_and_color_controls() {
+    let mut paint = PaintDriver::new("fg-artistic");
+    inked_layer(&mut paint);
+    let seen = dialog_names(&mut paint, "filter.artistic");
+    shows_all(&seen, &["Line Opacity"], "Artistic");
 }

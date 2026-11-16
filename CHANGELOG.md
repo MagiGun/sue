@@ -846,6 +846,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint: a new layer mask is what the tools draw on next, as in
+  Clip Studio Paint, so painting with transparent hides at once instead
+  of erasing the layer's own pixels.
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its
   tip, and a flick no longer bends off the way the stroke was going.
 - Sue Paint: masks of older files become gray masks as the file opens,
