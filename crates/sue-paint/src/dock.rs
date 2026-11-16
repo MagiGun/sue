@@ -1278,10 +1278,12 @@ impl SuePaint {
             self.dock.splitters(ui, &laid, theme);
         }
         if let Some(strip) = laid.strip {
-            self.strip_ui(ui, strip, Side::Right, &laid.icons, cx, theme);
+            let groups = &laid.icon_groups;
+            self.strip_ui(ui, strip, Side::Right, &laid.icons, groups, cx, theme);
         }
         if let Some(strip) = laid.left_strip {
-            self.strip_ui(ui, strip, Side::Left, &laid.left_icons, cx, theme);
+            let groups = &laid.left_icon_groups;
+            self.strip_ui(ui, strip, Side::Left, &laid.left_icons, groups, cx, theme);
         }
         self.side_arrows(ui, &laid, theme);
         self.row_strips(ui, &laid, theme);
@@ -1395,12 +1397,17 @@ impl SuePaint {
     /// An icon strip (the right one, or the left one while the left side
     /// is folded), and the collapsed palette it shows. Icons drag out to
     /// dock or float their palettes.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a strip, its icons and their groups"
+    )]
     fn strip_ui(
         &mut self,
         ui: &mut Ui,
         strip: Rect,
         side: Side,
         icons_shown: &[Palette],
+        groups: &[Vec<Palette>],
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
@@ -1423,6 +1430,27 @@ impl SuePaint {
                 ),
                 vec2(26.0, 26.0),
             );
+            // Palettes that were tabs of one group keep together as icons,
+            // a line between one group and the next (as Clip Studio Paint
+            // groups them). Which group an icon is in is kept for a test or
+            // a tour to read.
+            let group = groups.iter().position(|group| group.contains(palette));
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(
+                    Id::unique(("sue-paint-strip-group", palette.key())),
+                    group.unwrap_or(usize::MAX),
+                );
+            });
+            if index > 0 {
+                let before = groups
+                    .iter()
+                    .position(|group| group.contains(&icons_shown[index - 1]));
+                if before != group {
+                    let y = rect.top() - 3.0;
+                    ui.painter()
+                        .hline(rect.x_range().expand(2.0), y, theme.hairline());
+                }
+            }
             let open = self.dock.popped == Some(*palette);
             // The grip first, so the icon's own click stays on top of it:
             // egui drops a click when a drag-only widget is above the one
