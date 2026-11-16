@@ -677,6 +677,11 @@ impl MenuState {
                 let below = screen.bottom() - top;
                 if full <= below {
                     (pos2(x, top), full)
+                } else if full <= screen.height() {
+                    // It fits the window, not the room under what opened
+                    // it: it moves up just enough to show whole, rather
+                    // than hide rows behind a scroll.
+                    (pos2(x, screen.bottom() - full), full)
                 } else if below >= (row_height * 6.0).min(full) {
                     // It keeps its place under what opened it and scrolls.
                     (pos2(x, top), below)
@@ -1489,6 +1494,27 @@ mod tests {
             MenuEvent::Closed
         );
         assert!(!rig.menu.is_open());
+    }
+
+    #[test]
+    fn a_menu_that_fits_the_window_but_not_below_moves_up_whole() {
+        // Opened low (a palette's menu button near the bottom), twelve
+        // rows do not fit under it but fit the window: they show whole,
+        // none behind a scroll.
+        let labels: Vec<String> = (0..12).map(|row| format!("Row {row:02}")).collect();
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let items = rows(&labels);
+        let size = vec2(600.0, 500.0);
+        let mut rig = Rig::new(size, pos2(20.0, 260.0));
+        rig.frames(&items, vec![Vec::new(), Vec::new()]);
+        let screen = Rect::from_min_size(Pos2::ZERO, size);
+        for label in &labels {
+            let rect = rig
+                .rect_of(label)
+                .unwrap_or_else(|| panic!("{label} shows"));
+            assert!(screen.contains_rect(rect), "{label} at {rect:?}");
+        }
+        assert!(rig.rect_of("Row 00").unwrap().top() < 260.0, "it moved up");
     }
 
     #[test]
