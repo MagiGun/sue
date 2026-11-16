@@ -248,7 +248,9 @@ fn pixels(paint: &PaintDriver, layer: sue_core::EntityId) -> Vec<u8> {
 /// How much ink the layer holds: the sum of its alpha.
 fn ink(paint: &PaintDriver, layer: sue_core::EntityId) -> u64 {
     pixels(paint, layer)
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|pixel| u64::from(pixel[3]))
         .sum()
 }
@@ -1441,7 +1443,7 @@ fn step_00_22_19_zoom_tool_and_ctrl_plus_minus() {
 }
 
 #[test]
-fn step_00_22_41_hand_space_and_rotate() {
+fn step_00_22_41_hand_and_rotate_sub_tools() {
     let mut paint = PaintDriver::new("fg-hand");
     let subs = sub_tools_of(&mut paint, "tool.hand");
     shows_all(&subs, &["Hand", "Rotate"], "Hand tool");
@@ -1706,7 +1708,7 @@ fn step_00_28_09_brush_settings_categories_of_sub_tool_detail() {
 }
 
 #[test]
-fn step_00_33_55_vector_eraser_erases_up_to_the_intersection_or_whole_lines() {
+fn step_00_33_55_vector_eraser_erases_vector_lines() {
     let mut paint = PaintDriver::new("fg-vector-eraser");
     let rows = rows_of(&mut paint, "tool.eraser", "Vector");
     shows_all(&rows, &["Erase up to intersection"], "vector eraser");
@@ -2153,7 +2155,7 @@ fn step_00_40_09_timelapse_stop_asks_before_throwing_the_recording_away() {
 }
 
 #[test]
-fn step_00_40_37_new_dialog_kinds_colors_template_and_comic_settings() {
+fn step_00_40_37_new_dialog_kinds_colors_and_comic_settings() {
     let mut paint = PaintDriver::new("fg-new");
     paint.command("file.new");
     paint.settle(4);
@@ -2390,7 +2392,7 @@ fn step_00_46_27_tonal_corrections_and_correction_layers() {
 }
 
 #[test]
-fn step_00_49_08_transform_modes_ctrl_distort_and_mesh() {
+fn step_00_49_08_transform_settings_and_mesh() {
     let mut paint = PaintDriver::new("fg-transform");
     let layer = inked_layer(&mut paint);
     paint.step(vec![key(egui::Key::T, egui::Modifiers::COMMAND)]);
@@ -2421,6 +2423,37 @@ fn step_00_49_08_transform_modes_ctrl_distort_and_mesh() {
     paint.step(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
     paint.settle(3);
     assert!(pixels(&paint, layer) == before);
+}
+
+#[test]
+fn step_00_49_20_ctrl_on_a_corner_distorts() {
+    let mut paint = PaintDriver::new("fg-distort");
+    paint.step(vec![key(
+        egui::Key::N,
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+    )]);
+    paint.settle(4);
+    let layer = layers(&paint).last().unwrap().id;
+    // A filled box, then Ctrl+T on it.
+    select_middle(&mut paint);
+    paint.command("edit.fill");
+    paint.settle(3);
+    let before = pixels(&paint, layer);
+    paint.step(vec![key(egui::Key::T, egui::Modifiers::COMMAND)]);
+    paint.settle(4);
+    let corner = middle(&paint) + vec2(50.0, -30.0);
+    drag_with(
+        &mut paint,
+        corner,
+        corner + vec2(40.0, -30.0),
+        egui::Modifiers::COMMAND,
+    );
+    paint.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    paint.settle(4);
+    let after = pixels(&paint, layer);
+    assert_ne!(after, before, "the corner moved");
+    undo(&mut paint);
+    assert!(pixels(&paint, layer) == before, "one undo step");
 }
 
 #[test]
@@ -2506,7 +2539,7 @@ fn step_00_50_15_select_all_and_the_selection_launcher() {
 }
 
 #[test]
-fn step_00_51_07_view_grid_settings_and_webtoon_view() {
+fn step_00_51_07_view_commands_and_grid_settings() {
     let mut paint = PaintDriver::new("fg-view");
     for command in [
         "view.grid",
@@ -2568,7 +2601,7 @@ fn step_00_51_20_filters_of_the_video_change_the_layer() {
 }
 
 #[test]
-fn step_00_52_25_help_menu() {
+fn step_00_52_25_help_menu_is_sue_paints_own() {
     let commands = menu_commands();
     for command in ["help.guide", "help.shortcuts", "help.about"] {
         assert!(commands.iter().any(|found| found == command), "{command}");
@@ -2622,7 +2655,7 @@ fn step_00_52_29_quick_access_palette() {
 }
 
 #[test]
-fn step_00_52_47_material_palette_views_search_tags_and_favorites() {
+fn step_00_52_47_material_palette_search_and_tags() {
     let mut paint = PaintDriver::new("fg-material-palette");
     let thumbs = material_thumbnails(&mut paint);
     assert!(thumbs.len() > 4, "Sue Paint's own materials: {thumbs:?}");
@@ -2870,7 +2903,7 @@ fn step_00_04_45_fgv_3_a_check_box_in_each_row_picks_several_layers() {
 }
 
 #[test]
-fn step_00_20_56_fgv_16_auto_action_steps_turn_on_and_off() {
+fn step_00_20_56_fgv_16_auto_action_sets() {
     let mut paint = PaintDriver::new("fg-auto-steps");
     paint.command("window.auto_actions");
     paint.settle(4);
