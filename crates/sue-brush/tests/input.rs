@@ -605,6 +605,53 @@ fn a_mouse_presses_the_same_all_along() {
     assert!(points.iter().all(|p| (p.size - 16.0).abs() < 1e-4));
 }
 
+/// A mouse has no pressure to thin a stroke's ends, so by speed its
+/// tapers keep at least their set lengths: a slow mouse stroke still
+/// comes to a point at both ends, as a slow pen's does not (the pen
+/// thins its ends by pressing lighter).
+#[test]
+fn a_slow_mouse_stroke_still_tapers_by_speed() {
+    let mut preset = with_end_taper(pen(16.0, 0), 30.0, 60.0);
+    preset.taper.by_speed = true;
+    // 560 pixels in four seconds: slow.
+    let mut samples = stroke(line, 4.0, 0.0, 1, |_| Some(1.0));
+    lift(&mut samples);
+    let (mouse, _) = run(&preset, Settings::new(Device::MOUSE), &samples, 3);
+    let (pen, _) = run(&preset, Settings::new(Device::Pen), &samples, 3);
+    let first = |points: &[StrokePoint]| points.first().unwrap().size;
+    let last = |points: &[StrokePoint]| points.last().unwrap().size;
+    let middle = |points: &[StrokePoint]| points[points.len() / 2].size;
+    assert!((middle(&mouse) - 16.0).abs() < 1e-3, "the body is full");
+    assert!(first(&mouse) < 2.0, "a pointed start: {}", first(&mouse));
+    assert!(last(&mouse) < 2.0, "a pointed end: {}", last(&mouse));
+    // Halfway along its ending the size is about half or more (the
+    // taper eases out), never the full size.
+    let end = mouse.last().unwrap().arc;
+    let at = |arc: f32| {
+        mouse
+            .iter()
+            .min_by(|a, b| (a.arc - arc).abs().total_cmp(&(b.arc - arc).abs()))
+            .unwrap()
+            .size
+    };
+    assert!(at(end - 30.0) < 15.0 && at(end - 30.0) > 6.0, "{}", at(end - 30.0));
+    // The slow pen's ends thin over a few pixels only (its pressure
+    // thins them): ten pixels in, it is at nearly its full size, where
+    // the mouse's is still well under it.
+    let near = |points: &[StrokePoint], arc: f32| {
+        points
+            .iter()
+            .min_by(|a, b| (a.arc - arc).abs().total_cmp(&(b.arc - arc).abs()))
+            .unwrap()
+            .size
+    };
+    let pen_end = pen.last().unwrap().arc;
+    assert!(near(&pen, 10.0) > 14.0, "{}", near(&pen, 10.0));
+    assert!(near(&pen, pen_end - 10.0) > 14.0, "{}", near(&pen, pen_end - 10.0));
+    assert!(near(&mouse, 10.0) < 12.0, "{}", near(&mouse, 10.0));
+    assert!(near(&mouse, end - 10.0) < 8.0, "{}", near(&mouse, end - 10.0));
+}
+
 // ---------------------------------------------------------------------
 // The same samples, however they come
 // ---------------------------------------------------------------------
