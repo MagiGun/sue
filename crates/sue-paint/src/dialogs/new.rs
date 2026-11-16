@@ -24,10 +24,12 @@ pub(crate) enum Unit {
     Cm,
     Mm,
     In,
+    /// Points, 72 to the inch, as Clip Studio Paint's New offers them.
+    Pt,
 }
 
 impl Unit {
-    const ALL: [Self; 4] = [Self::Px, Self::Cm, Self::Mm, Self::In];
+    const ALL: [Self; 5] = [Self::Px, Self::Cm, Self::Mm, Self::In, Self::Pt];
 
     fn label(self) -> &'static str {
         match self {
@@ -35,6 +37,7 @@ impl Unit {
             Self::Cm => "cm",
             Self::Mm => "mm",
             Self::In => "in",
+            Self::Pt => "pt",
         }
     }
 
@@ -45,6 +48,7 @@ impl Unit {
             Self::Cm => 2.54,
             Self::Mm => 25.4,
             Self::In => 1.0,
+            Self::Pt => 72.0,
         }
     }
 
@@ -1588,6 +1592,15 @@ mod tests {
         assert!((mm - 210.0).abs() < 0.5, "{mm}");
         dialog.name = "  ".to_owned();
         assert_eq!(dialog.spec().name, "Illustration");
+    }
+
+    #[test]
+    fn points_are_a_unit_of_new_at_72_to_the_inch() {
+        assert_eq!(Unit::from_label("pt"), Some(Unit::Pt));
+        // An inch at 350 dpi is 350 pixels and 72 points.
+        let pixels = 350.0;
+        let points = pixels / 350.0 * Unit::Pt.per_inch(350.0);
+        assert!((points - 72.0).abs() < 1e-9);
     }
 
     #[test]

@@ -13,6 +13,7 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, New: points (pt) are a unit beside px, cm, mm and in.
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
   fill (click an area and the gradient runs from its outline inward).
