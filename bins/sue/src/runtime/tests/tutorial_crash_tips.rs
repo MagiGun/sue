@@ -378,6 +378,23 @@ fn pen(driver: &mut PaintDriver) {
     driver.click_text("G-pen");
 }
 
+/// The sub tool `sub` of the tool `key_name` picks, `marker` being a
+/// sub tool only that tool lists: the key pressed until the Sub Tool
+/// palette lists it (a key held by several tools goes round them, as in
+/// Clip Studio Paint), then the sub tool clicked.
+fn sub_tool(driver: &mut PaintDriver, key_name: Key, marker: &str, sub: &str) {
+    driver.settle(2);
+    for _ in 0..4 {
+        if shows(driver, marker) {
+            break;
+        }
+        tap(driver, key_name);
+        driver.settle(2);
+    }
+    assert!(shows(driver, marker), "{marker}: {:?}", driver.texts);
+    driver.click_text(sub);
+}
+
 /// A pen line across the canvas's middle on a new raster layer: the
 /// layer.
 fn ink_line(driver: &mut PaintDriver) -> EntityId {
@@ -1238,5 +1255,796 @@ fn cc1_rotate_snap_angle_turns_in_steps() {
     assert!(
         (free / 45.0 - (free / 45.0).round()).abs() > 0.01,
         "free: {free}"
+    );
+}
+
+// ----- Crash Course: flats, masks and folders ---------------------------------
+
+/// A closed box of pen lines on a new raster layer (the dragon's line
+/// art), its corners `half` screen points from the canvas's middle:
+/// the layer.
+fn line_box(driver: &mut PaintDriver, half: egui::Vec2) -> EntityId {
+    run(driver, "layer.new");
+    pen(driver);
+    let m = middle(driver);
+    let corners = [
+        m + vec2(-half.x, -half.y),
+        m + vec2(half.x, -half.y),
+        m + vec2(half.x, half.y),
+        m + vec2(-half.x, half.y),
+        m + vec2(-half.x, -half.y - 4.0),
+    ];
+    path_held(driver, &corners, PointerButton::Primary, Modifiers::NONE);
+    top(driver)
+}
+
+/// Inside, outside and on the box `line_box` draws with `half` 100 by
+/// 80: picture points.
+fn box_points(driver: &PaintDriver) -> ([i64; 2], [i64; 2]) {
+    let m = middle(driver);
+    (under(driver, m), under(driver, m + vec2(200.0, 150.0)))
+}
+
+/// The tutorial's state at 14:39: line art in a box, a folder below it
+/// masked to the inside of the box, a flat layer inside the folder
+/// filled with the Fill tool. Returns (line art, folder, flat layer).
+fn dragon(driver: &mut PaintDriver) -> (EntityId, EntityId, EntityId) {
+    let lines = line_box(driver, vec2(100.0, 80.0));
+    let m = middle(driver);
+    // 13:58: Auto Select, Refer only editing layer, outside the lines.
+    sub_tool(driver, Key::W, "Refer Reference Layers", "Refer Only Editing Layer");
+    click(driver, m + vec2(200.0, 150.0));
+    // 14:16: Invert.
+    run(driver, "select.invert");
+    // 14:29: below the line art, a folder.
+    driver.click_text("Layer 1");
+    click_widget(driver, "New Layer Folder");
+    let folder = layers(driver)
+        .into_iter()
+        .find(|info| sue_paint::doc::is_folder(arena(driver), info.id))
+        .expect("a folder")
+        .id;
+    // 14:34: a mask on the folder from the selection.
+    run(driver, "layer.mask.outside");
+    assert!(
+        sue_paint::doc::mask_of(arena(driver), folder).is_some(),
+        "the folder has a mask"
+    );
+    run(driver, "select.none");
+    // 14:37: a new raster layer lands inside the folder.
+    let before: Vec<EntityId> = layers(driver).into_iter().map(|info| info.id).collect();
+    click_widget(driver, "Raster Layer");
+    let flat = layers(driver)
+        .into_iter()
+        .map(|info| info.id)
+        .find(|id| !before.contains(id))
+        .expect("a new layer");
+    // 14:39: Fill, Refer only editing layer, one click fills the layer.
+    sub_tool(driver, Key::G, "Close and fill", "Refer Only Editing Layer");
+    click(driver, m + vec2(200.0, 150.0));
+    (lines, folder, flat)
+}
+
+/// CC 13:44 (and tip 47): Lasso fill fills the loop drawn round.
+#[test]
+fn cc_1344_lasso_fill_fills_the_loop() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("lasso-fill");
+    run(&mut driver, "layer.new");
+    let layer = top(&driver);
+    sub_tool(&mut driver, Key::G, "Close and fill", "Lasso fill");
+    let m = middle(&driver);
+    path_held(
+        &mut driver,
+        &[
+            m + vec2(-60.0, -40.0),
+            m + vec2(60.0, -40.0),
+            m + vec2(60.0, 40.0),
+            m + vec2(-60.0, 40.0),
+        ],
+        PointerButton::Primary,
+        Modifiers::NONE,
+    );
+    assert!(pixel(&driver, layer, under(&driver, m))[3] > 0, "filled");
+    assert_eq!(
+        pixel(&driver, layer, under(&driver, m + vec2(120.0, 0.0)))[3],
+        0,
+        "only the loop"
+    );
+}
+
+/// CC 13:58, 14:16, 14:29, 14:34, 14:37, 14:39 (CT-1, CT-4, CCS-8): W
+/// selects the outside of the line art, Invert, a folder below the
+/// lines, a mask on it from the selection, a new layer lands inside it,
+/// and one click of Fill fills that layer; the picture shows the color
+/// inside the lines only.
+#[test]
+fn cc_1358_auto_select_invert_folder_mask_and_fill() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("dragon");
+    let (_, folder, flat) = dragon(&mut driver);
+    assert_eq!(
+        sue_paint::doc::folder_of(arena(&driver), flat),
+        Some(folder),
+        "the new layer is inside the folder"
+    );
+    let [w, h] = size(&driver);
+    assert_eq!(
+        painted(&driver, flat),
+        (w * h) as usize,
+        "the whole layer is filled"
+    );
+    let (inside, outside) = box_points(&driver);
+    let tile = seen(&driver);
+    let ink = seen_at(&tile, inside);
+    let paper = seen_at(&tile, outside);
+    assert!(ink[0] < 60, "the flat shows inside: {ink:?}");
+    assert!(paper[0] > 200, "the mask hides it outside: {paper:?}");
+}
+
+/// The grays of `layer`'s mask, one byte a pixel, and its width.
+fn mask_grays(driver: &PaintDriver, layer: EntityId) -> (Vec<u8>, i64) {
+    let mask = sue_paint::doc::mask_of(arena(driver), layer).expect("a mask");
+    let raster = sue_paint::doc::raster(arena(driver), mask).expect("the mask's pixels");
+    let bytes = raster.bytes().unwrap();
+    let count = (raster.width() * raster.height()) as usize;
+    let step = bytes.len() / count.max(1);
+    let grays = (0..count).map(|index| bytes[index * step]).collect();
+    (grays, i64::from(raster.width()))
+}
+
+/// The gray of `layer`'s mask at picture point `p`.
+fn mask_at(driver: &PaintDriver, layer: EntityId, p: [i64; 2]) -> u8 {
+    let [ox, oy] = sue_paint::doc::mask_offset(arena(driver), layer).unwrap_or([0, 0]);
+    let (grays, width) = mask_grays(driver, layer);
+    let height = grays.len() as i64 / width;
+    let (x, y) = (p[0] - ox, p[1] - oy);
+    if x < 0 || y < 0 || x >= width || y >= height {
+        return 0;
+    }
+    grays[(y * width + x) as usize]
+}
+
+/// Clicks the mask thumbnail on the row of the layer `name`: what is
+/// drawn now goes on the mask.
+fn edit_mask(driver: &mut PaintDriver, name: &str) {
+    driver.click_text(name);
+    let row = driver.rect_of(name).unwrap();
+    let thumb = widgets(driver)
+        .into_iter()
+        .filter(|(label, rect)| {
+            label == "Draw on the mask: the pen shows, the eraser hides"
+                && (rect.center().y - row.center().y).abs() < 20.0
+        })
+        .map(|(_, rect)| rect)
+        .next()
+        .expect("the mask thumbnail on the row");
+    click(driver, thumb.center());
+}
+
+/// CC 14:55: the mask thumbnail clicked, a hard brush with the
+/// transparent color hides, with a color shows.
+#[test]
+fn cc_1455_painting_on_the_mask_hides_and_shows() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("mask-paint");
+    let (_, folder, _) = dragon(&mut driver);
+    let folder_name = arena(&driver).get_by_id(folder).unwrap().name().to_owned();
+    edit_mask(&mut driver, &folder_name);
+    pen(&mut driver);
+    for _ in 0..8 {
+        tap(&mut driver, Key::CloseBracket);
+    }
+    let m = middle(&driver);
+    let (inside, _) = box_points(&driver);
+    let shown = mask_at(&driver, folder, inside);
+    tap(&mut driver, Key::C);
+    stroke(&mut driver, m + vec2(-30.0, 0.0), m + vec2(30.0, 0.0));
+    let hidden = mask_at(&driver, folder, inside);
+    assert!(hidden < shown, "the transparent color hides: {shown} to {hidden}");
+    assert!(seen_at(&seen(&driver), inside)[0] > 200, "the paper shows there");
+    tap(&mut driver, Key::C);
+    let out = under(&driver, m + vec2(160.0, 0.0));
+    stroke(&mut driver, m + vec2(150.0, 0.0), m + vec2(170.0, 0.0));
+    assert!(mask_at(&driver, folder, out) > 0, "a color shows outside");
+    assert!(seen_at(&seen(&driver), out)[0] < 60, "the flat shows there");
+}
+
+/// CC 15:16 (CT-2): the Fill tool on the mask fills an area of it, so
+/// the flat shows there.
+#[test]
+fn cc_1516_fill_on_the_mask_shows_an_area() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("mask-fill");
+    let (_, folder, _) = dragon(&mut driver);
+    let name = arena(&driver).get_by_id(folder).unwrap().name().to_owned();
+    edit_mask(&mut driver, &name);
+    let (_, outside) = box_points(&driver);
+    assert_eq!(mask_at(&driver, folder, outside), 0);
+    sub_tool(&mut driver, Key::G, "Close and fill", "Refer Only Editing Layer");
+    let before = bytes(&driver);
+    let at = middle(&driver) + vec2(200.0, 150.0);
+    click(&mut driver, at);
+    assert!(mask_at(&driver, folder, outside) > 200, "the mask is filled");
+    assert!(seen_at(&seen(&driver), outside)[0] < 60, "the flat shows");
+    undo_pair(&mut driver, &before);
+}
+
+/// CC 16:00 (CT-3, CC-5): the Blend tool on the mask softens its edge.
+#[test]
+fn cc_1600_the_blend_tool_softens_the_mask_edge() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("mask-blend");
+    let (_, folder, _) = dragon(&mut driver);
+    let name = arena(&driver).get_by_id(folder).unwrap().name().to_owned();
+    edit_mask(&mut driver, &name);
+    let grays = |driver: &PaintDriver| {
+        mask_grays(driver, folder)
+            .0
+            .iter()
+            .filter(|gray| **gray > 10 && **gray < 245)
+            .count()
+    };
+    let hard = grays(&driver);
+    tap(&mut driver, Key::J);
+    driver.click_text("Blur");
+    for _ in 0..10 {
+        tap(&mut driver, Key::CloseBracket);
+    }
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-100.0, -60.0), m + vec2(-100.0, 60.0));
+    let soft = grays(&driver);
+    assert!(soft > hard + 50, "the edge has grays: {hard} to {soft}");
+}
+
+/// CC 16:16: a textured brush on the mask, for a painterly edge.
+#[test]
+fn cc_1616_a_textured_brush_paints_the_mask() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("mask-texture");
+    let (_, folder, _) = dragon(&mut driver);
+    let name = arena(&driver).get_by_id(folder).unwrap().name().to_owned();
+    edit_mask(&mut driver, &name);
+    run(&mut driver, "tool.pick.brush");
+    driver.click_text("India ink");
+    driver.click_text("Dry ink");
+    let mask = sue_paint::doc::mask_of(arena(&driver), folder).unwrap();
+    let before = sue_paint::doc::raster(arena(&driver), mask)
+        .unwrap()
+        .bytes()
+        .unwrap()
+        .to_vec();
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(140.0, -40.0), m + vec2(160.0, 40.0));
+    let after = sue_paint::doc::raster(arena(&driver), mask)
+        .unwrap()
+        .bytes()
+        .unwrap()
+        .to_vec();
+    assert!(after != before, "the mask took the brush");
+}
+
+/// CC 16:34: a blank mask on the line art (nothing selected), and the
+/// eraser on it hides part of the lines without erasing them.
+#[test]
+fn cc_1634_a_blank_mask_on_the_lines_hides_without_erasing() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("lines-mask");
+    let lines = line_box(&mut driver, vec2(100.0, 80.0));
+    let kept = sue_paint::doc::raster(arena(&driver), lines)
+        .unwrap()
+        .bytes()
+        .unwrap()
+        .to_vec();
+    run(&mut driver, "layer.mask.outside");
+    let m = middle(&driver);
+    let corner = under(&driver, m + vec2(-100.0, -80.0));
+    assert!(mask_at(&driver, lines, corner) > 200, "the mask shows all");
+    edit_mask(&mut driver, "Layer 2");
+    tap(&mut driver, Key::E);
+    for _ in 0..8 {
+        tap(&mut driver, Key::CloseBracket);
+    }
+    stroke(&mut driver, m + vec2(-110.0, -80.0), m + vec2(-60.0, -80.0));
+    assert!(mask_at(&driver, lines, corner) < 50, "hidden on the mask");
+    assert!(
+        sue_paint::doc::raster(arena(&driver), lines)
+            .unwrap()
+            .bytes()
+            .unwrap()
+            == kept.as_slice(),
+        "the lines themselves are kept"
+    );
+}
+
+/// CC 17:20: back on the flat layer, another color and a click with
+/// Fill changes the flat.
+#[test]
+fn cc_1720_fill_again_changes_the_flat() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("refill");
+    let (_, _, flat) = dragon(&mut driver);
+    let (inside, _) = box_points(&driver);
+    let first = pixel(&driver, flat, inside);
+    // The sub color (white) becomes the drawing color.
+    tap(&mut driver, Key::X);
+    let at = middle(&driver);
+    click(&mut driver, at);
+    let second = pixel(&driver, flat, inside);
+    assert_ne!(first, second, "the flat took the other color");
+    assert!(second[0] > 200, "{second:?}");
+}
+
+/// CC 18:01: more layers inside the folder, painted inside a selection.
+#[test]
+fn cc_1801_more_layers_in_the_folder_paint_inside_a_selection() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("horns");
+    let (_, folder, _) = dragon(&mut driver);
+    click_widget(&mut driver, "Raster Layer");
+    let horns = top_new(&driver, folder);
+    tap(&mut driver, Key::M);
+    driver.click_text("Rectangle");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-40.0, -40.0), m + vec2(0.0, 0.0));
+    pen(&mut driver);
+    for _ in 0..8 {
+        tap(&mut driver, Key::CloseBracket);
+    }
+    stroke(&mut driver, m + vec2(-80.0, -20.0), m + vec2(40.0, -20.0));
+    assert!(painted(&driver, horns) > 0, "painted");
+    assert_eq!(
+        pixel(&driver, horns, under(&driver, m + vec2(30.0, -20.0)))[3],
+        0,
+        "nothing outside the selection"
+    );
+}
+
+/// The layer of `folder` made last: the member that is not the first
+/// flat layer.
+fn top_new(driver: &PaintDriver, folder: EntityId) -> EntityId {
+    let members = sue_paint::doc::members(arena(driver), picture(driver), folder);
+    assert!(members.len() >= 2, "the new layer is in the folder");
+    *members
+        .iter()
+        .max_by_key(|id| {
+            layers(driver)
+                .iter()
+                .position(|info| info.id == **id)
+                .unwrap_or(0)
+        })
+        .unwrap()
+}
+
+/// CC 20:12: a double click on a layer's name renames it.
+#[test]
+fn cc_2012_double_click_renames_a_layer() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("rename");
+    let layer = top(&driver);
+    let at = driver.rect_of("Layer 1").unwrap().center();
+    let press = |pressed| Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    driver.step(vec![Event::PointerMoved(at)]);
+    driver.step(vec![press(true)]);
+    driver.step(vec![press(false)]);
+    driver.step(vec![press(true)]);
+    driver.step(vec![press(false)]);
+    driver.settle(4);
+    // The name is selected: what is typed takes its place.
+    driver.step(vec![Event::Text("Horns".to_owned())]);
+    driver.settle(2);
+    let before = bytes(&driver);
+    tap(&mut driver, Key::Enter);
+    assert_eq!(arena(&driver).get_by_id(layer).unwrap().name(), "Horns");
+    undo_pair(&mut driver, &before);
+    // Renamed again: the field takes the keys again.
+    let at = driver.rect_of("Horns").unwrap().center();
+    for pressed in [true, false, true, false] {
+        driver.step(vec![
+            Event::PointerMoved(at),
+            Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            },
+        ]);
+    }
+    driver.settle(4);
+    driver.step(vec![Event::Text("Tail".to_owned())]);
+    tap(&mut driver, Key::Enter);
+    assert_eq!(arena(&driver).get_by_id(layer).unwrap().name(), "Tail");
+}
+
+/// CC 20:42 (and 28:01; CT-5): several layers picked with their boxes,
+/// Ctrl+G puts them all in one new folder.
+#[test]
+fn cc_2042_ctrl_g_puts_every_picked_layer_in_a_folder() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("group");
+    run(&mut driver, "layer.new");
+    run(&mut driver, "layer.new");
+    let ids: Vec<EntityId> = layers(&driver)
+        .into_iter()
+        .filter(|info| info.name.starts_with("Layer"))
+        .map(|info| info.id)
+        .collect();
+    assert_eq!(ids.len(), 3);
+    for name in ["Layer 1", "Layer 2"] {
+        let row = driver.rect_of(name).unwrap();
+        click_held(
+            &mut driver,
+            row.center(),
+            PointerButton::Primary,
+            Modifiers::COMMAND,
+        );
+    }
+    let before = bytes(&driver);
+    press(&mut driver, Key::G, Modifiers::COMMAND);
+    let folder = sue_paint::doc::folder_of(arena(&driver), ids[0]).expect("in a folder");
+    for id in &ids {
+        assert_eq!(
+            sue_paint::doc::folder_of(arena(&driver), *id),
+            Some(folder),
+            "every picked layer went in"
+        );
+    }
+    undo_pair(&mut driver, &before);
+}
+
+/// Picks `mode` from the Layer palette's blending mode list.
+fn blend_mode(driver: &mut PaintDriver, mode: &str) {
+    let layer = top(driver);
+    let before = style(driver, layer).blend;
+    click_widget(driver, "Blending mode");
+    // A long list scrolls: the wheel over it until the mode can be had.
+    for _ in 0..12 {
+        let at = driver.rect_of(mode).expect("the mode is listed").center();
+        if at.y < 600.0 {
+            break;
+        }
+        let over = driver.rect_of("Darken").map_or(at, |rect| rect.center());
+        driver.step(vec![
+            Event::PointerMoved(over),
+            Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, -60.0),
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Unknown,
+                modifiers: Modifiers::NONE,
+            },
+        ]);
+        driver.settle(3);
+    }
+    driver.click_text(mode);
+    let _ = before;
+}
+
+/// CC 21:02, 24:11, 24:28, 25:24: new layers set to Multiply, Overlay
+/// and Screen from the blending mode list.
+#[test]
+fn cc_2102_blend_modes_from_the_layer_palette() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("blend-modes");
+    for (mode, want) in [
+        ("Multiply", sue_model::BlendMode::Multiply),
+        ("Overlay", sue_model::BlendMode::Overlay),
+        ("Screen", sue_model::BlendMode::Screen),
+    ] {
+        run(&mut driver, "layer.new");
+        let layer = top(&driver);
+        blend_mode(&mut driver, mode);
+        assert_eq!(style(&driver, layer).blend, want, "{mode}");
+    }
+}
+
+/// CC 25:41 (CT-14, CCS-6): Add (Glow) and Glow Dodge are in the list,
+/// and a bright Add (Glow) layer lightens what is below.
+#[test]
+fn cc_2541_add_glow_lights_the_rim() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("add-glow");
+    run(&mut driver, "edit.fill");
+    run(&mut driver, "layer.new");
+    let layer = top(&driver);
+    click_widget(&mut driver, "Blending mode");
+    assert!(shows(&driver, "Glow Dodge"), "{:?}", driver.texts);
+    driver.click_text("Add (Glow)");
+    assert_eq!(style(&driver, layer).blend, sue_model::BlendMode::AddGlow);
+    tap(&mut driver, Key::X);
+    run(&mut driver, "edit.fill");
+    let p = seen_middle(&driver);
+    assert!(p[0] > 200, "white over black glows: {p:?}");
+}
+
+/// CC 22:15 (CC-6): Window, Canvas, New Window adds a second tab of the
+/// same canvas and leaves tiling alone.
+#[test]
+fn cc_2215_new_window_adds_a_tab_of_the_same_canvas() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("new-window");
+    let canvas = picture(&driver);
+    let width = driver.runtime.shell.page_rect().width();
+    let before = zoom(&driver);
+    run(&mut driver, "window.new");
+    driver.settle(6);
+    let tabs = driver
+        .texts
+        .iter()
+        .filter(|(text, rect)| text.starts_with("Illustration") && rect.top() < 100.0)
+        .count();
+    assert_eq!(tabs, 2, "two tabs: {:?}", driver.texts);
+    assert_eq!(picture(&driver), canvas, "of the same canvas");
+    assert_eq!(driver.runtime.shell.page_rect().width(), width);
+    assert!((zoom(&driver) - before).abs() < 0.01, "a whole view, not a tile");
+}
+
+/// CC 22:38: the Blend tool softens a hard edge.
+#[test]
+fn cc_2238_the_blend_tool_softens_a_shadow_edge() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("blend-shadow");
+    run(&mut driver, "layer.new");
+    let layer = top(&driver);
+    tap(&mut driver, Key::M);
+    driver.click_text("Rectangle");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-80.0, -60.0), m + vec2(0.0, 60.0));
+    run(&mut driver, "edit.fill");
+    run(&mut driver, "select.none");
+    let partial = |driver: &PaintDriver| {
+        sue_paint::doc::raster(arena(driver), layer)
+            .unwrap()
+            .bytes()
+            .unwrap()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[3] > 10 && pixel[3] < 245)
+            .count()
+    };
+    let hard = partial(&driver);
+    tap(&mut driver, Key::J);
+    driver.click_text("Blur");
+    for _ in 0..10 {
+        tap(&mut driver, Key::CloseBracket);
+    }
+    stroke(&mut driver, m + vec2(0.0, -50.0), m + vec2(0.0, 50.0));
+    assert!(partial(&driver) > hard + 50, "{hard} to {}", partial(&driver));
+}
+
+/// CC 23:14 (CT-15, CC-7): a layer dragged onto New Raster Layer is
+/// copied right above it as "<name> Copy", and the copy is picked.
+#[test]
+fn cc_2314_a_layer_dragged_onto_new_layer_is_copied() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("drag-copy");
+    let layer = ink_line(&mut driver);
+    let count = layers(&driver).len();
+    let row = driver.rect_of("Layer 2").unwrap().center();
+    let new = widget(&mut driver, "Raster Layer").unwrap().center();
+    driver.drag(row, new, PointerButton::Primary);
+    assert_eq!(layers(&driver).len(), count + 1, "copied");
+    let all = layers(&driver);
+    let at = all.iter().position(|info| info.id == layer).unwrap();
+    assert_eq!(all[at + 1].name, "Layer 2 Copy", "right above, named so");
+    // Picked: the next stroke goes on the copy.
+    let copy = all[at + 1].id;
+    let ink = painted(&driver, copy);
+    let m = middle(&driver);
+    pen(&mut driver);
+    stroke(&mut driver, m + vec2(-50.0, 60.0), m + vec2(50.0, 60.0));
+    assert!(painted(&driver, copy) > ink, "the copy is picked");
+}
+
+/// CC 23:30: Lock Transparent Pixels, then paint over recolors only what
+/// is painted.
+#[test]
+fn cc_2330_lock_transparent_pixels_recolors_only_the_paint() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("lock-alpha");
+    let layer = ink_line(&mut driver);
+    let line = painted(&driver, layer);
+    click_widget(&mut driver, "Lock Transparent Pixels");
+    tap(&mut driver, Key::X);
+    for _ in 0..10 {
+        tap(&mut driver, Key::CloseBracket);
+    }
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-60.0, -30.0), m + vec2(60.0, 30.0));
+    assert_eq!(painted(&driver, layer), line, "no new pixels");
+    let p = pixel(&driver, layer, under(&driver, m));
+    assert!(p[0] > 200, "the line took the other color: {p:?}");
+}
+
+/// CC 26:22: Clip to Layer Below, and the paint shows on the lines only.
+#[test]
+fn cc_2622_clip_to_layer_below_paints_on_the_lines_only() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("clip");
+    ink_line(&mut driver);
+    run(&mut driver, "layer.new");
+    let clipped = top(&driver);
+    click_widget(&mut driver, "Clip to Layer Below");
+    assert!(style(&driver, clipped).clip);
+    tap(&mut driver, Key::X);
+    run(&mut driver, "edit.fill");
+    let m = middle(&driver);
+    let tile = seen(&driver);
+    let on = seen_at(&tile, under(&driver, m));
+    let off = seen_at(&tile, under(&driver, m + vec2(0.0, 60.0)));
+    assert!(on[0] > 200, "white on the line: {on:?}");
+    assert!(off[0] > 200 && off[3] == 255, "the paper elsewhere: {off:?}");
+    // The paint did not cover the paper: hidden, the clip shows a black
+    // line again.
+    click_widget(&mut driver, "Clip to Layer Below");
+    assert!(!style(&driver, clipped).clip);
+}
+
+/// CC 27:49: the transparent color pulls paint back.
+#[test]
+fn cc_2749_the_transparent_color_pulls_paint_back() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("transparent-c");
+    let layer = ink_line(&mut driver);
+    let line = painted(&driver, layer);
+    tap(&mut driver, Key::C);
+    for _ in 0..6 {
+        tap(&mut driver, Key::CloseBracket);
+    }
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-60.0, 0.0), m + vec2(0.0, 0.0));
+    assert!(painted(&driver, layer) < line);
+}
+
+/// CC 28:01, 28:07, 28:11 (X-9): Ctrl+G groups, the author's Ctrl+J
+/// duplicates the folder with what it holds, the original is hidden and
+/// Merge Selected Layers bakes the copy into one raster layer that keeps
+/// its name; the original stays as it was.
+#[test]
+fn cc_2801_group_duplicate_and_merge_the_copy() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("merge-copy");
+    let (lines, _, _) = dragon(&mut driver);
+    let look = seen(&driver);
+    // Ctrl+G on the line art and the masked folder.
+    let folder_name = layers(&driver)
+        .into_iter()
+        .find(|info| sue_paint::doc::is_folder(arena(&driver), info.id))
+        .unwrap()
+        .name;
+    driver.click_text("Layer 2");
+    let row = driver.rect_of(&folder_name).unwrap();
+    click_held(
+        &mut driver,
+        row.center(),
+        PointerButton::Primary,
+        Modifiers::COMMAND,
+    );
+    press(&mut driver, Key::G, Modifiers::COMMAND);
+    let group = sue_paint::doc::folder_of(arena(&driver), lines).expect("grouped");
+    let group_name = arena(&driver).get_by_id(group).unwrap().name().to_owned();
+    // Ctrl+J, the author's key for Duplicate Layer.
+    bind(&mut driver, "layer.duplicate", "Ctrl+J");
+    press(&mut driver, Key::J, Modifiers::COMMAND);
+    let copy_name = format!("{group_name} Copy");
+    let copy = named(&driver, &copy_name);
+    assert!(sue_paint::doc::is_folder(arena(&driver), copy));
+    assert_eq!(
+        sue_paint::doc::members(arena(&driver), picture(&driver), copy).len(),
+        sue_paint::doc::members(arena(&driver), picture(&driver), group).len(),
+        "the copy holds a copy of every member"
+    );
+    // The original hidden with its eye (by the layer command here).
+    driver.click_text(&group_name);
+    run(&mut driver, "layer.toggle.visible");
+    driver.click_text(&copy_name);
+    let original: Vec<EntityId> =
+        sue_paint::doc::members(arena(&driver), picture(&driver), group);
+    run(&mut driver, "layer.merge_selected");
+    let merged = named(&driver, &copy_name);
+    assert!(
+        !sue_paint::doc::is_folder(arena(&driver), merged),
+        "one raster layer"
+    );
+    assert_eq!(
+        sue_paint::doc::members(arena(&driver), picture(&driver), group),
+        original,
+        "the original is untouched"
+    );
+    // The merged layer looks as the group did: masks applied.
+    let (inside, outside) = box_points(&driver);
+    let now = seen(&driver);
+    assert_eq!(seen_at(&now, inside), seen_at(&look, inside));
+    assert_eq!(seen_at(&now, outside), seen_at(&look, outside));
+}
+
+/// CC 28:14: a color mixing brush (Oil paint) blends the colors it
+/// passes over. A defect found here: the built-in mixing brushes lay
+/// their own color only (`Mixing::new` loads the brush fully, so what it
+/// picks up never shows); sent to the owner of the brush presets.
+#[test]
+#[ignore = "CC 28:14 defect: Oil paint does not mix (brush presets, p5-brush)"]
+fn cc_2814_oil_paint_mixes_the_colors_it_crosses() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("oil");
+    run(&mut driver, "layer.new");
+    let layer = top(&driver);
+    tap(&mut driver, Key::M);
+    driver.click_text("Rectangle");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-200.0, -100.0), m + vec2(0.0, 100.0));
+    run(&mut driver, "edit.fill");
+    run(&mut driver, "select.none");
+    // White paint dragged from the black into the empty side.
+    tap(&mut driver, Key::X);
+    run(&mut driver, "tool.pick.brush");
+    driver.click_text("Thick paint");
+    driver.click_text("Oil paint");
+    for _ in 0..8 {
+        tap(&mut driver, Key::CloseBracket);
+    }
+    stroke(&mut driver, m + vec2(-60.0, 0.0), m + vec2(60.0, 0.0));
+    let [x0, y] = under(&driver, m + vec2(-60.0, 0.0));
+    let [x1, _] = under(&driver, m + vec2(60.0, 0.0));
+    let row: Vec<[u8; 4]> = (x0..x1).map(|x| pixel(&driver, layer, [x, y])).collect();
+    let mixed = row
+        .iter()
+        .filter(|p| p[3] > 0 && p[0] > 30 && p[0] < 225)
+        .count();
+    assert!(mixed > 10, "a mix of black and white along the stroke: {mixed}");
+}
+
+/// CC 28:57: Window, Material opens the Material palette.
+#[test]
+fn cc_2857_window_material_opens_the_material_palette() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open_fresh("material");
+    let was = driver.rect_of("Material").is_some();
+    run(&mut driver, "window.material");
+    driver.settle(6);
+    if was {
+        run(&mut driver, "window.material");
+        driver.settle(6);
+    }
+    assert!(driver.rect_of("Material").is_some(), "{:?}", driver.texts);
+}
+
+/// CC 29:55 (CT-18): File, Export (Single Layer), PNG: the export
+/// settings first, then the picture.
+#[test]
+fn cc_2955_export_single_layer_as_png() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("export-png");
+    ink_line(&mut driver);
+    run(&mut driver, "file.export.png");
+    driver.settle(6);
+    assert!(shows(&driver, "Export Settings"), "{:?}", driver.texts);
+    driver.click_text("Export");
+    driver.settle(6);
+    driver.finish_exports();
+    let mut found = Vec::new();
+    let mut folders = vec![driver.root.clone()];
+    while let Some(folder) = folders.pop() {
+        for entry in std::fs::read_dir(&folder).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                folders.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "png") {
+                found.push(path);
+            }
+        }
+    }
+    assert_eq!(found.len(), 1, "one PNG: {found:?}");
+    let back = sue_io::decode_png(&std::fs::read(&found[0]).unwrap()).unwrap();
+    assert_eq!(
+        [back.tile.width(), back.tile.height()],
+        size(&driver),
+        "the whole picture"
     );
 }
