@@ -1719,18 +1719,38 @@ impl SuePaint {
         }
     }
 
-    /// OK on a correction layer's settings.
+    /// OK on a correction layer's settings. When the dialog made the
+    /// layer (`made`), its setting joins that step: one undo takes the
+    /// new layer away, as Cancel would have.
     pub(super) fn correction_ok(
         cx: &mut AppletContext<'_>,
         layer: EntityId,
         filter: &Filter,
         before: &str,
+        made: bool,
     ) {
         let text = filter.to_text().unwrap_or_default();
         // Back as it was, then the change as one undo step.
         Self::set_correction(cx, layer, before);
-        if text != before {
-            Self::apply(cx, doc::set(layer, doc::CORRECTION_FILTER, text));
+        if text == before {
+            return;
+        }
+        cx.typing.flush(cx.history);
+        let making = cx.history.cursor();
+        let mark = cx.history.parent(making).filter(|_| made);
+        let label = cx.history.label(making).map(str::to_owned);
+        if !Self::apply(cx, doc::set(layer, doc::CORRECTION_FILTER, text)) {
+            return;
+        }
+        if let (Some(mark), Some(label)) = (mark, label) {
+            let steps = cx.history.take_since(mark);
+            if !steps.is_empty() {
+                let mut batch = sue_core::txn::Batch::new(label);
+                for step in steps {
+                    batch.push(step);
+                }
+                cx.history.record(batch);
+            }
         }
     }
 

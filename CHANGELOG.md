@@ -844,6 +844,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint: a new correction layer and the setting its dialog gave
+  it are one undo step; one Ctrl+Z takes the new layer away instead of
+  leaving it with its first setting.
 - Sue Paint, New: a registered canvas preset keeps the paper color and
   Record timelapse too.
 - Sue Paint: a layer folder's mask takes the pen, the eraser, Fill
