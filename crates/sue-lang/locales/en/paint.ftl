@@ -2466,6 +2466,7 @@ tone-shape-diamond = Diamond
 tone-shape-line = Line
 tone-shape-cross = Cross
 tone-shape-noise = Noise
+tone-shape-star = Star
 layer-sub-color = Sub Color
 ## anim/ (the animation model)
 enable-keyframes-on-this-layer = Enable Keyframes on This Layer

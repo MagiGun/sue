@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: tones take a Star dot shape, in Layer Property, Simple
+  Tone Settings (Layer, New Layer, Tone) and wherever the dot shape is
+  picked.
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
   fill (click an area and the gradient runs from its outline inward).

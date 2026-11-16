@@ -53,9 +53,18 @@ pub const TONE_DOT_Y: &str = "effect.tone.dot_y";
 /// What can set the size of a tone's dots, in order.
 pub const TONE_SOURCES: [&str; 2] = ["Brightness", "Opacity"];
 
-/// The shapes a tone's dots take, in order: the last scatters single
-/// pixels (noise) instead of drawing dots.
-pub const TONE_SHAPES: [&str; 6] = ["Circle", "Square", "Diamond", "Line", "Cross", "Noise"];
+/// The shapes a tone's dots take, in order: Noise ([`TONE_NOISE`])
+/// scatters single pixels instead of drawing dots. Star came later, so
+/// it is last and files that keep an index read as they did.
+pub const TONE_SHAPES: [&str; 7] = [
+    "Circle", "Square", "Diamond", "Line", "Cross", "Noise", "Star",
+];
+
+/// The index of Noise in [`TONE_SHAPES`].
+pub const TONE_NOISE: u8 = 5;
+
+/// The index of Star in [`TONE_SHAPES`].
+const TONE_STAR: u8 = 6;
 /// The layer shown in one color (`Bool`).
 pub const COLOR: &str = "effect.color";
 /// That color (`Color`).
@@ -175,6 +184,9 @@ fn dot(shape: u8, density: f32, du: f32, dv: f32, cell: f32) -> f32 {
     if density <= 0.0 {
         return 0.0;
     }
+    // Star turns with the angle around the dot's middle: read it before
+    // the halves fold onto each other.
+    let turn = dv.atan2(du);
     let (du, dv) = (du.abs(), dv.abs());
     let (reach, away) = match shape {
         // Square: as large as the density, its side square-rooted.
@@ -188,6 +200,16 @@ fn dot(shape: u8, density: f32, du: f32, dv: f32, cell: f32) -> f32 {
             cell * (1.0 - (1.0 - density).max(0.0).sqrt()) / 2.0,
             du.min(dv) * cell,
         ),
+        // Star: five points, its reach swelling and shrinking with the
+        // angle; the mean of its squared outline is 0.40375 of a circle
+        // of the same reach, so the area follows the density.
+        TONE_STAR => {
+            let outline = 0.55 + 0.45 * (5.0 * turn).cos();
+            (
+                cell * (density / (std::f32::consts::PI * 0.403_75)).sqrt(),
+                du.hypot(dv) * cell / outline.max(0.1),
+            )
+        }
         // Circle.
         _ => (
             cell * (density / std::f32::consts::PI).sqrt(),
@@ -367,7 +389,7 @@ impl Effects {
                 let steps = f32::from(self.tone_levels - 1);
                 density = (density * steps).round() / steps;
             }
-            let cover = if usize::from(self.tone_shape) == TONE_SHAPES.len() - 1 {
+            let cover = if self.tone_shape == TONE_NOISE {
                 if scatter(x, y) < density { 1.0 } else { 0.0 }
             } else {
                 let (sin, cos) = angle.sin_cos();
@@ -381,7 +403,7 @@ impl Effects {
                     _ if density >= 1.0 => 1.0,
                     // Dark dots past half turn into light holes between
                     // them, so the coverage keeps up to solid.
-                    0..=2 if density > 0.5 => {
+                    0..=2 | TONE_STAR if density > 0.5 => {
                         1.0 - dot(
                             self.tone_shape,
                             1.0 - density,
@@ -752,6 +774,35 @@ mod tests {
         }
         let share = sum / 4096.0;
         assert!((share - 0.5).abs() < 0.06, "{share}");
+    }
+
+    #[test]
+    fn a_star_tone_draws_dots_of_its_own_shape() {
+        // Full guide 00:13:41: a star among the dot shapes. Its dots are
+        // none of the other shapes, and a star with a point to the right
+        // is not the same mirrored left to right.
+        let look = |shape: u8| -> Vec<f32> {
+            let effects = Effects {
+                tone: Some((4.0, 0.0)),
+                tone_shape: shape,
+                ..Effects::default()
+            };
+            (0..64)
+                .flat_map(|y| (0..64).map(move |x| (x, y)))
+                .map(|(x, y)| effects.apply([0.7, 0.7, 0.7, 1.0], x, y)[3])
+                .collect()
+        };
+        let star = look(TONE_STAR);
+        assert!(star.iter().any(|cover| *cover > 0.5), "the star draws");
+        for other in 0..TONE_STAR {
+            assert_ne!(look(other), star, "{}", TONE_SHAPES[usize::from(other)]);
+        }
+        let row = |y: usize| &star[y * 64..y * 64 + 64];
+        let mirrored = (0..64).all(|y| {
+            let line = row(y);
+            (0..64).all(|x| (line[x] - line[63 - x]).abs() < 1e-3)
+        });
+        assert!(!mirrored, "five points are not mirrored left to right");
     }
 
     #[test]
