@@ -6,7 +6,8 @@
 //! canvas's own sheet (`every_brush_sheet` in the `sue` runtime tests)
 //! is the one that shows what a person sees.
 //!
-//! `SUE_BRUSH_SHEET` names the folder it writes to (one PPM picture per
+//! `SUE_BRUSH_SHEET` names the folder it writes to (else
+//! `sue-engine-sheet` in the temporary folder; one PPM picture per
 //! brush and ground); `SUE_BRUSH_SHEET_ONLY` keeps to the brushes whose
 //! ids hold it. Brushes with picture tips are left out (their pictures
 //! live in the studio).
@@ -127,9 +128,12 @@ const H: u32 = 220;
 #[test]
 #[ignore = "writes a sheet of every built-in brush for a person to look at"]
 fn engine_sheet() {
-    let folder = std::path::PathBuf::from(
-        std::env::var("SUE_BRUSH_SHEET").unwrap_or_else(|_| "sheet".into()),
-    );
+    let folder =
+        std::path::PathBuf::from(std::env::var_os("SUE_BRUSH_SHEET").unwrap_or_else(|| {
+            std::env::temp_dir()
+                .join("sue-engine-sheet")
+                .into_os_string()
+        }));
     std::fs::create_dir_all(&folder).unwrap();
     let only = std::env::var("SUE_BRUSH_SHEET_ONLY").ok();
     for preset in sue_brush::presets::builtin() {
@@ -209,9 +213,12 @@ fn engine_sheet() {
 #[test]
 #[ignore = "writes Sue's papers for a person to look at"]
 fn papers() {
-    let folder = std::path::PathBuf::from(
-        std::env::var("SUE_BRUSH_SHEET").unwrap_or_else(|_| "sheet".into()),
-    );
+    let folder =
+        std::path::PathBuf::from(std::env::var_os("SUE_BRUSH_SHEET").unwrap_or_else(|| {
+            std::env::temp_dir()
+                .join("sue-engine-sheet")
+                .into_os_string()
+        }));
     std::fs::create_dir_all(&folder).unwrap();
     for name in sue_brush::texture::BUILTIN {
         let paper = Paper::builtin(name).unwrap();
