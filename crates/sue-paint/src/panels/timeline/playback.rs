@@ -129,10 +129,18 @@ impl SuePaint {
         doc.frame = frame;
         let folders = anim::folders(&sequence);
         doc.track = doc.track.min(sequence.tracks.len().saturating_sub(1));
-        if let Some(cel) = folders
-            .contains(&doc.track)
-            .then(|| anim::cel_at(&sequence.tracks[doc.track], sequence.rate, frame))
-            .flatten()
+        // A camera, or a layer or folder moved by its keyframes, stays
+        // picked from frame to frame, so the Object tool keys it on each
+        // (as in Clip Studio Paint); else the cel shown is picked.
+        let keyed = doc.layer.is_some_and(|layer| {
+            crate::camera::is_camera(arena, layer)
+                || arena.get_by_id(layer).is_ok_and(anim::motion::keyframes_on)
+        });
+        if !keyed
+            && let Some(cel) = folders
+                .contains(&doc.track)
+                .then(|| anim::cel_at(&sequence.tracks[doc.track], sequence.rate, frame))
+                .flatten()
         {
             doc.layer = Some(cel);
         }
