@@ -1388,7 +1388,95 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         timeline_step,
     )
     .state(timeline_step_state),
+    c(
+        "anim.cel.edited_only",
+        "show-edited-cel-only",
+        "cel",
+        edited_only,
+    )
+    .state(edited_only_state),
+    c(
+        "anim.cel.check_motion",
+        "check-cel-motion-by-key-input",
+        "play",
+        cel_peek,
+    )
+    .state(peek_state),
+    c(
+        "anim.cel.check_surrounding",
+        "check-surrounding-cels-by-key-input",
+        "onion-skin",
+        cel_peek,
+    )
+    .state(peek_state),
 ];
+
+/// The cels of the folder of the current track: its track, when it is an
+/// animation folder's.
+fn folder_track(paint: &SuePaint, arena: &Arena) -> Option<(sue_model::Sequence, usize)> {
+    let (_, sequence, _) = paint.timeline_here(arena)?;
+    let track = paint.doc()?.track;
+    anim::folders(&sequence)
+        .contains(&track)
+        .then_some((sequence, track))
+}
+
+/// Show Edited Cel Only, and back: the cel being drawn shows in its
+/// animation folder, whichever cel the frame shows (a cel locked as the
+/// editing target, or picked in the Layer palette away from its frame).
+fn edited_only(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    if folder_track(paint, &cx.world.arena).is_some() {
+        paint.edited_cel_only = !paint.edited_cel_only;
+    }
+}
+
+/// Checked while on; grayed without an animation folder to show a cel of.
+fn edited_only_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    ItemState {
+        enabled: folder_track(paint, facts.arena).is_some(),
+        checked: Some(paint.edited_cel_only),
+    }
+}
+
+/// Check Cel Motion by Key Input: the frames from two cels back up to the
+/// playhead play once, so the drawing is seen moving into the cel being
+/// drawn. Check Surrounding Cels by Key Input: each press shows the cel
+/// before, then the cel after, then the playhead's own frame again. The
+/// playhead stays; moving it ends the look.
+fn cel_peek(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let Some((sequence, track)) = folder_track(paint, &cx.world.arena) else {
+        return;
+    };
+    let Some(frame) = paint.doc().map(|doc| doc.frame) else {
+        return;
+    };
+    let track = &sequence.tracks[track];
+    let now = cx.view.now;
+    let surrounding = call.name == "anim.cel.check_surrounding";
+    paint.cel_peek = match paint.cel_peek.take() {
+        // A press while the cels around show moves on to the next.
+        Some(mut peek) if surrounding && peek.from == frame && peek.turn.is_some() => {
+            let next = peek.turn.map_or(0, |at| at + 1);
+            (next < peek.frames.len()).then(|| {
+                peek.turn = Some(next);
+                peek
+            })
+        }
+        _ if surrounding => {
+            crate::panels::timeline::CelPeek::surrounding(track, sequence.rate, frame, now)
+        }
+        _ => crate::panels::timeline::CelPeek::motion(track, sequence.rate, frame, now),
+    };
+}
+
+/// Works on an animation folder's track with cels around the playhead.
+fn peek_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    super::when(
+        folder_track(paint, facts.arena).is_some_and(|(sequence, track)| {
+            anim::keys(&sequence.tracks[track], sequence.rate).len() > 1
+        }),
+    )
+}
 
 /// Audio Scrubbing: moving through the frames by hand plays the sound of
 /// each frame reached.

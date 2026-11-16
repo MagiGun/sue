@@ -671,7 +671,13 @@ pub fn menus() -> Vec<Menu> {
                 ),
                 sub(
                     &tr!("show-animation-cels"),
-                    vec![item("anim.onion"), item("anim.onion_settings")],
+                    vec![
+                        item("anim.cel.edited_only"),
+                        item("anim.onion"),
+                        item("anim.onion_settings"),
+                        item("anim.cel.check_motion"),
+                        item("anim.cel.check_surrounding"),
+                    ],
                 ),
                 sub(
                     &tr!("light-table"),

@@ -17,6 +17,7 @@ mod view;
 
 pub(crate) use bar::icon;
 pub(crate) use edit::Action;
+pub(crate) use playback::CelPeek;
 pub(crate) use view::TimelineView;
 
 use std::collections::HashMap;

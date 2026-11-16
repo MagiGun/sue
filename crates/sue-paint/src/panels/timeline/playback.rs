@@ -296,34 +296,82 @@ impl SuePaint {
                 views
             })
         };
+        // Check Cel Motion and Check Surrounding Cels by Key Input:
+        // another frame shows a moment, the playhead staying where it is.
+        let peeked = self.peek_frame(now, &sequence, ctx);
+        // Show Edited Cel Only: the cel being drawn shows in its folder
+        // in place of the frame's.
+        let edited_only = (self.edited_cel_only && peeked.is_none())
+            .then(|| self.editing_cel(arena))
+            .flatten()
+            .and_then(|cel| Some((cel, anim::cel_folder(arena, cel)?)))
+            .zip(picture)
+            .map(|((cel, folder), picture)| (cel, anim::cels(arena, picture, folder)));
         if let Some(doc) = self.doc_mut() {
             let playing = doc.playing.is_some();
+            let shown = peeked.unwrap_or(doc.frame);
+            let onion = (onion && !playing && peeked.is_none()).then_some(&settings);
             // The frame as it plays: layer keyframes, clips and folder
             // cels, with onion skin while it stands still.
-            let mut view = anim::frame_view(
-                arena,
-                doc.picture,
-                doc.frame,
-                (onion && !playing).then_some(&settings),
-                Some(false),
-            )
-            .unwrap_or_else(|| {
-                anim::view_in(
-                    arena,
-                    doc.picture,
-                    &sequence,
-                    doc.frame,
-                    (onion && !playing).then_some(&settings),
-                )
-            });
-            view.cameras = cameras_at(doc.frame);
-            if !playing {
+            let mut view = anim::frame_view(arena, doc.picture, shown, onion, Some(false))
+                .unwrap_or_else(|| anim::view_in(arena, doc.picture, &sequence, shown, onion));
+            view.cameras = cameras_at(shown);
+            if !playing && let Some((cel, cels)) = &edited_only {
+                for other in cels {
+                    if other == cel {
+                        view.hidden.remove(other);
+                    } else {
+                        view.hidden.insert(*other);
+                    }
+                }
+            }
+            if !playing && peeked.is_none() {
                 view = view
                     .with_light_table(&traced, opacity, light_color)
                     .with_light_table(&general, general_opacity, light_color);
             }
+            crate::studio::saw_view(crate::studio::ViewSeen {
+                frame: shown,
+                hidden: view.hidden.clone(),
+            });
             doc.compositor.set_view(Some(view));
         }
+    }
+
+    /// The frame Check Cel Motion or Check Surrounding Cels by Key Input
+    /// shows now in place of the playhead's, while it lasts; the look
+    /// ends when the playhead moves or playback starts.
+    fn peek_frame(
+        &mut self,
+        now: sue_platform::time::Instant,
+        sequence: &Sequence,
+        ctx: &egui::Context,
+    ) -> Option<u32> {
+        let (frame, playing) = self
+            .doc()
+            .map_or((0, true), |doc| (doc.frame, doc.playing.is_some()));
+        let peek = self.cel_peek.as_ref()?;
+        if playing || peek.from != frame {
+            self.cel_peek = None;
+            return None;
+        }
+        let shown = match peek.turn {
+            Some(at) => peek.frames.get(at).copied(),
+            None => {
+                let gone = now.saturating_duration_since(peek.started).as_secs_f64();
+                let step = (gone * anim::fps(sequence)) as usize;
+                let next = peek.frames.get(step).copied();
+                if next.is_some() {
+                    ctx.request_repaint();
+                }
+                next
+            }
+        };
+        if shown.is_none() {
+            self.cel_peek = None;
+            ctx.request_repaint();
+        }
+        shown
     }
 
     /// Keeps the timeline's sound in step with playback: started from the
@@ -492,5 +540,75 @@ impl SuePaint {
             Some(_) => {}
             None => self.anim_ui.clock = Some((now, frame)),
         }
+    }
+}
+
+/// A look at other frames while the playhead stays (Check Cel Motion by
+/// Key Input, Check Surrounding Cels by Key Input).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CelPeek {
+    /// The frame the playhead stands on: the look ends when it moves.
+    pub(crate) from: u32,
+    /// The frames shown in turn.
+    pub(crate) frames: Vec<u32>,
+    /// When the look began: Check Cel Motion plays `frames` at the
+    /// timeline's rate from then, once.
+    pub(crate) started: sue_platform::time::Instant,
+    /// Check Surrounding Cels: which of `frames` shows, until the next
+    /// press moves on (past the last, the playhead's own frame again).
+    pub(crate) turn: Option<usize>,
+}
+
+impl CelPeek {
+    /// Check Cel Motion by Key Input from `frame` of `track`: the frames
+    /// from the cel two cels before the one shown up to the frame before
+    /// the playhead, played at the timeline's rate, so the drawing is
+    /// seen moving into the one being drawn, as flipping paper does.
+    /// `None` when no cel comes before.
+    pub(crate) fn motion(
+        track: &sue_model::Track,
+        rate: sue_core::Rate,
+        frame: u32,
+        now: sue_platform::time::Instant,
+    ) -> Option<Self> {
+        let before: Vec<u32> = anim::keys(track, rate)
+            .into_iter()
+            .map(|(at, _)| at)
+            .filter(|at| *at <= frame)
+            .collect();
+        // The key of the cel shown, and two before it.
+        let start = *before.iter().rev().nth(2).or_else(|| before.first())?;
+        let frames: Vec<u32> = (start..frame).collect();
+        (!frames.is_empty()).then_some(Self {
+            from: frame,
+            frames,
+            started: now,
+            turn: None,
+        })
+    }
+
+    /// Check Surrounding Cels by Key Input from `frame` of `track`: the
+    /// keys of the cels before and after the one shown, one a press.
+    /// `None` when there is neither.
+    pub(crate) fn surrounding(
+        track: &sue_model::Track,
+        rate: sue_core::Rate,
+        frame: u32,
+        now: sue_platform::time::Instant,
+    ) -> Option<Self> {
+        let keys: Vec<u32> = anim::keys(track, rate)
+            .into_iter()
+            .map(|(at, _)| at)
+            .collect();
+        let here = keys.iter().rposition(|at| *at <= frame);
+        let previous = here.and_then(|at| at.checked_sub(1)).map(|at| keys[at]);
+        let next = keys.get(here.map_or(0, |at| at + 1)).copied();
+        let frames: Vec<u32> = previous.into_iter().chain(next).collect();
+        (!frames.is_empty()).then_some(Self {
+            from: frame,
+            frames,
+            started: now,
+            turn: Some(0),
+        })
     }
 }
