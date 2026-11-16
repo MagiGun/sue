@@ -1362,7 +1362,6 @@ fn sue_paint_strokes_on_a_mask_paint_its_gray_pixels() {
     let (format, shown) = paint.mask().expect("a mask");
     assert_eq!(format, sue_core::PixelFormat::Gray8, "a new mask is gray");
     assert!(shown.iter().all(|&v| v == 255), "it shows the whole layer");
-    paint.command("layer.mask.edit");
     paint.command("tool.eraser");
     let from = paint.middle() - vec2(120.0, 0.0);
     let to = paint.middle() + vec2(120.0, 0.0);
@@ -1399,7 +1398,6 @@ fn sue_paint_a_mask_apart_from_its_layer_is_painted_where_it_sits() {
     paint.command("select.all");
     paint.command("layer.mask.outside");
     paint.command("select.none");
-    paint.command("layer.mask.edit");
     paint.command("tool.eraser");
     // The first column of the mask an eraser stroke hides.
     let first = |paint: &mut Paint| {
@@ -1817,7 +1815,6 @@ fn sue_paint_the_blend_tool_softens_a_mask() {
     paint.command("edit.fill");
     paint.command("layer.mask.outside");
     paint.command("select.none");
-    paint.command("layer.mask.edit");
     paint.command("tool.eraser");
     let middle = paint.middle();
     paint.slow(

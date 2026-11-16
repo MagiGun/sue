@@ -800,7 +800,6 @@ fn sue_paint_delete_clears_the_mask_being_edited() {
     let mask = sue_paint::doc::mask_of(canvas.arena(), layer).expect("a mask");
     let area = canvas.area();
     assert_eq!(canvas.painted(mask), area);
-    canvas.command("layer.mask.edit");
     canvas.command("select.all");
     let depth = canvas.depth();
     let shown = canvas.entity(mask);

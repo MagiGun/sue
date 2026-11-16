@@ -204,7 +204,6 @@ fn sue_paint_fill_edit_fill_and_gradient_write_to_the_mask_being_edited() {
     let mask = sue_paint::doc::mask_of(canvas.arena(), layer).expect("a mask");
     let area = canvas.area();
     assert_eq!(canvas.painted(mask), area, "the new mask shows everything");
-    canvas.command("layer.mask.edit");
 
     // The bucket with the transparent color: the whole mask (one area)
     // hides, the layer's pixels stay as they were.
