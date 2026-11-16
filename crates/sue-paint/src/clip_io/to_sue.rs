@@ -487,6 +487,18 @@ pub fn into_picture(
         timeline: false,
     };
     let top = making.layers(&doc.root.children, &mut Vec::new())?;
+    // What belongs to the file's picture as a whole does not come with
+    // its layers into another picture: said so.
+    let rulers = doc.paths().iter().any(|(_, layer)| !layer.rulers.is_empty());
+    for (name, there) in [
+        (tr!("clip-report-timeline"), doc.timeline.is_some()),
+        (tr!("clip-report-comps"), !doc.comps.is_empty()),
+        (tr!("clip-report-rulers"), rulers),
+    ] {
+        if there {
+            making.report.parts.push(Line::new(name, Outcome::LeftOut));
+        }
+    }
     let mut edit = making.edit;
     if let Some(folder) = folder {
         for id in top {

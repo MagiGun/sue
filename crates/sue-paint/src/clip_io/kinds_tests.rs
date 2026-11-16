@@ -582,6 +582,25 @@ fn a_changed_layer_keeps_the_rulers_and_folders_hung_on_it() {
     ));
 }
 
+/// Layers brought into another picture leave the file's timeline, comps
+/// and rulers behind, and the report says so.
+#[test]
+fn layers_brought_into_a_picture_say_what_stayed_behind() {
+    let mut arena = Arena::new();
+    let picture = a_rich_picture(&mut arena);
+    let file = read(&encode(&arena, picture).unwrap()).unwrap();
+    let mut world = Arena::new();
+    let host = base(&mut world, 120, 90);
+    let (edit, report) = into_picture(&world, host, None, &file, "Import").unwrap();
+    apply(&mut world, edit);
+    let left_out = report.names(Outcome::LeftOut);
+    for part in ["the timeline", "the layer comps", "the rulers"] {
+        assert!(left_out.contains(&part), "{}", report.summary());
+    }
+    assert!(!report.exact());
+    assert!(anim::timeline(&world, host).is_none());
+}
+
 #[test]
 fn opening_a_rich_picture_is_one_step_undone_and_redone_whole() {
     let mut arena = Arena::new();
