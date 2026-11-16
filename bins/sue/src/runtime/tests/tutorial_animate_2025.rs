@@ -1264,8 +1264,8 @@ fn toggled(paint: &mut PaintDriver, name: &str) -> Option<bool> {
         .accesskit_update
         .iter()
         .flat_map(|update| update.nodes.iter())
-        .find(|(_, node)| node.label().is_some_and(|label| label == name))
-        .and_then(|(_, node)| node.toggled())
+        .filter(|(_, node)| node.label().is_some_and(|label| label == name))
+        .find_map(|(_, node)| node.toggled())
         .map(|state| state == egui::accesskit::Toggled::True);
     output.drop_without_applying_deltas();
     found
@@ -2247,13 +2247,77 @@ fn step_076_077_078_079_080_g_pen_2_px_with_no_anti_aliasing_or_dynamics() {
     let mut paint = tutorial("tut25-076");
     g_pen(&mut paint);
     click_named(&mut paint, "Tool Property");
+    // Step 77: 2 px, typed into Tool Property's Brush Size.
+    let field = look(&mut paint)
+        .into_iter()
+        .filter(|(name, rect)| name == "Brush Size" && rect.left() < 400.0 && rect.top() > 100.0)
+        .map(|(_, rect)| rect)
+        .max_by(|a, b| a.left().total_cmp(&b.left()))
+        .unwrap_or_else(|| panic!("Tool Property's Brush Size: {:?}", paint.texts));
+    click(&mut paint, field.center());
+    type_over(&mut paint, "2");
+    press_key(&mut paint, egui::Key::Enter, Modifiers::NONE);
+    paint.settle(3);
+    assert!(
+        paint.texts.iter().any(|(text, _)| text.starts_with("2.0")),
+        "the size reads 2: {:?}",
+        paint.texts
+    );
     choose(&mut paint, "Anti-aliasing", "None");
-    // Adjust by speed off; Brush Size dynamics: pressure off.
+    // Step 79: Adjust by speed turned off.
     let speed = reveal(&mut paint, "Adjust by speed");
-    click(&mut paint, speed.center());
+    if toggled(&mut paint, "Adjust by speed") != Some(false) {
+        click(&mut paint, speed.center());
+    }
+    assert_eq!(
+        toggled(&mut paint, "Adjust by speed"),
+        Some(false),
+        "Adjust by speed is off"
+    );
+    // Step 80: Brush Size dynamics, pen pressure off.
+    let dynamics = look(&mut paint)
+        .into_iter()
+        .find(|(name, rect)| name.contains("ynamics") && rect.left() < 400.0)
+        .map(|(_, rect)| rect)
+        .expect("the Brush Size dynamics button");
+    click(&mut paint, dynamics.center());
+    if toggled(&mut paint, "Pen pressure") != Some(false) {
+        let at = control(&mut paint, "Pen pressure");
+        click(&mut paint, at.center());
+    }
+    assert_eq!(
+        toggled(&mut paint, "Pen pressure"),
+        Some(false),
+        "pen pressure no longer sizes the line"
+    );
+    assert_eq!(toggled(&mut paint, "Tilt"), Some(false), "nor does tilt");
+    press_key(&mut paint, egui::Key::Escape, Modifiers::NONE);
+    paint.settle(3);
     let cel = layer(&paint, "1");
     stroke(&mut paint, 0.0);
     assert!(painted(&paint, cel) > 50, "the pen drew");
+    // A 2 px line: no column of it is thicker than 3 pixels, whatever
+    // the zoom (the canvas is shown at fit).
+    let raster = sue_paint::doc::raster(arena(&paint), cel).expect("a raster");
+    let width = raster.width() as usize;
+    let mut thickness = vec![0u32; width];
+    for (index, pixel) in raster
+        .bytes()
+        .expect("pixels")
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .enumerate()
+    {
+        if pixel[3] > 0 {
+            thickness[index % width] += 1;
+        }
+    }
+    let thickest = thickness.iter().copied().max().unwrap_or(0);
+    assert!(
+        (1..=3).contains(&thickest),
+        "a 2 px line, {thickest} px thick"
+    );
     // Anti-aliasing None (step 78) is the next test; here the body of
     // the line is hard pixels whatever the end does.
     let bounds = drawn(&paint, cel).expect("a line");
@@ -2522,6 +2586,29 @@ fn step_096_to_104_fill_refer_other_layers_stops_at_lines_and_passes_drafts() {
     // Steps 97 to 100: Close gap off, Tolerance 0, Area scaling 0,
     // Anti-aliasing off.
     choose(&mut paint, "Close gap", "None");
+    let tolerance = reveal(&mut paint, "Tolerance");
+    click(&mut paint, tolerance.center());
+    type_over(&mut paint, "0");
+    press_key(&mut paint, egui::Key::Enter, Modifiers::NONE);
+    paint.settle(3);
+    let tolerance = reveal(&mut paint, "Tolerance");
+    assert!(
+        paint.texts.iter().any(|(text, rect)| {
+            text.trim_end_matches(['%', ' ']).parse::<f32>() == Ok(0.0)
+                && (rect.center().y - tolerance.center().y).abs() < tolerance.height()
+        }),
+        "Tolerance reads 0: {tolerance:?} {:?}",
+        paint.texts
+    );
+    let area = reveal(&mut paint, "Area scaling");
+    assert!(
+        paint.texts.iter().any(|(text, rect)| {
+            text.trim_end_matches(['p', 'x', ' ']).parse::<f32>() == Ok(0.0)
+                && (rect.center().y - area.center().y).abs() < area.height()
+        }),
+        "Area scaling reads 0: {area:?} {:?}",
+        paint.texts
+    );
     choose(&mut paint, "Anti-aliasing", "None");
     // Step 101: a click above the separation line, inside the ring: the
     // ring and the separation line both stop it.
@@ -2580,12 +2667,21 @@ fn step_101_the_fill_sees_only_the_cels_of_the_frame_shown() {
 fn step_105_paper_hidden_shows_the_checkerboard() {
     let mut paint = tutorial("tut25-105");
     let paper = layer(&paint, "Paper");
+    // The picture's corner alpha: the paper covers it, then nothing does.
+    let corner = |paint: &PaintDriver| {
+        let options = sue_paint::composite::RenderOptions::default();
+        let shown = sue_paint::composite::flatten(arena(paint), picture(paint), options).unwrap();
+        shown.bytes().unwrap()[3]
+    };
+    assert_eq!(corner(&paint), 255, "the paper covers the picture");
     let at = row(&mut paint, "Paper");
     let eye = eye_of(&mut paint, at);
     click(&mut paint, eye.center());
-    assert!(
-        !info(&paint, paper).style.visible,
-        "Paper hidden: the checkerboard shows"
+    assert!(!info(&paint, paper).style.visible, "Paper hidden");
+    assert_eq!(
+        corner(&paint),
+        0,
+        "nothing covers it: the checkerboard shows"
     );
 }
 
