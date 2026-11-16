@@ -13,6 +13,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, Timeline: named track labels. Label, Track Label... puts a
+  name (and, with Range, a span of frames) on the picked track at the
+  frame shown; No Track Label takes it away. Animation and the Timeline
+  palette's menu now list Cut, Copy, Paste and Delete Frames under Edit
+  Track, both in-between marks under Label, and the Animation menu has
+  Label and Audio under New Animation Layer.
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
   fill (click an area and the gradient runs from its outline inward).
@@ -843,6 +849,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint, Timeline: drawing on a frame that shows a folder cel goes on
+  a layer of that folder; Create Folder and Insert Layer on a cel makes
+  the folder the cel (its name and frames); Zoom In no longer zooms out
+  a timeline that fits its frames; with a 2D camera folder picked, moving
+  the playhead keeps the camera picked; a track with keyframes on reads
+  "Name : Transform".
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its
   tip, and a flick no longer bends off the way the stroke was going.
 - Sue Paint: masks of older files become gray masks as the file opens,
