@@ -231,3 +231,102 @@ fn papers() {
         std::fs::write(folder.join(format!("paper-{name}.pgm")), out).unwrap();
     }
 }
+
+/// The three mouse strokes of the hands-on check against Clip Studio
+/// (P5-3), as the desktop driver sent them at 100% zoom: a slow stroke
+/// of three moves a second apart that rests before the lift, a fast
+/// drag, and a tap. Points are in the picture's pixels.
+fn mouse_strokes() -> Vec<Vec<Sample>> {
+    let at = |x: f32, y: f32| [(x - 582.0) * 1.76, (y - 340.0) * 1.76];
+    let slow = [
+        (600.0, 400.0),
+        (640.0, 393.0),
+        (690.0, 391.0),
+        (740.0, 398.0),
+    ];
+    let mut strokes = Vec::new();
+    let mut s = vec![Sample::new(Kind::Down, at(slow[0].0, slow[0].1), 10.0)];
+    for (i, (x, y)) in slow.iter().enumerate().skip(1) {
+        s.push(Sample::new(Kind::Move, at(*x, *y), 10.0 + i as f64));
+    }
+    s.push(Sample::new(Kind::Up, at(740.0, 398.0), 14.0));
+    strokes.push(s);
+    strokes.push(vec![
+        Sample::new(Kind::Down, at(770.0, 400.0), 20.0),
+        Sample::new(Kind::Move, at(880.0, 393.0), 20.05),
+        Sample::new(Kind::Up, at(880.0, 393.0), 20.1),
+    ]);
+    strokes.push(vec![
+        Sample::new(Kind::Down, at(905.0, 397.0), 30.0),
+        Sample::new(Kind::Up, at(905.0, 397.0), 30.08),
+    ]);
+    strokes
+}
+
+/// Paints the three mouse strokes of the Clip Studio check with each
+/// brush `SUE_BRUSH_MOUSE` names (`id=size` pairs split by commas, the
+/// size Clip Studio's sub tool had), on white, into a PGM picture per
+/// brush in `SUE_BRUSH_SHEET`'s folder.
+#[test]
+#[ignore = "writes the Sue side of the Clip Studio brush check"]
+fn mouse_rows_for_the_clip_studio_check() {
+    let Ok(list) = std::env::var("SUE_BRUSH_MOUSE") else {
+        return;
+    };
+    let folder =
+        std::path::PathBuf::from(std::env::var_os("SUE_BRUSH_SHEET").unwrap_or_else(|| {
+            std::env::temp_dir()
+                .join("sue-engine-sheet")
+                .into_os_string()
+        }));
+    std::fs::create_dir_all(&folder).unwrap();
+    let (w, h) = (600_u32, 211_u32);
+    for pair in list.split(',') {
+        let (id, size) = pair.split_once('=').unwrap();
+        let mut preset = sue_brush::presets::builtin()
+            .into_iter()
+            .find(|p| p.id == id)
+            .unwrap_or_else(|| panic!("no brush {id}"));
+        preset.params.insert(
+            sue_model::brush::param::SIZE.to_owned(),
+            size.parse().unwrap(),
+        );
+        let behaviours = sue_brush::paint::Behaviours::from_preset(&preset);
+        let paper = behaviours.texture.as_ref().and_then(|t| match &t.paper {
+            PaperChoice::Builtin(name) => Paper::builtin(name),
+            PaperChoice::Picture(_) => None,
+        });
+        let resources = Resources {
+            paper: paper.map(std::sync::Arc::new),
+            ..Resources::default()
+        };
+        let mut raster = RasterTile2D::new(w, h, PixelFormat::Rgba8).unwrap();
+        for stroke in mouse_strokes() {
+            let mut settings = Settings::new(Device::MOUSE);
+            settings.seed = 7;
+            let colors = Colors {
+                main: [0.0; 3],
+                sub: [1.0; 3],
+            };
+            let mut recorder = Recorder::new(ENGINE, [1; 32], &settings, colors, Vec::new());
+            for s in stroke {
+                recorder.take(s);
+            }
+            replay::paint(
+                &recorder.finish(),
+                &preset,
+                resources.clone(),
+                &mut raster,
+                [0, 0],
+                false,
+            )
+            .unwrap();
+        }
+        let mut out = format!("P5\n{w} {h}\n255\n").into_bytes();
+        for p in raster.bytes().unwrap().chunks(4) {
+            let a = f32::from(p[3]) / 255.0;
+            out.push((f32::from(p[0]) * a + 255.0 * (1.0 - a)).round() as u8);
+        }
+        std::fs::write(folder.join(format!("{id}.pgm")), out).unwrap();
+    }
+}
