@@ -944,8 +944,8 @@ Once a canvas is open:
   timeline from the frame you are on. It plays along when you play the
   animation; drag its bar to move it, and right-click it to mute or delete
   it.
-- **Timeline:** Animation, Timeline, Edit Timeline changes the frame rate
-  and length without moving your keys; Export Animation, Animation Cels
+- **Timeline:** Animation, Timeline, Change Frame Rate changes the frame
+  rate and length without moving your keys; Export Animation, Animation Cels
   saves every cel as its own picture.
 - **Line art from photos and scans:** Filter, Line Extraction turns a
   picture into clean black lines; Convert to Lines and Tones also makes its

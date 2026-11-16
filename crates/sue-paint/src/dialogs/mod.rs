@@ -377,7 +377,7 @@ impl Dialog {
             ),
             Dialog::Gamut(..) => Look::new(tr!("select-color-gamut"), Form, ok()),
             Dialog::Webtoon(..) => Look::new(tr!("export-webtoon"), Form, ok()),
-            Dialog::Timeline(..) => Look::new(tr!("edit-timeline"), Narrow, ok()),
+            Dialog::Timeline(..) => Look::new(tr!("change-frame-rate"), Narrow, ok()),
             Dialog::Shape3D(_) => Look::new(tr!("new-3d-layer"), Narrow, ok()),
             Dialog::Workspace(_) => Look::new(tr!("register-workspace"), Form, ok()),
             Dialog::Workspaces => Look::new(tr!("manage-workspaces"), Form, Footer::none()),

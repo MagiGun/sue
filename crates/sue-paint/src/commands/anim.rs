@@ -935,7 +935,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     ),
     c(
         "anim.timeline.edit",
-        "edit-timeline-ellipsis",
+        "change-frame-rate-ellipsis",
         "settings",
         timeline_edit,
     ),
