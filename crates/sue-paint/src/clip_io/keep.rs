@@ -21,11 +21,14 @@ use sue_io::sqlite::Value;
 /// held, the typed parts of `.clip` model P3-18 (a layer's content,
 /// effects, palette color, rulers and thumbnail; the document's comps,
 /// timeline and preview), each in the encoding of `sue_io::clip::parts`.
-const VERSION: u8 = 2;
+/// Version 3 adds, after what version 2 held for a picture, the
+/// fingerprint of what Sue made of the document's comps, rulers and
+/// timeline when it opened the file (a flag, then 32 bytes when set).
+const VERSION: u8 = 3;
 
 /// Whether a kept value of `version` is one this build reads.
 const fn reads(version: u8) -> bool {
-    version == 1 || version == VERSION
+    version >= 1 && version <= VERSION
 }
 
 fn value(out: &mut Writer, value: &Value) {
@@ -385,9 +388,10 @@ pub(super) fn layer_from(bytes: &[u8]) -> Result<ClipLayer, CodecError> {
 }
 
 /// What of `doc` belongs to no layer: the canvas, the `Head` chunk, the
-/// root folder's row and the foreign data.
+/// root folder's row and the foreign data; and `print`, the fingerprint
+/// of what Sue made of its comps, rulers and timeline.
 #[must_use]
-pub(super) fn picture_bytes(doc: &ClipDocument) -> Vec<u8> {
+pub(super) fn picture_bytes(doc: &ClipDocument, print: Option<&[u8; 32]>) -> Vec<u8> {
     let mut out = Writer::new();
     out.u8(VERSION);
     out.u32(doc.width);
@@ -453,6 +457,11 @@ pub(super) fn picture_bytes(doc: &ClipDocument) -> Vec<u8> {
         &mut out,
         doc.preview.as_ref().map(parts::encode_picture).as_deref(),
     );
+    // Version 3: the fingerprint of the parts as Sue made them.
+    out.bool(print.is_some());
+    if let Some(print) = print {
+        out.raw(print);
+    }
     out.into_bytes()
 }
 
@@ -461,6 +470,16 @@ pub(super) fn picture_bytes(doc: &ClipDocument) -> Vec<u8> {
 /// # Errors
 /// When the bytes are not such a document, or of a newer version.
 pub(super) fn picture_from(bytes: &[u8]) -> Result<ClipDocument, CodecError> {
+    picture_and_print(bytes).map(|(doc, _)| doc)
+}
+
+/// The document and the fingerprint [`picture_bytes`] wrote.
+///
+/// # Errors
+/// When the bytes are not such a document, or of a newer version.
+pub(super) fn picture_and_print(
+    bytes: &[u8],
+) -> Result<(ClipDocument, Option<[u8; 32]>), CodecError> {
     let mut input = Reader::new(bytes);
     let version = input.u8()?;
     if !reads(version) {
@@ -544,11 +563,17 @@ pub(super) fn picture_from(bytes: &[u8]) -> Result<ClipDocument, CodecError> {
             .map(|bytes| parts::decode_picture(&bytes))
             .transpose()?;
     }
+    let mut print = None;
+    if version >= 3 && input.bool()? {
+        let mut bytes = [0; 32];
+        bytes.copy_from_slice(input.raw(32)?);
+        print = Some(bytes);
+    }
     if !input.is_empty() {
         return Err(input.error("bytes after a kept canvas"));
     }
     doc.foreign = foreign;
-    Ok(doc)
+    Ok((doc, print))
 }
 
 #[cfg(test)]
@@ -576,8 +601,15 @@ mod tests {
             let mut canvas = doc.clone();
             canvas.root.children.clear();
             canvas.sue = None;
-            let bytes = picture_bytes(&canvas);
+            let bytes = picture_bytes(&canvas, None);
             assert_eq!(picture_from(&bytes).unwrap(), canvas, "{name}");
+            let print = [7; 32];
+            let with = picture_bytes(&canvas, Some(&print));
+            assert_eq!(
+                picture_and_print(&with).unwrap(),
+                (canvas.clone(), Some(print)),
+                "{name}"
+            );
             for cut in (0..bytes.len()).step_by(bytes.len() / 50 + 1) {
                 assert!(picture_from(&bytes[..cut]).is_err());
             }
@@ -589,7 +621,7 @@ mod tests {
         let mut bytes = layer_bytes(&ClipLayer::folder("A"));
         bytes[0] = VERSION + 1;
         assert!(layer_from(&bytes).is_err());
-        let mut bytes = picture_bytes(&ClipDocument::new(4, 4, 72.0));
+        let mut bytes = picture_bytes(&ClipDocument::new(4, 4, 72.0), None);
         bytes[0] = VERSION + 1;
         assert!(picture_from(&bytes).is_err());
     }
