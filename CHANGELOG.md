@@ -844,6 +844,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint, New: a registered canvas preset keeps the paper color and
+  Record timelapse too.
 - Sue Paint: a layer folder's mask takes the pen, the eraser, Fill
   and the Blend tool while it is edited, as a raster layer's mask does
   (strokes used to be refused with "pick a layer in it to draw on").
