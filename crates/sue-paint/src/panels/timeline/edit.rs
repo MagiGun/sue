@@ -89,6 +89,9 @@ impl SuePaint {
                 let target = sequence.tracks.get(track).and_then(|row| {
                     anim::cel_at(row, sequence.rate, frame)
                         .filter(|_| row.kind == anim::CELS)
+                        .map(|cel| {
+                            super::playback::drawn_in(&cx.world.arena, picture, cel, current)
+                        })
                         .or_else(|| anim::track_folder(row))
                         .or_else(|| anim::setup::track_layer(row))
                 });
