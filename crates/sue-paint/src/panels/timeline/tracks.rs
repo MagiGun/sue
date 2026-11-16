@@ -387,18 +387,25 @@ impl SuePaint {
                 items.push(item("anim.cel.assign"));
                 items.push(MenuItem::Separator);
             }
-            Kind::Camera | Kind::Layer => {
-                items.push(item("anim.key.layer"));
-                items.push(MenuItem::Sub {
-                    label: tr!("keyframe-interpolation"),
-                    items: Ease::ALL
-                        .iter()
-                        .map(|ease| item(&format!("anim.key.ease.{}", ease.name())))
-                        .collect(),
-                });
-                items.push(item("anim.key.delete"));
-                items.push(MenuItem::Separator);
-            }
+            Kind::Camera | Kind::Layer => {}
+        }
+        // The keyframe commands: on a camera or a layer's row, and on an
+        // animation folder's whose keyframes are on.
+        let keyed = row.kind != Kind::Cels
+            || anim::track_folder(&sequence.tracks[row.track])
+                .and_then(|folder| arena.get_by_id(folder).ok())
+                .is_some_and(anim::motion::keyframes_on);
+        if keyed {
+            items.push(item("anim.key.layer"));
+            items.push(MenuItem::Sub {
+                label: tr!("keyframe-interpolation"),
+                items: Ease::ALL
+                    .iter()
+                    .map(|ease| item(&format!("anim.key.ease.{}", ease.name())))
+                    .collect(),
+            });
+            items.push(item("anim.key.layer_delete"));
+            items.push(MenuItem::Separator);
         }
         items.extend([
             item("anim.edit.delete"),

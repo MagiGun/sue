@@ -637,6 +637,7 @@ pub fn menus() -> Vec<Menu> {
                         SEP,
                         item("anim.key.add"),
                         item("anim.key.delete"),
+                        item("anim.key.layer_delete"),
                         SEP,
                         item("anim.frame.insert"),
                         item("anim.frame.delete"),
@@ -646,7 +647,11 @@ pub fn menus() -> Vec<Menu> {
                 item("anim.play"),
                 sub(
                     &tr!("playback-settings"),
-                    vec![item("anim.loop"), item("anim.audio.scrub")],
+                    vec![
+                        item("anim.loop"),
+                        item("anim.audio.scrub"),
+                        item("anim.playback.camera"),
+                    ],
                 ),
                 sub(
                     &tr!("move-frame"),

@@ -48,6 +48,7 @@ pub(crate) const TREE: &[Entry] = &[
             Item("anim.key.add"),
             Item("anim.key.delete"),
             Item("anim.key.layer"),
+            Item("anim.key.layer_delete"),
             Item("anim.keyframes"),
             Line,
             Item("anim.frame.insert"),
@@ -61,6 +62,7 @@ pub(crate) const TREE: &[Entry] = &[
         &[
             Item("anim.loop"),
             Item("anim.audio.scrub"),
+            Item("anim.playback.camera"),
             Line,
             Item("anim.play_range.start"),
             Item("anim.play_range.end"),

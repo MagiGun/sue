@@ -647,9 +647,40 @@ impl SuePaint {
         };
         let frame = self.doc().map_or(0, |doc| doc.frame);
         let time = Time::from_frames(i64::from(frame), sequence.rate);
-        match anim::motion::set_ease(&cx.world.arena, layer, &[time], ease) {
+        let edit = if crate::camera::is_camera(&cx.world.arena, layer) {
+            crate::camera::set_ease(&cx.world.arena, layer, time, ease)
+        } else {
+            anim::motion::set_ease(&cx.world.arena, layer, &[time], ease)
+        };
+        match edit {
             Some(edit) => {
                 Self::apply(cx, edit);
+            }
+            None => cx.notify(tr!("no-keyframe-on-this-frame")),
+        }
+    }
+
+    /// Takes the current layer's key (or the 2D camera's) at the frame
+    /// shown away.
+    pub(crate) fn delete_key_here(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(layer) = self.layer() else {
+            return;
+        };
+        let Some((_, sequence, _)) = self.timeline_here(&cx.world.arena) else {
+            return;
+        };
+        let frame = self.doc().map_or(0, |doc| doc.frame);
+        let time = Time::from_frames(i64::from(frame), sequence.rate);
+        let arena = &cx.world.arena;
+        let edit = if crate::camera::is_camera(arena, layer) {
+            crate::camera::delete_key(arena, layer, time)
+        } else {
+            anim::motion::delete_key(arena, layer, time, None)
+        };
+        match edit {
+            Some(edit) => {
+                Self::apply(cx, edit);
+                self.camera_pending = None;
             }
             None => cx.notify(tr!("no-keyframe-on-this-frame")),
         }

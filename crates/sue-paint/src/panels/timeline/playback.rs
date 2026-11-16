@@ -292,17 +292,23 @@ impl SuePaint {
         let editing = (self.toolbox.tool() == crate::tools::Tool::Operation)
             .then(|| self.camera_folder(arena))
             .flatten();
+        // Playback Settings, Render 2D Camera off: the whole canvas, the
+        // cameras' frames over it.
+        let render_camera =
+            picture.is_some_and(|picture| anim::setup::Playback::of(arena, picture).render_camera);
         let cameras_at = |frame: u32| {
-            picture.map_or_else(Vec::new, |picture| {
-                let mut views = crate::camera::views(
-                    arena,
-                    picture,
-                    Some(crate::camera::time_of(frame, rate)),
-                    size,
-                );
-                views.retain(|(folder, _)| Some(*folder) != editing);
-                views
-            })
+            picture
+                .filter(|_| render_camera)
+                .map_or_else(Vec::new, |picture| {
+                    let mut views = crate::camera::views(
+                        arena,
+                        picture,
+                        Some(crate::camera::time_of(frame, rate)),
+                        size,
+                    );
+                    views.retain(|(folder, _)| Some(*folder) != editing);
+                    views
+                })
         };
         if let Some(doc) = self.doc_mut() {
             let playing = doc.playing.is_some();
