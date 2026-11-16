@@ -737,23 +737,44 @@ fn audio_clip_ui(ui: &mut Ui, form: &mut AudioClipForm, theme: &Theme) -> Outcom
 /// A timeline label's name; empty takes it away.
 fn label_ui(ui: &mut Ui, form: &mut LabelForm, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
+    let mut entered = false;
     wm_ui::form_grid(ui, "anim-label-form", theme, |grid| {
         grid.row(&tr!("label-at-frame", value = form.frame + 1), |ui| {
-            wm_ui::text_field("anim-label-name", &mut form.name).show(ui, theme);
+            let field = wm_ui::text_field("anim-label-name", &mut form.name).show(ui, theme);
+            entered = name_field_keys(ui, &field);
         });
     });
     help(ui, &tr!("an-empty-label-is-removed"), theme);
     ok_cancel(ui, &mut outcome);
-    outcome
+    if entered { Outcome::Ok } else { outcome }
+}
+
+/// A dialog's name field has the keyboard from the start (even when the
+/// Timeline's frames held it as the dialog opened), so the name is typed
+/// at once, and Enter in it is OK (the field gives the keyboard up as it
+/// takes the key, so either may be seen this frame).
+fn name_field_keys(ui: &Ui, field: &egui::Response) -> bool {
+    let ctx = ui.ctx();
+    let in_dialog = ctx
+        .memory(|memory| memory.focused())
+        .and_then(|id| ctx.read_response(id))
+        .is_some_and(|response| response.layer_id == field.layer_id);
+    if !in_dialog {
+        field.request_focus();
+    }
+    (field.lost_focus() || field.has_focus())
+        && ui.input(|input| input.key_pressed(egui::Key::Enter))
 }
 
 /// A named track label: its name, and Range with how many frames it
 /// covers. An empty name takes it away.
 fn track_note_ui(ui: &mut Ui, form: &mut TrackNoteForm, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
+    let mut entered = false;
     wm_ui::form_grid(ui, "anim-track-note-form", theme, |grid| {
         grid.row(&tr!("label-name"), |ui| {
-            wm_ui::text_field("anim-track-note-name", &mut form.name).show(ui, theme);
+            let field = wm_ui::text_field("anim-track-note-name", &mut form.name).show(ui, theme);
+            entered = name_field_keys(ui, &field);
         });
         grid.row("", |ui| {
             tick(
@@ -783,7 +804,7 @@ fn track_note_ui(ui: &mut Ui, form: &mut TrackNoteForm, theme: &Theme) -> Outcom
         theme,
     );
     ok_cancel(ui, &mut outcome);
-    outcome
+    if entered { Outcome::Ok } else { outcome }
 }
 
 /// Stopping Record Timelapse asks what becomes of the frames kept so far:

@@ -18,7 +18,9 @@ follow [Semantic Versioning](https://semver.org/).
   frame shown; No Track Label takes it away. Animation and the Timeline
   palette's menu now list Cut, Copy, Paste and Delete Frames under Edit
   Track, both in-between marks under Label, and the Animation menu has
-  Label and Audio under New Animation Layer.
+  Label and Audio under New Animation Layer. Named labels sit in a thin
+  strip of their own over the cels, and the label dialogs take the name
+  as they open, Enter for OK.
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
   fill (click an area and the gradient runs from its outline inward).

@@ -42,9 +42,13 @@ struct Row {
     height: f32,
     /// How many folders with rows of their own it is inside.
     depth: usize,
-    /// The band of keys over its cels (a folder with keyframes on), 0
-    /// when it has none.
+    /// The band over its cels: the strip of its named labels (`notes`)
+    /// and under it the strip of keys (a folder with keyframes on), 0
+    /// when it has neither.
     band: f32,
+    /// The strip of named track labels at the top of the band, 0 when
+    /// the track has none.
+    notes: f32,
 }
 
 /// Where a track sits among the rows: its place in the Layer palette
@@ -102,11 +106,21 @@ fn rows(
     for track in order {
         let kind = kind_of(&sequence.tracks[track]);
         let at = place(&sequence.tracks[track]);
-        let band = if kind == Kind::Cels && at.keys {
+        // Named track labels get a strip of their own over the cels, so
+        // they never run over a cel's name.
+        let notes = if kind == Kind::Cels
+            && !anim::editing::track_notes(&sequence.tracks[track]).is_empty()
+        {
             row
         } else {
             0.0
         };
+        let band = notes
+            + if kind == Kind::Cels && at.keys {
+                row
+            } else {
+                0.0
+            };
         let height = band
             + match kind {
                 Kind::Cels => row * (1.0 + thumbs.rows()),
@@ -120,6 +134,7 @@ fn rows(
             height,
             depth: if kind == Kind::Audio { 0 } else { at.depth },
             band,
+            notes,
         });
         top += height;
     }
@@ -1111,21 +1126,21 @@ impl SuePaint {
                             }
                         }
                     }
-                    // Named track labels: their text along the top of the
-                    // row from their frame, a line under it over their
-                    // range.
+                    // Named track labels, in their strip over the cels:
+                    // the text from their frame, a line under it over
+                    // their range.
                     for note in anim::editing::track_notes(track) {
                         let from = column(note.frame);
                         if note.range > 1 {
                             cells_painter.hline(
-                                from..=column(note.frame + note.range),
-                                top + 1.0,
+                                (from + pad / 4.0)..=column(note.frame + note.range) - pad / 4.0,
+                                top + row.notes - thick,
                                 Stroke::new(thick, theme.text_muted()),
                             );
                         }
                         cells_painter.text(
-                            pos2(from + pad / 4.0, top + 2.0),
-                            Align2::LEFT_TOP,
+                            pos2(from + pad / 2.0, top + row.notes / 2.0),
+                            Align2::LEFT_CENTER,
                             &note.name,
                             font.clone(),
                             theme.text_muted(),
@@ -1174,8 +1189,8 @@ impl SuePaint {
                     let at = time.frame(sequence.rate).max(0) as u32;
                     let ease =
                         anim::motion::ease_at(&cx.world.arena, layer, time).unwrap_or(Ease::Linear);
-                    let y = if row.kind == Kind::Cels && row.band > 0.0 {
-                        top + row.band / 2.0
+                    let y = if row.kind == Kind::Cels && row.band > row.notes {
+                        top + (row.band + row.notes) / 2.0
                     } else if row.kind == Kind::Cels {
                         top + row.height - row_size / 2.0
                     } else {
