@@ -1181,8 +1181,24 @@ impl SuePaint {
                         )
                         .label(&tr!("change-layer-name-ellipsis"))
                         .show_at(ui, field, theme);
-                        edit.request_focus();
+                        // The field takes the keys once, as it opens, with
+                        // the whole name selected for typing over; asking
+                        // every frame would keep the focus through Enter,
+                        // so the new name would never be taken.
+                        let opened = Id::unique(("sue-paint-rename-opened", info.id.to_u128()));
+                        if !ui.data(|data| data.get_temp::<bool>(opened).unwrap_or(false)) {
+                            ui.data_mut(|data| data.insert_temp(opened, true));
+                            edit.request_focus();
+                            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), edit.id)
+                            {
+                                state.cursor.set_char_range(Some(
+                                    egui::text::CCursorRange::select_all_str(&name),
+                                ));
+                                state.store(ui.ctx(), edit.id);
+                            }
+                        }
                         if edit.lost_focus() {
+                            ui.data_mut(|data| data.remove::<bool>(opened));
                             events.rename = Some((
                                 info.id,
                                 name.clone(),

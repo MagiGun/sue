@@ -843,6 +843,10 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint, Layer palette: a double click on a layer's name selects
+  the whole name for typing over, and Enter or a click elsewhere keeps
+  the new name (the field used to hold the keys for good, so the name
+  never changed).
 - Sue Paint, Rotate: Tool Property shows the Snap angle check box and
   its step, so the view can turn in steps without holding Shift (the
   setting was kept but had no row).
