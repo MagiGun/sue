@@ -1040,6 +1040,18 @@ fn step_00_14_35_search_layer_filters_the_list() {
     click_named(&mut paint, "Search Layer");
     let seen = names(&mut paint);
     shows_all(&seen, &["Kind of layer"], "Search Layer");
+    // Words typed in the field keep only the layers whose name has
+    // them: the vector layer stays, the raster layer leaves the list.
+    let all = layers(&paint);
+    let vector = all.last().unwrap().name.clone();
+    let raster = all[all.len() - 2].name.clone();
+    assert!(names(&mut paint).contains(&raster), "{raster} listed first");
+    click_named(&mut paint, "Layer name");
+    paint.step(vec![egui::Event::Text(vector.clone())]);
+    paint.settle(4);
+    let seen = names(&mut paint);
+    assert!(seen.contains(&vector), "{vector} is found");
+    assert!(!seen.contains(&raster), "{raster} is filtered out");
 }
 
 /// The brush size the Tool Property palette shows now.
@@ -1933,14 +1945,39 @@ fn step_00_37_26_ruler_sub_tools_and_snapping() {
     let before = arena_bytes(&paint);
     stroke(&mut paint, at - vec2(80.0, 0.0), at + vec2(80.0, 0.0));
     assert_ne!(arena_bytes(&paint), before, "a ruler was laid");
-    // A pen line started near it follows it.
+    // A pen line started near it follows it: the slanting drag lays a
+    // flat line along the ruler, much flatter than the same drag once
+    // the ruler is gone.
     let layer = layers(&paint).last().unwrap().id;
-    let inked = ink(&paint, layer);
     paint.command("tool.pick.pen");
     paint.settle(2);
-    stroke(&mut paint, at + vec2(-40.0, 4.0), at + vec2(40.0, 30.0));
-    assert!(ink(&paint, layer) > inked);
+    let drag = |paint: &mut PaintDriver| {
+        let before = pixels(paint, layer);
+        stroke(paint, at + vec2(-40.0, 4.0), at + vec2(40.0, 30.0));
+        let after = pixels(paint, layer);
+        let width = sue_paint::doc::raster(&paint.runtime.engine.world.arena, layer)
+            .unwrap()
+            .width() as usize;
+        let rows: Vec<usize> = before
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(after.as_chunks::<4>().0)
+            .enumerate()
+            .filter(|(_, (was, now))| was[3] != now[3])
+            .map(|(index, _)| index / width)
+            .collect();
+        assert!(!rows.is_empty(), "the pen line landed");
+        undo(paint);
+        rows.iter().max().unwrap() - rows.iter().min().unwrap()
+    };
+    let along = drag(&mut paint);
     undo(&mut paint);
+    let free = drag(&mut paint);
+    assert!(
+        along * 2 < free,
+        "the line follows the ruler: {along} rows tall, {free} without it"
+    );
 }
 
 #[test]
