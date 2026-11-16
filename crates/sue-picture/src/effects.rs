@@ -184,9 +184,20 @@ fn dot(shape: u8, density: f32, du: f32, dv: f32, cell: f32) -> f32 {
     if density <= 0.0 {
         return 0.0;
     }
-    // Star turns with the angle around the dot's middle: read it before
-    // the halves fold onto each other.
-    let turn = dv.atan2(du);
+    if shape == TONE_STAR {
+        // A star's points reach past its own cell once it is large, so
+        // the stars of the cells around are drawn too: a point is never
+        // cut off at the cell's edge.
+        let outer = (density / STAR_AREA).sqrt();
+        let mut cover: f32 = 0.0;
+        for nu in [-1.0, 0.0, 1.0] {
+            for nv in [-1.0, 0.0, 1.0] {
+                let outside = star_outside(du + nu, dv + nv, outer) * cell;
+                cover = cover.max((0.5 - outside).clamp(0.0, 1.0));
+            }
+        }
+        return cover;
+    }
     let (du, dv) = (du.abs(), dv.abs());
     let (reach, away) = match shape {
         // Square: as large as the density, its side square-rooted.
@@ -200,16 +211,6 @@ fn dot(shape: u8, density: f32, du: f32, dv: f32, cell: f32) -> f32 {
             cell * (1.0 - (1.0 - density).max(0.0).sqrt()) / 2.0,
             du.min(dv) * cell,
         ),
-        // Star: five points, its reach swelling and shrinking with the
-        // angle; the mean of its squared outline is 0.40375 of a circle
-        // of the same reach, so the area follows the density.
-        TONE_STAR => {
-            let outline = 0.55 + 0.45 * (5.0 * turn).cos();
-            (
-                cell * (density / (std::f32::consts::PI * 0.403_75)).sqrt(),
-                du.hypot(dv) * cell / outline.max(0.1),
-            )
-        }
         // Circle.
         _ => (
             cell * (density / std::f32::consts::PI).sqrt(),
@@ -217,6 +218,36 @@ fn dot(shape: u8, density: f32, du: f32, dv: f32, cell: f32) -> f32 {
         ),
     };
     (reach - away + 0.5).clamp(0.0, 1.0)
+}
+
+/// How far an inner corner of the star lies from its middle, as a share
+/// of how far its points reach.
+const STAR_INNER: f32 = 0.42;
+
+/// The area of a star whose points reach 1: ten triangles between the
+/// middle, a point and an inner corner, 36 degrees apart.
+const STAR_AREA: f32 = 5.0 * STAR_INNER * 0.587_785_25;
+
+/// How far `(du, dv)` lies outside a five pointed star whose points
+/// reach `outer`, with one point up (`dv` grows downward); below zero
+/// inside. All in cells.
+fn star_outside(du: f32, dv: f32, outer: f32) -> f32 {
+    use std::f32::consts::PI;
+    // The angle from the upper point, folded into the half of a point
+    // between a point (0) and the next inner corner (36 degrees).
+    let half = PI / 5.0;
+    let mut turn = du.atan2(-dv).rem_euclid(2.0 * half);
+    if turn > half {
+        turn = 2.0 * half - turn;
+    }
+    let reach = du.hypot(dv);
+    let (x, y) = (reach * turn.sin(), reach * turn.cos());
+    // The edge from the point (0, outer) to the inner corner; its normal
+    // faces away from the middle.
+    let inner = outer * STAR_INNER;
+    let (ex, ey) = (inner * half.sin(), inner * half.cos() - outer);
+    let length = ex.hypot(ey).max(f32::EPSILON);
+    (x * -ey + (y - outer) * ex) / length
 }
 
 /// A number from 0 to 1 for pixel `(x, y)` that looks random and is the
@@ -779,30 +810,46 @@ mod tests {
     #[test]
     fn a_star_tone_draws_dots_of_its_own_shape() {
         // Full guide 00:13:41: a star among the dot shapes. Its dots are
-        // none of the other shapes, and a star with a point to the right
-        // is not the same mirrored left to right.
-        let look = |shape: u8| -> Vec<f32> {
+        // none of the other shapes, a star with a point up is not the
+        // same turned upside down, and its points are never cut off at
+        // the cell's edge.
+        let look = |shape: u8, gray: f32| -> Vec<f32> {
             let effects = Effects {
-                tone: Some((4.0, 0.0)),
+                tone: Some((16.0, 0.0)),
                 tone_shape: shape,
                 ..Effects::default()
             };
             (0..64)
                 .flat_map(|y| (0..64).map(move |x| (x, y)))
-                .map(|(x, y)| effects.apply([0.7, 0.7, 0.7, 1.0], x, y)[3])
+                .map(|(x, y)| effects.apply([gray, gray, gray, 1.0], x, y)[3])
                 .collect()
         };
-        let star = look(TONE_STAR);
+        let star = look(TONE_STAR, 0.7);
         assert!(star.iter().any(|cover| *cover > 0.5), "the star draws");
         for other in 0..TONE_STAR {
-            assert_ne!(look(other), star, "{}", TONE_SHAPES[usize::from(other)]);
+            assert_ne!(
+                look(other, 0.7),
+                star,
+                "{}",
+                TONE_SHAPES[usize::from(other)]
+            );
         }
-        let row = |y: usize| &star[y * 64..y * 64 + 64];
-        let mirrored = (0..64).all(|y| {
-            let line = row(y);
-            (0..64).all(|x| (line[x] - line[63 - x]).abs() < 1e-3)
-        });
-        assert!(!mirrored, "five points are not mirrored left to right");
+        let at = |x: usize, y: usize| star[y * 64 + x];
+        let flipped = (0..64).all(|y| (0..64).all(|x| (at(x, y) - at(x, 63 - y)).abs() < 1e-3));
+        assert!(!flipped, "a point up is not a point down");
+        let mirrored = (0..64).all(|y| (0..64).all(|x| (at(x, y) - at(63 - x, y)).abs() < 1e-3));
+        assert!(mirrored, "the star stands upright");
+        // Its area follows the density, light and dark alike.
+        for gray in [0.85, 0.7, 0.3, 0.15] {
+            let covered = look(TONE_STAR, gray).iter().sum::<f32>() / (64.0 * 64.0);
+            assert!((covered - (1.0 - gray)).abs() < 0.04, "{gray}: {covered}");
+        }
+        // Near half the points reach past the cell, and the cell's edge
+        // does not cut them: on the line between two cells the stars
+        // still ink where their points cross it.
+        let half = look(TONE_STAR, 0.55);
+        let edge: f32 = (0..64).map(|y| half[y * 64 + 8]).sum();
+        assert!(edge > 1.0, "{edge}");
     }
 
     #[test]
