@@ -328,6 +328,38 @@ impl ClipBitmap {
         Self::color_placed(width, height, [0, 0], [width, height], rgba)
     }
 
+    /// A color bitmap of `width` by `height`, every pixel opaque `rgb`.
+    /// Packed tile by tile, so no picture of the whole bitmap is made.
+    #[must_use]
+    pub fn filled(width: u32, height: u32, rgb: [u8; 3]) -> Self {
+        let (w, h) = (width as usize, height as usize);
+        let columns = w.div_ceil(TILE);
+        let area = TILE * TILE;
+        pack(
+            width,
+            height,
+            &COLOR,
+            false,
+            u32::try_from(area * 5).unwrap_or(0),
+            |index| {
+                if columns == 0 {
+                    return None;
+                }
+                let (tx, ty) = (index % columns * TILE, index / columns * TILE);
+                let mut raw = vec![0_u8; area * 5];
+                for y in 0..TILE.min(h.saturating_sub(ty)) {
+                    for x in 0..TILE.min(w.saturating_sub(tx)) {
+                        let t = y * TILE + x;
+                        raw[t] = 255;
+                        let c = area + t * 4;
+                        raw[c..c + 4].copy_from_slice(&[rgb[2], rgb[1], rgb[0], 255]);
+                    }
+                }
+                Some(raw)
+            },
+        )
+    }
+
     /// A color bitmap of `width` by `height` holding `rgba` (straight
     /// RGBA8 of `size[0]` by `size[1]` pixels; a short buffer reads as
     /// clear) with its top left corner at `at`; what it does not cover

@@ -863,6 +863,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint: a .clip with folders, animation folders or a camera folder
+  saved by Sue opens in Clip Studio Paint again (it closed Clip Studio),
+  and the paper shows its color there instead of a clear canvas.
 - Sue Paint: Export as .psd keeps fill, gradient and image material
   layers, drawn as they look; they used to be left out.
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its

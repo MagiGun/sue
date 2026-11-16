@@ -421,7 +421,16 @@ impl Writer<'_> {
         } else {
             0
         };
-        let render = layer.pixels.as_ref().map(|bitmap| self.bitmap(id, bitmap));
+        // Clip Studio needs a bitmap on every folder, an empty one at the
+        // least: it closes when it opens a file with a folder that has
+        // none (seen in Clip Studio Paint 5.0.4 on 2026-11-16).
+        let empty = (layer.pixels.is_none() && layer.is_folder())
+            .then(|| ClipBitmap::empty(self.doc.width, self.doc.height));
+        let render = layer
+            .pixels
+            .as_ref()
+            .or(empty.as_ref())
+            .map(|bitmap| self.bitmap(id, bitmap));
         let mask = layer
             .mask
             .as_ref()
