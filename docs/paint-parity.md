@@ -48,13 +48,13 @@ rows are at the end.
 | 3D | 7 | 2 | 4 | 62 |
 | Colors | 9 | 0 | 1 | 90 |
 | View and navigation | 10 | 3 | 0 | 88 |
-| Window, palettes and workspaces | 25 | 4 | 1 | 90 |
+| Window, palettes and workspaces | 26 | 3 | 1 | 92 |
 | Materials and assets | 6 | 3 | 1 | 75 |
 | Print | 0 | 2 | 2 | 25 |
 | Preferences and settings | 5 | 2 | 1 | 75 |
 | File formats | 9 | 3 | 2 | 75 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 276 | 62 | 26 | 84 |
+| **All of Sue Paint** | 277 | 61 | 26 | 84 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -547,7 +547,7 @@ The order of work is the plan at the end.
 | Drag column widths and palette heights | Dock | done | Also the widths in the row under the canvas and its height; narrow windows fold the widest palettes by themselves |
 | Use Current Workspace as Default, Reset to Default | Window > Workspace | done | Reset goes back to the workspace you chose as the default, and again to Sue Paint's own |
 | Register and Manage Workspaces | Window > Workspace | done | Register, switch, rename and delete; layouts saved before tabs still open; the one in use is checked, Reload puts it back; Illustration and Animation ship with Sue |
-| What a workspace keeps | Register Workspace | partial | Palettes, the menu bar and the command bar's buttons; not yet shortcuts, units, Quick Access or the tool order |
+| What a workspace keeps | Register Workspace | partial | Palettes, the menu bar, the Command Bar and Quick Access, the keyboard shortcuts and the unit of lengths, as the dialog says; not yet the tool order |
 | Hide All Palettes, Hide Menu Bar | Window | done | Tab and Shift+Tab; Hide All hides every palette but the command bar and shows them back as they were, reading Show All Palettes meanwhile |
 | Command Bar | Window > Command Bar | done | |
 | Palettes: Tool, Sub Tool, Tool Property, Brush Size, Tool Sliders | Window | done | The names the tutorials show; the Window menu reads each palette's own title, in Clip Studio's order and groups, and Tool Sliders is Sue's own |
@@ -556,7 +556,7 @@ The order of work is the plan at the end.
 | Palettes: Timeline, Animation Cels, Material | Window | done | |
 | Auto Action palette (recorded sequences) | Window > Auto Action Palette | partial | Records and plays menu commands; it does not record tool strokes as Clip Studio's can |
 | Item Bank palette | Window > Item Bank | done | Keeps sub tools to add again |
-| Information palette | Window > Information | partial | Canvas size, resolution and physical size; not the cursor position or selection info |
+| Information palette | Window > Information | done | The canvas, the memory its pixels take, the pointer's place and color, a drag's length, in the unit chosen; its menu shows or hides each, so it can be emptied into a spacer |
 | Cascade, Tile, New Window | Window > Canvas | done | New Window adds a tab and leaves tiling alone; a canvas can also go into a window of its own (tear its tab off, or Canvas in Its Own Window), on any screen |
 | Interface: Automatic, Desktop, Tablet, Phone | Window > Interface | done | In the Sue menu and Settings, so Window has one layout menu, Layout Style; the command palette finds the choices too |
 | Companion Mode | Window | missing | A phone as a second screen |
