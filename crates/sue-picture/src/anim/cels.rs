@@ -292,8 +292,10 @@ pub fn wrap_cel(arena: &Arena, picture: EntityId, cel: EntityId, folder: EntityI
     let track = track_of(sequence, super::cel_folder(arena, cel)?)?;
     let name = arena.get_by_id(cel).ok()?.name().to_owned();
     let old = &sequence.tracks[track];
-    let mut kept = sue_model::Track::new(old.name.clone(), old.kind.clone());
-    kept.properties = old.properties.clone();
+    // The track as it was (hidden, locked, its labels), its clips put back
+    // one by one with the cel's keys now showing the folder.
+    let mut kept = old.clone();
+    while kept.remove(0).is_some() {}
     for clip in old.clips() {
         let mut clip = clip.clone();
         let blank = clip

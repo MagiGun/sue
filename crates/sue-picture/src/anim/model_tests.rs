@@ -1126,3 +1126,33 @@ fn reversing_a_light_table_keeps_each_entrys_eye_opacity_and_mode() {
     assert_eq!(light_table(&arena, cel), before);
     assert_eq!(entry(&arena, cel, LIGHT_TABLE, first), faint);
 }
+
+#[test]
+fn a_cel_wrapped_in_a_folder_hands_the_folder_its_keys_and_keeps_the_track() {
+    let (mut arena, mut history, picture, folder) = animated(8, 6);
+    let (edit, first) = new_cel(&arena, picture, folder, 0).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    let (edit, second) = new_cel(&arena, picture, folder, 3).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    // The track hidden and locked: wrapping a cel keeps both.
+    let mut sequence = super::timeline(&arena, picture).unwrap().clone();
+    sequence.tracks[0].muted = true;
+    sequence.tracks[0].locked = true;
+    history
+        .apply(&mut arena, set(picture, sequence, "Hide"))
+        .unwrap();
+    let (mut edit, wrapper) = crate::doc::new_folder(&arena, picture, Some(first), true);
+    // Reads the arena before the folder exists, as Create Folder and
+    // Insert Layer does.
+    edit = edit.then(cels::wrap_cel(&arena, picture, first, wrapper).unwrap());
+    undo_pair(&mut arena, &mut history, edit);
+    let sequence = super::timeline(&arena, picture).unwrap();
+    let track = &sequence.tracks[0];
+    assert!(track.muted && track.locked, "the track as it was");
+    assert_eq!(cel_at(track, sequence.rate, 0), Some(wrapper));
+    assert_eq!(cel_at(track, sequence.rate, 3), Some(second));
+    assert_eq!(arena.get_by_id(wrapper).unwrap().name(), "1");
+    assert_eq!(crate::doc::folder_of(&arena, first), Some(wrapper));
+    // A layer of no animation folder is no cel.
+    assert!(cels::wrap_cel(&arena, picture, folder, wrapper).is_none());
+}
