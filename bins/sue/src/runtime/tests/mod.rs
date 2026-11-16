@@ -60,6 +60,7 @@ mod settings;
 mod settings_screens;
 mod shell;
 mod shell_polish;
+mod tutorial_animate_2025;
 mod windows;
 mod writer;
 mod writer_bars;
