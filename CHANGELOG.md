@@ -13,6 +13,15 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: a .clip exported from Sue opens in Sue again with
+  everything live: fill, gradient and correction layers, text, vector
+  lines, layer effects, palette colors, rulers, layer comps and the
+  timeline with its animation folders, cels, keyframes, 2D camera and
+  sound. Clip Studio shows those layers as their pixels and the layer
+  color effect as its own; the status bar says what Clip Studio does
+  not read yet. Layers brought from a .clip into an open picture say
+  that the file's timeline, comps and rulers stayed behind.
+
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
   fill (click an area and the gradient runs from its outline inward).
@@ -854,6 +863,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint: Export as .psd keeps fill, gradient and image material
+  layers, drawn as they look; they used to be left out.
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its
   tip, and a flick no longer bends off the way the stroke was going.
 - Sue Paint: masks of older files become gray masks as the file opens,

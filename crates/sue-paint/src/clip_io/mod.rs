@@ -21,12 +21,16 @@
 //! layers are what that copy would have written: a file changed in Clip
 //! Studio afterwards opens from its layers, and the report says so.
 
+mod extras;
 mod keep;
+mod layers;
 mod print;
 mod report;
 mod to_clip;
 mod to_sue;
 
+#[cfg(test)]
+mod kinds_tests;
 #[cfg(test)]
 mod tests;
 

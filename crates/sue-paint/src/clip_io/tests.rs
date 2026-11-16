@@ -253,11 +253,13 @@ fn an_untouched_imported_document_exports_to_the_same_document() {
             .shapes
             .retain(|shape| shape.table != "SueProject");
         assert_eq!(back, want, "{name}");
-        assert!(
-            report.exact() || doc.sue.take().is_some(),
-            "{name}: {}",
-            report.summary()
-        );
+        // Going back, nothing is said: every layer goes as it came.
+        let (_, wrote) = encode_with_report(&arena, picture).unwrap();
+        assert!(wrote.exact(), "{name}: {}", wrote.summary());
+        // Coming in, a file of only what Sue maps is said exact.
+        if name.starts_with("raster subset") && doc.sue.take().is_none() {
+            assert!(report.exact(), "{name}: {}", report.summary());
+        }
     }
 }
 
@@ -330,6 +332,13 @@ fn an_edited_layer_loses_its_kept_data_and_only_it_across_a_save_and_reopen() {
         doc.foreign.external.retain(|(id, _)| !gone.contains(id));
     }
     *layer_named(&mut got.root.children, "Back").unwrap() = kept;
+    // A layer changed: the canvas preview is drawn again, in Sue's own
+    // table of document parts.
+    assert!(got.preview.is_some());
+    got.preview.clone_from(&want.preview);
+    got.foreign
+        .shapes
+        .retain(|shape| shape.table != "SueDocumentPart");
     assert_eq!(got, want);
 }
 
@@ -494,7 +503,7 @@ fn layers_imported_into_a_picture_land_in_the_picked_folder() {
 }
 
 #[test]
-fn what_clip_studio_has_no_layer_for_is_left_out_and_said() {
+fn a_correction_layer_is_kept_for_sue_and_said() {
     let mut arena = Arena::new();
     let (edit, picture) = doc::create(&NewPicture {
         width: 32,
@@ -507,9 +516,30 @@ fn what_clip_studio_has_no_layer_for_is_left_out_and_said() {
     apply(&mut arena, correction);
     let (bytes, report) = encode_with_report(&arena, picture).unwrap();
     assert!(!report.exact());
-    assert!(report.summary().contains("left out"));
+    assert_eq!(report.names(Outcome::SueOnly), ["Posterize"]);
+    assert!(
+        report
+            .summary()
+            .contains("kept for Sue only, empty in Clip Studio: Posterize"),
+        "{}",
+        report.summary()
+    );
     let doc = read(&bytes).unwrap();
-    assert_eq!(doc.all_layers().len(), 2, "paper and the layer");
+    assert_eq!(
+        doc.all_layers().len(),
+        3,
+        "paper, the layer and the correction"
+    );
+    let correction = doc.all_layers()[2];
+    assert_eq!(
+        correction.content,
+        Some(sue_io::clip::ClipContent::Correction(
+            sue_io::clip::ClipCorrection::Posterize { levels: 4 }
+        ))
+    );
+    // Clip Studio is given a layer with nothing on it.
+    let shown = correction.pixels.as_ref().unwrap().decode().unwrap();
+    assert!(shown.data.iter().all(|value| *value == 0));
 }
 
 #[test]

@@ -2844,6 +2844,25 @@ without reading them. A test reads and rewrites every `.clip` under the
 folder `SUE_CLIP_CORPUS` names, when it is set, and prints what the
 model does not type yet.
 
+Sue Paint maps those kinds to its own models both ways (`clip_io/layers.rs`
+for a layer, `clip_io/extras.rs` for the picture): fill, gradient and
+correction layers, text (`Lettering`), vector lines (`Geometry`), layer
+effects, palette color, the picture's rulers (hung on the layer they
+belong to), layer comps, and the timeline: each animation folder's cels,
+layer and camera keyframes, the camera folder, sound (a float WAV) and
+where a layer shows. Clip Studio is given each such layer's pixels (a
+fill or gradient as `rasterize_any` draws it, a correction empty) and the
+layer color effect in its own `DrawColor` columns. Each mapping says
+what had no place on the way, and the `Report` grows "live" (Clip Studio
+sees pixels, Sue reopens it live), "Sue only" and a line per picture
+part. So that an untouched import still writes back what the file held,
+the open applies its edit to a scratch arena once, fingerprints what
+`extras::parts` makes of the comps, rulers and timeline there, keeps
+that print with the canvas (`keep` version 3) and hands out the settled
+entities as one undoable edit; an export that makes the same print
+writes the file's own parts back, and the preview is drawn again only
+when a layer changed.
+
 `.clip` and `.psd` are in the `FormatRegistry` as `LayeredFormat`
 (`crates/sue-io/src/layered.rs`): import gives a layered picture with
 folders folded into their layers and the original file kept as

@@ -6,13 +6,13 @@
 
 use sue_core::txn::{Relate, SpawnEntity};
 use sue_core::{CHILD, Color, Entity, EntityId, OrderKey, PixelFormat, RasterTile2D, Relation};
-use sue_io::clip::{ClipDocument, ClipLayer, Columns, RASTER, column};
+use sue_io::clip::{ClipContent, ClipDocument, ClipLayer, ClipLayerPath, Columns, RASTER, column};
 use sue_io::sqlite::Value;
 use sue_model::picture;
 use sue_model::{BlendMode, Foreign, class};
 
 use super::report::{Line, Outcome, Report};
-use super::{FORMAT, blend_of, keep, print};
+use super::{FORMAT, blend_of, extras, keep, layers, print};
 use crate::doc::{self, Edit, MEMBER};
 
 /// The layers made from a document, and where they go.
@@ -25,6 +25,11 @@ struct Making<'a> {
     high: Option<OrderKey>,
     edit: Edit,
     report: Report,
+    /// Where each layer made was in the file's tree.
+    paths: Vec<(ClipLayerPath, EntityId)>,
+    /// The file's timeline comes along, so its animation and camera
+    /// folders are made as such.
+    timeline: bool,
 }
 
 impl Making<'_> {
@@ -54,16 +59,19 @@ impl Making<'_> {
     }
 
     /// The layers `layers` (bottom first); answers their ids.
-    fn layers(&mut self, layers: &[ClipLayer], depth: usize) -> Result<Vec<EntityId>, String> {
+    fn layers(&mut self, layers: &[ClipLayer], at: &mut Vec<u32>) -> Result<Vec<EntityId>, String> {
+        let depth = at.len();
         let mut ids = Vec::with_capacity(layers.len());
-        for layer in layers {
+        for (index, layer) in (0_u32..).zip(layers) {
+            at.push(index);
+            let path = ClipLayerPath(at.clone());
             if layer.is_folder() {
                 // Clip Studio nests folders far less deep; a file that
                 // claims more is broken.
                 if depth > 64 {
                     return Err(tr!("clip-folders-too-deep"));
                 }
-                let members = self.layers(&layer.children, depth + 1)?;
+                let members = self.layers(&layer.children, at)?;
                 let (entity, mask) = self.folder(layer)?;
                 let id = self.spawn(entity, mask);
                 let mut edit = std::mem::replace(&mut self.edit, Edit::new(""));
@@ -71,11 +79,15 @@ impl Making<'_> {
                     edit = edit.then(Relate::new(Relation::new(id, MEMBER, member)));
                 }
                 self.edit = edit;
+                self.paths.push((path, id));
                 ids.push(id);
             } else {
                 let (entity, mask) = self.layer(layer)?;
-                ids.push(self.spawn(entity, mask));
+                let id = self.spawn(entity, mask);
+                self.paths.push((path, id));
+                ids.push(id);
             }
+            at.pop();
         }
         Ok(ids)
     }
@@ -94,16 +106,41 @@ impl Making<'_> {
             }
         }
         entity = styled(entity, layer);
+        let entity = if self.timeline {
+            extras::folder_in(entity, layer.content.as_ref())
+        } else {
+            entity
+        };
+        let (entity, mut lost) = layers::styles_in(entity, layer);
+        // Without the file's timeline, an animation or camera folder is
+        // an ordinary folder.
+        lost |= !self.timeline
+            && matches!(
+                layer.content,
+                Some(ClipContent::AnimationFolder(_) | ClipContent::Camera(_))
+            );
         let canvas = [0, 0, i64::from(self.doc.width), i64::from(self.doc.height)];
         let mask = self.mask(layer, canvas)?;
-        Ok(self.finish(layer, entity, mask, outcome))
+        Ok(self.finish(layer, entity, mask, outcome, lost))
     }
 
     /// A layer that is not a folder, and its mask.
     fn layer(&mut self, layer: &ClipLayer) -> Result<(Entity, Option<Entity>), String> {
         let (width, height) = (self.doc.width, self.doc.height);
         let mut outcome = Outcome::Exact;
-        let (mut entity, area) = if layer.is_paper() {
+        let mut lost = false;
+        let canvas = [0, 0, i64::from(width), i64::from(height)];
+        let made = layer
+            .content
+            .as_ref()
+            .filter(|_| !layer.is_paper())
+            .and_then(|content| layers::generated_in(&layer.name, content));
+        let (mut entity, area) = if let Some((entity, generated_lost)) = made {
+            // A fill, a gradient or a correction: drawn by Sue from its
+            // settings, the file's pixels being only what it showed.
+            lost = generated_lost;
+            (entity, canvas)
+        } else if layer.is_paper() {
             let [r, g, b] = if layer.draw_color.enabled() {
                 layer.draw_color.color()
             } else {
@@ -113,12 +150,19 @@ impl Making<'_> {
                 .with_property(picture::COLOR, Color::srgb8(r, g, b));
             (paper, [0, 0, i64::from(width), i64::from(height)])
         } else {
-            let generated = drawn_by_clip_studio(&layer.columns);
+            let generated = drawn_by_clip_studio(&layer.columns) && layer.content.is_none();
             let decoded = match &layer.pixels {
                 Some(bitmap) if !generated => Some(bitmap.decode()?),
                 _ => None,
             };
-            if generated || (layer.layer_type != RASTER && !layer.is_paper()) {
+            let sue_reads = matches!(
+                layer.content,
+                Some(ClipContent::Text(_) | ClipContent::Vector(_))
+            );
+            if generated
+                || (layer.layer_type != RASTER && !layer.is_paper())
+                || (layer.content.is_some() && !sue_reads)
+            {
                 outcome = Outcome::Kept;
             }
             let [left, top] = layer.pixels_at();
@@ -174,6 +218,12 @@ impl Making<'_> {
             if y0 != 0 {
                 entity = entity.with_property(picture::Y, y0);
             }
+            if let Some(content) = &layer.content {
+                let (made, content_lost) =
+                    layers::on_pixels_in(entity, content, [x0, y0], self.doc.dpi);
+                lost |= content_lost;
+                entity = made;
+            }
             (entity, [x0, y0, x1, y1])
         };
         match blend_of(layer.composite) {
@@ -182,8 +232,9 @@ impl Making<'_> {
             None => outcome = outcome.max(Outcome::Approximated),
         }
         entity = styled(entity, layer);
+        let (entity, styles_lost) = layers::styles_in(entity, layer);
         let mask = self.mask(layer, area)?;
-        Ok(self.finish(layer, entity, mask, outcome))
+        Ok(self.finish(layer, entity, mask, outcome, lost || styles_lost))
     }
 
     /// `layer`'s mask, for a layer whose pixels cover `area` (`x0, y0,
@@ -240,6 +291,7 @@ impl Making<'_> {
         mut entity: Entity,
         mask: Option<Entity>,
         outcome: Outcome,
+        lost: bool,
     ) -> (Entity, Option<Entity>) {
         if mask.is_some() {
             entity = entity.with_property(doc::MASK_ON, layer.mask_enabled());
@@ -253,10 +305,9 @@ impl Making<'_> {
             fingerprint,
             keep::layer_bytes(&alone),
         ));
-        self.report.lines.push(Line {
-            name: layer.name.clone(),
-            outcome,
-        });
+        self.report
+            .lines
+            .push(Line::new(layer.name.clone(), outcome).lost(lost));
         (entity, mask)
     }
 }
@@ -319,7 +370,7 @@ pub fn new_picture(
         FORMAT,
         "picture",
         fingerprint,
-        keep::picture_bytes(&canvas),
+        keep::picture_bytes(&canvas, None),
     ));
     let picture = image.id();
     let mut making = Making {
@@ -329,9 +380,75 @@ pub fn new_picture(
         high: None,
         edit: Edit::new(label).then(SpawnEntity::new(image)),
         report: Report::default(),
+        paths: Vec::new(),
+        timeline: doc.timeline.is_some(),
     };
-    making.layers(&doc.root.children, 0)?;
-    Ok((making.edit, picture, making.report))
+    making.layers(&doc.root.children, &mut Vec::new())?;
+    let Making {
+        edit,
+        mut report,
+        paths,
+        ..
+    } = making;
+    // What belongs to the picture as a whole, once its layers are there.
+    let mut edit = extras::into(doc, picture, &paths, edit, &mut report.parts);
+    // Made once, the picture says what Sue makes of its comps, rulers and
+    // timeline: kept with the canvas, so an export that still makes the
+    // same writes back what the file held.
+    let mut made = sue_core::Arena::new();
+    sue_core::ReversibleTransaction::apply(&mut edit, &mut made)
+        .map_err(|error| error.to_string())?;
+    let written: Vec<(EntityId, ClipLayerPath)> =
+        paths.iter().map(|(path, id)| (*id, path.clone())).collect();
+    let parts = extras::parts(&made, picture, &written).print();
+    // The timeline may have keyed a layer after its fingerprint was taken:
+    // each is taken again from the layer as it ends up.
+    for (_, id) in &paths {
+        let mask = doc::mask_of(&made, *id).and_then(|mask| made.get_by_id(mask).ok());
+        let Ok(entity) = made.get_by_id(*id) else {
+            continue;
+        };
+        let now = print::layer(entity, mask);
+        let Some(foreign) = entity
+            .ext::<Foreign>()
+            .filter(|foreign| foreign.fingerprint != now)
+            .cloned()
+        else {
+            continue;
+        };
+        if let Ok(entity) = made.get_by_id_mut(*id) {
+            entity.set_ext(Box::new(Foreign {
+                fingerprint: now,
+                ..foreign
+            }));
+        }
+    }
+    if let Ok(entity) = made.get_by_id_mut(picture) {
+        entity.set_ext(Box::new(Foreign::new(
+            FORMAT,
+            "picture",
+            fingerprint,
+            keep::picture_bytes(&canvas, Some(&parts)),
+        )));
+    }
+    Ok((settled(made, label), picture, report))
+}
+
+/// The edit that brings everything in `arena` into another arena, with
+/// its ids and relations, as one step named `label`.
+fn settled(mut arena: sue_core::Arena, label: &str) -> Edit {
+    let relations: Vec<_> = arena.relations().iter().collect();
+    let handles: Vec<_> = arena.iter().map(|(handle, _)| handle).collect();
+    let mut edit = Edit::new(label);
+    for handle in handles {
+        if let Ok(entity) = arena.despawn(handle) {
+            edit = edit.then(SpawnEntity::new(entity));
+        }
+    }
+    for relation in relations {
+        edit = edit.then(Relate::new(relation));
+    }
+    edit
 }
 
 /// The edit that brings `doc`'s layers into `picture` where a new layer
@@ -366,8 +483,25 @@ pub fn into_picture(
         high,
         edit: Edit::new(label),
         report: Report::default(),
+        paths: Vec::new(),
+        timeline: false,
     };
-    let top = making.layers(&doc.root.children, 0)?;
+    let top = making.layers(&doc.root.children, &mut Vec::new())?;
+    // What belongs to the file's picture as a whole does not come with
+    // its layers into another picture: said so.
+    let rulers = doc
+        .paths()
+        .iter()
+        .any(|(_, layer)| !layer.rulers.is_empty());
+    for (name, there) in [
+        (tr!("clip-report-timeline"), doc.timeline.is_some()),
+        (tr!("clip-report-comps"), !doc.comps.is_empty()),
+        (tr!("clip-report-rulers"), rulers),
+    ] {
+        if there {
+            making.report.parts.push(Line::new(name, Outcome::LeftOut));
+        }
+    }
     let mut edit = making.edit;
     if let Some(folder) = folder {
         for id in top {

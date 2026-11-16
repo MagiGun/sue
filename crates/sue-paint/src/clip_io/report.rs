@@ -10,6 +10,13 @@ pub enum Outcome {
     /// Converted as closely as Sue can (a gray layer painted in color, a
     /// blend mode Sue does not know).
     Approximated,
+    /// Written for Clip Studio as the pixels Sue draws for it, with what
+    /// it is kept in Sue's own tables of the file, so Sue opens it live
+    /// again (text, vector lines, fill and gradient layers, effects).
+    Live,
+    /// Kept in Sue's own tables of the file for Sue to open live again,
+    /// with nothing for Clip Studio to show (a correction layer).
+    SueOnly,
     /// Shown as Sue can; what Sue cannot show yet is kept as Clip Studio
     /// data and goes back into the file while the layer is unchanged.
     Kept,
@@ -27,6 +34,28 @@ pub struct Line {
     pub name: String,
     /// What became of it.
     pub outcome: Outcome,
+    /// Something of it had no place on the way (said with "approximated"
+    /// beside its outcome).
+    pub approximated: bool,
+}
+
+impl Line {
+    /// A line for `name`.
+    #[must_use]
+    pub fn new(name: impl Into<String>, outcome: Outcome) -> Self {
+        Self {
+            name: name.into(),
+            outcome,
+            approximated: false,
+        }
+    }
+
+    /// The same line, approximated too when `lost`.
+    #[must_use]
+    pub fn lost(mut self, lost: bool) -> Self {
+        self.approximated |= lost;
+        self
+    }
 }
 
 /// A whole report.
@@ -34,6 +63,10 @@ pub struct Line {
 pub struct Report {
     /// One line per layer and folder, bottom first.
     pub lines: Vec<Line>,
+    /// One line per part of the picture beyond its layers that was
+    /// converted (the timeline, the layer comps, the rulers), named in
+    /// words people read.
+    pub parts: Vec<Line>,
     /// The file carried a copy of Sue's own project, but its layers were
     /// changed after Sue wrote it, so it opened from its layers.
     pub stale_copy: bool,
@@ -50,6 +83,7 @@ impl Report {
     pub fn names(&self, outcome: Outcome) -> Vec<&str> {
         self.lines
             .iter()
+            .chain(&self.parts)
             .filter(|line| line.outcome == outcome)
             .map(|line| line.name.as_str())
             .collect()
@@ -60,7 +94,11 @@ impl Report {
     pub fn exact(&self) -> bool {
         !self.stale_copy
             && !self.canvas_dropped
-            && self.lines.iter().all(|line| line.outcome == Outcome::Exact)
+            && self
+                .lines
+                .iter()
+                .chain(&self.parts)
+                .all(|line| line.outcome == Outcome::Exact && !line.approximated)
     }
 
     /// The report in one line of the language in use.
@@ -73,16 +111,52 @@ impl Report {
         if self.stale_copy {
             parts.push(tr!("clip-report-stale-copy"));
         }
-        let exact = self.names(Outcome::Exact).len();
+        let exact = self
+            .lines
+            .iter()
+            .filter(|line| line.outcome == Outcome::Exact)
+            .count();
         if exact > 0 {
             parts.push(tr!("clip-report-exact", count = exact));
         }
-        let approximated = self.names(Outcome::Approximated);
+        let approximated: Vec<&str> = self
+            .lines
+            .iter()
+            .chain(&self.parts)
+            .filter(|line| line.outcome == Outcome::Approximated || line.approximated)
+            .map(|line| line.name.as_str())
+            .collect();
         if !approximated.is_empty() {
             parts.push(tr!(
                 "clip-report-approximated",
                 names = listed(&approximated)
             ));
+        }
+        let layers_as = |outcome: Outcome| -> Vec<&str> {
+            self.lines
+                .iter()
+                .filter(|line| line.outcome == outcome)
+                .map(|line| line.name.as_str())
+                .collect()
+        };
+        let live = layers_as(Outcome::Live);
+        if !live.is_empty() {
+            parts.push(tr!("clip-report-live", names = listed(&live)));
+        }
+        let sue_only = layers_as(Outcome::SueOnly);
+        if !sue_only.is_empty() {
+            parts.push(tr!("clip-report-sue-only", names = listed(&sue_only)));
+        }
+        // The picture's own parts have no pixels: Clip Studio does not
+        // read them yet, Sue does.
+        let for_sue: Vec<&str> = self
+            .parts
+            .iter()
+            .filter(|line| matches!(line.outcome, Outcome::Live | Outcome::SueOnly))
+            .map(|line| line.name.as_str())
+            .collect();
+        if !for_sue.is_empty() {
+            parts.push(tr!("clip-report-parts-for-sue", names = listed(&for_sue)));
         }
         let kept = self.names(Outcome::Kept);
         if !kept.is_empty() {
@@ -132,10 +206,7 @@ mod tests {
     use super::*;
 
     fn line(name: &str, outcome: Outcome) -> Line {
-        Line {
-            name: name.to_owned(),
-            outcome,
-        }
+        Line::new(name, outcome)
     }
 
     #[test]
@@ -169,5 +240,19 @@ mod tests {
         report.stale_copy = false;
         assert!(report.exact());
         assert_eq!(report.summary(), "1 layer converted exactly");
+        report.lines = vec![
+            line("Ink", Outcome::Exact),
+            line("Words", Outcome::Live).lost(true),
+            line("Warm", Outcome::SueOnly),
+        ];
+        report.parts = vec![line("the timeline", Outcome::Live)];
+        assert!(!report.exact());
+        assert_eq!(
+            report.summary(),
+            "1 layer converted exactly; approximated: Words; in Clip Studio as \
+             their pixels, live again when Sue opens the file: Words; kept for \
+             Sue only, empty in Clip Studio: Warm; for Sue, not read by Clip \
+             Studio yet: the timeline"
+        );
     }
 }
