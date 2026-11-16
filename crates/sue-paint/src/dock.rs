@@ -136,10 +136,12 @@ pub(crate) fn classic_layout() -> Dock {
         Column::of(&[(Palette::Tools, 1.0)], 46.0),
         Column {
             groups: vec![
-                Group::one(Palette::SubTool, 0.24),
-                Group::one(Palette::ToolProperty, 0.3),
-                Group::one(Palette::BrushGrid, 0.16),
-                tabs(&COLOR_PALETTES, 0.3),
+                // Sub Tool tall enough for a tool's few sub tools and its
+                // Add row whole; Brush Size two rows of sizes.
+                Group::one(Palette::SubTool, 0.3),
+                Group::one(Palette::ToolProperty, 0.28),
+                Group::one(Palette::BrushGrid, 0.14),
+                tabs(&COLOR_PALETTES, 0.28),
             ],
             // Wide enough for the six color tabs; the canvas starts where
             // it did before the styles.
