@@ -3498,4 +3498,5 @@ fold-or-unfold-folder = Fold or Unfold the Folder
 keyframe-at-frame = Keyframe at frame { $frame }: { $ease }
 preview-on-the-timeline = Preview on the timeline
 drag-layer-here-to-trace-it = Drag a layer here from the Layer palette to trace it while you draw this cel, or pick it and use the register button above
+workspace-keeps = Kept in the workspace: where the palettes are, the Command Bar and Quick Access, the keyboard shortcuts and the unit of lengths
 info-show-canvas = Show Canvas Information
