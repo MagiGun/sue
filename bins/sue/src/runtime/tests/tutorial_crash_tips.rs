@@ -2834,13 +2834,58 @@ fn t50_02_a_sub_tool_on_the_command_bar() {
     assert!(shown >= 2, "listed and picked: {:?}", driver.texts);
 }
 
-/// Tip 3 (00:53): a 3D drawing figure on the canvas, to pose.
+/// Tip 3 (00:53): a 3D drawing figure on the canvas, posed and turned
+/// by drags on the canvas as the video does, each in one undo step: a
+/// drag on the body bends it at a joint, a drag beside it turns the
+/// camera round it.
 #[test]
 fn t50_03_a_3d_figure_on_the_canvas() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
     let mut driver = open("figure-3d");
     run(&mut driver, "layer.new.figure");
     let layer = top(&driver);
     assert!(sue_paint::three::is_3d(arena(&driver), layer), "a 3D layer");
+    let yaw = |driver: &PaintDriver| {
+        sue_paint::three::View3D::of(arena(driver).get_by_id(layer).unwrap()).yaw
+    };
+    let drawn = |driver: &PaintDriver| {
+        sue_paint::doc::raster(arena(driver), layer)
+            .unwrap()
+            .bytes()
+            .unwrap()
+            .to_vec()
+    };
+    assert!(painted(&driver, layer) > 0, "the figure is drawn");
+    let (start, before) = (yaw(&driver), drawn(&driver));
+    // Posed: the Object tool, picked for the new figure, bends the part
+    // under a drag on the body; the camera stays.
+    let m = middle(&driver);
+    assert!(
+        pixel(&driver, layer, under(&driver, m))[3] > 0,
+        "on the body"
+    );
+    stroke(&mut driver, m, m + vec2(60.0, 0.0));
+    driver.settle(4);
+    assert!(drawn(&driver) != before, "the posed figure is drawn again");
+    assert!((yaw(&driver) - start).abs() < 0.01, "the camera stays");
+    run(&mut driver, "edit.undo");
+    assert!(drawn(&driver) == before, "one undo step puts the pose back");
+    // Turned: a drag beside the figure turns the camera round it.
+    // Well clear of every part (a part takes a press 16 points away).
+    let [width, _] = size(&driver);
+    let beside = (1..60)
+        .map(|step| m - vec2(10.0 * step as f32, 0.0))
+        .find(|at| pixel(&driver, layer, under(&driver, *at))[3] == 0)
+        .map(|clear| clear - vec2(60.0, 0.0))
+        .filter(|at| (0..i64::from(width)).contains(&under(&driver, *at)[0]))
+        .expect("canvas beside the figure");
+    stroke(&mut driver, beside, beside + vec2(100.0, 0.0));
+    driver.settle(4);
+    assert!((yaw(&driver) - start).abs() > 5.0, "the figure turned");
+    assert!(drawn(&driver) != before, "the turned figure is drawn again");
+    run(&mut driver, "edit.undo");
+    assert!((yaw(&driver) - start).abs() < 0.01, "one undo step");
+    assert!(drawn(&driver) == before, "undo draws it as it was");
 }
 
 /// Tip 4 (01:00, CTV-1): Convert to Lines and Tones opens its dialog
@@ -3294,9 +3339,31 @@ fn t50_34_onion_skin_settings() {
 fn t50_35_gradient_map_with_sets() {
     let _english = sue_lang::scope(sue_lang::ENGLISH);
     let mut driver = open("gradient-map");
+    ink_line(&mut driver);
+    let at = under(&driver, middle(&driver));
+    let gray = seen_at(&seen(&driver), at);
+    assert!(gray[0] == gray[1] && gray[1] == gray[2], "{gray:?} is gray");
+    let count = layers(&driver).len();
     run(&mut driver, "layer.correction.gradient_map");
     driver.settle(4);
     assert!(shows(&driver, "Gradient Set"), "{:?}", driver.texts);
+    driver.click_text("Dusk");
+    driver.settle(2);
+    tap(&mut driver, Key::Enter);
+    driver.settle(4);
+    assert_eq!(layers(&driver).len(), count + 1, "a correction layer");
+    let mapped = seen_at(&seen(&driver), at);
+    assert!(
+        mapped[0] != mapped[1] || mapped[1] != mapped[2],
+        "the gray line takes Dusk's colors: {mapped:?}"
+    );
+    run(&mut driver, "edit.undo");
+    assert_eq!(layers(&driver).len(), count, "one undo step");
+    assert_eq!(
+        seen_at(&seen(&driver), at),
+        gray,
+        "undo shows it gray again"
+    );
 }
 
 /// Tip 36 (08:46, CT-37): 3D Preview for Binding.
