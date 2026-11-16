@@ -60,6 +60,7 @@ mod settings;
 mod settings_screens;
 mod shell;
 mod shell_polish;
+mod tutorial_crash_tips;
 mod windows;
 mod writer;
 mod writer_bars;
