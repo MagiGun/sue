@@ -24,7 +24,7 @@ pub fn to_psd(arena: &Arena, picture: EntityId) -> Option<Psd> {
     let merged = flatten(arena, picture, options)?.bytes()?.to_vec();
     let stack = doc::layers(arena, picture);
     let mut layers = Vec::new();
-    emit(arena, &stack, None, [width, height], &mut layers);
+    emit(arena, picture, &stack, None, [width, height], &mut layers);
     Some(Psd {
         width,
         height,
@@ -36,6 +36,7 @@ pub fn to_psd(arena: &Arena, picture: EntityId) -> Option<Psd> {
 /// The records of the layers whose folder is `parent`, bottom first.
 fn emit(
     arena: &Arena,
+    picture: EntityId,
     stack: &[doc::LayerInfo],
     parent: Option<EntityId>,
     size: [u32; 2],
@@ -50,7 +51,7 @@ fn emit(
         }
         if doc::is_folder(arena, info.id) {
             out.push(PsdLayer::folder("</Layer group>", PsdKind::FolderEnd));
-            emit(arena, stack, Some(info.id), size, out);
+            emit(arena, picture, stack, Some(info.id), size, out);
             let mut folder = PsdLayer::folder(
                 &info.name,
                 PsdKind::FolderOpen {
@@ -62,7 +63,7 @@ fn emit(
             out.push(folder);
             continue;
         }
-        let Some(mut layer) = pixels_of(arena, info, size) else {
+        let Some(mut layer) = pixels_of(arena, picture, info, size) else {
             continue;
         };
         layer.opacity = unit_byte(info.style.opacity);
@@ -73,8 +74,71 @@ fn emit(
     }
 }
 
+/// `pixels` (RGBA8, `width` across, their top left corner at picture
+/// pixel `at`) with the mask of the layer `info` laid into their alpha,
+/// when it has one that is on: whatever the mask's pixels (a `Gray8`
+/// mask, an old `Rgba8` one) and wherever it sits.
+fn masked(arena: &Arena, info: &doc::LayerInfo, pixels: &mut [u8], width: u32, at: [i64; 2]) {
+    if let Some(mask) = doc::mask_of(arena, info.id)
+        .filter(|_| doc::mask_on(arena, info.id))
+        .and_then(|mask| doc::raster(arena, mask))
+        && let Some(place) = doc::mask_offset(arena, info.id)
+    {
+        let width = width as usize;
+        let shift = [at[0] - place[0], at[1] - place[1]];
+        for (index, pixel) in pixels.chunks_mut(4).enumerate() {
+            let (x, y) = ((index % width) as i64, (index / width) as i64);
+            let shown = doc::cover(mask, x + shift[0], y + shift[1]);
+            let shown = (shown * 255.0).round() as u32;
+            pixel[3] = ((u32::from(pixel[3]) * shown) / 255) as u8;
+        }
+    }
+}
+
+/// What a layer of no pixels of its own (a fill, a gradient, an image
+/// material) shows by itself, and where; `None` for one that shows
+/// nothing (a correction).
+fn drawn(
+    arena: &Arena,
+    picture: EntityId,
+    layer: EntityId,
+) -> Option<(Vec<u8>, u32, u32, [i64; 2])> {
+    let mut alone = arena.clone();
+    // Rasterize refuses a locked layer; its look does not depend on it.
+    let mut unlock = sue_core::txn::SetProperty::new(layer, picture::LOCKED, false);
+    sue_core::ReversibleTransaction::apply(&mut unlock, &mut alone).ok()?;
+    let (mut edit, id) = doc::rasterize_any(&alone, picture, layer).ok()?;
+    sue_core::ReversibleTransaction::apply(&mut edit, &mut alone).ok()?;
+    let entity = alone.get_by_id(id).ok()?;
+    let at = [
+        entity
+            .property(picture::X)
+            .and_then(sue_core::Value::as_i64)
+            .unwrap_or(0),
+        entity
+            .property(picture::Y)
+            .and_then(sue_core::Value::as_i64)
+            .unwrap_or(0),
+    ];
+    let raster = doc::raster(&alone, id)?;
+    if raster.format() != PixelFormat::Rgba8 {
+        return None;
+    }
+    Some((
+        raster.bytes()?.to_vec(),
+        raster.width(),
+        raster.height(),
+        at,
+    ))
+}
+
 /// A layer's pixels, cut to where it is not clear.
-fn pixels_of(arena: &Arena, info: &doc::LayerInfo, size: [u32; 2]) -> Option<PsdLayer> {
+fn pixels_of(
+    arena: &Arena,
+    picture_id: EntityId,
+    info: &doc::LayerInfo,
+    size: [u32; 2],
+) -> Option<PsdLayer> {
     let entity = arena.get_by_id(info.id).ok()?;
     let (mut pixels, width, height, [x, y]) = match info.kind {
         LayerKind::Raster => {
@@ -83,23 +147,7 @@ fn pixels_of(arena: &Arena, info: &doc::LayerInfo, size: [u32; 2]) -> Option<Psd
                 return None;
             }
             let mut pixels = raster.bytes()?.to_vec();
-            if let Some(mask) = doc::mask_of(arena, info.id)
-                .filter(|_| doc::mask_on(arena, info.id))
-                .and_then(|mask| doc::raster(arena, mask))
-                && let Some(place) = doc::mask_offset(arena, info.id)
-            {
-                // Whatever the mask's pixels (a `Gray8` mask, an old
-                // `Rgba8` one) and wherever it sits.
-                let width = raster.width() as usize;
-                let at = info.style.offset;
-                let shift = [at[0] - place[0], at[1] - place[1]];
-                for (index, pixel) in pixels.chunks_mut(4).enumerate() {
-                    let (x, y) = ((index % width) as i64, (index / width) as i64);
-                    let shown = doc::cover(mask, x + shift[0], y + shift[1]);
-                    let shown = (shown * 255.0).round() as u32;
-                    pixel[3] = ((u32::from(pixel[3]) * shown) / 255) as u8;
-                }
-            }
+            masked(arena, info, &mut pixels, raster.width(), info.style.offset);
             (pixels, raster.width(), raster.height(), info.style.offset)
         }
         LayerKind::Paper => {
@@ -110,7 +158,13 @@ fn pixels_of(arena: &Arena, info: &doc::LayerInfo, size: [u32; 2]) -> Option<Psd
             let pixels = [r, g, b, 255].repeat((size[0] * size[1]) as usize);
             (pixels, size[0], size[1], [0, 0])
         }
-        LayerKind::Other => return None,
+        // A fill, a gradient or an image material: as it looks. A
+        // correction shows nothing of its own and is left out.
+        LayerKind::Other => {
+            let (mut pixels, width, height, at) = drawn(arena, picture_id, info.id)?;
+            masked(arena, info, &mut pixels, width, at);
+            (pixels, width, height, at)
+        }
     };
     // Cut to the pixels that show.
     let (mut x0, mut y0, mut x1, mut y1) = (width, height, 0, 0);
@@ -388,6 +442,62 @@ mod tests {
             before,
             "undo takes them away"
         );
+    }
+
+    /// A fill and a gradient layer go out as they look; a correction,
+    /// which shows nothing of its own, is left out.
+    #[test]
+    fn fill_and_gradient_layers_go_out_as_they_look() {
+        let mut arena = Arena::new();
+        let (mut edit, picture) = doc::create(&doc::NewPicture {
+            name: "Page".to_owned(),
+            width: 8,
+            height: 6,
+            ..doc::NewPicture::default()
+        })
+        .unwrap();
+        edit.apply(&mut arena).unwrap();
+        let (mut edit, fill) = doc::new_fill_layer(
+            &arena,
+            picture,
+            None,
+            "Fill",
+            sue_core::Color::srgb8(10, 200, 30),
+        );
+        edit.apply(&mut arena).unwrap();
+        SetProperty::new(fill, picture::LOCKED, true)
+            .apply(&mut arena)
+            .unwrap();
+        let gradient = doc::Gradient::two(
+            [[0.0, 0.0], [8.0, 0.0]],
+            [[0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]],
+            false,
+        );
+        let (mut edit, _) = doc::new_gradient_layer(&arena, picture, None, "Ramp", gradient);
+        edit.apply(&mut arena).unwrap();
+        let (mut edit, _) = doc::new_correction(&arena, picture, None, "Invert", "invert");
+        edit.apply(&mut arena).unwrap();
+        let psd = to_psd(&arena, picture).unwrap();
+        let names: Vec<&str> = psd.layers.iter().map(|layer| layer.name.as_str()).collect();
+        assert!(!names.contains(&"Invert"), "{names:?}");
+        let fill = psd
+            .layers
+            .iter()
+            .find(|layer| layer.name == "Fill")
+            .unwrap();
+        assert_eq!((fill.width, fill.height), (8, 6), "locked, still drawn");
+        assert!(
+            fill.pixels
+                .chunks(4)
+                .all(|pixel| pixel == [10, 200, 30, 255])
+        );
+        let ramp = psd
+            .layers
+            .iter()
+            .find(|layer| layer.name == "Ramp")
+            .unwrap();
+        assert_eq!((ramp.width, ramp.height), (8, 6));
+        assert!(ramp.pixels[0] < ramp.pixels[(8 - 1) * 4], "dark to light");
     }
 
     /// A layer's gray mask goes out in the layer's alpha, read where the
