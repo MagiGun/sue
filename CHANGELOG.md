@@ -553,6 +553,8 @@ follow [Semantic Versioning](https://semver.org/).
   click on a small picture of the layer; Perlin Noise has Scale,
   Amplitude, Attenuation, Repetition and Offset X and Y; Smart Smoothing
   has Weak, Medium and Strong and Remove Noise.
+- Sue Paint, File, New, Animation: the overflow frame takes an Offset X
+  and an Offset Y, moving the output frame from its reference point.
 
 ### Changed
 
