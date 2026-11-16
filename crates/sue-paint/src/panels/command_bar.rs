@@ -515,8 +515,12 @@ impl SuePaint {
             .dragging
             .filter(|(source, _)| *source == holder)
             .map(|(_, index)| index);
+        // A group or a separator never goes into a group: it moves.
+        let groupable = egui::DragAndDrop::payload::<BarPayload>(ctx)
+            .is_some_and(|payload| !matches!(payload.0.item, Item::Group(_) | Item::Separator));
         let onto = drop_onto(rects, pointer).filter(|&target| {
-            Some(target) != moving
+            groupable
+                && Some(target) != moving
                 && !matches!(
                     self.holder_items(holder).get(target).map(|slot| &slot.item),
                     Some(Item::Separator) | None
@@ -697,17 +701,14 @@ pub(crate) fn drop_place(rects: &[Rect], pointer: Pos2) -> usize {
 }
 
 /// The button among `rects` whose middle `pointer` is over: the middle
-/// half of its length (across a button in a row, down a button in a
-/// column of named rows). A button let go there joins its group.
+/// half of its width, so its left and right quarters still put a button
+/// before or after it as [`drop_place`] does (on a square button of the
+/// bar and a named row of Quick Access alike). A button let go there
+/// joins its group.
 #[must_use]
 pub(crate) fn drop_onto(rects: &[Rect], pointer: Pos2) -> Option<usize> {
     rects.iter().position(|rect| {
-        rect.contains(pointer)
-            && if rect.width() > rect.height() * 2.0 {
-                (pointer.y - rect.center().y).abs() < rect.height() / 4.0
-            } else {
-                (pointer.x - rect.center().x).abs() < rect.width() / 4.0
-            }
+        rect.contains(pointer) && (pointer.x - rect.center().x).abs() < rect.width() / 4.0
     })
 }
 
@@ -802,9 +803,18 @@ mod tests {
         assert_eq!(drop_onto(&rects, pos2(38.0, 16.0)), None, "its edge");
         assert_eq!(drop_place(&rects, pos2(38.0, 16.0)), 1, "goes before it");
         assert_eq!(drop_onto(&rects, pos2(34.0, 16.0)), None, "between");
-        // Quick Access's named rows: the middle of their height.
-        let rows = [Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 24.0))];
+        // Quick Access's named rows: the middle of their width, so a
+        // button let go over a row's left or right end still moves
+        // before or after it, whatever its height.
+        let rows = [
+            Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 24.0)),
+            Rect::from_min_size(pos2(0.0, 24.0), vec2(200.0, 24.0)),
+        ];
         assert_eq!(drop_onto(&rows, pos2(100.0, 12.0)), Some(0));
-        assert_eq!(drop_onto(&rows, pos2(100.0, 2.0)), None);
+        assert_eq!(drop_onto(&rows, pos2(100.0, 2.0)), Some(0));
+        assert_eq!(drop_onto(&rows, pos2(20.0, 12.0)), None);
+        assert_eq!(drop_place(&rows, pos2(20.0, 12.0)), 0, "before it");
+        assert_eq!(drop_onto(&rows, pos2(180.0, 12.0)), None);
+        assert_eq!(drop_place(&rows, pos2(180.0, 12.0)), 1, "after it");
     }
 }

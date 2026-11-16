@@ -2167,6 +2167,23 @@ fn b29_sub_tools_on_the_bar_make_a_group() {
     walk.held = Modifiers::NONE;
     let kept = walk.file("command_bar.txt");
     assert!(kept.contains("group\nsub-tool pen "), "{kept}");
+    // The group dropped onto another button moves; a group never goes
+    // into a group.
+    let group = walk.node_in("Group: G-pen", area).unwrap().center();
+    let undo = walk.node_in("Undo", area).unwrap().center();
+    walk.held = Modifiers::COMMAND;
+    walk.drag(group, undo);
+    walk.held = Modifiers::NONE;
+    let kept = walk.file("command_bar.txt");
+    assert!(!kept.contains("group\ngroup"), "{kept}");
+    assert!(!kept.contains("group\ncommand edit.undo"), "{kept}");
+    let names = walk.bar_names();
+    let at = |name: &str| names.iter().position(|found| found == name).unwrap();
+    assert_eq!(
+        at("Group: G-pen").abs_diff(at("Undo")),
+        1,
+        "beside Undo: {names:?}"
+    );
 }
 
 /// B30: the Information palette emptied by its menu, docked as a thin
