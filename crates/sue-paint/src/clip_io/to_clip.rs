@@ -225,7 +225,7 @@ impl Writing<'_> {
                 }
             }
             LayerKind::Other => {
-                let shown = layers::shown_pixels(self.arena, self.picture, info.id);
+                let shown = crate::psd_io::shown_alone(self.arena, self.picture, info.id);
                 let (pixels, [x, y]) = match &shown {
                     Some((raster, at)) => (
                         ClipBitmap::color(raster.width(), raster.height(), &rgba(raster)?),

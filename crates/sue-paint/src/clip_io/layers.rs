@@ -13,14 +13,13 @@
 //! in the conversion report); what Sue's or Clip Studio's model holds and
 //! the other has no place for is named beside each.
 
-use sue_core::{Arena, Color, ColorSpace, Entity, EntityId, RasterTile2D, Value};
+use sue_core::{Color, ColorSpace, Entity, Value};
 use sue_io::clip::{
     ClipAlign, ClipContent, ClipCorrection, ClipDrawColor, ClipEffects, ClipFill, ClipGradient,
     ClipGradientRepeat, ClipGradientShape, ClipLayer, ClipLine, ClipPoint, ClipStop, ClipText,
     ClipTextRun, ClipTone, ClipVector,
 };
 use sue_model::Response;
-use sue_model::picture;
 
 use crate::brush::{Finish, SAME, Sample, Tip};
 use crate::doc;
@@ -439,35 +438,6 @@ pub(super) fn draw_color_out(entity: &Entity) -> Option<ClipDrawColor> {
 pub(super) fn palette_out(entity: &Entity) -> Option<[u8; 3]> {
     let [r, g, b, _] = rgba8(&color_at(entity, doc::PALETTE_COLOR)?);
     Some([r, g, b])
-}
-
-/// What `layer` (a layer that is not plain pixels: a fill, a gradient, a
-/// material...) shows by itself, as pixels where they sit: what Clip
-/// Studio is given to show for it. `None` when it shows nothing (a
-/// correction) or cannot be drawn.
-pub(super) fn shown_pixels(
-    arena: &Arena,
-    picture: EntityId,
-    layer: EntityId,
-) -> Option<(RasterTile2D, [i64; 2])> {
-    let mut alone = arena.clone();
-    // Rasterize refuses a locked layer; its look does not depend on it.
-    let mut unlock = sue_core::txn::SetProperty::new(layer, picture::LOCKED, false);
-    sue_core::ReversibleTransaction::apply(&mut unlock, &mut alone).ok()?;
-    let (mut edit, id) = doc::rasterize_any(&alone, picture, layer).ok()?;
-    sue_core::ReversibleTransaction::apply(&mut edit, &mut alone).ok()?;
-    let entity = alone.get_by_id(id).ok()?;
-    let at = [
-        entity
-            .property(picture::X)
-            .and_then(Value::as_i64)
-            .unwrap_or(0),
-        entity
-            .property(picture::Y)
-            .and_then(Value::as_i64)
-            .unwrap_or(0),
-    ];
-    Some((doc::raster(&alone, id)?.clone(), at))
 }
 
 // ----- What a layer is, in from the file -----------------------------------------------

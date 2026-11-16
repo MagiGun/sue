@@ -95,14 +95,17 @@ fn masked(arena: &Arena, info: &doc::LayerInfo, pixels: &mut [u8], width: u32, a
     }
 }
 
-/// What a layer of no pixels of its own (a fill, a gradient, an image
-/// material) shows by itself, and where; `None` for one that shows
-/// nothing (a correction).
-fn drawn(
+/// What `layer` of `picture`, a layer of no pixels of its own (a fill,
+/// a gradient, an image material), shows by itself as pixels, and where
+/// their top left corner sits; its opacity, mode and mask are left to
+/// the caller. `None` for one that shows nothing (a correction) or
+/// cannot be drawn. Shared by the `.psd` and `.clip` exports.
+#[must_use]
+pub fn shown_alone(
     arena: &Arena,
     picture: EntityId,
     layer: EntityId,
-) -> Option<(Vec<u8>, u32, u32, [i64; 2])> {
+) -> Option<(RasterTile2D, [i64; 2])> {
     let mut alone = arena.clone();
     // Rasterize refuses a locked layer; its look does not depend on it.
     let mut unlock = sue_core::txn::SetProperty::new(layer, picture::LOCKED, false);
@@ -110,17 +113,22 @@ fn drawn(
     let (mut edit, id) = doc::rasterize_any(&alone, picture, layer).ok()?;
     sue_core::ReversibleTransaction::apply(&mut edit, &mut alone).ok()?;
     let entity = alone.get_by_id(id).ok()?;
-    let at = [
+    let at = [picture::X, picture::Y].map(|key| {
         entity
-            .property(picture::X)
+            .property(key)
             .and_then(sue_core::Value::as_i64)
-            .unwrap_or(0),
-        entity
-            .property(picture::Y)
-            .and_then(sue_core::Value::as_i64)
-            .unwrap_or(0),
-    ];
-    let raster = doc::raster(&alone, id)?;
+            .unwrap_or(0)
+    });
+    Some((doc::raster(&alone, id)?.clone(), at))
+}
+
+/// [`shown_alone`] as straight RGBA8 bytes, their width and height.
+fn drawn(
+    arena: &Arena,
+    picture: EntityId,
+    layer: EntityId,
+) -> Option<(Vec<u8>, u32, u32, [i64; 2])> {
+    let (raster, at) = shown_alone(arena, picture, layer)?;
     if raster.format() != PixelFormat::Rgba8 {
         return None;
     }
