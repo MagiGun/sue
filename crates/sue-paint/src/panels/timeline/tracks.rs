@@ -429,6 +429,15 @@ impl SuePaint {
             MenuItem::Separator,
             item("anim.play_range.start"),
             item("anim.play_range.end"),
+            MenuItem::Separator,
+            // As Clip Studio Paint's right click on the timeline offers it.
+            MenuItem::Sub {
+                label: tr!("thumbnail-size"),
+                items: ["none", "smallest", "small", "medium", "large", "largest"]
+                    .iter()
+                    .map(|size| item(&format!("anim.thumbnails.{size}")))
+                    .collect(),
+            },
         ]);
         items
     }

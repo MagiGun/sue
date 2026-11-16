@@ -561,6 +561,8 @@ follow [Semantic Versioning](https://semver.org/).
   Color on Clips. On (as it starts), each track's clips carry its
   layer's palette color: a band along a layer's clip, the line under an
   animation folder's cels.
+- Sue Paint, Timeline: a right click on the frames offers Thumbnail
+  Size, as Clip Studio Paint's does.
 
 ### Changed
 
