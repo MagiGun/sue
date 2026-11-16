@@ -40,7 +40,10 @@ pub(super) fn timeline(tour: &mut Tour<'_>) -> Result<(), String> {
     // keyboard as it comes into sight).
     tour.paint_go(&["dock/menu/layer", "dock/menu"]);
     tour.settle();
-    tour.camera.click(egui::pos2(657.0, 868.0));
+    // Frame 4 of the folder's row, found from where the row was laid
+    // (128 points under its top edge), whatever height it opens at.
+    let row = sue_wm::dock::bottom_row(&tour.camera.ctx).ok_or("the Timeline is open")?;
+    tour.camera.click(egui::pos2(657.0, row.top() + 128.0));
     tour.settle();
     tour.camera.input.push(key(egui::Key::ArrowRight));
     tour.shoot("11d1-sue-paint-timeline-keyboard")?;

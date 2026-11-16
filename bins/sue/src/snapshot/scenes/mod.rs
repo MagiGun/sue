@@ -32,6 +32,7 @@ mod paint_handles;
 mod paint_jobs;
 mod paint_layers;
 mod paint_modifiers;
+mod paint_polish;
 mod paint_saving;
 mod paint_start;
 mod paint_timeline;
@@ -105,6 +106,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_timeline::timeline(tour)?;
     // 11j1 to 11j3. Exports in the background, and Export Timelapse.
     paint_jobs::exports(tour)?;
+    // 11p1. The default layout with the Timeline docked under the canvas.
+    paint_polish::timeline_docked(tour)?;
     paint_view::marks(tour)?;
     paint_canvas_chrome::window(tour)?;
     paint_layers::property(tour)?;
