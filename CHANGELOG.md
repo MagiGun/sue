@@ -13,6 +13,14 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint: a .clip exported from Sue opens in Sue again with
+  everything live: fill, gradient and correction layers, text, vector
+  lines, layer effects, palette colors, rulers, layer comps and the
+  timeline with its animation folders, cels, keyframes, 2D camera and
+  sound. Clip Studio shows those layers as their pixels and the layer
+  color effect as its own; the status bar says what Clip Studio does
+  not read yet.
+
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
   fill (click an area and the gradient runs from its outline inward).

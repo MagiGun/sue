@@ -27,6 +27,9 @@ struct Making<'a> {
     report: Report,
     /// Where each layer made was in the file's tree.
     paths: Vec<(ClipLayerPath, EntityId)>,
+    /// The file's timeline comes along, so its animation and camera
+    /// folders are made as such.
+    timeline: bool,
 }
 
 impl Making<'_> {
@@ -103,8 +106,19 @@ impl Making<'_> {
             }
         }
         entity = styled(entity, layer);
-        let entity = extras::folder_in(entity, layer.content.as_ref());
-        let (entity, lost) = layers::styles_in(entity, layer);
+        let entity = if self.timeline {
+            extras::folder_in(entity, layer.content.as_ref())
+        } else {
+            entity
+        };
+        let (entity, mut lost) = layers::styles_in(entity, layer);
+        // Without the file's timeline, an animation or camera folder is
+        // an ordinary folder.
+        lost |= !self.timeline
+            && matches!(
+                layer.content,
+                Some(ClipContent::AnimationFolder(_) | ClipContent::Camera(_))
+            );
         let canvas = [0, 0, i64::from(self.doc.width), i64::from(self.doc.height)];
         let mask = self.mask(layer, canvas)?;
         Ok(self.finish(layer, entity, mask, outcome, lost))
@@ -205,13 +219,10 @@ impl Making<'_> {
                 entity = entity.with_property(picture::Y, y0);
             }
             if let Some(content) = &layer.content {
-                entity = match layers::on_pixels_in(entity, content, [x0, y0], self.doc.dpi) {
-                    Ok((entity, content_lost)) => {
-                        lost |= content_lost;
-                        entity
-                    }
-                    Err(entity) => entity,
-                };
+                let (made, content_lost) =
+                    layers::on_pixels_in(entity, content, [x0, y0], self.doc.dpi);
+                lost |= content_lost;
+                entity = made;
             }
             (entity, [x0, y0, x1, y1])
         };
@@ -370,6 +381,7 @@ pub fn new_picture(
         edit: Edit::new(label).then(SpawnEntity::new(image)),
         report: Report::default(),
         paths: Vec::new(),
+        timeline: doc.timeline.is_some(),
     };
     making.layers(&doc.root.children, &mut Vec::new())?;
     let Making {
@@ -472,6 +484,7 @@ pub fn into_picture(
         edit: Edit::new(label),
         report: Report::default(),
         paths: Vec::new(),
+        timeline: false,
     };
     let top = making.layers(&doc.root.children, &mut Vec::new())?;
     let mut edit = making.edit;

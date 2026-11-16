@@ -469,6 +469,7 @@ pub(super) fn picture_bytes(doc: &ClipDocument, print: Option<&[u8; 32]>) -> Vec
 ///
 /// # Errors
 /// When the bytes are not such a document, or of a newer version.
+#[cfg(test)]
 pub(super) fn picture_from(bytes: &[u8]) -> Result<ClipDocument, CodecError> {
     picture_and_print(bytes).map(|(doc, _)| doc)
 }
@@ -624,5 +625,20 @@ mod tests {
         let mut bytes = picture_bytes(&ClipDocument::new(4, 4, 72.0), None);
         bytes[0] = VERSION + 1;
         assert!(picture_from(&bytes).is_err());
+    }
+
+    /// A canvas kept by a build before version 3 (no fingerprint of the
+    /// parts after it) still reads, with no fingerprint.
+    #[test]
+    fn a_canvas_kept_as_version_2_still_reads() {
+        for (name, doc) in testkit::documents() {
+            let mut canvas = doc.clone();
+            canvas.root.children.clear();
+            canvas.sue = None;
+            let mut bytes = picture_bytes(&canvas, None);
+            assert_eq!(bytes.pop(), Some(0), "the flag of version 3");
+            bytes[0] = 2;
+            assert_eq!(picture_and_print(&bytes).unwrap(), (canvas, None), "{name}");
+        }
     }
 }

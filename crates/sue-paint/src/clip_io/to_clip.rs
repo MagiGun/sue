@@ -207,7 +207,11 @@ impl Writing<'_> {
                     // raster: Clip Studio gets what they drew.
                     let more = entity.class() != class::LAYER
                         || entity.exts().any(|component| {
-                            component.type_name() != <Foreign as sue_core::ComponentType>::NAME
+                            // Kept data and keyframes (the timeline's)
+                            // go their own way.
+                            let name = component.type_name();
+                            name != <Foreign as sue_core::ComponentType>::NAME
+                                && name != <sue_model::Animation as sue_core::ComponentType>::NAME
                         });
                     let outcome = if more {
                         Outcome::Flattened

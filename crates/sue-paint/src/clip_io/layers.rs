@@ -22,7 +22,7 @@ use sue_io::clip::{
 use sue_model::Response;
 use sue_model::picture;
 
-use crate::brush::{Finish, Sample, Tip};
+use crate::brush::{Finish, SAME, Sample, Tip};
 use crate::doc;
 use crate::effects;
 use crate::filters::Filter;
@@ -327,7 +327,8 @@ fn vector_out(lines: &[Line], at: [f32; 2]) -> (ClipContent, bool) {
             // brush) and the copies a symmetry ruler made have no place:
             // the line comes back from its points.
             lost |= line.engine.is_some()
-                || !line.copies.is_empty()
+                || line.copies.iter().any(|copy| *copy != SAME)
+                || line.finish != Finish::default()
                 || line.samples.iter().any(|sample| {
                     sample.speed != 0.0 || sample.tilt != 0.0 || sample.lean != [0.0, 0.0]
                 })
@@ -653,19 +654,19 @@ fn pixels(points: f32, dpi: f64) -> f32 {
 
 /// `entity` (a raster layer whose pixels sit at `offset` on a picture of
 /// `dpi`) made the layer `content` says it is, when that rides on pixels
-/// (text, vector lines), and whether something was lost. `None` leaves
-/// it a raster layer.
+/// (text, vector lines), and whether something was lost; any other
+/// content leaves it as it is.
 pub(super) fn on_pixels_in(
     entity: Entity,
     content: &ClipContent,
     offset: [i64; 2],
     dpi: f64,
-) -> Result<(Entity, bool), Entity> {
+) -> (Entity, bool) {
     let at = offset.map(|value| value as f32);
     match content {
-        ClipContent::Text(text) => Ok(text_in(entity, text, at, dpi)),
-        ClipContent::Vector(lines) => Ok(vector_in(entity, lines, at)),
-        _ => Err(entity),
+        ClipContent::Text(text) => text_in(entity, text, at, dpi),
+        ClipContent::Vector(lines) => vector_in(entity, lines, at),
+        _ => (entity, false),
     }
 }
 

@@ -30,6 +30,8 @@ mod to_clip;
 mod to_sue;
 
 #[cfg(test)]
+mod kinds_tests;
+#[cfg(test)]
 mod tests;
 
 use sue_core::ReversibleTransaction;

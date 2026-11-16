@@ -132,13 +132,31 @@ impl Report {
                 names = listed(&approximated)
             ));
         }
-        let live = self.names(Outcome::Live);
+        let layers_as = |outcome: Outcome| -> Vec<&str> {
+            self.lines
+                .iter()
+                .filter(|line| line.outcome == outcome)
+                .map(|line| line.name.as_str())
+                .collect()
+        };
+        let live = layers_as(Outcome::Live);
         if !live.is_empty() {
             parts.push(tr!("clip-report-live", names = listed(&live)));
         }
-        let sue_only = self.names(Outcome::SueOnly);
+        let sue_only = layers_as(Outcome::SueOnly);
         if !sue_only.is_empty() {
             parts.push(tr!("clip-report-sue-only", names = listed(&sue_only)));
+        }
+        // The picture's own parts have no pixels: Clip Studio does not
+        // read them yet, Sue does.
+        let for_sue: Vec<&str> = self
+            .parts
+            .iter()
+            .filter(|line| matches!(line.outcome, Outcome::Live | Outcome::SueOnly))
+            .map(|line| line.name.as_str())
+            .collect();
+        if !for_sue.is_empty() {
+            parts.push(tr!("clip-report-parts-for-sue", names = listed(&for_sue)));
         }
         let kept = self.names(Outcome::Kept);
         if !kept.is_empty() {
@@ -222,5 +240,19 @@ mod tests {
         report.stale_copy = false;
         assert!(report.exact());
         assert_eq!(report.summary(), "1 layer converted exactly");
+        report.lines = vec![
+            line("Ink", Outcome::Exact),
+            line("Words", Outcome::Live).lost(true),
+            line("Warm", Outcome::SueOnly),
+        ];
+        report.parts = vec![line("the timeline", Outcome::Live)];
+        assert!(!report.exact());
+        assert_eq!(
+            report.summary(),
+            "1 layer converted exactly; approximated: Words; in Clip Studio as \
+             their pixels, live again when Sue opens the file: Words; kept for \
+             Sue only, empty in Clip Studio: Warm; for Sue, not read by Clip \
+             Studio yet: the timeline"
+        );
     }
 }

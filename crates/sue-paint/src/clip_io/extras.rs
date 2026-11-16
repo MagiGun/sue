@@ -182,9 +182,14 @@ fn comps_out(
     }
 }
 
-/// A direction `angle` (radians) as a second point one pixel from `at`.
+/// A direction `angle` (radians) as a second point a long way from
+/// `at`, so the angle read back from the two is as near as can be.
 fn toward(at: [f32; 2], angle: f32) -> [f32; 2] {
-    [at[0] + angle.cos(), at[1] + angle.sin()]
+    let (sin, cos) = f64::from(angle).sin_cos();
+    [
+        (f64::from(at[0]) + cos * 1000.0) as f32,
+        (f64::from(at[1]) + sin * 1000.0) as f32,
+    ]
 }
 
 fn rulers_out(

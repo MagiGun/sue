@@ -3503,3 +3503,4 @@ clip-report-sue-only = kept for Sue only, empty in Clip Studio: { $names }
 clip-report-timeline = the timeline
 clip-report-comps = the layer comps
 clip-report-rulers = the rulers
+clip-report-parts-for-sue = for Sue, not read by Clip Studio yet: { $names }
