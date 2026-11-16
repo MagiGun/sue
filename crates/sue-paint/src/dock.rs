@@ -1761,7 +1761,7 @@ impl SuePaint {
                 // Never narrower than its header's menu, roll up, dock
                 // again and close buttons, so a narrow palette (the tools,
                 // Tool Sliders) can still be closed by its X.
-                let buttons = Density::Compact.icon_button() * 4.0;
+                let buttons = Density::Compact.icon_button() * 3.0 + 44.0;
                 window.resizable(true).min_size(vec2(
                     palette.min_width().min(180.0).max(buttons),
                     palette.min_height().min(120.0),
@@ -1851,16 +1851,29 @@ impl SuePaint {
         } else {
             area
         };
-        let group = lone_group(palette, shown, header);
+        let mut group = lone_group(palette, shown, header);
+        // A palette without a header of its own (the tools, the command
+        // bar) gets one here, a row above it, so its first buttons are
+        // never under roll up, dock again and close; the row's free part
+        // moves the window.
+        let headless = !palette.headed() && !rolled;
+        if headless {
+            group.body.min.y = (area.top() + TAB_STRIP).min(group.body.max.y);
+        }
         // The header's room for the buttons, as the header itself.
+        let pill_left = if headless { 0.0 } else { header };
         ui.painter().rect_filled(
             Rect::from_min_max(
-                pos2(area.left() + header, area.top()),
+                pos2(area.left() + pill_left, area.top()),
                 pos2(area.right(), area.top() + TAB_STRIP),
             ),
             0.0,
             theme.pill,
         );
+        if headless && self.ready {
+            let grab = Rect::from_min_size(area.min, vec2(header, TAB_STRIP));
+            self.dock.grip(ui, grab, palette, "floating-header");
+        }
         if rolled {
             if self.ready {
                 let grab = title_bar(palette, chrome_rect(&group), None);

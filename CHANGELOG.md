@@ -1068,7 +1068,8 @@ follow [Semantic Versioning](https://semver.org/).
   once, and Enter registers.
 - Sue Paint: a double click on a floating palette's title rolls it up
   and down; a narrow floating palette (the tools, Tool Sliders) keeps
-  its close button inside its window.
+  its close button inside its window, and a floating tool palette has a
+  header of its own, so its buttons no longer cover the first tools.
 - Sue Paint: folded icons keep the groups of their tabs, with a line
   between one group and the next, and every icon opens its palette
   when both sides are folded.

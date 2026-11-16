@@ -1818,6 +1818,17 @@ fn b13_b14_the_tool_palette_floats_widens_docks_and_narrows() {
     walk.palette_menu("Tool");
     walk.click_text("Float in a Window");
     let window = walk.float_rect("tool").expect("the Tool palette floats");
+    // Its roll up, dock again and close buttons stand in a header of
+    // their own, over none of its tools.
+    let buttons: Vec<Pos2> = (0..3)
+        .map(|index| walk.float_button("tool", index).expect("a header button"))
+        .collect();
+    let header = buttons.iter().map(|at| at.y).fold(0.0, f32::max) + 8.0;
+    let zoom = walk.expect("Hand (H)");
+    assert!(
+        zoom.top() > header && buttons.iter().all(|at| !zoom.contains(*at)),
+        "the first row {zoom:?} is clear of the header {buttons:?}"
+    );
     let corner = window.right_bottom() - vec2(3.0, 3.0);
     walk.drag(corner, corner + vec2(120.0, 0.0));
     assert!(
