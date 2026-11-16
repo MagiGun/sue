@@ -1355,3 +1355,698 @@ fn step_00_21_47_item_bank_keeps_pictures_to_put_on_the_canvas() {
     undo(&mut paint);
     assert!(arena_bytes(&paint) == before);
 }
+
+// B. Tools.
+
+/// The window title Sue Paint gives now: it ends with the zoom.
+fn title(paint: &PaintDriver) -> String {
+    paint
+        .runtime
+        .applets
+        .get(&AppletId::new(sue_paint::ID).unwrap())
+        .and_then(|applet| applet.window_title(&paint.runtime.engine.world.arena))
+        .unwrap_or_default()
+}
+
+/// The sub tools the Sub Tool palette lists for `tool` (a command), with
+/// its group tabs.
+fn sub_tools_of(paint: &mut PaintDriver, tool: &str) -> Vec<String> {
+    paint.command(tool);
+    paint.settle(3);
+    paint.click_text("Sub Tool");
+    let mut seen: Vec<String> = paint.texts.iter().map(|(text, _)| text.clone()).collect();
+    seen.sort();
+    seen.dedup();
+    seen
+}
+
+/// Picks the sub tool `sub` of `tool` and returns the rows its Tool
+/// Property shows.
+fn rows_of(paint: &mut PaintDriver, tool: &str, sub: &str) -> Vec<String> {
+    sub_tools_of(paint, tool);
+    if paint.rect_of(sub).is_none() {
+        // In the other group: its tab first.
+        let tabs: Vec<String> = paint.texts.iter().map(|(text, _)| text.clone()).collect();
+        for tab in tabs {
+            paint.click_text(&tab);
+            if paint.rect_of(sub).is_some() {
+                break;
+            }
+        }
+    }
+    paint.click_text(sub);
+    tool_property_rows(paint)
+}
+
+#[test]
+fn step_00_22_14_every_tool_of_the_video_is_on_the_tool_palette() {
+    let mut paint = PaintDriver::new("fg-tool-palette");
+    let seen = names(&mut paint);
+    for tool in [
+        "Zoom",
+        "Operation",
+        "Move Layer",
+        "Selection",
+        "Auto Select",
+        "Eyedropper",
+        "Pen",
+        "Sketch",
+        "Brush",
+        "Airbrush",
+        "Decoration",
+        "Eraser",
+        "Blend",
+        "Liquify",
+        "Fill",
+        "Gradient",
+        "Figure",
+        "Frame Border",
+        "Ruler",
+        "Text",
+        "Balloon",
+        "Correct Line",
+    ] {
+        assert!(
+            seen.iter()
+                .any(|name| name == tool || name.starts_with(&format!("{tool} ("))),
+            "{tool} in {seen:?}"
+        );
+    }
+}
+
+#[test]
+fn step_00_22_19_zoom_tool_and_ctrl_plus_minus() {
+    let mut paint = PaintDriver::new("fg-zoom");
+    let start = title(&paint);
+    assert!(
+        start.ends_with("%) - Sue Paint") || start.contains('%'),
+        "{start}"
+    );
+    // The Zoom tool's Zoom In: a click on the canvas zooms in.
+    let subs = sub_tools_of(&mut paint, "tool.zoom");
+    shows_all(&subs, &["Zoom In", "Zoom Out"], "Zoom tool");
+    paint.click_text("Zoom In");
+    let at = middle(&paint);
+    click_with(&mut paint, at, egui::Modifiers::NONE);
+    let zoomed = title(&paint);
+    assert_ne!(zoomed, start, "zoomed in");
+    // 00:22:36 Ctrl with minus and plus.
+    paint.step(vec![key(egui::Key::Minus, egui::Modifiers::COMMAND)]);
+    paint.settle(3);
+    assert_ne!(title(&paint), zoomed, "Ctrl+minus");
+    let out = title(&paint);
+    paint.step(vec![key(egui::Key::Plus, egui::Modifiers::COMMAND)]);
+    paint.settle(3);
+    assert_ne!(title(&paint), out, "Ctrl+plus");
+}
+
+#[test]
+fn step_00_22_41_hand_space_and_rotate() {
+    let mut paint = PaintDriver::new("fg-hand");
+    let subs = sub_tools_of(&mut paint, "tool.hand");
+    shows_all(&subs, &["Hand", "Rotate"], "Hand tool");
+    // Rotate turns the view: the title stays, the view's turn is a
+    // command of its own too.
+    label_of("view.rotate_left");
+    label_of("view.rotate_right");
+    label_of("view.rotate_reset");
+}
+
+#[test]
+fn step_00_22_51_operation_sub_tools_and_select_layer() {
+    let mut paint = PaintDriver::new("fg-operation");
+    let lower = inked_layer(&mut paint);
+    // The upper layer holds nothing at the middle.
+    paint.step(vec![key(
+        egui::Key::N,
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+    )]);
+    paint.settle(4);
+    let subs = sub_tools_of(&mut paint, "tool.operation");
+    shows_all(
+        &subs,
+        &["Object", "Select layer", "Light table", "Edit timeline"],
+        "Operation",
+    );
+    // Select layer: a click on the stroke makes its layer current, so
+    // the next layer command acts on it.
+    paint.click_text("Select layer");
+    let at = middle(&paint);
+    click_with(&mut paint, at, egui::Modifiers::NONE);
+    paint.command("layer.toggle.lock");
+    paint.settle(3);
+    assert_eq!(
+        entity(&paint, lower)
+            .property(sue_model::picture::LOCKED)
+            .and_then(sue_core::Value::as_bool),
+        Some(true),
+        "the stroke's layer was picked"
+    );
+}
+
+#[test]
+fn step_00_23_17_move_layer_moves_the_current_layer() {
+    let mut paint = PaintDriver::new("fg-move-layer");
+    let layer = inked_layer(&mut paint);
+    let subs = sub_tools_of(&mut paint, "tool.move_layer");
+    shows_all(&subs, &["Move Layer"], "Move layer");
+    let at = middle(&paint);
+    let offset =
+        move |paint: &PaintDriver| sue_model::picture::LayerStyle::of(entity(paint, layer)).offset;
+    undo_pair(
+        &mut paint,
+        "move layer",
+        |paint| stroke(paint, at, at + vec2(50.0, 30.0)),
+        move |paint| offset(paint) != [0, 0],
+    );
+}
+
+#[test]
+fn step_00_23_29_selection_tools_modes_and_ctrl_d() {
+    let mut paint = PaintDriver::new("fg-selection");
+    let subs = sub_tools_of(&mut paint, "tool.selection");
+    shows_all(
+        &subs,
+        &[
+            "Rectangle",
+            "Ellipse",
+            "Lasso",
+            "Polyline",
+            "Selection pen",
+            "Erase selection",
+        ],
+        "Selection",
+    );
+    // FGV-20: aspect, adjust angle after fixed, anti-aliasing.
+    let rows = rows_of(&mut paint, "tool.selection", "Rectangle");
+    shows_all(
+        &rows,
+        &[
+            "Aspect",
+            "Adjust angle after fixed",
+            "Anti-aliasing",
+            "Shift adds, Alt subtracts, both intersect",
+        ],
+        "Rectangle",
+    );
+    // A rectangle, then Fill fills only inside it.
+    let at = middle(&paint);
+    stroke(&mut paint, at - vec2(40.0, 30.0), at + vec2(40.0, 30.0));
+    paint.step(vec![key(
+        egui::Key::N,
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+    )]);
+    paint.settle(4);
+    let layer = layers(&paint).last().unwrap().id;
+    paint.command("edit.fill");
+    paint.settle(3);
+    let inside = ink(&paint, layer);
+    let all = 1600_u64 * 1200 * 255;
+    assert!(inside > 0 && inside < all / 4, "{inside}");
+    undo(&mut paint);
+    // Ctrl+D lets go of it: Fill now fills everything.
+    paint.step(vec![key(egui::Key::D, egui::Modifiers::COMMAND)]);
+    paint.settle(3);
+    paint.command("edit.fill");
+    paint.settle(3);
+    assert!(ink(&paint, layer) > all / 2, "deselected");
+}
+
+#[test]
+fn step_00_24_24_auto_select_close_gap_tolerance_and_area_scaling() {
+    let mut paint = PaintDriver::new("fg-auto-select");
+    let subs = sub_tools_of(&mut paint, "tool.auto_select");
+    shows_all(
+        &subs,
+        &[
+            "Refer Only Editing Layer",
+            "Refer Other Layers",
+            "Refer Reference Layers",
+        ],
+        "Auto Select",
+    );
+    let rows = rows_of(&mut paint, "tool.auto_select", "Refer Other Layers");
+    shows_all(
+        &rows,
+        &[
+            "Apply to connected pixels only",
+            "Close gap",
+            "Tolerance",
+            "Area scaling",
+            "Refer multiple",
+            "Anti-aliasing",
+        ],
+        "Auto Select",
+    );
+    // A closed shape, then a click inside it selects inside only.
+    let ring = inked_layer(&mut paint);
+    let at = middle(&paint);
+    paint.command("tool.pen");
+    paint.settle(2);
+    for (from, to) in [
+        (vec2(-60.0, -40.0), vec2(60.0, -40.0)),
+        (vec2(60.0, -40.0), vec2(60.0, 40.0)),
+        (vec2(60.0, 40.0), vec2(-60.0, 40.0)),
+        (vec2(-60.0, 40.0), vec2(-60.0, -40.0)),
+    ] {
+        stroke(&mut paint, at + from, at + to);
+    }
+    let _ = ring;
+    paint.command("tool.auto_select");
+    paint.settle(2);
+    click_with(&mut paint, at + vec2(0.0, 20.0), egui::Modifiers::NONE);
+    paint.step(vec![key(
+        egui::Key::N,
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+    )]);
+    paint.settle(4);
+    let filled = layers(&paint).last().unwrap().id;
+    paint.command("edit.fill");
+    paint.settle(3);
+    let got = ink(&paint, filled);
+    let all = 1600_u64 * 1200 * 255;
+    assert!(got > 0 && got < all / 4, "inside the shape only: {got}");
+}
+
+#[test]
+fn step_00_26_44_obtain_layer_color_on_an_empty_spot_gives_transparent() {
+    let mut paint = PaintDriver::new("fg-eyedropper");
+    let layer = inked_layer(&mut paint);
+    let subs = sub_tools_of(&mut paint, "tool.eyedropper");
+    shows_all(
+        &subs,
+        &["Obtain Display Color", "Obtain Layer Color"],
+        "Eyedropper",
+    );
+    paint.click_text("Obtain Layer Color");
+    let at = middle(&paint);
+    click_with(&mut paint, at + vec2(0.0, 120.0), egui::Modifiers::NONE);
+    // The pen now draws transparent: it erases.
+    let inked = ink(&paint, layer);
+    paint.command("tool.pen");
+    paint.settle(2);
+    stroke(&mut paint, at - vec2(30.0, 0.0), at + vec2(30.0, 0.0));
+    assert!(ink(&paint, layer) < inked, "transparent was picked");
+    // 00:26:29 Alt held with a pen picks a color off the canvas, and the
+    // pen draws with it again.
+    drag_with(
+        &mut paint,
+        at + vec2(50.0, 0.0),
+        at + vec2(50.0, 0.0),
+        egui::Modifiers::ALT,
+    );
+    let after = ink(&paint, layer);
+    stroke(&mut paint, at - vec2(30.0, 20.0), at + vec2(30.0, 20.0));
+    assert!(ink(&paint, layer) > after, "Alt picked a color that inks");
+}
+
+#[test]
+fn step_00_27_26_drawing_tools_and_their_sub_tool_groups() {
+    let mut paint = PaintDriver::new("fg-drawing-tools");
+    let cases: [(&str, &[&str]); 7] = [
+        ("tool.pick.pen", &["Pen", "Marker", "G-pen", "Mapping pen"]),
+        ("tool.pick.pencil", &["Pencil", "Pastel"]),
+        (
+            "tool.pick.brush",
+            &["Watercolor", "Thick paint", "India ink"],
+        ),
+        ("tool.pick.airbrush", &["Soft", "Spray", "Droplet"]),
+        ("tool.pick.decoration", &["Decoration", "Ribbon"]),
+        ("tool.eraser", &["Hard", "Soft", "Vector", "Kneaded eraser"]),
+        ("tool.blend", &["Blur", "Finger Tip", "Copy stamp"]),
+    ];
+    for (tool, wanted) in cases {
+        let seen = sub_tools_of(&mut paint, tool);
+        shows_all(&seen, wanted, tool);
+    }
+    // 00:31:25 the ribbon, on the Spray.
+    let rows = rows_of(&mut paint, "tool.pick.airbrush", "Spray");
+    shows_all(&rows, &["Lay as a ribbon", "Scatter", "Spacing"], "Spray");
+}
+
+#[test]
+fn step_00_28_09_brush_settings_categories_of_sub_tool_detail() {
+    let mut paint = PaintDriver::new("fg-brush-detail");
+    paint.command("tool.pick.brush");
+    paint.settle(3);
+    paint.command("window.sub_tool_detail");
+    paint.settle(6);
+    let seen = names(&mut paint);
+    shows_all(
+        &seen,
+        &[
+            "Brush Size",
+            "Ink",
+            "Anti-aliasing",
+            "Brush Tip",
+            "Stroke",
+            "Texture",
+            "Starting and Ending",
+            "Color Jitter",
+            "Correction",
+        ],
+        "Sub Tool Detail categories",
+    );
+    // FGV-13 and the Ink, Stroke and Correction rows of the video.
+    let rows = tool_property_rows(&mut paint);
+    shows_all(
+        &rows,
+        &[
+            "Hardness",
+            "Color mixing",
+            "Spacing",
+            "Paper grain",
+            "Stabilization",
+            "Adjust by speed",
+            "Starting",
+            "Ending",
+        ],
+        "brush rows",
+    );
+}
+
+#[test]
+fn step_00_33_55_vector_eraser_erases_up_to_the_intersection_or_whole_lines() {
+    let mut paint = PaintDriver::new("fg-vector-eraser");
+    let rows = rows_of(&mut paint, "tool.eraser", "Vector");
+    shows_all(&rows, &["Erase up to intersection"], "vector eraser");
+    paint.command("layer.new.vector");
+    paint.settle(4);
+    let layer = layers(&paint).last().unwrap().id;
+    let at = middle(&paint);
+    paint.command("tool.pen");
+    paint.settle(2);
+    stroke(&mut paint, at - vec2(60.0, 0.0), at + vec2(60.0, 0.0));
+    assert_eq!(line_count(&paint, layer), 1);
+    paint.command("tool.eraser");
+    paint.settle(2);
+    paint.click_text("Vector");
+    let before = arena_bytes(&paint);
+    stroke(&mut paint, at - vec2(0.0, 30.0), at + vec2(0.0, 30.0));
+    assert_ne!(arena_bytes(&paint), before, "the eraser touched the line");
+    undo(&mut paint);
+    assert!(arena_bytes(&paint) == before);
+}
+
+#[test]
+fn step_00_34_22_brush_size_dynamics_pressure_tilt_velocity_random() {
+    let mut paint = PaintDriver::new("fg-dynamics");
+    paint.command("tool.pick.pen");
+    paint.settle(3);
+    show_tool_property(&mut paint);
+    let rows = tool_property_rows(&mut paint);
+    assert!(
+        rows.iter()
+            .any(|row| row == "Brush Size Dynamics: what the pen changes")
+    );
+    // Back to the top of Tool Property, where the Brush Size row is.
+    let tab = paint.rect_of("Tool Property").unwrap();
+    for _ in 0..20 {
+        paint.step(vec![
+            egui::Event::PointerMoved(tab.center() + vec2(0.0, 160.0)),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, 400.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Wheel,
+            },
+        ]);
+    }
+    paint.settle(3);
+    click_named(&mut paint, "Brush Size Dynamics: what the pen changes");
+    paint.settle(4);
+    let seen = names(&mut paint);
+    shows_all(
+        &seen,
+        &["Pen pressure", "Tilt", "Velocity", "Random"],
+        "Brush Size Dynamics",
+    );
+}
+
+#[test]
+fn step_00_34_40_fill_settings_and_sub_tools() {
+    let mut paint = PaintDriver::new("fg-fill");
+    let subs = sub_tools_of(&mut paint, "tool.pick.fill");
+    shows_all(
+        &subs,
+        &[
+            "Refer Only Editing Layer",
+            "Refer Other Layers",
+            "Close and fill",
+            "Paint unpainted area",
+        ],
+        "Fill",
+    );
+    let rows = rows_of(&mut paint, "tool.pick.fill", "Close and fill");
+    shows_all(
+        &rows,
+        &[
+            "Apply to connected pixels only",
+            "Close gap",
+            "Tolerance",
+            "Area scaling",
+            "Refer multiple",
+            "Target color",
+            "Fill up to vector path",
+        ],
+        "Fill",
+    );
+    // A click fills the empty layer, one undo step.
+    paint.step(vec![key(
+        egui::Key::N,
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+    )]);
+    paint.settle(4);
+    let layer = layers(&paint).last().unwrap().id;
+    let subs = sub_tools_of(&mut paint, "tool.pick.fill");
+    assert!(!subs.is_empty());
+    paint.click_text("Refer Only Editing Layer");
+    let at = middle(&paint);
+    undo_pair(
+        &mut paint,
+        "fill",
+        |paint| click_with(paint, at, egui::Modifiers::NONE),
+        move |paint| ink(paint, layer) > 0,
+    );
+}
+
+#[test]
+fn step_00_35_30_gradient_sub_tools_shapes_and_edge_process() {
+    let mut paint = PaintDriver::new("fg-gradient");
+    let subs = sub_tools_of(&mut paint, "tool.pick.gradient");
+    shows_all(
+        &subs,
+        &[
+            "Gradient",
+            "Contour line",
+            "Drawing Color to Transparent",
+            "Main to Sub Color",
+            "Ellipse",
+        ],
+        "Gradient",
+    );
+    let rows = rows_of(
+        &mut paint,
+        "tool.pick.gradient",
+        "Drawing Color to Transparent",
+    );
+    shows_all(
+        &rows,
+        &[
+            "Edge process",
+            "Step of angle",
+            "Where to create",
+            "Gradient Stops",
+            "Shape",
+        ],
+        "Gradient",
+    );
+    paint.step(vec![key(
+        egui::Key::N,
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+    )]);
+    paint.settle(4);
+    let count = layers(&paint).len();
+    let at = middle(&paint);
+    let before = arena_bytes(&paint);
+    stroke(&mut paint, at - vec2(0.0, 60.0), at + vec2(0.0, 60.0));
+    assert_ne!(arena_bytes(&paint), before, "a gradient was laid");
+    assert!(layers(&paint).len() >= count);
+    undo(&mut paint);
+    assert!(arena_bytes(&paint) == before);
+}
+
+#[test]
+fn step_00_36_03_figure_direct_draw_and_line_groups() {
+    let mut paint = PaintDriver::new("fg-figure");
+    let subs = sub_tools_of(&mut paint, "tool.pick.figure");
+    shows_all(
+        &subs,
+        &[
+            "Direct draw",
+            "Saturated Line",
+            "Speed Line",
+            "Straight Line",
+            "Rectangle",
+            "Ellipse",
+            "Polyline",
+            "Curve",
+            "Continuous Curve",
+            "Bezier Curve",
+            "Polygon",
+        ],
+        "Figure",
+    );
+    paint.click_text("Rectangle");
+    let layer = layers(&paint).last().unwrap().id;
+    let at = middle(&paint);
+    undo_pair(
+        &mut paint,
+        "rectangle",
+        |paint| stroke(paint, at - vec2(40.0, 30.0), at + vec2(40.0, 30.0)),
+        move |paint| ink(paint, layer) > 0,
+    );
+}
+
+#[test]
+fn step_00_36_43_frame_border_tools_make_panels() {
+    let mut paint = PaintDriver::new("fg-frame");
+    let subs = sub_tools_of(&mut paint, "tool.pick.frame");
+    shows_all(
+        &subs,
+        &["Rectangle Frame", "Polyline frame", "Frame Border Division"],
+        "Frame Border",
+    );
+    paint.click_text("Rectangle Frame");
+    let count = layers(&paint).len();
+    let at = middle(&paint);
+    undo_pair(
+        &mut paint,
+        "frame",
+        |paint| stroke(paint, at - vec2(80.0, 60.0), at + vec2(80.0, 60.0)),
+        move |paint| layers(paint).len() > count,
+    );
+}
+
+#[test]
+fn step_00_37_26_ruler_sub_tools_and_snapping() {
+    let mut paint = PaintDriver::new("fg-ruler");
+    let subs = sub_tools_of(&mut paint, "tool.pick.ruler");
+    shows_all(
+        &subs,
+        &[
+            "Linear Ruler",
+            "Curve Ruler",
+            "Figure Ruler",
+            "Ruler Pen",
+            "Special Ruler",
+            "Perspective Ruler",
+            "Symmetrical Ruler",
+        ],
+        "Ruler",
+    );
+    paint.click_text("Linear Ruler");
+    let at = middle(&paint);
+    let before = arena_bytes(&paint);
+    stroke(&mut paint, at - vec2(80.0, 0.0), at + vec2(80.0, 0.0));
+    assert_ne!(arena_bytes(&paint), before, "a ruler was laid");
+    // A pen line started near it follows it.
+    let layer = layers(&paint).last().unwrap().id;
+    let inked = ink(&paint, layer);
+    paint.command("tool.pick.pen");
+    paint.settle(2);
+    stroke(&mut paint, at + vec2(-40.0, 4.0), at + vec2(40.0, 30.0));
+    assert!(ink(&paint, layer) > inked);
+    undo(&mut paint);
+}
+
+#[test]
+fn step_00_37_37_text_font_and_justify() {
+    let mut paint = PaintDriver::new("fg-text");
+    let rows = rows_of(&mut paint, "tool.pick.text", "Text");
+    shows_all(
+        &rows,
+        &["Font:", "Justify:", "Direction", "Size", "Line spacing"],
+        "Text",
+    );
+    let count = layers(&paint).len();
+    let at = middle(&paint);
+    click_with(&mut paint, at, egui::Modifiers::NONE);
+    paint.step(vec![egui::Event::Text("Hi".into())]);
+    paint.settle(3);
+    paint.step(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    paint.settle(4);
+    assert!(
+        layers(&paint).len() > count,
+        "a text layer: {}",
+        said(&paint)
+    );
+}
+
+#[test]
+fn step_00_37_45_balloon_and_its_tail() {
+    let mut paint = PaintDriver::new("fg-balloon");
+    let subs = sub_tools_of(&mut paint, "tool.pick.balloon");
+    shows_all(
+        &subs,
+        &[
+            "Balloon",
+            "Balloon Tail",
+            "Ellipse Balloon",
+            "Flash Balloon",
+            "Balloon Pen",
+        ],
+        "Balloon",
+    );
+    paint.click_text("Ellipse Balloon");
+    let count = layers(&paint).len();
+    let at = middle(&paint);
+    undo_pair(
+        &mut paint,
+        "balloon",
+        |paint| stroke(paint, at - vec2(60.0, 40.0), at + vec2(60.0, 40.0)),
+        move |paint| layers(paint).len() > count,
+    );
+    let rows = rows_of(&mut paint, "tool.pick.balloon", "Ellipse Balloon");
+    shows_all(&rows, &["Line width"], "Balloon");
+}
+
+#[test]
+fn step_00_37_57_correct_line_and_remove_dust() {
+    let mut paint = PaintDriver::new("fg-correct-line");
+    let subs = sub_tools_of(&mut paint, "tool.correct_line");
+    shows_all(
+        &subs,
+        &[
+            "Correct Line",
+            "Remove dust",
+            "Control point",
+            "Pinch vector line",
+            "Simplify vector line",
+            "Connect vector lines",
+            "Adjust line width",
+            "Redraw vector line",
+            "Redraw vector line width",
+        ],
+        "Correct Line",
+    );
+    let rows = rows_of(&mut paint, "tool.correct_line", "Pinch vector line");
+    shows_all(&rows, &["Fix end", "Pinch level", "Effect range"], "Pinch");
+    // Adjust line width on a vector line changes the line.
+    paint.command("layer.new.vector");
+    paint.settle(4);
+    let at = middle(&paint);
+    paint.command("tool.pen");
+    paint.settle(2);
+    stroke(&mut paint, at - vec2(60.0, 0.0), at + vec2(60.0, 0.0));
+    rows_of(&mut paint, "tool.correct_line", "Adjust line width");
+    let before = arena_bytes(&paint);
+    stroke(&mut paint, at - vec2(30.0, 0.0), at + vec2(30.0, 0.0));
+    assert_ne!(arena_bytes(&paint), before, "the width changed");
+    undo(&mut paint);
+    assert!(arena_bytes(&paint) == before);
+    // Remove dust on a raster layer: specks go.
+    let rows = rows_of(&mut paint, "tool.correct_line", "Remove dust");
+    shows_all(&rows, &["Dust size"], "Remove dust");
+}
