@@ -1332,14 +1332,17 @@ fn pa_0357_a_camera_folder_holds_the_animation_and_keys_by_dragging() {
     let at = inside(&paint);
     drag_with(&mut paint, at, at + vec2(60.0, 0.0), egui::Modifiers::NONE);
     let sequence = timeline(&paint);
-    let track = sequence
-        .tracks
-        .iter()
-        .find(|track| sue_paint::anim::setup::is_camera_track(track))
-        .expect("a camera track");
-    let _ = track;
+    assert!(
+        sequence
+            .tracks
+            .iter()
+            .any(sue_paint::anim::setup::is_camera_track),
+        "a camera track"
+    );
     let keys = sue_paint::anim::motion::key_times(arena(&paint), camera);
-    assert!(keys.len() >= 2, "keys at frames 1 and 9: {keys:?}");
+    // One key a drag: frames 1 and 9, apart.
+    assert_eq!(keys.len(), 2, "keys at frames 1 and 9: {keys:?}");
+    assert!(keys[0] < keys[1], "{keys:?}");
     let texts = paint.settle(2);
     assert!(
         track_row(&texts, "Camera 1").is_some(),

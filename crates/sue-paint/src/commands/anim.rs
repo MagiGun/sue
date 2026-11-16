@@ -762,12 +762,12 @@ fn label(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     }
 }
 
-/// A track label at the frame shown (the argument names its kind).
 /// A named label on the current track at the frame shown, in a dialog.
 fn track_note(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.ask_track_note(cx);
 }
 
+/// A track label at the frame shown (the argument names its kind).
 fn track_label(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
     paint.timeline_track_label(cx, call.name.trim_start_matches("anim.track_label."));
 }
