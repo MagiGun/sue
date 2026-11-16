@@ -1,7 +1,8 @@
 //! The brush sub tools are Sue's built-in presets (`sue_brush::presets`)
-//! and paint as the sub tools of 0.0.75 did: the brush of each is the one
-//! that Sue wrote (`crates/sue-paint/tests/golden/tips.txt`, package
-//! P0-4), which this file only reads.
+//! and paint as the sub tools of 0.0.75 did, but for those tuned in 0.0.8
+//! (`sue_brush::presets::RETUNED`): the brush of each is the one that Sue
+//! wrote (`crates/sue-paint/tests/golden/tips.txt`, package P0-4), which
+//! this file only reads.
 
 use sue_picture::tools::Tool;
 
@@ -40,8 +41,25 @@ fn every_brush_sub_tool_paints_as_in_0_0_75() {
             })
             .collect();
         assert_eq!(names, old_names, "{tool:?}: the same sub tools in order");
-        for (sub, (name, text)) in subs.iter().zip(&old) {
-            assert_eq!(sub.tip.to_text(), *text, "{name}");
+        let presets = sue_brush::presets::of_tool(match tool {
+            Tool::Pen => "pen",
+            Tool::Pencil => "pencil",
+            Tool::Brush => "brush",
+            Tool::Airbrush => "airbrush",
+            Tool::Decoration => "decoration",
+            _ => "eraser",
+        });
+        for ((sub, (name, text)), preset) in subs.iter().zip(&old).zip(&presets) {
+            // The brushes tuned in 0.0.8 paint as their tuning says, on
+            // purpose (`sue_brush::presets::RETUNED` says why).
+            if sue_brush::presets::RETUNED
+                .iter()
+                .any(|(id, _)| *id == preset.id)
+            {
+                assert_ne!(sub.tip.to_text(), *text, "{name} was retuned");
+            } else {
+                assert_eq!(sub.tip.to_text(), *text, "{name}");
+            }
             checked += 1;
         }
     }

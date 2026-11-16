@@ -841,6 +841,66 @@ pub fn builtin() -> Vec<BrushPreset> {
     .collect()
 }
 
+/// The brushes tuned in 0.0.8 (package "Brush presets tuned") so
+/// each has the character its name promises: they no longer paint
+/// as their 0.0.75 sub tools did, on purpose. Each with why.
+pub const RETUNED: &[(&str, &str)] = &[
+    ("sue.pen.grainy_g_pen", "its grain was too faint to see"),
+    ("sue.pen.calligraphy", "a flat nib, not a round tip"),
+    ("sue.pen.felt_pen", "a felt pen's ink is not quite opaque"),
+    (
+        "sue.pen.flat_marker",
+        "a chisel tip and a marker's even, see-through ink",
+    ),
+    ("sue.pencil.pencil", "graphite grain from the paper's tooth"),
+    (
+        "sue.pencil.mechanical_pencil",
+        "graphite grain from the paper's tooth",
+    ),
+    ("sue.pencil.charcoal", "a softer, darker grain"),
+    (
+        "sue.pencil.crayon",
+        "waxy grain that leaves specks of paper, no mixing",
+    ),
+    ("sue.pencil.pastel", "chalky tooth and a soft, smudging mix"),
+    ("sue.pencil.chalk", "crisp tooth, no mixing"),
+    (
+        "sue.brush.round_watercolor",
+        "transparent, with its pooled darker edge",
+    ),
+    (
+        "sue.brush.flat_watercolor",
+        "a flat brush with a watercolor edge",
+    ),
+    (
+        "sue.brush.gouache",
+        "covers as fully as the pen presses, and mixes",
+    ),
+    (
+        "sue.brush.oil_paint",
+        "drags the color it picks up, on canvas",
+    ),
+    (
+        "sue.brush.thick_oil_paint",
+        "drags further, thicker on canvas",
+    ),
+    ("sue.brush.wet_wash", "thin, soft and bleeding"),
+    (
+        "sue.brush.brush_pen",
+        "a clean taper in and out, a mouse's too",
+    ),
+    ("sue.brush.dry_ink", "dry, broken edges and tapered ends"),
+    ("sue.brush.watery_ink", "thin ink that pools at its edge"),
+    (
+        "sue.brush.pointillism",
+        "small dots over a band, not a few large blots",
+    ),
+    (
+        "sue.airbrush.spray",
+        "a puff of drops each dab, so a tap sprays too",
+    ),
+];
+
 /// `true` when the 0.0.75 text has a word for `binding` (size and
 /// opacity following pressure, speed, tilt or chance; the turn following
 /// the direction, the pen's lean or chance).
@@ -1129,66 +1189,6 @@ mod tests {
             _ => "Eraser",
         }
     }
-
-    /// The brushes tuned in 0.0.8 (package "Brush presets tuned") so
-    /// each has the character its name promises: they no longer paint
-    /// as their 0.0.75 sub tools did, on purpose. Each with why.
-    const RETUNED: &[(&str, &str)] = &[
-        ("sue.pen.grainy_g_pen", "its grain was too faint to see"),
-        ("sue.pen.calligraphy", "a flat nib, not a round tip"),
-        ("sue.pen.felt_pen", "a felt pen's ink is not quite opaque"),
-        (
-            "sue.pen.flat_marker",
-            "a chisel tip and a marker's even, see-through ink",
-        ),
-        ("sue.pencil.pencil", "graphite grain from the paper's tooth"),
-        (
-            "sue.pencil.mechanical_pencil",
-            "graphite grain from the paper's tooth",
-        ),
-        ("sue.pencil.charcoal", "a softer, darker grain"),
-        (
-            "sue.pencil.crayon",
-            "waxy grain that leaves specks of paper, no mixing",
-        ),
-        ("sue.pencil.pastel", "chalky tooth and a soft, smudging mix"),
-        ("sue.pencil.chalk", "crisp tooth, no mixing"),
-        (
-            "sue.brush.round_watercolor",
-            "transparent, with its pooled darker edge",
-        ),
-        (
-            "sue.brush.flat_watercolor",
-            "a flat brush with a watercolor edge",
-        ),
-        (
-            "sue.brush.gouache",
-            "covers as fully as the pen presses, and mixes",
-        ),
-        (
-            "sue.brush.oil_paint",
-            "drags the color it picks up, on canvas",
-        ),
-        (
-            "sue.brush.thick_oil_paint",
-            "drags further, thicker on canvas",
-        ),
-        ("sue.brush.wet_wash", "thin, soft and bleeding"),
-        (
-            "sue.brush.brush_pen",
-            "a clean taper in and out, a mouse's too",
-        ),
-        ("sue.brush.dry_ink", "dry, broken edges and tapered ends"),
-        ("sue.brush.watery_ink", "thin ink that pools at its edge"),
-        (
-            "sue.brush.pointillism",
-            "small dots over a band, not a few large blots",
-        ),
-        (
-            "sue.airbrush.spray",
-            "a puff of drops each dab, so a tap sprays too",
-        ),
-    ];
 
     #[test]
     fn every_built_in_brush_paints_as_its_0_0_75_sub_tool_unless_retuned() {
