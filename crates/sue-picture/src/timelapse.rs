@@ -411,7 +411,7 @@ impl Plan {
     }
 }
 
-// A kept frame read back.
+/// A kept frame read back.
 ///
 /// # Errors
 /// If it will not read or decode.
