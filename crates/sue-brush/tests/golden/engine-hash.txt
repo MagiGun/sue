@@ -1,3 +1,3 @@
 # The hash of the fixed stroke set of tests/replay.rs, per engine version,
 # recorded on Windows. See tests/replay.rs before changing a line.
-engine 1 cd4893bc786ea260
+engine 1 09dcd5cfe9f1ce7f

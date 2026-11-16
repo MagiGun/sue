@@ -631,10 +631,18 @@ unsafe extern "system" fn label_procedure(
         };
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, COLORREF(0x00f0_f0f0));
-        let mut first = area(s(46), s(5), size[0] - s(4), s(22));
-        DrawTextW(dc, &mut title, &raw mut first, DT_LEFT | DT_NOPREFIX);
-        let mut second = area(s(46), s(22), size[0] - s(4), s(40));
-        DrawTextW(dc, &mut values, &raw mut second, DT_LEFT | DT_NOPREFIX);
+        // An empty line is not drawn: its slice's pointer is dangling,
+        // and DrawTextW may read it even for no characters (a pick with
+        // no title, or before the pointer moved, then took the process
+        // down with an access violation inside this procedure).
+        if !title.is_empty() {
+            let mut first = area(s(46), s(5), size[0] - s(4), s(22));
+            DrawTextW(dc, &mut title, &raw mut first, DT_LEFT | DT_NOPREFIX);
+        }
+        if !values.is_empty() {
+            let mut second = area(s(46), s(22), size[0] - s(4), s(40));
+            DrawTextW(dc, &mut values, &raw mut second, DT_LEFT | DT_NOPREFIX);
+        }
         SelectObject(dc, old);
         if !font.is_invalid() {
             let _ = DeleteObject(font.into());

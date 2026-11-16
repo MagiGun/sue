@@ -311,7 +311,11 @@ impl Pipeline {
             steady,
             curve: Curve::new(step, curve::knot_spacing(scale)),
             dynamics,
-            shaper: Shaper::new(preset.taper, preset.min_width),
+            shaper: Shaper::new(
+                preset.taper,
+                preset.min_width,
+                matches!(settings.device, Device::Constant(_)),
+            ),
             flick: preset.input.flick,
             scale,
             step,

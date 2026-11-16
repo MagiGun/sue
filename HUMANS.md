@@ -513,8 +513,13 @@ Once a canvas is open:
   the line: it removes the little hook at the end, turns a few fast mouse
   points into a smooth curve, evens out wobbles while keeping sharp corners
   sharp ("Correction"), thins the end into a point ("Taper"), and lets a
-  quick flick run out into a fine tail. Watercolor and gouache brushes pick up the color underneath and
-  drag it along ("Color mixing"). All of it is in Tool Property.
+  quick flick run out into a fine tail. Gouache, oil paint, pastel and the
+  wet wash pick up the color underneath and drag it along ("Color
+  mixing"); a light touch lays thin paint and a firm one covers. The
+  watercolor brushes are transparent and their paint pools in a darker
+  edge; pencils, crayons and chalk catch the paper's grain; the brush pen
+  comes to a clean point at both ends, with a mouse too (the quicker the
+  stroke, the longer the point). All of it is in Tool Property.
 - **Colors:** a color wheel, sliders, color sets and the colors you recently
   painted with. `X` switches between your main and sub color, `C` takes the
   transparent color (brushes then erase); hold `Alt` and click, or

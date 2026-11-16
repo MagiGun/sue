@@ -215,6 +215,14 @@ pub fn blender(name: &str) -> Option<Wet> {
 struct WetTile {
     pixels: Box<[f32]>,
     touched: Box<[bool]>,
+    /// The strongest share of paint a dab has laid on each pixel (see
+    /// [`WetCanvas::capped`]).
+    held: Box<[f32]>,
+    /// For a capped canvas, each pixel as the stroke found it and the
+    /// paint the stroke's dabs have left on it (premultiplied); empty
+    /// otherwise.
+    base: Box<[f32]>,
+    paint: Box<[f32]>,
 }
 
 /// The picture under a wet stroke, as the stroke has left it so far.
@@ -231,6 +239,9 @@ pub struct WetCanvas {
     last_at: Option<[f32; 2]>,
     /// The tiles a dab changed since [`Self::take_dirty`] was last asked.
     dirty: BTreeSet<TileKey>,
+    /// Paint of its own does not stack within the stroke (see
+    /// [`Self::capped`]).
+    capped: bool,
 }
 
 impl WetCanvas {
@@ -244,12 +255,28 @@ impl WetCanvas {
             reservoir: None,
             last_at: None,
             dirty: BTreeSet::new(),
+            capped: false,
         }
+    }
+
+    /// The canvas with paint that does not stack within its stroke: a
+    /// pixel takes the brush's paint as strongly as the strongest dab
+    /// over it lays it, not once for every dab (as a stroke that does
+    /// not mix lays its coverage, the strongest of its dabs). So the
+    /// density of paint is how fully one stroke covers, and a light
+    /// touch stays light however close its dabs fall; what each dab
+    /// picks up and drags along still mixes. A brush that builds up, or
+    /// a blend tool, has its dabs stack instead.
+    #[must_use]
+    pub fn capped(mut self, capped: bool) -> Self {
+        self.capped = capped;
+        self
     }
 
     /// The premultiplied pixel at layer pixel `(x, y)` as the stroke has
     /// left it, loading its tile from `backdrop` first.
     fn load(&mut self, backdrop: &dyn Backdrop, key: TileKey) -> &mut WetTile {
+        let capped = self.capped;
         self.tiles.entry(key).or_insert_with(|| {
             let [ox, oy] = key.origin();
             let mut pixels = vec![0.0; AREA * 4].into_boxed_slice();
@@ -261,8 +288,11 @@ impl WetCanvas {
                 }
             }
             WetTile {
-                pixels,
                 touched: vec![false; AREA].into_boxed_slice(),
+                held: vec![0.0; AREA].into_boxed_slice(),
+                base: if capped { pixels.clone() } else { Box::new([]) },
+                paint: vec![0.0; if capped { AREA * 4 } else { 0 }].into_boxed_slice(),
+                pixels,
             }
         })
     }
@@ -333,13 +363,14 @@ impl WetCanvas {
         x: i32,
         y: i32,
         region: Option<&Region>,
+        paper: Option<&Texture<'_>>,
         keep_alpha: bool,
     ) -> [f32; 4] {
         let before = backdrop.pixel(x, y);
         settle(
             before,
             self.pixel(backdrop, x, y),
-            region.map(|r| r.at(x, y)),
+            share(region, paper, x, y),
             keep_alpha,
         )
     }
@@ -430,13 +461,32 @@ impl WetCanvas {
             density: unit(self.wet.density * driven[2]),
             ..self.wet
         };
-        let take = wet.pickup * (1.0 - wet.stretch);
+        let mut take = wet.pickup * (1.0 - wet.stretch);
+        let own = [self.color[0], self.color[1], self.color[2], 1.0];
+        // A brush with paint of its own picks up paint, not clearness:
+        // over clear pixels it finds nothing to take up and keeps what
+        // it carries, so it does not thin on an empty layer. (A blend
+        // tool drags clearness along, as a finger does.)
+        let picked = if self.wet.amount > 0.0 {
+            if picked[3] > 0.0 {
+                take *= unit(picked[3]);
+                picked.map(|v| v / picked[3])
+            } else {
+                take = 0.0;
+                picked
+            }
+        } else {
+            picked
+        };
+        // A brush with paint of its own lands full of it and takes up
+        // what it passes from the next dab on; one with none (a blend
+        // tool) lands holding what it lands on.
         let reservoir = match self.reservoir {
+            None if self.wet.amount > 0.0 => own,
             None => picked,
             Some(r) => std::array::from_fn(|k| r[k] + (picked[k] - r[k]) * take),
         };
         self.reservoir = Some(reservoir);
-        let own = [self.color[0], self.color[1], self.color[2], 1.0];
         let paint: [f32; 4] =
             std::array::from_fn(|k| reservoir[k] + (own[k] - reservoir[k]) * wet.amount);
         let blurred = (reach > 0).then(|| {
@@ -483,17 +533,44 @@ impl WetCanvas {
                     Some(b) => std::array::from_fn(|k| paint[k] + (b[ui][k] - paint[k]) * wet.blur),
                     None => paint,
                 };
+                let (px, py) = (rect.x0 + x as i32, rect.y0 + y as i32);
+                let key = TileKey::of_pixel(px, py);
+                let [ox, oy] = key.origin();
+                let capped = self.capped;
+                let tile = self.load(backdrop, key);
+                let i = ((py - oy) * TILE + (px - ox)) as usize;
                 let t = c * wet.density;
-                let mut out: [f32; 4] = std::array::from_fn(|k| u[k] + (target[k] - u[k]) * t);
+                let mut out: [f32; 4] = if capped {
+                    // The pixel is the paint over what the stroke found
+                    // there, as strongly as its strongest dab laid it.
+                    // This dab's paint takes over the paint there as
+                    // strongly as it lays beside that strongest one: a
+                    // dab as strong replaces it, the rim of a later dab
+                    // only tints it. So paint does not stack, and the
+                    // first dabs' paint (unmixed yet) does not stay as a
+                    // spot where they were strongest.
+                    let held = tile.held[i];
+                    let now = held.max(t);
+                    if now <= 0.0 {
+                        continue;
+                    }
+                    let w = t / now;
+                    let j = i * 4;
+                    let mut laid = [0.0; 4];
+                    for k in 0..4 {
+                        let p = tile.paint[j + k] + (target[k] - tile.paint[j + k]) * w;
+                        tile.paint[j + k] = p;
+                        laid[k] = tile.base[j + k] + (p - tile.base[j + k]) * now;
+                    }
+                    tile.held[i] = now;
+                    laid
+                } else {
+                    std::array::from_fn(|k| u[k] + (target[k] - u[k]) * t)
+                };
                 if let Some(carried) = &smear {
                     let d = carried[y * w + x];
                     out = std::array::from_fn(|k| out[k] + (d[k] - out[k]) * wet.smear);
                 }
-                let (px, py) = (rect.x0 + x as i32, rect.y0 + y as i32);
-                let key = TileKey::of_pixel(px, py);
-                let [ox, oy] = key.origin();
-                let tile = self.load(backdrop, key);
-                let i = ((py - oy) * TILE + (px - ox)) as usize;
                 tile.pixels[i * 4..i * 4 + 4].copy_from_slice(&out);
                 tile.touched[i] = true;
                 self.dirty.insert(key);
@@ -536,6 +613,7 @@ impl WetCanvas {
         raster: &mut RasterTile2D,
         origin: [i32; 2],
         region: Option<&Region>,
+        paper: Option<&Texture<'_>>,
         keep_alpha: bool,
     ) -> Result<Vec<PixelRect>, MergeError> {
         let (w, h) = (raster.width() as i32, raster.height() as i32);
@@ -567,7 +645,7 @@ impl WetCanvas {
                     let j = ((ry * w + rx) * 4) as usize;
                     let (lx, ly) = (ox + x, oy + y);
                     let before = RasterBackdrop { raster, origin }.pixel(lx, ly);
-                    let straight = settle(before, wet, region.map(|r| r.at(lx, ly)), keep_alpha);
+                    let straight = settle(before, wet, share(region, paper, lx, ly), keep_alpha);
                     if straight == before {
                         continue;
                     }
@@ -607,6 +685,21 @@ impl WetCanvas {
             changed.extend(rect);
         }
         Ok(changed)
+    }
+}
+
+/// How much of the wet paint layer pixel `(x, y)` takes: `region`'s
+/// share where anti-overflow holds the stroke, times what `paper` lets
+/// through there. A paper laid once on the whole stroke (not by dab)
+/// holds the paint back from its valleys however many dabs pass, as it
+/// does for a stroke that does not mix; laid by dab, dabs that mix fill
+/// the valleys one after another. `None`: all of it.
+fn share(region: Option<&Region>, paper: Option<&Texture<'_>>, x: i32, y: i32) -> Option<f32> {
+    let held = region.map(|r| r.at(x, y));
+    let let_through = paper.map(|t| t.apply(1.0, [x as f32 + 0.5, y as f32 + 0.5]));
+    match (held, let_through) {
+        (None, None) => None,
+        (a, b) => Some(a.unwrap_or(1.0) * b.unwrap_or(1.0)),
     }
 }
 
@@ -796,7 +889,7 @@ mod tests {
             origin: [0, 0],
         };
         let tips = Tips::round(1.0);
-        let paint = |amount: f32, density: f32, to: f32| {
+        let paint = |amount: f32, density: f32, from: f32, to: f32| {
             let wet = Wet {
                 pickup: 1.0,
                 amount,
@@ -806,20 +899,126 @@ mod tests {
                 smear: 0.0,
             };
             let mut canvas = WetCanvas::new(wet, [0.0, 1.0, 0.0]);
-            canvas.stamp(&backdrop, &dabs(8.0, to, 6.0), &tips, None);
-            canvas.pixel(&backdrop, 8, 16)
+            canvas.stamp(&backdrop, &dabs(from, to, 6.0), &tips, None);
+            canvas.pixel(&backdrop, to as i32, 16)
         };
-        let full = paint(1.0, 1.0, 20.0);
+        let full = paint(1.0, 1.0, 8.0, 20.0);
         assert!(full[1] > 0.95 && full[0] < 0.05, "{full:?}");
-        // One dab of half paint lays half the brush's color and half of
-        // what it picked up.
-        let half = paint(0.5, 1.0, 8.0);
+        // A brush lands full of its own paint (0.0.8: it no longer lands
+        // holding what is under it): its first dab lays its own color
+        // even with half paint.
+        let landing = paint(0.5, 1.0, 8.0, 8.0);
+        assert!(landing[1] > 0.95 && landing[0] < 0.05, "{landing:?}");
+        // From the next dab on, half paint lays half the brush's color
+        // and half of what it picked up: a second dab in the same place
+        // picks up the red under the first dab's rim.
+        let half = paint(0.5, 1.0, 8.0, 9.0);
         assert!(
-            (half[1] - 0.5).abs() < 0.05 && (half[0] - 0.5).abs() < 0.05,
+            half[0] > 0.05 && half[1] > 0.5 && half[1] < 0.95,
             "{half:?}"
         );
-        let thin = paint(1.0, 0.3, 8.0);
+        let thin = paint(1.0, 0.3, 8.0, 8.0);
         assert!(thin[0] > full[0] + 0.2, "{thin:?}");
+    }
+
+    /// A brush whose own paint is capped lays it as strongly as its
+    /// strongest dab, however close its dabs fall: thin paint stays
+    /// thin along the stroke. Uncapped, the same dabs stack to cover.
+    #[test]
+    fn a_capped_stroke_lays_thin_paint_once_however_close_its_dabs() {
+        let clear = RasterTile2D::new(64, 32, PixelFormat::Rgba8).expect("a raster");
+        let backdrop = RasterBackdrop {
+            raster: &clear,
+            origin: [0, 0],
+        };
+        let tips = Tips::round(1.0);
+        let alpha = |capped: bool| {
+            let wet = Wet {
+                pickup: 0.6,
+                amount: 1.0,
+                stretch: 0.0,
+                blur: 0.0,
+                density: 0.3,
+                smear: 0.0,
+            };
+            let mut canvas = WetCanvas::new(wet, [0.0; 3]).capped(capped);
+            canvas.stamp(&backdrop, &dabs(8.0, 40.0, 6.0), &tips, None);
+            canvas.pixel(&backdrop, 24, 16)[3]
+        };
+        let once = alpha(true);
+        assert!((once - 0.3).abs() < 0.02, "{once}");
+        assert!(alpha(false) > 0.9, "stacked: {}", alpha(false));
+    }
+
+    /// A brush with paint of its own finds nothing to take up on a clear
+    /// layer: it does not thin as it goes. A blend tool does drag the
+    /// clearness along.
+    #[test]
+    fn a_loaded_brush_does_not_pick_up_clearness() {
+        let clear = RasterTile2D::new(64, 32, PixelFormat::Rgba8).expect("a raster");
+        let backdrop = RasterBackdrop {
+            raster: &clear,
+            origin: [0, 0],
+        };
+        let tips = Tips::round(1.0);
+        let wet = Wet {
+            pickup: 0.8,
+            amount: 0.6,
+            stretch: 0.0,
+            blur: 0.0,
+            density: 1.0,
+            smear: 0.0,
+        };
+        let mut canvas = WetCanvas::new(wet, [0.0, 0.0, 1.0]).capped(true);
+        canvas.stamp(&backdrop, &dabs(8.0, 40.0, 6.0), &tips, None);
+        for x in [8, 24, 40] {
+            let p = canvas.pixel(&backdrop, x, 16);
+            assert!(p[3] > 0.99 && p[2] > 0.99, "at {x}: {p:?}");
+        }
+    }
+
+    /// A paper laid on a mixing stroke as a whole holds the paint back
+    /// from its valleys however many dabs pass over them.
+    #[test]
+    fn a_wet_strokes_paper_holds_paint_back_from_its_valleys() {
+        let clear = RasterTile2D::new(64, 32, PixelFormat::Rgba8).expect("a raster");
+        let backdrop = RasterBackdrop {
+            raster: &clear,
+            origin: [0, 0],
+        };
+        // Columns alternate between a high spot and a valley.
+        let texels: Vec<f32> = (0..16 * 16)
+            .map(|i| if (i % 16) % 2 == 0 { 1.0 } else { 0.0 })
+            .collect();
+        let paper = crate::texture::Paper::from_texels(16, 16, &texels).expect("a paper");
+        let texture = Texture::new(
+            &paper,
+            crate::texture::TextureSettings {
+                mode: crate::texture::TextureMode::Subtract,
+                ..crate::texture::TextureSettings::default()
+            },
+        );
+        let wet = Wet {
+            pickup: 0.5,
+            amount: 1.0,
+            stretch: 0.0,
+            blur: 0.0,
+            density: 1.0,
+            smear: 0.0,
+        };
+        let mut canvas = WetCanvas::new(wet, [0.0; 3]);
+        canvas.stamp(&backdrop, &dabs(8.0, 40.0, 6.0), &Tips::round(1.0), None);
+        let high = canvas.laid(&backdrop, 24, 16, None, Some(&texture), false);
+        let valley = canvas.laid(&backdrop, 25, 16, None, Some(&texture), false);
+        assert!(high[3] > 0.95, "{high:?}");
+        assert!(valley[3] < 0.05, "{valley:?}");
+        let mut picture = clear.clone();
+        canvas
+            .merge(&mut picture, [0, 0], None, Some(&texture), false)
+            .expect("laid");
+        let bytes = picture.bytes().expect("bytes");
+        let alpha = |x: usize| bytes[(16 * 64 + x) * 4 + 3];
+        assert!(alpha(24) > 240 && alpha(25) < 13);
     }
 
     #[test]
@@ -849,7 +1048,7 @@ mod tests {
         let mut canvas = WetCanvas::new(blender("blend").expect("a blender"), [0.0; 3]);
         canvas.stamp(&backdrop, &dabs(28.0, 36.0, 4.0), &Tips::round(1.0), None);
         let changed = canvas
-            .merge(&mut picture, [0, 0], None, false)
+            .merge(&mut picture, [0, 0], None, None, false)
             .expect("merged");
         assert_eq!(changed.len(), 1);
         let r = changed[0];

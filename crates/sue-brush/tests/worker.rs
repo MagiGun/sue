@@ -746,6 +746,22 @@ fn a_tile_of_the_live_view_reads_as_its_pixels() {
     assert!(!live.tile_coverage(far, &mut tile), "nothing there");
 }
 
+/// A flat tip (thinner than it is wide) is not a swept round tip: the
+/// worker lays it by dabs, which turn it, so a flat marker and a
+/// calligraphy nib paint flat.
+#[test]
+fn a_flat_tip_is_laid_by_dabs_not_swept_round() {
+    let round = sue_brush::presets::find("sue.pen.g_pen").expect("the G-pen");
+    assert!(Brush::new(round.clone(), [0.0; 3]).is_plain());
+    let mut flat = round;
+    flat.set(sue_model::brush::param::ASPECT, 0.3);
+    assert!(!Brush::new(flat, [0.0; 3]).is_plain());
+    for id in ["sue.pen.calligraphy", "sue.pen.flat_marker"] {
+        let preset = sue_brush::presets::find(id).expect(id);
+        assert!(!Brush::new(preset, [0.0; 3]).is_plain(), "{id}");
+    }
+}
+
 /// A brush with paint behaviours (an airbrush that builds up, here with
 /// a soft round tip and its size and flow following pressure) goes
 /// through the worker too: what the live view shows is, pixel for
