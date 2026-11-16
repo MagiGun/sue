@@ -33,7 +33,10 @@ impl SuePaint {
     ) {
         let Press { p, op, .. } = *press;
         let arena = &cx.world.arena;
+        // While its mask is edited, a gradient layer's mask takes the
+        // gradient as any mask does; else a drag lays the layer's line.
         if sub.mode != CONTOUR_FILL
+            && self.mask_layer(arena).is_none()
             && let Some((layer, gradient)) = self.gradient_layer(arena)
         {
             if let Some(info) = self.layer_info(arena)

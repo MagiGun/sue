@@ -26,7 +26,10 @@ impl SuePaint {
         if self.refuse_keyframed(cx) {
             return;
         }
-        let info = match self.paintable(&cx.world.arena) {
+        let info = match self
+            .mask_layer(&cx.world.arena)
+            .unwrap_or_else(|| self.paintable(&cx.world.arena))
+        {
             Ok(info) => info,
             Err(error) => {
                 cx.fail(error);

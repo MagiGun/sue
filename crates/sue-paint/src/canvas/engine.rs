@@ -502,7 +502,10 @@ impl SuePaint {
         let Some(doc) = self.docs.get(self.active) else {
             return false;
         };
-        let info = match self.drawable(&cx.world.arena) {
+        let info = match self
+            .mask_layer(&cx.world.arena)
+            .unwrap_or_else(|| self.drawable(&cx.world.arena))
+        {
             Ok(info) => info,
             Err(error) => {
                 cx.fail(error);

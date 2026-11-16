@@ -1277,6 +1277,25 @@ impl SuePaint {
         Ok(info)
     }
 
+    /// The current layer while its mask is edited (Edit Mask on, and the
+    /// layer has one), whatever kind of layer it is: a gradient, fill or
+    /// tone layer's mask is gray pixels and takes brushes, fills and the
+    /// Blend tool as a raster layer's does. `None` when no mask is
+    /// edited; else the layer, or why not (locked or hidden, as for any
+    /// layer).
+    pub(crate) fn mask_layer(&self, arena: &Arena) -> Option<Result<doc::LayerInfo, String>> {
+        self.doc().filter(|doc| doc.mask_edit)?;
+        let info = self.layer_info(arena)?;
+        doc::mask_of(arena, info.id)?;
+        Some(if info.locked {
+            Err(tr!("is-locked", name = info.name))
+        } else if !info.style.visible {
+            Err(tr!("is-hidden", name = info.name))
+        } else {
+            Ok(info)
+        })
+    }
+
     /// The current layer if pens and brushes can draw on it.
     pub(crate) fn drawable(&self, arena: &Arena) -> Result<doc::LayerInfo, String> {
         if let Some(info) = self.layer_info(arena)
