@@ -13,6 +13,13 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, Animation: Delete Keyframe from Layer (Edit Track and the
+  timeline's right click, an animation folder's row too once its
+  keyframes are on); Copy and Paste Frames carry a layer's or folder's
+  keyframes with the frames; Playback Settings, Render 2D Camera; the
+  Animated GIF export's Dithering; the light table's color in the
+  Animation Cels palette.
+
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
   fill (click an area and the gradient runs from its outline inward).
@@ -556,6 +563,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint, Animation: Edit Timeline is called Change Frame Rate, as in
+  Clip Studio Paint; Create Folder and Insert Layer on a cel makes the
+  folder the cel, named after it, so a color layer beside the lines shows
+  and hides with them; Add Keyframe with the 2D camera picked keys the
+  camera.
+
 - Sue Paint wears the theme you pick in Settings, Appearance, as the Hub
   and Sue Writer do: in Paper its menus, command bar, palettes, Tool
   Property, dialogs, canvas surround, timeline and status are light, in
@@ -842,6 +855,15 @@ follow [Semantic Versioning](https://semver.org/).
   own icons as a preview; choose one with a click or the arrow keys.
 
 ### Fixed
+
+- Sue Paint, Animation: a camera, or a layer or folder with keyframes on,
+  stays picked from frame to frame, so the Object tool keys it on each
+  (before, going to another frame picked the cel shown); the playback
+  range's markers on the Timeline's ruler can be dragged again (the ruler
+  took the pointer from them).
+- Sue Paint, Layer palette: a name typed after a double click is kept on
+  Enter or a click elsewhere (the field took the keys back); a drag on a
+  layer's opacity slider is one undo step, not two.
 
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its
   tip, and a flick no longer bends off the way the stroke was going.
