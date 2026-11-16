@@ -54,7 +54,7 @@ impl SuePaint {
         let Some(doc) = self.docs.get(self.active) else {
             return;
         };
-        if let Ok(info) = self.drawable(&cx.world.arena) {
+        if let Ok(info) = self.mask_drawable(&cx.world.arena) {
             let mask = doc
                 .mask_edit
                 .then(|| doc::mask_of(&cx.world.arena, info.id))

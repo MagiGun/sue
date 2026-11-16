@@ -502,7 +502,7 @@ impl SuePaint {
         let Some(doc) = self.docs.get(self.active) else {
             return false;
         };
-        let info = match self.drawable(&cx.world.arena) {
+        let info = match self.mask_drawable(&cx.world.arena) {
             Ok(info) => info,
             Err(error) => {
                 cx.fail(error);
