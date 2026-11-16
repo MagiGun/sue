@@ -174,23 +174,21 @@ impl Export {
 }
 
 /// How a video of `count` kept frames laid out as `export` goes: its
-/// frames a second, and every how many kept frames it shows one (every
-/// frame at 30 a second, or as many as fit the length, skipping some when
-/// there would be more than 60 a second).
+/// frames a second, and every how many kept frames it shows one
+/// ([`Timing`]).
 #[must_use]
 pub fn pace(count: usize, export: Export) -> (u32, usize) {
-    match export.seconds {
-        Some(seconds) if seconds > 0.0 => {
-            let wanted = (count as f32 / seconds).ceil().max(1.0);
-            if wanted > 60.0 {
-                (60, ((wanted / 60.0).ceil() as usize).max(1))
-            } else {
-                (wanted as u32, 1)
-            }
-        }
-        _ => (30, 1),
-    }
+    let timing = Timing::new(count, export);
+    (timing.fps, timing.step)
 }
+
+/// The fewest frames a second a video fitted to a length plays at: a few
+/// kept frames are each held for several video frames, and at this rate
+/// each is held for nearly the same time.
+pub const FIT_FPS: u32 = 10;
+
+/// The most frames a second a timelapse video plays at.
+const MOST_FPS: u32 = 60;
 
 /// How many kept frames a video of `count` shows when it shows every
 /// `step`th, the last always among them.
@@ -201,6 +199,129 @@ pub fn shown(count: usize, step: usize) -> usize {
     }
     let step = step.max(1);
     count.div_ceil(step) + usize::from(!(count - 1).is_multiple_of(step))
+}
+
+/// When each kept frame a timelapse video shows comes and how long it
+/// stays, worked out from how many frames there are and the export's
+/// length alone, so the dialog's preview and the export agree.
+///
+/// Not fitted, every kept frame shows for one video frame at 30 a
+/// second and the last holds a second more. Fitted to a length, the
+/// video lasts that length: the drawing as it grows fills it, each kept
+/// frame held for its share (a few frames make a slow video, never a
+/// short one), at [`FIT_FPS`] to 60 frames a second, skipping kept
+/// frames when there are more than 60 a second; its last second shows
+/// the finished picture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Timing {
+    /// Frames a second.
+    pub fps: u32,
+    /// Every how many kept frames one is shown.
+    pub step: usize,
+    /// The kept frames shown, in order, the last among them.
+    pub picks: Vec<usize>,
+    /// For each pick, the video frame after its last: pick `i` shows from
+    /// `ends[i - 1]` (0 for the first) up to `ends[i]`.
+    pub ends: Vec<usize>,
+}
+
+impl Timing {
+    /// The timing of `count` kept frames laid out as `export`.
+    #[must_use]
+    pub fn new(count: usize, export: Export) -> Self {
+        let pick = |step: usize| -> Vec<usize> {
+            if count == 0 {
+                return Vec::new();
+            }
+            let mut picks: Vec<usize> = (0..count).step_by(step.max(1)).collect();
+            if picks.last() != Some(&(count - 1)) {
+                picks.push(count - 1);
+            }
+            picks
+        };
+        let seconds = export
+            .seconds
+            .filter(|seconds| seconds.is_finite() && *seconds > 0.0);
+        let Some(seconds) = seconds else {
+            // Every frame at 30 a second, the last held a second.
+            let picks = pick(1);
+            let mut ends: Vec<usize> = (1..=picks.len()).collect();
+            if let Some(last) = ends.last_mut() {
+                *last += 30;
+            }
+            return Self {
+                fps: 30,
+                step: 1,
+                picks,
+                ends,
+            };
+        };
+        // The finished picture holds the last second when the length
+        // leaves room for the drawing before it.
+        let held = if seconds >= 2.0 { 1.0 } else { 0.0 };
+        let drawing = f64::from(seconds) - held;
+        let wanted = (count as f64 / drawing).ceil();
+        let fps = if wanted > f64::from(MOST_FPS) {
+            MOST_FPS
+        } else {
+            (wanted as u32).clamp(FIT_FPS, MOST_FPS)
+        };
+        let total = ((f64::from(seconds) * f64::from(fps)).round() as usize).max(1);
+        let hold = (held * f64::from(fps)).round() as usize;
+        let room = total.saturating_sub(hold).max(1);
+        // Kept frames are skipped until each one shown has a video frame
+        // of its own.
+        let mut step = count.div_ceil(room).max(1);
+        while shown(count, step) > room {
+            step += 1;
+        }
+        let picks = pick(step);
+        let n = picks.len().max(1);
+        let mut ends: Vec<usize> = (1..=picks.len()).map(|at| at * room / n).collect();
+        if let Some(last) = ends.last_mut() {
+            *last = total;
+        }
+        Self {
+            fps,
+            step,
+            picks,
+            ends,
+        }
+    }
+
+    /// How many frames the video has.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.ends.last().copied().unwrap_or(0)
+    }
+
+    /// `true` when it shows nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.picks.is_empty()
+    }
+
+    /// How long the video plays, in seconds.
+    #[must_use]
+    pub fn seconds(&self) -> f64 {
+        self.len() as f64 / f64::from(self.fps.max(1))
+    }
+
+    /// Which pick the video's frame `index` shows (the last one past the
+    /// end).
+    #[must_use]
+    pub fn pick_at(&self, index: usize) -> usize {
+        self.ends
+            .partition_point(|end| *end <= index)
+            .min(self.picks.len().saturating_sub(1))
+    }
+
+    /// Which kept frame the video shows `at` seconds in.
+    #[must_use]
+    pub fn kept_at(&self, at: f64) -> usize {
+        let frame = (at * f64::from(self.fps)).floor().max(0.0) as usize;
+        self.picks.get(self.pick_at(frame)).copied().unwrap_or(0)
+    }
 }
 
 /// Which kept frames a timelapse video shows, how big and how fast: what
@@ -214,13 +335,13 @@ pub struct Plan {
     pub size: [u32; 2],
     /// Frames a second.
     pub fps: u32,
+    /// When each chosen frame shows and for how long ([`Timing::ends`]).
+    pub ends: Vec<usize>,
 }
 
 impl Plan {
-    /// The plan for the frames `paths` laid out as `export`: every frame
-    /// at 30 a second, or as many as fit the length, skipping some when
-    /// there are more than 60 a second. The shape of the canvas is the
-    /// last frame's.
+    /// The plan for the frames `paths` laid out as `export` ([`Timing`]).
+    /// The shape of the canvas is the last frame's.
     ///
     /// # Errors
     /// If there are no frames, or the last will not read.
@@ -233,25 +354,27 @@ impl Plan {
     }
 
     /// [`Self::new`] for a canvas of `shape`, without reading a frame.
-    /// `paths` is not empty.
     #[must_use]
     pub fn sized(paths: &[PathBuf], export: Export, shape: [u32; 2]) -> Self {
         let size = export.size(shape);
-        let (fps, step) = pace(paths.len(), export);
-        let mut chosen: Vec<PathBuf> = paths.iter().step_by(step).cloned().collect();
-        if let Some(last) = paths.last()
-            && chosen.last() != Some(last)
-        {
-            chosen.push(last.clone());
+        let timing = Timing::new(paths.len(), export);
+        let chosen = timing
+            .picks
+            .iter()
+            .filter_map(|index| paths.get(*index).cloned())
+            .collect();
+        Self {
+            chosen,
+            size,
+            fps: timing.fps,
+            ends: timing.ends,
         }
-        Self { chosen, size, fps }
     }
 
-    /// How many frames the video has: the chosen ones, and the last held
-    /// for a second.
+    /// How many frames the video has.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.chosen.len() + self.fps as usize
+        self.ends.last().copied().unwrap_or(0)
     }
 
     /// `true` when it shows nothing.
@@ -269,7 +392,9 @@ impl Plan {
     /// Which chosen frame the video's frame `index` shows.
     #[must_use]
     pub fn source(&self, index: usize) -> usize {
-        index.min(self.chosen.len().saturating_sub(1))
+        self.ends
+            .partition_point(|end| *end <= index)
+            .min(self.chosen.len().saturating_sub(1))
     }
 
     /// The video's frame `index`: its frame laid over white in the
@@ -286,7 +411,7 @@ impl Plan {
     }
 }
 
-/// A kept frame read back.
+// A kept frame read back.
 ///
 /// # Errors
 /// If it will not read or decode.
@@ -387,8 +512,8 @@ mod tests {
         let (avi, count) = export_avi(&dir, all).unwrap();
         assert_eq!(&avi[..4], b"RIFF");
         assert_eq!(count, 33);
-        // Fit to a second: three frames a second.
-        let (_, fps) = video_frames(
+        // Fit to a second: a second long, the three frames held evenly.
+        let (video, fps) = video_frames(
             &dir,
             Export {
                 side: 32,
@@ -397,7 +522,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(fps, 3);
+        assert_eq!((fps, video.len()), (FIT_FPS, 10));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -487,12 +612,99 @@ mod tests {
             ),
             (30, 1)
         );
-        assert_eq!(pace(7200, Export::default()), (60, 4));
+        assert_eq!(pace(7200, Export::default()), (60, 5));
         assert_eq!(plan.len(), 5 + 30);
         assert!((plan.seconds() - 35.0 / 30.0).abs() < 1e-9);
         assert_eq!(plan.source(plan.len() - 1), 4, "the last frame holds");
         assert!(plan.frame(34).unwrap().bytes().unwrap()[0] > 100);
         assert!(Plan::new(&[], Export::default()).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_video_fitted_to_a_length_lasts_that_length_however_few_the_frames() {
+        let thirty = Export::default();
+        assert_eq!(thirty.seconds, Some(30.0));
+        for count in [
+            1_usize, 2, 3, 7, 45, 290, 291, 900, 1_740, 1_741, 7_200, 20_000,
+        ] {
+            let timing = Timing::new(count, thirty);
+            let length = timing.seconds();
+            assert!(
+                (length - 30.0).abs() < 1e-9,
+                "{count} frames: {length} s, not 30"
+            );
+            assert_eq!(timing.picks.first(), Some(&0), "{count}: the first frame");
+            assert_eq!(timing.picks.last(), Some(&(count - 1)), "{count}: the last");
+            assert!(
+                (FIT_FPS..=60).contains(&timing.fps),
+                "{count}: {}",
+                timing.fps
+            );
+            // Every pick shows for at least a frame, in order.
+            let mut before = 0;
+            for end in &timing.ends {
+                assert!(*end > before, "{count}: a pick with no frame");
+                before = *end;
+            }
+            // The last second shows the finished picture.
+            let last_second = timing.len() - timing.fps as usize;
+            assert_eq!(timing.kept_at(29.5), count - 1, "{count}");
+            assert_eq!(
+                timing.pick_at(last_second),
+                timing.picks.len() - 1,
+                "{count}"
+            );
+            // The drawing before it: held evenly, no pick more than one
+            // video frame longer than another.
+            let spans: Vec<usize> = timing
+                .ends
+                .iter()
+                .scan(0, |at, end| {
+                    let span = end - *at;
+                    *at = *end;
+                    Some(span)
+                })
+                .collect();
+            let drawing = &spans[..spans.len() - 1];
+            if let (Some(least), Some(most)) = (drawing.iter().min(), drawing.iter().max()) {
+                assert!(
+                    most - least <= 1,
+                    "{count}: held unevenly {least} to {most}"
+                );
+            }
+        }
+        // Three frames over 30 seconds: each of the first two shows for
+        // nearly 15 seconds of the 29 before the last second, not 4 s.
+        let few = Timing::new(3, thirty);
+        assert_eq!(few.fps, FIT_FPS);
+        assert_eq!(few.ends, vec![96, 193, 300]);
+        assert_eq!(few.kept_at(0.0), 0);
+        assert_eq!(few.kept_at(12.0), 1);
+        assert_eq!(few.kept_at(20.0), 2);
+        // Many frames skip some at 60 a second.
+        let many = Timing::new(7_200, thirty);
+        assert_eq!((many.fps, many.step), (60, 5));
+        assert_eq!(pace(7_200, thirty), (60, 5));
+        // Not fitted: every frame at 30 a second, the last held a second.
+        let all = Timing::new(
+            3,
+            Export {
+                seconds: None,
+                ..thirty
+            },
+        );
+        assert_eq!((all.fps, all.ends.clone()), (30, vec![1, 2, 33]));
+        assert!(Timing::new(0, thirty).is_empty());
+        assert_eq!(Timing::new(0, thirty).kept_at(1.0), 0);
+        // A plan of three kept frames fitted to 30 s is a 30 s video.
+        let paths: Vec<PathBuf> = (0..3)
+            .map(|index| PathBuf::from(format!("{index}.jpg")))
+            .collect();
+        let plan = Plan::sized(&paths, thirty, [100, 100]);
+        assert_eq!((plan.len(), plan.fps), (300, FIT_FPS));
+        assert!((plan.seconds() - 30.0).abs() < 1e-9);
+        assert_eq!(plan.source(150), 1);
+        assert_eq!(plan.source(299), 2);
     }
 }
