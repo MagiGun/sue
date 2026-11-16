@@ -481,6 +481,9 @@ fn sue_paint_lasso_fill_close_and_fill_and_copy_stamp_paint() {
     command(&mut runtime, "layer.new");
     command(&mut runtime, "tool.pen");
     let gap = middle + vec2(-80.0, 160.0);
+    // Copy stamp's notice (no source yet) sits on the canvas's view now,
+    // where the ring goes: it is put away first, as a person would.
+    runtime.shell.clear_notices();
     drag(&mut runtime, &mut step, &ring(gap, 20.0), plain);
     let before = painted(&runtime);
     // (The Fill tool still has Close and fill, two before.)
