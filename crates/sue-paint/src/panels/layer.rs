@@ -1206,6 +1206,12 @@ impl SuePaint {
                         }
                         self.renaming = Some((info.id, name));
                     } else {
+                        // A rename that ended without the field letting go
+                        // (Layer, Change Layer Name moved it to another
+                        // layer) leaves no mark, so the next one takes the
+                        // keys again.
+                        let opened = Id::unique(("sue-paint-rename-opened", info.id.to_u128()));
+                        ui.data_mut(|data| data.remove::<bool>(opened));
                         let arena = &cx.world.arena;
                         // An animation folder names the cel it shows now.
                         let shows = (is_folder && crate::anim::is_animation_folder(arena, info.id))
