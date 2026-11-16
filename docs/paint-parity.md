@@ -433,6 +433,36 @@ The order of work is the plan at the end.
 | Linux pen tablets: Wayland (tablet-v2) and X11 (XInput2) | Peripherals | partial | Position, pressure, tilt, barrel buttons and the eraser end; XWayland when a compositor has no tablet protocol. Verify on niri, KDE, GNOME and X11 |
 | Eraser end of the pen picks the Eraser | Peripherals | partial | Turning the pen back picks the tool before; between strokes only, and a tool picked by hand stays. Under Linux; Windows does not report the eraser end yet. Verify on a tablet |
 
+### Brush parity by hand (P5-3)
+
+Checked on 2026-11-16 against Clip Studio Paint EX 5.0.4 on Windows,
+with the mouse at 100%: a slow stroke (three moves about a second
+apart, resting before the lift, so the lift is while still), a fast
+drag (a lift while moving) and a tap. Clip Studio's sub tools there
+carry their owner's own sizes and settings, which were not changed,
+so Sue's side was painted by its engine with the same input at the
+width Clip Studio's stroke measured. Pen pressure (light, heavy) and
+a flick cannot be made with a mouse and were not compared. The side
+by side sheets and width profiles are kept outside the repository.
+These rows are notes, not counted in the Progress table.
+
+| Sub tool | Clip Studio, mouse | Sue, mouse | Ends |
+| --- | --- | --- | --- |
+| G-pen | even width, round ends, a tap is a dot the brush's size | the same widths (36 against 36), round ends, the same dot | never bigger than the body in either |
+| Mapping pen | thin, even, a tiny tap | the same | same |
+| Turnip pen | thin, even | the same | same |
+| Textured pen | grainy, even; a tap is a dot about two thirds of the line | grainy, even; a tap is a dot the brush's size (Sue's own rule that a tap is never smaller than the line) | never bigger than the body |
+| Calligraphy | a flat tip at a slant: ends cut on the slant, a tap a slanted sliver | the same tip, ends and sliver; the ends a little rounder | the slant makes the end columns wider, not the tip |
+| Felt pen | light, thin, even | the same | same |
+| Brush pen | its tip is a slanted flat oval: blunt slanted ends, no taper with a mouse, a tap a small pale blob | tapers to points at both ends with a mouse (on purpose: the brush pen promises a pointed line with any device); a tap is a full dot | Sue's ends are smaller than the body |
+| Every sub tool, a slow mouse stroke with points far apart | a smooth arc that does not quite pass through the points | a curve through every point, so a turn shows at each point when they are 40 pixels or more apart | open: Sue's curve stage passes through each point; making it smooth such sparse input changes the engine hash, so it is left for the owner to decide |
+
+Not compared here: the Real G-pen (its owner's size there is far
+larger than the canvas row), Rough pen, Milli pen (Sue's Fineliner),
+Dot pen, Flat marker, the sketch tools, the watercolor, thick paint
+and ink brushes other than the brush pen, the airbrushes, erasers and
+decorations. Light and heavy pressure and a flick need a tablet.
+
 ## Text
 
 | Feature | Clip Studio | Sue | Notes |
@@ -604,7 +634,7 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | Sue project (.sue) | (Sue's own) | done | |
-| Clip Studio (.clip) export | File > Export Back to the Same .clip, Save Duplicate | partial | Layers, folders with blend mode and clipping, masks, paper, draft and reference marks, the layer color effect; a layer not changed in Sue goes back exactly as it was read. Fill, gradient, text and vector layers reach Clip Studio as their pixels, correction layers as empty layers, and effects, palette colors, rulers, comps and the timeline not at all yet; Sue keeps all of them in its own tables of the file and opens them live again. No hidden copy of the Sue project any more. verify: not yet opened in Clip Studio (the files of the P5-1 check wait in N:\Sue\cache\p5-csp-inbox) |
+| Clip Studio (.clip) export | File > Export Back to the Same .clip, Save Duplicate | partial | Layers, folders with blend mode and clipping, masks, paper, draft and reference marks, the layer color effect; a layer not changed in Sue goes back exactly as it was read. Fill, gradient, text and vector layers reach Clip Studio as their pixels, correction layers as empty layers, and effects, palette colors, rulers, comps and the timeline not at all yet; Sue keeps all of them in its own tables of the file and opens them live again. No hidden copy of the Sue project any more. Every test file opens in Clip Studio Paint 5.0.4 with its layers, folders and paper; what shows there is in `docs/clip-sue-tables.md` |
 | Clip Studio (.clip) open | File > Open | partial | See File: open, for what arrives and what does not |
 | Photoshop (PSD, PSB) save | File > Save Duplicate | done | |
 | Photoshop open | File > Open | partial | A reader exists; verify what it keeps |
