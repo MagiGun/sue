@@ -677,9 +677,9 @@ impl SuePaint {
 
 /// The Hand tool's sub tools: Hand scrolls, Rotate turns the view.
 ///
-/// Rotate's Snap angle (`SubTool::angle_step`) is data since P3-5 and
-/// gets its row here once the canvas turns by it (P4-1d): a row that does
-/// nothing is not shown.
+/// Rotate's Snap angle (`SubTool::angle_step`, 0 for off): while it is
+/// on the view turns in its steps, and Shift snaps by the same step
+/// (CC-1).
 fn hand_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
     rows.choice_u8(
         ui,
@@ -689,6 +689,32 @@ fn hand_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
         &mut sub.mode,
         &[tr!("scroll"), tr!("rotate")],
     );
+    if sub.mode != 1 {
+        return;
+    }
+    let mut snap = sub.angle_step > 0.0;
+    if rows.check(
+        ui,
+        "hand-snap-angle",
+        Category::Operation,
+        &tr!("snap-angle"),
+        Some(&tr!("snap-angle-hint")),
+        &mut snap,
+    ) {
+        sub.angle_step = if snap { 45.0 } else { 0.0 };
+    }
+    if snap {
+        rows.slider(
+            ui,
+            "hand-angle-step",
+            Category::Operation,
+            &tr!("step-of-angle"),
+            &mut sub.angle_step,
+            1.0..=90.0,
+            &tr!("degrees-short"),
+            false,
+        );
+    }
 }
 
 #[cfg(test)]

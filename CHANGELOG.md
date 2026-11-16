@@ -843,6 +843,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint, Rotate: Tool Property shows the Snap angle check box and
+  its step, so the view can turn in steps without holding Shift (the
+  setting was kept but had no row).
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its
   tip, and a flick no longer bends off the way the stroke was going.
 - Sue Paint: masks of older files become gray masks as the file opens,
