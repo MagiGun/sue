@@ -663,6 +663,7 @@ assign-animation-cel = Assign Animation Cel
 track-editing = Track Editing
 add-keyframe = Add Keyframe
 delete-keyframe = Delete Keyframe
+move-keyframe = Move Keyframe
 show-animation-cels = Show Animation Cels
 enable-onion-skin = Enable Onion Skin
 onion-skin-settings-ellipsis = Onion Skin Settings...

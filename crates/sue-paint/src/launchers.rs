@@ -53,8 +53,41 @@ pub(crate) fn take(ctx: &egui::Context) -> Vec<Rect> {
 /// For tests that click them by where they are, never by a fixed place.
 #[must_use]
 pub fn shown_buttons(ctx: &egui::Context) -> Vec<(String, Rect)> {
-    ctx.data(|data| data.get_temp::<Vec<(String, Rect)>>(buttons()))
-        .unwrap_or_default()
+    let pass = ctx.cumulative_pass_nr();
+    let mut out = ctx
+        .data(|data| data.get_temp::<Vec<(String, Rect)>>(buttons()))
+        .unwrap_or_default();
+    // The palettes' marks of the last frame (drawn before the canvas takes
+    // its own list away); the count of frames goes on as a frame ends.
+    if let Some((drawn, marks)) =
+        ctx.data(|data| data.get_temp::<(u64, Vec<(String, Rect)>)>(palette_marks()))
+        && (drawn == pass || drawn + 1 == pass)
+    {
+        out.extend(marks);
+    }
+    out
+}
+
+/// Where a palette's marks of the frame are, with the pass they were
+/// drawn in.
+fn palette_marks() -> Id {
+    Id::NULL.with("sue-paint-palette-marks")
+}
+
+/// Notes a mark a palette drew at `at` this frame that a drag can take (a
+/// keyframe on the Timeline), by its id (`mark.<what>`), for
+/// [`shown_buttons`].
+pub(crate) fn note_palette_mark(ctx: &egui::Context, id: &str, at: Pos2) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|data| {
+        let (drawn, marks) =
+            data.get_temp_mut_or_default::<(u64, Vec<(String, Rect)>)>(palette_marks());
+        if *drawn != pass {
+            *drawn = pass;
+            marks.clear();
+        }
+        marks.push((format!("mark.{id}"), Rect::from_center_size(at, Vec2::ZERO)));
+    });
 }
 
 /// Notes a mark drawn at `at` this frame that a drag can take (a handle

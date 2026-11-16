@@ -1136,6 +1136,8 @@ impl SuePaint {
             // by how it moves on; an animation folder's in the band over
             // its cels. Each names its frame and how it moves on, on hover.
             let mut key_tip: Option<String> = None;
+            // Where each mark is, so a press on one drags that keyframe.
+            let mut key_spots: Vec<(EntityId, u32, Rect)> = Vec::new();
             if row.kind != Kind::Audio
                 && let Some(layer) = target
                 && (row.kind == Kind::Camera
@@ -1159,11 +1161,16 @@ impl SuePaint {
                     };
                     let center = pos2(column(at) + step / 2.0, y);
                     key_mark(&cells_painter, center, size, ease, theme.text);
-                    if hover.is_some_and(|pos| {
-                        below.contains(pos)
-                            && Rect::from_center_size(center, egui::Vec2::splat(size.max(pad)))
-                                .contains(pos)
-                    }) {
+                    let spot = Rect::from_center_size(center, egui::Vec2::splat(size.max(pad)));
+                    key_spots.push((layer, at, spot));
+                    if below.contains(center) {
+                        crate::launchers::note_palette_mark(
+                            ui.ctx(),
+                            &format!("keyframe.{}.{at}", row.track),
+                            center,
+                        );
+                    }
+                    if hover.is_some_and(|pos| below.contains(pos) && spot.contains(pos)) {
                         key_tip = Some(tr!(
                             "keyframe-at-frame",
                             frame = self.anim_ui.unit.show(at, fps),
@@ -1350,11 +1357,26 @@ impl SuePaint {
                 } else {
                     None
                 };
-                self.anim_ui.press = Some(Press {
-                    track: index,
-                    frame: at,
-                    moving,
-                    key,
+                // A press on a keyframe's mark drags that keyframe.
+                let keyframe = key_spots
+                    .iter()
+                    .find(|(_, _, spot)| spot.contains(pos))
+                    .map(|(layer, frame, _)| (*layer, *frame));
+                self.anim_ui.press = Some(match keyframe {
+                    Some((layer, frame)) => Press {
+                        track: index,
+                        frame,
+                        moving: false,
+                        key: None,
+                        keyframe: Some(layer),
+                    },
+                    None => Press {
+                        track: index,
+                        frame: at,
+                        moving,
+                        key,
+                        keyframe: None,
+                    },
                 });
             }
             if response.clicked()
@@ -1444,7 +1466,27 @@ impl SuePaint {
             let held = ui.input(|input| input.pointer.primary_down());
             let at = hover_frame.unwrap_or(press.frame);
             let row_now = hovered_row.unwrap_or(press.track);
-            if let Some((low, high)) = press.key {
+            if let Some(layer) = press.keyframe {
+                // Where the keyframe would go: a line and its frame.
+                let to = at.min(length - 1);
+                let x = column(to);
+                cells_painter.vline(x, below.y_range(), Stroke::new(thick, theme.focus()));
+                cells_painter.text(
+                    pos2(x + pad / 2.0, below.top() + pad),
+                    Align2::LEFT_TOP,
+                    self.anim_ui.unit.show(to, fps),
+                    font.clone(),
+                    theme.text,
+                );
+                if !held {
+                    actions.push(Action::MoveKeyframe {
+                        layer,
+                        from: press.frame,
+                        to,
+                    });
+                    self.anim_ui.press = None;
+                }
+            } else if let Some((low, high)) = press.key {
                 // Where the cel would start: a line and its frame.
                 let to = at.clamp(low, high);
                 let x = column(to);

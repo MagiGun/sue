@@ -380,7 +380,7 @@ The order of work is the plan at the end.
 | Timeline palette menu | Timeline palette | done | Clip Studio's list and order in submenus; Show split view, Graph Editor, Manage timeline, Show 2D camera frames, Show camera path, Show all field guides and Thumbnail display settings are left out |
 | Audio scrubbing | Animation > Playback Settings | done | Each frame reached by hand plays its own sound |
 | Render 2D Camera | Animation > Playback Settings | done | Off, the canvas shows the whole picture with the cameras' frames over it |
-| Delete Keyframe from Layer; keyframes cut, copied and pasted with their frames | Animation > Edit Track, Timeline palette right click | done | A camera's keys too; Add Keyframe with the camera picked keys the camera |
+| Delete Keyframe from Layer; keyframes cut, copied and pasted with their frames | Animation > Edit Track, Timeline palette right click | done | A camera's keys too; Add Keyframe with the camera picked keys the camera; a key's mark drags along its track |
 | Animated GIF export: Dithering | File > Export Animation > Animated GIF | done | Error diffusion over a fixed 252 color palette |
 | Folder rows on the timeline | Timeline palette | done | A folder holding animation folders is a parent row with a fold arrow; a folder's keys show in a band over its cels |
 

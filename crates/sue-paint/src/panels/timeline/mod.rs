@@ -192,6 +192,9 @@ pub(crate) struct Press {
     /// moves where that cel starts, between the keys around it (the
     /// frames it may start on), so the holds around it change.
     pub key: Option<(u32, u32)>,
+    /// It started on the mark of a keyframe of this layer, folder or
+    /// camera folder: the drag moves that keyframe along the track.
+    pub keyframe: Option<EntityId>,
 }
 
 /// What the Timeline palette keeps between frames besides its view.

@@ -998,8 +998,9 @@ Once a canvas is open:
   layers in it are filmed by a camera that can move, zoom and turn over the
   timeline. With the Object tool (O) on it, drag its red frame (inside to
   move, a corner to zoom, outside to turn) or type its position, scale and
-  rotation, and add a keyframe; between keyframes it glides. Playback and
-  exports show the animation through it.
+  rotation, and add a keyframe; between keyframes it glides. A keyframe's
+  mark on the Timeline drags to another frame. Playback and exports show
+  the animation through it.
 - **Timelapse** (File, Timelapse, or Record timelapse in New): while it
   records, Sue keeps a picture of the canvas after every change. Export
   Timelapse makes a video (MP4 where Windows has an encoder, AVI, or a

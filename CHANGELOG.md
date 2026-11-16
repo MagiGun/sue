@@ -18,7 +18,9 @@ follow [Semantic Versioning](https://semver.org/).
   keyframes are on); Copy and Paste Frames carry a layer's or folder's
   keyframes with the frames; Playback Settings, Render 2D Camera; the
   Animated GIF export's Dithering; the light table's color in the
-  Animation Cels palette.
+  Animation Cels palette. A keyframe's mark on the Timeline drags along
+  its track to another frame (a layer's, a folder's or the 2D camera's),
+  one undo step.
 
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
