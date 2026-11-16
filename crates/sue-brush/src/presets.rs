@@ -11,10 +11,12 @@
 //! Until the new engine paints on the canvas, the 0.0.75 engine paints
 //! with them through [`legacy_text`], the text that engine reads.
 
+use crate::paint::{field as paint_field, key as paint_key};
+use crate::texture::TextureMode;
 use sue_model::BrushPreset;
 use sue_model::brush::{
     AntiAlias, Binding, BrushRegistry, EngineKind, Mixing, Pick, PictureRef, Spacing, TaperMode,
-    Texture, TextureSource, TipSource, input, param,
+    Texture, TextureMode as ModelTextureMode, TextureSource, TipSource, input, param,
 };
 
 /// The tools whose sub tools are brushes, by the key their presets' ids
@@ -84,10 +86,22 @@ struct Make {
     follow: bool,
     size_jitter: f32,
     turn_jitter: f32,
-    // Size and opacity: pressure, speed (on, minimum), tilt.
+    // Size and opacity: pressure (on, minimum).
     size_pressure: (bool, f32),
-    size_speed: (bool, f32),
     opacity_pressure: bool,
+    /// Which of Sue's papers the grain is, how it meets the stroke, and
+    /// how large it is laid (`None`: the plain grain, multiplied, at 1).
+    paper: Option<(&'static str, TextureMode, f32)>,
+    /// What the mixing carries of its own paint, how far it drags what
+    /// it picked up, how much it softens (`None`: fully loaded, no drag,
+    /// no softening, as 0.0.75 mixed).
+    wet: Option<(f32, f32, f32)>,
+    /// The density of paint follows pressure down to this.
+    density_pressure: Option<f32>,
+    /// The watercolor edge: range, inside opacity, rim darkness, blur.
+    watercolor: Option<(f32, f32, f32, f32)>,
+    /// Opacity follows pressure down to this (with `opacity_pressure`).
+    opacity_min: f32,
 }
 
 impl Make {
@@ -113,8 +127,12 @@ impl Make {
             size_jitter: 0.0,
             turn_jitter: 0.0,
             size_pressure: (true, 0.15),
-            size_speed: (false, 0.0),
             opacity_pressure: false,
+            paper: None,
+            wet: None,
+            density_pressure: None,
+            watercolor: None,
+            opacity_min: 0.0,
         }
     }
 
@@ -173,6 +191,66 @@ impl Make {
         self
     }
 
+    /// The grain is Sue's paper `name`, meeting the stroke by `mode`,
+    /// laid `scale` times as large.
+    fn paper(mut self, name: &'static str, mode: TextureMode, scale: f32) -> Self {
+        self.paper = Some((name, mode, scale));
+        self
+    }
+
+    /// The mixing carries `load` of its own paint, drags what it picked
+    /// up by `pull` and softens by `blur`.
+    fn wet(mut self, load: f32, pull: f32, blur: f32) -> Self {
+        self.wet = Some((load, pull, blur));
+        self
+    }
+
+    /// The density of paint follows pressure down to `min`: a light
+    /// touch lays thin paint, a firm one covers.
+    fn density_pressure(mut self, min: f32) -> Self {
+        self.density_pressure = Some(min);
+        self
+    }
+
+    /// The watercolor edge: the paint pools at the rim `range` pixels
+    /// in, the inside keeps `opacity`, the rim darkens by `darkness`,
+    /// softened over `blur` pixels.
+    fn watercolor(mut self, range: f32, opacity: f32, darkness: f32, blur: f32) -> Self {
+        self.watercolor = Some((range, opacity, darkness, blur));
+        self
+    }
+
+    /// Each dab is a puff of `density` drops `size` of the brush's size,
+    /// gathered toward the middle by `deviation` (0 to 1).
+    fn spray(mut self, size: f32, density: f32, deviation: f32) -> Self {
+        extra(&mut self.preset, paint_field::SPRAY, &[1]);
+        extra(&mut self.preset, paint_field::SPRAY_LINKED, &[1]);
+        self.set(paint_key::PARTICLE_SIZE, size)
+            .set(paint_key::PARTICLE_DENSITY, density)
+            .set(paint_key::SPRAY_DEVIATION, deviation)
+    }
+
+    /// Opacity follows pressure down to `min`.
+    fn opacity_pressure_min(mut self, min: f32) -> Self {
+        self.opacity_pressure = true;
+        self.opacity_min = min;
+        self
+    }
+
+    /// The tip is `aspect` times as thin as it is wide, turned `angle`
+    /// degrees: a flat nib or a flat brush.
+    fn flat(self, aspect: f32, angle: f32) -> Self {
+        self.set(param::ASPECT, aspect).set(param::ANGLE, angle)
+    }
+
+    /// Starting and ending of `start` and `end` pixels, by speed.
+    fn tapers(mut self, start: f32, end: f32) -> Self {
+        self.preset.taper.start = start;
+        self.preset.taper.end = end;
+        self.preset.taper.by_speed = true;
+        self
+    }
+
     fn mix(mut self, value: f32) -> Self {
         self.mix = value;
         self
@@ -202,12 +280,6 @@ impl Make {
     /// Size does not follow pressure.
     fn no_size_pressure(mut self) -> Self {
         self.size_pressure.0 = false;
-        self
-    }
-
-    /// Size follows speed down to `min`.
-    fn speed_min(mut self, min: f32) -> Self {
-        self.size_speed = (true, min);
         self
     }
 
@@ -290,11 +362,38 @@ impl Make {
             }
         }
         if self.grain > 0.0 {
-            preset.texture = Some(Texture::new(TextureSource::Grain));
+            let mut texture = Texture::new(TextureSource::Grain);
+            if let Some((name, mode, scale)) = self.paper {
+                texture.scale = scale;
+                texture.mode = match mode {
+                    TextureMode::Subtract | TextureMode::Height => ModelTextureMode::Subtract,
+                    _ => ModelTextureMode::Multiply,
+                };
+                extra(&mut preset, paint_field::TEXTURE_PAPER, name.as_bytes());
+                extra(
+                    &mut preset,
+                    paint_field::TEXTURE_MODE,
+                    mode.name().as_bytes(),
+                );
+            }
+            preset.texture = Some(texture);
             preset.set(param::TEXTURE_STRENGTH, self.grain);
         }
         if self.mix > 0.0 {
-            preset.mix = Some(Mixing::new(self.mix));
+            let mut mixing = Mixing::new(self.mix);
+            if let Some((load, pull, blur)) = self.wet {
+                mixing.load = load;
+                mixing.pull = pull;
+                mixing.blur = blur;
+            }
+            preset.mix = Some(mixing);
+        }
+        if let Some((range, opacity, darkness, blur)) = self.watercolor {
+            extra(&mut preset, paint_field::WATERCOLOR, &[1]);
+            preset.set(paint_key::WATERCOLOR_RANGE, range);
+            preset.set(paint_key::WATERCOLOR_OPACITY, opacity);
+            preset.set(paint_key::WATERCOLOR_DARKNESS, darkness);
+            preset.set(paint_key::WATERCOLOR_BLUR, blur);
         }
         let (on, min) = self.size_pressure;
         if on || min != 0.0 {
@@ -304,15 +403,10 @@ impl Make {
                     .switched(on),
             );
         }
-        if self.size_speed.0 {
-            preset
-                .dynamics
-                .push(Binding::new(param::SIZE, input::SPEED).range(self.size_speed.1, 1.0));
-        }
         if self.opacity_pressure {
             preset
                 .dynamics
-                .push(Binding::new(param::OPACITY, input::PRESSURE));
+                .push(Binding::new(param::OPACITY, input::PRESSURE).range(self.opacity_min, 1.0));
         }
         if self.size_jitter > 0.0 {
             preset.dynamics.push(
@@ -335,6 +429,15 @@ impl Make {
                     .added(),
             );
         }
+        // Last, the bindings the 0.0.75 text has no word for, so a tip
+        // read back from that text and given them again ([`keep_unsaid`])
+        // holds them in the same order.
+        if let Some(min) = self.density_pressure {
+            preset.set(paint_key::PAINT_DENSITY, 1.0);
+            preset
+                .dynamics
+                .push(Binding::new(paint_key::PAINT_DENSITY, input::PRESSURE).range(min, 1.0));
+        }
         preset.tip = match self.shape {
             Some(name) => TipSource::Images {
                 pictures: vec![PictureRef::Named(name.to_owned())],
@@ -353,12 +456,22 @@ impl Make {
     }
 }
 
+/// Sets the field `key` of `preset` to `bytes`.
+fn extra(preset: &mut BrushPreset, key: &str, bytes: &[u8]) {
+    if let Some(slot) = preset.extra.iter_mut().find(|(k, _)| k == key) {
+        slot.1 = bytes.to_vec();
+    } else {
+        preset.extra.push((key.to_owned(), bytes.to_vec()));
+    }
+}
+
 /// Every built-in brush, tool by tool in [`TOOLS`] order, each tool's in
 /// the order its Sub Tool palette lists them.
 #[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn builtin() -> Vec<BrushPreset> {
     use AntiAlias::{None as Hard, Strong, Weak};
+    use TextureMode::{Height, Subtract};
     let pen = |id: &str, name: &str, size: f32| Make::csp(id, name, "Pen", size);
     let marker = |id: &str, name: &str, size: f32| Make::csp(id, name, "Marker", size);
     let pencil = |id: &str, name: &str, size: f32| Make::csp(id, name, "Pencil", size);
@@ -394,7 +507,8 @@ pub fn builtin() -> Vec<BrushPreset> {
             .flick(),
         pen("sue.pen.grainy_g_pen", "Grainy G-pen", 10.0)
             .pressure_min(0.05)
-            .grain(0.08)
+            .grain(0.3)
+            .paper("grain", Subtract, 1.0)
             .stabilization(10),
         pen("sue.pen.mapping_pen", "Mapping pen", 10.0)
             .tapered()
@@ -418,17 +532,18 @@ pub fn builtin() -> Vec<BrushPreset> {
             .pressure_min(0.2)
             .grain(0.6)
             .stabilization(10),
-        pen("sue.pen.calligraphy", "Calligraphy", 50.0)
+        pen("sue.pen.calligraphy", "Calligraphy", 30.0)
             .tapered()
             .aa(Weak)
-            .pressure_min(0.15)
-            .speed_min(0.4)
+            .flat(0.2, 40.0)
+            .pressure_min(0.4)
             .stabilization(10),
         marker("sue.pen.fineliner", "Fineliner", 10.0)
             .tapered()
             .no_size_pressure()
             .stabilization(10),
         marker("sue.pen.felt_pen", "Felt pen", 20.0)
+            .opacity(0.9)
             .aa(Weak)
             .no_size_pressure()
             .stabilization(10),
@@ -436,127 +551,163 @@ pub fn builtin() -> Vec<BrushPreset> {
             .no_size_pressure()
             .aa(Hard)
             .at_least_one(),
-        marker("sue.pen.flat_marker", "Flat marker", 50.0)
-            .hardness(0.7)
+        marker("sue.pen.flat_marker", "Flat marker", 40.0)
+            .opacity(0.7)
+            .flat(0.3, 60.0)
             .aa(Weak)
             .no_size_pressure()
             .stabilization(10),
         // The Sketch tool (once the Pencil tool), with Clip Studio
         // Paint's default settings; its paper textures are Sue's grain.
+        // Graphite: the paper's valleys hold back what the lead lays,
+        // a light touch catching only its high spots.
         pencil("sue.pencil.pencil", "Pencil", 10.0)
             .opacity(0.9)
-            .flow(0.85)
             .aa(Weak)
-            .grain(0.45)
-            .pressure_min(0.4)
-            .opacity_pressure()
+            .grain(0.8)
+            .paper("grain", Subtract, 1.0)
+            .pressure_min(0.5)
+            .opacity_pressure_min(0.2)
             .stabilization(10),
         pencil("sue.pencil.mechanical_pencil", "Mechanical pencil", 5.0)
             .tapered()
-            .flow(0.85)
             .aa(Weak)
-            .grain(0.3)
-            .opacity_pressure()
+            .grain(0.7)
+            .paper("grain", Subtract, 1.0)
+            .pressure_min(0.6)
+            .opacity_pressure_min(0.25)
             .stabilization(10),
         pencil("sue.pencil.charcoal", "Charcoal", 20.0)
             .aa(Weak)
+            .hardness(0.6)
             .grain(0.8)
+            .paper("grain", Subtract, 1.3)
             .pressure_min(0.5)
-            .opacity_pressure()
+            .opacity_pressure_min(0.4)
             .stabilization(10),
-        pastel("sue.pencil.crayon", "Crayon", 30.0)
+        // Wax and chalk sit on the paper's tooth and skip its valleys:
+        // crisp specks of paper show through even a firm stroke.
+        pastel("sue.pencil.crayon", "Crayon", 24.0)
             .tapered()
-            .flow(0.8)
             .aa(Weak)
-            .grain(0.65)
-            .mix(0.8)
+            .hardness(0.8)
+            .grain(1.0)
+            .paper("grain", Subtract, 1.0)
+            .set(paint_key::TEXTURE_CONTRAST, 0.6)
             .pressure_min(0.6)
-            .opacity_pressure()
+            .opacity_pressure_min(0.5)
             .stabilization(10),
         pastel("sue.pencil.pastel", "Pastel", 40.0)
             .tapered()
-            .hardness(0.01)
-            .flow(0.5)
+            .hardness(0.5)
             .aa(Hard)
-            .grain(0.5)
-            .mix(0.7)
+            .grain(0.8)
+            .paper("grain", Subtract, 1.5)
+            .mix(0.5)
+            .wet(0.85, 0.3, 0.2)
             .pressure_min(0.6)
-            .opacity_pressure()
+            .opacity_pressure_min(0.3)
             .stabilization(10),
         pastel("sue.pencil.chalk", "Chalk", 30.0)
-            .hardness(0.81)
+            .hardness(0.85)
             .aa(Weak)
-            .grain(0.75)
-            .mix(0.7)
+            .grain(1.0)
+            .paper("grain", Height, 1.0)
+            .set(paint_key::TEXTURE_BRIGHTNESS, 0.05)
             .pressure_min(0.7)
-            .opacity_pressure()
+            .opacity_pressure_min(0.5)
             .stabilization(10),
         // The Brush tool: watercolor, thick paint and ink brushes, with
         // Clip Studio Paint's default settings.
-        watercolor("sue.brush.round_watercolor", "Round watercolor brush", 80.0)
-            .hardness(0.3)
-            .flow(0.6)
-            .build_up()
-            .mix(0.3)
+        watercolor("sue.brush.round_watercolor", "Round watercolor brush", 60.0)
+            .hardness(0.75)
+            .opacity(0.8)
             .aa(Weak)
+            .grain(0.3)
+            .paper("cold-press", Subtract, 1.5)
+            .watercolor(10.0, 0.6, 0.5, 1.5)
+            .pressure_min(0.35)
+            .opacity_pressure_min(0.6)
+            .tapers(10.0, 30.0)
             .stabilization(2),
-        watercolor("sue.brush.flat_watercolor", "Flat watercolor brush", 100.0)
-            .hardness(0.6)
-            .flow(0.6)
-            .build_up()
-            .mix(0.25)
+        watercolor("sue.brush.flat_watercolor", "Flat watercolor brush", 70.0)
+            .hardness(0.8)
+            .opacity(0.8)
+            .flat(0.35, 70.0)
             .aa(Weak)
+            .grain(0.3)
+            .paper("cold-press", Subtract, 1.5)
+            .watercolor(8.0, 0.6, 0.5, 1.0)
+            .pressure_min(0.5)
+            .opacity_pressure_min(0.6)
             .stabilization(10),
-        thick("sue.brush.gouache", "Gouache", 80.0)
-            .flow(0.75)
-            .mix(0.8)
-            .aa(Hard)
-            .pressure_min(0.6)
+        thick("sue.brush.gouache", "Gouache", 60.0)
+            .hardness(0.9)
+            .mix(0.6)
+            .wet(0.85, 0.25, 0.0)
+            .density_pressure(0.25)
+            .aa(Weak)
+            .pressure_min(0.7)
+            .tapers(10.0, 25.0)
             .stabilization(2),
-        thick("sue.brush.oil_paint", "Oil paint", 80.0)
-            .mix(0.61)
+        thick("sue.brush.oil_paint", "Oil paint", 60.0)
+            .hardness(0.85)
+            .mix(0.6)
+            .wet(0.8, 0.5, 0.05)
+            .density_pressure(0.4)
             .aa(Weak)
             .grain(0.12)
+            .paper("canvas", Subtract, 1.0)
             .pressure_min(0.6)
             .stabilization(2),
         thick("sue.brush.thick_oil_paint", "Thick oil paint", 60.0)
-            .flow(0.85)
-            .mix(0.85)
+            .hardness(0.9)
+            .mix(0.8)
+            .wet(0.75, 0.65, 0.0)
+            .density_pressure(0.6)
             .aa(Weak)
-            .grain(0.3)
+            .grain(0.2)
+            .paper("canvas", Subtract, 1.5)
             .pressure_min(0.6)
             .stabilization(2),
-        watercolor("sue.brush.wet_wash", "Wet wash", 30.0)
-            .hardness(0.4)
+        watercolor("sue.brush.wet_wash", "Wet wash", 40.0)
+            .hardness(0.3)
             .build_up()
             .flow(0.5)
             .mix(0.7)
+            .wet(0.45, 0.4, 0.6)
+            .density_pressure(0.2)
             .aa(Hard)
             .stabilization(10),
-        ink("sue.brush.brush_pen", "Brush pen", 70.0)
-            .tapered()
-            .pressure_min(0.02)
+        ink("sue.brush.brush_pen", "Brush pen", 40.0)
+            .tapers(60.0, 100.0)
+            .pressure_min(0.05)
             .stabilization(10)
             .flick(),
-        ink("sue.brush.dry_ink", "Dry ink", 60.0)
+        ink("sue.brush.dry_ink", "Dry ink", 40.0)
             .aa(Strong)
-            .grain(0.5)
+            .grain(0.7)
+            .paper("grain", Height, 1.5)
+            .tapers(40.0, 80.0)
             .pressure_min(0.1)
             .stabilization(10),
-        ink("sue.brush.watery_ink", "Watery ink", 100.0)
-            .hardness(0.5)
+        ink("sue.brush.watery_ink", "Watery ink", 50.0)
+            .hardness(0.7)
             .aa(Strong)
-            .grain(0.35)
-            .opacity_pressure()
+            .watercolor(6.0, 0.6, 0.35, 1.0)
+            .pressure_min(0.4)
+            .opacity_pressure_min(0.3)
             .stabilization(10),
-        thick("sue.brush.pointillism", "Pointillism", 80.0)
+        // Many small dots scattered over a band, each its own size, larger
+        // as the pen presses harder.
+        thick("sue.brush.pointillism", "Pointillism", 16.0)
             .mix(0.5)
             .aa(Weak)
-            .spacing(1.2)
-            .scatter(0.6)
-            .size_jitter(0.6)
+            .spacing(0.45)
+            .scatter(2.0)
+            .size_jitter(0.5)
             .shape("Dot")
-            .no_size_pressure()
+            .pressure_min(0.5)
             .stabilization(6),
         // The Airbrush tool, with Clip Studio Paint's defaults; its spray
         // particles are scattered dots.
@@ -566,13 +717,12 @@ pub fn builtin() -> Vec<BrushPreset> {
             .flow(0.06)
             .no_size_pressure()
             .opacity_pressure(),
-        // Clip Studio's spray is 200 wide: 6 pixel drops scattered over it.
-        airbrush("sue.airbrush.spray", "Spray", 6.0)
+        // A spray can: each dab a puff of fine drops gathered toward its
+        // middle, so a tap is a puff too.
+        airbrush("sue.airbrush.spray", "Spray", 100.0)
             .build_up()
-            .spacing(0.08)
-            .scatter(16.0)
-            .size_jitter(0.8)
-            .shape("Dot")
+            .spacing(0.12)
+            .spray(0.035, 24.0, 0.35)
             .no_size_pressure()
             .opacity_pressure(),
         airbrush("sue.airbrush.droplet", "Droplet", 30.0)
@@ -689,6 +839,67 @@ pub fn builtin() -> Vec<BrushPreset> {
     .into_iter()
     .map(Make::done)
     .collect()
+}
+
+/// `true` when the 0.0.75 text has a word for `binding` (size and
+/// opacity following pressure, speed, tilt or chance; the turn following
+/// the direction, the pen's lean or chance).
+fn legacy_says(binding: &Binding) -> bool {
+    let multiplied = binding.combine != sue_model::brush::Combine::Add;
+    match binding.param.as_str() {
+        param::SIZE | param::OPACITY => {
+            multiplied
+                && [input::PRESSURE, input::SPEED, input::TILT, input::RANDOM]
+                    .contains(&binding.input.as_str())
+        }
+        param::ANGLE => {
+            !multiplied
+                && [input::DIRECTION, input::TILT_DIRECTION, input::RANDOM]
+                    .contains(&binding.input.as_str())
+        }
+        _ => false,
+    }
+}
+
+/// `read`, a tip read from its 0.0.75 text ([`BrushPreset::from_legacy_text`]),
+/// given back what `base` (the preset it was made from) holds and that
+/// text has no word for: the paint behaviours and their numbers, the
+/// paper's choice, size, turn and mode, how the mixing carries, drags
+/// and softens, and the bindings of other parameters. What the text
+/// does say is the text's. So a person who changes a built-in brush's
+/// size keeps its paper, its watercolor edge and how it mixes.
+#[must_use]
+pub fn keep_unsaid(base: &BrushPreset, mut read: BrushPreset) -> BrushPreset {
+    for (key, bytes) in &base.extra {
+        if read.extra(key).is_none() && !key.starts_with(BrushPreset::LEGACY) {
+            read.extra.push((key.clone(), bytes.clone()));
+        }
+    }
+    for (key, value) in &base.params {
+        read.params.entry(key.clone()).or_insert(*value);
+    }
+    if let (Some(texture), Some(kept)) = (&mut read.texture, &base.texture)
+        && texture.source == kept.source
+    {
+        texture.scale = kept.scale;
+        texture.rotation = kept.rotation;
+        texture.mode = kept.mode;
+    }
+    if let (Some(mixing), Some(kept)) = (&mut read.mix, &base.mix) {
+        mixing.load = kept.load;
+        mixing.pull = kept.pull;
+        mixing.blur = kept.blur;
+    }
+    for binding in &base.dynamics {
+        let has = read
+            .dynamics
+            .iter()
+            .any(|b| b.param == binding.param && b.input == binding.input);
+        if !legacy_says(binding) && !has {
+            read.dynamics.push(binding.clone());
+        }
+    }
+    read
 }
 
 /// `preset` as the text the 0.0.75 engine reads (`Tip::to_text` of
@@ -919,8 +1130,68 @@ mod tests {
         }
     }
 
+    /// The brushes tuned in 0.0.8 (package "Brush presets tuned") so
+    /// each has the character its name promises: they no longer paint
+    /// as their 0.0.75 sub tools did, on purpose. Each with why.
+    const RETUNED: &[(&str, &str)] = &[
+        ("sue.pen.grainy_g_pen", "its grain was too faint to see"),
+        ("sue.pen.calligraphy", "a flat nib, not a round tip"),
+        ("sue.pen.felt_pen", "a felt pen's ink is not quite opaque"),
+        (
+            "sue.pen.flat_marker",
+            "a chisel tip and a marker's even, see-through ink",
+        ),
+        ("sue.pencil.pencil", "graphite grain from the paper's tooth"),
+        (
+            "sue.pencil.mechanical_pencil",
+            "graphite grain from the paper's tooth",
+        ),
+        ("sue.pencil.charcoal", "a softer, darker grain"),
+        (
+            "sue.pencil.crayon",
+            "waxy grain that leaves specks of paper, no mixing",
+        ),
+        ("sue.pencil.pastel", "chalky tooth and a soft, smudging mix"),
+        ("sue.pencil.chalk", "crisp tooth, no mixing"),
+        (
+            "sue.brush.round_watercolor",
+            "transparent, with its pooled darker edge",
+        ),
+        (
+            "sue.brush.flat_watercolor",
+            "a flat brush with a watercolor edge",
+        ),
+        (
+            "sue.brush.gouache",
+            "covers as fully as the pen presses, and mixes",
+        ),
+        (
+            "sue.brush.oil_paint",
+            "drags the color it picks up, on canvas",
+        ),
+        (
+            "sue.brush.thick_oil_paint",
+            "drags further, thicker on canvas",
+        ),
+        ("sue.brush.wet_wash", "thin, soft and bleeding"),
+        (
+            "sue.brush.brush_pen",
+            "a clean taper in and out, a mouse's too",
+        ),
+        ("sue.brush.dry_ink", "dry, broken edges and tapered ends"),
+        ("sue.brush.watery_ink", "thin ink that pools at its edge"),
+        (
+            "sue.brush.pointillism",
+            "small dots over a band, not a few large blots",
+        ),
+        (
+            "sue.airbrush.spray",
+            "a puff of drops each dab, so a tap sprays too",
+        ),
+    ];
+
     #[test]
-    fn every_built_in_brush_paints_as_its_0_0_75_sub_tool() {
+    fn every_built_in_brush_paints_as_its_0_0_75_sub_tool_unless_retuned() {
         let presets = builtin();
         let mut matched = 0;
         for line in OLD.lines() {
@@ -942,23 +1213,99 @@ mod tests {
             else {
                 continue;
             };
-            assert_eq!(legacy_text(preset), text, "{name} ({tool})");
             matched += 1;
+            if RETUNED.iter().any(|(id, _)| *id == preset.id) {
+                assert_ne!(legacy_text(preset), text, "{name} ({tool}) was retuned");
+                continue;
+            }
+            assert_eq!(legacy_text(preset), text, "{name} ({tool})");
         }
         assert_eq!(matched, presets.len(), "every preset was a 0.0.75 brush");
+        for (id, why) in RETUNED {
+            assert!(find(id).is_some(), "{id}: {why}");
+        }
     }
 
     #[test]
     fn the_legacy_text_reads_back_to_the_same_preset() {
         for preset in builtin() {
-            let mut back = BrushPreset::from_legacy_text(&legacy_text(&preset));
+            let read = BrushPreset::from_legacy_text(&legacy_text(&preset));
+            let mut back = keep_unsaid(&preset, read);
             back.id.clone_from(&preset.id);
             back.name.clone_from(&preset.name);
             back.group.clone_from(&preset.group);
             back.input = preset.input;
-            back.extra.extend(preset.extra.iter().cloned());
             assert_eq!(back, preset, "{}", preset.id);
         }
+    }
+
+    #[test]
+    fn a_changed_tip_keeps_what_its_text_has_no_word_for() {
+        let base = find("sue.brush.gouache").unwrap();
+        let mut read = BrushPreset::from_legacy_text(&legacy_text(&base));
+        read.set(param::SIZE, 120.0);
+        let back = keep_unsaid(&base, read);
+        assert_eq!(back.value(param::SIZE), Some(120.0), "the text's own");
+        assert_eq!(back.mix, base.mix, "how it mixes");
+        assert!(
+            back.dynamics
+                .iter()
+                .any(|b| b.param == paint_key::PAINT_DENSITY && b.input == input::PRESSURE),
+            "the density of paint still follows pressure"
+        );
+        let crayon = find("sue.pencil.crayon").unwrap();
+        let back = keep_unsaid(
+            &crayon,
+            BrushPreset::from_legacy_text(&legacy_text(&crayon)),
+        );
+        assert_eq!(back.texture, crayon.texture, "its paper's size and mode");
+        assert_eq!(
+            back.extra(paint_field::TEXTURE_PAPER),
+            Some(b"grain".as_slice())
+        );
+    }
+
+    #[test]
+    fn every_brush_has_the_character_its_name_promises() {
+        let b = |id: &str| find(id).unwrap_or_else(|| panic!("{id}"));
+        let behaviours = |id: &str| crate::paint::Behaviours::from_preset(&b(id));
+        // Grain from a paper for the pencils, crayons, pastels, chalk.
+        for id in [
+            "sue.pencil.pencil",
+            "sue.pencil.mechanical_pencil",
+            "sue.pencil.charcoal",
+            "sue.pencil.crayon",
+            "sue.pencil.pastel",
+            "sue.pencil.chalk",
+        ] {
+            assert!(behaviours(id).texture.is_some(), "{id}: paper grain");
+        }
+        // Watercolor pools at its edge and is transparent.
+        for id in ["sue.brush.round_watercolor", "sue.brush.flat_watercolor"] {
+            assert!(behaviours(id).watercolor.is_some(), "{id}: an edge");
+            assert!(b(id).mix.is_none(), "{id}: the edge needs a whole stroke");
+        }
+        // Gouache covers as fully as the pen presses, and mixes.
+        let gouache = b("sue.brush.gouache");
+        assert!(gouache.mix.is_some_and(|m| m.load < 1.0 && m.amount > 0.0));
+        assert!(
+            gouache
+                .dynamics
+                .iter()
+                .any(|d| d.on && d.param == paint_key::PAINT_DENSITY && d.input == input::PRESSURE)
+        );
+        // A brush pen tapers in and out, by speed (a mouse's too).
+        let pen = b("sue.brush.brush_pen");
+        assert!(pen.taper.start > 0.0 && pen.taper.end > pen.taper.start);
+        assert!(pen.taper.by_speed);
+        // Markers lay even ink that is not quite opaque, and a flat one
+        // is a chisel.
+        for id in ["sue.pen.felt_pen", "sue.pen.flat_marker"] {
+            let opacity = b(id).value(param::OPACITY).unwrap_or(1.0);
+            assert!(opacity < 1.0 && !b(id).build_up, "{id}");
+        }
+        assert!(b("sue.pen.flat_marker").value(param::ASPECT).unwrap_or(1.0) < 0.5);
+        assert!(b("sue.pen.calligraphy").value(param::ASPECT).unwrap_or(1.0) < 0.5);
     }
 
     #[test]

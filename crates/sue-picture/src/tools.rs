@@ -1900,7 +1900,9 @@ mod tests {
         assert_eq!(toolbox.current().name, "Gouache");
         toolbox.current_mut().tip.size = 99.0;
         toolbox.pick_sub(Tool::Brush, 0);
-        assert_eq!(toolbox.current().tip.size, 80.0, "Round watercolor brush");
+        // The round watercolor brush's own size (60 since its 0.0.8
+        // tuning, 80 before).
+        assert_eq!(toolbox.current().tip.size, 60.0, "Round watercolor brush");
         toolbox.pick_sub(Tool::Brush, 3);
         assert_eq!(toolbox.current().tip.size, 99.0);
         toolbox.pick_sub(Tool::Brush, 99);
