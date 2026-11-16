@@ -1079,6 +1079,8 @@ follow [Semantic Versioning](https://semver.org/).
   takes its name and its frames on the timeline.
 - Sue Paint: Merge Selected Layers on a folder cel keeps it the cel on
   the timeline, on the frames it showed.
+- Sue Paint, Timeline: the playback range's start and end handles on the
+  ruler can be dragged again (a press there moved the playhead).
 
 ### Removed
 

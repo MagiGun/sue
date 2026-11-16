@@ -704,6 +704,15 @@ impl SuePaint {
                 theme.scrim(),
             );
         }
+        // A click or drag on the ruler goes to that frame; hovering it
+        // names the frame under the pointer. It is sensed before the
+        // playback range's two handles, so a press on a handle drags the
+        // handle (the widget sensed last is on top).
+        let ruler_response = ui.interact(
+            ruler_rect,
+            ui.scope_id().with("timeline-ruler"),
+            Sense::click_and_drag(),
+        );
         // The playback range: the frames outside it are shaded on the
         // ruler, and its two ends are handles.
         let marker_width = pad;
@@ -789,13 +798,6 @@ impl SuePaint {
                 theme.text,
             );
         }
-        // A click or drag on the ruler goes to that frame; hovering it
-        // names the frame under the pointer.
-        let ruler_response = ui.interact(
-            ruler_rect,
-            ui.scope_id().with("timeline-ruler"),
-            Sense::click_and_drag(),
-        );
         if !on_marker && let Some(pos) = ruler_response.hover_pos() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             let at = at_pointer(pos);
