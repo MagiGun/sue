@@ -11,6 +11,10 @@ use crate::doc;
 use crate::studio::{Gesture, SuePaint};
 use crate::tools::Tool;
 
+/// How much of the output frame the title-safe area takes, per side (as
+/// New's preview shows it).
+const TITLE_SAFE: f32 = 0.8;
+
 impl SuePaint {
     pub(super) fn overlays(
         &mut self,
@@ -104,6 +108,28 @@ impl SuePaint {
                 origin,
                 Color32::from_rgba_unmultiplied(0, 120, 255, 70),
             );
+        }
+        // An animation's output frame (New, Animation): a line round what
+        // exports, named under its lower left corner, with the title-safe
+        // area inside it when that is on.
+        if let Some(frame) = crate::anim::setup::OutputFrame::of(&cx.world.arena, doc.picture) {
+            let [x, y, w, h] = frame.rect().map(|value| value as f32);
+            let corners = |[x, y, w, h]: [f32; 4]| {
+                vec![
+                    screen([x, y]),
+                    screen([x + w, y]),
+                    screen([x + w, y + h]),
+                    screen([x, y + h]),
+                ]
+            };
+            marks::guide(&painter, corners([x, y, w, h]), true, theme);
+            if frame.title_safe {
+                let (sw, sh) = (w * TITLE_SAFE, h * TITLE_SAFE);
+                let inner = [x + (w - sw) / 2.0, y + (h - sh) / 2.0, sw, sh];
+                marks::guide(&painter, corners(inner), true, theme);
+            }
+            let under = screen([x, y + h]) + Vec2::new(0.0, theme.space(sue_wm::ui::Space::S1));
+            marks::tag(&painter, under, &tr!("output-frame-label"), theme);
         }
         // The selection.
         if self.show_selection

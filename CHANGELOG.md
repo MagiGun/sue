@@ -555,6 +555,8 @@ follow [Semantic Versioning](https://semver.org/).
   has Weak, Medium and Strong and Remove Noise.
 - Sue Paint, File, New, Animation: the overflow frame takes an Offset X
   and an Offset Y, moving the output frame from its reference point.
+- Sue Paint: an animation's output frame is drawn on the canvas, named
+  under its lower left corner, with its title-safe area when that is on.
 
 ### Changed
 
