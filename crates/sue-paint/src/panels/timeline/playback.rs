@@ -279,7 +279,9 @@ impl SuePaint {
         };
         let general_opacity = self.general_opacity;
         let opacity = self.light_opacity;
-        let light_color = self.light_color.then_some(anim::LIGHT_TABLE_TINT);
+        let light_color = self
+            .light_color
+            .then_some(self.light_tint.map(|channel| f32::from(channel) / 255.0));
         // The camera folders at the frame shown.
         let (arena, picture) = (&cx.world.arena, self.picture());
         let size = picture

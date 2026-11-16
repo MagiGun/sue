@@ -228,9 +228,15 @@ impl SuePaint {
             pos2(body.right() - edge - side, at(0, 0).top()),
             egui::Vec2::splat(side),
         );
+        // The light table's color (Change layer color), left of Color
+        // Mode.
+        let tint_rect = Rect::from_min_size(
+            pos2(color_rect.left() - gap - side * 2.0, color_rect.top()),
+            egui::vec2(side * 2.0, side),
+        );
         let opacity_rect = Rect::from_min_max(
             pos2(at(0, 3).left() + gap, at(0, 3).top()),
-            pos2(color_rect.left() - gap, at(0, 3).bottom()),
+            pos2(tint_rect.left() - gap, at(0, 3).bottom()),
         );
         let mut opacity = f64::from(if self.opacity_general {
             self.general_opacity
@@ -258,6 +264,19 @@ impl SuePaint {
         }
         if color.show_at(ui, color_rect, theme).clicked() {
             run = Some("anim.light_table.color");
+        }
+        let [red, green, blue] = self.light_tint;
+        let mut tint = [red, green, blue, 255];
+        let picked = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(tint_rect), |ui| {
+                ui.spacing_mut().interact_size.y = side;
+                sue_wm::color_button(ui, "cels-light-tint", &mut tint, false, theme)
+            })
+            .inner;
+        if picked.changed {
+            self.light_tint = [tint[0], tint[1], tint[2]];
+            // Picking a color shows it.
+            self.light_color = true;
         }
 
         // The entries: the cel being drawn, its light table, then the
