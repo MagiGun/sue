@@ -359,8 +359,10 @@ enum Drag<P> {
         weights: (f32, f32),
         per_point: f32,
     },
-    /// The bottom row's top edge.
-    Bottom { from: f32, height: f32 },
+    /// The bottom row's top edge: where the drag began, the row's height
+    /// as it was drawn then, and the most it may grow to (the room the
+    /// layout leaves it).
+    Bottom { from: f32, height: f32, most: f32 },
     /// The top row's bottom edge.
     Top { from: f32, height: f32 },
     /// A palette, by its title bar, tab or icon: where the drag began and
@@ -431,6 +433,12 @@ pub const COLUMN_BAR: f32 = 12.0;
 
 /// How wide a closed side's bar is.
 pub const HANDLE: f32 = 14.0;
+
+/// The least height of the bottom row (the timeline's).
+pub const BOTTOM_LEAST: f32 = 90.0;
+
+/// How much of the work area the bottom row always leaves above it.
+pub const BOTTOM_LEAVES: f32 = 200.0;
 
 /// The height of a group's header: its tab strip, when it has more than
 /// one tab or its palette is [headed](DockPanel::headed). The height of a
@@ -596,6 +604,16 @@ pub fn tab_place(ctx: &egui::Context, key: &str) -> Option<Rect> {
 pub fn tab_place_named(ctx: &egui::Context, name: &str) -> Option<Rect> {
     let now = ctx.cumulative_pass_nr();
     ctx.data(|data| data.get_temp::<(u64, Rect)>(tab_name_id(name)))
+        .filter(|(pass, _)| pass + 1 >= now)
+        .map(|(_, place)| place)
+}
+
+/// Where the bottom row (the timeline's, under the work area) was laid
+/// in the last frame, while it is open: for a test or a tour that drags
+/// its edge or looks at how tall it is.
+pub fn bottom_row(ctx: &egui::Context) -> Option<Rect> {
+    let now = ctx.cumulative_pass_nr();
+    ctx.data(|data| data.get_temp::<(u64, Rect)>(Id::unique("sue-dock-bottom-row")))
         .filter(|(pass, _)| pass + 1 >= now)
         .map(|(_, place)| place)
 }
@@ -1715,7 +1733,10 @@ impl<P: DockPanel> DockLayout<P> {
                 laid.center.max.y = bar.top();
             }
         } else if center.height() > 360.0 {
-            let height = self.bottom_height.min(center.height() - 200.0).max(90.0);
+            let height = self
+                .bottom_height
+                .min(center.height() - BOTTOM_LEAVES)
+                .max(BOTTOM_LEAST);
             let row = at_bottom(height);
             self.lay_row(&mut laid, Holder::Bottom, &bottom, row, shown);
             laid.bottom = Some(row);
@@ -2125,6 +2146,10 @@ impl<P: DockPanel> DockLayout<P> {
             }
         }
         if let Some(row) = laid.bottom {
+            let pass = ui.ctx().cumulative_pass_nr();
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(Id::unique("sue-dock-bottom-row"), (pass, row));
+            });
             let top = row.top();
             let rect =
                 Rect::from_x_y_ranges(row.x_range(), egui::Rangef::new(top - 3.0, top + 3.0));
@@ -2136,9 +2161,14 @@ impl<P: DockPanel> DockLayout<P> {
             if response.drag_started()
                 && let Some(point) = pointer
             {
+                // From the height drawn (a stored height taller than the
+                // window allows is drawn shorter), up to the room the
+                // layout gives the row.
+                let room = row.bottom() - laid.center.top() - BOTTOM_LEAVES;
                 self.drag = Some(Drag::Bottom {
                     from: point.y,
-                    height: self.bottom_height,
+                    height: row.height(),
+                    most: room.max(BOTTOM_LEAST),
                 });
             }
         }
@@ -2202,8 +2232,8 @@ impl<P: DockPanel> DockLayout<P> {
                     }
                 }
             }
-            (Some(Drag::Bottom { from, height }), Some(point)) if down => {
-                self.bottom_height = (height + from - point.y).clamp(90.0, 520.0);
+            (Some(Drag::Bottom { from, height, most }), Some(point)) if down => {
+                self.bottom_height = (height + from - point.y).clamp(BOTTOM_LEAST, most);
             }
             (Some(Drag::Top { from, height }), Some(point)) if down => {
                 let least = self

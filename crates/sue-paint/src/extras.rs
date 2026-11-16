@@ -168,7 +168,7 @@ pub(crate) const PRESETS: [Preset; 2] = [
             panels.timeline = true;
             dock.row_folded[sue_wm::dock::Row::Bottom.index()] = false;
             dock.row_hidden[sue_wm::dock::Row::Bottom.index()] = false;
-            dock.bottom_height = dock.bottom_height.max(200.0);
+            dock.bottom_height = dock.bottom_height.max(crate::dock::TIMELINE_HEIGHT);
             if dock.find(Palette::Layer).is_some() {
                 dock.put(
                     Palette::Cels,

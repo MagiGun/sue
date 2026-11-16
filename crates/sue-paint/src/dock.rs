@@ -166,11 +166,20 @@ pub(crate) fn classic_layout() -> Dock {
         width: 300.0,
     }];
     dock.bottom = vec![Group::one(Palette::Timeline, 1.0)];
-    dock.bottom_height = 160.0;
+    dock.bottom_height = TIMELINE_HEIGHT;
     dock.row_folded[sue_wm::dock::Row::Bottom.index()] = true;
     dock.iconized = STRIP_PALETTES.to_vec();
     dock
 }
+
+/// The Timeline's height under the canvas until a person drags it: room
+/// for the ruler, a folder's row of frames with its thumbnails and two
+/// more tracks, as Clip Studio Paint's animation workspace gives it.
+pub(crate) const TIMELINE_HEIGHT: f32 = 250.0;
+
+/// The Timeline's height before 0.0.8, which a layout kept even when no
+/// one had dragged it.
+const OLD_TIMELINE_HEIGHT: f32 = 160.0;
 
 /// Every palette.
 const PALETTES: [Palette; 25] = [
@@ -1069,6 +1078,12 @@ impl SuePaint {
         let mut dock = Dock::from_lines_with(lines, &bare)?;
         Self::rejoin_old_tabs(&mut dock);
         dock.fill_missing_from(model);
+        // The Timeline's height Sue Paint gave before 0.0.8, never
+        // dragged (a drag leaves a height with a fraction): the frames
+        // were a thin strip, so it takes today's.
+        if dock.bottom_height == OLD_TIMELINE_HEIGHT {
+            dock.bottom_height = TIMELINE_HEIGHT;
+        }
         Some(dock)
     }
 
@@ -2143,6 +2158,27 @@ mod tests {
         assert_eq!(read.bottom_height, 200.0);
         assert!(read.folded[1]);
         assert!(read.windows.is_empty());
+    }
+
+    #[test]
+    fn a_timeline_never_dragged_takes_the_new_height_and_a_dragged_one_stays() {
+        assert_eq!(classic_layout().bottom_height, TIMELINE_HEIGHT);
+        let with = |height: &str| -> Vec<String> {
+            [
+                "column left 46 1:tool",
+                &format!("bottom {height} 1:timeline"),
+            ]
+            .map(String::from)
+            .to_vec()
+        };
+        // The height Sue Paint kept before 0.0.8 without a drag.
+        let old = SuePaint::read_layout(&with("160"), &classic_layout()).unwrap();
+        assert_eq!(old.bottom_height, TIMELINE_HEIGHT);
+        // A height a person dragged stays theirs.
+        for height in ["160.5", "120", "333.25"] {
+            let kept = SuePaint::read_layout(&with(height), &classic_layout()).unwrap();
+            assert_eq!(kept.bottom_height, height.parse::<f32>().unwrap());
+        }
     }
 
     #[test]
