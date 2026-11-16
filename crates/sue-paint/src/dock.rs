@@ -1864,6 +1864,24 @@ impl SuePaint {
                 }
             }
         });
+        // A double click on its title rolls it up or down, as Clip Studio
+        // Paint's floating palettes do (its menu button and its own
+        // buttons left out).
+        let title =
+            Rect::from_min_max(area.min, pos2(area.left() + header, area.top() + TAB_STRIP));
+        let menu = menu_button(palette, chrome_rect(&group));
+        let double = ui.input(|input| {
+            input
+                .pointer
+                .button_double_clicked(egui::PointerButton::Primary)
+                && input
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|at| title.contains(at) && !menu.contains(at))
+        });
+        if double && action == FloatAction::None {
+            action = FloatAction::Roll;
+        }
         action
     }
 
