@@ -61,10 +61,6 @@ pub const PHONE_FRAME_KEY: &str = "display.phone_frame";
 /// How wide the phone-shaped column is, in points (a common phone's).
 const PHONE_FRAME_WIDTH: f32 = 412.0;
 
-/// The least room a studio's own place for the notices must have to be
-/// used (a notice is about this wide, and a couple fit this high).
-const NOTICE_ROOM_LEAST: egui::Vec2 = vec2(280.0, 120.0);
-
 /// A layout as the Sue menu names it.
 fn layout_name(form_factor: FormFactor) -> String {
     match form_factor {
@@ -1150,7 +1146,10 @@ impl Shell {
             && let Some(clear) = io.applets.get(id).and_then(|applet| applet.notice_room())
         {
             let inside = clear.intersect(room);
-            if inside.width() >= NOTICE_ROOM_LEAST.x && inside.height() >= NOTICE_ROOM_LEAST.y {
+            // Half a narrow room across (a notice's width), and half
+            // that high (a couple of notices).
+            let least = crate::ui::toast::NARROW / 2.0;
+            if inside.width() >= least && inside.height() >= least / 2.0 {
                 room = inside;
             }
         }
