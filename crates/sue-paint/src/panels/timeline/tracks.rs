@@ -777,6 +777,9 @@ impl SuePaint {
             );
             if response.drag_started() {
                 self.anim_ui.marker = Some(start);
+                // However many frames it passes, the drag is one undo step.
+                cx.typing.flush(cx.history);
+                self.anim_ui.marker_from = Some(cx.history.cursor());
             }
             if response.dragged()
                 && let Some(pos) = response.interact_pointer_pos()
@@ -788,6 +791,11 @@ impl SuePaint {
             }
             if response.drag_stopped() {
                 self.anim_ui.marker = None;
+                if let Some(mark) = self.anim_ui.marker_from.take() {
+                    let label = cx.history.label(cx.history.cursor());
+                    let label = label.unwrap_or_default().to_owned();
+                    crate::commands::fold_since(cx, mark, label);
+                }
             }
         }
         // Timeline labels: a tag and the name over their frame.

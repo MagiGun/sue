@@ -219,6 +219,9 @@ pub(crate) struct AnimUi {
     pub picked_before: Option<EntityId>,
     /// A playback marker being dragged: the start (`true`) or the end.
     pub marker: Option<bool>,
+    /// Where the history stood as that drag began, so the whole drag
+    /// becomes one undo step when it ends.
+    pub marker_from: Option<sue_core::NodeId>,
     /// Each sound's waveform: its revision, and its peaks.
     pub peaks: HashMap<EntityId, (u64, Vec<f32>)>,
     /// Playback measured: when the frame last changed, and the frames a

@@ -1894,9 +1894,11 @@ fn step_065_the_end_marker_dragged_left_trims_the_scene() {
     let step = (last.right() - first.left()) / length;
     let marker = last.center();
     let six = Pos2::new(first.left() + step * 6.5, marker.y);
+    let steps = depth(&paint);
     undo_pair(&mut paint, "the end marker", |paint| {
         paint.drag(marker, six, PointerButton::Primary);
     });
+    assert_eq!(depth(&paint), steps + 1, "the whole drag is one undo step");
     let settings = sue_paint::anim::setup::Settings::of(arena(&paint), picture(&paint));
     assert_eq!(settings.end, Some(5), "the last frame played is 6");
 }
