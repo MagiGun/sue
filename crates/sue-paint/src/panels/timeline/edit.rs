@@ -523,8 +523,29 @@ impl SuePaint {
             let end = frame.max(first);
             settings.end = (end < length - 1).then_some(end);
         }
-        if settings != anim::setup::Settings::of(&cx.world.arena, picture) {
-            Self::apply(cx, settings.apply(picture));
+        let now = anim::setup::Settings::of(&cx.world.arena, picture);
+        if settings != now {
+            // Shown at once while the drag goes on; kept as one step when it
+            // ends (end_play_marker).
+            let mut edit = settings.apply(picture);
+            if sue_core::ReversibleTransaction::apply(&mut edit, &mut cx.world.arena).is_ok() {
+                self.anim_ui.marker_live.push(edit);
+            }
+        }
+    }
+
+    /// Keeps where a playback marker was dragged to as one undo step.
+    pub(crate) fn end_play_marker(&mut self, cx: &mut AppletContext<'_>) {
+        let live = std::mem::take(&mut self.anim_ui.marker_live);
+        let Some(picture) = self.picture().filter(|_| !live.is_empty()) else {
+            return;
+        };
+        let to = anim::setup::Settings::of(&cx.world.arena, picture);
+        for mut edit in live.into_iter().rev() {
+            let _ = sue_core::ReversibleTransaction::revert(&mut edit, &mut cx.world.arena);
+        }
+        if to != anim::setup::Settings::of(&cx.world.arena, picture) {
+            Self::apply(cx, to.apply(picture));
         }
     }
 

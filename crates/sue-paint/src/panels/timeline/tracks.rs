@@ -737,6 +737,13 @@ impl SuePaint {
                 ),
             ),
         ];
+        // The ruler is sensed before its markers, so the markers, on top,
+        // take the pointer where they are.
+        let ruler_response = ui.interact(
+            ruler_rect,
+            ui.scope_id().with("timeline-ruler"),
+            Sense::click_and_drag(),
+        );
         let mut on_marker = false;
         for (start, rect) in markers {
             let response = ui
@@ -770,6 +777,7 @@ impl SuePaint {
             }
             if response.drag_stopped() {
                 self.anim_ui.marker = None;
+                self.end_play_marker(cx);
             }
         }
         // Timeline labels: a tag and the name over their frame.
@@ -791,11 +799,6 @@ impl SuePaint {
         }
         // A click or drag on the ruler goes to that frame; hovering it
         // names the frame under the pointer.
-        let ruler_response = ui.interact(
-            ruler_rect,
-            ui.scope_id().with("timeline-ruler"),
-            Sense::click_and_drag(),
-        );
         if !on_marker && let Some(pos) = ruler_response.hover_pos() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             let at = at_pointer(pos);
