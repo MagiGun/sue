@@ -1285,6 +1285,14 @@ impl SuePaint {
             let groups = &laid.left_icon_groups;
             self.strip_ui(ui, strip, Side::Left, &laid.left_icons, groups, cx, theme);
         }
+        // A palette popped out of a strip it is no longer in closes.
+        if let Some(popped) = self.dock.popped {
+            let right = laid.strip.is_some() && laid.icons.contains(&popped);
+            let left = laid.left_strip.is_some() && laid.left_icons.contains(&popped);
+            if !right && !left {
+                self.dock.popped = None;
+            }
+        }
         self.side_arrows(ui, &laid, theme);
         self.row_strips(ui, &laid, theme);
         if self.ready {
@@ -1492,7 +1500,7 @@ impl SuePaint {
             .popped
             .filter(|palette| icons_shown.contains(palette))
         else {
-            self.dock.popped = None;
+            // Not this strip's (the other strip may show it).
             return;
         };
         // The collapsed palette, beside the strip, until a click elsewhere.
