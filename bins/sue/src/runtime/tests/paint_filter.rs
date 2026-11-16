@@ -459,7 +459,8 @@ fn a_level_correction_layer_changes_one_channel_alone() {
     let base = driver.runtime.engine.history.depth();
     driver.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
     driver.settle(4);
-    assert_eq!(driver.runtime.engine.history.depth(), base + 1, "one step");
+    // The setting joins the new layer's own step (CTV-12).
+    assert_eq!(driver.runtime.engine.history.depth(), base, "one step");
     let arena = &driver.runtime.engine.world.arena;
     let stored: Vec<String> = sue_paint::doc::layers(arena, picture(&driver))
         .iter()
