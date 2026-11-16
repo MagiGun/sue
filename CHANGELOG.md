@@ -843,6 +843,9 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint: a layer folder's mask takes the pen, the eraser, Fill
+  and the Blend tool while it is edited, as a raster layer's mask does
+  (strokes used to be refused with "pick a layer in it to draw on").
 - Sue Paint, Layer palette: a double click on a layer's name selects
   the whole name for typing over, and Enter or a click elsewhere keeps
   the new name (the field used to hold the keys for good, so the name

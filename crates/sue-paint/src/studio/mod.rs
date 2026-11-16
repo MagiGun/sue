@@ -1235,7 +1235,7 @@ impl SuePaint {
     /// layer, which only pens, brushes and erasers draw on.
     pub(crate) fn paintable(&self, arena: &Arena) -> Result<doc::LayerInfo, String> {
         let info = self.drawable(arena)?;
-        if crate::vector::is_vector(arena, info.id) {
+        if !self.editing_mask_of(arena, info.id) && crate::vector::is_vector(arena, info.id) {
             return Err(tr!("vector-layer-draw-pens-brushes-pick", name = info.name));
         }
         Ok(info)
@@ -1249,9 +1249,13 @@ impl SuePaint {
             return Err(tr!("n-3d-layer-draw-layer-above-use", name = info.name));
         }
         let info = self.layer_info(arena).ok_or(tr!("pick-layer-draw-first"))?;
+        // While its mask is edited, a folder or any other kind of layer
+        // with a mask takes the strokes there, in the mask's gray pixels.
+        let on_mask = self.editing_mask_of(arena, info.id);
         match info.kind {
             LayerKind::Raster => {}
             LayerKind::Paper => return Err(tr!("paper-layer-cannot-drawn")),
+            LayerKind::Other if on_mask => {}
             LayerKind::Other if doc::is_folder(arena, info.id) => {
                 return Err(tr!("folder-pick-layer-draw", name = info.name));
             }
@@ -1263,10 +1267,17 @@ impl SuePaint {
         if !info.style.visible {
             return Err(tr!("is-hidden", name = info.name));
         }
-        if doc::raster(arena, info.id).is_none_or(|raster| raster.format() != PixelFormat::Rgba8) {
+        if !on_mask
+            && doc::raster(arena, info.id).is_none_or(|raster| raster.format() != PixelFormat::Rgba8)
+        {
             return Err(tr!("is-not-an-rgba-layer", name = info.name));
         }
         Ok(info)
+    }
+
+    /// Whether Edit Mask is on and `layer` has a mask to edit.
+    fn editing_mask_of(&self, arena: &Arena, layer: EntityId) -> bool {
+        self.doc().is_some_and(|doc| doc.mask_edit) && doc::mask_of(arena, layer).is_some()
     }
 
     // ----- Keeping up with the arena ---------------------------------------
