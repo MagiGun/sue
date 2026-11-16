@@ -230,9 +230,9 @@ impl SuePaint {
         );
         // The light table's color (Change layer color), left of Color
         // Mode.
-        let tint_rect = Rect::from_min_size(
-            pos2(color_rect.left() - gap - side * 2.0, color_rect.top()),
-            egui::vec2(side * 2.0, side),
+        let tint_rect = Rect::from_min_max(
+            pos2(color_rect.left() - gap - side - side, color_rect.top()),
+            pos2(color_rect.left() - gap, color_rect.bottom()),
         );
         let opacity_rect = Rect::from_min_max(
             pos2(at(0, 3).left() + gap, at(0, 3).top()),
