@@ -506,14 +506,40 @@ impl SuePaint {
         }
         ctx.set_cursor_icon(CursorIcon::Grabbing);
         let at = drop_place(rects, pointer);
-        let mark = drop_mark(rects, at, area, theme);
-        ui.painter()
-            .clone()
-            .with_layer_id(egui::LayerId::new(
-                egui::Order::Tooltip,
-                Id::unique("sue-paint-bar-drop"),
-            ))
-            .line_segment(mark, theme.focus_stroke());
+        // Over the middle of another button it goes into that button's
+        // group (a button alone becomes a group of two), as Clip Studio
+        // Paint groups a bar's icons; near a button's edge it goes before
+        // or after it.
+        let moving = self
+            .bar_ui
+            .dragging
+            .filter(|(source, _)| *source == holder)
+            .map(|(_, index)| index);
+        let onto = drop_onto(rects, pointer).filter(|&target| {
+            Some(target) != moving
+                && !matches!(
+                    self.holder_items(holder).get(target).map(|slot| &slot.item),
+                    Some(Item::Separator) | None
+                )
+        });
+        let painter = ui.painter().clone().with_layer_id(egui::LayerId::new(
+            egui::Order::Tooltip,
+            Id::unique("sue-paint-bar-drop"),
+        ));
+        match onto {
+            Some(target) => {
+                painter.rect_stroke(
+                    rects[target].expand(1.0),
+                    theme.radius(Radius::Sm),
+                    theme.focus_stroke(),
+                    egui::StrokeKind::Outside,
+                );
+            }
+            None => {
+                let mark = drop_mark(rects, at, area, theme);
+                painter.line_segment(mark, theme.focus_stroke());
+            }
+        }
         if !ui.input(|input| input.pointer.any_released()) {
             return;
         }
@@ -522,8 +548,17 @@ impl SuePaint {
         };
         let from = self.bar_ui.dragging.take();
         if let Some(items) = self.holder_items_mut(holder) {
-            match from {
-                Some((source, index)) if source == holder => {
+            match (from, onto) {
+                (Some((source, index)), Some(target)) if source == holder => {
+                    if let Some(slot) = (index < items.len()).then(|| items.remove(index)) {
+                        let target = if target > index { target - 1 } else { target };
+                        edit::into_group(items, target, slot);
+                    }
+                }
+                (_, Some(target)) => {
+                    edit::into_group(items, target, payload.0.clone());
+                }
+                (Some((source, index)), None) if source == holder => {
                     edit::move_to(items, index, at);
                 }
                 _ => {
@@ -661,6 +696,21 @@ pub(crate) fn drop_place(rects: &[Rect], pointer: Pos2) -> usize {
     place
 }
 
+/// The button among `rects` whose middle `pointer` is over: the middle
+/// half of its length (across a button in a row, down a button in a
+/// column of named rows). A button let go there joins its group.
+#[must_use]
+pub(crate) fn drop_onto(rects: &[Rect], pointer: Pos2) -> Option<usize> {
+    rects.iter().position(|rect| {
+        rect.contains(pointer)
+            && if rect.width() > rect.height() * 2.0 {
+                (pointer.y - rect.center().y).abs() < rect.height() / 4.0
+            } else {
+                (pointer.x - rect.center().x).abs() < rect.width() / 4.0
+            }
+    })
+}
+
 /// The line drawn where a dropped button would go: upright before the
 /// button at `at` (or after the last).
 fn drop_mark(rects: &[Rect], at: usize, area: Rect, theme: &Theme) -> [Pos2; 2] {
@@ -736,4 +786,25 @@ pub(crate) fn icon_picker(
         picked = Some(None);
     }
     picked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_button_let_go_over_the_middle_of_another_joins_its_group() {
+        let rects = [
+            Rect::from_min_size(pos2(0.0, 0.0), vec2(32.0, 32.0)),
+            Rect::from_min_size(pos2(36.0, 0.0), vec2(32.0, 32.0)),
+        ];
+        assert_eq!(drop_onto(&rects, pos2(52.0, 16.0)), Some(1));
+        assert_eq!(drop_onto(&rects, pos2(38.0, 16.0)), None, "its edge");
+        assert_eq!(drop_place(&rects, pos2(38.0, 16.0)), 1, "goes before it");
+        assert_eq!(drop_onto(&rects, pos2(34.0, 16.0)), None, "between");
+        // Quick Access's named rows: the middle of their height.
+        let rows = [Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 24.0))];
+        assert_eq!(drop_onto(&rows, pos2(100.0, 12.0)), Some(0));
+        assert_eq!(drop_onto(&rows, pos2(100.0, 2.0)), None);
+    }
 }
