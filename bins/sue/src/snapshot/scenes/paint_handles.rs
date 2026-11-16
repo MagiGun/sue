@@ -105,6 +105,17 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     }
     tour.shoot("08ee-sue-paint-camera-frame")?;
 
+    // 08eg. The camera moved on frame 12 (a second key): its path from
+    // the first key shows on the canvas, and the camera track's two keys.
+    for _ in 0..11 {
+        tour.paint_command("anim.next");
+    }
+    tour.settle();
+    if let Some(at) = shown(tour, "mark.camera.middle") {
+        drag(tour, at + vec2(20.0, 20.0), at + vec2(180.0, 60.0));
+    }
+    tour.shoot("08eg-sue-paint-camera-path")?;
+
     // 08ef. The Light table tool's box round a layer on the general light
     // table.
     tour.paint_command("anim.cel.new");

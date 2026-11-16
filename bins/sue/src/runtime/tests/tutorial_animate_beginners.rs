@@ -1952,7 +1952,19 @@ fn step_54_keyframes_switch_copy_paste_drag_and_delete() {
         run(paint, "anim.edit.paste");
     });
     assert_eq!(key_frames(&paint, folder), [0, 7], "the key pasted");
-    // Delete Keyframe from Layer on frame 8, the folder picked.
+    // Its mark dragged along the track from frame 8 to frame 10: the key
+    // moves, in one undo step, and frame 10 is shown.
+    paint.settle(4);
+    let track = track_named(&paint, "Folder 1");
+    let diamond = mark(&paint, &format!("keyframe.{track}.7"));
+    let grid = Grid::read(&mut paint);
+    let to = Pos2::new(grid.cell("Folder 1", 10).x, diamond.y);
+    undo_pair(&mut paint, "a keyframe dragged", |paint| {
+        paint.drag(diamond, to, egui::PointerButton::Primary);
+    });
+    assert_eq!(key_frames(&paint, folder), [0, 9], "the key moved");
+    assert_eq!(frame_shown(&mut paint), 10);
+    // Delete Keyframe from Layer on frame 10, the folder picked.
     let row = layer_row(&mut paint, "Folder 1");
     click_at(&mut paint, row.center());
     undo_pair(&mut paint, "Delete Keyframe from Layer", |paint| {
@@ -2103,6 +2115,15 @@ fn step_59_and_60_the_camera_frame_zooms_moves_and_shows_its_path() {
     );
     let between = camera_at(&paint, folder, 5);
     assert!(between.center[0] > zoomed.center[0] && between.center[0] < moved.center[0]);
+    // The camera's path shows on the canvas: a dot at each key's middle,
+    // the last where the frame's middle is now, the first to its left.
+    paint.settle(2);
+    let (first, last) = (mark(&paint, "camera.path.0"), mark(&paint, "camera.path.1"));
+    assert!((last - mark(&paint, "camera.middle")).length() < 1.0);
+    assert!(
+        first.x < last.x - 20.0 && (first.y - last.y).abs() < 1.0,
+        "{first:?} {last:?}"
+    );
 }
 
 #[test]
@@ -2435,6 +2456,41 @@ fn step_69_animation_folders_put_in_one_folder_whose_opacity_is_lowered() {
     assert!(
         (opacity(&paint) - 0.4).abs() < 0.08,
         "about 40 %: {}",
+        opacity(&paint)
+    );
+}
+
+#[test]
+fn step_69_a_folders_opacity_typed_in_its_box() {
+    // The other way to lower it: a click on the number beside the slider,
+    // 40 typed and Enter. One undo step.
+    let mut paint = two_cels("tab-69b");
+    let folder = named(&paint, "Folder 1");
+    let row = layer_row(&mut paint, "Folder 1");
+    click_at(&mut paint, row.center());
+    let opacity = |paint: &PaintDriver| {
+        sue_paint::doc::layers(arena(paint), open_picture(paint))
+            .into_iter()
+            .find(|info| info.id == folder)
+            .unwrap()
+            .style
+            .opacity
+    };
+    let number = told(&mut paint)
+        .into_iter()
+        .filter(|(name, rect)| name == "Opacity" && rect.left() > 1106.0 && rect.top() < 520.0)
+        .map(|(_, rect)| rect)
+        .max_by(|a, b| a.left().total_cmp(&b.left()))
+        .expect("the opacity box");
+    undo_pair(&mut paint, "the opacity typed", |paint| {
+        click_at(paint, number.center());
+        paint.settle(2);
+        paint.step(vec![egui::Event::Text("40".to_owned())]);
+        press(paint, egui::Key::Enter);
+    });
+    assert!(
+        (opacity(&paint) - 0.4).abs() < 0.005,
+        "40 %: {}",
         opacity(&paint)
     );
 }
