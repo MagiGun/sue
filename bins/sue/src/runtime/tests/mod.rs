@@ -45,6 +45,7 @@ mod paint_jobs;
 mod paint_layers;
 mod paint_menus;
 mod paint_palettes;
+mod paint_polish;
 mod paint_rulers;
 mod paint_saving;
 mod paint_select;
