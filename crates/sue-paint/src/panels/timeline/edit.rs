@@ -230,14 +230,38 @@ impl SuePaint {
             return;
         };
         let selection = self.timeline_selection(&sequence);
+        // The keyframes of what each track picked stands for go with its
+        // frames.
+        let target = |index: usize| {
+            sequence.tracks.get(index).and_then(|track| {
+                anim::track_folder(track).or_else(|| anim::setup::track_layer(track))
+            })
+        };
+        let keys: Vec<Vec<anim::motion::CopiedKey>> = selection
+            .tracks
+            .iter()
+            .map(|index| {
+                target(*index).map_or_else(Vec::new, |layer| {
+                    anim::motion::copy_keys(
+                        &cx.world.arena,
+                        layer,
+                        sequence.rate,
+                        selection.start,
+                        selection.end,
+                    )
+                })
+            })
+            .collect();
         match what {
             "copy" => {
                 self.anim_ui.clipboard = editing::copy(&sequence, &selection);
+                self.anim_ui.key_clipboard = keys;
             }
             "cut" => {
                 let (changed, clipboard) = editing::cut(&sequence, &selection, length, picture);
                 if Self::apply(cx, anim::set(picture, changed, &tr!("cut-frames"))) {
                     self.anim_ui.clipboard = clipboard;
+                    self.anim_ui.key_clipboard = keys;
                 }
             }
             "delete" => {
@@ -245,7 +269,8 @@ impl SuePaint {
                 Self::apply(cx, anim::set(picture, changed, &tr!("delete-frames")));
             }
             _ => {
-                if self.anim_ui.clipboard.is_empty() {
+                let keyed = self.anim_ui.key_clipboard.iter().any(|row| !row.is_empty());
+                if self.anim_ui.clipboard.is_empty() && !keyed {
                     return;
                 }
                 // Paste lands at the frame shown, on the tracks picked.
@@ -267,6 +292,14 @@ impl SuePaint {
                         anim::LENGTH,
                         i64::from(new_length),
                     ));
+                }
+                for (row, index) in self.anim_ui.key_clipboard.iter().zip(&selection.tracks) {
+                    if let Some(layer) = target(*index)
+                        && let Some(keys) =
+                            anim::motion::paste_keys(arena, layer, sequence.rate, at, row)
+                    {
+                        edit = edit.then(keys);
+                    }
                 }
                 Self::apply(cx, edit);
             }

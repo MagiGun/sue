@@ -239,6 +239,9 @@ pub(crate) struct AnimUi {
     /// The frame shown when the frames were last looked at, so a move by
     /// hand is told from standing still.
     pub scrubbed: Option<u32>,
+    /// The keyframes Cut or Copy took, a list for each track copied: those
+    /// of the layer, folder or 2D camera the track stands for.
+    pub key_clipboard: Vec<Vec<crate::anim::motion::CopiedKey>>,
 }
 
 /// The keys that run `command` now, as people read them (`Ctrl+K`), or
