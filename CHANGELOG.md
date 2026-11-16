@@ -1080,7 +1080,9 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint: renaming a layer or an Auto Action ends with Enter, Tab or a
   click elsewhere and keeps the new name (the name typed was lost).
 - Sue Paint: a new animation lists every layer on the timeline, the
-  paper too, so it can be locked or hidden there.
+  paper too, so it can be locked or hidden there; a layer made or
+  dragged out of an animation folder later gets its track at once, in
+  the same undo step.
 - Sue Paint: a cel put in a folder of its own (Create Folder and Insert
   Layer, or dragged onto New Layer Folder) stays the cel: the folder
   takes its name and its frames on the timeline.

@@ -707,7 +707,16 @@ fn step_010_011_012_a_template_pasted_from_another_canvas_goes_above_paper_and_i
     let name = name_of(&paint, pasted);
     let from = row(&mut paint, &name).center();
     let to = row(&mut paint, "Paper").center();
-    paint.drag(from, to, PointerButton::Primary);
+    undo_pair(&mut paint, "the template's row dragged", |paint| {
+        paint.drag(from, to, PointerButton::Primary);
+    });
+    // Out of the animation folder it is a track of the timeline, in the
+    // same undo step (V5: the timeline lists every layer).
+    let sequence = timeline(&paint);
+    assert!(
+        sue_paint::anim::setup::track_of_layer(&sequence, pasted).is_some(),
+        "the template has a track"
+    );
     let order: Vec<EntityId> = stack(&paint).into_iter().map(|info| info.id).collect();
     let paper = layer(&paint, "Paper");
     let at = order.iter().position(|id| *id == paper).unwrap();
@@ -740,9 +749,19 @@ fn step_013_the_timeline_opens_from_the_window_menu() {
 #[test]
 fn step_014_seen_v05_paper_and_template_picked_together_and_locked() {
     let mut paint = tutorial("tut25-014");
+    // The template: a layer made right above Paper, outside the
+    // animation folder, after the timeline was made.
+    let at = row(&mut paint, "Paper").center();
+    click(&mut paint, at);
+    let before: Vec<EntityId> = stack(&paint).into_iter().map(|info| info.id).collect();
     paint.command("layer.new");
     paint.settle(2);
-    let template = stack(&paint).last().unwrap().id;
+    let template = stack(&paint)
+        .into_iter()
+        .find(|info| !before.contains(&info.id))
+        .expect("a new layer")
+        .id;
+    assert_eq!(sue_paint::doc::folder_of(arena(&paint), template), None);
     paint.command("layer.select_none");
     // Paper current, then Shift+click on the template's row: both picked.
     let paper = layer(&paint, "Paper");
@@ -756,14 +775,24 @@ fn step_014_seen_v05_paper_and_template_picked_together_and_locked() {
     });
     assert!(info(&paint, paper).locked, "Paper is locked");
     assert!(info(&paint, template).locked, "the template is locked");
-    // The timeline lists every layer, and a locked one reads as locked.
+    // The timeline lists every layer, the one made after it too.
+    let sequence = timeline(&paint);
+    for (what, id) in [("Paper", paper), ("the template", template)] {
+        assert!(
+            sue_paint::anim::setup::track_of_layer(&sequence, id).is_some(),
+            "{what} has a track"
+        );
+    }
+    paint.command("anim.thumbnails.none");
     let texts = paint.settle(3);
-    assert!(
-        texts
-            .iter()
-            .any(|(text, rect)| text.starts_with("Paper") && rect.top() > 600.0),
-        "Paper has a track: {texts:?}"
-    );
+    for name in ["Paper".to_owned(), name] {
+        assert!(
+            texts
+                .iter()
+                .any(|(text, rect)| text.starts_with(&name) && rect.top() > 600.0),
+            "{name} has a row on the timeline: {texts:?}"
+        );
+    }
 }
 
 #[test]

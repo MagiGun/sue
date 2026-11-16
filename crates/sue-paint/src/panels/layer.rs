@@ -1509,7 +1509,10 @@ impl SuePaint {
         }
         if let Some(dragged) = events.dropped {
             self.layer_drag = None;
+            let recorded = cx.history.len();
             self.drop_layer(dragged, events.onto, events.pointer, cx);
+            // A layer dragged out of an animation folder gets a track.
+            self.track_new_layers(cx, recorded);
         }
         if let Some((id, filter, text)) = events.reopen {
             self.dialog = Some(crate::dialogs::Dialog::Correction(id, filter, text, false));

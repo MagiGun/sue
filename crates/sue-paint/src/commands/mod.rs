@@ -121,7 +121,34 @@ impl SuePaint {
         if !self.state(command, &Facts::of(cx)).enabled {
             return;
         }
+        let recorded = cx.history.len();
         crate::commands::registry().run(self, cx, command);
+        self.track_new_layers(cx, recorded);
+    }
+
+    /// A layer made while the picture has a timeline gets a track of its
+    /// own in the same undo step, as Clip Studio Paint's timeline lists
+    /// every layer at once (A25V-5). `recorded` is how many steps the
+    /// history held before: nothing is done unless a step was added.
+    pub(crate) fn track_new_layers(&self, cx: &mut AppletContext<'_>, recorded: usize) {
+        if cx.history.len() == recorded {
+            return;
+        }
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let Some(tracks) = crate::anim::setup::give_every_layer_a_track(&cx.world.arena, picture)
+        else {
+            return;
+        };
+        let last = cx.history.cursor();
+        let Some(before) = cx.history.parent(last) else {
+            return;
+        };
+        let label = cx.history.label(last).unwrap_or_default().to_owned();
+        if Self::apply(cx, tracks) {
+            fold_since(cx, before, label);
+        }
     }
 
     /// How a menu item for `command` looks right now: grayed when it is
@@ -244,6 +271,21 @@ impl SuePaint {
 }
 
 /// An item checked when `on`.
+/// Folds the undo steps made after `mark` into one called `label`, so
+/// they undo together.
+pub(crate) fn fold_since(cx: &mut AppletContext<'_>, mark: sue_core::NodeId, label: String) {
+    let mut steps = cx.history.take_since(mark);
+    if steps.len() == 1 {
+        cx.history.record_boxed(steps.remove(0));
+    } else if !steps.is_empty() {
+        let mut batch = sue_core::txn::Batch::new(label);
+        for step in steps {
+            batch.push(step);
+        }
+        cx.history.record(batch);
+    }
+}
+
 pub(super) fn flag(on: bool) -> ItemState {
     ItemState::check(on)
 }
