@@ -960,7 +960,18 @@ impl SuePaint {
             let cel_now = (row.kind == Kind::Cels)
                 .then(|| anim::cel_at(track, sequence.rate, frame))
                 .flatten();
+            // With keyframes on, the track is the layer's transform
+            // (TRV-2), as Clip Studio Paint names it.
+            let keyed = anim::setup::track_layer(track)
+                .or_else(|| anim::track_folder(track))
+                .and_then(|layer| cx.world.arena.get_by_id(layer).ok())
+                .is_some_and(anim::motion::keyframes_on);
             let title = match (row.kind, cel_now) {
+                (Kind::Cels | Kind::Layer, _) if keyed => format!(
+                    "{} : {}",
+                    anim::track_name(&cx.world.arena, track),
+                    tr!("transform")
+                ),
                 (Kind::Cels, Some(cel)) => format!(
                     "{} : {}",
                     anim::track_name(&cx.world.arena, track),
