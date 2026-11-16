@@ -489,7 +489,10 @@ pub fn into_picture(
     let top = making.layers(&doc.root.children, &mut Vec::new())?;
     // What belongs to the file's picture as a whole does not come with
     // its layers into another picture: said so.
-    let rulers = doc.paths().iter().any(|(_, layer)| !layer.rulers.is_empty());
+    let rulers = doc
+        .paths()
+        .iter()
+        .any(|(_, layer)| !layer.rulers.is_empty());
     for (name, there) in [
         (tr!("clip-report-timeline"), doc.timeline.is_some()),
         (tr!("clip-report-comps"), !doc.comps.is_empty()),
