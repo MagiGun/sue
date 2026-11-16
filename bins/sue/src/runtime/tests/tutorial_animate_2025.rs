@@ -2223,9 +2223,8 @@ fn step_076_077_078_079_080_g_pen_2_px_with_no_anti_aliasing_or_dynamics() {
     let cel = layer(&paint, "1");
     stroke(&mut paint, 0.0);
     assert!(painted(&paint, cel) > 50, "the pen drew");
-    // The body of the line is hard pixels; the last few pixels of the
-    // tapered end are lighter ink (a defect sent to the brush engine's
-    // steward: see step_078_every_pixel_hard_with_anti_aliasing_none).
+    // Anti-aliasing None (step 78) is the next test; here the body of
+    // the line is hard pixels whatever the end does.
     let bounds = drawn(&paint, cel).expect("a line");
     for (x, _) in soft_pixels(&paint, cel) {
         assert!(
@@ -2252,11 +2251,9 @@ fn soft_pixels(paint: &PaintDriver, layer: EntityId) -> Vec<(u32, u8)> {
 }
 
 /// Step 78 as Clip Studio Paint has it: with Anti-aliasing None every
-/// pixel of a pen line is fully covered, its tapered ends too. Sue lays
-/// a tip thinner than 0.7 px as lighter ink (`Disc::drawn` in
-/// `sue-brush`), so a few pixels at the end of the taper are partial.
+/// pixel of a pen line is fully covered, its tapered ends too (gap
+/// A25-78: a tip thinner than 0.7 px was laid as lighter ink).
 #[test]
-#[ignore = "DEFECT: lighter ink at the taper's end with Anti-aliasing None; sent to the brush engine's steward (P5-3)"]
 fn step_078_every_pixel_hard_with_anti_aliasing_none() {
     let mut paint = tutorial("tut25-078");
     g_pen(&mut paint);
@@ -2265,6 +2262,29 @@ fn step_078_every_pixel_hard_with_anti_aliasing_none() {
     let cel = layer(&paint, "1");
     stroke(&mut paint, 0.0);
     assert_eq!(soft(&paint, cel), 0, "hard pixels only");
+    // The tapered ends are never thicker than the body.
+    let raster = sue_paint::doc::raster(arena(&paint), cel).expect("a raster");
+    let width = raster.width() as usize;
+    let mut thickness = vec![0u32; width];
+    for (index, pixel) in raster
+        .bytes()
+        .expect("pixels")
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .enumerate()
+    {
+        if pixel[3] > 0 {
+            thickness[index % width] += 1;
+        }
+    }
+    let bounds = drawn(&paint, cel).expect("a line");
+    let body = thickness[((bounds[0] + bounds[2]) / 2) as usize];
+    let thickest = thickness.iter().copied().max().unwrap_or(0);
+    assert!(
+        thickest <= body,
+        "ends {thickest} px against a body of {body} px"
+    );
 }
 
 #[test]
