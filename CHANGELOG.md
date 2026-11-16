@@ -1073,6 +1073,8 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint: a cel put in a folder of its own (Create Folder and Insert
   Layer, or dragged onto New Layer Folder) stays the cel: the folder
   takes its name and its frames on the timeline.
+- Sue Paint: Merge Selected Layers on a folder cel keeps it the cel on
+  the timeline, on the frames it showed.
 
 ### Removed
 

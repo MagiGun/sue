@@ -1116,6 +1116,12 @@ fn merge_selected(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
     ids.extend(doc.layer);
     match doc::merge_layers(&cx.world.arena, picture, &ids) {
         Ok((edit, into)) => {
+            // A folder cel merged stays the cel: its frames show the layer
+            // it became.
+            let edit = match crate::anim::cels::rekeyed(&cx.world.arena, picture, &ids, into) {
+                Some(kept) => edit.then(kept),
+                None => edit,
+            };
             if SuePaint::apply(cx, edit)
                 && let Some(doc) = paint.doc_mut()
             {
