@@ -1181,8 +1181,15 @@ impl SuePaint {
                         )
                         .label(&tr!("change-layer-name-ellipsis"))
                         .show_at(ui, field, theme);
-                        edit.request_focus();
-                        if edit.lost_focus() {
+                        // Focus is held while the name is typed, but asked
+                        // for only after looking whether it just went:
+                        // asked first, Enter, Tab or a click elsewhere
+                        // would never end the typing.
+                        let lost = edit.lost_focus();
+                        if !lost {
+                            edit.request_focus();
+                        }
+                        if lost {
                             events.rename = Some((
                                 info.id,
                                 name.clone(),

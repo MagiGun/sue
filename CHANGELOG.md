@@ -1062,6 +1062,8 @@ follow [Semantic Versioning](https://semver.org/).
   selection and polyline selections) is a dark line on a light rim, so
   it reads on white paper, black ink and every color between, whatever
   the theme.
+- Sue Paint: renaming a layer or an Auto Action ends with Enter, Tab or a
+  click elsewhere and keeps the new name (the name typed was lost).
 
 ### Removed
 
