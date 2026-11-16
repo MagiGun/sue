@@ -2050,3 +2050,547 @@ fn step_00_37_57_correct_line_and_remove_dust() {
     let rows = rows_of(&mut paint, "tool.correct_line", "Remove dust");
     shows_all(&rows, &["Dust size"], "Remove dust");
 }
+
+// C. Menus.
+
+/// Runs `command`, which opens a dialog; every name the dialog shows;
+/// then closes it with Escape.
+fn dialog_names(paint: &mut PaintDriver, command: &str) -> Vec<String> {
+    paint.command(command);
+    paint.settle(4);
+    let seen = names(paint);
+    paint.step(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    paint.settle(3);
+    seen
+}
+
+/// Every command of Sue Paint's menus, at any depth.
+fn menu_commands() -> Vec<String> {
+    fn walk(items: &[sue_wm::MenuItem], out: &mut Vec<String>) {
+        for item in items {
+            match item {
+                sue_wm::MenuItem::Action { command, .. } => out.push(command.clone()),
+                sue_wm::MenuItem::Sub { items, .. } => walk(items, out),
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for menu in sue_paint::menus() {
+        walk(&menu.items, &mut out);
+    }
+    out
+}
+
+/// A rectangle selection around the middle, with the Selection tool.
+fn select_middle(paint: &mut PaintDriver) {
+    paint.command("tool.selection");
+    paint.settle(2);
+    let at = middle(paint);
+    stroke(paint, at - vec2(50.0, 30.0), at + vec2(50.0, 30.0));
+}
+
+#[test]
+fn step_00_38_47_settings_commands_close_the_file_menu() {
+    let file = sue_paint::menus()
+        .into_iter()
+        .next()
+        .expect("the File menu");
+    let mut all = Vec::new();
+    for item in &file.items {
+        if let sue_wm::MenuItem::Action { command, .. } = item {
+            all.push(command.clone());
+        }
+    }
+    let tail: Vec<&String> = all.iter().rev().take(9).collect();
+    for command in [
+        "file.preferences",
+        "file.shortcuts",
+        "file.modifiers",
+        "file.pressure",
+    ] {
+        assert!(
+            tail.iter().any(|found| *found == command),
+            "{command} near the end of File: {all:?}"
+        );
+    }
+}
+
+#[test]
+fn step_00_38_57_preferences_interface_color_light_and_dark() {
+    let mut paint = PaintDriver::new("fg-preferences");
+    paint.command("file.preferences");
+    paint.settle(10);
+    let seen = names(&mut paint);
+    assert!(
+        seen.iter().any(|name| name.contains("Sue Paint's colors")
+            || name == "Theme"
+            || name.contains("colors")),
+        "{seen:?}"
+    );
+}
+
+#[test]
+fn step_00_39_24_modifier_key_settings_general_or_per_tool() {
+    let mut paint = PaintDriver::new("fg-modifiers");
+    let seen = dialog_names(&mut paint, "file.modifiers");
+    shows_all(
+        &seen,
+        &["General", "For One Tool", "Mouse Buttons"],
+        "Modifier Key Settings",
+    );
+    // 00:39:11 Shortcut Settings opens the key settings.
+    paint.command("file.shortcuts");
+    paint.settle(10);
+    assert!(
+        !said(&paint).contains("not in Sue Paint"),
+        "{}",
+        said(&paint)
+    );
+}
+
+#[test]
+fn step_00_39_34_pen_pressure_settings_draw_test_strokes() {
+    let mut paint = PaintDriver::new("fg-pressure");
+    let seen = dialog_names(&mut paint, "file.pressure");
+    assert!(seen.len() > 10, "the dialog shows: {seen:?}");
+    assert!(!said(&paint).contains("not in Sue Paint"));
+}
+
+#[test]
+fn step_00_40_09_timelapse_stop_asks_before_throwing_the_recording_away() {
+    let mut paint = PaintDriver::new("fg-timelapse");
+    paint.command("file.timelapse.record");
+    paint.settle(3);
+    inked_layer(&mut paint);
+    paint.command("file.timelapse.record");
+    paint.settle(4);
+    let seen = names(&mut paint);
+    shows_all(&seen, &["Keep", "Delete"], "stopping the timelapse");
+    paint.click_text("Keep");
+    // Export is there for the kept recording.
+    label_of("file.timelapse.export");
+}
+
+#[test]
+fn step_00_40_37_new_dialog_kinds_colors_template_and_comic_settings() {
+    let mut paint = PaintDriver::new("fg-new");
+    paint.command("file.new");
+    paint.settle(4);
+    let seen = names(&mut paint);
+    shows_all(
+        &seen,
+        &[
+            "Illustration",
+            "Webtoon",
+            "Comic",
+            "Show all comic settings",
+            "Animation",
+            "Basic expression color",
+            "Gray",
+            "Monochrome",
+            "Paper color",
+            "Create animated illustration",
+            "Record timelapse",
+        ],
+        "New",
+    );
+    // 00:41:14 and FGV-46: the comic's bleed and default tone frequency.
+    click_named(&mut paint, "Comic");
+    let seen = names(&mut paint);
+    shows_all(&seen, &["Bleed width"], "New comic");
+    click_named(&mut paint, "Monochrome");
+    let seen = names(&mut paint);
+    shows_all(&seen, &["Default tone frequency"], "New monochrome comic");
+    paint.step(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    paint.settle(3);
+}
+
+#[test]
+fn step_00_42_05_edit_undo_redo_cut_copy_paste_and_delete() {
+    let mut paint = PaintDriver::new("fg-edit");
+    let layer = inked_layer(&mut paint);
+    let count = layers(&paint).len();
+    paint.step(vec![key(egui::Key::C, egui::Modifiers::COMMAND)]);
+    paint.settle(2);
+    undo_pair(
+        &mut paint,
+        "paste",
+        |paint| {
+            paint.step(vec![key(egui::Key::V, egui::Modifiers::COMMAND)]);
+        },
+        move |paint| layers(paint).len() == count + 1,
+    );
+    undo(&mut paint);
+    let inked = ink(&paint, layer);
+    undo_pair(
+        &mut paint,
+        "delete",
+        |paint| {
+            paint.command("edit.clear");
+        },
+        move |paint| ink(paint, layer) < inked,
+    );
+}
+
+#[test]
+fn step_00_42_11_smart_smoothing_with_strength_and_noise() {
+    let mut paint = PaintDriver::new("fg-smart-smoothing");
+    inked_layer(&mut paint);
+    let seen = dialog_names(&mut paint, "edit.smart_smoothing");
+    shows_all(&seen, &["Remove Noise"], "Smart Smoothing");
+}
+
+#[test]
+fn step_00_42_16_fill_and_advanced_fill() {
+    let mut paint = PaintDriver::new("fg-edit-fill");
+    paint.step(vec![key(
+        egui::Key::N,
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+    )]);
+    paint.settle(4);
+    let layer = layers(&paint).last().unwrap().id;
+    undo_pair(
+        &mut paint,
+        "fill",
+        |paint| paint.command("edit.fill"),
+        move |paint| ink(paint, layer) > 0,
+    );
+    let seen = dialog_names(&mut paint, "edit.advanced_fill");
+    assert!(seen.len() > 5);
+}
+
+#[test]
+fn step_00_42_22_colorize_from_a_hint_layer() {
+    let mut paint = PaintDriver::new("fg-colorize");
+    // Line art: a closed box.
+    let lines = inked_layer(&mut paint);
+    let at = middle(&paint);
+    for (from, to) in [
+        (vec2(-60.0, -40.0), vec2(60.0, -40.0)),
+        (vec2(60.0, -40.0), vec2(60.0, 40.0)),
+        (vec2(60.0, 40.0), vec2(-60.0, 40.0)),
+        (vec2(-60.0, 40.0), vec2(-60.0, -40.0)),
+    ] {
+        stroke(&mut paint, at + from, at + to);
+    }
+    let _ = lines;
+    // The hint layer: one stroke inside.
+    paint.step(vec![key(
+        egui::Key::N,
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+    )]);
+    paint.settle(4);
+    stroke(&mut paint, at - vec2(10.0, 0.0), at + vec2(10.0, 0.0));
+    paint.command("edit.colorize");
+    paint.settle(4);
+    let seen = names(&mut paint);
+    shows_all(&seen, &["Line Art", "Blur Strength"], "Colorize");
+    let count = layers(&paint).len();
+    let before = arena_bytes(&paint);
+    paint.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    paint.settle(30);
+    assert_eq!(
+        layers(&paint).len(),
+        count + 1,
+        "a colors layer: {}",
+        said(&paint)
+    );
+    undo(&mut paint);
+    assert!(arena_bytes(&paint) == before);
+}
+
+#[test]
+fn step_00_43_52_convert_to_drawing_color_and_brightness_to_opacity() {
+    let mut paint = PaintDriver::new("fg-convert-colors");
+    let layer = inked_layer(&mut paint);
+    let before = pixels(&paint, layer);
+    // Main color white, then Convert to Drawing Color.
+    press(&mut paint, egui::Key::X);
+    undo_pair(
+        &mut paint,
+        "convert to drawing color",
+        |paint| paint.command("edit.recolor"),
+        move |paint| pixels(paint, layer) != before,
+    );
+    undo(&mut paint);
+    // 00:44:24 Convert Brightness to Opacity on a white paper copy.
+    paint.command("layer.new");
+    paint.settle(3);
+    let white = layers(&paint).last().unwrap().id;
+    paint.command("edit.fill");
+    paint.settle(3);
+    let filled = ink(&paint, white);
+    undo_pair(
+        &mut paint,
+        "brightness to opacity",
+        |paint| paint.command("edit.luma_to_alpha"),
+        move |paint| ink(paint, white) < filled,
+    );
+}
+
+#[test]
+fn step_00_44_03_rasterize_bakes_a_border_effect() {
+    let mut paint = PaintDriver::new("fg-rasterize");
+    let layer = inked_layer(&mut paint);
+    paint.runtime.engine.world.arena.get_by_id(layer).unwrap();
+    show_layer_property(&mut paint);
+    click_named(&mut paint, "Border effect");
+    let inked = ink(&paint, layer);
+    let count = layers(&paint).len();
+    paint.command("layer.rasterize");
+    paint.settle(4);
+    let baked = layers(&paint).last().unwrap().id;
+    assert_eq!(layers(&paint).len(), count, "{}", said(&paint));
+    assert!(ink(&paint, baked) > inked, "the border is pixels now");
+    assert_ne!(
+        entity(&paint, baked)
+            .property(sue_paint::effects::BORDER)
+            .and_then(sue_core::Value::as_bool),
+        Some(true),
+        "the effect is off"
+    );
+}
+
+#[test]
+fn step_00_45_18_register_a_layer_as_material_and_as_a_brush_tip() {
+    let mut paint = PaintDriver::new("fg-register-material");
+    inked_layer(&mut paint);
+    let seen = dialog_names(&mut paint, "edit.material.image");
+    assert!(
+        seen.iter()
+            .any(|name| name.starts_with("Register Material")),
+        "{seen:?}"
+    );
+    // The layer as a brush tip: a sub tool that stamps it.
+    paint.command("edit.material.tip");
+    paint.settle(4);
+    paint.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    paint.settle(6);
+    assert!(
+        !said(&paint).contains("not in Sue Paint"),
+        "{}",
+        said(&paint)
+    );
+}
+
+#[test]
+fn step_00_46_27_tonal_corrections_and_correction_layers() {
+    let mut paint = PaintDriver::new("fg-corrections");
+    let layer = inked_layer(&mut paint);
+    for filter in [
+        "filter.brightness",
+        "filter.hue",
+        "filter.posterize",
+        "filter.levels",
+        "filter.curve",
+        "filter.balance",
+        "filter.binarize",
+        "filter.gradient_map",
+    ] {
+        let seen = dialog_names(&mut paint, filter);
+        assert!(seen.len() > 3, "{filter}");
+    }
+    // Reverse gradient, Ctrl+I: on the layer at once.
+    let before = pixels(&paint, layer);
+    undo_pair(
+        &mut paint,
+        "reverse gradient",
+        |paint| paint.command("filter.invert"),
+        move |paint| pixels(paint, layer) != before,
+    );
+    // A correction layer applies to all layers below.
+    let count = layers(&paint).len();
+    undo_pair(
+        &mut paint,
+        "correction layer",
+        |paint| command_ok(paint, "layer.correction.hue"),
+        move |paint| layers(paint).len() == count + 1,
+    );
+}
+
+#[test]
+fn step_00_49_08_transform_modes_ctrl_distort_and_mesh() {
+    let mut paint = PaintDriver::new("fg-transform");
+    let layer = inked_layer(&mut paint);
+    paint.step(vec![key(egui::Key::T, egui::Modifiers::COMMAND)]);
+    paint.settle(4);
+    show_tool_property(&mut paint);
+    let seen = names(&mut paint);
+    shows_all(
+        &seen,
+        &[
+            "Center of rotation",
+            "Keep aspect ratio",
+            "Keep original image",
+        ],
+        "transform in Tool Property",
+    );
+    paint.step(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    paint.settle(3);
+    // Mesh transformation with its grid.
+    let before = pixels(&paint, layer);
+    paint.command("edit.transform.mesh");
+    paint.settle(4);
+    let seen = names(&mut paint);
+    assert!(
+        seen.iter()
+            .any(|name| name.contains("Mesh") || name.contains("mesh")),
+        "{seen:?}"
+    );
+    paint.step(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    paint.settle(3);
+    assert!(pixels(&paint, layer) == before);
+}
+
+#[test]
+fn step_00_49_32_resolution_canvas_size_rotate_and_clear_memory() {
+    let mut paint = PaintDriver::new("fg-canvas");
+    inked_layer(&mut paint);
+    for command in [
+        "edit.resolution",
+        "edit.canvas_size",
+        "edit.canvas_properties",
+    ] {
+        let seen = dialog_names(&mut paint, command);
+        assert!(seen.len() > 3, "{command}");
+    }
+    let size =
+        |paint: &PaintDriver| sue_model::picture::size(entity(paint, picture(paint))).unwrap();
+    undo_pair(
+        &mut paint,
+        "rotate canvas",
+        |paint| paint.command("canvas.rotate_right"),
+        move |paint| size(paint) == [1200, 1600],
+    );
+    label_of("edit.clear_history");
+}
+
+#[test]
+fn step_00_49_59_obtain_screen_color() {
+    label_of("edit.screen_color");
+    label_of("edit.screen_color_hidden");
+    let mut paint = PaintDriver::new("fg-screen-color");
+    paint.command("edit.screen_color");
+    paint.settle(4);
+    assert!(
+        !said(&paint).contains("not in Sue Paint"),
+        "{}",
+        said(&paint)
+    );
+    paint.step(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
+    paint.settle(3);
+}
+
+#[test]
+fn step_00_50_15_select_all_and_the_selection_launcher() {
+    let mut paint = PaintDriver::new("fg-launcher");
+    inked_layer(&mut paint);
+    select_middle(&mut paint);
+    let seen = names(&mut paint);
+    // The launcher under the selection, in the video's order.
+    for command in [
+        "select.none",
+        "edit.crop",
+        "select.invert",
+        "select.expand",
+        "select.shrink",
+        "edit.clear",
+        "edit.clear_outside",
+        "edit.cut_paste",
+        "edit.copy_paste",
+        "edit.transform.scale",
+        "edit.fill",
+    ] {
+        let label = label_of(command);
+        let label = label.trim_end_matches("...");
+        assert!(
+            seen.iter().any(|name| name == label),
+            "{label:?} on the launcher: {seen:?}"
+        );
+    }
+    let count = layers(&paint).len();
+    let copy = label_of("edit.copy_paste");
+    undo_pair(
+        &mut paint,
+        "copy and paste",
+        |paint| click_named(paint, &copy),
+        move |paint| layers(paint).len() == count + 1,
+    );
+    // FGV-50 Expand has an expansion type.
+    let seen = dialog_names(&mut paint, "select.expand");
+    shows_all(&seen, &["Expansion type"], "Expand Selected Area");
+    label_of("select.vectors_overlapping");
+    label_of("select.vectors_within");
+    label_of("select.all");
+}
+
+#[test]
+fn step_00_51_07_view_grid_settings_and_webtoon_view() {
+    let mut paint = PaintDriver::new("fg-view");
+    for command in [
+        "view.grid",
+        "view.grid_settings",
+        "view.safety_margin",
+        "view.playback_fps",
+        "view.special_ruler_snapping",
+        "view.vector_paths.all",
+        "view.ruler_bar",
+        "view.print_size",
+    ] {
+        label_of(command);
+    }
+    let seen = dialog_names(&mut paint, "view.grid_settings");
+    assert!(seen.len() > 3);
+}
+
+#[test]
+fn step_00_51_20_filters_of_the_video_change_the_layer() {
+    let mut paint = PaintDriver::new("fg-filters");
+    let layer = inked_layer(&mut paint);
+    for filter in [
+        "filter.gaussian",
+        "filter.motion_blur",
+        "filter.radial_blur",
+        "filter.line_width",
+        "filter.curved_surface",
+        "filter.artistic",
+        "filter.mosaic",
+        "filter.sharpen",
+    ] {
+        let before = arena_bytes(&paint);
+        command_ok(&mut paint, filter);
+        assert_ne!(arena_bytes(&paint), before, "{filter}: {}", said(&paint));
+        undo(&mut paint);
+        assert!(arena_bytes(&paint) == before, "{filter} undoes");
+    }
+    // Dust removal on raster specks.
+    label_of("filter.dust");
+    // Perlin noise on a new layer, then Overlay.
+    paint.step(vec![key(
+        egui::Key::N,
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+    )]);
+    paint.settle(4);
+    let noise = layers(&paint).last().unwrap().id;
+    paint.command("filter.perlin");
+    paint.settle(4);
+    let seen = names(&mut paint);
+    shows_all(
+        &seen,
+        &["Amplitude", "Attenuation", "Repetition"],
+        "Perlin noise",
+    );
+    paint.step(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+    paint.settle(6);
+    assert!(ink(&paint, noise) > 0, "noise drawn");
+    let _ = layer;
+}
+
+#[test]
+fn step_00_52_25_help_menu() {
+    let commands = menu_commands();
+    for command in ["help.guide", "help.shortcuts", "help.about"] {
+        assert!(commands.iter().any(|found| found == command), "{command}");
+    }
+}
