@@ -1722,8 +1722,12 @@ impl SuePaint {
                 let margins = ui.ctx().global_style().spacing.window_margin.sum().y;
                 window.fixed_size(vec2(rect.width(), TAB_STRIP + margins))
             } else {
+                // Never narrower than its header's menu, roll up, dock
+                // again and close buttons, so a narrow palette (the tools,
+                // Tool Sliders) can still be closed by its X.
+                let buttons = Density::Compact.icon_button() * 4.0;
                 window.resizable(true).min_size(vec2(
-                    palette.min_width().min(180.0),
+                    palette.min_width().min(180.0).max(buttons),
                     palette.min_height().min(120.0),
                 ))
             };
