@@ -637,6 +637,17 @@ fn animated_ui(ui: &mut Ui, form: &mut AnimatedForm, theme: &Theme) -> Outcome {
         grid.row(&tr!("form-frame-rate"), |ui| {
             help(ui, &tr!("fps-of-the-timeline", value = form.fps), theme);
         });
+        if form.kind == Animated::Gif {
+            grid.row(&tr!("export-options"), |ui| {
+                tick(
+                    ui,
+                    "anim-animated-dither",
+                    &tr!("dithering"),
+                    &mut form.dither,
+                    theme,
+                );
+            });
+        }
         grid.row("", |ui| {
             tick(
                 ui,

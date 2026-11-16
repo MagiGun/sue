@@ -196,8 +196,9 @@ pub(crate) fn movie_bytes(
 }
 
 /// The animated picture of `frames` (`kind`), each frame scaled to `size`
-/// when one is given, looping `loops` times (0 for ever), and how many
-/// frames it holds (a frame that will not render is left out).
+/// when one is given, looping `loops` times (0 for ever) and dithered when
+/// asked (GIF), and how many frames it holds (a frame that will not render
+/// is left out).
 ///
 /// # Errors
 /// When a frame will not encode, or it was cancelled.
@@ -205,7 +206,7 @@ pub(crate) fn animated_bytes(
     frames: &Frames,
     kind: Animated,
     size: Option<[u32; 2]>,
-    loops: u32,
+    (loops, dither): (u32, bool),
     steps: Steps<'_>,
 ) -> Result<(Vec<u8>, usize), String> {
     let mut tiles = Vec::with_capacity(frames.len());
@@ -224,10 +225,11 @@ pub(crate) fn animated_bytes(
     let bytes = match kind {
         Animated::WebP => sue_io::encode_webp_animation(&tiles, delay),
         Animated::Apng => sue_io::encode_apng(&tiles, delay),
-        Animated::Gif => sue_io::encode_gif_animation_looping(
+        Animated::Gif => sue_io::encode_gif_animation_with(
             &tiles,
             delay,
             u16::try_from(loops).ok().filter(|loops| *loops > 0),
+            dither,
         ),
     }?;
     Ok((bytes, tiles.len()))
@@ -294,6 +296,7 @@ impl SuePaint {
                 range,
                 fps,
                 camera: true,
+                dither: false,
             })
         } else if command == "file.export.cels" {
             AnimDialog::Cels(self.anim_ui.pending.cels.clone().unwrap_or_default())
@@ -486,9 +489,10 @@ impl SuePaint {
         };
         let size = form.as_ref().map(|form| form.size);
         let loops = form.as_ref().map_or(0, |form| form.loops);
+        let dither = form.as_ref().is_some_and(|form| form.dither);
         let target = path.to_path_buf();
         self.run_export(cx, What::Animation, path, move |steps| {
-            let (bytes, count) = animated_bytes(&frames, kind, size, loops, steps)?;
+            let (bytes, count) = animated_bytes(&frames, kind, size, (loops, dither), steps)?;
             write_whole(&target, &bytes, steps)?;
             Ok(Done {
                 frames: count,
