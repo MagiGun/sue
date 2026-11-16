@@ -1268,7 +1268,8 @@ impl SuePaint {
             return Err(tr!("is-hidden", name = info.name));
         }
         if !on_mask
-            && doc::raster(arena, info.id).is_none_or(|raster| raster.format() != PixelFormat::Rgba8)
+            && doc::raster(arena, info.id)
+                .is_none_or(|raster| raster.format() != PixelFormat::Rgba8)
         {
             return Err(tr!("is-not-an-rgba-layer", name = info.name));
         }

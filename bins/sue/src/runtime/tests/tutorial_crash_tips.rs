@@ -484,7 +484,11 @@ fn cc_0235_b_picks_brushes_and_p_cycles_pen_and_pencil() {
     let mut driver = open("keys-b-p");
     tap(&mut driver, Key::B);
     driver.settle(4);
-    assert!(shows(&driver, "Round watercolor brush"), "{:?}", driver.texts);
+    assert!(
+        shows(&driver, "Round watercolor brush"),
+        "{:?}",
+        driver.texts
+    );
     tap(&mut driver, Key::P);
     driver.settle(4);
     assert!(shows(&driver, "G-pen"), "{:?}", driver.texts);
@@ -706,7 +710,10 @@ fn cc_0400_brackets_resize_the_brush() {
     tap(&mut driver, Key::OpenBracket);
     tap(&mut driver, Key::OpenBracket);
     let smaller = brush_size(&driver);
-    assert!(bigger > before && smaller < before, "{before} {bigger} {smaller}");
+    assert!(
+        bigger > before && smaller < before,
+        "{before} {bigger} {smaller}"
+    );
 }
 
 /// CC 04:06: the zoom is shown under the canvas; Ctrl and plus zooms in,
@@ -1132,7 +1139,10 @@ fn cc_1046_ctrl_b_switches_the_layer_color() {
     let before = bytes(&driver);
     press(&mut driver, Key::B, Modifiers::COMMAND);
     let p = seen_middle(&driver);
-    assert!(i32::from(p[2]) > i32::from(p[0]) + 40, "the line shows blue: {p:?}");
+    assert!(
+        i32::from(p[2]) > i32::from(p[0]) + 40,
+        "the line shows blue: {p:?}"
+    );
     assert!(
         widgets(&mut driver)
             .iter()
@@ -1276,7 +1286,12 @@ fn dragon(driver: &mut PaintDriver) -> (EntityId, EntityId, EntityId) {
     let lines = line_box(driver, vec2(100.0, 80.0));
     let m = middle(driver);
     // 13:58: Auto Select, Refer only editing layer, outside the lines.
-    sub_tool(driver, Key::W, "Refer Reference Layers", "Refer Only Editing Layer");
+    sub_tool(
+        driver,
+        Key::W,
+        "Refer Reference Layers",
+        "Refer Only Editing Layer",
+    );
     click(driver, m + vec2(200.0, 150.0));
     // 14:16: Invert.
     run(driver, "select.invert");
@@ -1425,8 +1440,14 @@ fn cc_1455_painting_on_the_mask_hides_and_shows() {
     tap(&mut driver, Key::C);
     stroke(&mut driver, m + vec2(-30.0, 0.0), m + vec2(30.0, 0.0));
     let hidden = mask_at(&driver, folder, inside);
-    assert!(hidden < shown, "the transparent color hides: {shown} to {hidden}");
-    assert!(seen_at(&seen(&driver), inside)[0] > 200, "the paper shows there");
+    assert!(
+        hidden < shown,
+        "the transparent color hides: {shown} to {hidden}"
+    );
+    assert!(
+        seen_at(&seen(&driver), inside)[0] > 200,
+        "the paper shows there"
+    );
     tap(&mut driver, Key::C);
     let out = under(&driver, m + vec2(160.0, 0.0));
     stroke(&mut driver, m + vec2(150.0, 0.0), m + vec2(170.0, 0.0));
@@ -1445,11 +1466,19 @@ fn cc_1516_fill_on_the_mask_shows_an_area() {
     edit_mask(&mut driver, &name);
     let (_, outside) = box_points(&driver);
     assert_eq!(mask_at(&driver, folder, outside), 0);
-    sub_tool(&mut driver, Key::G, "Close and fill", "Refer Only Editing Layer");
+    sub_tool(
+        &mut driver,
+        Key::G,
+        "Close and fill",
+        "Refer Only Editing Layer",
+    );
     let before = bytes(&driver);
     let at = middle(&driver) + vec2(200.0, 150.0);
     click(&mut driver, at);
-    assert!(mask_at(&driver, folder, outside) > 200, "the mask is filled");
+    assert!(
+        mask_at(&driver, folder, outside) > 200,
+        "the mask is filled"
+    );
     assert!(seen_at(&seen(&driver), outside)[0] < 60, "the flat shows");
     undo_pair(&mut driver, &before);
 }
@@ -1765,7 +1794,10 @@ fn cc_2215_new_window_adds_a_tab_of_the_same_canvas() {
     assert_eq!(tabs, 2, "two tabs: {:?}", driver.texts);
     assert_eq!(picture(&driver), canvas, "of the same canvas");
     assert_eq!(driver.runtime.shell.page_rect().width(), width);
-    assert!((zoom(&driver) - before).abs() < 0.01, "a whole view, not a tile");
+    assert!(
+        (zoom(&driver) - before).abs() < 0.01,
+        "a whole view, not a tile"
+    );
 }
 
 /// CC 22:38: the Blend tool softens a hard edge.
@@ -1799,7 +1831,11 @@ fn cc_2238_the_blend_tool_softens_a_shadow_edge() {
         tap(&mut driver, Key::CloseBracket);
     }
     stroke(&mut driver, m + vec2(0.0, -50.0), m + vec2(0.0, 50.0));
-    assert!(partial(&driver) > hard + 50, "{hard} to {}", partial(&driver));
+    assert!(
+        partial(&driver) > hard + 50,
+        "{hard} to {}",
+        partial(&driver)
+    );
 }
 
 /// CC 23:14 (CT-15, CC-7): a layer dragged onto New Raster Layer is
@@ -1863,7 +1899,10 @@ fn cc_2622_clip_to_layer_below_paints_on_the_lines_only() {
     let on = seen_at(&tile, under(&driver, m));
     let off = seen_at(&tile, under(&driver, m + vec2(0.0, 60.0)));
     assert!(on[0] > 200, "white on the line: {on:?}");
-    assert!(off[0] > 200 && off[3] == 255, "the paper elsewhere: {off:?}");
+    assert!(
+        off[0] > 200 && off[3] == 255,
+        "the paper elsewhere: {off:?}"
+    );
     // The paint did not cover the paper: hidden, the clip shows a black
     // line again.
     click_widget(&mut driver, "Clip to Layer Below");
@@ -1928,8 +1967,7 @@ fn cc_2801_group_duplicate_and_merge_the_copy() {
     driver.click_text(&group_name);
     run(&mut driver, "layer.toggle.visible");
     driver.click_text(&copy_name);
-    let original: Vec<EntityId> =
-        sue_paint::doc::members(arena(&driver), picture(&driver), group);
+    let original: Vec<EntityId> = sue_paint::doc::members(arena(&driver), picture(&driver), group);
     run(&mut driver, "layer.merge_selected");
     let merged = named(&driver, &copy_name);
     assert!(
@@ -1981,7 +2019,10 @@ fn cc_2814_oil_paint_mixes_the_colors_it_crosses() {
         .iter()
         .filter(|p| p[3] > 0 && p[0] > 30 && p[0] < 225)
         .count();
-    assert!(mixed > 10, "a mix of black and white along the stroke: {mixed}");
+    assert!(
+        mixed > 10,
+        "a mix of black and white along the stroke: {mixed}"
+    );
 }
 
 /// CC 28:57: Window, Material opens the Material palette.
@@ -2146,7 +2187,10 @@ fn cc3_shrink_selection_selects_what_is_drawn_inside() {
     let zoomed = zoom(&driver);
     let ring_area = (140.0 * 120.0 / (zoomed * zoomed)) as usize;
     assert!(held > 0, "something is selected");
-    assert!(held < ring_area / 3, "only the drawing: {held} of {ring_area}");
+    assert!(
+        held < ring_area / 3,
+        "only the drawing: {held} of {ring_area}"
+    );
 }
 
 /// CC-4 (07:20): Liquify is a tool of its own with one sub tool, its
@@ -2201,7 +2245,11 @@ fn cc6_window_canvas_lists_the_canvases_and_ctrl_shift_tab_goes_back() {
         "Previous Canvas",
     ];
     let tops: Vec<Option<f32>> = order.iter().map(|name| at(name)).collect();
-    assert!(tops.iter().all(Option::is_some), "{order:?} in {:?}", driver.texts);
+    assert!(
+        tops.iter().all(Option::is_some),
+        "{order:?} in {:?}",
+        driver.texts
+    );
     assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "{tops:?}");
     let numbered = driver
         .texts
@@ -2220,7 +2268,12 @@ fn cc9_alt_picks_a_color_with_the_fill_tool() {
     let layer = ink_line(&mut driver);
     // White to draw with.
     tap(&mut driver, Key::X);
-    sub_tool(&mut driver, Key::G, "Close and fill", "Refer Only Editing Layer");
+    sub_tool(
+        &mut driver,
+        Key::G,
+        "Close and fill",
+        "Refer Only Editing Layer",
+    );
     let m = middle(&driver);
     click_held(&mut driver, m, PointerButton::Primary, Modifiers::ALT);
     // The black of the line is the drawing color now: a fill of the
@@ -2385,7 +2438,10 @@ fn tl_0111_object_loops_lines_and_stretches_them() {
     let now = lines_on(&driver, layer);
     let [_, new_top, _, new_bottom] = sue_paint::vector::bounds(&now, &[0, 1]).unwrap();
     assert!((new_top - top_y).abs() < 1.0, "the top stays");
-    assert!(new_bottom > bottom + 20.0, "taller: {bottom} to {new_bottom}");
+    assert!(
+        new_bottom > bottom + 20.0,
+        "taller: {bottom} to {new_bottom}"
+    );
 }
 
 /// TL 01:20 and 01:32 (CTL-2): the picked lines take a new main color
@@ -2449,7 +2505,12 @@ fn tl_0135_simplify_vector_line_smooths_the_wobble() {
             m + vec2(a.cos(), a.sin()) * (70.0 + wobble)
         })
         .collect();
-    path_held(&mut driver, &circle, PointerButton::Primary, Modifiers::NONE);
+    path_held(
+        &mut driver,
+        &circle,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    );
     // How far the line strays from its mean radius, on average.
     let wobble = |driver: &PaintDriver| {
         let line = &lines_on(driver, layer)[0];
@@ -2464,11 +2525,21 @@ fn tl_0135_simplify_vector_line_smooths_the_wobble() {
         radii.iter().map(|r| (r - mean).abs()).sum::<f32>() / radii.len() as f32
     };
     let before = wobble(&driver);
-    sub_tool(&mut driver, Key::Y, "Pinch vector line", "Simplify vector line");
+    sub_tool(
+        &mut driver,
+        Key::Y,
+        "Pinch vector line",
+        "Simplify vector line",
+    );
     for _ in 0..10 {
         tap(&mut driver, Key::CloseBracket);
     }
-    path_held(&mut driver, &circle, PointerButton::Primary, Modifiers::NONE);
+    path_held(
+        &mut driver,
+        &circle,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    );
     let after = wobble(&driver);
     assert!(after < before * 0.7, "smoother: {before} to {after}");
 }
@@ -2647,7 +2718,10 @@ fn t50_05_file_import_pose_scanner_asks_for_a_photo() {
     let mut driver = open("pose-scanner");
     run(&mut driver, "file.import.pose_scanner");
     driver.settle(4);
-    assert!(driver.runtime.pending_pick().is_some(), "a photo is asked for");
+    assert!(
+        driver.runtime.pending_pick().is_some(),
+        "a photo is asked for"
+    );
 }
 
 /// Tip 6 (01:31, CTV-2): Layer Property's Border Effect outlines what is
@@ -2809,7 +2883,11 @@ fn t50_14_the_page_manager_menu_and_webtoon_direction() {
         PointerButton::Secondary,
         Modifiers::NONE,
     );
-    assert!(shows(&driver, "Webtoon Reading Direction"), "{:?}", driver.texts);
+    assert!(
+        shows(&driver, "Webtoon Reading Direction"),
+        "{:?}",
+        driver.texts
+    );
 }
 
 /// Tip 15 (03:46): record a timelapse, then export it.
@@ -2861,7 +2939,9 @@ fn t50_17_the_wheel_switches_square_and_triangle() {
 fn t50_18_double_click_on_the_color_opens_color_settings() {
     let _english = sue_lang::scope(sue_lang::ENGLISH);
     let mut driver = open("color-settings");
-    let chip = widget(&mut driver, "Main color").expect("the main color").center();
+    let chip = widget(&mut driver, "Main color")
+        .expect("the main color")
+        .center();
     for pressed in [true, false, true, false] {
         driver.step(vec![
             Event::PointerMoved(chip),
@@ -2912,7 +2992,10 @@ fn t50_20_fill_refers_to_the_reference_layer() {
     sub_tool(&mut driver, Key::G, "Close and fill", "Refer Other Layers");
     let m = middle(&driver);
     click(&mut driver, m);
-    assert!(pixel(&driver, flat, under(&driver, m))[3] > 0, "filled inside");
+    assert!(
+        pixel(&driver, flat, under(&driver, m))[3] > 0,
+        "filled inside"
+    );
     assert_eq!(
         pixel(&driver, flat, under(&driver, m + vec2(200.0, 150.0)))[3],
         0,
@@ -2960,7 +3043,11 @@ fn t50_24_selection_launcher_settings() {
     }
     launcher(&mut driver, "launcher.settings");
     driver.settle(4);
-    assert!(shows(&driver, "Selection Launcher Settings"), "{:?}", driver.texts);
+    assert!(
+        shows(&driver, "Selection Launcher Settings"),
+        "{:?}",
+        driver.texts
+    );
 }
 
 /// Tip 25 (06:07): Window, Sub View shows reference pictures.
@@ -3077,7 +3164,10 @@ fn t50_36_preview_for_binding() {
     run(&mut driver, "story.preview_binding");
     driver.settle(6);
     assert!(
-        driver.texts.iter().any(|(text, _)| text.contains("Binding")),
+        driver
+            .texts
+            .iter()
+            .any(|(text, _)| text.contains("Binding")),
         "{:?}",
         driver.texts
     );
@@ -3193,9 +3283,14 @@ fn t50_42_focus_and_speed_lines() {
     stroke(&mut driver, m + vec2(-80.0, -60.0), m + vec2(80.0, 60.0));
     // The lines land on a new layer named after the sub tool (CTV-15).
     assert!(
-        layers(&driver).iter().any(|info| info.name == "Saturated Line"),
+        layers(&driver)
+            .iter()
+            .any(|info| info.name == "Saturated Line"),
         "{:?}",
-        layers(&driver).iter().map(|i| i.name.clone()).collect::<Vec<_>>()
+        layers(&driver)
+            .iter()
+            .map(|i| i.name.clone())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -3260,7 +3355,10 @@ fn t50_48_convert_brightness_to_opacity() {
     let before = bytes(&driver);
     run(&mut driver, "edit.luma_to_alpha");
     let m = middle(&driver);
-    assert!(pixel(&driver, layer, under(&driver, m))[3] < 20, "white went clear");
+    assert!(
+        pixel(&driver, layer, under(&driver, m))[3] < 20,
+        "white went clear"
+    );
     undo_pair(&mut driver, &before);
 }
 
@@ -3291,7 +3389,11 @@ fn t50_49_palettes_fold_and_come_back() {
         .unwrap_or_else(|| panic!("the arrow that opens it: {names:?}"));
     click(&mut driver, open_arrow.center());
     driver.settle(6);
-    assert!(shows(&driver, "Navigator"), "open again: {:?}", driver.texts);
+    assert!(
+        shows(&driver, "Navigator"),
+        "open again: {:?}",
+        driver.texts
+    );
     run(&mut driver, "window.navigator");
     driver.settle(4);
     assert!(!shows(&driver, "Navigator"), "hidden");
@@ -3348,7 +3450,11 @@ fn t50_27_figures_follow_the_perspective_ruler() {
     let layer = top(&driver);
     sub_tool(&mut driver, Key::U, "Straight Line", "Rectangle");
     let m = middle(&driver);
-    stroke(&mut driver, m + vec2(-260.0, -160.0), m + vec2(-100.0, -40.0));
+    stroke(
+        &mut driver,
+        m + vec2(-260.0, -160.0),
+        m + vec2(-100.0, -40.0),
+    );
     let [left, _, right, _] = ink_box(&driver, layer).expect("a rectangle");
     let column = |x: i64| {
         let rows: Vec<i64> = (0..i64::from(size(&driver)[1]))
@@ -3357,7 +3463,10 @@ fn t50_27_figures_follow_the_perspective_ruler() {
         rows.last().unwrap_or(&0) - rows.first().unwrap_or(&0)
     };
     let (l, r) = (column(left + 1), column(right - 1));
-    assert!(l.abs_diff(r) > 6, "in perspective the sides differ: {l} {r}");
+    assert!(
+        l.abs_diff(r) > 6,
+        "in perspective the sides differ: {l} {r}"
+    );
 }
 
 /// Tip 31 (07:20, CT-29): the two screen color commands are the last of
@@ -3369,7 +3478,9 @@ fn t50_31_the_edit_menu_has_both_screen_color_commands() {
     let mut driver = open("screen-color");
     driver.click_text("Edit");
     driver.settle(4);
-    let pick = driver.rect_of("Pick Screen Color...").expect("Pick Screen Color");
+    let pick = driver
+        .rect_of("Pick Screen Color...")
+        .expect("Pick Screen Color");
     let hidden = driver
         .rect_of("Hide Windows and Pick Screen Color...")
         .expect("the hidden variant");
@@ -3383,8 +3494,13 @@ fn t50_44_the_eye_in_sub_tool_detail_hides_a_row() {
     let _english = sue_lang::scope(sue_lang::ENGLISH);
     let mut driver = open_fresh("detail-eye");
     pen(&mut driver);
-    let property =
-        |driver: &PaintDriver| driver.texts.iter().filter(|(t, r)| t == "Opacity" && r.left() < 360.0).count();
+    let property = |driver: &PaintDriver| {
+        driver
+            .texts
+            .iter()
+            .filter(|(t, r)| t == "Opacity" && r.left() < 360.0)
+            .count()
+    };
     let shown = property(&driver);
     assert!(shown > 0, "Tool Property shows Opacity");
     click_widget(
@@ -3413,7 +3529,9 @@ fn t50_44_the_eye_in_sub_tool_detail_hides_a_row() {
         .expect("Opacity in Sub Tool Detail");
     let eye = widgets(&mut driver)
         .into_iter()
-        .filter(|(name, rect)| name == "Hide in Tool Property" && rect.right() <= opacity.left() + 1.0)
+        .filter(|(name, rect)| {
+            name == "Hide in Tool Property" && rect.right() <= opacity.left() + 1.0
+        })
         .map(|(_, rect)| rect)
         .min_by(|a, b| {
             (a.center().y - opacity.center().y)

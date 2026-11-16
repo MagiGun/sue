@@ -652,10 +652,7 @@ impl NewDialog {
         // Tip 45: the paper color and Record timelapse are kept too.
         let [r, g, b] = self.paper_color;
         more.push(("paper_color".to_owned(), format!("#{r:02x}{g:02x}{b:02x}")));
-        more.push((
-            "timelapse".to_owned(),
-            u8::from(self.timelapse).to_string(),
-        ));
+        more.push(("timelapse".to_owned(), u8::from(self.timelapse).to_string()));
         CanvasPreset {
             name,
             width: self.width,

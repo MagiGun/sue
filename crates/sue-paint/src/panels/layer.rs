@@ -1189,8 +1189,7 @@ impl SuePaint {
                         if !ui.data(|data| data.get_temp::<bool>(opened).unwrap_or(false)) {
                             ui.data_mut(|data| data.insert_temp(opened, true));
                             edit.request_focus();
-                            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), edit.id)
-                            {
+                            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), edit.id) {
                                 state.cursor.set_char_range(Some(
                                     egui::text::CCursorRange::select_all_str(&name),
                                 ));
