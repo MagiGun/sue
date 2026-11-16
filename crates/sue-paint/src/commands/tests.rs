@@ -459,6 +459,7 @@ fn the_palette_offers_what_it_offered() {
             "anim.key.ease.smooth",
             "anim.key.ease.linear",
             "anim.key.ease.hold",
+            "anim.key.delete_all",
             "anim.keyframes",
             "anim.audio.settings",
             "anim.audio.mute",

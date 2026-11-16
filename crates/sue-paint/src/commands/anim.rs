@@ -841,6 +841,15 @@ fn key_ease(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
     paint.ease_here(cx, call.name.trim_start_matches("anim.key.ease."));
 }
 
+/// Every key of the current layer taken away (Delete all keyframes).
+fn key_delete_all(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    if let Some(layer) = paint.layer()
+        && let Some(edit) = crate::anim::motion::delete_all_keys(&cx.world.arena, layer)
+    {
+        SuePaint::apply(cx, edit);
+    }
+}
+
 /// Keyframes on or off for the current layer.
 fn keyframes(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.toggle_keyframes(cx);
@@ -1341,6 +1350,14 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     c("anim.key.ease.hold", "keyframe-hold", "edit", key_ease)
         .state(on_timeline)
         .with(Flags::PALETTE),
+    c(
+        "anim.key.delete_all",
+        "delete-all-keyframes",
+        "delete",
+        key_delete_all,
+    )
+    .state(on_timeline)
+    .with(Flags::PALETTE),
     c(
         "anim.keyframes",
         "enable-layer-keyframes",
