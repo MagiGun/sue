@@ -98,9 +98,16 @@ fn a_rich_picture(arena: &mut Arena) -> EntityId {
     apply(arena, edit);
     // A raster layer with a border, a tone, a layer color and a palette
     // color.
+    // Dots in a square at the bottom right, so the border and the tone
+    // can be seen around them.
     let mut dots = vec![0_u8; 120 * 90 * 4];
-    for at in (0..dots.len()).step_by(4 * 7) {
-        dots[at..at + 4].copy_from_slice(&[30, 30, 30, 255]);
+    for y in (55..85).step_by(5) {
+        for x in (80..115).step_by(5) {
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let at = ((y + dy) * 120 + x + dx) * 4;
+                dots[at..at + 4].copy_from_slice(&[30, 30, 30, 255]);
+            }
+        }
     }
     let dots = Entity::new(
         "Dots",

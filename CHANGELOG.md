@@ -19,7 +19,8 @@ follow [Semantic Versioning](https://semver.org/).
   timeline with its animation folders, cels, keyframes, 2D camera and
   sound. Clip Studio shows those layers as their pixels and the layer
   color effect as its own; the status bar says what Clip Studio does
-  not read yet.
+  not read yet. Layers brought from a .clip into an open picture say
+  that the file's timeline, comps and rulers stayed behind.
 
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
