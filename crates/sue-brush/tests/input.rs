@@ -634,7 +634,11 @@ fn a_slow_mouse_stroke_still_tapers_by_speed() {
             .unwrap()
             .size
     };
-    assert!(at(end - 30.0) < 15.0 && at(end - 30.0) > 6.0, "{}", at(end - 30.0));
+    assert!(
+        at(end - 30.0) < 15.0 && at(end - 30.0) > 6.0,
+        "{}",
+        at(end - 30.0)
+    );
     // The slow pen's ends thin over a few pixels only (its pressure
     // thins them): ten pixels in, it is at nearly its full size, where
     // the mouse's is still well under it.
@@ -647,9 +651,17 @@ fn a_slow_mouse_stroke_still_tapers_by_speed() {
     };
     let pen_end = pen.last().unwrap().arc;
     assert!(near(&pen, 10.0) > 14.0, "{}", near(&pen, 10.0));
-    assert!(near(&pen, pen_end - 10.0) > 14.0, "{}", near(&pen, pen_end - 10.0));
+    assert!(
+        near(&pen, pen_end - 10.0) > 14.0,
+        "{}",
+        near(&pen, pen_end - 10.0)
+    );
     assert!(near(&mouse, 10.0) < 12.0, "{}", near(&mouse, 10.0));
-    assert!(near(&mouse, end - 10.0) < 8.0, "{}", near(&mouse, end - 10.0));
+    assert!(
+        near(&mouse, end - 10.0) < 8.0,
+        "{}",
+        near(&mouse, end - 10.0)
+    );
 }
 
 // ---------------------------------------------------------------------

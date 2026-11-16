@@ -184,7 +184,9 @@ fn scatters(preset: &sue_model::BrushPreset) -> bool {
             .dynamics
             .iter()
             .any(|b| b.on && (b.input == input::RANDOM || b.input == input::STROKE_RANDOM))
-        || preset.extra.iter().any(|(key, _)| key.starts_with("spray"))
+        || preset
+            .extra("paint.spray")
+            .is_some_and(|on| on.first() == Some(&1))
 }
 
 /// Every built-in brush sub tool paints two strokes through the brush
@@ -637,147 +639,235 @@ fn sheet_rows() -> Vec<(&'static str, Vec<Leg>, usize)> {
     ]
 }
 
-/// Writes a sheet of every built-in brush drawn through the canvas, for
-/// a person to look at: a row for each brush sub tool, its strokes slow,
-/// fast, light, heavy, a tap, a flick, a lift while moving (a pen's
-/// packets) and a fast mouse stroke, over white. `SUE_BRUSH_SHEET` names
-/// the folder; one PNG per tool, and `rows.txt` names the rows.
+/// The ground a sheet's strokes are drawn on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ground {
+    /// A clear layer over white paper.
+    White,
+    /// A layer filled with a mid-gray, so a brush that mixes picks the
+    /// gray up and one that lays thin paint shows how thin.
+    Gray,
+}
+
+impl Ground {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::White => "white",
+            Self::Gray => "gray",
+        }
+    }
+
+    const fn rgb(self) -> [u8; 3] {
+        match self {
+            Self::White => [255, 255, 255],
+            Self::Gray => [128, 128, 128],
+        }
+    }
+}
+
+/// Fills the top layer with `rgba`, straight into its pixels: the ground
+/// of a sheet, not a step anyone undoes.
+fn ground_layer(driver: &mut PaintDriver, rgba: [u8; 4]) {
+    let (layer, _, _) = top_layer(driver);
+    let arena = &mut driver.runtime.engine.world.arena;
+    let raster = sue_paint::doc::raster_mut(arena, layer).expect("pixels");
+    for pixel in raster.bytes_mut().expect("bytes").chunks_mut(4) {
+        pixel.copy_from_slice(&rgba);
+    }
+    driver.settle(2);
+}
+
+/// One brush's strokes on one ground at one zoom, each cut out of the
+/// layer and laid over the ground's color: its width, height and pixels.
+type Cut = (usize, usize, Vec<[u8; 3]>);
+
+/// Draws every stroke of [`sheet_rows`] (a pen's packets) and a fast
+/// mouse stroke with the picked sub tool, each at the middle of the
+/// canvas, cut out and undone; a cut is magnified `zoom` times, as the
+/// view shows it.
+fn brush_cuts(
+    driver: &mut PaintDriver,
+    name: &str,
+    ground: Ground,
+    zoom: usize,
+    time: &mut f64,
+) -> Vec<Cut> {
+    let middle = paint_middle(&driver.runtime);
+    let mut strokes: Vec<(Vec<Leg>, usize, Route)> = sheet_rows()
+        .into_iter()
+        .map(|(_, legs, rest)| (legs, rest, Route::Pen))
+        .collect();
+    strokes.push((
+        (0..6)
+            .map(|i| (vec2(22.0, 3.0 - 1.5 * i as f32), 1.0))
+            .collect(),
+        0,
+        Route::Mouse,
+    ));
+    let back = ground.rgb();
+    let mut cuts = Vec::new();
+    for (legs, rest, route) in strokes {
+        let (_, width, before) = top_layer(driver);
+        let start = middle - vec2(80.0, 0.0);
+        draw(driver, start, &legs, route, rest, time);
+        let (_, _, after) = top_layer(driver);
+        let height = after.len() / 4 / width;
+        // Where the stroke changed the layer, and its margin.
+        let (mut x0, mut y0, mut x1, mut y1) = (width, height, 0, 0);
+        for y in 0..height {
+            for x in 0..width {
+                let i = (y * width + x) * 4;
+                if after[i..i + 4] != before[i..i + 4] {
+                    x0 = x0.min(x);
+                    y0 = y0.min(y);
+                    x1 = x1.max(x);
+                    y1 = y1.max(y);
+                }
+            }
+        }
+        let margin = 10;
+        let cut = if x1 >= x0 && y1 >= y0 {
+            let (x0, y0) = (x0.saturating_sub(margin), y0.saturating_sub(margin));
+            let (x1, y1) = ((x1 + margin).min(width - 1), (y1 + margin).min(height - 1));
+            let (w, h) = ((x1 - x0 + 1) * zoom, (y1 - y0 + 1) * zoom);
+            let pixels = (0..h)
+                .flat_map(|y| (0..w).map(move |x| (x0 + x / zoom, y0 + y / zoom)))
+                .map(|(x, y)| {
+                    let i = (y * width + x) * 4;
+                    let a = u32::from(after[i + 3]);
+                    std::array::from_fn(|c| {
+                        ((u32::from(after[i + c]) * a + u32::from(back[c]) * (255 - a)) / 255) as u8
+                    })
+                })
+                .collect();
+            (w, h, pixels)
+        } else {
+            (1, 1, vec![back])
+        };
+        cuts.push(cut);
+        if after != before {
+            driver.command("edit.undo");
+            driver.settle(1);
+        }
+        assert_eq!(top_layer(driver).2, before, "{name}: undone");
+    }
+    cuts
+}
+
+/// `cuts` in rows of `columns`, each in a cell as large as the largest,
+/// over `back`, appended to `sheet` with a rule under them.
+fn lay_cuts(sheet: &mut Vec<Vec<[u8; 3]>>, cuts: &[Cut], columns: usize, back: [u8; 3]) {
+    let cell_w = cuts.iter().map(|c| c.0).max().unwrap_or(1) + 8;
+    let cell_h = cuts.iter().map(|c| c.1).max().unwrap_or(1) + 8;
+    for row in cuts.chunks(columns) {
+        for y in 0..cell_h {
+            let mut line = Vec::with_capacity(cell_w * columns);
+            for (cw, ch, pixels) in row {
+                for x in 0..cell_w {
+                    let (dx, dy) = ((cell_w - cw) / 2, (cell_h - ch) / 2);
+                    let inside = x >= dx && x < dx + cw && y >= dy && y < dy + ch;
+                    line.push(if inside {
+                        pixels[(y - dy) * cw + (x - dx)]
+                    } else {
+                        back
+                    });
+                }
+            }
+            sheet.push(line);
+        }
+    }
+    // A rule between brushes, red so it reads on either ground.
+    sheet.push(vec![[200, 60, 60]; cell_w * columns]);
+}
+
+/// `rows` as a PNG at `path`, short rows filled with `back`.
+fn write_sheet(path: &std::path::Path, rows: &[Vec<[u8; 3]>], back: [u8; 3]) {
+    let width = rows.iter().map(Vec::len).max().unwrap_or(1);
+    let mut out = Vec::with_capacity(width * rows.len() * 4);
+    for row in rows {
+        for x in 0..width {
+            let pixel = row.get(x).copied().unwrap_or(back);
+            out.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+        }
+    }
+    let png = sue_io::encode_png_rgba(width as u32, rows.len() as u32, &out).unwrap();
+    std::fs::write(path, png).unwrap();
+}
+
+/// Writes sheets of every built-in brush drawn through the canvas, for
+/// a person to look at: for each brush sub tool its strokes slow, fast,
+/// light, heavy, a tap, a flick, a lift while moving (a pen's packets)
+/// and a fast mouse stroke, drawn at 100 % and at 200 % (shown magnified
+/// as the view shows them), on a clear layer over white and on a layer
+/// of mid-gray. `SUE_BRUSH_SHEET` names the folder: one PNG per tool,
+/// zoom and ground (`pen-z1-white.png`), one per brush in `brushes/`,
+/// and `rows.txt` naming the brushes in order. `SUE_BRUSH_SHEET_ONLY`
+/// keeps to the brushes whose names hold it.
 #[test]
-#[ignore = "writes a sheet of every built-in brush for a person to look at"]
+#[ignore = "writes sheets of every built-in brush for a person to look at"]
 fn every_brush_sheet() {
     let mut driver = PaintDriver::new("paint-brush-sheet");
-    driver.command("view.actual");
-    driver.settle(3);
     let folder = std::env::var("SUE_BRUSH_SHEET").map_or_else(
         |_| std::env::temp_dir().join("sue-brush-sheet"),
         PathBuf::from,
     );
-    std::fs::create_dir_all(&folder).unwrap();
+    let only = std::env::var("SUE_BRUSH_SHEET_ONLY").ok();
+    std::fs::create_dir_all(folder.join("brushes")).unwrap();
     let toolbox = sue_paint::tools::Toolbox::default();
-    let middle = paint_middle(&driver.runtime);
     let mut time = 1000.0;
     let mut names = Vec::new();
-    // A stroke's cut: its width, height and straight RGB over white.
-    type Cut = (usize, usize, Vec<[u8; 3]>);
-    for tool in BRUSH_TOOLS {
-        let eraser = tool == sue_paint::tools::Tool::Eraser;
-        let mut sheet: Vec<Vec<[u8; 3]>> = Vec::new();
-        for sub in toolbox.subs(tool) {
-            let clear = top_layer(&driver).2;
-            if eraser {
-                driver.command("select.all");
-                driver.command("edit.fill");
-                driver.command("select.none");
-                driver.settle(2);
-            }
-            driver.command(&pick(tool, &sub.name));
-            driver.settle(2);
-            let size = sub.tip.size;
-            // Every stroke at the middle of the canvas, cut out and
-            // undone, so none lands off the canvas or on another.
-            let mut strokes: Vec<(Vec<Leg>, usize, Route)> = sheet_rows()
-                .into_iter()
-                .map(|(_, legs, rest)| (legs, rest, Route::Pen))
-                .collect();
-            strokes.push((
-                (0..6)
-                    .map(|i| (vec2(22.0, 3.0 - 1.5 * i as f32), 1.0))
-                    .collect(),
-                0,
-                Route::Mouse,
-            ));
-            let mut cuts: Vec<Cut> = Vec::new();
-            for (legs, rest, route) in strokes {
-                let (_, width, before) = top_layer(&driver);
-                let start = middle - vec2(80.0, 0.0);
-                draw(&mut driver, start, &legs, route, rest, &mut time);
-                let (_, _, after) = top_layer(&driver);
-                let height = after.len() / 4 / width;
-                // Where the stroke changed the layer, and its margin.
-                let (mut x0, mut y0, mut x1, mut y1) = (width, height, 0, 0);
-                for y in 0..height {
-                    for x in 0..width {
-                        let i = (y * width + x) * 4;
-                        if after[i..i + 4] != before[i..i + 4] {
-                            x0 = x0.min(x);
-                            y0 = y0.min(y);
-                            x1 = x1.max(x);
-                            y1 = y1.max(y);
-                        }
+    for (zoom, view) in [(1, "view.actual"), (2, "view.double")] {
+        driver.command(view);
+        driver.settle(3);
+        for ground in [Ground::White, Ground::Gray] {
+            let back = ground.rgb();
+            for tool in BRUSH_TOOLS {
+                let eraser = tool == sue_paint::tools::Tool::Eraser;
+                let mut sheet: Vec<Vec<[u8; 3]>> = Vec::new();
+                for (index, sub) in toolbox.subs(tool).iter().enumerate() {
+                    if only.as_deref().is_some_and(|only| !sub.name.contains(only)) {
+                        continue;
                     }
-                }
-                let margin = 10;
-                let cut = if x1 >= x0 && y1 >= y0 {
-                    let (x0, y0) = (x0.saturating_sub(margin), y0.saturating_sub(margin));
-                    let (x1, y1) = ((x1 + margin).min(width - 1), (y1 + margin).min(height - 1));
-                    let pixels = (y0..=y1)
-                        .flat_map(|y| (x0..=x1).map(move |x| (x, y)))
-                        .map(|(x, y)| {
-                            let i = (y * width + x) * 4;
-                            let a = u32::from(after[i + 3]);
-                            std::array::from_fn(|c| {
-                                ((u32::from(after[i + c]) * a + 255 * (255 - a)) / 255) as u8
-                            })
-                        })
-                        .collect();
-                    (x1 - x0 + 1, y1 - y0 + 1, pixels)
-                } else {
-                    (1, 1, vec![[255, 255, 255]])
-                };
-                cuts.push(cut);
-                if after != before {
-                    driver.command("edit.undo");
-                    driver.settle(1);
-                }
-                assert_eq!(top_layer(&driver).2, before, "{}: undone", sub.name);
-            }
-            // The cuts in rows of four (two for a big brush), each in a
-            // cell as large as the largest.
-            let columns = if size > 40.0 { 2 } else { 4 };
-            let cell_w = cuts.iter().map(|c| c.0).max().unwrap_or(1) + 8;
-            let cell_h = cuts.iter().map(|c| c.1).max().unwrap_or(1) + 8;
-            for row in cuts.chunks(columns) {
-                for y in 0..cell_h {
-                    let mut line = Vec::with_capacity(cell_w * columns);
-                    for (cw, ch, pixels) in row {
-                        for x in 0..cell_w {
-                            let (dx, dy) = ((cell_w - cw) / 2, (cell_h - ch) / 2);
-                            let inside = x >= dx && x < dx + cw && y >= dy && y < dy + ch;
-                            line.push(if inside {
-                                pixels[(y - dy) * cw + (x - dx)]
-                            } else {
-                                [255, 255, 255]
-                            });
-                        }
+                    // An eraser takes black away; every other brush paints
+                    // on the ground's own layer.
+                    match (eraser, ground) {
+                        (true, _) => ground_layer(&mut driver, [0, 0, 0, 255]),
+                        (false, Ground::Gray) => ground_layer(&mut driver, [128, 128, 128, 255]),
+                        (false, Ground::White) => {}
                     }
-                    sheet.push(line);
-                }
-            }
-            // A gray rule between brushes.
-            sheet.push(vec![[200, 200, 200]; cell_w * columns]);
-            names.push(format!("{} {}", tool.id(), sub.name));
-            if eraser {
-                for _ in 0..4 {
-                    if top_layer(&driver).2 == clear {
-                        break;
+                    driver.command(&pick(tool, &sub.name));
+                    driver.settle(2);
+                    let size = sub.tip.size;
+                    let cuts = brush_cuts(&mut driver, &sub.name, ground, zoom, &mut time);
+                    let columns = if size > 40.0 || zoom > 1 { 2 } else { 4 };
+                    let mut own = Vec::new();
+                    lay_cuts(&mut own, &cuts, columns, back);
+                    write_sheet(
+                        &folder.join("brushes").join(format!(
+                            "{}-{:02}-{}-z{zoom}-{}.png",
+                            tool.id(),
+                            index,
+                            sub.name.replace(' ', "_"),
+                            ground.name()
+                        )),
+                        &own,
+                        back,
+                    );
+                    sheet.extend(own);
+                    if zoom == 1 && ground == Ground::White {
+                        names.push(format!("{} {}", tool.id(), sub.name));
                     }
-                    driver.command("edit.undo");
-                    driver.settle(1);
+                    ground_layer(&mut driver, [0, 0, 0, 0]);
                 }
-            }
-            assert_eq!(top_layer(&driver).2, clear, "{}: undone", sub.name);
-        }
-        let sheet_width = sheet.iter().map(Vec::len).max().unwrap_or(1);
-        let height = sheet.len();
-        let mut out = Vec::with_capacity(sheet_width * height * 4);
-        for row in &sheet {
-            for x in 0..sheet_width {
-                let pixel = row.get(x).copied().unwrap_or([255, 255, 255]);
-                out.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+                if !sheet.is_empty() {
+                    write_sheet(
+                        &folder.join(format!("{}-z{zoom}-{}.png", tool.id(), ground.name())),
+                        &sheet,
+                        back,
+                    );
+                }
             }
         }
-        let png = sue_io::encode_png_rgba(sheet_width as u32, height as u32, &out).unwrap();
-        std::fs::write(folder.join(format!("{}.png", tool.id())), png).unwrap();
     }
     std::fs::write(folder.join("rows.txt"), names.join("\n")).unwrap();
     println!("brush sheet: {}", folder.display());
