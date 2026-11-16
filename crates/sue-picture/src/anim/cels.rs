@@ -52,6 +52,42 @@ pub fn whole_folders(arena: &Arena, picture: EntityId, mut view: FrameView) -> F
     view
 }
 
+/// The edit that makes `folder`, made around the cel `cel`, the cel in its
+/// place: named as the cel is, and shown on every frame the cel was (Clip
+/// Studio Paint's Create Folder and Insert Layer on a cel), so a color
+/// layer put in it beside the lines shows and hides with them. Applied
+/// after the edit that made the folder.
+#[must_use]
+pub fn folder_takes_cel(arena: &Arena, picture: EntityId, cel: EntityId, folder: EntityId) -> Edit {
+    let name = arena
+        .get_by_id(cel)
+        .map(|entity| entity.name().to_owned())
+        .unwrap_or_default();
+    let mut edit = Edit::new(name.clone()).then(Rename::new(folder, name));
+    if let Some(sequence) = timeline(arena, picture) {
+        let mut out = sequence.clone();
+        let mut changed = false;
+        for track in &mut out.tracks {
+            if !track.clips().iter().any(|clip| clip.source == cel) {
+                continue;
+            }
+            let clips = track.clips().to_vec();
+            while track.remove(0).is_some() {}
+            for mut clip in clips {
+                if clip.source == cel {
+                    clip.source = folder;
+                }
+                track.insert(clip);
+            }
+            changed = true;
+        }
+        if changed {
+            edit = edit.then(SetExtension::set(picture, out));
+        }
+    }
+    edit
+}
+
 /// The cel `track` shows at or before `frame`, else the folder's top cel:
 /// the one a new cel follows.
 fn cel_before(
