@@ -117,6 +117,15 @@ impl Brush {
         let preset = &self.preset;
         preset.engine == EngineKind::Stroke
             && matches!(preset.tip, TipSource::Round)
+            // A swept round tip is round: a flat one (thinner than it
+            // is wide) is laid by dabs, which turn it.
+            && preset
+                .value(sue_model::brush::param::ASPECT)
+                .is_none_or(|aspect| aspect >= 1.0)
+            && !preset
+                .dynamics
+                .iter()
+                .any(|b| b.on && b.param == sue_model::brush::param::ASPECT)
             && preset.mix.is_none()
             && preset.texture.is_none()
             && !preset.build_up
