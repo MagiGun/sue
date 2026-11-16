@@ -78,6 +78,7 @@ pub(crate) const MENU: &[&str] = &[
     "anim.light_table.register",
     "anim.light_table.register_general",
     "anim.light_table.clear",
+    "anim.palette_color.clips",
     "anim.thumbnails.none",
     "anim.thumbnails.smallest",
     "anim.thumbnails.small",
@@ -234,6 +235,9 @@ pub(crate) struct AnimUi {
     /// The frame shown when the frames were last looked at, so a move by
     /// hand is told from standing still.
     pub scrubbed: Option<u32>,
+    /// Show Palette Color on Clips turned off: the clips are drawn in
+    /// the timeline's own colors (on by default).
+    pub palette_clips_hidden: bool,
 }
 
 /// The keys that run `command` now, as people read them (`Ctrl+K`), or

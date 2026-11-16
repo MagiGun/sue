@@ -1022,7 +1022,9 @@ impl SuePaint {
                 });
             }
 
-            // The frames.
+            // The frames: the clips in the palette color, unless Show
+            // Palette Color on Clips is off.
+            let clip_tint = tint.filter(|_| !self.anim_ui.palette_clips_hidden);
             match row.kind {
                 Kind::Cels => {
                     let keys = anim::keys(track, sequence.rate);
@@ -1056,7 +1058,7 @@ impl SuePaint {
                             cells_painter.hline(
                                 (x + pad / 2.0)..=column(end) - pad / 2.0,
                                 top + row_size - pad / 2.0 + row.band,
-                                tint.map_or_else(
+                                clip_tint.map_or_else(
                                     || Stroke::new(theme.hairline().width, theme.text_muted()),
                                     |tint| Stroke::new(thick, tint),
                                 ),
@@ -1112,6 +1114,14 @@ impl SuePaint {
                             CornerRadius::same(theme.radius(wm_ui::Radius::Xs) as u8),
                             theme.surface(2),
                         );
+                        if let Some(tint) = clip_tint {
+                            // A band of the palette color along its top.
+                            cells_painter.rect_filled(
+                                Rect::from_min_size(bar.min, vec2(bar.width(), thick * 2.0)),
+                                CornerRadius::ZERO,
+                                tint,
+                            );
+                        }
                         cells_painter.rect_stroke(
                             bar,
                             CornerRadius::same(theme.radius(wm_ui::Radius::Xs) as u8),

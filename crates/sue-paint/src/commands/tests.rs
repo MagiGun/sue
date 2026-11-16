@@ -463,6 +463,7 @@ fn the_palette_offers_what_it_offered() {
             "anim.audio.mute",
             "anim.audio.delete",
             "anim.export.audio",
+            "anim.palette_color.clips",
             "window.interface.auto",
             "window.interface.desktop",
             "window.interface.tablet",

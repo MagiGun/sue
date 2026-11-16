@@ -557,6 +557,10 @@ follow [Semantic Versioning](https://semver.org/).
   and an Offset Y, moving the output frame from its reference point.
 - Sue Paint: an animation's output frame is drawn on the canvas, named
   under its lower left corner, with its title-safe area when that is on.
+- Sue Paint, Timeline palette menu: Show Palette Color, Show Palette
+  Color on Clips. On (as it starts), each track's clips carry its
+  layer's palette color: a band along a layer's clip, the line under an
+  animation folder's cels.
 
 ### Changed
 
