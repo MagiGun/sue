@@ -610,6 +610,14 @@ impl SuePaint {
             cx.fail(tr!("make-timeline-first-animation-timeline-new"));
             return;
         };
+        // The 2D camera picked: its key, of the camera as it stands.
+        if crate::camera::is_camera(&cx.world.arena, layer) {
+            let camera = self.camera_now(&cx.world.arena, layer);
+            let (_, time) = self.frame_time(&cx.world.arena);
+            Self::apply(cx, crate::camera::key(&cx.world.arena, layer, time, camera));
+            self.camera_pending = None;
+            return;
+        }
         let arena = &cx.world.arena;
         let size = arena
             .get_by_id(picture)
