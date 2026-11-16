@@ -146,7 +146,7 @@ impl SuePaint {
 
 use crate::panels::timeline::forms::{
     Animated, AnimatedForm, AudioClipForm, CelsForm, InsertForm, LabelForm, MovieForm, Range,
-    SequenceForm, TimelineForm,
+    SequenceForm, TimelineForm, TrackNoteForm,
 };
 use sue_wm::ui::{self as wm_ui, TextRole};
 
@@ -172,6 +172,8 @@ pub(crate) enum AnimDialog {
     StopTimelapse(bool, usize),
     /// Insert Frame: how many, where and how.
     Insert(InsertForm),
+    /// A named track label: its name and range.
+    TrackNote(TrackNoteForm),
 }
 
 impl AnimDialog {
@@ -192,6 +194,7 @@ impl AnimDialog {
             Self::Label(_) => tr!("timeline-label"),
             Self::StopTimelapse(..) => tr!("stop-recording-timelapse"),
             Self::Insert(_) => tr!("insert-frame"),
+            Self::TrackNote(_) => tr!("track-label"),
         }
     }
 
@@ -206,7 +209,7 @@ impl AnimDialog {
             Self::Cels(_) => 5.0,
             Self::AudioClip(_) => 10.0,
             Self::Label(_) | Self::StopTimelapse(..) => 4.0,
-            Self::Insert(_) => 5.5,
+            Self::Insert(_) | Self::TrackNote(_) => 5.5,
         };
         let row = wm_ui::Density::Regular.row();
         egui::Vec2::new(row * 15.0, row * (rows + 2.0) * 1.2)
@@ -224,6 +227,7 @@ impl AnimDialog {
             Self::Label(form) => label_ui(ui, form, theme),
             Self::StopTimelapse(delete, frames) => stop_timelapse_ui(ui, delete, *frames, theme),
             Self::Insert(form) => insert_ui(ui, form, theme),
+            Self::TrackNote(form) => track_note_ui(ui, form, theme),
         }
     }
 }
@@ -241,6 +245,7 @@ impl SuePaint {
             AnimDialog::Label(form) => self.label_ok(cx, &form),
             AnimDialog::StopTimelapse(delete, _) => self.stop_timelapse(cx, delete),
             AnimDialog::Insert(form) => self.insert_frames(cx, &form),
+            AnimDialog::TrackNote(form) => self.track_note_ok(cx, &form),
         }
     }
 }
@@ -738,6 +743,45 @@ fn label_ui(ui: &mut Ui, form: &mut LabelForm, theme: &Theme) -> Outcome {
         });
     });
     help(ui, &tr!("an-empty-label-is-removed"), theme);
+    ok_cancel(ui, &mut outcome);
+    outcome
+}
+
+/// A named track label: its name, and Range with how many frames it
+/// covers. An empty name takes it away.
+fn track_note_ui(ui: &mut Ui, form: &mut TrackNoteForm, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    wm_ui::form_grid(ui, "anim-track-note-form", theme, |grid| {
+        grid.row(&tr!("label-name"), |ui| {
+            wm_ui::text_field("anim-track-note-name", &mut form.name).show(ui, theme);
+        });
+        grid.row("", |ui| {
+            tick(
+                ui,
+                "anim-track-note-range",
+                &tr!("range"),
+                &mut form.range,
+                theme,
+            );
+        });
+        if form.range {
+            grid.row(&tr!("number-of-frames"), |ui| {
+                whole(
+                    ui,
+                    "anim-track-note-frames",
+                    &mut form.frames,
+                    1..=10_000,
+                    "",
+                    theme,
+                );
+            });
+        }
+    });
+    help(
+        ui,
+        &tr!("track-label-at-frame", value = form.frame + 1),
+        theme,
+    );
     ok_cancel(ui, &mut outcome);
     outcome
 }

@@ -438,6 +438,7 @@ fn the_palette_offers_what_it_offered() {
             "anim.clip.first",
             "anim.clip.last",
             "anim.label",
+            "anim.track_note",
             "anim.track_label.inbetween",
             "anim.track_label.inbetween-done",
             "anim.track_label.reverse-sheet",

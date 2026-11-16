@@ -763,6 +763,11 @@ fn label(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 }
 
 /// A track label at the frame shown (the argument names its kind).
+/// A named label on the current track at the frame shown, in a dialog.
+fn track_note(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.ask_track_note(cx);
+}
+
 fn track_label(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
     paint.timeline_track_label(cx, call.name.trim_start_matches("anim.track_label."));
 }
@@ -1187,6 +1192,9 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     .state(on_timeline)
     .with(Flags::PALETTE),
     c("anim.label", "timeline-label-ellipsis", "tag", label)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
+    c("anim.track_note", "track-label-ellipsis", "tag", track_note)
         .state(on_timeline)
         .with(Flags::PALETTE),
     c(

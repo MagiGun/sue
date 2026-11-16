@@ -3498,3 +3498,6 @@ fold-or-unfold-folder = Fold or Unfold the Folder
 keyframe-at-frame = Keyframe at frame { $frame }: { $ease }
 preview-on-the-timeline = Preview on the timeline
 drag-layer-here-to-trace-it = Drag a layer here from the Layer palette to trace it while you draw this cel, or pick it and use the register button above
+track-label-ellipsis = Track Label...
+label-name = Label name
+track-label-at-frame = On the picked track, from frame { $value }. An empty name takes the label away.

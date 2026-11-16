@@ -10,7 +10,7 @@ use sue_model::Sequence;
 use sue_wm::AppletContext;
 
 use super::Edit;
-use super::forms::{InsertForm, LabelForm, TimelineForm};
+use super::forms::{InsertForm, LabelForm, TimelineForm, TrackNoteForm};
 use crate::anim;
 use crate::anim::editing::{self, Selection, TrackLabel};
 use crate::anim::motion::Ease;
@@ -86,6 +86,7 @@ impl SuePaint {
                 // A blank there picks the folder itself, as the Layer
                 // palette does, so the two stay in step; a layer track
                 // picks its layer.
+                let current = self.layer();
                 let target = sequence.tracks.get(track).and_then(|row| {
                     anim::cel_at(row, sequence.rate, frame)
                         .filter(|_| row.kind == anim::CELS)
@@ -330,7 +331,51 @@ impl SuePaint {
         };
         let (frame, track) = self.doc().map_or((0, 0), |doc| (doc.frame, doc.track));
         let label = TrackLabel::from_name(kind);
-        let changed = editing::with_track_label(&sequence, track, frame, label);
+        let mut changed = editing::with_track_label(&sequence, track, frame, label);
+        // No Track Label takes a named one there away too.
+        if label.is_none() {
+            changed = editing::with_track_note(&changed, track, frame, None);
+        }
+        if changed != sequence {
+            Self::apply(cx, anim::set(picture, changed, &tr!("track-label")));
+        }
+    }
+
+    /// Opens a named track label at the frame shown on the current track
+    /// (Create Track Label): its name and its range.
+    pub(crate) fn ask_track_note(&mut self, cx: &mut AppletContext<'_>) {
+        let Some((_, sequence, _)) = self.timeline_here(&cx.world.arena) else {
+            cx.fail(tr!("make-timeline-first-animation-timeline-new"));
+            return;
+        };
+        let (frame, track) = self.doc().map_or((0, 0), |doc| (doc.frame, doc.track));
+        let note = sequence.tracks.get(track).and_then(|row| {
+            editing::track_notes(row)
+                .into_iter()
+                .find(|note| note.frame == frame)
+        });
+        self.dialog = Some(Dialog::Anim(Box::new(AnimDialog::TrackNote(
+            TrackNoteForm {
+                track,
+                frame,
+                name: note
+                    .as_ref()
+                    .map(|note| note.name.clone())
+                    .unwrap_or_default(),
+                range: note.as_ref().is_some_and(|note| note.range > 1),
+                frames: note.map_or(1, |note| note.range),
+            },
+        ))));
+    }
+
+    /// Keeps a named track label; an empty name takes it away.
+    pub(crate) fn track_note_ok(&mut self, cx: &mut AppletContext<'_>, form: &TrackNoteForm) {
+        let Some((picture, sequence, _)) = self.timeline_here(&cx.world.arena) else {
+            return;
+        };
+        let range = if form.range { form.frames.max(1) } else { 1 };
+        let changed =
+            editing::with_track_note(&sequence, form.track, form.frame, Some((&form.name, range)));
         if changed != sequence {
             Self::apply(cx, anim::set(picture, changed, &tr!("track-label")));
         }

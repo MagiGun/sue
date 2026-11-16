@@ -812,6 +812,89 @@ pub fn with_track_label(
     out
 }
 
+/// A track's named labels (Create Track Label): one a line, `frame`,
+/// `range` and the name joined by tabs (`Text`, a track property).
+pub const TRACK_NOTES: &str = "anim.track.notes";
+
+/// A named label on a track: text at a frame, over `range` frames when it
+/// covers more than one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrackNote {
+    /// The frame it starts at, from 0.
+    pub frame: u32,
+    /// How many frames it covers, at least 1.
+    pub range: u32,
+    /// What it says.
+    pub name: String,
+}
+
+/// The named labels of `track`, first first.
+#[must_use]
+pub fn track_notes(track: &Track) -> Vec<TrackNote> {
+    let mut out: Vec<TrackNote> = track
+        .properties
+        .get(TRACK_NOTES)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '\t');
+            Some(TrackNote {
+                frame: parts.next()?.trim().parse().ok()?,
+                range: parts.next()?.trim().parse::<u32>().ok()?.max(1),
+                name: parts.next()?.to_owned(),
+            })
+        })
+        .collect();
+    out.sort_by_key(|note| note.frame);
+    out
+}
+
+/// `sequence` with track `track`'s named label at `frame` set to `note`
+/// (its name and range; `None`, or an empty name: taken away).
+#[must_use]
+pub fn with_track_note(
+    sequence: &Sequence,
+    track: usize,
+    frame: u32,
+    note: Option<(&str, u32)>,
+) -> Sequence {
+    let mut out = sequence.clone();
+    let Some(target) = out.tracks.get_mut(track) else {
+        return out;
+    };
+    let mut notes: Vec<TrackNote> = track_notes(target)
+        .into_iter()
+        .filter(|kept| kept.frame != frame)
+        .collect();
+    if let Some((name, range)) = note {
+        // A tab or a line break would end the field it is kept in.
+        let name: String = name
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect();
+        let name = name.trim();
+        if !name.is_empty() {
+            notes.push(TrackNote {
+                frame,
+                range: range.max(1),
+                name: name.to_owned(),
+            });
+        }
+    }
+    notes.sort_by_key(|note| note.frame);
+    if notes.is_empty() {
+        target.properties.remove(TRACK_NOTES);
+    } else {
+        let text: Vec<String> = notes
+            .iter()
+            .map(|note| format!("{}\t{}\t{}", note.frame, note.range, note.name))
+            .collect();
+        target.properties.set(TRACK_NOTES, text.join("\n"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::{MIX_RATE, assign, cel_at, with_folder};
@@ -1122,5 +1205,35 @@ mod tests {
         for kind in TrackLabel::ALL {
             assert_eq!(TrackLabel::from_name(kind.name()), Some(kind));
         }
+    }
+
+    #[test]
+    fn named_track_labels_keep_their_range_and_go_with_an_empty_name() {
+        let sequence = timeline_of(&[(0, None)], 24);
+        let one = with_track_note(&sequence, 0, 9, Some(("start\tmoving", 3)));
+        let two = with_track_note(&one, 0, 2, Some(("hold", 0)));
+        assert_eq!(
+            track_notes(&two.tracks[0]),
+            vec![
+                TrackNote {
+                    frame: 2,
+                    range: 1,
+                    name: "hold".to_owned()
+                },
+                TrackNote {
+                    frame: 9,
+                    range: 3,
+                    name: "start moving".to_owned()
+                },
+            ]
+        );
+        // The in-between marks are kept apart and stay.
+        let marked = with_track_label(&two, 0, 4, Some(TrackLabel::InBetween));
+        assert_eq!(track_notes(&marked.tracks[0]).len(), 2);
+        let gone = with_track_note(&marked, 0, 9, Some(("  ", 1)));
+        let gone = with_track_note(&gone, 0, 2, None);
+        assert!(track_notes(&gone.tracks[0]).is_empty());
+        assert!(gone.tracks[0].properties.get(TRACK_NOTES).is_none());
+        assert_eq!(track_labels(&gone.tracks[0]).len(), 1);
     }
 }

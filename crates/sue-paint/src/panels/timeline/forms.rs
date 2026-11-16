@@ -415,6 +415,22 @@ impl AudioClipForm {
     }
 }
 
+/// A named track label: the track, the frame (from 0), its name and how
+/// many frames it covers when Range is ticked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TrackNoteForm {
+    /// The track it goes on.
+    pub track: usize,
+    /// The frame, from 0.
+    pub frame: u32,
+    /// The name; empty takes the label away.
+    pub name: String,
+    /// Whether it covers more than its frame.
+    pub range: bool,
+    /// How many frames it covers when `range` is on.
+    pub frames: u32,
+}
+
 /// A timeline label: the frame (from 0) and its name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LabelForm {

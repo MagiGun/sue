@@ -1111,6 +1111,26 @@ impl SuePaint {
                             }
                         }
                     }
+                    // Named track labels: their text along the top of the
+                    // row from their frame, a line under it over their
+                    // range.
+                    for note in anim::editing::track_notes(track) {
+                        let from = column(note.frame);
+                        if note.range > 1 {
+                            cells_painter.hline(
+                                from..=column(note.frame + note.range),
+                                top + 1.0,
+                                Stroke::new(thick, theme.text_muted()),
+                            );
+                        }
+                        cells_painter.text(
+                            pos2(from + pad / 4.0, top + 2.0),
+                            Align2::LEFT_TOP,
+                            &note.name,
+                            font.clone(),
+                            theme.text_muted(),
+                        );
+                    }
                 }
                 Kind::Layer => {
                     // Its clips: the frames it shows on.
