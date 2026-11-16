@@ -1128,7 +1128,7 @@ impl SuePaint {
                         if let Some(tint) = clip_tint {
                             // A band of the palette color along its top.
                             cells_painter.rect_filled(
-                                Rect::from_min_size(bar.min, vec2(bar.width(), thick * 2.0)),
+                                Rect::from_min_size(bar.min, vec2(bar.width(), thick + thick)),
                                 CornerRadius::ZERO,
                                 tint,
                             );
