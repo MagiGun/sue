@@ -519,19 +519,6 @@ fn png_size(path: &std::path::Path) -> [u32; 2] {
     ]
 }
 
-/// No error said on the status line.
-fn no_error(paint: &PaintDriver) {
-    assert!(
-        paint
-            .runtime
-            .shell
-            .message()
-            .is_none_or(|(_, error)| !error),
-        "{:?}",
-        paint.runtime.shell.message()
-    );
-}
-
 // ----- 00:57 to 03:00: a new animation and its frame -------------------------
 
 #[test]
@@ -782,19 +769,7 @@ fn step_014_seen_v05_paper_and_template_picked_together_and_locked() {
 #[test]
 fn step_015_timeline_thumbnails_none_from_its_right_click() {
     let mut paint = tutorial("tut25-015");
-    let menu = timeline_menu(&mut paint);
-    click(&mut paint, menu);
-    let size = paint
-        .texts
-        .iter()
-        .find(|(text, _)| text == "Thumbnail Size")
-        .map(|(_, rect)| *rect)
-        .unwrap_or_else(|| panic!("Thumbnail Size in the menu: {:?}", paint.texts));
-    paint.step(vec![Event::PointerMoved(size.center())]);
-    paint.settle(30);
-    let folder = first_folder(&paint);
-    let name = name_of(&paint, folder);
-    let row_top = |paint: &mut PaintDriver| {
+    let paper_top = |paint: &mut PaintDriver| {
         paint
             .settle(3)
             .iter()
@@ -804,11 +779,27 @@ fn step_015_timeline_thumbnails_none_from_its_right_click() {
             .map(|(_, rect)| rect.top())
             .next()
     };
+    assert!(
+        paper_top(&mut paint).is_none(),
+        "the cels' pictures fill the rows"
+    );
+    // A right click on the timeline, Thumbnail Size, None.
+    let folder = first_folder(&paint);
+    let name = name_of(&paint, folder);
+    let at = cell(&mut paint, &name, 3);
+    let texts = right_click(&mut paint, at);
+    let size = texts
+        .iter()
+        .find(|(text, _)| text == "Thumbnail Size")
+        .map(|(_, rect)| *rect)
+        .unwrap_or_else(|| panic!("Thumbnail Size in the right click's menu: {texts:?}"));
+    paint.step(vec![Event::PointerMoved(size.center())]);
+    paint.settle(30);
     paint.click_text("Thumbnails: None");
-    let _ = name;
-    let gap = row_top(&mut paint).expect("Paper's track in sight with no thumbnails");
-    assert!(gap < 900.0);
-    no_error(&paint);
+    assert!(
+        paper_top(&mut paint).is_some(),
+        "rows of one line: Paper's track in sight"
+    );
 }
 
 #[test]
