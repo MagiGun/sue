@@ -1181,7 +1181,17 @@ impl SuePaint {
                         )
                         .label(&tr!("change-layer-name-ellipsis"))
                         .show_at(ui, field, theme);
-                        edit.request_focus();
+                        // The field keeps the keys while the name is typed,
+                        // but not in the frame Enter, Escape or a click
+                        // elsewhere ends it: that would take back the end.
+                        let ending = ui.input(|input| {
+                            input.key_pressed(egui::Key::Enter)
+                                || input.key_pressed(egui::Key::Escape)
+                                || input.pointer.any_pressed()
+                        });
+                        if !ending {
+                            edit.request_focus();
+                        }
                         if edit.lost_focus() {
                             events.rename = Some((
                                 info.id,
