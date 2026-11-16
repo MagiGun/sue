@@ -282,6 +282,47 @@ pub fn new_cel(
     Ok((edit, cel))
 }
 
+/// The edit that keeps `cel` a cel once a new folder `wrapper` takes its
+/// place in its animation folder (Create Folder and Insert Layer, or the
+/// cel dropped on New Layer Folder), as Clip Studio Paint does: the
+/// folder takes the cel's name, and every frame that showed the cel shows
+/// the folder. Read before the wrap is applied. `None` when `cel` is no
+/// cel of an animation folder.
+#[must_use]
+pub fn wrapped(arena: &Arena, picture: EntityId, cel: EntityId, wrapper: EntityId) -> Option<Edit> {
+    super::cel_folder(arena, cel)?;
+    let name = arena.get_by_id(cel).ok()?.name().to_owned();
+    let rekeyed = rekeyed(arena, picture, &[cel], wrapper)?;
+    Some(
+        Edit::new(tr!("create-folder-and-insert-layer"))
+            .then(Rename::new(wrapper, name))
+            .then(rekeyed),
+    )
+}
+
+/// The edit that shows `to` on every frame of the timeline that showed
+/// one of `from`: what a cel's frames go to when it is merged into a new
+/// layer (Merge Selected Layers on a folder cel) or put in a folder.
+/// `None` when no frame shows any of them.
+#[must_use]
+pub fn rekeyed(arena: &Arena, picture: EntityId, from: &[EntityId], to: EntityId) -> Option<Edit> {
+    let sequence = timeline(arena, picture)?;
+    let mut out = sequence.clone();
+    let mut any = false;
+    for track in &mut out.tracks {
+        let clips: Vec<sue_model::Clip> = track.clips().to_vec();
+        for index in (0..clips.len()).rev() {
+            if from.contains(&clips[index].source) {
+                let mut clip = track.remove(index)?;
+                clip.source = to;
+                track.insert(clip);
+                any = true;
+            }
+        }
+    }
+    any.then(|| Edit::new(tr!("edit-track")).then(SetExtension::set(picture, out)))
+}
+
 /// The edit that names the cels of `folder` 1, 2, 3 in the order the
 /// timeline first shows them (Rename in timeline order); the cels it
 /// never shows follow in layer order. `None` when no name changes.
@@ -355,4 +396,50 @@ pub fn first_frame_of(sequence: &Sequence, track: usize, cel: EntityId) -> Optio
 pub fn shows_at(sequence: &Sequence, folder: EntityId, cel: EntityId, frame: u32) -> bool {
     track_of(sequence, folder)
         .is_some_and(|track| cel_at(&sequence.tracks[track], sequence.rate, frame) == Some(cel))
+}
+
+#[cfg(test)]
+mod wrap_tests {
+    use sue_core::{Arena, ReversibleTransaction, UndoStack};
+
+    use super::*;
+    use crate::doc::{NewPicture, create};
+
+    #[test]
+    fn a_cel_wrapped_in_a_folder_hands_the_folder_its_name_and_frames() {
+        let mut arena = Arena::new();
+        let (mut made, picture) = create(&NewPicture {
+            width: 8,
+            height: 8,
+            ..NewPicture::default()
+        })
+        .unwrap();
+        made.apply(&mut arena).unwrap();
+        let mut timeline_edit = super::super::new_timeline(&arena, picture, 10, 6);
+        timeline_edit.apply(&mut arena).unwrap();
+        let sequence = timeline(&arena, picture).unwrap();
+        let folder = super::super::track_folder(&sequence.tracks[0]).unwrap();
+        let mut history: UndoStack<Arena> = UndoStack::new();
+        let (edit, cel) = new_cel(&arena, picture, folder, 0).unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        let (wrap, wrapper) = crate::doc::new_folder(&arena, picture, Some(cel), true);
+        let kept = wrapped(&arena, picture, cel, wrapper).expect("a cel");
+        let before = crate::doc::layers(&arena, picture);
+        history.apply(&mut arena, wrap.then(kept)).unwrap();
+        assert_eq!(arena.get_by_id(wrapper).unwrap().name(), "1");
+        let sequence = timeline(&arena, picture).unwrap();
+        assert_eq!(cel_at(&sequence.tracks[0], sequence.rate, 0), Some(wrapper));
+        assert_eq!(cels(&arena, picture, folder), [wrapper]);
+        history.undo(&mut arena).unwrap();
+        let sequence = timeline(&arena, picture).unwrap();
+        assert_eq!(cel_at(&sequence.tracks[0], sequence.rate, 0), Some(cel));
+        assert_eq!(crate::doc::layers(&arena, picture).len(), before.len());
+        // A layer outside any animation folder is no cel.
+        let outside = before
+            .iter()
+            .find(|info| info.id != folder && crate::doc::folder_of(&arena, info.id).is_none())
+            .expect("a layer outside the folder")
+            .id;
+        assert!(wrapped(&arena, picture, outside, wrapper).is_none());
+    }
 }
