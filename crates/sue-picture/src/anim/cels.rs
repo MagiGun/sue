@@ -282,6 +282,39 @@ pub fn new_cel(
     Ok((edit, cel))
 }
 
+/// What Create Folder and Insert Layer adds when the layer it wraps is a
+/// cel: the new `folder` takes the cel's name and every key that showed
+/// the cel, so the folder is the cel from then on, in the same place on
+/// the timeline. `None` when `cel` is no cel of an animation folder.
+#[must_use]
+pub fn wrap_cel(arena: &Arena, picture: EntityId, cel: EntityId, folder: EntityId) -> Option<Edit> {
+    let sequence = timeline(arena, picture)?;
+    let track = track_of(sequence, super::cel_folder(arena, cel)?)?;
+    let name = arena.get_by_id(cel).ok()?.name().to_owned();
+    let old = &sequence.tracks[track];
+    let mut kept = sue_model::Track::new(old.name.clone(), old.kind.clone());
+    kept.properties = old.properties.clone();
+    for clip in old.clips() {
+        let mut clip = clip.clone();
+        let blank = clip
+            .properties
+            .get(super::BLANK)
+            .and_then(sue_core::Value::as_bool)
+            == Some(true);
+        if clip.source == cel && !blank {
+            clip.source = folder;
+        }
+        kept.insert(clip);
+    }
+    let mut out = sequence.clone();
+    out.tracks[track] = kept;
+    Some(
+        Edit::new(tr!("create-folder-and-insert-layer"))
+            .then(Rename::new(folder, name))
+            .then(SetExtension::set(picture, out)),
+    )
+}
+
 /// The edit that names the cels of `folder` 1, 2, 3 in the order the
 /// timeline first shows them (Rename in timeline order); the cels it
 /// never shows follow in layer order. `None` when no name changes.

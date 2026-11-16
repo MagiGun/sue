@@ -767,7 +767,15 @@ fn folder(paint: &mut SuePaint, cx: &mut AppletContext<'_>, insert: bool) {
     let layer = paint
         .layer()
         .filter(|layer| !doc::is_folder(&cx.world.arena, *layer));
-    let (edit, folder) = doc::new_folder(&cx.world.arena, picture, layer.or(paint.layer()), insert);
+    let (mut edit, folder) =
+        doc::new_folder(&cx.world.arena, picture, layer.or(paint.layer()), insert);
+    // A cel wrapped in a folder: the folder becomes the cel (TR-1).
+    if insert
+        && let Some(wrap) =
+            layer.and_then(|cel| crate::anim::cels::wrap_cel(&cx.world.arena, picture, cel, folder))
+    {
+        edit = edit.then(wrap);
+    }
     apply_and_pick(paint, cx, edit, folder);
 }
 
