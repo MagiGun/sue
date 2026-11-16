@@ -158,7 +158,15 @@ impl PaintStroke {
         }
         .or_else(|| preset.mix.map(|mixing| Wet::new(mixing, 1.0)));
         let target = match wet {
-            Some(wet) => Target::Wet(WetCanvas::new(wet, jitter.main())),
+            Some(wet) => Target::Wet(
+                // A brush with paint of its own lays it once a stroke,
+                // unless it builds up; a blend tool's dabs stack.
+                WetCanvas::new(wet, jitter.main()).capped(
+                    !preset.build_up
+                        && wet.amount > 0.0
+                        && !matches!(preset.engine, EngineKind::Blend(_)),
+                ),
+            ),
             None if jitter.varies() => {
                 Target::Color(ColorBuffer::new(combine, behaviours.tip_blend))
             }
@@ -323,14 +331,13 @@ impl PaintStroke {
 
     /// Stamps planned dabs into the committed part or the tail.
     fn stamp(&mut self, tail: bool, dabs: &[Planned], backdrop: Option<&dyn Backdrop>) {
-        // A wet stroke has no whole stroke to lay the paper on (it lays
-        // its dabs on the picture one by one), so its paper breaks up
-        // each dab.
-        let wet = matches!(self.target, Target::Wet(_));
+        // A wet stroke's paper, unless laid by dab, holds its paint
+        // back where it meets the layer ([`Self::paper`]), as a whole
+        // stroke's does.
         let texture = self
             .texture
             .as_ref()
-            .filter(|(_, settings)| settings.per_dab || wet)
+            .filter(|(_, settings)| settings.per_dab)
             .map(|(paper, settings)| Texture::new(paper, *settings));
         let texture = texture.as_ref();
         let tips = Tips {
@@ -605,6 +612,14 @@ impl PaintStroke {
         }
     }
 
+    /// The paper laid once on the whole stroke (not by dab), if any.
+    fn paper(&self) -> Option<Texture<'_>> {
+        self.texture
+            .as_ref()
+            .filter(|(_, settings)| !settings.per_dab)
+            .map(|(paper, settings)| Texture::new(paper, *settings))
+    }
+
     /// For a mixing stroke, layer pixel `(x, y)` as the live view shows
     /// it: what the merge will lay there, anti-overflow and lock
     /// transparent pixels (`keep_alpha`) included. `None` for a stroke
@@ -619,7 +634,15 @@ impl PaintStroke {
     ) -> Option<[f32; 4]> {
         match &self.target {
             Target::Wet(canvas) => {
-                Some(canvas.laid(backdrop, x, y, self.overflow.as_deref(), keep_alpha))
+                let paper = self.paper();
+                Some(canvas.laid(
+                    backdrop,
+                    x,
+                    y,
+                    self.overflow.as_deref(),
+                    paper.as_ref(),
+                    keep_alpha,
+                ))
             }
             _ => None,
         }
@@ -725,7 +748,14 @@ impl PaintStroke {
         keep_alpha: bool,
     ) -> Result<Vec<PixelRect>, MergeError> {
         if let Target::Wet(canvas) = &self.target {
-            return canvas.merge(raster, origin, self.overflow.as_deref(), keep_alpha);
+            let paper = self.paper();
+            return canvas.merge(
+                raster,
+                origin,
+                self.overflow.as_deref(),
+                paper.as_ref(),
+                keep_alpha,
+            );
         }
         let Some(rect) = self.bounds() else {
             return Ok(Vec::new());
