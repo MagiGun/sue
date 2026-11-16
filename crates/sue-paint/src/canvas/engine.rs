@@ -180,6 +180,11 @@ fn round_of(preset: &BrushPreset) -> BrushPreset {
     let mut preset = preset.clone();
     preset.engine = EngineKind::Stroke;
     preset.tip = TipSource::Round;
+    // Round: a flat tip is round too.
+    preset.params.remove(sue_model::brush::param::ASPECT);
+    preset
+        .dynamics
+        .retain(|binding| binding.param != sue_model::brush::param::ASPECT);
     preset.mix = None;
     preset.texture = None;
     preset.build_up = false;
