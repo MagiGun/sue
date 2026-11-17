@@ -161,6 +161,9 @@ pub struct Compositor {
     /// The stroke being painted, shown over its layer (see
     /// [`Self::set_live`]).
     live: Option<std::sync::Arc<dyn LiveStroke>>,
+    /// Each layer's palette color shows on the canvas (see
+    /// [`Self::set_palette_colors`]).
+    palette_colors: bool,
 }
 
 /// Versions come from one count for every compositor, so a texture made
@@ -190,6 +193,7 @@ impl Compositor {
             pending: std::collections::BTreeSet::new(),
             pending_layer: None,
             live: None,
+            palette_colors: false,
         }
     }
 

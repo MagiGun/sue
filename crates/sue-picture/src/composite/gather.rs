@@ -532,6 +532,13 @@ fn gather_layer<'a>(
             effects.color = around.color;
             effects.sub_color = around.sub_color;
         }
+        // Shown in its palette color, the picture itself unchanged.
+        if effects.color.is_none()
+            && how.view.is_some_and(|view| view.palette_colors)
+            && let Some(sue_core::Value::Color(color)) = entity.property(crate::doc::PALETTE_COLOR)
+        {
+            effects.color = Some(color.to_space(sue_core::ColorSpace::Srgb).rgb);
+        }
         effects
     } else {
         crate::effects::Effects::default()

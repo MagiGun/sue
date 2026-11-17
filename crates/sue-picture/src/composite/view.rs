@@ -28,6 +28,10 @@ pub struct FrameView {
     /// Layers and folders whose opacity their keyframes set at this frame
     /// (0 to 1), in place of their own.
     pub opacities: Vec<(EntityId, f32)>,
+    /// Each layer with a palette color shows its drawing in that color,
+    /// as its layer color would, the picture itself unchanged (Layer
+    /// Settings, Display palette colors on canvas).
+    pub palette_colors: bool,
 }
 
 /// `outer` followed by `inner`: the map that sees through `outer` first,
@@ -173,11 +177,39 @@ impl Compositor {
 
     /// Shows the layers as animation frame `view` has them (`None`: all
     /// of them); a change is composited on the next [`Self::sync`].
-    pub fn set_view(&mut self, view: Option<FrameView>) {
+    pub fn set_view(&mut self, mut view: Option<FrameView>) {
+        // The palette colors stay shown through every frame's view.
+        if self.palette_colors {
+            view.get_or_insert_with(FrameView::default).palette_colors = true;
+        }
         if self.view != view {
             self.view = view;
             self.seen.clear();
             self.focus = None;
         }
+    }
+
+    /// Shows each layer's palette color on the canvas (`true`) or not; a
+    /// change is composited on the next [`Self::sync`].
+    pub fn set_palette_colors(&mut self, on: bool) {
+        if self.palette_colors == on {
+            return;
+        }
+        self.palette_colors = on;
+        let mut view = self.view.take();
+        if let Some(shown) = view.as_mut() {
+            shown.palette_colors = false;
+        }
+        let view = view.filter(|shown| *shown != FrameView::default());
+        self.set_view(view);
+        // Even when the view stays the same, every layer is drawn again.
+        self.seen.clear();
+        self.focus = None;
+    }
+
+    /// Whether each layer's palette color shows on the canvas.
+    #[must_use]
+    pub fn palette_colors(&self) -> bool {
+        self.palette_colors
     }
 }
