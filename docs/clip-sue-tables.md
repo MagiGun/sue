@@ -129,6 +129,26 @@ Track property names are Sue's: `opacity`, `x`, `y`, `scale`, `angle`,
 and `camera.x`, `camera.y`, `camera.scale`, `camera.angle` for the
 camera.
 
+How Sue Paint fills these in (since 0.0.8):
+
+- A layer's `angle` is in degrees, clockwise; `center.x` and
+  `center.y` are the point it turns and scales about. `opacity` is 0
+  to 1, `scale` 1 for as it is, `x` and `y` in canvas pixels.
+- The camera may also have `camera.pivot.x`, `camera.pivot.y` (its
+  centre of rotation) and `camera.opacity`; `camera.angle` is in
+  radians.
+- `shown` says on which frames a layer shows at all: its keys hold
+  (each is "hold"), 1 shows the layer from that frame on, 0 hides it.
+  A layer with no `shown` track shows on every frame.
+- A sound's file is a WAV of 32-bit float samples, as Sue holds sound.
+- A vector line's brush name is Sue's brush as `key=value` pairs
+  joined by `;` (the tip a vector line keeps), so Sue gets the same
+  brush back; another program may leave it empty.
+- Rulers hang on the layer they belong to, or on the bottom layer when
+  they belong to the whole picture (then each is shown on every
+  layer). A parallel ruler's two points give its direction, and a
+  symmetrical ruler's two points lie on its mirror line.
+
 ## What Clip Studio sees
 
 Clip Studio reads its own tables only. For a layer with a content part,

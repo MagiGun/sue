@@ -19,6 +19,15 @@ follow [Semantic Versioning](https://semver.org/).
   play up to the one you are on, as flipping paper does) and Check
   Surrounding Cels by Key Input (each press shows the cel before, then
   the cel after, then yours again). The playhead stays where it is.
+- Sue Paint: a .clip exported from Sue opens in Sue again with
+  everything live: fill, gradient and correction layers, text, vector
+  lines, layer effects, palette colors, rulers, layer comps and the
+  timeline with its animation folders, cels, keyframes, 2D camera and
+  sound. Clip Studio shows those layers as their pixels and the layer
+  color effect as its own; the status bar says what Clip Studio does
+  not read yet. Layers brought from a .clip into an open picture say
+  that the file's timeline, comps and rulers stayed behind.
+
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
   fill (click an area and the gradient runs from its outline inward).
@@ -878,6 +887,8 @@ follow [Semantic Versioning](https://semver.org/).
   tool work on it as on a raster layer's mask.
 - Sue Paint: the pen's twist (its turn about its own axis) turns and
   mirrors with a turned or flipped view, as its tilt already did.
+- Sue Paint: Export as .psd keeps fill, gradient and image material
+  layers, drawn as they look; they used to be left out.
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its
   tip, and a flick no longer bends off the way the stroke was going.
 - Sue Paint: masks of older files become gray masks as the file opens,

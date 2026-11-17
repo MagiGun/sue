@@ -113,7 +113,7 @@ The order of work is the plan at the end.
 | Create New from Clipboard | File > Create New from Clipboard | done | A new canvas from the picture on the clipboard |
 | Create new from movie | File > Create new from movie | missing | An animation project from a video |
 | Open pictures and projects | File > Open | done | PNG, JPEG, JPEG XL and Sue projects through the system's own dialog (`FilePick`) |
-| Open .clip files | File > Open | partial | Layers, folders with their own blend mode and clipping, masks as masks, paper as paper, gray layers, pixels off the canvas, draft and reference come in; text and vector layers arrive as the pixels Clip Studio last drew, and correction, gradient and fill layers as empty layers, each with its Clip Studio data kept for the way back. The status bar says per layer what was not exact |
+| Open .clip files | File > Open | partial | Layers, folders with their own blend mode and clipping, masks as masks, paper as paper, gray layers, pixels off the canvas, draft and reference come in, and the layer color effect. A .clip Sue wrote opens live: fill, gradient and correction layers, text, vector lines, effects, palette colors, rulers, layer comps and the timeline (animation folders and cels, keyframes, the 2D camera, sound). From a file Clip Studio saved, text and vector layers still arrive as the pixels Clip Studio last drew and correction, gradient and fill layers as empty layers, each with its Clip Studio data kept for the way back, until Clip Studio's own storage of them is observed. The status bar says per layer what was not exact |
 | Recent files, Clear Recent Files | File > Recent | done | |
 | Close | File > Close | done | |
 | Save | File > Save | done | Writes the Sue project. A canvas opened from a flat picture saves back in its format, and asks first when layers would be merged, as Clip Studio does; one opened from a .clip asks once whether to export back to it or keep a Sue project beside it. The title names the file Save writes |
@@ -605,7 +605,7 @@ The order of work is the plan at the end.
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
 | Sue project (.sue) | (Sue's own) | done | |
-| Clip Studio (.clip) export | File > Export Back to the Same .clip, Save Duplicate | partial | Layers, folders with blend mode and clipping, masks, paper, draft and reference marks; a layer not changed in Sue goes back exactly as it was read. No hidden copy of the Sue project any more. verify: not yet opened in Clip Studio |
+| Clip Studio (.clip) export | File > Export Back to the Same .clip, Save Duplicate | partial | Layers, folders with blend mode and clipping, masks, paper, draft and reference marks, the layer color effect; a layer not changed in Sue goes back exactly as it was read. Fill, gradient, text and vector layers reach Clip Studio as their pixels, correction layers as empty layers, and effects, palette colors, rulers, comps and the timeline not at all yet; Sue keeps all of them in its own tables of the file and opens them live again. No hidden copy of the Sue project any more. verify: not yet opened in Clip Studio (the files of the P5-1 check wait in N:\Sue\cache\p5-csp-inbox) |
 | Clip Studio (.clip) open | File > Open | partial | See File: open, for what arrives and what does not |
 | Photoshop (PSD, PSB) save | File > Save Duplicate | done | |
 | Photoshop open | File > Open | partial | A reader exists; verify what it keeps |
