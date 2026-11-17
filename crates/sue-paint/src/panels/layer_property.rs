@@ -855,9 +855,15 @@ impl SuePaint {
         key: &str,
         value: Value,
     ) {
+        // A press on a slider changes it at once and a drag goes on from
+        // there: one step, kept when the pointer lets go.
         let finished = response.drag_stopped()
             || response.lost_focus()
-            || (response.changed() && !response.dragged() && !response.has_focus());
+            || response.clicked()
+            || (response.changed()
+                && !response.dragged()
+                && !response.has_focus()
+                && !response.is_pointer_button_down_on());
         self.live_value(cx, (response.changed(), finished), id, key, value);
     }
 

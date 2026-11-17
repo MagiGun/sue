@@ -949,8 +949,8 @@ Once a canvas is open:
   timeline from the frame you are on. It plays along when you play the
   animation; drag its bar to move it, and right-click it to mute or delete
   it.
-- **Timeline:** Animation, Timeline, Edit Timeline changes the frame rate
-  and length without moving your keys; Export Animation, Animation Cels
+- **Timeline:** Animation, Timeline, Change Frame Rate changes the frame
+  rate and length without moving your keys; Export Animation, Animation Cels
   saves every cel as its own picture.
 - **Line art from photos and scans:** Filter, Line Extraction turns a
   picture into clean black lines; Convert to Lines and Tones also makes its
@@ -1003,8 +1003,9 @@ Once a canvas is open:
   layers in it are filmed by a camera that can move, zoom and turn over the
   timeline. With the Object tool (O) on it, drag its red frame (inside to
   move, a corner to zoom, outside to turn) or type its position, scale and
-  rotation, and add a keyframe; between keyframes it glides. Playback and
-  exports show the animation through it.
+  rotation, and add a keyframe; between keyframes it glides. A keyframe's
+  mark on the Timeline drags to another frame. Playback and exports show
+  the animation through it.
 - **Timelapse** (File, Timelapse, or Record timelapse in New): while it
   records, Sue keeps a picture of the canvas after every change. Export
   Timelapse makes a video (MP4 where Windows has an encoder, AVI, or a

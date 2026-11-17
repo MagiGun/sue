@@ -462,6 +462,24 @@ pub fn encode_gif_animation_looping(
     delay_ms: u32,
     loops: Option<u16>,
 ) -> Result<Vec<u8>, String> {
+    encode_gif_animation_with(frames, delay_ms, loops, false)
+}
+
+/// [`encode_gif_animation_looping`], each frame dithered first when
+/// `dither` is set: its colors spread by Floyd and Steinberg's error
+/// diffusion over a fixed palette of 252 colors (6 reds, 7 greens, 6
+/// blues), so smooth shading shows as fine dots instead of bands. Clear
+/// pixels stay clear.
+///
+/// # Errors
+/// No frames, frames of different sizes or not RGBA8, or the encoder
+/// failing.
+pub fn encode_gif_animation_with(
+    frames: &[RasterTile2D],
+    delay_ms: u32,
+    loops: Option<u16>,
+    dither: bool,
+) -> Result<Vec<u8>, String> {
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::{Delay, Frame};
     let first = frames.first().ok_or("an animation needs frames")?;
@@ -479,7 +497,10 @@ pub fn encode_gif_animation_looping(
             {
                 return Err("every frame must be the same size of RGBA pixels".to_owned());
             }
-            let pixels = tile.bytes().ok_or("a frame has no pixels")?.to_vec();
+            let mut pixels = tile.bytes().ok_or("a frame has no pixels")?.to_vec();
+            if dither {
+                dithered(&mut pixels, width as usize, height as usize);
+            }
             let image =
                 RgbaImage::from_raw(width, height, pixels).ok_or("a frame's pixels do not fit")?;
             let frame =
@@ -492,9 +513,107 @@ pub fn encode_gif_animation_looping(
     Ok(out)
 }
 
+/// How many steps each of red, green and blue has in the dithering
+/// palette, less one (6, 7 and 6 levels: 252 colors).
+const DITHER_STEPS: [f32; 3] = [5.0, 6.0, 5.0];
+
+/// `pixels` (RGBA8, `width` by `height`) dithered in place onto the fixed
+/// palette of [`DITHER_STEPS`] with Floyd and Steinberg's error
+/// diffusion; clear pixels are passed over and keep their alpha.
+fn dithered(pixels: &mut [u8], width: usize, height: usize) {
+    // The error carried to this row and the next, one column of margin
+    // on each side.
+    let mut this = vec![[0.0_f32; 3]; width + 2];
+    let mut next = vec![[0.0_f32; 3]; width + 2];
+    for y in 0..height {
+        for x in 0..width {
+            let at = (y * width + x) * 4;
+            if pixels[at + 3] == 0 {
+                continue;
+            }
+            let mut error = [0.0_f32; 3];
+            for channel in 0..3 {
+                let want =
+                    (f32::from(pixels[at + channel]) + this[x + 1][channel]).clamp(0.0, 255.0);
+                let step = 255.0 / DITHER_STEPS[channel];
+                let got = (want / step).round() * step;
+                pixels[at + channel] = got.round().clamp(0.0, 255.0) as u8;
+                error[channel] = want - got;
+            }
+            for channel in 0..3 {
+                this[x + 2][channel] += error[channel] * 7.0 / 16.0;
+                next[x][channel] += error[channel] * 3.0 / 16.0;
+                next[x + 1][channel] += error[channel] * 5.0 / 16.0;
+                next[x + 2][channel] += error[channel] / 16.0;
+            }
+        }
+        std::mem::swap(&mut this, &mut next);
+        next.fill([0.0; 3]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dithering_keeps_the_palette_and_the_shade_and_leaves_clear_pixels_alone() {
+        // A gray ramp across 64 columns, 16 rows, with a clear corner.
+        let (width, height) = (64_usize, 16_usize);
+        let mut pixels = Vec::with_capacity(width * height * 4);
+        for y in 0..height {
+            for x in 0..width {
+                let shade = (x * 255 / (width - 1)) as u8;
+                let alpha = if x < 2 && y < 2 { 0 } else { 255 };
+                pixels.extend_from_slice(&[shade, shade, shade, alpha]);
+            }
+        }
+        let before = pixels.clone();
+        dithered(&mut pixels, width, height);
+        for (pixel, was) in pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(before.as_chunks::<4>().0)
+        {
+            assert_eq!(pixel[3], was[3], "alpha is kept");
+            if was[3] == 0 {
+                assert_eq!(pixel, was, "a clear pixel is left alone");
+                continue;
+            }
+            for channel in 0..3 {
+                let step = 255.0 / DITHER_STEPS[channel];
+                let on = f32::from(pixel[channel]) / step;
+                assert!((on - on.round()).abs() < 0.02, "on the palette: {pixel:?}");
+            }
+        }
+        // Each column's mean is the ramp's shade: the dots average out.
+        for x in 4..width - 4 {
+            let mean: f32 = (2..height)
+                .map(|y| f32::from(pixels[(y * width + x) * 4]))
+                .sum::<f32>()
+                / (height - 2) as f32;
+            let want = f32::from(before[x * 4]);
+            assert!((mean - want).abs() < 12.0, "column {x}: {mean} for {want}");
+        }
+        // More than one level in a column between two palette levels:
+        // dots, not a band.
+        let column: std::collections::BTreeSet<u8> =
+            (2..height).map(|y| pixels[(y * width + 20) * 4]).collect();
+        assert!(column.len() > 1, "{column:?}");
+    }
+
+    #[test]
+    fn a_dithered_gif_reads_back_with_every_frame() {
+        use image::AnimationDecoder;
+        let ramp: Vec<u8> = (0..32_u32)
+            .flat_map(|x| [(x * 8) as u8, 0, 255 - (x * 8) as u8, 255])
+            .collect();
+        let frame = RasterTile2D::from_bytes(32, 1, PixelFormat::Rgba8, ramp).unwrap();
+        let bytes = encode_gif_animation_with(&[frame.clone(), frame], 50, Some(2), true).unwrap();
+        let decoder = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(decoder.into_frames().collect_frames().unwrap().len(), 2);
+    }
 
     #[test]
     fn an_animated_gif_keeps_every_frame() {

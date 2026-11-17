@@ -732,6 +732,9 @@ pub struct SuePaint {
     /// Dragging on the canvas moves the light table's layers (Light table
     /// tool).
     pub(crate) light_tool: bool,
+    /// The one color the light table's layers show in while Color mode is
+    /// on (Change layer color).
+    pub(crate) light_tint: [u8; 3],
     /// Copy stamp: where Alt and click set it to copy from, and how far
     /// from the brush that is once a stroke starts (picture pixels).
     pub(crate) stamp: Option<([f32; 2], Option<[f32; 2]>)>,
@@ -1029,6 +1032,8 @@ impl Default for SuePaint {
             general_opacity: 0.5,
             opacity_general: false,
             light_tool: false,
+            light_tint: crate::anim::LIGHT_TABLE_TINT
+                .map(|channel| (channel * 255.0).round() as u8),
             stamp: None,
             cel_lock: None,
             gathered: std::collections::HashSet::new(),

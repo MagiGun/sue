@@ -465,6 +465,8 @@ fn the_palette_offers_what_it_offered() {
             "anim.audio.delete",
             "anim.export.audio",
             "anim.palette_color.clips",
+            "anim.key.layer_delete",
+            "anim.playback.camera",
             "window.interface.auto",
             "window.interface.desktop",
             "window.interface.tablet",

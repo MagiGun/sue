@@ -888,8 +888,9 @@ fn camera_marks(
     if keys.len() > 1 {
         let path: Vec<Pos2> = keys.iter().map(|time| screen(at(*time).center)).collect();
         marks::faint(painter, path.clone(), false, theme);
-        for point in path {
+        for (index, point) in path.into_iter().enumerate() {
             marks::dot(painter, point, false, theme);
+            crate::launchers::note_mark(painter.ctx(), &format!("camera.path.{index}"), point);
         }
     }
     let before = keys.iter().rev().find(|time| **time < view.time);

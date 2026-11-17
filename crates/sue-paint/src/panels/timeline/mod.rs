@@ -50,12 +50,14 @@ pub(crate) const MENU: &[&str] = &[
     "anim.key.add",
     "anim.key.delete",
     "anim.key.layer",
+    "anim.key.layer_delete",
     "anim.keyframes",
     "anim.frame.insert",
     "anim.frame.delete",
     "anim.play",
     "anim.loop",
     "anim.audio.scrub",
+    "anim.playback.camera",
     "anim.play_range.start",
     "anim.play_range.end",
     "anim.play_range.clear",
@@ -192,6 +194,9 @@ pub(crate) struct Press {
     /// moves where that cel starts, between the keys around it (the
     /// frames it may start on), so the holds around it change.
     pub key: Option<(u32, u32)>,
+    /// It started on the mark of a keyframe of this layer, folder or
+    /// camera folder: the drag moves that keyframe along the track.
+    pub keyframe: Option<EntityId>,
 }
 
 /// What the Timeline palette keeps between frames besides its view.
@@ -220,9 +225,9 @@ pub(crate) struct AnimUi {
     pub picked_before: Option<EntityId>,
     /// A playback marker being dragged: the start (`true`) or the end.
     pub marker: Option<bool>,
-    /// Where the history stood as that drag began, so the whole drag
-    /// becomes one undo step when it ends.
-    pub marker_from: Option<sue_core::NodeId>,
+    /// The changes a marker's drag has shown so far, undone and kept as
+    /// one step when it ends.
+    pub marker_live: Vec<crate::doc::Edit>,
     /// Each sound's waveform: its revision, and its peaks.
     pub peaks: HashMap<EntityId, (u64, Vec<f32>)>,
     /// Playback measured: when the frame last changed, and the frames a
@@ -242,6 +247,9 @@ pub(crate) struct AnimUi {
     /// Show Palette Color on Clips turned off: the clips are drawn in
     /// the timeline's own colors (on by default).
     pub palette_clips_hidden: bool,
+    /// The keyframes Cut or Copy took, a list for each track copied: those
+    /// of the layer, folder or 2D camera the track stands for.
+    pub key_clipboard: Vec<Vec<crate::anim::motion::CopiedKey>>,
 }
 
 /// The keys that run `command` now, as people read them (`Ctrl+K`), or

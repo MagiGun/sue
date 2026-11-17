@@ -27,6 +27,14 @@ follow [Semantic Versioning](https://semver.org/).
   color effect as its own; the status bar says what Clip Studio does
   not read yet. Layers brought from a .clip into an open picture say
   that the file's timeline, comps and rulers stayed behind.
+- Sue Paint, Animation: Delete Keyframe from Layer (Edit Track and the
+  timeline's right click, an animation folder's row too once its
+  keyframes are on); Copy and Paste Frames carry a layer's or folder's
+  keyframes with the frames; Playback Settings, Render 2D Camera; the
+  Animated GIF export's Dithering; the light table's color in the
+  Animation Cels palette. A keyframe's mark on the Timeline drags along
+  its track to another frame (a layer's, a folder's or the 2D camera's),
+  one undo step.
 
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
@@ -592,6 +600,12 @@ follow [Semantic Versioning](https://semver.org/).
   ink; the spray lays a puff of fine drops, even with a tap; pointillism
   lays small dots over a band. A brush you changed keeps its paper and
   how it mixes when you change its size.
+- Sue Paint, Animation: Edit Timeline is called Change Frame Rate, as in
+  Clip Studio Paint; Create Folder and Insert Layer on a cel makes the
+  folder the cel, named after it, so a color layer beside the lines shows
+  and hides with them; Add Keyframe with the 2D camera picked keys the
+  camera.
+
 - Sue Paint wears the theme you pick in Settings, Appearance, as the Hub
   and Sue Writer do: in Paper its menus, command bar, palettes, Tool
   Property, dialogs, canvas surround, timeline and status are light, in
@@ -907,6 +921,15 @@ follow [Semantic Versioning](https://semver.org/).
   layers, drawn as they look; they used to be left out.
 - Sue Paint, pens with Anti-aliasing None: the thin end of a tapered
   line is solid pixels too, not a few lighter ones.
+- Sue Paint, Animation: a camera, or a layer or folder with keyframes on,
+  stays picked from frame to frame, so the Object tool keys it on each
+  (before, going to another frame picked the cel shown); the playback
+  range's markers on the Timeline's ruler can be dragged again (the ruler
+  took the pointer from them).
+- Sue Paint, Layer palette: a name typed after a double click is kept on
+  Enter or a click elsewhere (the field took the keys back); a drag on a
+  layer's opacity slider is one undo step, not two.
+
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its
   tip, and a flick no longer bends off the way the stroke was going.
 - Sue Paint: masks of older files become gray masks as the file opens,

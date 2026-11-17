@@ -935,7 +935,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     ),
     c(
         "anim.timeline.edit",
-        "edit-timeline-ellipsis",
+        "change-frame-rate-ellipsis",
         "settings",
         timeline_edit,
     ),
@@ -1417,6 +1417,22 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     )
     .state(palette_clips_on)
     .with(Flags::PALETTE),
+    c(
+        "anim.key.layer_delete",
+        "delete-layer-keyframe",
+        "minus",
+        key_layer_delete,
+    )
+    .state(on_timeline)
+    .with(Flags::PALETTE),
+    c(
+        "anim.playback.camera",
+        "render-2d-camera",
+        "film",
+        playback_camera,
+    )
+    .state(render_camera_state)
+    .with(Flags::PALETTE),
 ];
 
 /// The cels of the folder of the current track: its track, when it is an
@@ -1483,6 +1499,31 @@ fn peek_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
         folder_track(paint, facts.arena).is_some_and(|(sequence, track)| {
             anim::keys(&sequence.tracks[track], sequence.rate).len() > 1
         }),
+    )
+}
+
+/// Delete Keyframe from Layer: the current layer's key (or the 2D
+/// camera's) at the frame shown goes.
+fn key_layer_delete(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.delete_key_here(cx);
+}
+
+/// Playback Settings, Render 2D Camera: the canvas shows the frame as the
+/// 2D cameras see it, or the whole canvas with their frames over it.
+fn playback_camera(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let Some(here) = paint.here(&cx.world.arena) else {
+        return;
+    };
+    let mut playback = anim::setup::Playback::of(&cx.world.arena, here.picture);
+    playback.render_camera = !playback.render_camera;
+    SuePaint::apply(cx, playback.apply(here.picture));
+}
+
+fn render_camera_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    flag(
+        paint
+            .picture()
+            .is_some_and(|picture| anim::setup::Playback::of(facts.arena, picture).render_camera),
     )
 }
 

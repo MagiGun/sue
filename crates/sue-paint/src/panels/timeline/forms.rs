@@ -318,6 +318,9 @@ pub(crate) struct AnimatedForm {
     pub fps: u32,
     /// Seen through the 2D camera folders.
     pub camera: bool,
+    /// Dithered, so smooth shading shows as dots instead of bands (GIF
+    /// only).
+    pub dither: bool,
 }
 
 impl AnimatedForm {

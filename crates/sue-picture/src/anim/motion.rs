@@ -346,6 +346,34 @@ pub fn delete_key(
     })
 }
 
+/// The edit that moves `layer`'s keys at `from` (every value) to `to`, a
+/// key already there giving way, as a keyframe's mark dragged along its
+/// track; `None` when there is none at `from` or it would not move.
+#[must_use]
+pub fn move_key(arena: &Arena, layer: EntityId, from: Time, to: Time) -> Option<Edit> {
+    if from == to {
+        return None;
+    }
+    let mut animation = animation_of(arena, layer);
+    let names: Vec<String> = animation
+        .channels()
+        .map(|(name, _)| name.to_owned())
+        .collect();
+    let mut any = false;
+    for name in names {
+        let curve = animation.channel_mut(&name);
+        if let Some(mut key) = curve.remove(from) {
+            curve.remove(to);
+            key.time = to;
+            curve.insert(key);
+            any = true;
+        }
+    }
+    any.then(|| {
+        Edit::new(tr!("move-keyframe")).then(SetExtension::set(layer, resmoothed(animation)))
+    })
+}
+
 /// The edit that takes every key of `layer` away (Delete all keyframes).
 #[must_use]
 pub fn delete_all_keys(arena: &Arena, layer: EntityId) -> Option<Edit> {
@@ -384,6 +412,77 @@ pub fn set_ease(arena: &Arena, layer: EntityId, times: &[Time], ease: Ease) -> O
         Edit::new(tr!("switch-keyframe-interpolation"))
             .then(SetExtension::set(layer, resmoothed(animation)))
     })
+}
+
+/// A key of one value as Copy Frames takes it: its frame from the first
+/// frame copied, the value's channel, its value and how it moves on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CopiedKey {
+    /// Frames after the first frame copied.
+    pub offset: u32,
+    /// The value's channel.
+    pub channel: String,
+    /// The value.
+    pub value: f64,
+    /// How it moves on to the next key.
+    pub interpolation: sue_model::Interpolation,
+}
+
+/// The keys of `layer` on frames `start` to before `end` at `rate` (Copy
+/// Frames on its track).
+#[must_use]
+pub fn copy_keys(
+    arena: &Arena,
+    layer: EntityId,
+    rate: Rate,
+    start: u32,
+    end: u32,
+) -> Vec<CopiedKey> {
+    let mut out = Vec::new();
+    for (name, curve) in animation_of(arena, layer).channels() {
+        for key in curve.keys() {
+            let frame = key.time.frame(rate);
+            if frame >= i64::from(start) && frame < i64::from(end) {
+                out.push(CopiedKey {
+                    offset: (frame - i64::from(start)) as u32,
+                    channel: name.to_owned(),
+                    value: key.value,
+                    interpolation: key.interpolation,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// The edit that lays `keys` on `layer` from frame `at` at `rate`,
+/// replacing keys there (Paste Frames on its track); `None` when there are
+/// none.
+#[must_use]
+pub fn paste_keys(
+    arena: &Arena,
+    layer: EntityId,
+    rate: Rate,
+    at: u32,
+    keys: &[CopiedKey],
+) -> Option<Edit> {
+    if keys.is_empty() {
+        return None;
+    }
+    let mut animation = animation_of(arena, layer);
+    for key in keys {
+        animation.channel_mut(&key.channel).insert(Key {
+            time: Time::from_frames(i64::from(at + key.offset), rate),
+            value: key.value,
+            interpolation: key.interpolation,
+        });
+    }
+    let mut edit =
+        Edit::new(tr!("paste-frames")).then(SetExtension::set(layer, resmoothed(animation)));
+    if !arena.get_by_id(layer).is_ok_and(keyframes_on) {
+        edit = edit.then(SetProperty::new(layer, KEYFRAMES, true));
+    }
+    Some(edit)
 }
 
 /// The kind of `layer`'s key at `time` (the first value keyed there).
@@ -510,6 +609,52 @@ mod tests {
             first.revert(&mut arena).unwrap();
             assert_eq!(arena.get_by_id(layer).unwrap(), &before);
         }
+    }
+
+    #[test]
+    fn a_key_moved_along_its_track_takes_every_value_and_undoes() {
+        let mut arena = Arena::new();
+        let (mut made, picture) = create(&NewPicture::default()).unwrap();
+        made.apply(&mut arena).unwrap();
+        let layer = crate::doc::layers(&arena, picture).last().unwrap().id;
+        let rate = Rate::new(12, 1);
+        let at = |frame: i64| Time::from_frames(frame, rate);
+        let mut first = key(
+            &arena,
+            layer,
+            at(0),
+            &[(POSITION_X, 0.0), (OPACITY, 1.0)],
+            Ease::Linear,
+        );
+        first.apply(&mut arena).unwrap();
+        let mut second = key(
+            &arena,
+            layer,
+            at(4),
+            &[(POSITION_X, 40.0), (OPACITY, 0.5)],
+            Ease::Hold,
+        );
+        second.apply(&mut arena).unwrap();
+        let before = arena.get_by_id(layer).unwrap().clone();
+        assert!(move_key(&arena, layer, at(4), at(4)).is_none(), "no move");
+        assert!(move_key(&arena, layer, at(2), at(6)).is_none(), "no key");
+        let mut moved = move_key(&arena, layer, at(4), at(10)).expect("a key on 4");
+        moved.apply(&mut arena).unwrap();
+        assert_eq!(key_times(&arena, layer), [at(0), at(10)]);
+        assert_eq!(ease_at(&arena, layer, at(10)), Some(Ease::Hold));
+        let late = pose(&arena, layer, at(10), [64, 64]).unwrap();
+        assert!(near(late.position[0], 40.0) && late.opacity.is_some_and(|o| near(o, 0.5)));
+        // Onto the other key: that one gives way.
+        let mut onto = move_key(&arena, layer, at(10), at(0)).unwrap();
+        onto.apply(&mut arena).unwrap();
+        assert_eq!(key_times(&arena, layer), [at(0)]);
+        assert!(near(
+            pose(&arena, layer, at(0), [64, 64]).unwrap().position[0],
+            40.0
+        ));
+        onto.revert(&mut arena).unwrap();
+        moved.revert(&mut arena).unwrap();
+        assert_eq!(arena.get_by_id(layer).unwrap(), &before);
     }
 
     #[test]

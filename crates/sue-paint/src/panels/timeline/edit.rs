@@ -35,6 +35,9 @@ pub(crate) enum Action {
     /// Move the key of `track` that starts on `from` to start on `to`
     /// (a drag of a picked cel's first frame): the holds around it change.
     MoveKey { track: usize, from: u32, to: u32 },
+    /// Move the keyframe of `layer` (a layer, folder or camera folder) on
+    /// frame `from` to frame `to` (a drag of its mark).
+    MoveKeyframe { layer: EntityId, from: u32, to: u32 },
     /// Show or hide a track's layer or folder.
     Eye(usize, bool),
     /// Move an audio track's clip to start at a frame.
@@ -154,6 +157,15 @@ impl SuePaint {
                     self.go_to_frame(&cx.world.arena, i64::from(to));
                 }
             }
+            Action::MoveKeyframe { layer, from, to } => {
+                let time = |frame: u32| Time::from_frames(i64::from(frame), sequence.rate);
+                if let Some(edit) =
+                    anim::motion::move_key(&cx.world.arena, layer, time(from), time(to))
+                    && Self::apply(cx, edit)
+                {
+                    self.go_to_frame(&cx.world.arena, i64::from(to));
+                }
+            }
             Action::Eye(track, visible) => {
                 match sequence.tracks.get(track).and_then(|row| {
                     anim::track_folder(row).or_else(|| anim::setup::track_layer(row))
@@ -230,14 +242,38 @@ impl SuePaint {
             return;
         };
         let selection = self.timeline_selection(&sequence);
+        // The keyframes of what each track picked stands for go with its
+        // frames.
+        let target = |index: usize| {
+            sequence.tracks.get(index).and_then(|track| {
+                anim::track_folder(track).or_else(|| anim::setup::track_layer(track))
+            })
+        };
+        let keys: Vec<Vec<anim::motion::CopiedKey>> = selection
+            .tracks
+            .iter()
+            .map(|index| {
+                target(*index).map_or_else(Vec::new, |layer| {
+                    anim::motion::copy_keys(
+                        &cx.world.arena,
+                        layer,
+                        sequence.rate,
+                        selection.start,
+                        selection.end,
+                    )
+                })
+            })
+            .collect();
         match what {
             "copy" => {
                 self.anim_ui.clipboard = editing::copy(&sequence, &selection);
+                self.anim_ui.key_clipboard = keys;
             }
             "cut" => {
                 let (changed, clipboard) = editing::cut(&sequence, &selection, length, picture);
                 if Self::apply(cx, anim::set(picture, changed, &tr!("cut-frames"))) {
                     self.anim_ui.clipboard = clipboard;
+                    self.anim_ui.key_clipboard = keys;
                 }
             }
             "delete" => {
@@ -245,7 +281,8 @@ impl SuePaint {
                 Self::apply(cx, anim::set(picture, changed, &tr!("delete-frames")));
             }
             _ => {
-                if self.anim_ui.clipboard.is_empty() {
+                let keyed = self.anim_ui.key_clipboard.iter().any(|row| !row.is_empty());
+                if self.anim_ui.clipboard.is_empty() && !keyed {
                     return;
                 }
                 // Paste lands at the frame shown, on the tracks picked.
@@ -267,6 +304,14 @@ impl SuePaint {
                         anim::LENGTH,
                         i64::from(new_length),
                     ));
+                }
+                for (row, index) in self.anim_ui.key_clipboard.iter().zip(&selection.tracks) {
+                    if let Some(layer) = target(*index)
+                        && let Some(keys) =
+                            anim::motion::paste_keys(arena, layer, sequence.rate, at, row)
+                    {
+                        edit = edit.then(keys);
+                    }
                 }
                 Self::apply(cx, edit);
             }
@@ -523,8 +568,29 @@ impl SuePaint {
             let end = frame.max(first);
             settings.end = (end < length - 1).then_some(end);
         }
-        if settings != anim::setup::Settings::of(&cx.world.arena, picture) {
-            Self::apply(cx, settings.apply(picture));
+        let now = anim::setup::Settings::of(&cx.world.arena, picture);
+        if settings != now {
+            // Shown at once while the drag goes on; kept as one step when it
+            // ends (end_play_marker).
+            let mut edit = settings.apply(picture);
+            if sue_core::ReversibleTransaction::apply(&mut edit, &mut cx.world.arena).is_ok() {
+                self.anim_ui.marker_live.push(edit);
+            }
+        }
+    }
+
+    /// Keeps where a playback marker was dragged to as one undo step.
+    pub(crate) fn end_play_marker(&mut self, cx: &mut AppletContext<'_>) {
+        let live = std::mem::take(&mut self.anim_ui.marker_live);
+        let Some(picture) = self.picture().filter(|_| !live.is_empty()) else {
+            return;
+        };
+        let to = anim::setup::Settings::of(&cx.world.arena, picture);
+        for mut edit in live.into_iter().rev() {
+            let _ = sue_core::ReversibleTransaction::revert(&mut edit, &mut cx.world.arena);
+        }
+        if to != anim::setup::Settings::of(&cx.world.arena, picture) {
+            Self::apply(cx, to.apply(picture));
         }
     }
 
@@ -589,6 +655,14 @@ impl SuePaint {
             cx.fail(tr!("make-timeline-first-animation-timeline-new"));
             return;
         };
+        // The 2D camera picked: its key, of the camera as it stands.
+        if crate::camera::is_camera(&cx.world.arena, layer) {
+            let camera = self.camera_now(&cx.world.arena, layer);
+            let (_, time) = self.frame_time(&cx.world.arena);
+            Self::apply(cx, crate::camera::key(&cx.world.arena, layer, time, camera));
+            self.camera_pending = None;
+            return;
+        }
         let arena = &cx.world.arena;
         let size = arena
             .get_by_id(picture)
@@ -626,9 +700,40 @@ impl SuePaint {
         };
         let frame = self.doc().map_or(0, |doc| doc.frame);
         let time = Time::from_frames(i64::from(frame), sequence.rate);
-        match anim::motion::set_ease(&cx.world.arena, layer, &[time], ease) {
+        let edit = if crate::camera::is_camera(&cx.world.arena, layer) {
+            crate::camera::set_ease(&cx.world.arena, layer, time, ease)
+        } else {
+            anim::motion::set_ease(&cx.world.arena, layer, &[time], ease)
+        };
+        match edit {
             Some(edit) => {
                 Self::apply(cx, edit);
+            }
+            None => cx.notify(tr!("no-keyframe-on-this-frame")),
+        }
+    }
+
+    /// Takes the current layer's key (or the 2D camera's) at the frame
+    /// shown away.
+    pub(crate) fn delete_key_here(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(layer) = self.layer() else {
+            return;
+        };
+        let Some((_, sequence, _)) = self.timeline_here(&cx.world.arena) else {
+            return;
+        };
+        let frame = self.doc().map_or(0, |doc| doc.frame);
+        let time = Time::from_frames(i64::from(frame), sequence.rate);
+        let arena = &cx.world.arena;
+        let edit = if crate::camera::is_camera(arena, layer) {
+            crate::camera::delete_key(arena, layer, time)
+        } else {
+            anim::motion::delete_key(arena, layer, time, None)
+        };
+        match edit {
+            Some(edit) => {
+                Self::apply(cx, edit);
+                self.camera_pending = None;
             }
             None => cx.notify(tr!("no-keyframe-on-this-frame")),
         }

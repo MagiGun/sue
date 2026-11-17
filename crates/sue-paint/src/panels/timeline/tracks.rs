@@ -387,18 +387,25 @@ impl SuePaint {
                 items.push(item("anim.cel.assign"));
                 items.push(MenuItem::Separator);
             }
-            Kind::Camera | Kind::Layer => {
-                items.push(item("anim.key.layer"));
-                items.push(MenuItem::Sub {
-                    label: tr!("keyframe-interpolation"),
-                    items: Ease::ALL
-                        .iter()
-                        .map(|ease| item(&format!("anim.key.ease.{}", ease.name())))
-                        .collect(),
-                });
-                items.push(item("anim.key.delete"));
-                items.push(MenuItem::Separator);
-            }
+            Kind::Camera | Kind::Layer => {}
+        }
+        // The keyframe commands: on a camera or a layer's row, and on an
+        // animation folder's whose keyframes are on.
+        let keyed = row.kind != Kind::Cels
+            || anim::track_folder(&sequence.tracks[row.track])
+                .and_then(|folder| arena.get_by_id(folder).ok())
+                .is_some_and(anim::motion::keyframes_on);
+        if keyed {
+            items.push(item("anim.key.layer"));
+            items.push(MenuItem::Sub {
+                label: tr!("keyframe-interpolation"),
+                items: Ease::ALL
+                    .iter()
+                    .map(|ease| item(&format!("anim.key.ease.{}", ease.name())))
+                    .collect(),
+            });
+            items.push(item("anim.key.layer_delete"));
+            items.push(MenuItem::Separator);
         }
         items.extend([
             item("anim.edit.delete"),
@@ -777,9 +784,6 @@ impl SuePaint {
             );
             if response.drag_started() {
                 self.anim_ui.marker = Some(start);
-                // However many frames it passes, the drag is one undo step.
-                cx.typing.flush(cx.history);
-                self.anim_ui.marker_from = Some(cx.history.cursor());
             }
             if response.dragged()
                 && let Some(pos) = response.interact_pointer_pos()
@@ -791,11 +795,7 @@ impl SuePaint {
             }
             if response.drag_stopped() {
                 self.anim_ui.marker = None;
-                if let Some(mark) = self.anim_ui.marker_from.take() {
-                    let label = cx.history.label(cx.history.cursor());
-                    let label = label.unwrap_or_default().to_owned();
-                    crate::commands::fold_since(cx, mark, label);
-                }
+                self.end_play_marker(cx);
             }
         }
         // Timeline labels: a tag and the name over their frame.
@@ -815,6 +815,8 @@ impl SuePaint {
                 theme.text,
             );
         }
+        // A click or drag on the ruler goes to that frame; hovering it
+        // names the frame under the pointer.
         if !on_marker && let Some(pos) = ruler_response.hover_pos() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             let at = at_pointer(pos);
@@ -1155,6 +1157,8 @@ impl SuePaint {
             // by how it moves on; an animation folder's in the band over
             // its cels. Each names its frame and how it moves on, on hover.
             let mut key_tip: Option<String> = None;
+            // Where each mark is, so a press on one drags that keyframe.
+            let mut key_spots: Vec<(EntityId, u32, Rect)> = Vec::new();
             if row.kind != Kind::Audio
                 && let Some(layer) = target
                 && (row.kind == Kind::Camera
@@ -1178,11 +1182,16 @@ impl SuePaint {
                     };
                     let center = pos2(column(at) + step / 2.0, y);
                     key_mark(&cells_painter, center, size, ease, theme.text);
-                    if hover.is_some_and(|pos| {
-                        below.contains(pos)
-                            && Rect::from_center_size(center, egui::Vec2::splat(size.max(pad)))
-                                .contains(pos)
-                    }) {
+                    let spot = Rect::from_center_size(center, egui::Vec2::splat(size.max(pad)));
+                    key_spots.push((layer, at, spot));
+                    if below.contains(center) {
+                        crate::launchers::note_palette_mark(
+                            ui.ctx(),
+                            &format!("keyframe.{}.{at}", row.track),
+                            center,
+                        );
+                    }
+                    if hover.is_some_and(|pos| below.contains(pos) && spot.contains(pos)) {
                         key_tip = Some(tr!(
                             "keyframe-at-frame",
                             frame = self.anim_ui.unit.show(at, fps),
@@ -1369,11 +1378,26 @@ impl SuePaint {
                 } else {
                     None
                 };
-                self.anim_ui.press = Some(Press {
-                    track: index,
-                    frame: at,
-                    moving,
-                    key,
+                // A press on a keyframe's mark drags that keyframe.
+                let keyframe = key_spots
+                    .iter()
+                    .find(|(_, _, spot)| spot.contains(pos))
+                    .map(|(layer, frame, _)| (*layer, *frame));
+                self.anim_ui.press = Some(match keyframe {
+                    Some((layer, frame)) => Press {
+                        track: index,
+                        frame,
+                        moving: false,
+                        key: None,
+                        keyframe: Some(layer),
+                    },
+                    None => Press {
+                        track: index,
+                        frame: at,
+                        moving,
+                        key,
+                        keyframe: None,
+                    },
                 });
             }
             if response.clicked()
@@ -1463,7 +1487,27 @@ impl SuePaint {
             let held = ui.input(|input| input.pointer.primary_down());
             let at = hover_frame.unwrap_or(press.frame);
             let row_now = hovered_row.unwrap_or(press.track);
-            if let Some((low, high)) = press.key {
+            if let Some(layer) = press.keyframe {
+                // Where the keyframe would go: a line and its frame.
+                let to = at.min(length - 1);
+                let x = column(to);
+                cells_painter.vline(x, below.y_range(), Stroke::new(thick, theme.focus()));
+                cells_painter.text(
+                    pos2(x + pad / 2.0, below.top() + pad),
+                    Align2::LEFT_TOP,
+                    self.anim_ui.unit.show(to, fps),
+                    font.clone(),
+                    theme.text,
+                );
+                if !held {
+                    actions.push(Action::MoveKeyframe {
+                        layer,
+                        from: press.frame,
+                        to,
+                    });
+                    self.anim_ui.press = None;
+                }
+            } else if let Some((low, high)) = press.key {
                 // Where the cel would start: a line and its frame.
                 let to = at.clamp(low, high);
                 let x = column(to);

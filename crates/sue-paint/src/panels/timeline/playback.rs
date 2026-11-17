@@ -134,10 +134,18 @@ impl SuePaint {
         doc.frame = frame;
         let folders = anim::folders(&sequence);
         doc.track = doc.track.min(sequence.tracks.len().saturating_sub(1));
-        if let Some(cel) = folders
-            .contains(&doc.track)
-            .then(|| anim::cel_at(&sequence.tracks[doc.track], sequence.rate, frame))
-            .flatten()
+        // A camera, or a layer or folder moved by its keyframes, stays
+        // picked from frame to frame, so the Object tool keys it on each
+        // (as in Clip Studio Paint); else the cel shown is picked.
+        let keyed = doc.layer.is_some_and(|layer| {
+            crate::camera::is_camera(arena, layer)
+                || arena.get_by_id(layer).is_ok_and(anim::motion::keyframes_on)
+        });
+        if !keyed
+            && let Some(cel) = folders
+                .contains(&doc.track)
+                .then(|| anim::cel_at(&sequence.tracks[doc.track], sequence.rate, frame))
+                .flatten()
         {
             doc.layer = Some(cel);
         }
@@ -276,7 +284,9 @@ impl SuePaint {
         };
         let general_opacity = self.general_opacity;
         let opacity = self.light_opacity;
-        let light_color = self.light_color.then_some(anim::LIGHT_TABLE_TINT);
+        let light_color = self
+            .light_color
+            .then_some(self.light_tint.map(|channel| f32::from(channel) / 255.0));
         // The camera folders at the frame shown.
         let (arena, picture) = (&cx.world.arena, self.picture());
         let size = picture
@@ -289,17 +299,23 @@ impl SuePaint {
         let editing = (self.toolbox.tool() == crate::tools::Tool::Operation)
             .then(|| self.camera_folder(arena))
             .flatten();
+        // Playback Settings, Render 2D Camera off: the whole canvas, the
+        // cameras' frames over it.
+        let render_camera =
+            picture.is_some_and(|picture| anim::setup::Playback::of(arena, picture).render_camera);
         let cameras_at = |frame: u32| {
-            picture.map_or_else(Vec::new, |picture| {
-                let mut views = crate::camera::views(
-                    arena,
-                    picture,
-                    Some(crate::camera::time_of(frame, rate)),
-                    size,
-                );
-                views.retain(|(folder, _)| Some(*folder) != editing);
-                views
-            })
+            picture
+                .filter(|_| render_camera)
+                .map_or_else(Vec::new, |picture| {
+                    let mut views = crate::camera::views(
+                        arena,
+                        picture,
+                        Some(crate::camera::time_of(frame, rate)),
+                        size,
+                    );
+                    views.retain(|(folder, _)| Some(*folder) != editing);
+                    views
+                })
         };
         // Check Cel Motion and Check Surrounding Cels by Key Input:
         // another frame shows a moment, the playhead staying where it is.
