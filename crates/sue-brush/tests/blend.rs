@@ -23,7 +23,11 @@ fn preset(id: &str) -> BrushPreset {
 fn stripes() -> RasterTile2D {
     let mut raster = RasterTile2D::new(W, H, PixelFormat::Rgba8).unwrap();
     for (i, p) in raster.bytes_mut().unwrap().chunks_mut(4).enumerate() {
-        let v = if (i as u32 % W / 16).is_multiple_of(2) { 0 } else { 255 };
+        let v = if (i as u32 % W / 16).is_multiple_of(2) {
+            0
+        } else {
+            255
+        };
         p.copy_from_slice(&[v, v, v, 255]);
     }
     raster
