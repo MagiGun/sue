@@ -1673,9 +1673,10 @@ fn step_00_27_26_drawing_tools_and_their_sub_tool_groups() {
         let seen = sub_tools_of(&mut paint, tool);
         shows_all(&seen, wanted, tool);
     }
-    // 00:31:25 the ribbon, on the Spray.
-    let rows = rows_of(&mut paint, "tool.pick.airbrush", "Spray");
-    shows_all(&rows, &["Lay as a ribbon", "Scatter", "Spacing"], "Spray");
+    // 00:31:25 the ribbon, on an airbrush laid in shapes. Sue's Spray
+    // lays puffs of drops (p5-brush), so the ribbon is set on Droplet.
+    let rows = rows_of(&mut paint, "tool.pick.airbrush", "Droplet");
+    shows_all(&rows, &["Lay as a ribbon", "Scatter", "Spacing"], "Droplet");
 }
 
 #[test]
@@ -1701,14 +1702,15 @@ fn step_00_28_09_brush_settings_categories_of_sub_tool_detail() {
         ],
         "Sub Tool Detail categories",
     );
-    // FGV-13 and the Ink, Stroke and Correction rows of the video.
+    // FGV-13 and the Ink, Stroke and Correction rows of the video. The
+    // default brush is swept, not laid in dabs, so it has no Spacing;
+    // the Droplet's Spacing is checked at 00:31:25.
     let rows = tool_property_rows(&mut paint);
     shows_all(
         &rows,
         &[
             "Hardness",
             "Color mixing",
-            "Spacing",
             "Paper grain",
             "Stabilization",
             "Adjust by speed",

@@ -585,9 +585,8 @@ fn sue_paint_cut_on_a_mask_hides_the_selection_and_keeps_the_pixels() {
     line_on_canvas(&mut paint, 0.0);
     let layer = newest_layer(&paint);
     let drawn = pixels(&paint, layer);
+    // A new mask is what the tools draw on next.
     paint.command("layer.mask.outside");
-    paint.settle(3);
-    paint.command("layer.mask.edit");
     paint.settle(3);
     let mask = sue_paint::doc::mask_of(&paint.runtime.engine.world.arena, layer).expect("a mask");
     assert!(
@@ -643,9 +642,8 @@ fn sue_paint_paints_the_mask_of_a_gradient_layer() {
         sue_paint::doc::Gradient::of(arena.get_by_id(layer).unwrap()).line
     };
     let gradient_line = line(&paint);
+    // A new mask is what the tools draw on next.
     paint.command("layer.mask.outside");
-    paint.settle(3);
-    paint.command("layer.mask.edit");
     paint.settle(3);
     let mask = sue_paint::doc::mask_of(&paint.runtime.engine.world.arena, layer).expect("a mask");
     // The eraser hides.

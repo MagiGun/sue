@@ -1660,7 +1660,7 @@ fn cc_1634_a_blank_mask_on_the_lines_hides_without_erasing() {
     let m = middle(&driver);
     let corner = under(&driver, m + vec2(-100.0, -80.0));
     assert!(mask_at(&driver, lines, corner) > 200, "the mask shows all");
-    edit_mask(&mut driver, "Layer 2");
+    // A new mask is what the tools draw on next (full guide, 00:08:51).
     tap(&mut driver, Key::E);
     for _ in 0..8 {
         tap(&mut driver, Key::CloseBracket);
@@ -3483,7 +3483,10 @@ fn t50_40_a_frame_border_keeps_the_drawing_inside() {
     let p = seen_at(&tile, [2, i64::from(h) / 2]);
     assert!(p[0] > 200, "outside the frame stays clear: {p:?}");
     let inside = seen_at(&tile, under(&driver, m - vec2(4.0, 0.0)));
-    assert!(inside[0] < 100, "inside the frame the stroke shows: {inside:?}");
+    assert!(
+        inside[0] < 100,
+        "inside the frame the stroke shows: {inside:?}"
+    );
 }
 
 /// Tip 41 (10:12, CTV-14): a balloon with text inside.
