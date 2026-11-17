@@ -17,6 +17,7 @@ general-autosave_seconds = Autosave Every
 
 launchpad-pinned = Open At Launch
     .description = The studio or tool Sue opens straight into (the pin on its box in the Hub; empty opens the Hub)
+    .empty = The Hub
 launchpad-recent_count = Recent Files on the Hub
     .description = How many recent files and projects the Hub lists (0 hides the list)
 
@@ -159,11 +160,13 @@ io-max_ingest_mib = Largest file to open (MiB)
     .description = Sue does not open a file larger than this
 io-convert_dir = Folder for exported files
     .description = Folder for exported and batch converted files (empty saves next to the source)
+    .empty = Next to the source file
 
 ## [audio]
 
 audio-output_device = Output device
     .description = Output device (empty for the system default)
+    .empty = The system default
 audio-sample_rate = Sample rate
     .description = Sample rate (Hz)
 audio-buffer_frames = Buffer size
@@ -193,6 +196,7 @@ sue_paint-dpi = Resolution
     .description = Resolution of new illustrations (dpi)
 sue_paint-materials_dir = Materials folder
     .description = Where Sue Paint keeps its materials and brush tips (empty: its own folder)
+    .empty = Sue Paint's own folder
 sue_paint-save_format = Save format
     .description = How Save keeps a picture: a Clip Studio Paint .clip file, or a Sue project
     .clip = Clip Studio Paint (.clip)

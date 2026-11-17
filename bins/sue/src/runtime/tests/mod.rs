@@ -16,6 +16,7 @@ mod p6_tools_a;
 mod p6_tools_b;
 mod p6_p6_assets;
 mod p6_anim;
+mod p6_p6_ui;
 mod paint_3d;
 mod paint_anim;
 mod paint_basics;

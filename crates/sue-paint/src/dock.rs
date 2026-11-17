@@ -136,14 +136,15 @@ pub(crate) fn classic_layout() -> Dock {
         Column::of(&[(Palette::Tools, 1.0)], 46.0),
         Column {
             groups: vec![
-                // Sub Tool tall enough for three rows of a brush's sub
-                // tools with their sample strokes (Pen's G-pen, Grainy
-                // G-pen, Mapping pen); Tool Property its first rows,
-                // Opacity among them; Brush Size two rows of sizes.
-                Group::one(Palette::SubTool, 0.31),
+                // Sub Tool tall enough for five sub tools with their
+                // sample strokes on a 900 point high window and six on a
+                // 1080 one, nearer the seven Clip Studio Paint lists; Tool
+                // Property its first rows, Opacity among them; Brush Size
+                // two rows of sizes; the color wheel the rest.
+                Group::one(Palette::SubTool, 0.36),
                 Group::one(Palette::ToolProperty, 0.28),
-                Group::one(Palette::BrushGrid, 0.16),
-                tabs(&COLOR_PALETTES, 0.25),
+                Group::one(Palette::BrushGrid, 0.165),
+                tabs(&COLOR_PALETTES, 0.195),
             ],
             // Wide enough for the six color tabs; the canvas starts where
             // it did before the styles.

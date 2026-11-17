@@ -151,29 +151,37 @@ pub fn sample_picture(cx: &mut AppletContext<'_>, width: u32, height: u32) -> Op
         cx.apply(ArenaEdit(order)).ok()?;
     }
     let (w, h) = (width as f32, height as f32);
-    let soft = Tip {
-        size: w * 0.18,
-        hardness: 0.0,
-        build_up: true,
-        flow: 0.12,
-        size_by: crate::brush::Dynamics::NONE,
-        ..Tip::default()
-    };
-    for (center, rgb) in [
-        ([0.34, 0.45], [0.95, 0.55, 0.35]),
-        ([0.62, 0.38], [0.35, 0.6, 0.95]),
-        ([0.5, 0.66], [0.55, 0.85, 0.45]),
-    ] {
-        let points: Vec<[f32; 2]> = (0..24)
+    // The circles the ink draws (center, and radius as a share of the
+    // width), each filled with flat color up to the middle of its ring:
+    // a hard round brush a little over half the circle across, led once
+    // around a path a little under half the circle out, covers it from
+    // the middle to the ink's center line, so the color meets the line
+    // with no pale gap inside it and no halo outside it.
+    let circles = [
+        ([0.34, 0.45], 0.1, [0.95, 0.55, 0.35]),
+        ([0.62, 0.38], 0.08, [0.35, 0.6, 0.95]),
+        ([0.5, 0.66], 0.09, [0.55, 0.85, 0.45]),
+    ];
+    for (center, radius, rgb) in circles {
+        let radius = w * radius;
+        let fill = Tip {
+            size: radius * 1.08,
+            hardness: 1.0,
+            size_by: crate::brush::Dynamics::NONE,
+            opacity_by: crate::brush::Dynamics::NONE,
+            ..Tip::default()
+        };
+        let orbit = radius * 0.46;
+        let points: Vec<[f32; 2]> = (0..=48)
             .map(|step| {
-                let t = step as f32 / 24.0 * std::f32::consts::TAU;
+                let t = step as f32 / 48.0 * std::f32::consts::TAU;
                 [
-                    w * center[0] + t.cos() * w * 0.06,
-                    h * center[1] + t.sin() * h * 0.06,
+                    w * center[0] + t.cos() * orbit,
+                    h * center[1] + t.sin() * orbit,
                 ]
             })
             .collect();
-        paint_path(cx, color_layer, soft, rgb, &points, "Airbrush");
+        paint_path(cx, color_layer, fill, rgb, &points, "Fill");
     }
     let pen = Tip {
         size: (w / 160.0).max(2.0),

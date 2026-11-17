@@ -188,7 +188,10 @@ impl SuePaint {
         // so it can still be scrolled away by hand.
         let followed = Id::unique(("sue-paint-subs-followed", slot, shown_group));
         let follow = inner.ctx().data(|data| data.get_temp::<usize>(followed)) != Some(picked);
-        let tall = if paints { line * 1.4 } else { line };
+        // A painting tool's row holds its sample stroke and its name on
+        // one line, as tall as a plain row, so a palette of ordinary
+        // height lists five or six of them.
+        let tall = line;
         let height = list_height(
             names.len(),
             tall,
@@ -237,48 +240,13 @@ impl SuePaint {
                         radius,
                         fill,
                     );
-                    if paints {
-                        let size = [
-                            (row.width().round() as u32).clamp(40, 600),
-                            (tall - pad).max(8.0) as u32,
-                        ];
-                        if let Some(texture) =
-                            Self::sub_preview(&mut self.sub_previews, cx, sub, size)
-                        {
-                            ui.painter().image(
-                                texture,
-                                Rect::from_min_size(
-                                    row.min + egui::Vec2::Y * (pad / 2.0),
-                                    vec2(size[0] as f32, size[1] as f32),
-                                ),
-                                Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
-                                if chosen {
-                                    theme.text
-                                } else {
-                                    theme.text_muted()
-                                },
-                            );
-                        }
-                        ui.painter().text(
-                            row.right_bottom() - vec2(pad, half_pad),
-                            Align2::RIGHT_BOTTOM,
-                            name,
-                            theme.text_font(TextRole::Caption),
-                            theme.text,
-                        );
-                    } else {
-                        ui.painter().text(
-                            row.left_center() + egui::Vec2::X * pad,
-                            Align2::LEFT_CENTER,
-                            name,
-                            theme.text_font(TextRole::Body),
-                            theme.text,
-                        );
-                    }
+                    // The key that picks it, at the row's end, then the
+                    // name before it.
+                    let mut end = row.right() - pad;
                     if let Some(key) = &key {
-                        ui.painter().text(
-                            row.right_top() + vec2(-pad, half_pad),
-                            Align2::RIGHT_TOP,
+                        let shown = ui.painter().text(
+                            pos2(end, row.center().y),
+                            Align2::RIGHT_CENTER,
                             key,
                             theme.text_font(TextRole::Micro),
                             // Readable on the chosen row's fill too.
@@ -287,6 +255,52 @@ impl SuePaint {
                             } else {
                                 theme.text_muted_on(fill)
                             },
+                        );
+                        end = shown.left() - theme.space(Space::S2);
+                    }
+                    if paints {
+                        let named = ui.painter().text(
+                            pos2(end, row.center().y),
+                            Align2::RIGHT_CENTER,
+                            name,
+                            theme.text_font(TextRole::Body),
+                            theme.text,
+                        );
+                        // Every row's stroke is as long, so they line up,
+                        // and stops before a long name.
+                        let room = (row.width() * 0.58)
+                            .min(named.left() - row.left() - pad)
+                            .max(row.width() * 0.3);
+                        // Drawn at the display's own pixels, so the
+                        // stroke is as sharp at 2.0 scale as at 1.0.
+                        let scale = ui.ctx().pixels_per_point();
+                        let high = tall - half_pad * 2.0;
+                        let points = vec2(room, high);
+                        let size = [
+                            ((points.x * scale).round() as u32).clamp(40, 1800),
+                            ((points.y * scale).round() as u32).max(8),
+                        ];
+                        if let Some(texture) =
+                            Self::sub_preview(&mut self.sub_previews, cx, sub, size, scale)
+                        {
+                            ui.painter().image(
+                                texture,
+                                Rect::from_min_size(row.min + vec2(half_pad, half_pad), points),
+                                Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
+                                if chosen {
+                                    theme.text
+                                } else {
+                                    theme.text_muted()
+                                },
+                            );
+                        }
+                    } else {
+                        ui.painter().text(
+                            row.left_center() + egui::Vec2::X * pad,
+                            Align2::LEFT_CENTER,
+                            name,
+                            theme.text_font(TextRole::Body),
+                            theme.text,
                         );
                     }
                     sue_wm::ui::focus_ring(ui, &response, radius, theme);
@@ -389,9 +403,16 @@ impl SuePaint {
         if let Some((what, index)) = action {
             self.sub_tool_action(&what, slot, index);
         }
-        // The buttons under the list, at its trailing edge.
+        // The buttons under the list, at its trailing edge, where Clip
+        // Studio Paint has them.
         let bar = Rect::from_min_max(pos2(body.left(), body.bottom() - footer), body.max)
             .shrink2(egui::Vec2::X * pad);
+        self.sub_tool_buttons(ui, bar, slot, theme);
+    }
+
+    /// The Sub Tool palette's reset, duplicate and delete buttons, right
+    /// aligned in `bar`.
+    fn sub_tool_buttons(&mut self, ui: &mut Ui, bar: Rect, slot: usize, theme: &Theme) {
         let mut bar_ui = child(ui, bar, "sub-tool-buttons");
         bar_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let picked = self.toolbox.current_entry().picked();
@@ -570,17 +591,19 @@ impl SuePaint {
     }
 
     /// The texture of `sub`'s sample stroke for the Sub Tool list, `size`
-    /// pixels: white ink on clear, tinted when drawn.
+    /// pixels at `scale` pixels to the point: white ink on clear, tinted
+    /// when drawn.
     fn sub_preview(
         cache: &mut std::collections::HashMap<u64, Vec<u8>>,
         cx: &mut AppletContext<'_>,
         sub: &SubTool,
         size: [u32; 2],
+        scale: f32,
     ) -> Option<egui::TextureId> {
         use std::hash::{Hash, Hasher};
         let mut sub = sub.clone();
         // Thin pens stay thin and big brushes fit the row.
-        sub.tip.size = (sub.tip.size * 0.7).clamp(1.0, size[1] as f32 * 0.4);
+        sub.tip.size = (sub.tip.size * 0.7 * scale).clamp(scale, size[1] as f32 * 0.4);
         // An eraser's sample is drawn as ink, so it shows.
         sub.tip.eraser = false;
         let key = {

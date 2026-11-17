@@ -357,15 +357,12 @@ impl SuePaint {
                     ),
                     vec2(cell - gap, cell - gap),
                 );
-                let sense = if editing {
-                    Sense::click_and_drag()
-                } else {
-                    Sense::click()
-                };
+                // Every swatch drags: within a set to move it, and from a
+                // set or the history onto a command bar.
                 let response = ui.interact(
                     rect,
                     Id::unique(("sue-paint-swatch", salt, set, index)),
-                    sense,
+                    Sense::click_and_drag(),
                 );
                 if !ui.is_rect_visible(rect) {
                     continue;
@@ -412,9 +409,26 @@ impl SuePaint {
                     (None, _) => tr!("empty-cell-help"),
                     (Some(_), false) => String::new(),
                 };
+                // Named, so assistive technology (and a test) finds it.
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::Role::Button,
+                        true,
+                        picked == Some(index),
+                        &tip_name,
+                    )
+                });
                 let response = ui::tooltip(response, &ui::Tip::new(&tip_name).help(&help), theme);
-                if response.drag_started() && swatch.is_some() {
-                    self.color_ui.dragging = Some(index);
+                if response.drag_started()
+                    && let Some(swatch) = swatch
+                {
+                    if editing {
+                        self.color_ui.dragging = Some(index);
+                    }
+                    egui::DragAndDrop::set_payload(
+                        ui.ctx(),
+                        crate::bar_items::ColorDrag(swatch.rgb),
+                    );
                 }
                 if response.double_clicked() && swatch.is_some() && editing {
                     act = Some(Act::Edit(index));

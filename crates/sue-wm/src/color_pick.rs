@@ -461,7 +461,7 @@ pub fn color_wheel(ui: &mut Ui, id: Id, rgba: &mut [u8; 4], side: f32) -> ColorP
     let (area, response) = ui.allocate_exact_size(vec2(side, side), Sense::click_and_drag());
     let center = area.center();
     let outer = side / 2.0;
-    let inner = outer * 0.8;
+    let inner = outer * 0.84;
     let hue_id = id.with("hue");
     let shape = wheel_shape(ui.ctx());
     let mut hsv = hsv_of([rgba[0], rgba[1], rgba[2]]);
@@ -471,7 +471,7 @@ pub fn color_wheel(ui: &mut Ui, id: Id, rgba: &mut [u8; 4], side: f32) -> ColorP
 
     ui.painter()
         .add(Shape::mesh(ring_mesh(center, inner, outer)));
-    let square = Rect::from_center_size(center, Vec2::splat(inner * 0.68 * 2.0));
+    let square = Rect::from_center_size(center, Vec2::splat(inner * 0.7 * 2.0));
     let triangle = Triangle::new(center, inner * 0.94, hsv[0]);
     let mark = match shape {
         WheelShape::Square => {

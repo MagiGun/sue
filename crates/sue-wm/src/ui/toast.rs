@@ -73,6 +73,10 @@ const MAX_WIDTH: f32 = 420.0;
 /// How many card edges show behind a folded stack, at most.
 const EDGES: usize = 2;
 
+/// How much of a notice fades while a press is held over it (not on its
+/// buttons), so the work under it shows through.
+const SEE_THROUGH: f32 = 0.75;
+
 /// What a notice, or a question, is about. Each has a glyph of its own.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Tone {
@@ -315,6 +319,9 @@ struct Entry {
     leaving: Option<f64>,
     /// Where it was drawn last; `None` while it is folded.
     rects: Option<ToastRects>,
+    /// How far it had faded to show the work under it, last frame (0
+    /// solid, 1 as clear as it goes).
+    see_through: f32,
 }
 
 /// The stack of notices of one window.
@@ -392,6 +399,7 @@ impl Toasts {
             dismissed: false,
             leaving: None,
             rects: None,
+            see_through: 0.0,
         });
         id
     }
@@ -449,6 +457,17 @@ impl Toasts {
             .iter()
             .find(|entry| entry.id == id)
             .and_then(|entry| entry.rects)
+    }
+
+    /// How far the notice `id` had faded to let the work under it show
+    /// in the last frame: 0 solid, 1 as clear as it goes (scripted runs
+    /// and tests).
+    #[must_use]
+    pub fn see_through(&self, id: ToastId) -> Option<f32> {
+        self.entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.see_through)
     }
 
     /// How many notices were folded behind the shown ones in the last
@@ -554,6 +573,7 @@ impl Toasts {
 
         // The clock: it stands still while the pointer is over the stack.
         let pointer = ctx.pointer_hover_pos();
+        let pressed = ctx.input(|input| input.pointer.any_down());
         let hovered = !modal
             && pointer.is_some_and(|at| {
                 self.entries
@@ -758,12 +778,15 @@ impl Toasts {
         } else {
             Layer::Toast.order()
         };
+        // The cards take no clicks: what lies under them (a canvas, a
+        // timeline) still gets every press, and only their buttons, each
+        // on a layer of its own just over the cards, can be pressed.
         let area = Area::new(self.id)
             .order(order)
             .fixed_pos(all.min)
             .constrain(false)
             .fade_in(false)
-            .sense(Sense::hover())
+            .interactable(false)
             .role(egui::accesskit::Role::Alert)
             .accessible_name(tr!("notices"));
         self.layer = Some(area.layer());
@@ -777,6 +800,23 @@ impl Toasts {
         let mut toggle = false;
         area.show(ctx, |ui| {
             ui.allocate_rect(all, Sense::hover());
+            let on_top =
+                |id: Id, rect: Rect, opacity: f32, add: &mut dyn FnMut(&Ui) -> Response| {
+                    let area = Area::new(id.with("sue-on-top"))
+                        .order(order)
+                        .fixed_pos(rect.min)
+                        .constrain(false)
+                        .fade_in(false);
+                    let layer = area.layer();
+                    let response = area
+                        .show(ctx, |ui| {
+                            ui.set_opacity(opacity);
+                            add(ui)
+                        })
+                        .inner;
+                    ctx.move_to_top(layer);
+                    response
+                };
             // Behind the cards, the edges of the folded ones, the farthest
             // first.
             let painter = ui.painter();
@@ -794,7 +834,26 @@ impl Toasts {
                 let place = *place;
                 let id = stack.with(entry.id);
                 let mut child = ui.new_child(UiBuilder::new().max_rect(place).id_salt(id));
-                child.set_opacity(toast.presence);
+                // A press held over the card (not on its buttons), a
+                // stroke drawn across it, sees through it to the work
+                // under it. A pointer that only rests there (to read it,
+                // which stops its clock) keeps it solid.
+                let row_top = place.top() + pad.y;
+                let action_width = toast
+                    .action
+                    .as_ref()
+                    .map_or(0.0, |label| label.size().x + pad.x * 2.0 + tight);
+                let buttons = Rect::from_min_max(
+                    pos2(place.right() - tight - control - action_width, row_top),
+                    pos2(place.right(), row_top + control),
+                );
+                let through = !modal
+                    && pressed
+                    && pointer.is_some_and(|at| place.contains(at) && !buttons.contains(at));
+                let clear = motion::hover_t(ctx, id.with("sue-see-through"), through);
+                entry.see_through = clear;
+                let opacity = toast.presence * (1.0 - SEE_THROUGH * clear);
+                child.set_opacity(opacity);
                 let body = child.interact(place, id.with("sue-toast"), Sense::hover());
                 body.widget_info(|| {
                     WidgetInfo::labeled(Role::Label, true, entry.toast.text.as_str())
@@ -830,14 +889,17 @@ impl Toasts {
                 // In reading order, so Tab walks them that way.
                 if let Some((rect, label)) = action {
                     let text = entry.toast.action.as_deref().unwrap_or_default();
-                    let pressed =
-                        text_button(&child, id.with("sue-action"), rect, label, text, theme);
+                    let pressed = on_top(id.with("sue-action-layer"), rect, opacity, &mut |ui| {
+                        text_button(ui, id.with("sue-action"), rect, label, text, theme)
+                    });
                     if pressed.clicked() && entry.leaving.is_none() {
                         entry.leaving = Some(now);
                         events.push(ToastEvent::Action(entry.id));
                     }
                 }
-                let closed = close_button(&child, id.with("sue-close"), close, &dismiss, theme);
+                let closed = on_top(id.with("sue-close-layer"), close, opacity, &mut |ui| {
+                    close_button(ui, id.with("sue-close"), close, &dismiss, theme)
+                });
                 if closed.clicked() && entry.leaving.is_none() {
                     entry.leaving = Some(now);
                     events.push(ToastEvent::Dismissed(entry.id));
@@ -864,13 +926,15 @@ impl Toasts {
                 });
             }
             if let Some((rect, label, galley, glyph)) = &fold {
-                toggle = fold_button(
-                    ui,
-                    stack.with("sue-fold"),
-                    *rect,
-                    (label, galley, *glyph),
-                    theme,
-                )
+                toggle = on_top(stack.with("sue-fold-layer"), *rect, 1.0, &mut |ui| {
+                    fold_button(
+                        ui,
+                        stack.with("sue-fold"),
+                        *rect,
+                        (label, galley, *glyph),
+                        theme,
+                    )
+                })
                 .clicked();
             }
         });
