@@ -338,7 +338,15 @@ impl Tool {
                     .referring(Refer::Reference),
             ],
             Self::Eyedropper => vec![
-                plain("Obtain Display Color", 0),
+                // What is shown, all of it: nothing left out, the paper
+                // neither, until its Exclude row says otherwise.
+                SubTool {
+                    exclude: Exclude {
+                        paper: false,
+                        ..Exclude::default()
+                    },
+                    ..plain("Obtain Display Color", 0)
+                },
                 plain("Obtain Layer Color", 1),
             ],
             // The brushes: Sue's built-in presets (`sue_brush::presets`).
@@ -773,7 +781,34 @@ pub struct SubTool {
     /// A rectangle or ellipse selection turns with the pointer after the
     /// drag until a click fixes it (Adjust angle after fixed).
     pub adjust_angle: bool,
+    /// What a click does where the sub tool offers a choice: the Light
+    /// table's click (0 nothing, [`LIGHT_TABLE_CLICK_RESETS`] puts its
+    /// layers back where they were).
+    pub click: u8,
+    /// What a drag does where the sub tool offers a choice: Edit
+    /// timeline's drag (0 steps through the frames,
+    /// [`DRAG_DOES_NOTHING`] nothing).
+    pub drag: u8,
+    /// What Move layer moves: [`MOVES_LAYER`], [`MOVES_TONE`] (the
+    /// tone's dots of the current layer) or [`MOVES_GRID`] (the
+    /// picture's grid) (Object to move).
+    pub move_target: u8,
+    /// With a selection, Move layer moves every layer painted inside it,
+    /// whole, instead of the selected pixels (Move layers in the selected
+    /// area).
+    pub move_in_selection: bool,
 }
+
+/// The Light table sub tool's click puts its layers back where they were
+/// ([`SubTool::click`]).
+pub const LIGHT_TABLE_CLICK_RESETS: u8 = 1;
+/// A drag does nothing ([`SubTool::drag`]).
+pub const DRAG_DOES_NOTHING: u8 = 1;
+/// What Move layer moves ([`SubTool::move_target`]): the layer, the
+/// current layer's tone dots, or the picture's grid.
+pub const MOVES_LAYER: u8 = 0;
+pub const MOVES_TONE: u8 = 1;
+pub const MOVES_GRID: u8 = 2;
 
 impl SubTool {
     /// A sub tool.
@@ -828,6 +863,10 @@ impl SubTool {
             contour_width: 0.0,
             close_target: Target::All,
             adjust_angle: false,
+            click: 0,
+            drag: 0,
+            move_target: MOVES_LAYER,
+            move_in_selection: false,
         }
     }
 

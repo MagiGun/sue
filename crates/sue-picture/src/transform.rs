@@ -406,8 +406,115 @@ pub fn lift(
     Some(([x0, y0, x1, y1], piece, rest))
 }
 
+/// How a transform samples the piece it moves (Interpolation method):
+/// each pixel of the result reads the piece between its pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Interpolation {
+    /// The nearest pixel: hard edges, every pixel whole, for pixel art
+    /// and line art that must stay crisp.
+    Nearest,
+    /// Between the four nearest pixels (bilinear): smooth.
+    #[default]
+    Smooth,
+    /// Between the sixteen nearest pixels (bicubic): smooth and sharper
+    /// where a picture is scaled up.
+    Bicubic,
+}
+
+impl Interpolation {
+    /// Every choice, in Tool Property's order.
+    pub const ALL: [Self; 3] = [Self::Nearest, Self::Smooth, Self::Bicubic];
+
+    /// Its stable name in saved settings.
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Nearest => "nearest",
+            Self::Smooth => "smooth",
+            Self::Bicubic => "bicubic",
+        }
+    }
+
+    /// The choice saved as `id`, if it is one.
+    #[must_use]
+    pub fn of_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|choice| choice.id() == id)
+    }
+
+    /// The pixel of `source` (`width` by `height`, straight RGBA8) at
+    /// `x`, `y` (pixel centres at halves), transparent outside it.
+    #[must_use]
+    pub fn sample(self, source: &[u8], width: u32, height: u32, x: f32, y: f32) -> [u8; 4] {
+        match self {
+            Self::Smooth => crate::warp::sample(source, width, height, x, y),
+            Self::Nearest => {
+                let (nx, ny) = (x.floor(), y.floor());
+                if nx < 0.0 || ny < 0.0 || nx >= width as f32 || ny >= height as f32 {
+                    return [0; 4];
+                }
+                let at = ((ny as u32 * width + nx as u32) * 4) as usize;
+                [source[at], source[at + 1], source[at + 2], source[at + 3]]
+            }
+            Self::Bicubic => bicubic(source, width, height, x, y),
+        }
+    }
+}
+
+/// Catmull-Rom's weight for a pixel `t` away (0 to 2).
+fn cubic_weight(t: f32) -> f32 {
+    let t = t.abs();
+    if t < 1.0 {
+        1.5 * t * t * t - 2.5 * t * t + 1.0
+    } else if t < 2.0 {
+        -0.5 * t * t * t + 2.5 * t * t - 4.0 * t + 2.0
+    } else {
+        0.0
+    }
+}
+
+/// Bicubic (Catmull-Rom) sampling over premultiplied colors, so a clear
+/// pixel's color never bleeds in; outside the source is clear.
+fn bicubic(source: &[u8], width: u32, height: u32, x: f32, y: f32) -> [u8; 4] {
+    let (x, y) = (x - 0.5, y - 0.5);
+    let (x0, y0) = (x.floor(), y.floor());
+    let (fx, fy) = (x - x0, y - y0);
+    let mut sum = [0.0_f32; 4];
+    for dy in -1..=2_i64 {
+        let wy = cubic_weight(fy - dy as f32);
+        let py = y0 as i64 + dy;
+        if wy == 0.0 || py < 0 || py >= i64::from(height) {
+            continue;
+        }
+        for dx in -1..=2_i64 {
+            let wx = cubic_weight(fx - dx as f32);
+            let px = x0 as i64 + dx;
+            if wx == 0.0 || px < 0 || px >= i64::from(width) {
+                continue;
+            }
+            let at = ((py as u32 * width + px as u32) * 4) as usize;
+            let weight = wx * wy;
+            let a = f32::from(source[at + 3]) / 255.0;
+            for channel in 0..3 {
+                sum[channel] += f32::from(source[at + channel]) * a * weight;
+            }
+            sum[3] += a * weight;
+        }
+    }
+    let alpha = sum[3].clamp(0.0, 1.0);
+    if alpha <= 1e-6 {
+        return [0; 4];
+    }
+    [
+        (sum[0] / alpha).round().clamp(0.0, 255.0) as u8,
+        (sum[1] / alpha).round().clamp(0.0, 255.0) as u8,
+        (sum[2] / alpha).round().clamp(0.0, 255.0) as u8,
+        (alpha * 255.0).round().clamp(0.0, 255.0) as u8,
+    ]
+}
+
 /// `rest` (the layer without the piece, `width` by `height`) with `piece`
-/// (`size` pixels) laid over it on `quad`, straight RGBA8.
+/// (`size` pixels) laid over it on `quad`, straight RGBA8, sampled
+/// smoothly.
 #[must_use]
 pub fn place(
     rest: &[u8],
@@ -416,6 +523,29 @@ pub fn place(
     piece: &[u8],
     size: [u32; 2],
     quad: &Quad,
+) -> Vec<u8> {
+    place_with(
+        rest,
+        width,
+        height,
+        piece,
+        size,
+        quad,
+        Interpolation::Smooth,
+    )
+}
+
+/// [`place`], sampling the piece as `interpolation` says.
+#[must_use]
+#[allow(clippy::too_many_arguments, reason = "place and how it samples")]
+pub fn place_with(
+    rest: &[u8],
+    width: u32,
+    height: u32,
+    piece: &[u8],
+    size: [u32; 2],
+    quad: &Quad,
+    interpolation: Interpolation,
 ) -> Vec<u8> {
     let mut out = rest.to_vec();
     let Some(back) = invert(&square_to_quad(quad)) else {
@@ -432,7 +562,7 @@ pub fn place(
             if !(-0.01..=1.01).contains(&u) || !(-0.01..=1.01).contains(&v) {
                 continue;
             }
-            let source = crate::warp::sample(
+            let source = interpolation.sample(
                 piece,
                 size[0],
                 size[1],
@@ -623,5 +753,40 @@ mod tests {
         assert_eq!(alpha(&source, 12, 17), 0);
         assert_eq!(alpha(&bent, 12, 17), 255, "the bottom edge came down");
         assert_eq!(alpha(&bent, 12, 10), 255, "the top stays");
+    }
+
+    #[test]
+    fn each_interpolation_samples_its_own_way() {
+        // A 2 by 2 checker of black and white, scaled up eight times.
+        let mut piece = vec![0_u8; 16];
+        for (index, value) in [0_u8, 255, 255, 0].into_iter().enumerate() {
+            piece[index * 4..index * 4 + 4].copy_from_slice(&[value, value, value, 255]);
+        }
+        let (width, height) = (16, 16);
+        let rest = vec![0_u8; (width * height * 4) as usize];
+        let quad = rotated([8.0, 8.0], 2.0, 2.0, [8.0, 8.0], 0.0);
+        let shades = |interpolation: Interpolation| {
+            let out = place_with(&rest, width, height, &piece, [2, 2], &quad, interpolation);
+            let mut seen: Vec<u8> = (0..width * height)
+                .map(|index| out[(index * 4) as usize])
+                .collect();
+            seen.sort_unstable();
+            seen.dedup();
+            seen
+        };
+        // Hard edges: only the two colors there were.
+        assert_eq!(shades(Interpolation::Nearest), vec![0, 255]);
+        // Smooth and bicubic blend between them.
+        assert!(shades(Interpolation::Smooth).len() > 4);
+        assert!(shades(Interpolation::Bicubic).len() > 4);
+        // Bicubic keeps more contrast near a pixel's middle than bilinear.
+        let at = |interpolation: Interpolation| {
+            let out = place_with(&rest, width, height, &piece, [2, 2], &quad, interpolation);
+            out[((5 * width + 5) * 4) as usize]
+        };
+        assert!(at(Interpolation::Bicubic) <= at(Interpolation::Smooth));
+        for choice in Interpolation::ALL {
+            assert_eq!(Interpolation::of_id(choice.id()), Some(choice));
+        }
     }
 }
