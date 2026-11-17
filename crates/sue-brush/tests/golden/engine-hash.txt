@@ -1,3 +1,7 @@
 # The hash of the fixed stroke set of tests/replay.rs, per engine version,
 # recorded on Windows. See tests/replay.rs before changing a line.
-engine 1 09dcd5cfe9f1ce7f
+# Recorded again in Phase 6 (brush engine package), after a look at the
+# stroke sheets: sparse samples are joined by arcs (the resampler's
+# curve), the stabilizer's drain only goes forward along the pen's way,
+# and an ending comes to a clean point or is a round end.
+engine 1 63468e6130624fba

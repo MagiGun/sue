@@ -20,7 +20,9 @@
 //!    steps. The speed of the pen is measured here, on device time.
 //! 3. **Resampling** (`resample.rs`): records at a fixed [`RATE`] in
 //!    device time, so the stabilizer does not depend on how often the
-//!    device or the frames come.
+//!    device or the frames come, laid along a centripetal Catmull-Rom
+//!    curve through the device's records, so places far apart (a mouse,
+//!    a fast pen) are joined by arcs, not by straight pieces.
 //! 4. **Stabilizer** (`stabilize.rs`): a weighted average of whole
 //!    records (place, pressure, tilt, twist and speed together) over a
 //!    window of device time set by Clip Studio's 0 to 100 scale, which
@@ -298,6 +300,7 @@ impl Pipeline {
             .step
             .filter(|step| step.is_finite() && *step > 0.0)
             .unwrap_or_else(|| (dynamics.base_size() * 0.05).clamp(0.25, 2.0));
+        let base_size = dynamics.base_size();
         let level = preset.input.stabilization.min(100);
         let steady = (level > 0).then(|| {
             (
@@ -315,6 +318,7 @@ impl Pipeline {
                 preset.taper,
                 preset.min_width,
                 matches!(settings.device, Device::Constant(_)),
+                base_size,
             ),
             flick: preset.input.flick,
             scale,
@@ -369,10 +373,17 @@ impl Pipeline {
         }
         let mut curve = self.curve.clone();
         let mut bases = Vec::new();
-        if let Some((resampler, stabilizer)) = &self.steady
-            && let Some(record) = stabilizer.peek(resampler.partial())
-        {
-            curve.push(record, &mut bases);
+        if let Some((resampler, stabilizer)) = &self.steady {
+            // The curve's newest piece, laid with the way it is going.
+            let (ticks, partial) = resampler.provisional();
+            let mut stabilizer = stabilizer.clone();
+            for tick in ticks {
+                let steady = stabilizer.push(tick);
+                curve.push(steady, &mut bases);
+            }
+            if let Some(record) = stabilizer.peek(partial) {
+                curve.push(record, &mut bases);
+            }
         }
         curve.finish(&mut bases);
         let points: Vec<StrokePoint> = bases.iter().map(|base| self.dynamics.eval(base)).collect();
@@ -440,14 +451,16 @@ impl Pipeline {
                 // The last contact as a tick of its own, then the drain
                 // to it. Nothing after the brush's place at the last
                 // contact presses harder than the brush did there.
-                let mut cap = f32::INFINITY;
-                if let Some(tick) = resampler.partial() {
+                let mut ticks = Vec::new();
+                resampler.flush(&mut ticks);
+                ticks.extend(resampler.partial());
+                for tick in ticks {
                     let steady = stabilizer.push(tick);
-                    cap = steady.pressure;
                     self.curve.push(steady, &mut bases);
-                } else if let Some(steady) = stabilizer.peek(None) {
-                    cap = steady.pressure;
                 }
+                let mut cap = stabilizer
+                    .peek(None)
+                    .map_or(f32::INFINITY, |steady| steady.pressure);
                 self.curve.settle(&mut bases);
                 for mut steady in stabilizer.drain() {
                     steady.pressure = steady.pressure.min(cap);
@@ -483,11 +496,26 @@ impl Pipeline {
         self.curve.finish(&mut bases);
         let mut points: Vec<StrokePoint> =
             bases.iter().map(|base| self.dynamics.eval(base)).collect();
+        let mut reach = 0.0;
         if let Some(speed) = flick {
             let size = self.dynamics.base_size();
-            flick::run_out(&mut points, self.shaper.last(), speed, size, self.step);
+            let narrowing = if self.shaper.ends_tapered() {
+                flick::Narrowing::Taper {
+                    most: self.shaper.longest_ending(),
+                }
+            } else {
+                flick::Narrowing::Own
+            };
+            reach = flick::run_out(
+                &mut points,
+                self.shaper.last(),
+                speed,
+                size,
+                self.step,
+                narrowing,
+            );
         }
-        self.shaper.finish(&points);
+        self.shaper.finish(&points, reach);
     }
 
     /// Points of final curve segments, into the shaper.

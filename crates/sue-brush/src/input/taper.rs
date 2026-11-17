@@ -15,6 +15,17 @@
 //! lengths and stretch from there: a slow mouse stroke still comes to a
 //! point, a quick one to a longer one, as a pen user's would.
 //!
+//! An ending comes to a clean point or not at all. A tip that thins
+//! slower than it advances is pointed; one that thins faster ends in
+//! the round end of its widest disc. An ending between a quarter of
+//! [`ENDING_PER_WIDTH`] widths of the line near its end and that many
+//! widths would be both, a blunt wedge with a rounded nose that reads
+//! as a cut, so it is made that many widths long (as the stroke's
+//! length allows). Shorter than that quarter it is the round end it
+//! already looks like (a slow pen, whose pressure thins its end). A
+//! flick's run out lies inside the ending, which then reaches at least
+//! over it.
+//!
 //! The ending is applied while the pen is down, at the stroke's end as
 //! it stands, so it does not change shape on the lift. Over the ending
 //! window the size and the opacity never grow toward the end: a pen
@@ -41,6 +52,38 @@ const FULL_SPEED: f32 = 2000.0;
 /// The share of a stroke both tapers fit in.
 const FIT: f32 = 0.8;
 
+/// The shortest pointed ending, in widths of the line near its end.
+pub(crate) const ENDING_PER_WIDTH: f32 = 2.0;
+
+/// How many times its set length an ending is made at most to come to
+/// a clean point.
+const LONGEST_STRETCH: f32 = 3.0;
+
+/// The share of the shortest pointed ending under which an ending is a
+/// round end and is left as it is.
+const ROUND_BELOW: f32 = 0.25;
+
+/// What an ending must reach over at least: a pointed ending's length
+/// for the line's width near its end, and a flick's run out.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Floor {
+    pointed: f32,
+    run_out: f32,
+}
+
+impl Floor {
+    /// The ending `end` long made clean: a round end is left, a blunt
+    /// wedge made pointed, and it reaches over the run out.
+    fn widen(self, end: f32) -> f32 {
+        let pointed = if end >= self.pointed * ROUND_BELOW {
+            end.max(self.pointed)
+        } else {
+            end
+        };
+        pointed.max(self.run_out)
+    }
+}
+
 /// The ease of the tapers, 0 at 0 and 1 at 1.
 fn ease(x: f32) -> f32 {
     let x = x.clamp(0.0, 1.0);
@@ -65,10 +108,13 @@ pub(crate) struct Shaper {
     /// The device has no pressure (a mouse): by speed, the tapers keep
     /// at least their set lengths.
     pressureless: bool,
+    /// The brush's size before its dynamics: the widest a line can be,
+    /// so the longest an ending can be made.
+    base_size: f32,
 }
 
 impl Shaper {
-    pub fn new(taper: Taper, min_width: f32, pressureless: bool) -> Self {
+    pub fn new(taper: Taper, min_width: f32, pressureless: bool, base_size: f32) -> Self {
         let clean = |length: f32| {
             if length.is_finite() {
                 length.max(0.0)
@@ -93,7 +139,30 @@ impl Shaper {
             speeds: (0.0, 0),
             start_speed: None,
             pressureless,
+            base_size: if base_size.is_finite() {
+                base_size.max(0.0)
+            } else {
+                0.0
+            },
         }
+    }
+
+    /// `true` when the brush has an ending taper of a length (not a
+    /// fade).
+    pub fn ends_tapered(&self) -> bool {
+        self.taper.end > 0.0 && self.taper.mode != TaperMode::Fade
+    }
+
+    /// The longest ending window a stroke of this brush can have in
+    /// length mode, at any speed and width: its set length (stretched
+    /// at full speed), made longer for a clean point by at most
+    /// [`LONGEST_STRETCH`] times. A very wide brush with a short ending
+    /// is not given an ending many times longer than was asked for (and
+    /// a tail that long to draw again on every frame).
+    pub fn longest_ending(&self) -> f32 {
+        let stretch = if self.taper.by_speed { BY_SPEED } else { 1.0 };
+        let set = self.taper.end * stretch;
+        (ENDING_PER_WIDTH * self.base_size).clamp(set, set * LONGEST_STRETCH)
     }
 
     /// How much "by speed" stretches a taper at speed share `share`: up
@@ -156,7 +225,7 @@ impl Shaper {
             for p in &mut done {
                 // Settled points have no ending, and a settled starting
                 // does not depend on the length.
-                let factor = self.factor(p.arc, f32::INFINITY, start_speed, 0.0);
+                let factor = self.factor(p.arc, f32::INFINITY, start_speed, 0.0, Floor::default());
                 self.apply(p, factor);
             }
             self.committed.extend(done);
@@ -170,7 +239,12 @@ impl Shaper {
             return point.arc < known;
         }
         let stretch = if self.taper.by_speed { BY_SPEED } else { 1.0 };
-        let (start, end) = (self.taper.start * stretch, self.taper.end * stretch);
+        let start = self.taper.start * stretch;
+        let end = if self.ends_tapered() {
+            self.longest_ending()
+        } else {
+            0.0
+        };
         let speed_known = !self.taper.by_speed || self.start_speed.is_some();
         match self.taper.mode {
             TaperMode::Percent => false,
@@ -185,8 +259,8 @@ impl Shaper {
 
     /// The taper factor at arc length `s` of a stroke `length` long
     /// (infinite: not known, no ending), with the starting and ending
-    /// speed shares.
-    fn factor(&self, s: f32, length: f32, start_speed: f32, end_speed: f32) -> f32 {
+    /// speed shares and the shortest the ending may be (`floor`).
+    fn factor(&self, s: f32, length: f32, start_speed: f32, end_speed: f32, floor: Floor) -> f32 {
         if !self.tapers() {
             return 1.0;
         }
@@ -204,6 +278,9 @@ impl Shaper {
             } else {
                 end_speed
             });
+        }
+        if self.ends_tapered() {
+            end = floor.widen(end);
         }
         if self.taper.mode == TaperMode::Fade {
             let up = if start > 0.0 { ease(s / start) } else { 1.0 };
@@ -230,8 +307,8 @@ impl Shaper {
     }
 
     /// The length of the ending window of a stroke `length` long whose
-    /// end moves at `end_speed`, after fitting.
-    fn end_window(&self, length: f32, start_speed: f32, end_speed: f32) -> f32 {
+    /// end moves at `end_speed`, at least `floor`, after fitting.
+    fn end_window(&self, length: f32, start_speed: f32, end_speed: f32, floor: Floor) -> f32 {
         if self.taper.mode == TaperMode::Fade || self.taper.end <= 0.0 || length < 1.0 {
             return 0.0;
         }
@@ -246,6 +323,7 @@ impl Shaper {
             start *= self.stretch(start_speed);
             end *= self.stretch(end_speed);
         }
+        end = floor.widen(end);
         let fit = (start + end) / (FIT * length);
         if fit > 1.0 {
             end /= fit;
@@ -266,9 +344,33 @@ impl Shaper {
         point.size = point.size.max(self.min_width);
     }
 
+    /// What the ending of `points` (before the tapers), the last
+    /// `run_out` pixels of which are a flick's run out, reaches over at
+    /// least: the run out, and if pointed, [`ENDING_PER_WIDTH`] times the
+    /// widest the line is near its end; never more than
+    /// [`Self::longest_ending`].
+    fn ending_floor(&self, points: &[StrokePoint], length: f32, run_out: f32) -> Floor {
+        if !self.ends_tapered() {
+            return Floor::default();
+        }
+        let near = length - self.longest_ending();
+        let widest = points
+            .iter()
+            .rev()
+            .take_while(|p| p.arc >= near)
+            .map(|p| p.size)
+            .fold(0.0_f32, f32::max);
+        let most = self.longest_ending();
+        Floor {
+            pointed: (ENDING_PER_WIDTH * widest).min(most),
+            run_out: run_out.min(most),
+        }
+    }
+
     /// The pending points and then `provisional`, shaped for a stroke
-    /// that ends at the last of them.
-    fn shaped(&self, provisional: &[StrokePoint]) -> Vec<StrokePoint> {
+    /// that ends at the last of them, the last `run_out` pixels a
+    /// flick's run out.
+    fn shaped(&self, provisional: &[StrokePoint], run_out: f32) -> Vec<StrokePoint> {
         let mut points: Vec<StrokePoint> =
             self.pending.iter().chain(provisional).cloned().collect();
         let Some(last) = points.last() else {
@@ -294,11 +396,12 @@ impl Shaper {
                 (sum / count as f32).clamp(0.0, 1.0)
             }
         });
+        let floor = self.ending_floor(&points, length, run_out);
         for point in &mut points {
-            let factor = self.factor(point.arc, length, start_speed, end_speed);
+            let factor = self.factor(point.arc, length, start_speed, end_speed, floor);
             self.apply(point, factor);
         }
-        let window = self.end_window(length, start_speed, end_speed);
+        let window = self.end_window(length, start_speed, end_speed, floor);
         if window > 0.0 {
             hold_down(&mut points, length - window);
         }
@@ -307,18 +410,19 @@ impl Shaper {
 
     /// The tail: what is not committed, with `provisional` after it.
     pub fn tail(&self, provisional: &[StrokePoint]) -> Vec<StrokePoint> {
-        self.shaped(provisional)
+        self.shaped(provisional, 0.0)
     }
 
-    /// The lift: the last points come, and everything is committed.
-    pub fn finish(&mut self, last: &[StrokePoint]) {
+    /// The lift: the last points come (the last `run_out` pixels of
+    /// them a flick's run out), and everything is committed.
+    pub fn finish(&mut self, last: &[StrokePoint], run_out: f32) {
         for point in last {
             self.measure(point);
         }
         if self.start_speed.is_none() {
             self.start_speed = Some(self.measured());
         }
-        let shaped = self.shaped(last);
+        let shaped = self.shaped(last, run_out);
         self.pending.clear();
         self.committed.extend(shaped);
     }
