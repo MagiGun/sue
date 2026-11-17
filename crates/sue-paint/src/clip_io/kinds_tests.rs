@@ -1485,15 +1485,15 @@ fn a_line_whose_pressure_or_tapers_shape_it_says_clip_studio_shows_it_evener() {
     };
     let by_pressure = Tip {
         size_by: crate::brush::Dynamics::pressure(0.2),
-        ..plain.clone()
+        ..plain
     };
     let tapered = Tip {
         taper_end: 20.0,
-        ..plain.clone()
+        ..plain
     };
     for (lines, approximated) in [
-        (vec![line(plain.clone(), 0.5)], false),
-        (vec![line(by_pressure.clone(), 1.0)], false),
+        (vec![line(plain, 0.5)], false),
+        (vec![line(by_pressure, 1.0)], false),
         (vec![line(by_pressure, 0.5)], true),
         (vec![line(tapered, 1.0)], true),
     ] {
