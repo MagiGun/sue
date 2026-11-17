@@ -44,12 +44,35 @@ fn overlap_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState 
 }
 
 /// Merge Selected Layers: two or more picked layers of any kind, or a
-/// folder alone (it is baked into one layer).
+/// folder alone (it is baked into one layer), or a layer alone in a
+/// folder cel (the cel is merged).
 fn merge_selected_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
     let folder = paint
         .layer()
         .is_some_and(|layer| doc::is_folder(facts.arena, layer));
-    when(paint.doc().is_some_and(|doc| !doc.picked.is_empty()) || folder)
+    when(
+        paint.doc().is_some_and(|doc| !doc.picked.is_empty())
+            || folder
+            || folder_cel_around(paint, facts.arena).is_some(),
+    )
+}
+
+/// The folder cel the current layer lies in, when it is the only layer
+/// picked: going to a frame that shows a folder cel picks a layer in it
+/// (TR-1), and Merge Selected Layers then merges that cel, as an auto
+/// action that merges each cel and steps on expects (the 2025 tutorial,
+/// V26).
+fn folder_cel_around(paint: &SuePaint, arena: &Arena) -> Option<EntityId> {
+    let doc = paint.doc()?;
+    if !doc.picked.is_empty() {
+        return None;
+    }
+    let layer = doc.layer?;
+    if doc::is_folder(arena, layer) {
+        return None;
+    }
+    let cel = doc::folder_of(arena, layer)?;
+    crate::anim::cel_folder(arena, cel).map(|_| cel)
 }
 
 fn from_selection_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
@@ -1117,7 +1140,7 @@ fn merge_selected(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
         return;
     };
     let mut ids = doc.picked.clone();
-    ids.extend(doc.layer);
+    ids.extend(folder_cel_around(paint, &cx.world.arena).or(doc.layer));
     match doc::merge_layers(&cx.world.arena, picture, &ids) {
         Ok((edit, into)) => {
             // A folder cel merged stays the cel: its frames show the layer
