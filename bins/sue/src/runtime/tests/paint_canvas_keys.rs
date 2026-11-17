@@ -426,11 +426,28 @@ fn alt_picks_a_color_with_fill_and_a_right_click_picks_too() {
         .find(|pixel| pixel[3] == 255 && pixel[0] > 240)
         .is_some();
     assert!(white, "the Fill tool's Alt picked the paper's white");
-    // A right-click on the black line picks black again.
+    // A right-click on the black line picks black again. The Pencil's
+    // grain leaves light valleys in the line, and where the middle pixel
+    // falls depends on the layout, so the click goes where the graphite
+    // is solid: the pixel near the middle whose 3 by 3 block is the most
+    // covered.
+    let solid = |[x, y]: [i64; 2]| {
+        (-1..=1)
+            .flat_map(|dy| (-1..=1).map(move |dx| [x + dx, y + dy]))
+            .map(|p| pixel(&driver, layer, p)[3])
+            .min()
+            .unwrap_or(0)
+    };
+    let [dx, dy] = (-4..=4)
+        .flat_map(|dy| (-40..=40).map(move |dx| [dx, dy]))
+        .max_by_key(|[dx, dy]| solid([center[0] + dx, center[1] + dy]))
+        .expect("pixels about the middle");
+    let scale = zoom(&driver) / 100.0;
+    let on_line = middle + vec2(dx as f32 * scale, dy as f32 * scale);
     drag_held(
         &mut driver,
-        middle,
-        middle,
+        on_line,
+        on_line,
         PointerButton::Secondary,
         Modifiers::NONE,
     );
