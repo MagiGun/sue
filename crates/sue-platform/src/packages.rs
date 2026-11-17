@@ -78,6 +78,8 @@ pub struct PackageCenter {
     fetch: Arc<dyn Fetch>,
     pool: JobPool,
     known: Mutex<Vec<Known>>,
+    /// The ids of the packages Sue names itself.
+    own: Vec<String>,
     running: Mutex<HashMap<String, Running>>,
     failed: Mutex<HashMap<String, PkgError>>,
 }
@@ -96,8 +98,25 @@ impl PackageCenter {
     /// before.
     #[must_use]
     pub fn new(root: impl Into<PathBuf>, fetch: Arc<dyn Fetch>) -> Self {
+        Self::with_packages(root, fetch, &BUILT_IN)
+    }
+
+    /// [`Self::new`], naming the packages of `manifests` in place of
+    /// [`BUILT_IN`]: for tests and previews, whose packages are small
+    /// and made up.
+    #[must_use]
+    pub fn with_packages(
+        root: impl Into<PathBuf>,
+        fetch: Arc<dyn Fetch>,
+        manifests: &[&str],
+    ) -> Self {
         let home = PackageHome::new(root);
-        let mut known: Vec<Known> = BUILT_IN
+        let own: Vec<String> = manifests
+            .iter()
+            .filter_map(|text| OptionalPackage::parse(text).ok())
+            .map(|package| package.id)
+            .collect();
+        let mut known: Vec<Known> = manifests
             .iter()
             .filter_map(|text| OptionalPackage::parse(text).ok())
             .map(|package| Known {
@@ -127,6 +146,7 @@ impl PackageCenter {
             fetch,
             pool: JobPool::new(1),
             known: Mutex::new(known),
+            own,
             running: Mutex::new(HashMap::new()),
             failed: Mutex::new(HashMap::new()),
         }
@@ -192,10 +212,7 @@ impl PackageCenter {
     /// removed).
     #[must_use]
     pub fn built_in(&self, id: &str) -> bool {
-        BUILT_IN
-            .iter()
-            .filter_map(|text| OptionalPackage::parse(text).ok())
-            .any(|package| package.id == id)
+        self.own.iter().any(|own| own == id)
     }
 
     /// The folder package `id` is installed in, when it is whole.

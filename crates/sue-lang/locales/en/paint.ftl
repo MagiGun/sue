@@ -3947,6 +3947,7 @@ hand-scanner-looking = Looking for a hand
 hand-scanner-following-left = Following a left hand, { $rate } times a second
 hand-scanner-following-right = Following a right hand, { $rate } times a second
 hand-scanner-paused = Capture is paused
+hand-scanner-stopped = The camera is off
 hand-scanner-camera = Camera
 hand-scanner-camera-hint = The camera the Hand Scanner looks through.
 hand-scanner-default-camera = Default camera

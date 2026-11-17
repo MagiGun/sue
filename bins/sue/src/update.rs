@@ -374,12 +374,6 @@ impl Updater {
         }
     }
 
-    /// `true` while an update downloads (for tests).
-    #[cfg(test)]
-    fn downloading(&self) -> bool {
-        matches!(self.state, State::Downloading { .. })
-    }
-
     /// Draws the window in the corner, when it shows.
     pub fn ui(&mut self, ctx: &egui::Context, theme: &Theme) -> Option<Action> {
         let mut action = None;

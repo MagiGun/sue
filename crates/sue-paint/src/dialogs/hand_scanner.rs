@@ -87,6 +87,31 @@ pub fn inject(parts: Parts) {
     INJECTED.with(|slot| *slot.borrow_mut() = Some(parts));
 }
 
+thread_local! {
+    /// What the Hand Scanner open on this thread is doing.
+    static STATE: std::cell::Cell<Option<State>> = const { std::cell::Cell::new(None) };
+}
+
+/// What an open Hand Scanner is doing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct State {
+    /// Its camera runs.
+    pub camera: bool,
+    /// How many pictures showed a hand.
+    pub hands: u64,
+    /// How many pictures the tracker looked at.
+    pub pictures: u64,
+    /// Capture is paused.
+    pub paused: bool,
+}
+
+/// What the Hand Scanner open on this thread is doing; `None` when none
+/// is open. For tests: the camera must never run without its dialog.
+#[must_use]
+pub fn state() -> Option<State> {
+    STATE.with(std::cell::Cell::get)
+}
+
 /// The size of the made-up camera's pictures.
 const FAKE_SIZE: (u32, u32) = (640, 480);
 
@@ -495,6 +520,13 @@ impl HandScan {
                     tr!("hand-scanner-following-left", rate = format!("{rate:.0}"))
                 }
             }
+            None if self
+                .stream
+                .as_ref()
+                .is_some_and(|stream| stream.error().is_some()) =>
+            {
+                tr!("hand-scanner-stopped")
+            }
             None if self.picture.is_some() => tr!("hand-scanner-looking"),
             None => tr!("hand-scanner-starting"),
         }
@@ -737,6 +769,14 @@ impl SuePaint {
             return Outcome::Cancel;
         };
         let outcome = Self::hand_scanner_body(ui, cx, theme, &mut scan);
+        STATE.with(|state| {
+            state.set(Some(State {
+                camera: scan.stream.is_some(),
+                hands: scan.found.0,
+                pictures: scan.found.1,
+                paused: scan.paused,
+            }));
+        });
         self.hand_scan = Some(scan);
         outcome
     }
@@ -1009,6 +1049,7 @@ impl SuePaint {
         let Some(mut scan) = self.hand_scan.take() else {
             return;
         };
+        STATE.with(|state| state.set(None));
         scan.stop();
         let scanned = scan.shown.clone();
         if scanned == scan.before {
@@ -1035,15 +1076,6 @@ impl SuePaint {
         if self.hand_scan.is_some() && !matches!(self.dialog, Some(super::Dialog::HandScanner)) {
             self.hand_scanner_end(cx, false);
         }
-    }
-
-    /// What an open Hand Scanner is doing, for tests: whether its camera
-    /// runs, how many pictures showed a hand and how many were looked at.
-    #[must_use]
-    pub fn hand_scanner_state(&self) -> Option<(bool, u64, u64)> {
-        self.hand_scan
-            .as_ref()
-            .map(|scan| (scan.stream.is_some(), scan.found.0, scan.found.1))
     }
 }
 
