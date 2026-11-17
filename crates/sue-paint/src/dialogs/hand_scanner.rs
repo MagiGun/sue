@@ -28,7 +28,7 @@
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use egui::{Color32, Rect, Stroke, Ui, pos2, vec2};
 use sue_ai::hand::{HandFrame, HandObservation, HandTracker, OnnxHandTracker};
@@ -38,6 +38,7 @@ use sue_platform::camera::{
     self, CameraError, CameraFrame, CameraInfo, CameraOpener, CameraStream, FakeCamera,
 };
 use sue_platform::packages::{HAND_TRACKING, PackageCenter, PackageState};
+use sue_platform::time::Instant;
 use sue_wm::ui::{self, Space, TextRole, Tip};
 use sue_wm::{AppletContext, Theme};
 

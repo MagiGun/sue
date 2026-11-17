@@ -22,10 +22,11 @@ use crate::studio::SuePaint;
 /// its photo. A test holds it to the flags of the table, which Auto
 /// Actions read.
 #[cfg_attr(not(test), allow(dead_code))]
-pub(super) const RECORDABLE: [&str; 13] = [
+pub(super) const RECORDABLE: [&str; 14] = [
     "figure.register_pose",
     "figure.pose_scanner",
     "figure.hand_scanner",
+    "figure.hand_scanner_camera",
     "figure.flip",
     "figure.reset",
     "figure.preset.",
@@ -276,15 +277,15 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         hand_scanner,
         on_hand,
     ),
-    // Not recordable: what it does depends on what the camera sees.
-    Command::new(
+    // Recorded as the photo scanners are: an Auto Action opens the
+    // dialog, and what the camera sees then poses the hand.
+    c(
         "figure.hand_scanner_camera",
         "hand-scanner-camera",
-        "figure",
+        Icon::ToolHand,
         hand_scanner_camera,
-    )
-    .icon(Icon::ToolHand.name())
-    .state(on_hands),
+        on_hands,
+    ),
     c(
         "figure.flip",
         "flip-pose",

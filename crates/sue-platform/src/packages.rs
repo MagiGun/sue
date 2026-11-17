@@ -13,10 +13,10 @@
 //! ([`PackageCenter::at`]): an install started in a dialog shows its
 //! progress in Settings too, and either place can cancel it.
 
+use crate::time::Instant;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use sue_core::{JobHandle, JobPool};
 pub use sue_pkg::{
