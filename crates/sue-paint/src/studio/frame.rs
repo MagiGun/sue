@@ -180,6 +180,25 @@ impl SuePaint {
     }
 
     pub(super) fn frame(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
+        // A lifted stroke its worker is still laying lands before
+        // anything is pressed or typed, so whatever that starts finds
+        // the picture and the history in order.
+        if self.engine_ending()
+            && ui.ctx().input(|input| {
+                input.pointer.any_pressed()
+                    || input.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::Key { pressed: true, .. }
+                                | egui::Event::Text(_)
+                                | egui::Event::Paste(_)
+                                | egui::Event::Cut
+                        )
+                    })
+            })
+        {
+            self.engine_settle(cx);
+        }
         self.follow_language(cx);
         // The layout style, changed in Settings, the Window menu or by undo.
         self.follow_layout_style(cx);

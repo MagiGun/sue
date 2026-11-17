@@ -376,6 +376,64 @@ impl Painter<'_> {
         self.fill(ribbon);
     }
 
+    /// [`Self::fill`] for a shape whose coverage of every pixel of its
+    /// bounds `rect` is worked out already (`cover`, row by row, as the
+    /// shape's `coverage` answers at each pixel's center): the same
+    /// values combined the same way, for coverage that was worked out
+    /// on several threads.
+    pub fn fill_cover(&mut self, rect: PixelRect, cover: &[f32]) {
+        if rect.is_empty() {
+            return;
+        }
+        let combine = self.buffer.combine;
+        let width = (rect.x1 - rect.x0) as usize;
+        let mut values = [0_u16; TILE as usize];
+        let mut worked = 0_u64;
+        for (y, row) in (rect.y0..rect.y1).zip(cover.chunks(width)) {
+            worked += width as u64;
+            let mut x0 = rect.x0;
+            while x0 < rect.x1 {
+                let key = TileKey::of_pixel(x0, y);
+                let [ox, oy] = key.origin();
+                let x1 = rect.x1.min(ox + TILE);
+                let mut any = false;
+                for x in x0..x1 {
+                    let q = quantize(row[(x - rect.x0) as usize]);
+                    values[(x - x0) as usize] = q;
+                    any |= q > 0;
+                }
+                if any {
+                    let tile = self.buffer.tiles.entry(key).or_default();
+                    let slot = match self.part {
+                        Part::Committed => &mut tile.committed,
+                        Part::Tail => &mut tile.tail,
+                    };
+                    let part = Tile::part(slot);
+                    let at = ((y - oy) * TILE) as usize;
+                    for (x, &q) in (x0..x1).zip(&values) {
+                        let i = at + (x - ox) as usize;
+                        part[i] = combine.apply(part[i], q);
+                    }
+                    let run = PixelRect {
+                        x0,
+                        y0: y,
+                        x1,
+                        y1: y + 1,
+                    };
+                    if self.part == Part::Tail {
+                        mark(&mut self.buffer.tail, key, run);
+                    }
+                    mark(&mut self.buffer.dirty, key, run);
+                }
+                x0 = x1;
+            }
+        }
+        self.buffer.counters.pixels += worked;
+        if self.part == Part::Tail {
+            self.buffer.counters.tail_pixels += worked;
+        }
+    }
+
     /// Lays `shape`'s coverage, pixel by pixel within its bounds and row
     /// spans, combining it with what the part holds. The work is row by
     /// row over each row's span only, so a long thin shape at a slant

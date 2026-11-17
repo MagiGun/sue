@@ -2144,6 +2144,34 @@ grid. The Blend tool's blenders are presets of tool `blend`
 cannot say live in `SubTool::behaviours` and are written over its preset
 when it paints.
 
+**Performance (0.0.81).** A stroke costs what its new samples cost,
+however long it is, and the interface never waits for it. The pipeline
+hands its committed points to whoever lays them and keeps only what can
+still change (`Pipeline::take_committed`). A mixing dab finds each tile
+it covers once, works in buffers kept from dab to dab, and a big one is
+worked out and written on the pool's threads by bands of tile rows
+(`WetCanvas::stamp_shared`); dabs still go down one after another and
+every pixel is the same arithmetic in the same order, so the bytes do
+not depend on the threads. The tiles an update changed are laid for the
+live view on several threads, and a watercolor edge shows again only the
+tiles a change reaches (`StrokeBuffer::take_dirty_rects`). A worker's job
+lays a slice of about a frame, shows it (`LiveView::take_fresh`) and goes
+on, so a stroke it is behind on still grows frame by frame, and a stroke
+given up stops after the sample in hand. On the lift Sue Paint asks how
+much is left (`StrokeWorker::work_left`) and how much the stroke spans:
+a small stroke is finished on the spot, any other settles on the worker
+(`StrokeWorker::settle`), which works the undo step out on a copy of the
+part of the layer the stroke spans (`Stroke::prepare`, patch for patch
+the edit of the merge); the interface then only writes the patches. A
+press, a key or a command meanwhile lands the stroke first. What stays
+as it was: a taper by percent of the line keeps the whole stroke
+provisional, a mixing stroke holds about 53 bytes for each pixel of the
+tiles it touched until it lands, and brushes that do not mix lay their
+dabs on one thread. `sue-brush/tests/perf.rs` holds the bytes against
+hashes recorded before the change and has the benchmark (ignored);
+`bins/sue/src/runtime/tests/paint_brush_long.rs` follows a long stroke
+through the runtime.
+
 **Transform.** Scale/Rotate (Ctrl+T) and Free Transform (Ctrl+Shift+T)
 lift the selected part of the current layer, or all of it
 (`sue_paint::transform::lift`), and draw it onto a quad with one projective

@@ -45,8 +45,8 @@ use sue_brush::paint::overflow::Region;
 use sue_brush::raster::PixelRect;
 use sue_brush::replay::{self, Recorder};
 use sue_brush::worker::{Brush, Canvas, Landing, LiveView, StrokeWorker};
-use sue_core::ReversibleTransaction;
 use sue_core::EntityId;
+use sue_core::ReversibleTransaction;
 use sue_core::txn::Batch;
 use sue_model::BrushPreset;
 use sue_model::brush::{EngineKind, TipSource, param};
@@ -147,6 +147,9 @@ pub(crate) struct EngineStroke {
     /// it goes into its layer by itself once the worker is through
     /// (see [`SETTLE_HERE`]).
     ending: bool,
+    /// The pen's reach so far in the stroke's pixels, `[x0, y0, x1,
+    /// y1]` around every sample sent.
+    reach: Option<[f32; 4]>,
 }
 
 /// About how many pixels of work a lift waits for on the spot. A
@@ -156,6 +159,12 @@ pub(crate) struct EngineStroke {
 /// the undo step out, and the stroke lands a few frames later, the same
 /// pixels. A sixteenth of a second of work at the engine's slowest.
 const SETTLE_HERE: u64 = 16 << 20;
+
+/// A stroke that spans more pixels than this is let go on the lift too,
+/// however far its worker is: merging it into its layer and cutting its
+/// undo step take as long as the place it spans is big (a watercolor
+/// edge is shaped over all of it), and that is the worker's to do.
+const SETTLE_SPAN: f64 = (1_u64 << 19) as f64;
 
 /// The tool key of the built-in brushes of `tool` (`sue_brush::presets`).
 fn brush_key(tool: Tool) -> Option<&'static str> {
@@ -393,9 +402,23 @@ impl EngineStroke {
             }
         }
         self.raw.push(sample);
+        let [x, y] = sample.pos;
+        self.reach = Some(match self.reach {
+            Some([x0, y0, x1, y1]) => [x0.min(x), y0.min(y), x1.max(x), y1.max(y)],
+            None => [x, y, x, y],
+        });
         if sample.kind == Kind::Up {
             self.lifted = true;
         }
+    }
+
+    /// About how many pixels the stroke spans: the box around the pen's
+    /// way, the brush's size around it.
+    fn span(&self) -> f64 {
+        let size = f64::from(self.size());
+        self.reach.map_or(0.0, |[x0, y0, x1, y1]| {
+            (f64::from(x1 - x0) + size) * (f64::from(y1 - y0) + size)
+        })
     }
 
     /// One sample of the pen, in the stroke's pixels: snapped to its ruler,
@@ -1118,6 +1141,7 @@ impl SuePaint {
             rest: None,
             shaping: None,
             ending: false,
+            reach: None,
         };
         for sample in first {
             stroke.feed(sample);
@@ -1301,13 +1325,10 @@ impl SuePaint {
         };
         let left: u64 = stroke
             .copies
-            .iter_mut()
-            .map(|copy| {
-                let _ = copy.worker.poll();
-                copy.worker.work_left(each)
-            })
+            .iter()
+            .map(|copy| copy.worker.work_left(each))
             .fold(0, u64::saturating_add);
-        if left > SETTLE_HERE {
+        if left > SETTLE_HERE || stroke.span() > SETTLE_SPAN {
             if stroke.lay.is_none()
                 && let Some(raster) = doc::raster(&cx.world.arena, stroke.target)
                 && let Some(copy) = stroke.copies.first_mut()
@@ -1371,6 +1392,7 @@ impl SuePaint {
             );
         }
         stroke.raw.clear();
+        stroke.reach = None;
         stroke.lifted = false;
         for sample in samples {
             stroke.send(sample);

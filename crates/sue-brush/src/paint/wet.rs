@@ -37,10 +37,11 @@ use sue_model::brush::Mixing;
 use super::math::unit;
 use super::overflow::Region;
 use super::plan::Planned;
-use super::stamp::{Stamp, Tips};
+pub use super::stamp::SharedTips;
+use super::stamp::{Stamp, Tips, WORTH_SHARING, cover_shared};
 use crate::buffer::{AREA, MergeError, TILE, TileKey};
 use crate::raster::{PixelRect, Shape};
-use crate::texture::{Paper, Texture, TextureSettings};
+use crate::texture::Texture;
 
 /// Where a wet stroke reads the picture under it: straight RGBA, 0 to
 /// 1, of a layer pixel. Outside the picture it is clear.
@@ -273,10 +274,6 @@ impl Band {
 /// The most threads one dab is laid on.
 const MOST_BANDS: usize = 8;
 
-/// A dab with fewer pixels than this is laid on one thread: handing it
-/// out would cost more than it saves.
-const WORTH_SHARING: usize = 96 * 96;
-
 /// Marks a tile of a dab's [`Grid`] nobody has asked for yet.
 const UNKNOWN: u32 = u32::MAX;
 
@@ -488,19 +485,6 @@ impl DabWork {
             }
         }
     }
-}
-
-/// What dabs are stamped with, owned, so a dab's coverage can be worked
-/// out on several threads: the tip's pictures, the width of a hard
-/// rim's antialiasing, and the paper laid dab by dab.
-#[derive(Clone, Debug)]
-pub struct SharedTips {
-    /// The tip's pictures.
-    pub pictures: Arc<[crate::raster::TipImage]>,
-    /// The width of a hard round rim's antialiasing.
-    pub edge: f32,
-    /// The paper laid dab by dab, if any.
-    pub texture: Option<(Arc<Paper>, TextureSettings)>,
 }
 
 /// The coverage of rows `rows` of `rect` by `shape`, row by row.
@@ -835,44 +819,11 @@ impl WetCanvas {
                 Some(pool) => {
                     // The dab's rows in as many runs as bands: the first
                     // here, the others on the pool.
-                    let w = (rect.x1 - rect.x0) as usize;
-                    let rows = (rect.y1 - rect.y0) as usize;
-                    let per = rows.div_ceil(bands);
-                    let jobs: Vec<_> = (1..bands)
-                        .filter(|run| run * per < rows)
-                        .map(|run| {
-                            let (from, to) = (run * per, ((run + 1) * per).min(rows));
-                            let (planned, tips) = (*planned, tips.clone());
-                            let job = pool.spawn("brush dab", move |_| {
-                                let texture = tips
-                                    .texture
-                                    .as_ref()
-                                    .map(|(paper, settings)| Texture::new(paper, *settings));
-                                let borrowed = Tips {
-                                    pictures: &tips.pictures,
-                                    edge: tips.edge,
-                                };
-                                let stamp = Stamp::new(&planned, &borrowed, texture.as_ref());
-                                let mut out = vec![0.0_f32; (to - from) * w];
-                                let rows = rect.y0 + from as i32..rect.y0 + to as i32;
-                                cover_rows(&stamp, rect, rows, &mut out);
-                                Ok(out)
-                            });
-                            (from * w, job)
-                        })
-                        .collect();
-                    let first = per.min(rows);
-                    cover_rows(
-                        &stamp,
-                        rect,
-                        rect.y0..rect.y0 + first as i32,
-                        &mut out[..first * w],
-                    );
-                    for (at, job) in jobs {
-                        match job.wait() {
-                            Ok(part) => out[at..at + part.len()].copy_from_slice(&part),
-                            Err(error) => failed = Some(error.to_string()),
-                        }
+                    if let Err(error) = cover_shared(planned, tips, rect, bands, pool, out) {
+                        failed = Some(error);
+                    }
+                    for c in out.iter_mut() {
+                        *c = unit(*c);
                     }
                 }
             };

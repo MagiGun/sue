@@ -117,6 +117,14 @@ follow [Semantic Versioning](https://semver.org/).
   triangle's tip no longer turns the hue, and picking inside the shape
   never drifts the hue by a fraction of a degree. From @propaneko's
   pull request (#10).
+- Sue Paint, brushes: a long stroke of a heavy brush (a big textured
+  brush, oil paint, gouache or pastel that mix, a dual brush, Blur,
+  Finger tip, Wet bleed, a watercolor edge) no longer lags behind the
+  pen for minutes or freezes Sue when you lift. Mixing brushes paint
+  about ten times as fast, and a stroke that is long or wide finishes
+  in the background while you go on: it lands a moment later, the
+  pointer shows a quiet busy mark meanwhile, and it is one undo step as
+  before. What is painted is the same, pixel for pixel.
 
 ## [0.0.8] - 2026-11-17
 

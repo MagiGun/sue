@@ -2,10 +2,157 @@
 //! flipped as planned, and broken up by the paper when the texture is
 //! laid dab by dab.
 
+use std::sync::Arc;
+
+use sue_core::JobPool;
+
 use super::plan::Planned;
 use crate::buffer::Painter;
 use crate::raster::{Dab, DabShape, PixelRect, RoundTip, Shape, TipImage, Turn};
-use crate::texture::Texture;
+use crate::texture::{Paper, Texture, TextureSettings};
+
+/// What dabs are stamped with, owned, so a dab's coverage can be worked
+/// out on several threads: the tip's pictures, the width of a hard
+/// rim's antialiasing, and the paper laid dab by dab.
+#[derive(Clone, Debug)]
+pub struct SharedTips {
+    /// The tip's pictures.
+    pub pictures: Arc<[TipImage]>,
+    /// The width of a hard round rim's antialiasing.
+    pub edge: f32,
+    /// The paper laid dab by dab, if any.
+    pub texture: Option<(Arc<Paper>, TextureSettings)>,
+}
+
+/// A dab with fewer pixels than this is worked out on one thread:
+/// handing it out would cost more than it saves.
+pub(crate) const WORTH_SHARING: usize = 96 * 96;
+
+/// What `shape` answers for the center of every pixel of rows `rows`
+/// of `rect`, row by row.
+fn cover_rows(shape: &impl Shape, rect: PixelRect, rows: std::ops::Range<i32>, out: &mut [f32]) {
+    let w = (rect.x1 - rect.x0) as usize;
+    for (row, py) in out.chunks_mut(w.max(1)).zip(rows) {
+        for (c, px) in row.iter_mut().zip(rect.x0..rect.x1) {
+            *c = shape.coverage([px as f32 + 0.5, py as f32 + 0.5]);
+        }
+    }
+}
+
+/// The coverage of the dab `planned`, stamped with `tips`, at the
+/// center of every pixel of its bounds `rect` (row by row into `out`),
+/// its rows worked out in `runs` runs: the first here, the others on
+/// `pool`. Each value is what [`Stamp`]'s `coverage` answers there, so
+/// it does not matter which thread asked.
+///
+/// # Errors
+/// When a job of the pool failed.
+pub(crate) fn cover_shared(
+    planned: &Planned,
+    tips: &SharedTips,
+    rect: PixelRect,
+    runs: usize,
+    pool: &JobPool,
+    out: &mut [f32],
+) -> Result<(), String> {
+    let w = (rect.x1 - rect.x0) as usize;
+    let rows = (rect.y1 - rect.y0) as usize;
+    let per = rows.div_ceil(runs.max(1));
+    let stamped = |tips: &SharedTips, rows: std::ops::Range<i32>, out: &mut [f32]| {
+        let texture = tips
+            .texture
+            .as_ref()
+            .map(|(paper, settings)| Texture::new(paper, *settings));
+        let borrowed = Tips {
+            pictures: &tips.pictures,
+            edge: tips.edge,
+        };
+        cover_rows(
+            &Stamp::new(planned, &borrowed, texture.as_ref()),
+            rect,
+            rows,
+            out,
+        );
+    };
+    let jobs: Vec<_> = (1..runs)
+        .filter(|run| run * per < rows)
+        .map(|run| {
+            let (from, to) = (run * per, ((run + 1) * per).min(rows));
+            let (planned, tips) = (*planned, tips.clone());
+            let job = pool.spawn("brush dab", move |_| {
+                let texture = tips
+                    .texture
+                    .as_ref()
+                    .map(|(paper, settings)| Texture::new(paper, *settings));
+                let borrowed = Tips {
+                    pictures: &tips.pictures,
+                    edge: tips.edge,
+                };
+                let stamp = Stamp::new(&planned, &borrowed, texture.as_ref());
+                let mut part = vec![0.0_f32; (to - from) * w];
+                cover_rows(
+                    &stamp,
+                    rect,
+                    rect.y0 + from as i32..rect.y0 + to as i32,
+                    &mut part,
+                );
+                Ok(part)
+            });
+            (from * w, job)
+        })
+        .collect();
+    let first = per.min(rows);
+    stamped(tips, rect.y0..rect.y0 + first as i32, &mut out[..first * w]);
+    let mut failed = None;
+    for (at, job) in jobs {
+        match job.wait() {
+            Ok(part) => out[at..at + part.len()].copy_from_slice(&part),
+            Err(error) => failed = Some(error.to_string()),
+        }
+    }
+    failed.map_or(Ok(()), Err)
+}
+
+/// [`stamp_coverage`] with every big dab's coverage worked out on
+/// `pool`'s threads (`runs` runs of its rows) and laid here: the same
+/// values combined the same way, dab after dab.
+///
+/// # Errors
+/// When a job of the pool failed: the part cannot be trusted.
+pub fn stamp_coverage_shared(
+    painter: &mut Painter<'_>,
+    dabs: &[Planned],
+    tips: &SharedTips,
+    runs: usize,
+    pool: &JobPool,
+    cover: &mut Vec<f32>,
+) -> Result<(), String> {
+    let texture = tips
+        .texture
+        .as_ref()
+        .map(|(paper, settings)| Texture::new(paper, *settings));
+    let borrowed = Tips {
+        pictures: &tips.pictures,
+        edge: tips.edge,
+    };
+    for planned in dabs {
+        let stamp = Stamp::new(planned, &borrowed, texture.as_ref());
+        let rect = stamp.bounds();
+        if rect.is_empty() {
+            continue;
+        }
+        let area = (rect.x1 - rect.x0) as usize * (rect.y1 - rect.y0) as usize;
+        if area < WORTH_SHARING {
+            painter.fill(&stamp);
+            continue;
+        }
+        cover.clear();
+        cover.resize(area, 0.0);
+        cover_shared(planned, tips, rect, runs, pool, cover)?;
+        painter.fill_cover(rect, cover);
+    }
+    Ok(())
+}
 
 /// The tip a stroke stamps: its pictures (none for a round tip) and the
 /// antialiasing width of a hard round rim.

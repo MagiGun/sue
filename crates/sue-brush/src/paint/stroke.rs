@@ -24,7 +24,7 @@ use super::lay::{EraseTarget, Lay, lay_field};
 use super::overflow::Region;
 use super::plan::{PlanSettings, Planned, Planner, edge_of};
 use super::settings::{Behaviours, DualBrush, TipOrder};
-use super::stamp::{Tips, stamp_coverage};
+use super::stamp::{Tips, stamp_coverage, stamp_coverage_shared};
 use super::wet::{Backdrop, SharedTips, Wet, WetCanvas, blender};
 use crate::buffer::{Combine, MergeError, StrokeBuffer, TILE, TileKey};
 use crate::input::StrokePoint;
@@ -137,6 +137,11 @@ pub struct PaintStroke {
     /// What went wrong on those threads, if anything did: the stroke
     /// cannot be trusted any more.
     failed: Option<String>,
+    /// How many runs a big dab's rows are worked out in.
+    runs: usize,
+    /// A buffer big dabs' coverage is worked out in, kept from dab to
+    /// dab.
+    cover: Vec<f32>,
 }
 
 impl PaintStroke {
@@ -262,6 +267,8 @@ impl PaintStroke {
             overflow: resources.overflow,
             pool: None,
             failed: None,
+            runs: 1,
+            cover: Vec::new(),
         }
     }
 
@@ -273,6 +280,7 @@ impl PaintStroke {
         if let Target::Wet(canvas) = &mut self.target {
             canvas.sharing(bands);
         }
+        self.runs = bands.clamp(1, 8);
         self.pool = Some(pool);
     }
 
@@ -377,7 +385,30 @@ impl PaintStroke {
                 } else {
                     buffer.committed()
                 };
-                stamp_coverage(&mut painter, dabs, &tips, texture);
+                match self.pool.as_ref().filter(|pool| pool.threads() > 1) {
+                    Some(pool) => {
+                        let shared = SharedTips {
+                            pictures: Arc::clone(&self.pictures),
+                            edge: self.edge,
+                            texture: self
+                                .texture
+                                .as_ref()
+                                .filter(|(_, settings)| settings.per_dab)
+                                .cloned(),
+                        };
+                        if let Err(error) = stamp_coverage_shared(
+                            &mut painter,
+                            dabs,
+                            &shared,
+                            self.runs,
+                            pool,
+                            &mut self.cover,
+                        ) {
+                            self.failed = Some(error);
+                        }
+                    }
+                    None => stamp_coverage(&mut painter, dabs, &tips, texture),
+                }
             }
             Target::Color(buffer) => {
                 if tail {
