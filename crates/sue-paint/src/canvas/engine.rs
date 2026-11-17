@@ -146,8 +146,16 @@ fn brush_key(tool: Tool) -> Option<&'static str> {
         Tool::Airbrush => "airbrush",
         Tool::Decoration => "decoration",
         Tool::Eraser => "eraser",
+        Tool::Blend => "blend",
         _ => return None,
     })
+}
+
+/// `true` when `sub` is one of the Blend tool's blenders of the brush
+/// engine (Blend, Painterly blender and the rest), which paint on the
+/// engine; Blur, Finger Tip, Copy stamp and Liquify do not.
+pub(crate) fn is_blender(sub: &SubTool) -> bool {
+    sub.tool == Tool::Blend && crate::brush::engine::builtin("blend", &sub.name).is_some()
 }
 
 /// The brush a sub tool paints with on the engine, with its pictures
@@ -156,15 +164,18 @@ fn brush_key(tool: Tool) -> Option<&'static str> {
 /// is drawn as its round tip, since a mask holds only how much shows.
 /// `None` for a tool that does not paint.
 pub(crate) fn brush_of(sub: &SubTool, eraser: bool, round: bool) -> Option<LineBrush> {
-    if !sub.tool.paints() {
+    let base = brush_key(sub.tool).and_then(|key| crate::brush::engine::builtin(key, &sub.name));
+    if !sub.tool.paints() && !is_blender(sub) {
         return None;
     }
-    let base = brush_key(sub.tool).and_then(|key| crate::brush::engine::builtin(key, &sub.name));
     let mut brush = crate::brush::engine::line_brush(&sub.tip, base.as_ref());
     let preset = &mut brush.preset;
     if round {
         *preset = round_of(preset);
         brush.pictures.clear();
+    }
+    if let Some(behaviours) = &sub.behaviours {
+        apply_behaviours(preset, behaviours, sub.tip.grain);
     }
     preset.input.stabilization = sub.stabilization;
     preset.input.by_speed = sub.adjust_by_speed;
@@ -173,6 +184,74 @@ pub(crate) fn brush_of(sub: &SubTool, eraser: bool, round: bool) -> Option<LineB
     preset.input.smart_shape = sub.smart_shape;
     preset.erase |= eraser;
     Some(brush)
+}
+
+/// The layers of `picture` besides `current` that the Multiple layers
+/// eraser erases too, each with where its pixels sit from the stroke's
+/// (`offset` is where the stroke's pixel `(0, 0)` is in the picture):
+/// every raster layer that is shown, not locked, of 8-bit color and not a
+/// vector layer. A layer in a hidden or locked folder is neither shown
+/// nor open to edits, so it is left alone too.
+fn erasable_layers(
+    arena: &sue_core::Arena,
+    picture: EntityId,
+    current: EntityId,
+    offset: [i64; 2],
+) -> Vec<(EntityId, [i64; 2])> {
+    let all = doc::layers(arena, picture);
+    let closed: Vec<EntityId> = all
+        .iter()
+        .filter(|info| doc::is_folder(arena, info.id) && (!info.style.visible || info.locked))
+        .map(|info| info.id)
+        .collect();
+    all.into_iter()
+        .filter(|info| {
+            info.id != current
+                && info.kind == sue_model::picture::LayerKind::Raster
+                && info.style.visible
+                && !info.locked
+                && !doc::folders_around(arena, info.id)
+                    .iter()
+                    .any(|folder| closed.contains(folder))
+                && !crate::vector::is_vector(arena, info.id)
+                && doc::raster(arena, info.id)
+                    .is_some_and(|raster| raster.format() == sue_core::PixelFormat::Rgba8)
+        })
+        .map(|info| {
+            let delta = [
+                info.style.offset[0] - offset[0],
+                info.style.offset[1] - offset[1],
+            ];
+            (info.id, delta)
+        })
+        .collect()
+}
+
+/// `preset` with the paint behaviours Sub Tool Detail set. The texture's
+/// strength stays the tip's Paper grain (`grain`, 0 to 1), the row
+/// Tool Property has always shown for it; a paper chosen where there was
+/// none takes it at full strength while the grain is still 0.
+pub(crate) fn apply_behaviours(
+    preset: &mut BrushPreset,
+    behaviours: &sue_brush::paint::Behaviours,
+    grain: f32,
+) {
+    let had = preset.texture.is_some();
+    behaviours.write_to(preset);
+    if preset.texture.is_some() {
+        let strength = if had || grain > 0.0 { grain } else { 1.0 };
+        preset.set(param::TEXTURE_STRENGTH, strength);
+    }
+}
+
+/// The paint behaviours `sub` paints with now: what Sub Tool Detail set,
+/// else its brush's own.
+pub(crate) fn behaviours_of(sub: &SubTool) -> sue_brush::paint::Behaviours {
+    sub.behaviours.clone().unwrap_or_else(|| {
+        brush_of(sub, false, false).map_or_else(sue_brush::paint::Behaviours::default, |brush| {
+            sue_brush::paint::Behaviours::from_preset(&brush.preset)
+        })
+    })
 }
 
 /// `preset` as its round tip alone (on a mask).
@@ -531,7 +610,10 @@ impl SuePaint {
             .flatten()
             .zip(doc::mask_offset(arena, info.id));
         let vector = mask.is_none() && crate::vector::is_vector(arena, info.id);
-        let Some(line_brush) = brush_of(sub, self.transparent, mask.is_some()) else {
+        // Drawing in the transparent color erases; a blender has no
+        // color of its own to make transparent.
+        let transparent = self.transparent && sub.tool != Tool::Blend;
+        let Some(line_brush) = brush_of(sub, transparent, mask.is_some()) else {
             return false;
         };
         let (target, offset) = mask.unwrap_or((info.id, info.style.offset));
@@ -611,6 +693,21 @@ impl SuePaint {
         // A straight line, or one along a ruler, does not flick.
         let mut line_brush = line_brush;
         line_brush.preset.input.flick &= !shift_line && snap.is_none();
+        // The Multiple layers eraser: a plain eraser laid straight into
+        // every layer it can erase (`all_layers`), the stroke itself plain.
+        let others = if mask.is_none() && !vector && eraser {
+            if sue_brush::paint::Behaviours::from_preset(&line_brush.preset).all_layers {
+                line_brush
+                    .preset
+                    .extra
+                    .retain(|(key, _)| key != sue_brush::paint::field::ALL_LAYERS);
+                erasable_layers(arena, doc.picture, info.id, offset)
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
         let line_brush = Arc::new(line_brush);
         let brush = Brush::new(line_brush.preset.clone(), main)
             .with(crate::brush::engine::resources(&line_brush), other);
@@ -647,8 +744,17 @@ impl SuePaint {
             };
             (None, Some((canvas, brush)))
         } else {
-            let targets = vec![Target::new(target, [0, 0], lock)];
-            let direct = mask.is_some() || clip.is_some() || lock || transforms.len() > 1;
+            let mut targets = vec![Target::new(target, [0, 0], lock)];
+            let direct = mask.is_some()
+                || clip.is_some()
+                || lock
+                || transforms.len() > 1
+                || !others.is_empty();
+            targets.extend(
+                others
+                    .iter()
+                    .map(|&(layer, delta)| Target::new(layer, delta, false)),
+            );
             (direct.then(|| Lay::new(brush.ink(), clip, targets)), None)
         };
         let (brush, canvas) = match canvas {

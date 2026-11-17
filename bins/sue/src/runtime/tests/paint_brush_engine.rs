@@ -224,7 +224,18 @@ fn every_built_in_brush_paints_through_the_engine_and_ends_no_wider_than_its_bod
             let scattered = scatters(&preset);
             // The brush's size in layer pixels (the view is at 100 %).
             let tip = preset.value(sue_model::brush::param::SIZE).unwrap_or(0.0);
-            let plain = sue_paint::brush::engine::is_plain(&preset);
+            // The Multiple layers eraser is laid plain into every layer
+            // it erases (the canvas takes its flag off the stroke).
+            let mut stroked = preset.clone();
+            stroked.extra.retain(|(key, _)| key != "paint.all_layers");
+            let plain = sue_paint::brush::engine::is_plain(&stroked);
+            // A brush that erases on another tool (Tone scraping) needs
+            // something to take away too.
+            let borrowed = preset.erase && tool != sue_paint::tools::Tool::Eraser;
+            let eraser = eraser || preset.erase;
+            if borrowed {
+                ground_layer(&mut driver, [0, 0, 0, 255]);
+            }
             // A swell (the pen pressing harder and easing off), and the
             // stroke that made the blob of old: pressed evenly and lifted
             // while still moving fast.
@@ -273,10 +284,11 @@ fn every_built_in_brush_paints_through_the_engine_and_ends_no_wider_than_its_bod
                 );
                 // A scattered brush's tips land by chance: its body need
                 // not hold its largest tip, and two tips may fall in one
-                // column. Its end may hold a tip of the brush's own size, or
-                // a column a sixth more than the body's, never a blob.
+                // column. Its end may hold two tips of the brush's own size
+                // overlapping in a column (a third more than one), or a
+                // column a sixth more than the body's, never a blob.
                 let allowed = if scattered {
-                    (body + body / 6 + 1).max(tip.ceil() as usize + 1)
+                    (body + body / 6 + 1).max((tip * 4.0 / 3.0).ceil() as usize + 1)
                 } else {
                     body + 1
                 };
@@ -302,6 +314,9 @@ fn every_built_in_brush_paints_through_the_engine_and_ends_no_wider_than_its_bod
                 driver.command("edit.undo");
                 driver.settle(2);
                 assert_eq!(top_layer(&driver).2, before, "{}: undone", sub.name);
+            }
+            if borrowed {
+                ground_layer(&mut driver, [0, 0, 0, 0]);
             }
             checked += 1;
         }

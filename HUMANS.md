@@ -783,6 +783,29 @@ Once a canvas is open:
   stroke, and Liquify pushes the drawing along, swells it, pinches it or
   twirls it under the brush. **Copy stamp** copies one part of a layer to
   another: Alt and click where to copy from, then paint.
+- **Blenders:** the Blend tool also has Blend (smooths the colors under
+  it into each other), Painterly blender (drags the paint in strokes that
+  keep their marks), Wet bleed blender (bleeds colors together thinly),
+  Textured blender (blends, broken up by the paper's tooth) and Soothing
+  watercolor (a gentle wash). None lays a color of its own; on a layer
+  mask they soften it as Blur does. Liquify has a Hardness: how far out
+  from the middle it moves the picture whole.
+- **More erasers and Tone scraping:** Multiple layers erases every
+  shown, unlocked layer at once, as one undo step; Snap eraser takes a
+  vector line away up to where it crosses another; the Airbrush's Tone
+  scraping takes a screen tone away in dots.
+- **Paper, watercolor edge and dual brush:** in Sub Tool Detail a brush's
+  Texture can be none or one of Sue's papers (grain, canvas, cold press,
+  rough), laid at a scale, turned, brighter or darker, with more or less
+  contrast, inverted, emphasized where the stroke is light, in a texture
+  mode, and on every dab or on the whole stroke. Watercolor edge gives a
+  brush a darker rim (range, opacity, darkness, blurring width, and
+  whether it is made only when the pen lifts); Dual brush lays the
+  stroke through a second tip. Open a row's eye to see it in Tool
+  Property too. Oil paint and the other mixing brushes carry the paint
+  they pick up: white dragged out of black goes gray and takes the black
+  along. A quick mouse draws smooth curves, and every stroke ends in a
+  clean point or a clean round end.
 - **Puppet warp** (Edit, Transform): click to put pins on a layer, drag one
   and the drawing bends around the others while keeping its shape; a part
   of the drawing that does not touch another bends only by its own pins.

@@ -79,6 +79,7 @@ group	Airbrush
 sub	airbrush	Soft
 sub	airbrush	Spray
 sub	airbrush	Droplet
+sub	airbrush	Tone scraping
 tool	Decoration	decoration	B
 group	Decoration
 sub	decoration	Stars
@@ -107,10 +108,17 @@ sub	eraser	Soft
 sub	eraser	Rough
 sub	eraser	Vector
 sub	eraser	Kneaded eraser
+sub	eraser	Multiple layers
+sub	eraser	Snap eraser
 tool	Blend	blend	J
 group	Blend
+sub	blend	Blend
 sub	blend	Blur
 sub	blend	Finger Tip
+sub	blend	Painterly blender
+sub	blend	Wet bleed blender
+sub	blend	Textured blender
+sub	blend	Soothing watercolor
 sub	blend	Copy stamp
 tool	Liquify	blend	J
 group	Liquify

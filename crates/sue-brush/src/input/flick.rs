@@ -8,9 +8,11 @@
 //! not a chord back to an older sample, so it never bends off the line),
 //! as far as the speed carries it up to a few brush widths, and narrows
 //! from the line's own width to nothing, leaving the line without a
-//! corner. Its points are stroke points
-//! like any other: the brush's ending taper reaches over them, and a
-//! stroke painted again from its samples flicks the same.
+//! corner. Its points are stroke points like any other, and a stroke
+//! painted again from its samples flicks the same. A brush with an
+//! ending taper narrows the line and the run out in that one taper,
+//! which then reaches at least over the run out: the line thins once,
+//! to a clean point, never as a bulge with a needle on its end.
 
 use super::StrokePoint;
 use crate::math::cos_sin;
@@ -45,26 +47,41 @@ pub(crate) fn speed(
     (speed * scale >= FAST).then_some(speed)
 }
 
+/// How a run out comes to its point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Narrowing {
+    /// It narrows by itself (the brush has no ending taper).
+    Own,
+    /// The brush's ending taper narrows the line and the run out
+    /// together, in one taper that reaches at least over the run out, so
+    /// the line does not thin twice (a bulging end with a needle on it):
+    /// the run out keeps the line's width.
+    Taper,
+}
+
 /// Carries `points` (the stroke's last points; `before` the point taken
 /// before them, when they are too few to say) on into a point: a run out
 /// at `speed` layer pixels a second, for a brush `size` wide, a point
-/// every `step` pixels.
+/// every `step` pixels, narrowing as `narrowing` says. Answers how far
+/// it reaches (0 for none).
 pub(crate) fn run_out(
     points: &mut Vec<StrokePoint>,
     before: Option<&StrokePoint>,
     speed: f32,
     size: f32,
     step: f32,
-) {
+    narrowing: Narrowing,
+) -> f32 {
     let Some(end) = points.last().or(before).cloned() else {
-        return;
+        return 0.0;
     };
     if !(speed.is_finite() && speed > 0.0 && step > 0.0) {
-        return;
+        return 0.0;
     }
     let reach = (speed * CARRY).min(size * 4.0 + 16.0).min(FARTHEST);
+    let own = narrowing == Narrowing::Own;
     if reach < step {
-        return;
+        return 0.0;
     }
     let (cos, sin) = cos_sin(end.direction);
     let count = (reach / step).ceil() as usize;
@@ -73,7 +90,7 @@ pub(crate) fn run_out(
         // Narrowing as `1 - t^2`: no corner where the run out leaves the
         // line, and a sharp point at its end.
         let t = d / reach;
-        let left = 1.0 - t * t;
+        let left = if own { 1.0 - t * t } else { 1.0 };
         let mut point = end.clone();
         point.pos = [end.pos[0] + cos * d, end.pos[1] + sin * d];
         point.arc = end.arc + d;
@@ -83,6 +100,7 @@ pub(crate) fn run_out(
         point.taper = end.taper * left;
         points.push(point);
     }
+    reach
 }
 
 #[cfg(test)]
@@ -133,7 +151,7 @@ mod tests {
     fn the_run_out_goes_on_along_the_line_and_narrows_to_a_point() {
         // A line going down and to the right, at 30 degrees.
         let mut points = vec![point([0.0, 0.0], 0.0, 30.0), point([8.66, 5.0], 10.0, 30.0)];
-        run_out(&mut points, None, 1500.0, 10.0, 1.0);
+        run_out(&mut points, None, 1500.0, 10.0, 1.0, Narrowing::Own);
         let end = &points[1];
         let runs: Vec<&StrokePoint> = points[2..].iter().collect();
         assert!(runs.len() >= 20, "it reaches on: {}", runs.len());
@@ -157,8 +175,14 @@ mod tests {
         );
         // Never farther than a few brush widths.
         let mut fast = vec![point([0.0, 0.0], 0.0, 0.0)];
-        run_out(&mut fast, None, 100_000.0, 10.0, 2.0);
+        run_out(&mut fast, None, 100_000.0, 10.0, 2.0, Narrowing::Own);
         let reach = fast.last().unwrap().arc;
         assert!((reach - 56.0).abs() < 1e-3, "{reach}");
+        // Under the brush's ending taper it keeps the line's width (the
+        // taper narrows it) and reaches as far.
+        let mut tapered = vec![point([0.0, 0.0], 0.0, 0.0)];
+        let reach = run_out(&mut tapered, None, 100_000.0, 10.0, 2.0, Narrowing::Taper);
+        assert!((reach - 56.0).abs() < 1e-3, "{reach}");
+        assert!(tapered.iter().all(|p| (p.size - 10.0).abs() < 1e-6));
     }
 }

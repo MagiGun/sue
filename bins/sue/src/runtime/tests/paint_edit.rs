@@ -441,8 +441,9 @@ fn sue_paint_lasso_fill_close_and_fill_and_copy_stamp_paint() {
     // Copy stamp: nothing until Alt and click sets a source, then the
     // lasso fill's paint copies onto an empty place.
     command(&mut runtime, "layer.select_below");
-    // Copy stamp, the Blend tool's third (Liquify is a tool of its own).
-    sub(&mut runtime, "tool.blend", 2);
+    // Copy stamp, the Blend tool's eighth, after Blend, Blur, Finger
+    // Tip and the four blenders (Liquify is a tool of its own).
+    sub(&mut runtime, "tool.blend", 7);
     let empty = middle + vec2(-80.0, 120.0);
     let line = [empty, empty + vec2(10.0, 0.0), empty + vec2(20.0, 0.0)];
     drag(&mut runtime, &mut step, &line, plain);

@@ -84,3 +84,4 @@ movie-bad-sound = the sound's rate or channel count does not fit the format
 movie-no-pixels = the frame has no 8-bit RGBA pixels
 movie-no-frames = the movie has no frames
 movie-encoder-failed = the system encoder failed
+brush-group-blend = Blend

@@ -29,7 +29,18 @@ fn every_brush_sub_tool_paints_as_in_0_0_75() {
                 Some((parts.next()?, parts.next()?))
             })
             .collect();
-        let names: Vec<&str> = subs.iter().map(|sub| sub.name.as_str()).collect();
+        // The sub tools 0.0.8 adds (`sue_brush::presets::ADDED`) come
+        // after those 0.0.75 had.
+        let added: Vec<String> = sue_brush::presets::ADDED
+            .iter()
+            .filter_map(|(id, _)| sue_brush::presets::find(id))
+            .map(|preset| preset.name)
+            .collect();
+        let names: Vec<&str> = subs
+            .iter()
+            .map(|sub| sub.name.as_str())
+            .filter(|name| !added.iter().any(|new| new == name))
+            .collect();
         // P3-5 renamed two pens after Clip Studio Paint Ver. 4; their
         // brushes are the same.
         let old_names: Vec<&str> = old
@@ -63,7 +74,10 @@ fn every_brush_sub_tool_paints_as_in_0_0_75() {
             checked += 1;
         }
     }
-    assert_eq!(checked, sue_brush::presets::builtin().len());
+    assert_eq!(
+        checked + sue_brush::presets::ADDED.len(),
+        sue_brush::presets::builtin().len()
+    );
 }
 
 #[test]

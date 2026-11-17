@@ -13,6 +13,23 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, Blend tool: Blend, Painterly blender, Wet bleed blender,
+  Textured blender and Soothing watercolor beside Blur, Finger Tip and
+  Copy stamp, each working the paint under it its own way (smoothing,
+  dragging in marks that stay, bleeding thinly, broken up by the paper,
+  a gentle wash). On a layer mask they soften it as Blur does. Liquify
+  has a Hardness (50 % to begin with).
+- Sue Paint: Airbrush, Tone scraping takes a screen tone away in dots.
+  Eraser, Multiple layers erases every shown, unlocked layer at once in
+  one undo step; Snap eraser takes a vector line away up to where it
+  crosses another.
+- Sue Paint, Sub Tool Detail: a brush's Texture can be chosen (none,
+  grain, canvas, cold press, rough) with its scale ratio, rotation
+  angle, brightness, contrast, invert, emphasize density, texture mode
+  and apply by each plot; Watercolor edge (range, opacity, darkness,
+  blurring width, process after brush stroke) and Dual brush (mode,
+  size or linked to the main size, spacing, scatter, hardness) are new
+  categories. Tool Property shows these rows once their eye is opened.
 - Sue Paint, Animation, Show Animation Cels: Show Edited Cel Only (the
   cel locked as the one you draw shows in its folder in place of the
   frame's), Check Cel Motion by Key Input (the frames from two cels back
@@ -911,6 +928,19 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue Paint: oil paint and every mixing brush really mix. White oil
+  dragged out of black lays a gray, carries the black on past the edge
+  and lightens as it goes, as a loaded brush does; black over gray stays
+  dark where pressed and mixes where light.
+- Sue Paint: a mouse or a fast pen that reports places far apart draws
+  smooth arcs through them, not straight pieces with a corner at each.
+- Sue Paint: fast pen strokes end in a clean taper, never cut off, hooked
+  back or wider than the line (a flick and the ending taper thin the
+  line once, to one point; a short ending is made long enough to come
+  to a point).
+- Sue Paint: the canvas paper and the other papers read as natural grain
+  at 100 % and 200 %, never as a grid of dots (oil and thick paint
+  showed one).
 - Sue Paint: the Timeline opens under the canvas 250 points tall, so
   its frames are no longer a thin strip, and keeps the height you drag
   it to; a layout kept with the old height takes the new one.
