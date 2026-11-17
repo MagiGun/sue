@@ -3457,9 +3457,23 @@ fn t50_40_a_frame_border_keeps_the_drawing_inside() {
         }),
         "a frame border layer"
     );
-    // A stroke from the canvas's edge to its middle shows only inside
-    // the frame.
+    // A stroke from the canvas's edge to its middle, on a layer under
+    // the frame border, shows only inside the frame.
     run(&mut driver, "layer.new");
+    run(&mut driver, "layer.order.down");
+    let frame = layers(&driver)
+        .iter()
+        .position(|info| {
+            arena(&driver)
+                .get_by_id(info.id)
+                .is_ok_and(|entity| entity.class() == sue_paint::manga::FRAME)
+        })
+        .expect("the frame border layer");
+    let drawn = layers(&driver)
+        .iter()
+        .position(|info| info.name == "Layer 2")
+        .expect("the new layer");
+    assert!(drawn < frame, "the new layer is under the frame border");
     pen(&mut driver);
     let m = middle(&driver);
     let [_, h] = size(&driver);
@@ -3468,6 +3482,8 @@ fn t50_40_a_frame_border_keeps_the_drawing_inside() {
     let tile = seen(&driver);
     let p = seen_at(&tile, [2, i64::from(h) / 2]);
     assert!(p[0] > 200, "outside the frame stays clear: {p:?}");
+    let inside = seen_at(&tile, under(&driver, m - vec2(4.0, 0.0)));
+    assert!(inside[0] < 100, "inside the frame the stroke shows: {inside:?}");
 }
 
 /// Tip 41 (10:12, CTV-14): a balloon with text inside.
