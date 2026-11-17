@@ -997,7 +997,7 @@ impl SuePaint {
             && pending == folder
             && at == frame
         {
-            let center = camera.unswung([values[4] as f32, values[5] as f32]);
+            let center = crate::camera::unswung_at(arena, folder, time, &camera);
             values[0] = f64::from(center[0]);
             values[1] = f64::from(center[1]);
             values[2] = f64::from(camera.scale);

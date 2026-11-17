@@ -384,7 +384,7 @@ fn camera_value_key(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call
             && pending == folder
             && at == frame
         {
-            let center = camera.unswung([values[4] as f32, values[5] as f32]);
+            let center = crate::camera::unswung_at(arena, folder, time, &camera);
             values[..4].copy_from_slice(&[
                 f64::from(center[0]),
                 f64::from(center[1]),
