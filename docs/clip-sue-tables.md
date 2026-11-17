@@ -193,7 +193,7 @@ With those fixes, what Clip Studio shows:
 | 09-everything | yes | every layer and folder; the animation folder and the camera folder as ordinary folders (`Folder 1`, `Camera 1`), the three cels inside the first; no timeline |
 | 10-bouncing-ball | yes | the five cels as raster layers in an ordinary folder, all shown at once; the sketch at 30%; no timeline |
 | sue-picture | yes | folders with their blend mode and opacity, the clipped layer, the glow mode, a mask, and the draft and reference layers |
-| raster-subset-through-sue | yes | every layer and the 27 blend layers; a clear area at the top left, about where this generated file's one channel (gray) layer lies, where Sue's preview shows paper; not looked into further (Sue writes its own layers in color) |
+| raster-subset-through-sue | yes | every layer and the 27 blend layers; a clear area at the top left, where the generated `Gray` layer lies (300 by 200 at 5, 7). That layer goes back unchanged, so the file still holds it as a one channel bitmap, which the test kit builds by itself and which was never seen in a file Clip Studio saved; Sue reads it as opaque gray. Open: either a gray layer is not stored that way by Clip Studio, or Sue reads such a layer wrong. Check with a gray layer made in Clip Studio |
 
 Each file also has the layer `Layer 1` that a new Sue picture starts
 with. Clip Studio's own Layer Property palette was not opened (the

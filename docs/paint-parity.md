@@ -449,13 +449,13 @@ These rows are notes, not counted in the Progress table.
 | Sub tool | Clip Studio, mouse | Sue, mouse | Ends |
 | --- | --- | --- | --- |
 | G-pen | even width, round ends, a tap is a dot the brush's size | the same widths (36 against 36), round ends, the same dot | never bigger than the body in either |
-| Mapping pen | thin, even, a tiny tap | the same | same |
+| Mapping pen | thin, even, blunt ends; the tap was hidden under the cursor in the capture | thin, even, but both ends taper to points | Sue's ends are smaller than the body; Clip Studio's tap not compared |
 | Turnip pen | thin, even | the same | same |
-| Textured pen | grainy, even; a tap is a dot about two thirds of the line | grainy, even; a tap is a dot the brush's size (Sue's own rule that a tap is never smaller than the line) | never bigger than the body |
+| Textured pen | grainy, even, with ragged edges; a tap is a dot about two thirds of the line | even, the grain only a mottle inside the line, its edges smooth (open: Sue's grain does not reach the edge as Clip Studio's does); a tap is a dot the brush's size (Sue's own rule that a tap is never smaller than the line) | never bigger than the body |
 | Calligraphy | a flat tip at a slant: ends cut on the slant, a tap a slanted sliver | the same tip, ends and sliver; the ends a little rounder | the slant makes the end columns wider, not the tip |
 | Felt pen | light, thin, even | the same | same |
 | Brush pen | its tip is a slanted flat oval: blunt slanted ends, no taper with a mouse, a tap a small pale blob | tapers to points at both ends with a mouse (on purpose: the brush pen promises a pointed line with any device); a tap is a full dot | Sue's ends are smaller than the body |
-| Every sub tool, a slow mouse stroke with points far apart | a smooth arc that does not quite pass through the points | a curve through every point, so a turn shows at each point when they are 40 pixels or more apart | open: Sue's curve stage passes through each point; making it smooth such sparse input changes the engine hash, so it is left for the owner to decide |
+| Every sub tool, a slow mouse stroke with points far apart | a smooth arc that does not quite pass through the points (the owner's sub tools there have stabilization 6) | straight legs between the points, with a turn at each one | open: the check's mouse moved once a second, which no real mouse does. Sue's resampler lays its records straight between the device's samples and the stabilizer only rounds the corners within its window, so the legs stay straight. With a real mouse the turns show only on a very fast curve: an S curve drawn in 0.15 s at 60 samples a second (about 40 pixels apart) shows them, the same curve at 125 samples a second does not (engine renders). Laying the records on a curve through the samples instead would change the engine hash, so it is left for the owner to decide |
 
 Not compared here: the Real G-pen (its owner's size there is far
 larger than the canvas row), Rough pen, Milli pen (Sue's Fineliner),
