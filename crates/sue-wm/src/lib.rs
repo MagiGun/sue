@@ -33,6 +33,7 @@ mod color_pick;
 pub mod commands;
 mod config;
 pub mod cover;
+mod density;
 pub mod dock;
 mod error;
 pub mod export;

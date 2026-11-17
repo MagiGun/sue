@@ -1176,7 +1176,9 @@ impl Shell {
     /// Sue's.
     fn page_theme(&self, id: &AppletId, rice: &RiceSchema, theme: &Theme) -> Theme {
         let section = id.as_str().replace('-', "_");
-        theme.for_studio(rice, &section, &self.presets)
+        theme
+            .for_studio(rice, &section, &self.presets)
+            .with_density_from(rice, &section)
     }
 
     /// Runs `draw` with `theme` as egui's style, so menus and popups wear it
