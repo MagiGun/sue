@@ -917,8 +917,7 @@ follow [Semantic Versioning](https://semver.org/).
   fills its palette with the main and sub color at its lower left and
   the drawing color's red, green and blue in a column at its right.
 - Sue Paint: the Layer palette spreads its buttons evenly over their
-  lines; an empty Item Bank says so once, in its middle, with what to
-  do; Layer Property says No Canvas in its middle when none is open.
+  lines; Layer Property says No canvas in its middle when none is open.
 - Paper: every piece of text draws at its full weight, so secondary
   text (a layer's 100 % Normal, captions, a field's unit) reads clearly.
 - Notices take no clicks from what lies under them, only on their own
