@@ -905,6 +905,9 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint, Fill tool: Refer Other Layers starts with draft layers left
   out, as Clip Studio Paint's does, so color lines on a draft layer stop
   no fill.
+- Sue Paint, Merge Selected Layers: with one layer picked inside a
+  folder cel, the whole cel is merged into one layer, so an auto action
+  that merges a cel and steps to the next works on every cel.
 
 ### Fixed
 
