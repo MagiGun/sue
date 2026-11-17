@@ -1166,3 +1166,61 @@ fn step_00_38_12_fgv_41_pinch_redraw_and_the_dust_group() {
         "the layer is left as it was"
     );
 }
+
+/// FG-24 (00:36:43): with How to add on Create new frame folder, frames
+/// drawn one after another each get a folder of their own, although the
+/// first one's frame border layer is the one picked when the second is
+/// drawn; on Add to frame folder the next frame joins the picked one.
+#[test]
+fn step_00_36_43_fg_24_frames_drawn_in_a_row_each_get_a_folder() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut paint = PaintDriver::new("p6b-frames-in-a-row");
+    pick_sub(&mut paint, "tool.pick.frame", "Rectangle Frame");
+    let folders = |paint: &PaintDriver| {
+        layers(paint)
+            .into_iter()
+            .filter(|info| flag_of(paint, info.id, "frame.folder"))
+            .count()
+    };
+    let at = middle(&paint);
+    stroke(&mut paint, at - vec2(200.0, 120.0), at - vec2(20.0, 10.0));
+    paint.settle(4);
+    assert_eq!(folders(&paint), 1, "the first frame");
+    assert_eq!(of_class(&paint, sue_paint::manga::FRAME).len(), 1);
+    undo_pair(
+        &mut paint,
+        "a second frame",
+        |paint| stroke(paint, at + vec2(20.0, 10.0), at + vec2(200.0, 120.0)),
+        |paint| folders(paint) == 2,
+    );
+    assert_eq!(of_class(&paint, sue_paint::manga::FRAME).len(), 2);
+    // Add to frame folder: the next frame joins the picked frame layer.
+    let rows = rows_of(&mut paint, "tool.pick.frame", "Rectangle Frame");
+    shows_all(&rows, &["How to add"], "Rectangle Frame");
+    choose(&mut paint, "How to add", "Add to frame border layer");
+    let panels_of = |paint: &PaintDriver| {
+        of_class(paint, sue_paint::manga::FRAME)
+            .into_iter()
+            .map(|id| {
+                sue_paint::manga::decode_panels(
+                    &text_of(paint, id, sue_paint::manga::PANELS).unwrap_or_default(),
+                )
+                .len()
+            })
+            .sum::<usize>()
+    };
+    let before = panels_of(&paint);
+    stroke(
+        &mut paint,
+        at + vec2(-200.0, 140.0),
+        at + vec2(-40.0, 220.0),
+    );
+    paint.settle(4);
+    assert_eq!(folders(&paint), 2, "no new folder");
+    assert_eq!(
+        of_class(&paint, sue_paint::manga::FRAME).len(),
+        2,
+        "no new layer"
+    );
+    assert_eq!(panels_of(&paint), before + 1, "the panel joined");
+}

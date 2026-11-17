@@ -987,24 +987,29 @@ impl SuePaint {
 
     /// Adds `panel` as one undo step called `label`: in a frame folder of
     /// its own when the sub tool's How to add says so (Clip Studio
-    /// Paint's Create new folder) and the current layer is no frame
-    /// border layer, else to the frame border layer (a new one when there
-    /// is none).
+    /// Paint's Create new folder), else to the frame border layer being
+    /// worked on (a new one when there is none).
     fn add_panel(&mut self, cx: &mut AppletContext<'_>, panel: Panel, sub: &SubTool, label: &str) {
         let Some((_, [width, height], paper)) = self.page(&cx.world.arena) else {
             return;
         };
         let border = if sub.edge { sub.tip.size.max(0.5) } else { 0.0 };
-        // A new frame folder (How to add), unless the layer being worked
-        // on is a frame border layer: then the panel joins it, as in a
-        // frame folder made with a layout.
-        let on_frame = self.layer().is_some_and(|layer| {
-            cx.world
-                .arena
+        // How to add: Create new frame folder makes a folder for every
+        // frame, one after another, even while the last one's frame
+        // border layer is picked. Only a frame border layer of a layout
+        // (New Frame Border Folder: a page of panels in one layer, not in
+        // a folder this tool made) takes the panel in, as a page of
+        // panels does. Add to frame folder always puts the panel with the
+        // frame border layer being worked on.
+        let arena = &cx.world.arena;
+        let on_layout = self.layer().is_some_and(|layer| {
+            arena
                 .get_by_id(layer)
                 .is_ok_and(|entity| entity.class() == manga::FRAME)
+                && !doc::folder_of(arena, layer)
+                    .is_some_and(|folder| is_frame_folder(arena, folder))
         });
-        if sub.new_layer && !on_frame {
+        if sub.new_layer && !on_layout {
             self.add_frame_folder(cx, panel, sub, border, label);
             return;
         }
