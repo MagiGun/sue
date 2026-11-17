@@ -651,6 +651,18 @@ fn materials_are_searched_tagged_and_dragged_onto_the_canvas() {
         })
         .cloned()
         .collect();
+    // The ones in sight, in reading order: the library is longer than
+    // the palette is tall.
+    let mut all: Vec<Node> = all
+        .into_iter()
+        .filter(|node| node.rect.bottom() < 900.0)
+        .collect();
+    all.sort_by(|a, b| {
+        a.rect
+            .top()
+            .total_cmp(&b.rect.top())
+            .then(a.rect.left().total_cmp(&b.rect.left()))
+    });
     assert!(
         all.len() > 4,
         "Sue Paint's own materials show: {:?}",
@@ -684,6 +696,20 @@ fn materials_are_searched_tagged_and_dragged_onto_the_canvas() {
             .collect()
     };
     kept.click("Folder", None);
+    // The list of folders is longer than the list shows: scrolled to its
+    // end, where Favorites and Recent are.
+    let list = kept.node("All", Some(Role::ListBoxOption)).rect.center();
+    kept.step(vec![
+        egui::Event::PointerMoved(list),
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -400.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+        },
+    ]);
+    kept.settle(6);
     kept.click("Favorites", None);
     let mut favorites = thumbs(&kept);
     favorites.sort();
@@ -691,6 +717,21 @@ fn materials_are_searched_tagged_and_dragged_onto_the_canvas() {
     expected.sort();
     assert_eq!(favorites, expected, "Favorites shows the favorites");
     kept.click("Folder", None);
+    let list = kept
+        .node("Favorites", Some(Role::ListBoxOption))
+        .rect
+        .center();
+    kept.step(vec![
+        egui::Event::PointerMoved(list),
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, 400.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+        },
+    ]);
+    kept.settle(6);
     kept.click("All", None);
     assert_eq!(thumbs(&kept).len(), all.len(), "All shows every one again");
     // Tagged: the tag is the library's, and the search finds it.

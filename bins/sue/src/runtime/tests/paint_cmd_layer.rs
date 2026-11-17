@@ -174,6 +174,15 @@ const CASES: &[Case] = &[
     case("layer.palette_color.green", &[], 1),
     case("layer.palette_color.blue", &[], 1),
     case("layer.palette_color.purple", &[], 1),
+    // Settings, so the picture stays as it is.
+    case("layer.palette_in_folder", &[], 0),
+    case("layer.palette_on_canvas", &[], 0),
+    // Asks for the picture file (the File Object test answers it in
+    // p6_p6_assets.rs); Update has no file object here to update.
+    case("layer.new.file_object", &[], 0),
+    case("layer.file_object.update", &[], 0),
+    // A family: a recorded layer drag names how many places.
+    case("layer.move_by.", &[], 0),
 ];
 
 #[test]
