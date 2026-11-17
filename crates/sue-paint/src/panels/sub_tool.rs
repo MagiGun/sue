@@ -189,9 +189,9 @@ impl SuePaint {
         let followed = Id::unique(("sue-paint-subs-followed", slot, shown_group));
         let follow = inner.ctx().data(|data| data.get_temp::<usize>(followed)) != Some(picked);
         // A painting tool's row holds its sample stroke and its name on
-        // one line, a little taller than a plain row, so a palette of
-        // ordinary height lists six or seven of them.
-        let tall = if paints { density.icon_button() } else { line };
+        // one line, as tall as a plain row, so a palette of ordinary
+        // height lists five or six of them.
+        let tall = line;
         let height = list_height(
             names.len(),
             tall,

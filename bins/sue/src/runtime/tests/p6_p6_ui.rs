@@ -362,10 +362,12 @@ fn ab_notice_a_stroke_across_a_notice_paints() {
 fn p6_the_default_sub_tool_lists_five_sub_tools() {
     let _english = sue_lang::scope(sue_lang::ENGLISH);
     let ui = Polish::new("sub-tool-rows");
-    let property = ui
-        .driver
-        .rect_of("Tool Property")
-        .expect("the Tool Property palette");
+    // The list ends above the buttons under it: a row drawn lower is
+    // cut off by the list's edge and does not count.
+    let buttons = ui
+        .node("Delete Sub Tool", |rect| rect.right() < 400.0)
+        .expect("the buttons under the list");
+    let list_end = buttons.top() - 8.0;
     let listed = [
         "G-pen",
         "Grainy G-pen",
@@ -375,9 +377,10 @@ fn p6_the_default_sub_tool_lists_five_sub_tools() {
     ]
     .iter()
     .filter(|name| {
-        ui.driver.texts.iter().any(|(text, rect)| {
-            text == *name && rect.right() < 400.0 && rect.bottom() < property.top()
-        })
+        ui.driver
+            .texts
+            .iter()
+            .any(|(text, rect)| text == *name && rect.right() < 400.0 && rect.bottom() < list_end)
     })
     .count();
     assert_eq!(listed, 5, "{:?}", ui.driver.texts);
