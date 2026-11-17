@@ -22,6 +22,7 @@ sue-lang.workspace = true
 sue-model.workspace = true
 sue-platform.workspace = true
 sue-type.workspace = true
+miniz_oxide.workspace = true
 
 [lints]
 workspace = true

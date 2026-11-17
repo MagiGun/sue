@@ -17,6 +17,9 @@ use sue_model::{Geometry, PrimKind};
 
 use crate::doc::Edit;
 
+mod surface;
+pub use surface::{Relief, Surface, frame_of_points, light_of, render_surface, smooth_normals};
+
 /// The class of a 3D layer.
 pub const CLASS: &str = "sue.paint.layer3d";
 /// How far round the model the camera is, in degrees (`Float`).
@@ -62,6 +65,10 @@ pub const FOG_HEIGHT: &str = "view3d.fog_height";
 /// in a drawn foreshortening, 0 (off) to 1 (`Float`). The model's middle
 /// keeps its size; the lens widens and the camera comes nearer.
 pub const MANGA: &str = "view3d.manga";
+/// How high the light stands, in degrees above the ground (`Float`).
+pub const LIGHT_HEIGHT: &str = "view3d.light_height";
+/// The model casts a shadow on the floor (`Bool`).
+pub const FLOOR: &str = "view3d.floor_shadow";
 
 /// Where the object stands on its 3D layer: across, up and toward the
 /// camera's front, in the units of its shape (`Float`, on the model).
@@ -268,6 +275,13 @@ pub struct View3D {
     pub fog_height: f32,
     /// Manga Perspective, 0 (off) to 1.
     pub manga: f32,
+    /// How high the light stands, in degrees above the ground.
+    pub light_height: f32,
+    /// The model casts a shadow on the floor.
+    pub floor: bool,
+    /// Draw quickly rather than finely (while something is dragged);
+    /// never kept with the layer.
+    pub fast: bool,
 }
 
 impl Default for View3D {
@@ -291,6 +305,9 @@ impl Default for View3D {
             fog: 0.0,
             fog_height: 0.5,
             manga: 0.0,
+            light_height: Self::LIGHT_HEIGHT,
+            floor: false,
+            fast: false,
         }
     }
 }
@@ -339,8 +356,18 @@ impl View3D {
             fog: number(FOG, still.fog).clamp(0.0, 1.0),
             fog_height: number(FOG_HEIGHT, still.fog_height).clamp(0.0, 1.0),
             manga: number(MANGA, still.manga).clamp(0.0, 1.0),
+            light_height: number(LIGHT_HEIGHT, still.light_height).clamp(-89.0, 89.0),
+            floor: entity
+                .property(FLOOR)
+                .and_then(Value::as_bool)
+                .unwrap_or(still.floor),
+            fast: false,
         }
     }
+
+    /// How high the light stands unless set, in degrees: the height Sue
+    /// Paint's light has always had.
+    pub const LIGHT_HEIGHT: f32 = 38.659_81;
 
     /// The widest lens Manga Perspective opens to, in degrees.
     pub const MANGA_FOV: f32 = 90.0;
@@ -411,6 +438,8 @@ impl View3D {
             (FOG, Value::from(f64::from(self.fog))),
             (FOG_HEIGHT, Value::from(f64::from(self.fog_height))),
             (MANGA, Value::from(f64::from(self.manga))),
+            (LIGHT_HEIGHT, Value::from(f64::from(self.light_height))),
+            (FLOOR, Value::from(self.floor)),
         ]
     }
 }
@@ -597,6 +626,15 @@ pub struct Buffers {
     pub light: Vec<f32>,
     /// How much fog is in front of it, 0 to 1.
     pub fog: Vec<f32>,
+    /// How much of the pixel the surface covers, 0 to 1, so edges are
+    /// soft (empty when every covered pixel is covered whole).
+    pub cover: Vec<f32>,
+    /// How much guide line lies on the surface at the pixel (empty when
+    /// the model has none).
+    pub guide: Vec<f32>,
+    /// How dark the model's shadow on the floor is at the pixel (empty
+    /// without one).
+    pub floor: Vec<f32>,
 }
 
 impl Buffers {
@@ -742,6 +780,9 @@ pub fn render_framed(
         normal: vec![[0.0; 3]; w * h],
         light: vec![0.0; w * h],
         fog: vec![0.0; w * h],
+        cover: Vec::new(),
+        guide: Vec::new(),
+        floor: Vec::new(),
     };
     let positions = mesh.positions();
     if positions.is_empty() || w == 0 || h == 0 {
@@ -754,8 +795,7 @@ pub fn render_framed(
     let eye = lens.eye;
     // Carried on the camera, the light keeps its place on the screen as
     // the camera goes round.
-    let light_angle = (view.light + if view.follow_light { view.yaw } else { 0.0 }).to_radians();
-    let light = normalized([light_angle.sin(), 0.8, light_angle.cos()]);
+    let light = light_of(view);
     // Height-based fog: thickest at the model's foot, gone at its height.
     let (low, high) = positions
         .iter()
@@ -847,17 +887,23 @@ impl ShadowMap {
     const SIZE: usize = 512;
 
     fn new(mesh: &MeshBuffer3D, lens: &Camera, toward: [f32; 3]) -> Self {
+        let worlds: Vec<[f32; 3]> = mesh.positions().iter().map(|p| lens.see(*p).0).collect();
+        Self::from_points(&worlds, mesh.indices(), toward)
+    }
+
+    /// The map of triangles `indices` over `worlds` (points in the world
+    /// the camera orbits), seen from the light at `toward`.
+    fn from_points(worlds: &[[f32; 3]], indices: &[u32], toward: [f32; 3]) -> Self {
         let mut across = cross(toward, [0.0, 1.0, 0.0]);
         if dot(across, across) < 1e-6 {
             across = [1.0, 0.0, 0.0];
         }
         let across = normalized(across);
         let up = cross(across, toward);
-        let worlds: Vec<[f32; 3]> = mesh.positions().iter().map(|p| lens.see(*p).0).collect();
         let flat = |p: [f32; 3]| [dot(p, across), dot(p, up), dot(p, toward)];
         let (mut min, mut max) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
         let (mut near, mut far) = (f32::NEG_INFINITY, f32::INFINITY);
-        for p in &worlds {
+        for p in worlds {
             let q = flat(*p);
             for axis in 0..2 {
                 min[axis] = min[axis].min(q[axis]);
@@ -877,7 +923,7 @@ impl ShadowMap {
             bias: (near - far).max(1e-3) * 0.01 + cell * 1.5,
         };
         let n = Self::SIZE as f32;
-        for triangle in mesh.indices().as_chunks::<3>().0 {
+        for triangle in indices.as_chunks::<3>().0 {
             let [a, b, c] = [0, 1, 2].map(|k| {
                 let q = flat(worlds[triangle[k] as usize]);
                 [(q[0] - min[0]) / cell, (q[1] - min[1]) / cell, q[2]]
@@ -998,10 +1044,25 @@ pub fn draw(buffers: &Buffers, view: &View3D) -> Option<RasterTile2D> {
         let fog = buffers.fog.get(at).copied().unwrap_or(0.0);
         let ink = line.as_ref().map_or(0.0, |line| line[at]) * view.line_opacity * (1.0 - fog);
         let (rgb, alpha) = if view.style != 1 && buffers.covered(at) {
-            let gray = buffers.light[at] + (1.0 - buffers.light[at]) * fog;
-            (color.map(|c| gray + (c - gray) * ink), 1.0)
+            // Guide lines lie on the surface, a darker gray.
+            let guide = buffers.guide.get(at).copied().unwrap_or(0.0);
+            let lit = buffers.light[at] * (1.0 - 0.6 * guide);
+            let gray = lit + (1.0 - lit) * fog;
+            // A soft edge: the pixel shows as much as the model covers.
+            let cover = buffers.cover.get(at).copied().unwrap_or(1.0);
+            (
+                color.map(|c| gray + (c - gray) * ink),
+                cover + (1.0 - cover) * ink,
+            )
         } else {
-            (color, ink)
+            // The model's shadow on the floor, where the model is not.
+            let floor = buffers.floor.get(at).copied().unwrap_or(0.0) * 0.38;
+            let alpha = ink + (1.0 - ink) * floor;
+            if alpha <= 0.0 {
+                (color, 0.0)
+            } else {
+                (color.map(|c| c * ink / alpha), alpha)
+            }
         };
         pixels.extend_from_slice(&[
             (rgb[0] * 255.0).round() as u8,
