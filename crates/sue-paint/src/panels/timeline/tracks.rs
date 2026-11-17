@@ -42,9 +42,13 @@ struct Row {
     height: f32,
     /// How many folders with rows of their own it is inside.
     depth: usize,
-    /// The band of keys over its cels (a folder with keyframes on), 0
-    /// when it has none.
+    /// The band over its cels: the strip of its named labels (`notes`)
+    /// and under it the strip of keys (a folder with keyframes on), 0
+    /// when it has neither.
     band: f32,
+    /// The strip of named track labels at the top of the band, 0 when
+    /// the track has none.
+    notes: f32,
 }
 
 /// Where a track sits among the rows: its place in the Layer palette
@@ -102,11 +106,21 @@ fn rows(
     for track in order {
         let kind = kind_of(&sequence.tracks[track]);
         let at = place(&sequence.tracks[track]);
-        let band = if kind == Kind::Cels && at.keys {
+        // Named track labels get a strip of their own over the cels, so
+        // they never run over a cel's name.
+        let notes = if kind == Kind::Cels
+            && !anim::editing::track_notes(&sequence.tracks[track]).is_empty()
+        {
             row
         } else {
             0.0
         };
+        let band = notes
+            + if kind == Kind::Cels && at.keys {
+                row
+            } else {
+                0.0
+            };
         let height = band
             + match kind {
                 Kind::Cels => row * (1.0 + thumbs.rows()),
@@ -120,6 +134,7 @@ fn rows(
             height,
             depth: if kind == Kind::Audio { 0 } else { at.depth },
             band,
+            notes,
         });
         top += height;
     }
@@ -549,6 +564,9 @@ impl SuePaint {
         let frames_area = Rect::from_min_max(pos2(names.right(), area.top()), area.max);
         let content = ruler + layout.last().map_or(0.0, |row| row.top + row.height);
         let mut step = self.timeline_view.step(frames_area.width(), length);
+        if self.timeline_view.step.is_none() {
+            self.timeline_view.fitted = Some(step);
+        }
         // Over the frames, as Clip Studio Paint: the wheel zooms around the
         // pointer, Shift and the wheel pan, Alt and the wheel scroll the
         // tracks, Space and a drag or the middle button pan.
@@ -978,7 +996,18 @@ impl SuePaint {
             let cel_now = (row.kind == Kind::Cels)
                 .then(|| anim::cel_at(track, sequence.rate, frame))
                 .flatten();
+            // With keyframes on, the track is the layer's transform
+            // (TRV-2), as Clip Studio Paint names it.
+            let keyed = anim::setup::track_layer(track)
+                .or_else(|| anim::track_folder(track))
+                .and_then(|layer| cx.world.arena.get_by_id(layer).ok())
+                .is_some_and(anim::motion::keyframes_on);
             let title = match (row.kind, cel_now) {
+                (Kind::Cels | Kind::Layer, _) if keyed => format!(
+                    "{} : {}",
+                    anim::track_name(&cx.world.arena, track),
+                    tr!("transform")
+                ),
                 (Kind::Cels, Some(cel)) => format!(
                     "{} : {}",
                     anim::track_name(&cx.world.arena, track),
@@ -1120,6 +1149,26 @@ impl SuePaint {
                             }
                         }
                     }
+                    // Named track labels, in their strip over the cels:
+                    // the text from their frame, a line under it over
+                    // their range.
+                    for note in anim::editing::track_notes(track) {
+                        let from = column(note.frame);
+                        if note.range > 1 {
+                            cells_painter.hline(
+                                (from + pad / 4.0)..=column(note.frame + note.range) - pad / 4.0,
+                                top + row.notes - thick,
+                                Stroke::new(thick, theme.text_muted()),
+                            );
+                        }
+                        cells_painter.text(
+                            pos2(from + pad / 2.0, top + row.notes / 2.0),
+                            Align2::LEFT_CENTER,
+                            &note.name,
+                            font.clone(),
+                            theme.text_muted(),
+                        );
+                    }
                 }
                 Kind::Layer => {
                     // Its clips: the frames it shows on.
@@ -1173,8 +1222,8 @@ impl SuePaint {
                     let at = time.frame(sequence.rate).max(0) as u32;
                     let ease =
                         anim::motion::ease_at(&cx.world.arena, layer, time).unwrap_or(Ease::Linear);
-                    let y = if row.kind == Kind::Cels && row.band > 0.0 {
-                        top + row.band / 2.0
+                    let y = if row.kind == Kind::Cels && row.band > row.notes {
+                        top + (row.band + row.notes) / 2.0
                     } else if row.kind == Kind::Cels {
                         top + row.height - row_size / 2.0
                     } else {

@@ -3522,3 +3522,6 @@ export-options = Export options
 dithering = Dithering
 snap-angle = Snap angle
 snap-angle-hint = Turns the view in steps of this angle; Shift snaps by the same step
+track-label-ellipsis = Track Label...
+label-name = Label name
+track-label-at-frame = On the picked track, from frame { $value }. An empty name takes the label away.

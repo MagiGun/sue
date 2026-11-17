@@ -282,24 +282,6 @@ pub fn new_cel(
     Ok((edit, cel))
 }
 
-/// The edit that keeps `cel` a cel once a new folder `wrapper` takes its
-/// place in its animation folder (Create Folder and Insert Layer, or the
-/// cel dropped on New Layer Folder), as Clip Studio Paint does: the
-/// folder takes the cel's name, and every frame that showed the cel shows
-/// the folder. Read before the wrap is applied. `None` when `cel` is no
-/// cel of an animation folder.
-#[must_use]
-pub fn wrapped(arena: &Arena, picture: EntityId, cel: EntityId, wrapper: EntityId) -> Option<Edit> {
-    super::cel_folder(arena, cel)?;
-    let name = arena.get_by_id(cel).ok()?.name().to_owned();
-    let rekeyed = rekeyed(arena, picture, &[cel], wrapper)?;
-    Some(
-        Edit::new(tr!("create-folder-and-insert-layer"))
-            .then(Rename::new(wrapper, name))
-            .then(rekeyed),
-    )
-}
-
 /// The edit that shows `to` on every frame of the timeline that showed
 /// one of `from`: what a cel's frames go to when it is merged into a new
 /// layer (Merge Selected Layers on a folder cel) or put in a folder.
@@ -321,6 +303,41 @@ pub fn rekeyed(arena: &Arena, picture: EntityId, from: &[EntityId], to: EntityId
         }
     }
     any.then(|| Edit::new(tr!("edit-track")).then(SetExtension::set(picture, out)))
+}
+
+/// What Create Folder and Insert Layer adds when the layer it wraps is a
+/// cel: the new `folder` takes the cel's name and every key that showed
+/// the cel, so the folder is the cel from then on, in the same place on
+/// the timeline. `None` when `cel` is no cel of an animation folder.
+#[must_use]
+pub fn wrap_cel(arena: &Arena, picture: EntityId, cel: EntityId, folder: EntityId) -> Option<Edit> {
+    let sequence = timeline(arena, picture)?;
+    let track = track_of(sequence, super::cel_folder(arena, cel)?)?;
+    let name = arena.get_by_id(cel).ok()?.name().to_owned();
+    let old = &sequence.tracks[track];
+    // The track as it was (hidden, locked, its labels), its clips put back
+    // one by one with the cel's keys now showing the folder.
+    let mut kept = old.clone();
+    while kept.remove(0).is_some() {}
+    for clip in old.clips() {
+        let mut clip = clip.clone();
+        let blank = clip
+            .properties
+            .get(super::BLANK)
+            .and_then(sue_core::Value::as_bool)
+            == Some(true);
+        if clip.source == cel && !blank {
+            clip.source = folder;
+        }
+        kept.insert(clip);
+    }
+    let mut out = sequence.clone();
+    out.tracks[track] = kept;
+    Some(
+        Edit::new(tr!("create-folder-and-insert-layer"))
+            .then(Rename::new(folder, name))
+            .then(SetExtension::set(picture, out)),
+    )
 }
 
 /// The edit that names the cels of `folder` 1, 2, 3 in the order the
@@ -423,7 +440,7 @@ mod wrap_tests {
         let (edit, cel) = new_cel(&arena, picture, folder, 0).unwrap();
         history.apply(&mut arena, edit).unwrap();
         let (wrap, wrapper) = crate::doc::new_folder(&arena, picture, Some(cel), true);
-        let kept = wrapped(&arena, picture, cel, wrapper).expect("a cel");
+        let kept = wrap_cel(&arena, picture, cel, wrapper).expect("a cel");
         let before = crate::doc::layers(&arena, picture);
         history.apply(&mut arena, wrap.then(kept)).unwrap();
         assert_eq!(arena.get_by_id(wrapper).unwrap().name(), "1");
@@ -440,6 +457,6 @@ mod wrap_tests {
             .find(|info| info.id != folder && crate::doc::folder_of(&arena, info.id).is_none())
             .expect("a layer outside the folder")
             .id;
-        assert!(wrapped(&arena, picture, outside, wrapper).is_none());
+        assert!(wrap_cel(&arena, picture, outside, wrapper).is_none());
     }
 }

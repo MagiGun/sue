@@ -146,7 +146,7 @@ impl SuePaint {
 
 use crate::panels::timeline::forms::{
     Animated, AnimatedForm, AudioClipForm, CelsForm, InsertForm, LabelForm, MovieForm, Range,
-    SequenceForm, TimelineForm,
+    SequenceForm, TimelineForm, TrackNoteForm,
 };
 use sue_wm::ui::{self as wm_ui, TextRole};
 
@@ -172,6 +172,8 @@ pub(crate) enum AnimDialog {
     StopTimelapse(bool, usize),
     /// Insert Frame: how many, where and how.
     Insert(InsertForm),
+    /// A named track label: its name and range.
+    TrackNote(TrackNoteForm),
 }
 
 impl AnimDialog {
@@ -192,6 +194,7 @@ impl AnimDialog {
             Self::Label(_) => tr!("timeline-label"),
             Self::StopTimelapse(..) => tr!("stop-recording-timelapse"),
             Self::Insert(_) => tr!("insert-frame"),
+            Self::TrackNote(_) => tr!("track-label"),
         }
     }
 
@@ -206,7 +209,7 @@ impl AnimDialog {
             Self::Cels(_) => 5.0,
             Self::AudioClip(_) => 10.0,
             Self::Label(_) | Self::StopTimelapse(..) => 4.0,
-            Self::Insert(_) => 5.5,
+            Self::Insert(_) | Self::TrackNote(_) => 5.5,
         };
         let row = wm_ui::Density::Regular.row();
         egui::Vec2::new(row * 15.0, row * (rows + 2.0) * 1.2)
@@ -224,6 +227,7 @@ impl AnimDialog {
             Self::Label(form) => label_ui(ui, form, theme),
             Self::StopTimelapse(delete, frames) => stop_timelapse_ui(ui, delete, *frames, theme),
             Self::Insert(form) => insert_ui(ui, form, theme),
+            Self::TrackNote(form) => track_note_ui(ui, form, theme),
         }
     }
 }
@@ -241,6 +245,7 @@ impl SuePaint {
             AnimDialog::Label(form) => self.label_ok(cx, &form),
             AnimDialog::StopTimelapse(delete, _) => self.stop_timelapse(cx, delete),
             AnimDialog::Insert(form) => self.insert_frames(cx, &form),
+            AnimDialog::TrackNote(form) => self.track_note_ok(cx, &form),
         }
     }
 }
@@ -743,14 +748,74 @@ fn audio_clip_ui(ui: &mut Ui, form: &mut AudioClipForm, theme: &Theme) -> Outcom
 /// A timeline label's name; empty takes it away.
 fn label_ui(ui: &mut Ui, form: &mut LabelForm, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
+    let mut entered = false;
     wm_ui::form_grid(ui, "anim-label-form", theme, |grid| {
         grid.row(&tr!("label-at-frame", value = form.frame + 1), |ui| {
-            wm_ui::text_field("anim-label-name", &mut form.name).show(ui, theme);
+            let field = wm_ui::text_field("anim-label-name", &mut form.name).show(ui, theme);
+            entered = name_field_keys(ui, &field);
         });
     });
     help(ui, &tr!("an-empty-label-is-removed"), theme);
     ok_cancel(ui, &mut outcome);
-    outcome
+    if entered { Outcome::Ok } else { outcome }
+}
+
+/// A dialog's name field has the keyboard from the start (even when the
+/// Timeline's frames held it as the dialog opened), so the name is typed
+/// at once, and Enter in it is OK (the field gives the keyboard up as it
+/// takes the key, so either may be seen this frame).
+fn name_field_keys(ui: &Ui, field: &egui::Response) -> bool {
+    let ctx = ui.ctx();
+    let in_dialog = ctx
+        .memory(|memory| memory.focused())
+        .and_then(|id| ctx.read_response(id))
+        .is_some_and(|response| response.layer_id == field.layer_id);
+    if !in_dialog {
+        field.request_focus();
+    }
+    (field.lost_focus() || field.has_focus())
+        && ui.input(|input| input.key_pressed(egui::Key::Enter))
+}
+
+/// A named track label: its name, and Range with how many frames it
+/// covers. An empty name takes it away.
+fn track_note_ui(ui: &mut Ui, form: &mut TrackNoteForm, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    let mut entered = false;
+    wm_ui::form_grid(ui, "anim-track-note-form", theme, |grid| {
+        grid.row(&tr!("label-name"), |ui| {
+            let field = wm_ui::text_field("anim-track-note-name", &mut form.name).show(ui, theme);
+            entered = name_field_keys(ui, &field);
+        });
+        grid.row("", |ui| {
+            tick(
+                ui,
+                "anim-track-note-range",
+                &tr!("range"),
+                &mut form.range,
+                theme,
+            );
+        });
+        if form.range {
+            grid.row(&tr!("number-of-frames"), |ui| {
+                whole(
+                    ui,
+                    "anim-track-note-frames",
+                    &mut form.frames,
+                    1..=10_000,
+                    "",
+                    theme,
+                );
+            });
+        }
+    });
+    help(
+        ui,
+        &tr!("track-label-at-frame", value = form.frame + 1),
+        theme,
+    );
+    ok_cancel(ui, &mut outcome);
+    if entered { Outcome::Ok } else { outcome }
 }
 
 /// Stopping Record Timelapse asks what becomes of the frames kept so far:

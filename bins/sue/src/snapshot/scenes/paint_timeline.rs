@@ -49,6 +49,17 @@ pub(super) fn timeline(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.shoot("11d1-sue-paint-timeline-keyboard")?;
     tour.camera.input.push(key(egui::Key::ArrowLeft));
     tour.settle();
+    tour.paint_command("anim.track_note");
+    tour.settle();
+    tour.camera
+        .input
+        .push(vec![egui::Event::Text("Walk cycle".to_owned())]);
+    tour.shoot("11d1a-sue-paint-track-label-dialog")?;
+    tour.camera.input.push(key(egui::Key::Enter));
+    tour.settle();
+    tour.shoot("11d1b-sue-paint-track-label")?;
+    tour.paint_command("edit.undo");
+    tour.settle();
     // Cel 1 on the light table of cel 2 (cel 2 locked as the one drawn
     // while frame 1 picks cel 1), so the Animation Cels palette shows an
     // entry, picked, its settings at the foot.

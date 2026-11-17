@@ -21,6 +21,9 @@ pub(crate) struct TimelineView {
     pub down: f32,
     /// The current frame the view last made sure to show.
     seen: Option<u32>,
+    /// Points per frame the frames were last drawn at while they fit, so
+    /// the zoom buttons start from what people see.
+    pub fitted: Option<f32>,
 }
 
 impl TimelineView {

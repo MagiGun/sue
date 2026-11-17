@@ -122,9 +122,10 @@ impl SuePaint {
     }
 
     /// Moves to `frame` (wrapped into the timeline) and makes the cel it
-    /// shows in the current folder the current layer.
+    /// shows in the current folder the current layer (in a folder cel, a
+    /// layer of it: see [`drawn_in`]).
     pub(crate) fn go_to_frame(&mut self, arena: &sue_core::Arena, frame: i64) {
-        let Some((_, sequence, length)) = self.timeline_here(arena) else {
+        let Some((picture, sequence, length)) = self.timeline_here(arena) else {
             return;
         };
         let frame = frame.rem_euclid(i64::from(length)) as u32;
@@ -136,18 +137,27 @@ impl SuePaint {
         doc.track = doc.track.min(sequence.tracks.len().saturating_sub(1));
         // A camera, or a layer or folder moved by its keyframes, stays
         // picked from frame to frame, so the Object tool keys it on each
-        // (as in Clip Studio Paint); else the cel shown is picked.
+        // (as in Clip Studio Paint). Else the cel shown becomes the
+        // current layer while the current layer is in that track's folder
+        // (or none is): a layer picked outside it, a 2D camera folder
+        // say, stays picked as the frame moves.
         let keyed = doc.layer.is_some_and(|layer| {
             crate::camera::is_camera(arena, layer)
                 || arena.get_by_id(layer).is_ok_and(anim::motion::keyframes_on)
         });
+        let on_track = |layer: EntityId| {
+            anim::track_folder(&sequence.tracks[doc.track]).is_some_and(|folder| {
+                layer == folder || doc::members(arena, picture, folder).contains(&layer)
+            })
+        };
         if !keyed
             && let Some(cel) = folders
                 .contains(&doc.track)
                 .then(|| anim::cel_at(&sequence.tracks[doc.track], sequence.rate, frame))
                 .flatten()
+            && doc.layer.is_none_or(on_track)
         {
-            doc.layer = Some(cel);
+            doc.layer = Some(drawn_in(arena, picture, cel, doc.layer));
         }
     }
 
@@ -632,4 +642,30 @@ impl CelPeek {
             turn: Some(0),
         })
     }
+}
+
+/// Where drawing goes while `cel` shows: the cel itself, or, when the cel
+/// is a folder (TR-1), the layer of it that was current already, else its
+/// topmost layer that is no folder, so a folder cel is drawn into on its
+/// own layers.
+pub(crate) fn drawn_in(
+    arena: &sue_core::Arena,
+    picture: EntityId,
+    cel: EntityId,
+    current: Option<EntityId>,
+) -> EntityId {
+    if !doc::is_folder(arena, cel) {
+        return cel;
+    }
+    let members = doc::members(arena, picture, cel);
+    current
+        .filter(|layer| members.contains(layer))
+        .or_else(|| {
+            members
+                .iter()
+                .rev()
+                .copied()
+                .find(|layer| !doc::is_folder(arena, *layer))
+        })
+        .unwrap_or(cel)
 }

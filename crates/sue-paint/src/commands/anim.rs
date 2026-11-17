@@ -732,7 +732,7 @@ fn timeline_switch(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<
 /// Zooms the frames in or out.
 fn zoom(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
     let view = &mut paint.timeline_view;
-    let step = view.step.unwrap_or(15.0);
+    let step = view.step.or(view.fitted).unwrap_or(15.0);
     let factor = if call.name == "anim.zoom_in" {
         1.25
     } else {
@@ -760,6 +760,11 @@ fn label(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     } else {
         cx.fail(tr!("make-timeline-first-animation-timeline-new"));
     }
+}
+
+/// A named label on the current track at the frame shown, in a dialog.
+fn track_note(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.ask_track_note(cx);
 }
 
 /// A track label at the frame shown (the argument names its kind).
@@ -834,6 +839,15 @@ fn key_layer(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 /// How the current layer's key at the frame shown moves on.
 fn key_ease(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
     paint.ease_here(cx, call.name.trim_start_matches("anim.key.ease."));
+}
+
+/// Every key of the current layer taken away (Delete all keyframes).
+fn key_delete_all(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    if let Some(layer) = paint.layer()
+        && let Some(edit) = crate::anim::motion::delete_all_keys(&cx.world.arena, layer)
+    {
+        SuePaint::apply(cx, edit);
+    }
 }
 
 /// Keyframes on or off for the current layer.
@@ -1189,6 +1203,9 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     c("anim.label", "timeline-label-ellipsis", "tag", label)
         .state(on_timeline)
         .with(Flags::PALETTE),
+    c("anim.track_note", "track-label-ellipsis", "tag", track_note)
+        .state(on_timeline)
+        .with(Flags::PALETTE),
     c(
         "anim.track_label.inbetween",
         "track-label-inbetween",
@@ -1333,6 +1350,14 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     c("anim.key.ease.hold", "keyframe-hold", "edit", key_ease)
         .state(on_timeline)
         .with(Flags::PALETTE),
+    c(
+        "anim.key.delete_all",
+        "delete-all-keyframes",
+        "delete",
+        key_delete_all,
+    )
+    .state(on_timeline)
+    .with(Flags::PALETTE),
     c(
         "anim.keyframes",
         "enable-layer-keyframes",
