@@ -465,8 +465,16 @@ pub fn color_wheel(ui: &mut Ui, id: Id, rgba: &mut [u8; 4], side: f32) -> ColorP
     let hue_id = id.with("hue");
     let shape = wheel_shape(ui.ctx());
     let mut hsv = hsv_of([rgba[0], rgba[1], rgba[2]]);
-    if hsv[1] <= 0.0 || hsv[2] <= 0.0 {
-        hsv[0] = ui.data(|data| data.get_temp(hue_id)).unwrap_or(hsv[0]);
+    // The hue the wheel last picked, with the very color that pick made.
+    // A gray carries no hue in its bytes, and a color's bytes round its
+    // hue (by a degree or more near black or gray): while the color is
+    // still the one the wheel made, the wheel keeps the hue it was given,
+    // so a drag inside the shape never turns the ring.
+    let kept: Option<(f32, [u8; 3])> = ui.data(|data| data.get_temp(hue_id));
+    if let Some((hue, made)) = kept
+        && (hsv[1] <= 0.0 || hsv[2] <= 0.0 || made == [rgba[0], rgba[1], rgba[2]])
+    {
+        hsv[0] = hue;
     }
 
     ui.painter()
@@ -543,7 +551,10 @@ pub fn color_wheel(ui: &mut Ui, id: Id, rgba: &mut [u8; 4], side: f32) -> ColorP
             .input(|input| input.pointer.press_origin())
             .unwrap_or(pointer);
         let mut next = hsv;
-        if (press - center).length() > inner * 0.95 {
+        // The ring begins at its own inner edge: a press on the square's
+        // corner or just past the triangle's tip, both close to it,
+        // stays with the shape instead of turning the hue.
+        if (press - center).length() >= inner {
             let offset = pointer - center;
             next[0] = offset.y.atan2(offset.x).to_degrees().rem_euclid(360.0);
         } else {
@@ -557,8 +568,8 @@ pub fn color_wheel(ui: &mut Ui, id: Id, rgba: &mut [u8; 4], side: f32) -> ColorP
                 }
             }
         }
-        ui.data_mut(|data| data.insert_temp(hue_id, next[0]));
         let [r, g, b] = rgb_of(next);
+        ui.data_mut(|data| data.insert_temp(hue_id, (next[0], [r, g, b])));
         if [r, g, b] != [rgba[0], rgba[1], rgba[2]] {
             *rgba = [r, g, b, rgba[3]];
             pick.changed = true;
@@ -968,6 +979,65 @@ mod tests {
         let [h, s, v] = hsv_of([rgba[0], rgba[1], rgba[2]]);
         assert!(h.abs() < 1.0 && (s - 0.5).abs() < 0.05 && (v - 0.5).abs() < 0.05);
         assert_eq!(rgba[3], 255, "opacity untouched");
+    }
+
+    /// The hue the wheel under `Id::unique("test")` keeps.
+    fn kept_hue(ctx: &egui::Context) -> f32 {
+        ctx.data(|data| data.get_temp::<(f32, [u8; 3])>(Id::unique("test").with("hue")))
+            .expect("the wheel picked")
+            .0
+    }
+
+    /// The square's corners reach almost to the ring: a press there sets
+    /// saturation and value and leaves the hue alone.
+    #[test]
+    fn picking_the_squares_corner_keeps_the_hue() {
+        let ctx = egui::Context::default();
+        let mut rgba = [0, 128, 0, 255];
+        // Just inside the top right corner (full saturation and value),
+        // 0.98 of the way from the middle to the ring.
+        wheel_frames(&ctx, &mut rgba, click_at(pos2(158.0, 42.0)));
+        let [h, s, v] = hsv_of([rgba[0], rgba[1], rgba[2]]);
+        assert!((h - 120.0).abs() < 1.0, "the hue stayed green: {rgba:?}");
+        assert!(s > 0.95 && v > 0.95, "{rgba:?}");
+    }
+
+    /// Just past the triangle's hue corner, still inside the ring, takes
+    /// the corner's color and leaves the hue alone.
+    #[test]
+    fn picking_just_past_the_triangles_tip_keeps_the_hue() {
+        let ctx = egui::Context::default();
+        set_wheel_shape(&ctx, WheelShape::Triangle);
+        let center = pos2(100.0, 100.0);
+        let mut rgba = [0, 128, 0, 255];
+        let triangle = Triangle::new(center, 100.0 * 0.84 * 0.94, 120.0);
+        let past = center + (triangle.hue - center) * (0.99 / 0.94);
+        wheel_frames(&ctx, &mut rgba, click_at(past));
+        let [h, _, s] = hls_of([rgba[0], rgba[1], rgba[2]]);
+        assert!((h - 120.0).abs() < 1.0 && s > 0.9, "{rgba:?}");
+    }
+
+    /// Picks inside the square never turn the hue, not by the fraction
+    /// of a degree a color's bytes round it by.
+    #[test]
+    fn dragging_inside_the_square_keeps_the_hue_bit_exact() {
+        let ctx = egui::Context::default();
+        let mut rgba = [255, 0, 0, 255];
+        // A hue no byte holds exactly: 37.3 degrees on the ring.
+        let angle = 37.3_f32.to_radians();
+        let on_ring = pos2(100.0, 100.0) + vec2(angle.cos(), angle.sin()) * 92.0;
+        wheel_frames(&ctx, &mut rgba, click_at(on_ring));
+        let hue = kept_hue(&ctx);
+        assert!((hue - 37.3).abs() < 0.5, "{hue}");
+        for at in [
+            pos2(70.0, 130.0),
+            pos2(60.0, 150.0),
+            pos2(120.0, 140.0),
+            pos2(90.0, 90.0),
+        ] {
+            wheel_frames(&ctx, &mut rgba, click_at(at));
+            assert_eq!(kept_hue(&ctx).to_bits(), hue.to_bits(), "at {at:?}");
+        }
     }
 
     /// Crash tips, tip 17: the button at the wheel's bottom right switches
