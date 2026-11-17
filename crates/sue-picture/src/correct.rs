@@ -379,11 +379,29 @@ pub fn split(lines: &mut Vec<Line>, line: usize, along: f32) -> bool {
     true
 }
 
+/// Pinch's Add control point: a control point on `line`, pinched from
+/// `base`, where `along` (an arc length on `base`) lies now. Returns its
+/// index among the samples.
+pub fn add_control_after(line: &mut Line, base: &Line, along: f32) -> usize {
+    let total = |samples: &[Sample]| vector::arcs(samples).last().copied().unwrap_or(0.0);
+    let (was, now) = (total(&base.samples), total(&line.samples));
+    let at = if was > 0.0 { along * now / was } else { along };
+    add_control(line, at)
+}
+
+/// Pinch vector line's Fix end: both ends stay where they are.
+pub const FIX_BOTH: u8 = 0;
+/// Pinch vector line's Fix end: neither end is held.
+pub const FIX_NONE: u8 = 1;
+/// Pinch vector line's Fix end: the end farther from the pull stays, the
+/// nearer one moves with it.
+pub const FIX_FAR: u8 = 2;
+
 /// Pinch vector line: the stretch of `base` within `range` of `along`
-/// moved by `by`, sharper the higher `level` (1 to 5); with `fixed` the
-/// line's ends stay where they are.
+/// moved by `by`, sharper the higher `level` (1 to 5); `fix` says which
+/// ends stay where they are (`FIX_*`).
 #[must_use]
-pub fn pinch(base: &Line, along: f32, by: [f32; 2], range: f32, level: u32, fixed: bool) -> Line {
+pub fn pinch(base: &Line, along: f32, by: [f32; 2], range: f32, level: u32, fix: u8) -> Line {
     let mut line = base.clone();
     // A line drawn quickly keeps few points, far apart: put points along it
     // close enough that the stretch in range bends smoothly.
@@ -401,14 +419,20 @@ pub fn pinch(base: &Line, along: f32, by: [f32; 2], range: f32, level: u32, fixe
     let arcs = vector::arcs(&base.samples);
     let total = arcs.last().copied().unwrap_or(0.0);
     let hold = along.min(total - along).max(1.0);
+    // The far end is the one the pull is not nearer to.
+    let far_is_end = along < total / 2.0;
+    let from_far = |arc: f32| if far_is_end { total - arc } else { arc };
+    let far_hold = from_far(along).max(1.0);
     for (k, sample) in line.samples.iter_mut().enumerate() {
         let away = (arcs[k] - along).abs();
         if away >= range {
             continue;
         }
         let mut weight = smooth(1.0 - away / range.max(1e-3)).powi(level.clamp(1, 5) as i32);
-        if fixed {
-            weight *= (arcs[k].min(total - arcs[k]) / hold).clamp(0.0, 1.0);
+        match fix {
+            FIX_BOTH => weight *= (arcs[k].min(total - arcs[k]) / hold).clamp(0.0, 1.0),
+            FIX_FAR => weight *= (from_far(arcs[k]) / far_hold).clamp(0.0, 1.0),
+            _ => {}
         }
         sample.at[0] += by[0] * weight;
         sample.at[1] += by[1] * weight;
@@ -611,8 +635,10 @@ pub fn adjust_width(
 
 /// Redraw vector line: the line nearest where `path` begins takes the
 /// path's shape from there to where it ends, keeping its pressure and
-/// width along the way.
-pub fn redraw(lines: &mut [Line], path: &[[f32; 2]], reach: f32) -> bool {
+/// width along the way. With `free_end` the line ends where the path
+/// does (Fix end off): what lay past the path's end goes, so a line is
+/// lengthened or shortened by tracing past or short of its end.
+pub fn redraw(lines: &mut [Line], path: &[[f32; 2]], reach: f32, free_end: bool) -> bool {
     let (Some(&start), Some(&end)) = (path.first(), path.last()) else {
         return false;
     };
@@ -635,7 +661,15 @@ pub fn redraw(lines: &mut [Line], path: &[[f32; 2]], reach: f32) -> bool {
             0.0
         }
     });
-    let (from, to, path): (f32, f32, Vec<[f32; 2]>) = if from <= to {
+    let forward = from <= to;
+    // A free end: the line runs from its far side of the start along the
+    // path and stops where the path stops.
+    let to = match (free_end, forward) {
+        (true, true) => total,
+        (true, false) => 0.0,
+        _ => to,
+    };
+    let (from, to, path): (f32, f32, Vec<[f32; 2]>) = if forward {
         (from, to, path.to_vec())
     } else {
         (to, from, path.iter().rev().copied().collect())
@@ -704,6 +738,147 @@ pub fn redraw_width(lines: &mut [Line], path: &[([f32; 2], f32)], reach: f32) ->
 /// wider or taller than `size` that lies inside `rect` (`[x0, y0, x1, y1]`)
 /// is cleared. Returns how many went.
 pub fn remove_dust(pixels: &mut [u8], width: u32, height: u32, rect: [u32; 4], size: u32) -> usize {
+    let (specks, count) = dust(pixels, width, height, rect, size, true);
+    for (index, speck) in specks.iter().enumerate() {
+        if *speck {
+            pixels[index * 4..index * 4 + 4].fill(0);
+        }
+    }
+    count
+}
+
+/// Fill leftover: every hole of `pixels` (a clear patch no wider or
+/// taller than `size` inside `rect`, ink all round it) is filled with
+/// `rgba`, so specks of paper left inside inked or painted areas go.
+/// Returns how many were filled.
+pub fn fill_leftover(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    rect: [u32; 4],
+    size: u32,
+    rgba: [u8; 4],
+) -> usize {
+    let (holes, count) = dust(pixels, width, height, rect, size, false);
+    for (index, hole) in holes.iter().enumerate() {
+        if *hole {
+            pixels[index * 4..index * 4 + 4].copy_from_slice(&rgba);
+        }
+    }
+    count
+}
+
+/// Select garbage: the specks Remove dust would clear (or, not `ink`, the
+/// holes Fill leftover would fill), as a mask of 255 for each of their
+/// pixels and 0 elsewhere, and how many there are.
+#[must_use]
+pub fn dust_mask(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    rect: [u32; 4],
+    size: u32,
+    ink: bool,
+) -> (Vec<u8>, usize) {
+    let (found, count) = dust(pixels, width, height, rect, size, ink);
+    (
+        found
+            .into_iter()
+            .map(|on| if on { 255 } else { 0 })
+            .collect(),
+        count,
+    )
+}
+
+/// The specks (with `ink`: inked pixels joined at sides or corners; else
+/// clear pixels joined at their sides, not touching the picture's edge)
+/// no wider or taller than `size` inside `rect`: which pixels they hold,
+/// and how many there are.
+fn dust(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    rect: [u32; 4],
+    size: u32,
+    ink: bool,
+) -> (Vec<bool>, usize) {
+    let (w, h) = (width as usize, height as usize);
+    let [x0, y0, x1, y1] = rect.map(|value| value as usize);
+    let (x1, y1) = (x1.min(w), y1.min(h));
+    let wanted: Vec<bool> = (0..w * h)
+        .map(|index| (pixels[index * 4 + 3] > 0) == ink)
+        .collect();
+    let mut found = vec![false; w * h];
+    let mut seen = vec![false; w * h];
+    let mut count = 0;
+    let reach: &[(i64, i64)] = if ink {
+        &[
+            (-1, -1),
+            (0, -1),
+            (1, -1),
+            (-1, 0),
+            (1, 0),
+            (-1, 1),
+            (0, 1),
+            (1, 1),
+        ]
+    } else {
+        &[(0, -1), (-1, 0), (1, 0), (0, 1)]
+    };
+    for start in 0..w * h {
+        if seen[start] || !wanted[start] {
+            continue;
+        }
+        let mut speck = vec![start];
+        seen[start] = true;
+        let mut at = 0;
+        let mut edge = false;
+        while at < speck.len() {
+            let index = speck[at];
+            at += 1;
+            let (x, y) = (index % w, index / w);
+            edge |= x == 0 || y == 0 || x + 1 == w || y + 1 == h;
+            for (dx, dy) in reach {
+                let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                    continue;
+                }
+                let next = ny as usize * w + nx as usize;
+                if !seen[next] && wanted[next] {
+                    seen[next] = true;
+                    speck.push(next);
+                }
+            }
+        }
+        let (mut min_x, mut min_y, mut max_x, mut max_y) = (usize::MAX, usize::MAX, 0, 0);
+        for index in &speck {
+            let (x, y) = (index % w, index / w);
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+        let small = max_x - min_x < size as usize && max_y - min_y < size as usize;
+        let inside = min_x >= x0 && min_y >= y0 && max_x < x1 && max_y < y1;
+        if small && inside && (ink || !edge) {
+            for index in speck {
+                found[index] = true;
+            }
+            count += 1;
+        }
+    }
+    (found, count)
+}
+
+/// The old Remove dust, kept as the reference [`dust`] is tested against.
+#[cfg(test)]
+fn remove_dust_reference(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    rect: [u32; 4],
+    size: u32,
+) -> usize {
     let (w, h) = (width as usize, height as usize);
     let [x0, y0, x1, y1] = rect.map(|value| value as usize);
     let (x1, y1) = (x1.min(w), y1.min(h));
@@ -863,7 +1038,7 @@ mod tests {
     fn pinch_simplify_connect_and_widen() {
         // Pinch the middle of a level line up; its ends stay.
         let base = line(&[[0.0, 0.0], [100.0, 0.0]]);
-        let pulled = pinch(&base, 50.0, [0.0, -20.0], 30.0, 2, true);
+        let pulled = pinch(&base, 50.0, [0.0, -20.0], 30.0, 2, FIX_BOTH);
         let middle = pulled
             .samples
             .iter()
@@ -971,7 +1146,7 @@ mod tests {
                 ]
             })
             .collect();
-        assert!(redraw(&mut lines, &bump, 4.0));
+        assert!(redraw(&mut lines, &bump, 4.0, false));
         let top = lines[0]
             .samples
             .iter()
@@ -1004,5 +1179,88 @@ mod tests {
         assert_eq!(remove_dust(&mut pixels, w, h, [0, 0, w, h], 4), 1);
         assert_eq!(pixels[((5 * w + 5) * 4 + 3) as usize], 0);
         assert_eq!(pixels[((12 * w + 20) * 4 + 3) as usize], 255);
+    }
+
+    #[test]
+    fn pinch_holds_the_far_end_or_neither() {
+        let base = line(&[[0.0, 0.0], [100.0, 0.0]]);
+        // Pulled near its start: the start goes along, the end stays.
+        let far = pinch(&base, 10.0, [0.0, -10.0], 60.0, 2, FIX_FAR);
+        assert!(far.samples[0].at[1] < -5.0, "{:?}", far.samples[0].at);
+        assert_eq!(far.samples.last().unwrap().at, [100.0, 0.0]);
+        let both = pinch(&base, 10.0, [0.0, -10.0], 60.0, 2, FIX_BOTH);
+        assert_eq!(both.samples[0].at, [0.0, 0.0]);
+        let free = pinch(&base, 10.0, [0.0, -10.0], 60.0, 2, FIX_NONE);
+        assert!(free.samples[0].at[1] < -5.0);
+    }
+
+    #[test]
+    fn a_free_redraw_ends_the_line_where_the_trace_ends() {
+        // Traced from the middle on past the end and down: the line now
+        // ends where the trace does.
+        let mut lines = vec![line(&[[0.0, 0.0], [100.0, 0.0]])];
+        let trace: Vec<[f32; 2]> = (0..=60)
+            .map(|step| [50.0 + step as f32, step as f32 * 0.5])
+            .collect();
+        assert!(redraw(&mut lines, &trace, 4.0, true));
+        let end = lines[0].samples.last().unwrap().at;
+        assert!(near(end, [110.0, 30.0]), "{end:?}");
+        assert!(near(lines[0].samples[0].at, [0.0, 0.0]));
+        // Traced back toward the start and short of it: the start moves.
+        let mut lines = vec![line(&[[0.0, 0.0], [100.0, 0.0]])];
+        let back: Vec<[f32; 2]> = (0..=30).map(|step| [60.0 - step as f32, 0.0]).collect();
+        assert!(redraw(&mut lines, &back, 4.0, true));
+        assert!(
+            near(lines[0].samples[0].at, [30.0, 0.0]),
+            "{:?}",
+            lines[0].samples[0].at
+        );
+        assert!(near(lines[0].samples.last().unwrap().at, [100.0, 0.0]));
+    }
+
+    #[test]
+    fn leftover_holes_fill_and_garbage_is_found_as_remove_dust_finds_it() {
+        let (w, h) = (40_u32, 30_u32);
+        let mut pixels = vec![0_u8; (w * h * 4) as usize];
+        // An inked block with a two pixel hole, a dot, and paper round.
+        for y in 5..20 {
+            for x in 5..25 {
+                pixels[((y * w + x) * 4) as usize..((y * w + x) * 4 + 4) as usize]
+                    .copy_from_slice(&[0, 0, 0, 255]);
+            }
+        }
+        let clear = |pixels: &mut Vec<u8>, x: u32, y: u32| {
+            pixels[((y * w + x) * 4 + 3) as usize] = 0;
+        };
+        clear(&mut pixels, 10, 10);
+        clear(&mut pixels, 11, 10);
+        pixels[((25 * w + 32) * 4 + 3) as usize] = 255;
+        // Select garbage finds the dot; the holes, asked for.
+        let (mask, found) = dust_mask(&pixels, w, h, [0, 0, w, h], 4, true);
+        assert_eq!(found, 1);
+        assert_eq!(mask[(25 * w + 32) as usize], 255);
+        assert_eq!(mask[(12 * w + 12) as usize], 0);
+        let (holes, count) = dust_mask(&pixels, w, h, [0, 0, w, h], 4, false);
+        assert_eq!(count, 1, "the paper round the block touches the edge");
+        assert_eq!(holes[(10 * w + 10) as usize], 255);
+        // Fill leftover fills the hole only.
+        let mut filled = pixels.clone();
+        assert_eq!(
+            fill_leftover(&mut filled, w, h, [0, 0, w, h], 4, [9, 8, 7, 255]),
+            1
+        );
+        assert_eq!(
+            &filled[((10 * w + 11) * 4) as usize..((10 * w + 11) * 4 + 4) as usize],
+            &[9, 8, 7, 255]
+        );
+        assert_eq!(filled[((2 * w + 2) * 4 + 3) as usize], 0);
+        // Remove dust as it always did.
+        let mut old = pixels.clone();
+        let mut new = pixels;
+        assert_eq!(
+            remove_dust_reference(&mut old, w, h, [0, 0, w, h], 4),
+            remove_dust(&mut new, w, h, [0, 0, w, h], 4)
+        );
+        assert_eq!(old, new);
     }
 }

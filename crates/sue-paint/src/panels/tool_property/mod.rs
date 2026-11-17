@@ -11,6 +11,7 @@ mod brush;
 mod comic;
 mod correct;
 mod effect;
+mod figure;
 mod fill;
 mod lines;
 mod paint;
@@ -539,6 +540,9 @@ impl SuePaint {
                     self.magnet_row(ui, theme);
                 }
                 let sub = self.toolbox.current_mut();
+                if tool == Tool::Figure {
+                    figure::figure_properties(ui, rows, sub);
+                }
                 paint::paint_properties(ui, rows, tool, sub);
             }
             Tool::Fill | Tool::AutoSelect => {

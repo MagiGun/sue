@@ -151,12 +151,20 @@ sub	figure	Bezier Curve
 sub	figure	Polygon
 group	Saturated Line
 sub	figure	Saturated Line
+sub	figure	Scattered saturated line
+sub	figure	Dense saturated line
+sub	figure	Dark saturated line
+sub	figure	Burst
 group	Speed Line
 sub	figure	Speed Line
+sub	figure	Scattered speed line
+sub	figure	Dark speed line
+sub	figure	Rain
 tool	Frame Border	frame_border	U
 group	Frame Border
 sub	frame_border	Rectangle Frame
 sub	frame_border	Polyline frame
+sub	frame_border	Frame pen
 sub	frame_border	Frame Border Division
 tool	Ruler	ruler	U
 group	Create ruler
@@ -165,6 +173,7 @@ sub	ruler	Curve Ruler
 sub	ruler	Figure Ruler
 sub	ruler	Ruler Pen
 sub	ruler	Special Ruler
+sub	ruler	Guide
 sub	ruler	Perspective Ruler
 sub	ruler	Symmetrical Ruler
 tool	Text	text	T
@@ -194,3 +203,5 @@ sub	correct_line	Redraw vector line
 sub	correct_line	Redraw vector line width
 group	Remove dust
 sub	correct_line	Remove dust
+sub	correct_line	Fill leftover
+sub	correct_line	Select garbage

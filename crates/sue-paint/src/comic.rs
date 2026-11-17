@@ -5,8 +5,8 @@
 //! and the drawing together.
 
 use egui::Pos2;
-use sue_core::txn::{ReplaceComponent, SetProperty};
-use sue_core::{Entity, EntityId, PixelFormat, RasterTile2D, Value};
+use sue_core::txn::{ReplaceComponent, SetProperty, SpawnEntity};
+use sue_core::{Entity, EntityId, PixelFormat, RasterTile2D, Relation, Value};
 use sue_model::picture::{self, LayerKind};
 use sue_wm::AppletContext;
 
@@ -425,6 +425,39 @@ pub(crate) fn snap_to_border(p: [f32; 2], border: [f32; 4], reach: f32) -> [f32;
     ]
 }
 
+/// A folder made by the Frame Border tool for one frame (`Bool`): its
+/// mask follows the panels of the frame border layer in it. Saved data.
+pub(crate) const FRAME_FOLDER: &str = "frame.folder";
+
+/// `true` if `folder` is a frame folder ([`FRAME_FOLDER`]).
+pub(crate) fn is_frame_folder(arena: &sue_core::Arena, folder: EntityId) -> bool {
+    arena.get_by_id(folder).is_ok_and(|entity| {
+        entity
+            .property(FRAME_FOLDER)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    })
+}
+
+/// How much of each pixel of a `size` picture the panels cover, 0 to
+/// 255: a frame folder's mask.
+fn panel_cover(panels: &[Panel], [width, height]: [u32; 2]) -> Vec<u8> {
+    let mut out = vec![0_u8; (width * height) as usize];
+    for panel in panels {
+        let [x0, y0, x1, y1] = bounds(panel);
+        let clamp = |value: f32, top: u32| (value.max(0.0) as u32).min(top);
+        for y in clamp(y0 - 1.0, height)..clamp(y1 + 2.0, height) {
+            for x in clamp(x0 - 1.0, width)..clamp(x1 + 2.0, width) {
+                let d = manga::outside(panel, [x as f32 + 0.5, y as f32 + 0.5]);
+                let cover = ((0.5 - d).clamp(0.0, 1.0) * 255.0).round() as u8;
+                let at = &mut out[(y * width + x) as usize];
+                *at = (*at).max(cover);
+            }
+        }
+    }
+    out
+}
+
 impl Default for FrameSpec {
     fn default() -> Self {
         Self {
@@ -575,7 +608,24 @@ impl SuePaint {
         let Ok(raster) = RasterTile2D::from_bytes(width, height, PixelFormat::Rgba8, pixels) else {
             return;
         };
-        let edit = Edit::new(label)
+        let mut edit = Edit::new(label);
+        // A frame folder's mask shows its panels as they are now.
+        if key == manga::PANELS
+            && let Some(mask) = self
+                .picture()
+                .and_then(|_| doc::folder_of(&cx.world.arena, layer))
+                .filter(|folder| is_frame_folder(&cx.world.arena, *folder))
+                .and_then(|folder| doc::mask_of(&cx.world.arena, folder))
+            && let Ok(cover) = RasterTile2D::from_bytes(
+                width,
+                height,
+                PixelFormat::Gray8,
+                panel_cover(&manga::decode_panels(&text), [width, height]),
+            )
+        {
+            edit = edit.then(ReplaceComponent::new(mask, cover, label));
+        }
+        let edit = edit
             .then(SetProperty::new(layer, key, Value::from(text)))
             .then(ReplaceComponent::new(layer, raster, label));
         Self::apply(cx, edit);
@@ -594,7 +644,7 @@ impl SuePaint {
             return;
         };
         let (a, mut b) = ([from.x, from.y], [to.x, to.y]);
-        let existing = self.layer_of_class(&cx.world.arena, manga::FRAME);
+        let existing = self.frame_layer_near(&cx.world.arena);
         if sub.mode == 1 {
             // Frame border division: straight across when nearly so.
             let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
@@ -607,8 +657,16 @@ impl SuePaint {
                 cx.fail(tr!("make-frame-borders-first-layer-new"));
                 return;
             };
-            let Some((panels, border, gutter)) = Self::frame_of(&cx.world.arena, layer) else {
+            let Some((panels, border, _)) = Self::frame_of(&cx.world.arena, layer) else {
                 return;
+            };
+            // The sub tool's gutters: a cut running down leaves the
+            // vertical gutter between the panels side by side, a cut
+            // across the horizontal one.
+            let gutter = if (b[0] - a[0]).abs() < (b[1] - a[1]).abs() {
+                sub.gutter[0]
+            } else {
+                sub.gutter[1]
             };
             // Divide along the whole line through the drag.
             let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
@@ -651,7 +709,7 @@ impl SuePaint {
         if (b[0] - a[0]).abs() < 4.0 || (b[1] - a[1]).abs() < 4.0 {
             return;
         }
-        self.add_panel(cx, manga::rectangle(a, b), &tr!("rectangle-frame"));
+        self.add_panel(cx, manga::rectangle(a, b), sub, &tr!("rectangle-frame"));
     }
 
     /// A Balloon tool drag: a new balloon of the sub tool's shape, or a
@@ -664,12 +722,9 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
     ) {
         let (a, b) = ([from.x, from.y], [to.x, to.y]);
-        let shapes = self.balloon_shapes(&cx.world.arena);
-        let under = shapes.iter().rev().find_map(|shape| {
-            shape
-                .balloon()
-                .filter(|[x0, y0, x1, y1]| a[0] > *x0 && a[0] < *x1 && a[1] > *y0 && a[1] < *y1)
-        });
+        let under = self
+            .balloon_at(&cx.world.arena, a)
+            .map(|(_, balloon)| balloon);
         let new = match sub.mode {
             1 | THOUGHT_TAIL => {
                 let Some(balloon) = under else {
@@ -710,7 +765,7 @@ impl SuePaint {
         } else {
             tr!("balloon")
         };
-        self.add_balloon_shapes(cx, new, sub, &label);
+        self.add_balloon_shapes(cx, new, sub, &label, Some(a));
     }
 
     /// The Balloon pen: a balloon in the outline drawn.
@@ -733,42 +788,121 @@ impl SuePaint {
         if outline.len() < 3 {
             return;
         }
-        self.add_balloon_shapes(cx, vec![Shape::Drawn(outline)], sub, &tr!("balloon"));
+        self.add_balloon_shapes(cx, vec![Shape::Drawn(outline)], sub, &tr!("balloon"), None);
     }
 
-    /// The balloon layer's shapes (none without one).
-    fn balloon_shapes(&self, arena: &sue_core::Arena) -> Vec<Shape> {
-        self.layer_of_class(arena, manga::BALLOON)
-            .and_then(|layer| arena.get_by_id(layer).ok())
-            .and_then(|entity| {
-                entity
-                    .property(manga::SHAPES)
-                    .and_then(Value::as_str)
-                    .map(manga::decode_shapes)
-            })
+    /// The balloon layer `layer`'s shapes.
+    fn shapes_of(arena: &sue_core::Arena, layer: EntityId) -> Vec<Shape> {
+        arena
+            .get_by_id(layer)
+            .ok()
+            .and_then(|entity| entity.property(manga::SHAPES).and_then(Value::as_str))
+            .map(manga::decode_shapes)
             .unwrap_or_default()
     }
 
-    /// Adds `new` shapes to the balloon layer (a new one when there is
-    /// none) as one undo step called `label`.
+    /// The balloon layers of the current picture, the current layer first
+    /// when it is one, then from the top down.
+    fn balloon_layers(&self, arena: &sue_core::Arena) -> Vec<EntityId> {
+        let Some(picture) = self.picture() else {
+            return Vec::new();
+        };
+        let is = |id: EntityId| {
+            arena
+                .get_by_id(id)
+                .is_ok_and(|entity| entity.class() == manga::BALLOON)
+        };
+        let current = self.layer().filter(|id| is(*id));
+        current
+            .into_iter()
+            .chain(
+                doc::layers(arena, picture)
+                    .into_iter()
+                    .rev()
+                    .map(|info| info.id)
+                    .filter(|id| is(*id) && Some(*id) != current),
+            )
+            .collect()
+    }
+
+    /// The balloon at `p` (picture pixels), on whichever balloon layer
+    /// holds it, the current one first: its layer and its box.
+    fn balloon_at(&self, arena: &sue_core::Arena, p: [f32; 2]) -> Option<(EntityId, [f32; 4])> {
+        self.balloon_layers(arena).into_iter().find_map(|layer| {
+            Self::shapes_of(arena, layer)
+                .iter()
+                .rev()
+                .find_map(|shape| {
+                    shape.balloon().filter(|[x0, y0, x1, y1]| {
+                        p[0] > *x0 && p[0] < *x1 && p[1] > *y0 && p[1] < *y1
+                    })
+                })
+                .map(|balloon| (layer, balloon))
+        })
+    }
+
+    /// A balloon layer's line width (3 pixels where it names none).
+    fn line_of(arena: &sue_core::Arena, layer: EntityId) -> f32 {
+        arena
+            .get_by_id(layer)
+            .ok()
+            .and_then(|entity| entity.property(manga::LINE))
+            .and_then(Value::as_f64)
+            .map_or(3.0, |line| line as f32)
+    }
+
+    /// Adds `new` shapes to a balloon layer as one undo step called
+    /// `label`. A tail goes to the layer of the balloon it leaves. A
+    /// balloon goes to the current layer when it is a balloon layer
+    /// drawn the way the sub tool says (How to add: Add to selected
+    /// layer), else to a new balloon layer with the sub tool's edge and
+    /// colors, so every balloon looks as its tool was set.
     fn add_balloon_shapes(
         &mut self,
         cx: &mut AppletContext<'_>,
         new: Vec<Shape>,
         sub: &SubTool,
         label: &str,
+        from: Option<[f32; 2]>,
     ) {
         let Some((_, [width, height], _)) = self.page(&cx.world.arena) else {
             return;
         };
-        // A line width of 0 draws balloons with no edge.
-        let line = sub.tip.size.max(0.0);
-        let existing = self.layer_of_class(&cx.world.arena, manga::BALLOON);
-        // A balloon layer keeps the colors it was made with.
-        let style = existing
-            .and_then(|layer| cx.world.arena.get_by_id(layer).ok())
-            .map_or_else(|| self.balloon_style(), BalloonStyle::of);
-        let mut shapes = self.balloon_shapes(&cx.world.arena);
+        let arena = &cx.world.arena;
+        let tail = matches!(sub.mode, 1 | THOUGHT_TAIL);
+        let (existing, style, line) = if tail {
+            let layer = from
+                .and_then(|p| self.balloon_at(arena, p))
+                .map(|(layer, _)| layer)
+                .or_else(|| self.layer_of_class(arena, manga::BALLOON));
+            let Some(layer) = layer else {
+                return;
+            };
+            let style = arena
+                .get_by_id(layer)
+                .map_or_else(|_| self.balloon_style(sub), BalloonStyle::of);
+            (Some(layer), style, Self::line_of(arena, layer))
+        } else {
+            let style = self.balloon_style(sub);
+            let line = if sub.edge { sub.tip.size.max(0.5) } else { 0.0 };
+            let same = |layer: &EntityId| {
+                arena.get_by_id(*layer).is_ok_and(|entity| {
+                    BalloonStyle::of(entity) == style
+                        && (Self::line_of(arena, *layer) - line).abs() < 0.01
+                })
+            };
+            let existing = (!sub.new_layer)
+                .then(|| self.layer())
+                .flatten()
+                .filter(|layer| {
+                    arena
+                        .get_by_id(*layer)
+                        .is_ok_and(|entity| entity.class() == manga::BALLOON)
+                })
+                .filter(same);
+            (existing, style, line)
+        };
+        let mut shapes = existing.map_or_else(Vec::new, |layer| Self::shapes_of(arena, layer));
         shapes.extend(new);
         let mut pixels = manga::render_balloons(&shapes, width, height, line);
         style.tint(&mut pixels);
@@ -794,17 +928,21 @@ impl SuePaint {
         }
     }
 
-    /// The colors a new balloon layer takes: the line in the color being
-    /// drawn with, the inside in the other of the main and sub colors
-    /// (black on white by default, as Clip Studio Paint's main and sub
-    /// drawing colors give).
-    fn balloon_style(&self) -> BalloonStyle {
-        let (line, fill) = if self.sub_active {
+    /// The colors a new balloon of `sub` is drawn in: its Line color and
+    /// Fill color, the drawing color, the other of the main and sub
+    /// colors, or its own (by default the line in the drawing color and
+    /// the inside in the other: black on white, as Clip Studio Paint's
+    /// main and sub colors give).
+    fn balloon_style(&self, sub: &SubTool) -> BalloonStyle {
+        let (drawing, other) = if self.sub_active {
             (self.sub, self.main)
         } else {
             (self.main, self.sub)
         };
-        BalloonStyle { line, fill }
+        BalloonStyle {
+            line: sub.line_color.rgb(drawing, other),
+            fill: sub.fill_color.rgb(drawing, other),
+        }
     }
 
     /// A polyline or curve balloon closed with the corners `points`.
@@ -820,21 +958,47 @@ impl SuePaint {
         } else {
             points
         };
-        self.add_balloon_shapes(cx, vec![Shape::Drawn(outline)], &sub, &tr!("balloon"));
+        self.add_balloon_shapes(cx, vec![Shape::Drawn(outline)], &sub, &tr!("balloon"), None);
     }
 
     /// A polyline frame closed with the corners `points`.
-    pub(crate) fn frame_corners(&mut self, points: Vec<[f32; 2]>, cx: &mut AppletContext<'_>) {
-        self.add_panel(cx, points, &tr!("polyline-frame"));
+    pub(crate) fn frame_corners(
+        &mut self,
+        points: Vec<[f32; 2]>,
+        sub: &SubTool,
+        cx: &mut AppletContext<'_>,
+    ) {
+        self.add_panel(cx, points, sub, &tr!("polyline-frame"));
     }
 
-    /// Adds `panel` to the frame border layer (a new one when there is
-    /// none) as one undo step called `label`.
-    fn add_panel(&mut self, cx: &mut AppletContext<'_>, panel: Panel, label: &str) {
+    /// The Frame pen: a frame round the outline drawn, smoothed a little.
+    pub(crate) fn frame_drawn(
+        &mut self,
+        points: Vec<[f32; 2]>,
+        sub: &SubTool,
+        cx: &mut AppletContext<'_>,
+    ) {
+        let outline = crate::correct::simplified_points(&points, 1.5);
+        if outline.len() < 3 {
+            return;
+        }
+        self.add_panel(cx, outline, sub, &tr!("frame-pen"));
+    }
+
+    /// Adds `panel` as one undo step called `label`: in a frame folder of
+    /// its own when the sub tool's How to add says so (Clip Studio
+    /// Paint's Create new folder), else to the frame border layer (a new
+    /// one when there is none).
+    fn add_panel(&mut self, cx: &mut AppletContext<'_>, panel: Panel, sub: &SubTool, label: &str) {
         let Some((_, [width, height], paper)) = self.page(&cx.world.arena) else {
             return;
         };
-        match self.layer_of_class(&cx.world.arena, manga::FRAME) {
+        let border = if sub.edge { sub.tip.size.max(0.5) } else { 0.0 };
+        if sub.new_layer {
+            self.add_frame_folder(cx, panel, sub, border, label);
+            return;
+        }
+        match self.frame_layer_near(&cx.world.arena) {
             Some(layer) => {
                 let Some((mut panels, border, _)) = Self::frame_of(&cx.world.arena, layer) else {
                     return;
@@ -852,7 +1016,7 @@ impl SuePaint {
             }
             None => {
                 let panels = vec![panel];
-                let pixels = manga::render_frames(&panels, width, height, 6.0, paper);
+                let pixels = manga::render_frames(&panels, width, height, border, paper);
                 self.spawn_drawn_layer(
                     cx,
                     &tr!("frame"),
@@ -860,11 +1024,141 @@ impl SuePaint {
                     pixels,
                     vec![
                         (manga::PANELS, Value::from(manga::encode_panels(&panels))),
-                        (manga::BORDER, Value::from(6.0)),
-                        (manga::GUTTER, Value::from(20.0)),
+                        (manga::BORDER, Value::from(f64::from(border))),
+                        (manga::GUTTER, Value::from(f64::from(sub.gutter[0]))),
                     ],
                 );
             }
+        }
+    }
+
+    /// The frame border layer the Frame Border tool works on: the current
+    /// layer when it is one, else the one in the current layer's frame
+    /// folder, else the topmost.
+    fn frame_layer_near(&self, arena: &sue_core::Arena) -> Option<EntityId> {
+        let picture = self.picture()?;
+        let is_frame = |id: &EntityId| {
+            arena
+                .get_by_id(*id)
+                .is_ok_and(|entity| entity.class() == manga::FRAME)
+        };
+        let current = self.layer()?;
+        if is_frame(&current) {
+            return Some(current);
+        }
+        let folder = if doc::is_folder(arena, current) {
+            Some(current)
+        } else {
+            doc::folder_of(arena, current)
+        };
+        folder
+            .filter(|folder| is_frame_folder(arena, *folder))
+            .and_then(|folder| {
+                doc::members(arena, picture, folder)
+                    .into_iter()
+                    .find(|id| is_frame(id))
+            })
+            .or_else(|| self.layer_of_class(arena, manga::FRAME))
+    }
+
+    /// A frame folder holding `panel` (Clip Studio Paint's frame border
+    /// folder): a folder masked to the panel, holding a white background,
+    /// a layer to draw on and the frame border layer that inks its
+    /// border, made where a new layer goes as one undo step. The frame
+    /// border layer becomes the current layer, so the Object tool and
+    /// the division work on it at once.
+    fn add_frame_folder(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        panel: Panel,
+        sub: &SubTool,
+        border: f32,
+        label: &str,
+    ) {
+        let arena = &cx.world.arena;
+        let Some((picture, [width, height], paper)) = self.page(arena) else {
+            return;
+        };
+        let (keys, outer) = doc::landing(arena, picture, self.layer(), 4);
+        let [back_key, draw_key, frame_key, folder_key] =
+            <[_; 4]>::try_from(keys).ok().unwrap_or_default();
+        let count = doc::layers(arena, picture)
+            .iter()
+            .filter(|info| is_frame_folder(arena, info.id))
+            .count();
+        let folder = Entity::empty(
+            tr!("frame-folder-name", value = count + 1),
+            sue_model::class::FOLDER,
+        )
+        .with_property(doc::OPEN, true)
+        .with_property(doc::MASK_ON, true)
+        .with_property(FRAME_FOLDER, true);
+        let folder_id = folder.id();
+        let Ok(mask_raster) = RasterTile2D::from_bytes(
+            width,
+            height,
+            PixelFormat::Gray8,
+            panel_cover(std::slice::from_ref(&panel), [width, height]),
+        ) else {
+            return;
+        };
+        let mask = Entity::new(tr!("mask"), mask_raster).with_class(doc::MASK_CLASS);
+        let mask_id = mask.id();
+        let back = Entity::empty(tr!("frame-paper"), doc::FILL_LAYER).with_property(
+            doc::FILL_COLOR,
+            sue_core::Color::srgb8(paper[0], paper[1], paper[2]),
+        );
+        let back_id = back.id();
+        let Ok((draw, draw_id)) =
+            doc::add_raster_layer_at(arena, picture, draw_key, tr!("frame-drawing-layer"), None)
+        else {
+            return;
+        };
+        let panels = vec![panel];
+        let Ok(frame_raster) = RasterTile2D::from_bytes(
+            width,
+            height,
+            PixelFormat::Rgba8,
+            manga::render_frames(&panels, width, height, border, paper),
+        ) else {
+            return;
+        };
+        let frame = Entity::new(tr!("frame"), frame_raster)
+            .with_class(manga::FRAME)
+            .with_property(manga::PANELS, Value::from(manga::encode_panels(&panels)))
+            .with_property(manga::BORDER, Value::from(f64::from(border)))
+            .with_property(manga::GUTTER, Value::from(f64::from(sub.gutter[0])));
+        let frame_id = frame.id();
+        let child = |id: EntityId, key| Relation::new(picture, sue_core::CHILD, id).ordered(key);
+        let member = |id: EntityId| Relation::new(folder_id, doc::MEMBER, id);
+        let mut spawn_folder = SpawnEntity::new(folder).with_relation(child(folder_id, folder_key));
+        if let Some(outer) = outer {
+            spawn_folder = spawn_folder.with_relation(Relation::new(outer, doc::MEMBER, folder_id));
+        }
+        let edit = Edit::new(label)
+            .then(spawn_folder)
+            .then(SpawnEntity::new(mask).with_relation(Relation::new(
+                folder_id,
+                doc::MASK,
+                mask_id,
+            )))
+            .then(
+                SpawnEntity::new(back)
+                    .with_relation(child(back_id, back_key))
+                    .with_relation(member(back_id)),
+            )
+            .then(draw.with_relation(member(draw_id)))
+            .then(
+                SpawnEntity::new(frame)
+                    .with_relation(child(frame_id, frame_key))
+                    .with_relation(member(frame_id)),
+            );
+        if !Self::apply(cx, edit) {
+            return;
+        }
+        self.sync_docs(&cx.world.arena);
+        if let Some(doc) = self.doc_mut() {
+            doc.layer = Some(frame_id);
         }
     }
 
@@ -1224,6 +1518,7 @@ impl SuePaint {
         let Some((_, [width, height], _)) = self.page(&cx.world.arena) else {
             return;
         };
+        let balloon = self.toolbox.of(crate::tools::Tool::Balloon).clone();
         self.spawn_drawn_layer(
             cx,
             &tr!("balloon"),
@@ -1234,11 +1529,11 @@ impl SuePaint {
                 (manga::LINE, Value::from(3.0)),
                 (
                     BALLOON_LINE_COLOR,
-                    Value::from(hex(self.balloon_style().line)),
+                    Value::from(hex(self.balloon_style(&balloon).line)),
                 ),
                 (
                     BALLOON_FILL_COLOR,
-                    Value::from(hex(self.balloon_style().fill)),
+                    Value::from(hex(self.balloon_style(&balloon).fill)),
                 ),
             ],
         );

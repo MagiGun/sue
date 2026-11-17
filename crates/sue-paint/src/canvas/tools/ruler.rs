@@ -37,6 +37,16 @@ impl SuePaint {
                 self.finish_curve(cx);
             } else {
                 self.curve_points.push([p.x, p.y]);
+                // A quadratic Bezier curve lays on its third click, a
+                // cubic one on its fourth.
+                let wanted = match sub.kind {
+                    1 => 3,
+                    2 => 4,
+                    _ => usize::MAX,
+                };
+                if self.curve_points.len() >= wanted {
+                    self.finish_curve(cx);
+                }
             }
         } else if sub.mode == 8 {
             self.gesture = Some(Gesture::RulerPen {
@@ -64,7 +74,8 @@ impl SuePaint {
                         .then(|| crate::rulers::Perspective { points }.to_text());
                     Self::apply(
                         cx,
-                        crate::rulers::edit(
+                        crate::rulers::edit_shown(
+                            &cx.world.arena,
                             picture,
                             crate::rulers::PERSPECTIVE,
                             text,
@@ -75,7 +86,8 @@ impl SuePaint {
                 Some(handle) => {
                     self.gesture = Some(Gesture::RulerHandle {
                         handle,
-                        before: rulers.text(handle.key()),
+                        before: crate::rulers::Rulers::stored(&cx.world.arena, picture)
+                            .text(handle.key()),
                     });
                 }
                 None => {
@@ -114,7 +126,21 @@ impl SuePaint {
             crate::canvas::shape::snapped_angle(dy.atan2(dx), sub.angle_step, self.modifiers.shift)
                 .unwrap_or_else(|| dy.atan2(dx));
         let end = [from.x + angle.cos() * length, from.y + angle.sin() * length];
+        let mut scale = None;
         let (key, text, label) = match sub.mode {
+            crate::tools::GUIDE_RULER => {
+                if !dragged {
+                    return;
+                }
+                let mut all = Rulers::of(&cx.world.arena, picture);
+                all.guides
+                    .push(rulers::GuideLine::dragged([from.x, from.y], [to.x, to.y]));
+                (
+                    rulers::GUIDES,
+                    all.text(rulers::GUIDES),
+                    tr!("create-guide"),
+                )
+            }
             7 => {
                 if !dragged {
                     return;
@@ -136,6 +162,13 @@ impl SuePaint {
                     linear: Some([[from.x, from.y], end]),
                     ..Rulers::default()
                 };
+                // Its scale, or none.
+                scale = Some(rulers::edit(
+                    picture,
+                    rulers::LINEAR_SCALE,
+                    (sub.ruler_scale >= 1.0).then(|| sub.ruler_scale.to_string()),
+                    "",
+                ));
                 (
                     rulers::LINEAR,
                     ruler.text(rulers::LINEAR),
@@ -194,11 +227,15 @@ impl SuePaint {
                 )
             }
         };
-        if Self::apply(cx, rulers::edit(picture, key, text, &label))
+        let mut edit = rulers::edit_shown(&cx.world.arena, picture, key, text, &label);
+        if let Some(scale) = scale {
+            edit = edit.then(scale);
+        }
+        if self.apply_ruler(cx, edit, sub, &label)
             && let Some(doc) = self.doc_mut()
         {
             doc.show_rulers = true;
-            if matches!(sub.mode, 5..=8) {
+            if matches!(sub.mode, 3 | 5..=8) {
                 doc.snap_ruler = true;
             } else {
                 doc.ruler_on = true;
@@ -234,7 +271,13 @@ impl SuePaint {
             fix,
             size,
         );
-        if let Some(text) = rulers.text(handle.key())
+        let kept = crate::rulers::kept_text(
+            &cx.world.arena,
+            picture,
+            handle.key(),
+            rulers.text(handle.key()),
+        );
+        if let Some(text) = kept
             && let Ok(entity) = cx.world.arena.get_by_id_mut(picture)
         {
             // Shown as it moves; one undo step when it is let go.
@@ -251,7 +294,7 @@ impl SuePaint {
             return;
         };
         let key = handle.key();
-        let after = crate::rulers::Rulers::of(&cx.world.arena, picture).text(key);
+        let after = crate::rulers::Rulers::stored(&cx.world.arena, picture).text(key);
         // Back as it was, then the move as one undo step.
         if let Ok(entity) = cx.world.arena.get_by_id_mut(picture) {
             match &before {

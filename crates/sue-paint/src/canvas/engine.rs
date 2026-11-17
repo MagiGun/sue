@@ -558,7 +558,7 @@ impl SuePaint {
         let local = self.layer_point(pos, viewport, size, offset);
         // The picture's rulers, in the stroke's pixels.
         let rulers = if doc.show_rulers {
-            crate::rulers::Rulers::of(arena, doc.picture)
+            crate::rulers::Rulers::seen(arena, doc.picture, doc.layer)
                 .shifted([-(offset[0] as f32), -(offset[1] as f32)])
         } else {
             crate::rulers::Rulers::default()

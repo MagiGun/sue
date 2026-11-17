@@ -218,7 +218,49 @@ fn delete_ruler_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemS
     )
 }
 
+fn link_ruler_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    paint.doc().map_or(ItemState::off(), |doc| {
+        flag(crate::rulers::layer_linked(facts.arena, doc.picture))
+    })
+}
+
+fn link_guide_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    paint.doc().map_or(ItemState::off(), |doc| {
+        flag(crate::rulers::guides_linked(facts.arena, doc.picture))
+    })
+}
+
 // What they do.
+
+/// Link Ruler to Layer: the rulers move with the layer they belong to
+/// (the current layer when they belong to none), or no longer do. One
+/// undo step.
+fn link_ruler(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let Some(picture) = paint.picture() else {
+        return;
+    };
+    let on = !crate::rulers::layer_linked(&cx.world.arena, picture);
+    let label = tr!("link-ruler-to-layer");
+    match crate::rulers::link_layer_edit(&cx.world.arena, picture, on, paint.layer(), &label) {
+        Some(edit) => {
+            SuePaint::apply(cx, edit);
+        }
+        None => cx.notify(tr!("pick-a-layer-for-the-ruler")),
+    }
+}
+
+/// Link guide to ruler: guides show only where the rulers do, or on
+/// every layer again. One undo step.
+fn link_guide(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let Some(picture) = paint.picture() else {
+        return;
+    };
+    let on = !crate::rulers::guides_linked(&cx.world.arena, picture);
+    SuePaint::apply(
+        cx,
+        crate::rulers::link_guide_edit(picture, on, &tr!("link-guide-to-ruler")),
+    );
+}
 
 /// Makes `id` the current layer once `edit` went in.
 fn apply_and_pick(
@@ -450,7 +492,10 @@ fn middle_ruler(paint: &mut SuePaint, cx: &mut AppletContext<'_>, symmetry: bool
             2,
         )
     };
-    if SuePaint::apply(cx, crate::rulers::edit(picture, key, text, &label)) {
+    if SuePaint::apply(
+        cx,
+        crate::rulers::edit_shown(&cx.world.arena, picture, key, text, &label),
+    ) {
         paint.pick_ruler(mode);
         if mode == 2 {
             paint.toolbox.current_mut().kind = 2;
@@ -476,7 +521,7 @@ fn delete_ruler(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     };
     let rulers = crate::rulers::Rulers::of(&cx.world.arena, picture);
     let mut edit = doc::Edit::new(tr!("delete-ruler"));
-    for key in crate::rulers::ALL {
+    for key in crate::rulers::ALL.into_iter().chain(crate::rulers::MORE) {
         if rulers.text(key).is_some() {
             edit = edit.then(SetProperty::remove(picture, key));
         }
@@ -1507,6 +1552,13 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         palette_color,
     )
     .icon("palette-color-set"),
+    // Ruler/Frame's links (FGV-1).
+    c("layer.ruler.link_layer", "link-ruler-to-layer", link_ruler)
+        .icon("tool-ruler")
+        .state(link_ruler_state),
+    c("layer.ruler.link_guide", "link-guide-to-ruler", link_guide)
+        .icon("tool-ruler")
+        .state(link_guide_state),
 ];
 
 #[cfg(test)]

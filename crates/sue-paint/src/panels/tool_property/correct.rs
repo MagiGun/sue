@@ -66,7 +66,7 @@ pub(super) fn correct_line_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mu
                 Category::Operation,
                 &tr!("fix-end"),
                 &mut sub.kind,
-                &[tr!("both-ends"), tr!("free")],
+                &[tr!("both-ends"), tr!("free"), tr!("far-end")],
             );
             level(ui, rows, "pinch-level", &tr!("pinch-level"), &mut sub.level);
             rows.slider(
@@ -78,6 +78,22 @@ pub(super) fn correct_line_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mu
                 1.0..=500.0,
                 &tr!("px"),
                 true,
+            );
+            rows.check(
+                ui,
+                "pinch-add-point",
+                Category::Operation,
+                &tr!("add-control-point"),
+                Some(&tr!("pinch-add-point-hint")),
+                &mut sub.add_points,
+            );
+            rows.check(
+                ui,
+                "pinch-connect",
+                Category::Operation,
+                &tr!("connect-lines"),
+                Some(&tr!("connect-lines-hint")),
+                &mut sub.connect,
             );
             rows.hint(ui, &tr!("drag-line-pull-into-shape"));
         }
@@ -130,6 +146,32 @@ pub(super) fn correct_line_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mu
             size(ui, rows, sub);
         }
         5 => {
+            rows.choice_u8(
+                ui,
+                "redraw-fix-end",
+                Category::Operation,
+                &tr!("fix-end"),
+                &mut sub.kind,
+                &[tr!("both-ends"), tr!("free")],
+            );
+            rows.check(
+                ui,
+                "redraw-connect",
+                Category::Operation,
+                &tr!("connect-lines"),
+                Some(&tr!("connect-lines-hint")),
+                &mut sub.connect,
+            );
+            rows.slider(
+                ui,
+                "redraw-simplify",
+                Category::Correction,
+                &tr!("simplify"),
+                &mut sub.amount,
+                0.0..=10.0,
+                &tr!("px"),
+                false,
+            );
             rows.slider_u32(
                 ui,
                 "redraw-stabilization",
@@ -155,7 +197,14 @@ pub(super) fn correct_line_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mu
                 &tr!("px"),
                 false,
             );
-            rows.hint(ui, &tr!("drag-box-remove-specks-click-whole"));
+            rows.hint(
+                ui,
+                &match sub.mode {
+                    crate::tools::FILL_LEFTOVER => tr!("drag-box-fill-leftover"),
+                    crate::tools::SELECT_GARBAGE => tr!("drag-box-select-garbage"),
+                    _ => tr!("drag-box-remove-specks-click-whole"),
+                },
+            );
         }
     }
     rows.hint(ui, &tr!("correct-line-works-vector-layers-remove"));

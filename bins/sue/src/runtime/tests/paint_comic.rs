@@ -1009,26 +1009,32 @@ fn binding_preview_opens_at_the_page_turns_and_closes() {
 
 // ----- Frames and balloons (P4-15) --------------------------------------------
 
-/// The canvas' frame border layer (the topmost) and its panels.
+/// The canvas' frame border layer (the topmost) and the panels of every
+/// frame border layer, bottom first (each frame drawn with the tool is in
+/// a frame folder of its own).
 fn frame_panels(
     driver: &PaintDriver,
 ) -> Option<(sue_core::EntityId, Vec<sue_paint::manga::Panel>)> {
     let arena = &driver.runtime.engine.world.arena;
     let picture = shown_page(driver)?;
-    sue_paint::doc::layers(arena, picture)
-        .into_iter()
-        .rev()
-        .find_map(|info| {
-            let entity = arena.get_by_id(info.id).ok()?;
-            (entity.class() == sue_paint::manga::FRAME).then(|| {
-                let panels = entity
+    let mut top = None;
+    let mut all = Vec::new();
+    for info in sue_paint::doc::layers(arena, picture) {
+        let Ok(entity) = arena.get_by_id(info.id) else {
+            continue;
+        };
+        if entity.class() == sue_paint::manga::FRAME {
+            all.extend(
+                entity
                     .property(sue_paint::manga::PANELS)
                     .and_then(sue_core::Value::as_str)
                     .map(sue_paint::manga::decode_panels)
-                    .unwrap_or_default();
-                (info.id, panels)
-            })
-        })
+                    .unwrap_or_default(),
+            );
+            top = Some(info.id);
+        }
+    }
+    top.map(|top| (top, all))
 }
 
 /// The box round a panel: `[left, top, right, bottom]`.

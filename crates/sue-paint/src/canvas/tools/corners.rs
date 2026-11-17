@@ -98,7 +98,7 @@ impl SuePaint {
         }
         match owner {
             Some((Tool::Balloon, mode)) => self.balloon_corners(points, mode, sub, cx),
-            Some((Tool::Frame, _)) => self.frame_corners(points, cx),
+            Some((Tool::Frame, _)) => self.frame_corners(points, &sub, cx),
             _ => {
                 self.polyline = points;
                 self.finish_polyline(op);

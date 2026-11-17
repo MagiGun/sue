@@ -396,7 +396,7 @@ impl SuePaint {
                 .iter()
                 .find(|sub| sub.mode == 0)
                 .map_or(1, |sub| crate::rulers::turns(sub.lines, sub.mirror));
-            let rulers = crate::rulers::Rulers::of(&cx.world.arena, doc.picture);
+            let rulers = crate::rulers::Rulers::seen(&cx.world.arena, doc.picture, doc.layer);
             ruler_overlay(
                 &painter,
                 &rulers,
@@ -695,6 +695,36 @@ fn ruler_overlay(
             stroke,
         );
     };
+    // Guides right across, and the linear ruler's unit marks.
+    for guide in &rulers.guides {
+        let (from, to) = if guide.upright {
+            ([guide.at, -reach], [guide.at, h + reach])
+        } else {
+            ([-reach, guide.at], [w + reach, guide.at])
+        };
+        painter.line_segment(
+            [screen(from), screen(to)],
+            Stroke::new(marks::firm(theme), linear),
+        );
+    }
+    if let (Some([a, b]), Some(step)) = (rulers.linear, rulers.linear_scale) {
+        let length = (b[0] - a[0]).hypot(b[1] - a[1]);
+        let count = (length / step).floor() as usize;
+        // Marks on screen at least 4 points apart, else none.
+        if length > 0.0 && step * zoom >= 4.0 && count <= 4000 {
+            let (dx, dy) = ((b[0] - a[0]) / length, (b[1] - a[1]) / length);
+            for index in 0..=count {
+                let along = index as f32 * step;
+                let at = [a[0] + dx * along, a[1] + dy * along];
+                // Every fifth mark longer, as on a ruler.
+                let tall = if index % 5 == 0 { 9.0 } else { 5.0 } / zoom.max(0.01);
+                painter.line_segment(
+                    [screen(at), screen([at[0] - dy * tall, at[1] + dx * tall])],
+                    Stroke::new(marks::hair(theme), linear),
+                );
+            }
+        }
+    }
     if let Some((center, angle)) = rulers.symmetry {
         let turns = turns.max(1);
         for line in 0..turns {

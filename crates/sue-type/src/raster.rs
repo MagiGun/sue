@@ -39,7 +39,30 @@ pub struct TextSpec<'a> {
     /// Readings (ruby, furigana) set small over the words they read (to
     /// their right in columns). Not drawn on a curve.
     pub ruby: &'a [Ruby],
+    /// Bold, italic, underline and strike through.
+    pub style: TextStyle,
 }
+
+/// How words are set: heavier, slanted, with a line under or through
+/// them. A family with a bold or italic face of its own draws with it;
+/// else the letters are made heavier or slanted (Sue's own font has one
+/// face).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TextStyle {
+    /// Heavier letters.
+    pub bold: bool,
+    /// Slanted letters.
+    pub italic: bool,
+    /// A line under the words (beside them in columns).
+    pub underline: bool,
+    /// A line through the words.
+    pub strike: bool,
+}
+
+/// How far a made italic leans: across per unit up.
+const SLANT: f32 = 0.21;
+/// How much heavier a made bold is, in ems.
+const EMBOLDEN: f32 = 0.045;
 
 /// A reading set over some of the words: the characters it covers
 /// (counted as [`CaretSlot`]s count them) and what it says.
@@ -63,11 +86,13 @@ struct Outline {
     scale: f32,
     /// The glyph's turn: the cosine and sine of its angle.
     turn: [f32; 2],
+    /// How far it leans: across per unit up (0 upright).
+    slant: f32,
 }
 
 impl Outline {
     fn point(&self, x: f32, y: f32) -> [f32; 2] {
-        let (lx, ly) = (x * self.scale, -y * self.scale);
+        let (lx, ly) = ((x + y * self.slant) * self.scale, -y * self.scale);
         let [c, s] = self.turn;
         [
             self.origin[0] + lx * c - ly * s,
@@ -167,11 +192,13 @@ fn blend(
     clippy::too_many_arguments,
     reason = "a glyph, where, and the pixels it lands on"
 )]
+#[allow(clippy::too_many_arguments, reason = "one glyph and where it goes")]
 fn glyph(
     face: &Face<'_>,
     id: ttf_parser::GlyphId,
     (origin, turn): ([f32; 2], [f32; 2]),
     scale: f32,
+    slant: f32,
     pixels: &mut [u8],
     width: u32,
     height: u32,
@@ -184,6 +211,7 @@ fn glyph(
         origin,
         scale,
         turn,
+        slant,
     };
     face.outline_glyph(id, &mut outline)?;
     let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
@@ -459,6 +487,106 @@ fn lay_out(spec: &TextSpec<'_>, metrics: &Metrics<'_>) -> Vec<LaidLine> {
     out
 }
 
+/// The underline (`under`) or the strike through of a laid line: a band
+/// along each glyph, a twentieth of an em thick, as quadrilaterals. In
+/// columns an underline runs down the right of the column and a strike
+/// down its middle.
+fn rule(
+    spec: &TextSpec<'_>,
+    metrics: &Metrics<'_>,
+    line: &LaidLine,
+    under: bool,
+) -> Vec<[[f32; 2]; 4]> {
+    let thick = (spec.size / 20.0).max(1.0);
+    let half = thick / 2.0;
+    if spec.vertical {
+        // Slots run [right, left] at each character's top.
+        return line
+            .slots
+            .windows(2)
+            .map(|pair| {
+                let [[right, top], [left, _]] = pair[0];
+                let bottom = pair[1][0][1];
+                let x = if under { right } else { (right + left) / 2.0 };
+                [
+                    [x - half, top],
+                    [x + half, top],
+                    [x + half, bottom],
+                    [x - half, bottom],
+                ]
+            })
+            .collect();
+    }
+    // Below the baseline by a tenth of an em, or through the middle of
+    // the small letters (about a quarter em up).
+    let drop = if under {
+        spec.size * 0.1
+    } else {
+        -spec.size * 0.27
+    };
+    let glyphs = &line.glyphs;
+    glyphs
+        .iter()
+        .enumerate()
+        .map(|(index, &(ch, origin, turn))| {
+            let advance = metrics.advance(ch, spec.size);
+            // To the next glyph when it follows on, so tracking leaves no
+            // gap in the line.
+            let end = glyphs
+                .get(index + 1)
+                .map(|next| next.1)
+                .filter(|next| {
+                    let along = (next[0] - origin[0]) * turn[0] + (next[1] - origin[1]) * turn[1];
+                    along > 0.0 && along < advance * 2.0 + spec.size
+                })
+                .unwrap_or([origin[0] + turn[0] * advance, origin[1] + turn[1] * advance]);
+            // Down from the baseline is the turn's normal.
+            let normal = [-turn[1], turn[0]];
+            let at = |p: [f32; 2], off: f32| [p[0] + normal[0] * off, p[1] + normal[1] * off];
+            [
+                at(origin, drop - half),
+                at(end, drop - half),
+                at(end, drop + half),
+                at(origin, drop + half),
+            ]
+        })
+        .collect()
+}
+
+/// Fills the quadrilateral `band` in `rgb`; the box it covers.
+fn fill_band(
+    band: [[f32; 2]; 4],
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    rgb: [u8; 3],
+) -> Option<[f32; 4]> {
+    let lines: Vec<[[f32; 2]; 2]> = (0..4).map(|i| [band[i], band[(i + 1) % 4]]).collect();
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for p in band {
+        (x0, y0, x1, y1) = (x0.min(p[0]), y0.min(p[1]), x1.max(p[0]), y1.max(p[1]));
+    }
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let min = [x0.floor() - 1.0, y0.floor() - 1.0];
+    let (w, h) = (
+        (x1.ceil() - min[0] + 2.0) as usize,
+        (y1.ceil() - min[1] + 2.0) as usize,
+    );
+    let coverage = fill(&lines, min, w, h);
+    blend(
+        pixels,
+        width,
+        height,
+        &coverage,
+        [min[0] as i64, min[1] as i64],
+        w,
+        rgb,
+    );
+    Some([x0, y0, x1, y1])
+}
+
 /// Draws `spec` over `pixels` (RGBA8, `width` by `height`). Returns the box
 /// the text covers, `[x0, y0, x1, y1]`, or `None` when nothing drew (no
 /// font, no glyphs).
@@ -468,8 +596,18 @@ pub fn draw_text(
     height: u32,
     spec: &TextSpec<'_>,
 ) -> Option<[f32; 4]> {
-    let (bytes, index) = sue_wm::fonts::face_bytes(spec.font, false, false)
-        .or_else(|| sue_wm::fonts::face_bytes("", false, false))?;
+    let style = spec.style;
+    // A face of the family's own for the style, else letters made so.
+    let own = |bold: bool, italic: bool| {
+        !spec.font.is_empty()
+            && sue_wm::fonts::find(spec.font).is_some_and(|family| family.has(bold, italic))
+    };
+    let real = own(style.bold, style.italic);
+    let (bytes, index) =
+        sue_wm::fonts::face_bytes(spec.font, style.bold && real, style.italic && real)
+            .or_else(|| sue_wm::fonts::face_bytes("", false, false))?;
+    let made_bold = style.bold && !real;
+    let slant = if style.italic && !real { SLANT } else { 0.0 };
     let metrics = metrics(Face::parse(&bytes, index).ok()?, spec.size);
     let mut covered: Option<[f32; 4]> = None;
     let laid = lay_out(spec, &metrics);
@@ -477,23 +615,46 @@ pub fn draw_text(
         .iter()
         .flat_map(|line| line.slots.iter().copied())
         .collect();
-    for line in laid {
-        for (ch, origin, turn) in line.glyphs {
-            if let Some(id) = metrics.face.glyph_index(ch)
-                && let Some([a, b, c, d]) = glyph(
+    let mut grow = |[a, b, c, d]: [f32; 4]| {
+        covered = Some(covered.map_or([a, b, c, d], |[x0, y0, x1, y1]| {
+            [x0.min(a), y0.min(b), x1.max(c), y1.max(d)]
+        }));
+    };
+    // A made bold is the glyph drawn again a little along the line.
+    let heavier = spec.size * EMBOLDEN;
+    let passes: &[f32] = if made_bold { &[0.0, 0.5, 1.0] } else { &[0.0] };
+    for line in &laid {
+        for &(ch, origin, turn) in &line.glyphs {
+            let Some(id) = metrics.face.glyph_index(ch) else {
+                continue;
+            };
+            for pass in passes {
+                let at = [
+                    origin[0] + turn[0] * heavier * pass,
+                    origin[1] + turn[1] * heavier * pass,
+                ];
+                if let Some(drawn) = glyph(
                     &metrics.face,
                     id,
-                    (origin, turn),
+                    (at, turn),
                     metrics.scale,
+                    slant,
                     pixels,
                     width,
                     height,
                     spec.rgb,
-                )
-            {
-                covered = Some(covered.map_or([a, b, c, d], |[x0, y0, x1, y1]| {
-                    [x0.min(a), y0.min(b), x1.max(c), y1.max(d)]
-                }));
+                ) {
+                    grow(drawn);
+                }
+            }
+        }
+        for (wanted, under) in [(style.underline, true), (style.strike, false)] {
+            if wanted {
+                for band in rule(spec, &metrics, line, under) {
+                    if let Some(drawn) = fill_band(band, pixels, width, height, spec.rgb) {
+                        grow(drawn);
+                    }
+                }
             }
         }
     }
@@ -512,6 +673,11 @@ pub fn draw_text(
                 justify: Justify::Start,
                 path: &[],
                 ruby: &[],
+                style: TextStyle {
+                    underline: false,
+                    strike: false,
+                    ..spec.style
+                },
                 ..*spec
             };
             if let Some([a, b, c, d]) = draw_text(pixels, width, height, &small) {
@@ -634,7 +800,80 @@ mod tests {
             justify: Justify::Start,
             path: &[],
             ruby: &[],
+            style: TextStyle::default(),
         }
+    }
+
+    /// The ink a spec lays on a 400 by 120 page: its coverage, and the
+    /// rows and columns that hold any.
+    fn inked(spec: &TextSpec<'_>) -> (u64, Vec<u32>, Vec<u32>) {
+        let (width, height) = (400, 120);
+        let mut pixels = vec![0; (width * height * 4) as usize];
+        draw_text(&mut pixels, width, height, spec);
+        let mut rows = Vec::new();
+        let mut columns = Vec::new();
+        let mut total = 0;
+        for y in 0..height {
+            for x in 0..width {
+                let alpha = pixels[((y * width + x) * 4 + 3) as usize];
+                if alpha > 0 {
+                    total += u64::from(alpha);
+                    rows.push(y);
+                    columns.push(x);
+                }
+            }
+        }
+        rows.sort_unstable();
+        rows.dedup();
+        columns.sort_unstable();
+        columns.dedup();
+        (total, rows, columns)
+    }
+
+    #[test]
+    fn styles_make_words_heavier_slanted_underlined_and_struck() {
+        let plain = spec("Hello", false);
+        let (ink, rows, _) = inked(&plain);
+        assert!(ink > 0);
+        let styled = |style: TextStyle| TextSpec { style, ..plain };
+        // Bold: more ink in the same rows.
+        let (bold, bold_rows, _) = inked(&styled(TextStyle {
+            bold: true,
+            ..TextStyle::default()
+        }));
+        assert!(bold > ink * 11 / 10, "heavier: {bold} against {ink}");
+        assert_eq!(bold_rows.first(), rows.first());
+        // Italic: the tops lean right, so the ink reaches further right.
+        let (_, _, upright) = inked(&plain);
+        let (_, _, leaning) = inked(&styled(TextStyle {
+            italic: true,
+            ..TextStyle::default()
+        }));
+        assert!(leaning.last() > upright.last(), "slanted");
+        // Underline: ink below the lowest row the letters reach.
+        let (_, under_rows, _) = inked(&styled(TextStyle {
+            underline: true,
+            ..TextStyle::default()
+        }));
+        assert!(under_rows.last() > rows.last(), "a line under the words");
+        // Strike through: more ink, within the letters' rows.
+        let (struck, struck_rows, _) = inked(&styled(TextStyle {
+            strike: true,
+            ..TextStyle::default()
+        }));
+        assert!(struck > ink, "a line through the words");
+        assert_eq!(struck_rows.last(), rows.last());
+        // Columns take them too.
+        let column = spec("Hi", true);
+        let (column_ink, _, _) = inked(&column);
+        let (column_lined, _, _) = inked(&TextSpec {
+            style: TextStyle {
+                underline: true,
+                ..TextStyle::default()
+            },
+            ..column
+        });
+        assert!(column_lined > column_ink);
     }
 
     #[test]

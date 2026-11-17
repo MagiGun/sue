@@ -31,6 +31,10 @@ pub(super) fn text_properties(
         &tr!("px"),
         true,
     );
+    // Bold, italic, underline and strike through: each a switch.
+    rows.row(ui, "text-style", Category::Text, |ui, theme, enabled| {
+        style_row(ui, &mut sub.text_style, theme, enabled);
+    });
     rows.choice_u8(
         ui,
         "text-direction",
@@ -89,6 +93,33 @@ pub(super) fn text_properties(
             ruby_rows(ui, typing, theme)
         });
     }
+}
+
+/// The Style row: four switches, lit while on.
+fn style_row(ui: &mut Ui, bits: &mut u8, theme: &Theme, enabled: bool) {
+    use crate::tools::{STYLE_BOLD, STYLE_ITALIC, STYLE_STRIKE, STYLE_UNDERLINE};
+    use sue_wm::icons::Icon;
+    ui.horizontal(|ui| {
+        super::name_cell(ui, &tr!("text-style"), super::name_width(theme), theme);
+        let side = sue_wm::ui::Density::of(ui).icon_button();
+        for (bit, icon, name) in [
+            (STYLE_BOLD, Icon::Bold, tr!("bold")),
+            (STYLE_ITALIC, Icon::Italic, tr!("italic")),
+            (STYLE_UNDERLINE, Icon::Underline, tr!("underline")),
+            (STYLE_STRIKE, Icon::Strikethrough, tr!("strike-through")),
+        ] {
+            let on = *bits & bit != 0;
+            let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::hover());
+            let clicked = sue_wm::ui::icon_button(("sue-paint-text-style", bit), icon, &name)
+                .selected(on)
+                .enabled(enabled)
+                .show_at(ui, rect, theme)
+                .clicked();
+            if clicked {
+                *bits ^= bit;
+            }
+        }
+    });
 }
 
 /// The font: Sue's own, or any installed family from Sue's font list.

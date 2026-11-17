@@ -56,6 +56,8 @@ pub const POLYLINE_BALLOON: u8 = 8;
 /// The Frame Border tool's polyline frame (0 is the rectangle, 1 the
 /// division).
 pub const POLYLINE_FRAME: u8 = 2;
+/// The Frame Border tool's frame pen: a frame drawn round freehand.
+pub const FRAME_PEN: u8 = 3;
 /// The Operation tool's Light table and Edit timeline sub tools, by
 /// mode (0 is Object, 1 Select layer).
 pub const OPERATION_LIGHT_TABLE: u8 = 2;
@@ -68,6 +70,12 @@ pub const PICKS_RASTER: u8 = 2;
 pub const PICKS_COMIC: u8 = 4;
 pub const PICKS_3D: u8 = 8;
 pub const PICKS_CAMERA: u8 = 16;
+/// The Correct Line tool's Remove dust group, by mode (7 is Remove
+/// dust): fill small holes left in the ink, and select the specks.
+pub const FILL_LEFTOVER: u8 = 8;
+pub const SELECT_GARBAGE: u8 = 9;
+/// The Ruler tool's Guide sub tool's mode.
+pub const GUIDE_RULER: u8 = 3;
 /// The Figure tool's effect lines, by mode.
 pub const SATURATED_LINES: u8 = 5;
 pub const SPEED_LINES: u8 = 6;
@@ -376,7 +384,10 @@ impl Tool {
                     // Clip Studio Paint's Saturated line and Speed line,
                     // each on a layer of its own.
                     SubTool::new(self, "Saturated Line", SATURATED_LINES, line),
-                    SubTool::new(self, "Speed Line", SPEED_LINES, line),
+                    SubTool {
+                        effect: crate::manga::EffectStyle::speed(),
+                        ..SubTool::new(self, "Speed Line", SPEED_LINES, line)
+                    },
                     // Draw round an area and it fills.
                     SubTool::new(self, "Lasso fill", LASSO_FILL, line),
                     // A click at each corner; a double-click (or Enter)
@@ -388,13 +399,25 @@ impl Tool {
                     SubTool::new(self, "Bezier Curve", BEZIER_CURVE, line),
                     SubTool::new(self, "Polygon", POLYGON, line),
                 ]
+                .into_iter()
+                .chain(effect_line_tools())
+                .collect()
             }
             // Clip Studio Paint's order: rectangle, polyline, then cut.
-            Self::Frame => vec![
-                plain("Rectangle Frame", 0),
-                plain("Polyline frame", POLYLINE_FRAME),
-                plain("Frame Border Division", 1),
-            ],
+            Self::Frame => {
+                // The border is drawn 6 pixels wide, as frames always were;
+                // each frame lands in a folder of its own (How to add).
+                let border = |name: &str, mode: u8| SubTool {
+                    new_layer: mode != 1,
+                    ..SubTool::new(self, name, mode, tip(6.0, |t| t.size_by.pressure = false))
+                };
+                vec![
+                    border("Rectangle Frame", 0),
+                    border("Polyline frame", POLYLINE_FRAME),
+                    border("Frame pen", FRAME_PEN),
+                    border("Frame Border Division", 1),
+                ]
+            }
             Self::Balloon => {
                 let outline = tip(3.0, |t| {
                     t.size_by.pressure = false;
@@ -419,6 +442,7 @@ impl Tool {
                 plain("Figure Ruler", 7),
                 plain("Ruler Pen", 8),
                 plain("Special Ruler", 2),
+                plain("Guide", GUIDE_RULER),
                 plain("Perspective Ruler", 1),
                 SubTool {
                     lines: 2,
@@ -491,6 +515,14 @@ impl Tool {
                         amount: 10.0,
                         ..plain("Remove dust", 7)
                     },
+                    SubTool {
+                        amount: 10.0,
+                        ..plain("Fill leftover", FILL_LEFTOVER)
+                    },
+                    SubTool {
+                        amount: 10.0,
+                        ..plain("Select garbage", SELECT_GARBAGE)
+                    },
                 ]
             }
             // Clip Studio Paint's Operation group: Light table drags the
@@ -504,6 +536,113 @@ impl Tool {
             Self::Decoration => brushes(self),
         }
     }
+}
+
+/// The Figure tool's other effect line sub tools, Sue's own settings for
+/// the kinds of saturated and speed lines a comic uses: each keeps its
+/// own [`crate::manga::EffectStyle`] and lands on a layer of its own.
+fn effect_line_tools() -> Vec<SubTool> {
+    use crate::manga::EffectStyle;
+    let made = |name: &str, mode: u8, size: f32, effect: EffectStyle| {
+        let mut tip = Tip {
+            size,
+            ..Tip::default()
+        };
+        tip.size_by.pressure = false;
+        SubTool {
+            effect,
+            ..SubTool::new(Tool::Figure, name, mode, tip)
+        }
+    };
+    let saturated = EffectStyle::default();
+    let speed = EffectStyle::speed();
+    vec![
+        // Fewer lines, far apart, their lengths all different.
+        made(
+            "Scattered saturated line",
+            SATURATED_LINES,
+            5.0,
+            EffectStyle {
+                count: 60,
+                length: 0.7,
+                jitter: 0.7,
+                spread: 0.6,
+                ..saturated
+            },
+        ),
+        // Many fine lines close together.
+        made(
+            "Dense saturated line",
+            SATURATED_LINES,
+            3.0,
+            EffectStyle {
+                count: 360,
+                spread: 0.2,
+                ..saturated
+            },
+        ),
+        // Thick lines in bunches, bowed a little.
+        made(
+            "Dark saturated line",
+            SATURATED_LINES,
+            14.0,
+            EffectStyle {
+                count: 160,
+                curve: 0.04,
+                group: 4,
+                spread: 0.25,
+                ..saturated
+            },
+        ),
+        // Short thick spikes round the rim, as a shout or a blast.
+        made(
+            "Burst",
+            SATURATED_LINES,
+            12.0,
+            EffectStyle {
+                count: 48,
+                length: 0.18,
+                jitter: 0.6,
+                spread: 0.15,
+                ..saturated
+            },
+        ),
+        made(
+            "Scattered speed line",
+            SPEED_LINES,
+            4.0,
+            EffectStyle {
+                count: 40,
+                length: 0.45,
+                jitter: 0.9,
+                ..speed
+            },
+        ),
+        made(
+            "Dark speed line",
+            SPEED_LINES,
+            10.0,
+            EffectStyle {
+                count: 160,
+                length: 0.8,
+                jitter: 0.3,
+                group: 5,
+                ..speed
+            },
+        ),
+        // Fine short streaks all over.
+        made(
+            "Rain",
+            SPEED_LINES,
+            1.5,
+            EffectStyle {
+                count: 400,
+                length: 0.08,
+                jitter: 0.5,
+                ..speed
+            },
+        ),
+    ]
 }
 
 /// The built-in brushes of `tool` as its sub tools: each preset's name,
@@ -773,7 +912,104 @@ pub struct SubTool {
     /// A rectangle or ellipse selection turns with the pointer after the
     /// drag until a click fixes it (Adjust angle after fixed).
     pub adjust_angle: bool,
+    /// Where a balloon's or frame's line color comes from (Line color).
+    pub line_color: ColorPick,
+    /// Where a balloon's inside color comes from (Fill color).
+    pub fill_color: ColorPick,
+    /// A balloon or frame border is drawn with its edge line; off, with
+    /// none (no edge).
+    pub edge: bool,
+    /// The Text tool's style, bits of `STYLE_*` (bold, italic, underline,
+    /// strike through).
+    pub text_style: u8,
+    /// The Figure tool's rectangles, ellipses and polygons: draw the
+    /// outline, fill the inside, or both (Line/Fill, `FIGURE_*`).
+    pub line_fill: u8,
+    /// The Figure tool's saturated and speed lines: how they are laid.
+    pub effect: crate::manga::EffectStyle,
+    /// A ruler is laid on the layer being edited, else on a new layer of
+    /// its own (Create at editing layer).
+    pub at_editing_layer: bool,
+    /// A linear ruler's scale: unit marks this many pixels apart along
+    /// it (0: none).
+    pub ruler_scale: f32,
+    /// Pinch vector line adds control points where the line bends
+    /// (Add control point); Pinch and Redraw join the line to a line
+    /// whose end they reach (Connect lines).
+    pub add_points: bool,
+    /// See [`Self::add_points`]: join to a line whose end is reached.
+    pub connect: bool,
+    /// The Frame Border tool's divide: the gap across and down between
+    /// the panels it makes, in pixels (Vertical and Horizontal gutter).
+    pub gutter: [f32; 2],
 }
+
+/// Where a color a tool lays comes from: the drawing color (the main or
+/// the sub color, whichever is picked), the other of the two, or one of
+/// its own (Clip Studio Paint's Main color, Sub color and User color, the
+/// first two as the color in use and the other one).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorPick {
+    /// The drawing color, as it is when the tool is used.
+    Drawing,
+    /// The other of the main and sub colors.
+    Other,
+    /// A color of the sub tool's own.
+    Own([u8; 3]),
+}
+
+impl ColorPick {
+    /// The choices' names in English, in the order of [`Self::index`].
+    pub const NAMES: [&'static str; 3] = ["Drawing color", "Other color", "Own color"];
+
+    /// The color it gives with `drawing` as the drawing color and
+    /// `other` as the other one.
+    #[must_use]
+    pub const fn rgb(self, drawing: [u8; 3], other: [u8; 3]) -> [u8; 3] {
+        match self {
+            Self::Drawing => drawing,
+            Self::Other => other,
+            Self::Own(rgb) => rgb,
+        }
+    }
+
+    /// Its place in [`Self::NAMES`].
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Drawing => 0,
+            Self::Other => 1,
+            Self::Own(_) => 2,
+        }
+    }
+
+    /// The choice at `index` of [`Self::NAMES`]; an own color starts as
+    /// `own`.
+    #[must_use]
+    pub const fn at(index: usize, own: [u8; 3]) -> Self {
+        match index {
+            0 => Self::Drawing,
+            1 => Self::Other,
+            _ => Self::Own(own),
+        }
+    }
+}
+
+/// [`SubTool::text_style`]: heavier letters.
+pub const STYLE_BOLD: u8 = 1;
+/// [`SubTool::text_style`]: slanted letters.
+pub const STYLE_ITALIC: u8 = 2;
+/// [`SubTool::text_style`]: a line under the words.
+pub const STYLE_UNDERLINE: u8 = 4;
+/// [`SubTool::text_style`]: a line through the words.
+pub const STYLE_STRIKE: u8 = 8;
+
+/// [`SubTool::line_fill`]: the outline only.
+pub const FIGURE_LINE: u8 = 0;
+/// [`SubTool::line_fill`]: the inside only.
+pub const FIGURE_FILL: u8 = 1;
+/// [`SubTool::line_fill`]: the inside, and the outline over it.
+pub const FIGURE_LINE_AND_FILL: u8 = 2;
 
 impl SubTool {
     /// A sub tool.
@@ -828,6 +1064,17 @@ impl SubTool {
             contour_width: 0.0,
             close_target: Target::All,
             adjust_angle: false,
+            line_color: ColorPick::Drawing,
+            fill_color: ColorPick::Other,
+            edge: true,
+            text_style: 0,
+            line_fill: FIGURE_LINE,
+            effect: crate::manga::EffectStyle::default(),
+            at_editing_layer: true,
+            ruler_scale: 0.0,
+            add_points: false,
+            connect: false,
+            gutter: [20.0, 40.0],
         }
     }
 
@@ -1989,8 +2236,8 @@ mod tests {
             groups(&toolbox, figure),
             [
                 ("Direct draw".to_owned(), 10),
-                ("Saturated Line".to_owned(), 1),
-                ("Speed Line".to_owned(), 1)
+                ("Saturated Line".to_owned(), 5),
+                ("Speed Line".to_owned(), 4)
             ]
         );
         // Fill in Ver. 4's order, Lasso fill among them (A25V-22).
@@ -2220,8 +2467,10 @@ mod tests {
         let mut one = Toolbox::default();
         let figure = slot_named(&one, "Figure");
         one.pick(Tool::Figure);
-        let speed = one.slots()[figure].group_range(2).start;
-        assert!(one.delete_sub(Tool::Figure, speed));
+        let speed = one.slots()[figure].group_range(2);
+        for _ in speed.clone() {
+            assert!(one.delete_sub(Tool::Figure, speed.start));
+        }
         assert_eq!(one.slots()[figure].groups().len(), 2);
         // An Item Bank sub tool lands at the end of the group shown (the
         // Pen's own while its first sub tool is picked).
