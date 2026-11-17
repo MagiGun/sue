@@ -475,6 +475,42 @@ impl SuePaint {
         ui.ctx().read_response(id).map(|response| response.rect)
     }
 
+    /// The button what is being dragged would become on a bar: a bar's
+    /// own button as it is; a Tool palette entry, a button that picks
+    /// that tool (or, for an entry made from a sub tool, that sub tool);
+    /// a sub tool, one that picks it; a color, one that sets it.
+    pub(crate) fn dragged_slot(&self, ctx: &egui::Context) -> Option<Slot> {
+        use crate::panels::tool::ToolDrag;
+        if let Some(payload) = egui::DragAndDrop::payload::<BarPayload>(ctx) {
+            return Some(payload.0.clone());
+        }
+        if let Some(color) = egui::DragAndDrop::payload::<crate::bar_items::ColorDrag>(ctx) {
+            return Some(Slot::of(Item::Color(color.0)));
+        }
+        let slots = self.toolbox.slots();
+        match *egui::DragAndDrop::payload::<ToolDrag>(ctx)? {
+            ToolDrag::Slot(index) => {
+                let entry = slots.get(index)?;
+                // The entry a Tool button picks: the first of its kind
+                // with a key, else the first of its kind.
+                let home = slots
+                    .iter()
+                    .position(|slot| slot.kind == entry.kind && slot.key.is_some())
+                    .or_else(|| slots.iter().position(|slot| slot.kind == entry.kind));
+                if home == Some(index) {
+                    Some(Slot::of(Item::Tool(entry.kind)))
+                } else {
+                    let sub = entry.subs().get(entry.picked())?;
+                    Some(Slot::of(Item::SubTool(sub.tool, sub.name.clone())))
+                }
+            }
+            ToolDrag::Sub { slot, index } => {
+                let sub = slots.get(slot)?.subs().get(index)?;
+                Some(Slot::of(Item::SubTool(sub.tool, sub.name.clone())))
+            }
+        }
+    }
+
     /// A button dragged over the bar `holder` (its buttons at `rects`, in
     /// `area`): a line shows where it goes, and letting go puts it there.
     /// A button of this bar moves; one from elsewhere is copied in.
@@ -488,12 +524,15 @@ impl SuePaint {
         theme: &Theme,
     ) {
         let ctx = ui.ctx();
-        if !egui::DragAndDrop::has_payload_of_type::<BarPayload>(ctx) {
+        // What is dragged: a bar's own button, or a tool, a sub tool or a
+        // color dragged straight from its palette (Clip Studio Paint lets
+        // all three be dropped on the Command Bar).
+        let Some(dragged) = self.dragged_slot(ctx) else {
             if self.bar_ui.dragging.is_some_and(|(at, _)| at == holder) {
                 self.bar_ui.dragging = None;
             }
             return;
-        }
+        };
         let Some(pointer) = ctx.pointer_latest_pos() else {
             return;
         };
@@ -516,8 +555,7 @@ impl SuePaint {
             .filter(|(source, _)| *source == holder)
             .map(|(_, index)| index);
         // A group or a separator never goes into a group: it moves.
-        let groupable = egui::DragAndDrop::payload::<BarPayload>(ctx)
-            .is_some_and(|payload| !matches!(payload.0.item, Item::Group(_) | Item::Separator));
+        let groupable = !matches!(dragged.item, Item::Group(_) | Item::Separator);
         let onto = drop_onto(rects, pointer).filter(|&target| {
             groupable
                 && Some(target) != moving
@@ -547,9 +585,9 @@ impl SuePaint {
         if !ui.input(|input| input.pointer.any_released()) {
             return;
         }
-        let Some(payload) = egui::DragAndDrop::take_payload::<BarPayload>(ctx) else {
-            return;
-        };
+        // The drag ends here: no palette under the pointer takes it too.
+        egui::DragAndDrop::clear_payload(ctx);
+        let payload = BarPayload(dragged);
         let from = self.bar_ui.dragging.take();
         if let Some(items) = self.holder_items_mut(holder) {
             match (from, onto) {
