@@ -60,6 +60,10 @@ pub(crate) enum Category {
     Stroke,
     /// Paper grain.
     Texture,
+    /// The darker, pooled rim of a watercolor stroke.
+    WatercolorEdge,
+    /// A second tip the stroke is laid through.
+    DualBrush,
     /// Starting and ending.
     StartEnd,
     /// Color jitter.
@@ -81,13 +85,15 @@ pub(crate) enum Category {
 impl Category {
     /// Every category, in the list's order.
     #[cfg(test)]
-    pub(crate) const ALL: [Self; 14] = [
+    pub(crate) const ALL: [Self; 16] = [
         Self::BrushSize,
         Self::Ink,
         Self::AntiAliasing,
         Self::BrushTip,
         Self::Stroke,
         Self::Texture,
+        Self::WatercolorEdge,
+        Self::DualBrush,
         Self::StartEnd,
         Self::ColorJitter,
         Self::Correction,
@@ -107,6 +113,8 @@ impl Category {
             Self::BrushTip => tr!("detail-brush-tip"),
             Self::Stroke => tr!("detail-stroke"),
             Self::Texture => tr!("detail-texture"),
+            Self::WatercolorEdge => tr!("detail-watercolor-edge"),
+            Self::DualBrush => tr!("detail-dual-brush"),
             Self::StartEnd => tr!("detail-starting-and-ending"),
             Self::ColorJitter => tr!("detail-color-jitter"),
             Self::Correction => tr!("detail-correction"),
@@ -127,6 +135,8 @@ impl Category {
             Self::BrushTip => tr!("detail-help-brush-tip"),
             Self::Stroke => tr!("detail-help-stroke"),
             Self::Texture => tr!("detail-help-texture"),
+            Self::WatercolorEdge => tr!("detail-help-watercolor-edge"),
+            Self::DualBrush => tr!("detail-help-dual-brush"),
             Self::StartEnd => tr!("detail-help-starting-and-ending"),
             Self::ColorJitter => tr!("detail-help-color-jitter"),
             Self::Correction => tr!("detail-help-correction"),
@@ -135,6 +145,62 @@ impl Category {
             Self::Area => tr!("detail-help-area"),
             Self::Selection => tr!("detail-help-selection"),
             Self::Text => tr!("detail-help-text"),
+        }
+    }
+}
+
+/// Rows that Tool Property leaves out until a person opens their eye in
+/// Sub Tool Detail (the paper texture's settings, the watercolor edge and
+/// the dual brush, as Clip Studio Paint keeps them in Sub Tool Detail).
+/// Their eye is kept in [`crate::tools::SubTool::hidden`] as `show:` and
+/// the row's name.
+const DETAIL_ONLY: &[&str] = &[
+    "texture-paper",
+    "texture-scale",
+    "texture-rotation",
+    "texture-brightness",
+    "texture-contrast",
+    "texture-invert",
+    "texture-emphasize",
+    "texture-mode",
+    "texture-per-dab",
+    "watercolor-edge",
+    "watercolor-range",
+    "watercolor-opacity",
+    "watercolor-darkness",
+    "watercolor-blur",
+    "watercolor-after",
+    "dual-brush",
+    "dual-mode",
+    "dual-linked",
+    "dual-size",
+    "dual-spacing",
+    "dual-scatter",
+    "dual-hardness",
+];
+
+/// `true` when Tool Property leaves row `id` out, as `hidden` says.
+fn left_out(hidden: &[String], id: &str) -> bool {
+    if DETAIL_ONLY.contains(&id) {
+        let shown = format!("show:{id}");
+        !hidden.contains(&shown)
+    } else {
+        hidden.iter().any(|name| name == id)
+    }
+}
+
+/// Opens (`show`) or closes row `id`'s eye in `hidden`.
+fn set_shown(hidden: &mut Vec<String>, id: &str, show: bool) {
+    if DETAIL_ONLY.contains(&id) {
+        let name = format!("show:{id}");
+        hidden.retain(|found| *found != name);
+        if show {
+            hidden.push(name);
+        }
+    } else {
+        hidden.retain(|found| found != id);
+        if !show {
+            hidden.push(id.to_owned());
         }
     }
 }
@@ -234,7 +300,7 @@ impl<'h> Rows<'h> {
                 None
             }
             View::Property { hidden, headings } => {
-                if hidden.iter().any(|name| name == id) {
+                if left_out(hidden, id) {
                     return None;
                 }
                 if *headings && self.last != Some(category) {
@@ -256,7 +322,7 @@ impl<'h> Rows<'h> {
                 if *chosen != category {
                     return None;
                 }
-                let shown = !hidden.iter().any(|name| name == id);
+                let shown = !left_out(hidden, id);
                 let side = Density::Compact.icon_button();
                 ui.horizontal(|ui| {
                     let name = if shown {
@@ -274,11 +340,7 @@ impl<'h> Rows<'h> {
                     let (rect, _) =
                         ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::hover());
                     if eye.show_at(ui, rect, theme).clicked() {
-                        if shown {
-                            hidden.push(id.to_owned());
-                        } else {
-                            hidden.retain(|name| name != id);
-                        }
+                        set_shown(hidden, id, !shown);
                     }
                     ui.vertical(|ui| add(ui, theme, enabled)).inner
                 })

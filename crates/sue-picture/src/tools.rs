@@ -442,16 +442,36 @@ impl Tool {
                     t.opacity = 0.6;
                     t.size_by.pressure = false;
                 });
+                // The blenders of the brush engine (`sue_brush::presets`,
+                // tool `blend`), by name: Blend first, then Sue Paint's
+                // own Blur and Finger Tip, then the painterly ones, as
+                // Clip Studio Paint lists them (crash course CC-5).
+                let blender = |name: &str| {
+                    let presets = blenders();
+                    presets
+                        .into_iter()
+                        .find(|sub| sub.name == name)
+                        .unwrap_or_else(|| SubTool::new(self, name, 0, soft))
+                };
                 vec![
+                    blender("Blend"),
                     SubTool::new(self, "Blur", 0, soft),
                     SubTool::new(self, "Finger Tip", 1, soft),
+                    blender("Painterly blender"),
+                    blender("Wet bleed blender"),
+                    blender("Textured blender"),
+                    blender("Soothing watercolor"),
                     // One sub tool, its mode picked in Tool Property
-                    // (`blend::LiquifyMode`).
+                    // (`blend::LiquifyMode`), whole out to half its size
+                    // (Hardness 50, crash course CC-4).
                     SubTool::new(
                         self,
                         "Liquify",
                         crate::blend::LiquifyMode::Push.mode(),
-                        soft,
+                        Tip {
+                            hardness: 0.5,
+                            ..soft
+                        },
                     ),
                     // Alt and click picks where it copies from.
                     SubTool::new(
@@ -600,6 +620,24 @@ fn gradients() -> Vec<SubTool> {
             ..made("Contour Bands", main_sub, Shape::Linear, Edge::Mirror)
         },
     ]
+}
+
+/// The Blend tool's blenders of the brush engine as sub tools: each
+/// preset's name and tip, at mode 0 (where the engine cannot run them,
+/// on a layer mask, they soften as Blur does).
+fn blenders() -> Vec<SubTool> {
+    sue_brush::presets::of_tool("blend")
+        .iter()
+        .map(|preset| {
+            let tip = Tip::from_text(&sue_brush::presets::legacy_text(preset));
+            SubTool {
+                stabilization: preset.input.stabilization,
+                adjust_by_speed: preset.input.by_speed,
+                smart_shape: false,
+                ..SubTool::new(Tool::Blend, &preset.name, 0, tip)
+            }
+        })
+        .collect()
 }
 
 fn brushes(tool: Tool) -> Vec<SubTool> {
@@ -773,6 +811,10 @@ pub struct SubTool {
     /// A rectangle or ellipse selection turns with the pointer after the
     /// drag until a click fixes it (Adjust angle after fixed).
     pub adjust_angle: bool,
+    /// A brush's paint behaviours as Sub Tool Detail set them (its paper
+    /// texture, watercolor edge, dual brush and the rest), over what its
+    /// built-in brush has; `None` while they are as Sue ships them.
+    pub behaviours: Option<sue_brush::paint::Behaviours>,
 }
 
 impl SubTool {
@@ -828,6 +870,7 @@ impl SubTool {
             contour_width: 0.0,
             close_target: Target::All,
             adjust_angle: false,
+            behaviours: None,
         }
     }
 
