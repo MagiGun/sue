@@ -1160,7 +1160,11 @@ fn step_00_38_12_fgv_41_pinch_redraw_and_the_dust_group() {
     pick_sub(&mut paint, "tool.correct_line", "Select garbage");
     let document = arena_bytes(&paint);
     click_at(&mut paint, at + vec2(-120.0, -120.0));
-    assert!(said(&paint).contains("One speck selected"), "{}", said(&paint));
+    assert!(
+        said(&paint).contains("One speck selected"),
+        "{}",
+        said(&paint)
+    );
     assert!(
         arena_bytes(&paint) == document,
         "the layer is left as it was"
