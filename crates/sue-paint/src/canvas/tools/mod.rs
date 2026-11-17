@@ -138,7 +138,7 @@ impl SuePaint {
             Some(Gesture::Blend { .. }) => self.blend_drag(pos, viewport, size, cx),
             Some(Gesture::VectorErase { .. }) => self.vector_erase_drag(pos, viewport, size, cx),
             Some(Gesture::MoveLines { .. }) => self.move_lines_drag(pos, viewport, size, cx),
-            Some(Gesture::Pose { .. }) => self.pose_drag(pos, cx),
+            Some(Gesture::Pose { .. }) => self.pose_drag(pos, viewport, size, cx),
             Some(Gesture::Orbit { .. }) => self.orbit_drag(pos, cx),
             Some(Gesture::Camera { .. }) => self.camera_drag(pos, viewport, size),
             Some(Gesture::Correct { .. }) => self.correct_drag(pos, viewport, size, cx),

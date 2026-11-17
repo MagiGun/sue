@@ -337,7 +337,7 @@ fn import_3d(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     let start = open_dir(paint, cx);
     cx.request(ShellRequest::PickFile(
         FilePick::open(Some(me_id()), "model3d", &tr!("import-3d-data"))
-            .extensions(&["obj"])
+            .extensions(&crate::model3d::EXTENSIONS)
             .starting_in(start),
     ));
 }

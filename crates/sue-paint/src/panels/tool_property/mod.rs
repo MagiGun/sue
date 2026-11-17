@@ -12,6 +12,7 @@ mod comic;
 mod correct;
 mod effect;
 mod figure;
+mod figure3d;
 mod fill;
 mod lines;
 mod operation;
@@ -29,6 +30,8 @@ use egui::{RichText, Ui};
 use sue_wm::Theme;
 use sue_wm::icons::Icon;
 use sue_wm::ui::{Density, Space, TextRole};
+
+pub(crate) use figure3d::MODELS;
 
 use crate::studio::SuePaint;
 use crate::tools::{SubTool, Tool};

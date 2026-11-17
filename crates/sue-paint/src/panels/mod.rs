@@ -44,6 +44,7 @@ pub(crate) use item_bank::{MENU_COMMANDS as ITEM_BANK_COMMANDS, bank_pictures};
 pub(crate) use layer::{DELETE_FOLDERS_SIZE, LayerPalette};
 pub(crate) use layer_property::{SIMPLE_TONE_SIZE, SimpleTone};
 pub(crate) use material::material_thumb;
+pub(crate) use tool_property::MODELS;
 pub(crate) use material::{MENU_COMMANDS as MATERIAL_COMMANDS, MaterialView, ThumbSize};
 pub(crate) use navigator::MENU_COMMANDS as NAVIGATOR_COMMANDS;
 pub(crate) use quick_access::MENU_COMMANDS as QUICK_ACCESS_COMMANDS;

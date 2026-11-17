@@ -41,9 +41,9 @@ struct Dragged {
 /// A slider's change this frame: whether it changed and whether it was
 /// let go (or set by a key or the field, which is a let go at once).
 #[derive(Clone, Copy, Debug, Default)]
-struct Slid {
-    changed: bool,
-    released: bool,
+pub(super) struct Slid {
+    pub(super) changed: bool,
+    pub(super) released: bool,
 }
 
 impl std::ops::BitOrAssign for Slid {
@@ -56,7 +56,7 @@ impl std::ops::BitOrAssign for Slid {
 /// A slider of `value` in `range`, named `name` (written before it and in
 /// its tooltip), showing `suffix` after the number.
 #[allow(clippy::too_many_arguments)]
-fn slide(
+pub(super) fn slide(
     ui: &mut Ui,
     theme: &Theme,
     salt: impl std::hash::Hash + std::fmt::Debug,
@@ -96,7 +96,7 @@ fn held(ui: &Ui) -> bool {
 
 /// A checkbox that says `name`, with a tooltip; `true` when clicked (and
 /// `on` flipped).
-fn check(
+pub(super) fn check(
     ui: &mut Ui,
     theme: &Theme,
     salt: impl std::hash::Hash + std::fmt::Debug,
@@ -382,10 +382,17 @@ impl SuePaint {
         if let Some(model) = figure {
             let body = crate::figure::Body::of(model);
             ui.add_space(gap);
-            // A hand or a head has a size but no type, ratio or chart.
+            self.model_rows(ui, theme, &body);
+            ui.add_space(gap);
+            // A body has its type, height, ratio and chart, then every
+            // part's sliders; a hand its size and its own sliders.
+            let mut shaped = body;
             if body.kind == crate::figure::Kind::Body {
-                let mut shaped = body;
                 slid |= self.body_rows(ui, theme, &mut shaped);
+                ui.add_space(gap);
+            }
+            if body.kind != crate::figure::Kind::Imported {
+                slid |= self.part_rows(ui, theme, &mut shaped);
                 shape = Some((body, shaped));
             }
             ui.add_space(gap);
@@ -888,6 +895,14 @@ impl SuePaint {
                     &tr!("register-pose-as-material"),
                 );
             });
+            let pinned = self.figure_joint.is_some_and(|joint| {
+                crate::figure::limb_of(body, joint).is_some_and(|limb| {
+                    crate::figure::of_layer(arena, layer)
+                        .and_then(|model| arena.get_by_id(model).ok())
+                        .is_some_and(|model| crate::figure::pins_of(model).contains(&limb[2]))
+                })
+            });
+            self.pose_option_rows(ui, theme, body, pinned);
             // Pose Scanner and Hand Scanner: a photo poses it.
             match body.kind {
                 crate::figure::Kind::Body => {
@@ -906,7 +921,7 @@ impl SuePaint {
                         &tr!("hand-scanner"),
                     );
                 }
-                crate::figure::Kind::Head => {}
+                crate::figure::Kind::Head | crate::figure::Kind::Imported => {}
             }
             let names: Vec<String> = std::iter::once(tr!("none"))
                 .chain(joints.iter().map(|joint| crate::localize(joint.name)))
@@ -941,8 +956,18 @@ impl SuePaint {
                     released |= moved.released;
                 }
                 if turned != *pose {
-                    next = Some(turned);
+                    next = Some(if self.figure_limits {
+                        crate::figure::limited(&turned, body)
+                    } else {
+                        turned
+                    });
                 }
+            }
+            if let Some((set, let_go)) = self.hand_setup_rows(ui, theme, pose, body) {
+                if set != *pose {
+                    next = Some(set);
+                }
+                released |= let_go;
             }
             ui.label(
                 egui::RichText::new(tr!("drag-body-part-bend-shift-twists"))
@@ -1232,6 +1257,16 @@ fn light_rows(ui: &mut Ui, theme: &Theme, view: &mut crate::three::View3D) -> Sl
         slid |= slide(
             ui,
             theme,
+            "sue-paint-3d-light-height",
+            &tr!("light-height"),
+            &mut view.light_height,
+            -80.0..=89.0,
+            &tr!("deg"),
+            0,
+        );
+        slid |= slide(
+            ui,
+            theme,
             "sue-paint-3d-intensity",
             &tr!("light-intensity"),
             &mut view.intensity,
@@ -1261,6 +1296,11 @@ fn light_rows(ui: &mut Ui, theme: &Theme, view: &mut crate::three::View3D) -> Sl
                 "sue-paint-3d-shadows",
                 tr!("cast-shadows"),
                 &mut view.shadows,
+            ),
+            (
+                "sue-paint-3d-floor",
+                tr!("shadow-on-the-floor"),
+                &mut view.floor,
             ),
         ] {
             if check(ui, theme, salt, &name, on) {

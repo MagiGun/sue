@@ -1989,6 +1989,31 @@ pub fn new_of(name: &str, kind: Kind) -> Entity {
         .with_property(POSE, Value::from(body.standing().to_text()))
 }
 
+/// The three rings of the rotation manipulator round joint `joint` of
+/// the posed body: for each of the joint's own x, y and z, a circle of
+/// points square to it, in the model's space. Turning a ring turns the
+/// joint about that axis ([`turned`]).
+#[must_use]
+pub fn rings(pose: &Pose, body: &Body, joint: usize) -> Option<[Vec<[f32; 3]>; 3]> {
+    let placed = solve(pose, body);
+    let (at, frame) = *placed.get(joint)?;
+    let joints = body.joints();
+    let bone = joints.get(joint)?.bone;
+    let long = (bone[0] * bone[0] + bone[1] * bone[1] + bone[2] * bone[2]).sqrt();
+    let size = body.frame().1 * body.place.scale;
+    let radius = (long * 0.8).clamp(size * 0.035, size * 0.075);
+    let axis = |k: usize| [frame[0][k], frame[1][k], frame[2][k]];
+    Some([0, 1, 2].map(|k| {
+        let (u, v) = (axis((k + 1) % 3), axis((k + 2) % 3));
+        (0..=48)
+            .map(|step| {
+                let (sin, cos) = (step as f32 / 48.0 * std::f32::consts::TAU).sin_cos();
+                [0, 1, 2].map(|i| at[i] + radius * (cos * u[i] + sin * v[i]))
+            })
+            .collect()
+    }))
+}
+
 /// The hands and feet pinned on figure model `entity`, by joint.
 #[must_use]
 pub fn pins_of(entity: &Entity) -> Vec<usize> {

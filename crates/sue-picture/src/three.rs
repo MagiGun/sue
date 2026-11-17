@@ -1265,17 +1265,8 @@ pub fn new_layer_viewed(
     } else {
         View3D::default()
     };
-    let buffers = if figure {
-        let pose = crate::figure::Pose::of(&model);
-        let body = crate::figure::Body::of(&model);
-        crate::figure::render(&pose, &body, &view, size)
-    } else {
-        let mesh = model
-            .ext::<Geometry>()
-            .map(Geometry::to_mesh)
-            .unwrap_or_default();
-        render_buffers(&mesh, &view, size)
-    };
+    let buffers = render_model(&model, &view, size, &Placement::of(&model))
+        .unwrap_or_else(|| render_buffers(&MeshBuffer3D::default(), &view, size));
     let raster = draw(&buffers, &view).ok_or(tr!("cannot-draw-the-model"))?;
     let model_id = model.id();
     let mut layer = Entity::new(name, raster).with_class(CLASS);

@@ -42,6 +42,7 @@ impl SuePaint {
                     crate::figure::Kind::Body => tr!("figure-kind-body"),
                     crate::figure::Kind::Hand => tr!("figure-kind-hand"),
                     crate::figure::Kind::Head => tr!("figure-kind-head"),
+                    crate::figure::Kind::Imported => tr!("figure-kind-model"),
                 };
                 tr!("pose-material-name", kind = kind, number = number)
             })
@@ -71,14 +72,51 @@ impl SuePaint {
             cx.fail(tr!("cannot-read-the-material", name = material.name));
             return;
         };
-        let current = self.layer().filter(|layer| {
-            crate::figure::of_layer(&cx.world.arena, *layer)
-                .and_then(|model| cx.world.arena.get_by_id(model).ok())
-                .is_some_and(|model| crate::figure::Body::of(model).kind == kind)
+        use crate::figure::{Body, Kind, Pose, Side};
+        // The figure on the current layer, with its pose and body.
+        let current = self.layer().and_then(|layer| {
+            let model = crate::figure::of_layer(&cx.world.arena, layer)
+                .and_then(|model| cx.world.arena.get_by_id(model).ok())?;
+            Some((layer, Pose::of(model), Body::of(model)))
         });
-        if let Some(layer) = current {
+        // How the pose lies on that figure: as it is on one of its own
+        // kind; a hand pose on a body's hands (the one whose arm is
+        // picked, else both); and any other by the joints that share a
+        // name (a body pose on an imported model with the same bones).
+        let fitted = current.and_then(|(layer, now, body)| {
+            if body.kind == kind {
+                return Some((layer, pose.clone()));
+            }
+            if kind == Kind::Hand && body.kind == Kind::Body {
+                let picked = self.figure_joint.and_then(|joint| {
+                    let joints = body.joints();
+                    let name = joints.get(joint)?.name;
+                    if name.starts_with("Left") {
+                        Some(Side::Left)
+                    } else if name.starts_with("Right") {
+                        Some(Side::Right)
+                    } else {
+                        None
+                    }
+                });
+                let mut next = now;
+                for side in [Side::Left, Side::Right] {
+                    if picked.is_none_or(|picked| picked == side) {
+                        crate::figure::hand_onto_body(&body, &mut next, side, &pose);
+                    }
+                }
+                return Some((layer, next));
+            }
+            let from = Body {
+                kind,
+                ..Body::default()
+            }
+            .joints();
+            crate::figure::retargeted(&pose, &from, &body.joints(), &now).map(|next| (layer, next))
+        });
+        if let Some((layer, next)) = fitted {
             if let Some(edit) =
-                crate::figure::set_pose(&cx.world.arena, layer, &pose, &material.name)
+                crate::figure::set_pose(&cx.world.arena, layer, &next, &material.name)
             {
                 Self::apply(cx, edit);
             }
@@ -191,27 +229,88 @@ impl SuePaint {
         }
     }
 
-    /// Imports the model at `path` (OBJ) as a 3D layer.
+    /// Imports the model at `path` (glTF, GLB or OBJ) as a 3D layer: the
+    /// file is kept inside the model, so the picture needs nothing
+    /// beside it, and kept among the 3D object materials to use again.
     pub(super) fn import_3d(&mut self, cx: &mut AppletContext<'_>, path: &Path) {
-        use sue_core::FormatHandler as _;
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
         }
         let name = path
             .file_stem()
             .map_or_else(|| tr!("model"), |stem| stem.to_string_lossy().into_owned());
-        let bundle = sue_platform::fs::read(path)
-            .map_err(|error| error.to_string())
-            .and_then(|bytes| {
-                sue_io::ObjFormat
-                    .import(&bytes, &name, &sue_core::Properties::new())
-                    .map_err(|error| error.to_string())
-            });
-        match bundle.map(|bundle| bundle.entities.into_iter().next()) {
-            Ok(Some(model)) => self.add_3d_layer(cx, &name, model),
-            Ok(None) => cx.fail(tr!("file-has-no-model")),
+        match crate::materials::model_file(path) {
+            Ok(model) => {
+                self.add_3d_layer(cx, &name, model);
+                if let Some(folder) = crate::materials::location(cx)
+                    && crate::materials::register_model(&folder, path).is_ok()
+                {
+                    self.hub.materials_changed();
+                }
+            }
             Err(error) => cx.fail(tr!("cannot-import", name = name, error = error)),
         }
+    }
+
+    /// Makes the figure on the current layer another of Sue's models,
+    /// as one step.
+    pub(crate) fn set_figure_model(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        kind: crate::figure::Kind,
+        build: crate::figure::Build,
+        side: crate::figure::Side,
+    ) {
+        let Some(layer) = self.layer() else {
+            return;
+        };
+        if let Some(edit) = crate::figure::set_model(
+            &cx.world.arena,
+            layer,
+            kind,
+            build,
+            side,
+            &tr!("change-model"),
+        ) {
+            self.figure_joint = None;
+            Self::apply(cx, edit);
+        } else {
+            cx.notify(tr!("pick-a-drawing-figure-layer"));
+        }
+    }
+
+    /// Pins or frees the picked hand or foot of the figure on the current
+    /// layer (the end of the limb the picked joint belongs to), as one
+    /// step: a pinned hand or foot stays where it is while the rest of
+    /// the body is posed.
+    pub(crate) fn toggle_pin(&mut self, cx: &mut AppletContext<'_>) {
+        let Some((model, end)) = self.layer().and_then(|layer| {
+            let model = crate::figure::of_layer(&cx.world.arena, layer)?;
+            let body = crate::figure::Body::of(cx.world.arena.get_by_id(model).ok()?);
+            let limb = crate::figure::limb_of(&body, self.figure_joint?)?;
+            Some((model, limb[2]))
+        }) else {
+            cx.notify(tr!("pick-a-hand-or-foot-to-pin"));
+            return;
+        };
+        let mut pins = cx
+            .world
+            .arena
+            .get_by_id(model)
+            .map(crate::figure::pins_of)
+            .unwrap_or_default();
+        match pins.iter().position(|pin| *pin == end) {
+            Some(at) => {
+                pins.remove(at);
+            }
+            None => pins.push(end),
+        }
+        let edit = doc::Edit::new(tr!("pin-joint")).then(SetProperty::new(
+            model,
+            crate::figure::PINS,
+            crate::figure::pins_text(&pins),
+        ));
+        Self::apply(cx, edit);
     }
 
     /// Shows 3D layer `layer` as `view` sees it, in place, with the object
@@ -256,8 +355,13 @@ impl SuePaint {
         if let Some(draft) = self.three_draft.as_mut() {
             draft.shown = shown_now(&cx.world.arena, layer, draft.model);
         }
-        let Some(drawn) = crate::three::buffers_of(&cx.world.arena, layer, view, size)
-            .and_then(|buffers| crate::three::draw(&buffers, view))
+        // Quickly while it is dragged; finely when it is let go.
+        let quick = crate::three::View3D {
+            fast: true,
+            ..*view
+        };
+        let Some(drawn) = crate::three::buffers_of(&cx.world.arena, layer, &quick, size)
+            .and_then(|buffers| crate::three::draw(&buffers, &quick))
         else {
             return;
         };
@@ -334,6 +438,7 @@ impl SuePaint {
         else {
             return;
         };
+        let view = crate::three::View3D { fast: true, ..view };
         let Some(drawn) = crate::three::buffers_of(&cx.world.arena, layer, &view, size)
             .and_then(|buffers| crate::three::draw(&buffers, &view))
         else {
