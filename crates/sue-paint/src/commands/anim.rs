@@ -334,6 +334,92 @@ fn camera_unkey(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     }
 }
 
+/// The camera value Tool Property set: keyed alone at its frame, as one
+/// step, with the ease the camera's keys there have (Linear when none).
+fn camera_value_set(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let Some((folder, frame, channel, value)) = paint.camera_value.take() else {
+        return;
+    };
+    paint.camera_pending = None;
+    let arena = &cx.world.arena;
+    if paint.here(arena).is_none() || paint.doc().is_none_or(|doc| doc.frame != frame) {
+        return;
+    }
+    let (_, time) = paint.frame_time(arena);
+    let ease = anim::motion::ease_at(arena, folder, time).unwrap_or(anim::motion::Ease::Linear);
+    let edit = crate::camera::key_value(arena, folder, channel, time, value, ease);
+    SuePaint::apply(cx, edit);
+}
+
+/// The key button of one camera value (the argument is its channel, one
+/// of `camera::VALUES`): keys it alone at the frame shown as it stands,
+/// or takes its key there away.
+fn camera_value_key(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let Some(channel) = crate::camera::VALUES
+        .iter()
+        .copied()
+        .find(|channel| *channel == call.arg)
+    else {
+        return;
+    };
+    if paint.here(&cx.world.arena).is_none() {
+        return;
+    }
+    let Some(folder) = paint.camera_folder(&cx.world.arena) else {
+        return;
+    };
+    let arena = &cx.world.arena;
+    let (frame, time) = paint.frame_time(arena);
+    let edit = if crate::camera::keyed(arena, folder, channel, time) {
+        crate::camera::delete_value_key(arena, folder, channel, time)
+    } else {
+        let size = paint
+            .picture()
+            .and_then(|picture| arena.get_by_id(picture).ok())
+            .and_then(sue_model::picture::size)
+            .unwrap_or([0, 0]);
+        let mut values = crate::camera::values(arena, folder, Some(time), size);
+        // What is shown: a value being set, else a camera being moved.
+        if let Some((pending, at, camera)) = paint.camera_pending
+            && pending == folder
+            && at == frame
+        {
+            let center = crate::camera::unswung_at(arena, folder, time, &camera);
+            values[..4].copy_from_slice(&[
+                f64::from(center[0]),
+                f64::from(center[1]),
+                f64::from(camera.scale),
+                f64::from(camera.angle),
+            ]);
+        }
+        if let Some((pending, at, was, value)) = paint.camera_value
+            && pending == folder
+            && at == frame
+            && let Some(index) = crate::camera::VALUES.iter().position(|key| *key == was)
+        {
+            values[index] = value;
+        }
+        let index = crate::camera::VALUES
+            .iter()
+            .position(|key| *key == channel)
+            .unwrap_or(0);
+        let ease = anim::motion::ease_at(arena, folder, time).unwrap_or(anim::motion::Ease::Linear);
+        Some(crate::camera::key_value(
+            arena,
+            folder,
+            channel,
+            time,
+            values[index],
+            ease,
+        ))
+    };
+    if let Some(edit) = edit {
+        SuePaint::apply(cx, edit);
+    }
+    paint.camera_value = None;
+    paint.camera_pending = None;
+}
+
 // ----- Run: onion skin and playback ----------------------------------------
 
 /// Enable Onion Skin, and back.
@@ -765,6 +851,30 @@ fn label(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 /// A named label on the current track at the frame shown, in a dialog.
 fn track_note(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.ask_track_note(cx);
+}
+
+/// Assign Multiple Cels: asks which cels show from the frame shown on.
+fn cel_assign_many(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.ask_assign_many(cx);
+}
+
+/// Create All Supported Cels: the cels the frames name, made.
+fn cel_create_supported(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    if paint.timeline_here(&cx.world.arena).is_some() {
+        paint.create_supported_cels(cx);
+    }
+}
+
+/// Edit Layers with Active Keyframes, and back.
+fn key_edit_keyed(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    if paint.here(&cx.world.arena).is_some() {
+        paint.edit_keyed = !paint.edit_keyed;
+    }
+}
+
+/// Checked while layers with keyframes on take strokes.
+fn edit_keyed_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    flag(paint.edit_keyed)
 }
 
 /// A track label at the frame shown (the argument names its kind).
@@ -1457,6 +1567,50 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         playback_camera,
     )
     .state(render_camera_state)
+    .with(Flags::PALETTE),
+    // A key button by each camera value in Tool Property: keys that value
+    // alone at the frame shown, or takes its key there away.
+    Command::family(
+        "anim.camera.value_key.",
+        "camera-value-keyframe",
+        "anim",
+        camera_value_key,
+    )
+    .icon("keyframe")
+    .state(doc_open)
+    .with(Flags::RECORDABLE)
+    .with(Flags::HIDDEN),
+    c(
+        "anim.camera.value_set",
+        "set-camera-value",
+        "keyframe",
+        camera_value_set,
+    )
+    .with(Flags::HIDDEN),
+    // Animation, Edit Track: the rest of Clip Studio Paint's entries.
+    c(
+        "anim.cel.assign_many",
+        "assign-multiple-cels-ellipsis",
+        "cel-specify",
+        cel_assign_many,
+    )
+    .state(on_timeline)
+    .with(Flags::PALETTE),
+    c(
+        "anim.cel.create_supported",
+        "create-all-supported-cels",
+        "cel-new",
+        cel_create_supported,
+    )
+    .state(on_timeline)
+    .with(Flags::PALETTE),
+    c(
+        "anim.key.edit_keyed",
+        "edit-layers-with-active-keyframes",
+        "keyframes",
+        key_edit_keyed,
+    )
+    .state(edit_keyed_on)
     .with(Flags::PALETTE),
 ];
 

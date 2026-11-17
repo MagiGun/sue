@@ -145,8 +145,8 @@ impl SuePaint {
 // ----- The timeline's dialogs -------------------------------------------------
 
 use crate::panels::timeline::forms::{
-    Animated, AnimatedForm, AudioClipForm, CelsForm, InsertForm, LabelForm, MovieForm, Range,
-    SequenceForm, TimelineForm, TrackNoteForm,
+    Animated, AnimatedForm, AssignManyForm, AudioClipForm, CelsForm, InsertForm, LabelForm,
+    MovieForm, Range, SequenceForm, TimelineForm, TrackNoteForm,
 };
 use sue_wm::ui::{self as wm_ui, TextRole};
 
@@ -174,6 +174,8 @@ pub(crate) enum AnimDialog {
     Insert(InsertForm),
     /// A named track label: its name and range.
     TrackNote(TrackNoteForm),
+    /// Assign Multiple Cels: which cels, from which frame, how long each.
+    AssignMany(AssignManyForm),
 }
 
 impl AnimDialog {
@@ -195,6 +197,7 @@ impl AnimDialog {
             Self::StopTimelapse(..) => tr!("stop-recording-timelapse"),
             Self::Insert(_) => tr!("insert-frame"),
             Self::TrackNote(_) => tr!("track-label"),
+            Self::AssignMany(_) => tr!("assign-multiple-cels"),
         }
     }
 
@@ -210,6 +213,7 @@ impl AnimDialog {
             Self::AudioClip(_) => 10.0,
             Self::Label(_) | Self::StopTimelapse(..) => 4.0,
             Self::Insert(_) | Self::TrackNote(_) => 5.5,
+            Self::AssignMany(_) => 9.0,
         };
         let row = wm_ui::Density::Regular.row();
         egui::Vec2::new(row * 15.0, row * (rows + 2.0) * 1.2)
@@ -228,6 +232,7 @@ impl AnimDialog {
             Self::StopTimelapse(delete, frames) => stop_timelapse_ui(ui, delete, *frames, theme),
             Self::Insert(form) => insert_ui(ui, form, theme),
             Self::TrackNote(form) => track_note_ui(ui, form, theme),
+            Self::AssignMany(form) => assign_many_ui(ui, form, theme),
         }
     }
 }
@@ -246,6 +251,7 @@ impl SuePaint {
             AnimDialog::StopTimelapse(delete, _) => self.stop_timelapse(cx, delete),
             AnimDialog::Insert(form) => self.insert_frames(cx, &form),
             AnimDialog::TrackNote(form) => self.track_note_ok(cx, &form),
+            AnimDialog::AssignMany(form) => self.assign_many_ok(cx, &form),
         }
     }
 }
@@ -796,8 +802,11 @@ fn track_note_ui(ui: &mut Ui, form: &mut TrackNoteForm, theme: &Theme) -> Outcom
                 theme,
             );
         });
-        if form.range {
-            grid.row(&tr!("number-of-frames"), |ui| {
+        // Off, Range leaves the frame count in place, grayed, as Clip
+        // Studio Paint shows it.
+        let range = form.range;
+        grid.row(&tr!("number-of-frames"), |ui| {
+            ui.add_enabled_ui(range, |ui| {
                 whole(
                     ui,
                     "anim-track-note-frames",
@@ -807,13 +816,78 @@ fn track_note_ui(ui: &mut Ui, form: &mut TrackNoteForm, theme: &Theme) -> Outcom
                     theme,
                 );
             });
-        }
+        });
     });
     help(
         ui,
         &tr!("track-label-at-frame", value = form.frame + 1),
         theme,
     );
+    ok_cancel(ui, &mut outcome);
+    if entered { Outcome::Ok } else { outcome }
+}
+
+/// Assign Multiple Cels: the cels by name (a run like `1-6` too), the
+/// frame they start from, how many frames each shows and how many times
+/// the run goes. Enter in the names is OK.
+fn assign_many_ui(ui: &mut Ui, form: &mut AssignManyForm, theme: &Theme) -> Outcome {
+    let mut outcome = Outcome::Open;
+    let mut entered = false;
+    wm_ui::form_grid(ui, "anim-assign-many-form", theme, |grid| {
+        grid.row(&tr!("cels-to-show"), |ui| {
+            let field = wm_ui::text_field("anim-assign-many-cels", &mut form.cels).show(ui, theme);
+            entered = name_field_keys(ui, &field);
+        });
+        grid.row(&tr!("first-frame-to-show"), |ui| {
+            let mut shown = form.start + 1;
+            if whole(
+                ui,
+                "anim-assign-many-start",
+                &mut shown,
+                1..=100_000,
+                "",
+                theme,
+            ) {
+                form.start = shown.max(1) - 1;
+            }
+        });
+        grid.row(&tr!("frames-each-cel"), |ui| {
+            whole(
+                ui,
+                "anim-assign-many-each",
+                &mut form.each,
+                1..=1_000,
+                "",
+                theme,
+            );
+        });
+        grid.row(&tr!("times-over"), |ui| {
+            whole(
+                ui,
+                "anim-assign-many-times",
+                &mut form.times,
+                1..=1_000,
+                "",
+                theme,
+            );
+        });
+    });
+    help(
+        ui,
+        &tr!("assign-multiple-cels-help", folder = form.folder.as_str()),
+        theme,
+    );
+    if !form.known.is_empty() {
+        help(
+            ui,
+            &tr!(
+                "cels-of-folder",
+                folder = form.folder.as_str(),
+                names = form.known.join(", ")
+            ),
+            theme,
+        );
+    }
     ok_cancel(ui, &mut outcome);
     if entered { Outcome::Ok } else { outcome }
 }

@@ -1074,7 +1074,22 @@ Once a canvas is open:
   move, a corner to zoom, outside to turn) or type its position, scale and
   rotation, and add a keyframe; between keyframes it glides. A keyframe's
   mark on the Timeline drags to another frame. Playback and exports show
-  the animation through it.
+  the animation through it. Tool Property lists Position X and Y, Scale,
+  Rotation, Center of Rotation X and Y and Layer Opacity, each with a
+  diamond key button beside it: press it to key that value alone at the
+  frame shown (it fills while the value is keyed there), press it again
+  to take that key away. A value you type or drag is keyed when you let
+  go.
+- **Edit Track, more:** Animation, Edit Track, Assign Multiple Cels...
+  shows a run of cels from a frame: type their names (or 1-6 for six
+  numbered cels), how many frames each shows and how many times the run
+  goes. A name with no cel yet leaves its frames empty with the name
+  grayed on the timeline; Create All Supported Cels makes those cels in
+  the folder and shows them there. Edit Layers with Active Keyframes
+  lets you draw on a layer whose keyframes are on: the stroke lands
+  where the layer shows at that frame. The Timeline's ruler goes on left
+  of frame 1 (0, -1 and on, shaded) when you pan there, and in-between
+  marks sit with the track labels in the strip at the top of a track.
 - **Timelapse** (File, Timelapse, or Record timelapse in New): while it
   records, Sue keeps a picture of the canvas after every change. Export
   Timelapse makes a video (MP4 where Windows has an encoder, AVI, or a

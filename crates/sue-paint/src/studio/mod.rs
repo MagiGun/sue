@@ -694,6 +694,16 @@ pub struct SuePaint {
     /// A camera being set up and not keyed yet: its folder, the frame and
     /// where it stands.
     pub(crate) camera_pending: Option<(EntityId, u32, crate::camera::Camera)>,
+    /// One camera value being set in Tool Property and not keyed yet:
+    /// its folder, the frame, the value's channel and what it is set to.
+    pub(crate) camera_value: Option<(EntityId, u32, &'static str, f64)>,
+    /// Edit Layers with Active Keyframes: a layer whose keyframes are on
+    /// takes strokes, drawn where they show.
+    pub(crate) edit_keyed: bool,
+    /// What each canvas point sees on the layer a stroke is drawn on,
+    /// when keyframes or a keyed folder move it at the frame shown: the
+    /// stroke lands where the layer shows.
+    pub(crate) stroke_warp: Option<[f32; 6]>,
     /// The Material palette: the kind it shows (0 all, then by the kinds
     /// registered) and the material picked, by name.
     pub(crate) material_kind: u8,
@@ -1023,6 +1033,9 @@ impl Default for SuePaint {
             timeline_view: crate::panels::timeline::TimelineView::default(),
             anim_ui: crate::panels::timeline::AnimUi::default(),
             camera_pending: None,
+            camera_value: None,
+            edit_keyed: false,
+            stroke_warp: None,
             view3d_before: None,
             pending_view3d: None,
             figure_joint: None,
@@ -1209,6 +1222,45 @@ pub(crate) fn saw_view(seen: ViewSeen) {
 #[must_use]
 pub fn last_view() -> Option<ViewSeen> {
     LAST_VIEW.with(|last| last.borrow().clone())
+}
+
+/// Picture pixels the runtime tests asked the canvas to read as it shows
+/// them, and the screen colors it read there in its last frame.
+type Probe = (Vec<[u32; 2]>, Vec<Option<[u8; 4]>>);
+
+thread_local! {
+    /// What the canvas is asked to read, and read (see [`probe_canvas`]).
+    static CANVAS_PROBE: std::cell::RefCell<Probe> =
+        const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+}
+
+/// Asks the canvas to read the screen colors of picture pixels `points`
+/// in every frame from now on (for the runtime tests; none stops it).
+pub fn probe_canvas(points: Vec<[u32; 2]>) {
+    CANVAS_PROBE.with(|probe| *probe.borrow_mut() = (points, Vec::new()));
+}
+
+/// The screen colors the canvas showed at the points [`probe_canvas`]
+/// asked for, in its last frame on this thread.
+#[must_use]
+pub fn canvas_probed() -> Vec<Option<[u8; 4]>> {
+    CANVAS_PROBE.with(|probe| probe.borrow().1.clone())
+}
+
+/// Reads the points asked for off `compositor`, when any are.
+pub(crate) fn probe_with(compositor: &crate::composite::Compositor) {
+    CANVAS_PROBE.with(|probe| {
+        let mut probe = probe.borrow_mut();
+        if probe.0.is_empty() {
+            return;
+        }
+        let seen = probe
+            .0
+            .iter()
+            .map(|[x, y]| compositor.pixel(*x, *y))
+            .collect();
+        probe.1 = seen;
+    });
 }
 
 impl std::fmt::Debug for SuePaint {

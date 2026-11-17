@@ -3912,3 +3912,25 @@ name-open-mouth = Open mouth
 name-open-hand = Open hand
 name-look-up = Look up
 new-template-pick = Template to start from
+center-of-rotation-x = Center of Rotation X
+center-of-rotation-y = Center of Rotation Y
+key-camera-value = Key { $name } at this frame
+unkey-camera-value = Take away the key of { $name } at this frame
+camera-value-keyframe = Key a Camera Value
+set-camera-value = Set a Camera Value
+assign-multiple-cels-ellipsis = Assign Multiple Cels...
+assign-multiple-cels = Assign Multiple Cels
+create-all-supported-cels = Create All Supported Cels
+edit-layers-with-active-keyframes = Edit Layers with Active Keyframes
+cels-to-show = Cels
+first-frame-to-show = From frame
+frames-each-cel = Frames each
+times-over = Times
+assign-multiple-cels-help = Cel names in the order they show, split by commas or spaces; 1-6 stands for 1 to 6. A name with no cel in { $folder } yet shows nothing, and Create All Supported Cels makes it.
+cels-of-folder = Cels of { $folder }: { $names }
+cels-wanted-count = { $count ->
+    [one] One cel named has no layer yet: Animation, Edit Track, Create All Supported Cels makes it.
+   *[other] { $count } cels named have no layer yet: Animation, Edit Track, Create All Supported Cels makes them.
+}
+no-cels-to-make = No frame names a cel that has no layer.
+pick-animation-folder-track = Pick an animation folder's track first.

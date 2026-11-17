@@ -38,7 +38,7 @@ my-pack/
 - A file is named after the icon's stable name (the tables at the end
   of this page) and ends in `.svg`. Names are lower case.
 - A few icons are the "on" half of an on and off pair and have a filled
-  twin: `star`, `heart`, `eye`, `lock` and `pin`. The twin is
+  twin: `star`, `heart`, `eye`, `lock`, `pin` and `keyframe`. The twin is
   `<name>.solid.svg`. If a pack replaces such an icon but not its twin,
   Sue draws its own twin for the state that is on, and says so in the
   pack's notes, so replace both.
@@ -461,6 +461,7 @@ own files are. A twin marked "yes" also has a `<name>.solid.svg`.
 | `stop` |  | A small square, well inside the square of maximize. Stop playing. |
 | `pause` |  | Two upright bars with round ends, side by side. Hold the playing where it is, to go on from there. |
 | `keyframe-add` |  | A diamond outline, the mark of a key on the timeline, with a plus at its lower right. Add a keyframe. |
+| `keyframe` | yes | The diamond of a key alone, solid when its value is keyed at this frame. Key one value. |
 | `keyframes` |  | A solid diamond on a level track that runs out of both its sides. Keyframes are on for this layer. |
 | `frame-first` |  | Two solid triangles that point to the left, the one at the front touching the back of the other, at an upright bar they run into. Go to the first frame. |
 | `frame-last` |  | Two solid triangles that point to the right, the one at the front touching the back of the other, at an upright bar they run into. Go to the last frame. |

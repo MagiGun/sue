@@ -15,9 +15,15 @@ use crate::tools::{SubTool, Tool};
 
 impl SuePaint {
     /// A layer whose keyframes are on moves as its keys say: it takes no
-    /// strokes (the Layer palette shows its pen locked). `true`, with a
-    /// notice saying why, when the current layer is one.
-    pub(super) fn refuse_keyframed(&self, cx: &mut AppletContext<'_>) -> bool {
+    /// strokes (the Layer palette shows its pen locked) unless Edit Layers
+    /// with Active Keyframes is on and the tool `follows` the layer (puts
+    /// its strokes where the layer shows, as the brush engine does).
+    /// `true`, with a notice saying why, when the current layer is one.
+    pub(super) fn refuse_keyframed(&self, cx: &mut AppletContext<'_>, follows: bool) -> bool {
+        // Edit Layers with Active Keyframes: it takes them, where it shows.
+        if self.edit_keyed && follows {
+            return false;
+        }
         let Some(info) = self.layer_info(&cx.world.arena) else {
             return false;
         };
@@ -48,7 +54,7 @@ impl SuePaint {
             size,
             ..
         } = *press;
-        if self.refuse_keyframed(cx) {
+        if self.refuse_keyframed(cx, true) {
             return;
         }
         let Some(doc) = self.docs.get(self.active) else {
@@ -61,6 +67,11 @@ impl SuePaint {
                 .flatten();
             let eraser = sub.tip.eraser || self.transparent;
             if mask.is_none() && eraser && crate::vector::is_vector(&cx.world.arena, info.id) {
+                // Taking lines away works on the lines as they are kept,
+                // not where keyframes show them.
+                if self.refuse_keyframed(cx, false) {
+                    return;
+                }
                 // The eraser takes vector lines away, as its Vector
                 // setting says: on every picked vector layer when several
                 // are picked, else on this one.

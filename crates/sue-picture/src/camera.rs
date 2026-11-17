@@ -60,6 +60,40 @@ fn sampled(entity: &Entity, time: Option<Time>, key: &str) -> Option<f64> {
         .or_else(|| entity.property(key).and_then(Value::as_f64))
 }
 
+/// The seven values of `folder`'s camera at `time`, in the order of
+/// [`VALUES`], as its keys there say, else as it is set, else the camera
+/// that shows a `size` canvas as it is. The centre of rotation is the
+/// middle of the view when nothing sets it, and the opacity 1.
+#[must_use]
+pub fn values(arena: &Arena, folder: EntityId, time: Option<Time>, size: [u32; 2]) -> [f64; 7] {
+    let middle = [f64::from(size[0]) / 2.0, f64::from(size[1]) / 2.0];
+    let Ok(entity) = arena.get_by_id(folder) else {
+        return [middle[0], middle[1], 1.0, 0.0, middle[0], middle[1], 1.0];
+    };
+    let value = |key: &str, or: f64| sampled(entity, time, key).unwrap_or(or);
+    let (x, y) = (value(X, middle[0]), value(Y, middle[1]));
+    [
+        x,
+        y,
+        value(SCALE, 1.0),
+        value(ANGLE, 0.0),
+        value(PIVOT_X, x),
+        value(PIVOT_Y, y),
+        value(OPACITY, 1.0).clamp(0.0, 1.0),
+    ]
+}
+
+/// `true` if `folder`'s camera has a key of `channel` at `time`.
+#[must_use]
+pub fn keyed(arena: &Arena, folder: EntityId, channel: &str, time: Time) -> bool {
+    arena
+        .get_by_id(folder)
+        .ok()
+        .and_then(|entity| entity.ext::<Animation>())
+        .and_then(|animation| animation.channel(channel))
+        .is_some_and(|curve| curve.keys().iter().any(|key| key.time == time))
+}
+
 /// `true` if `folder` is a camera folder.
 #[must_use]
 pub fn is_camera(arena: &Arena, folder: EntityId) -> bool {
@@ -77,39 +111,67 @@ impl Camera {
     /// else its own values), on a canvas of `size`.
     #[must_use]
     pub fn of(arena: &Arena, folder: EntityId, time: Option<Time>, size: [u32; 2]) -> Self {
-        let Ok(entity) = arena.get_by_id(folder) else {
-            return Self::still(size);
-        };
-        let keyed = time
-            .and_then(|time| {
-                entity
-                    .ext::<Animation>()
-                    .map(|animation| animation.sample(time))
-            })
-            .unwrap_or_default();
-        let value = |key: &str, or: f32| {
-            keyed
-                .get(key)
-                .or_else(|| entity.property(key))
-                .and_then(Value::as_f64)
-                .map_or(or, |value| value as f32)
-        };
-        let still = Self::still(size);
+        Self::from_values(&values(arena, folder, time, size))
+    }
+
+    /// The camera that the seven values of [`VALUES`] (in that order)
+    /// make: the middle of its view swung round the centre of rotation by
+    /// its angle.
+    #[must_use]
+    pub fn from_values(values: &[f64; 7]) -> Self {
+        let [x, y, scale, angle, px, py, _] = values.map(|value| value as f32);
         let mut camera = Self {
-            center: [value(X, still.center[0]), value(Y, still.center[1])],
-            scale: value(SCALE, 1.0).max(0.01),
-            angle: value(ANGLE, 0.0),
+            center: [x, y],
+            scale: scale.max(0.01),
+            angle,
         };
         // Turned about a centre of its own: the middle of the view swings
         // round it.
-        let pivot = [PIVOT_X, PIVOT_Y].map(|key| sampled(entity, time, key));
-        if let [Some(px), Some(py)] = pivot {
-            let (px, py) = (px as f32, py as f32);
-            let (sin, cos) = camera.angle.sin_cos();
-            let (dx, dy) = (camera.center[0] - px, camera.center[1] - py);
-            camera.center = [px + cos * dx - sin * dy, py + sin * dx + cos * dy];
-        }
+        let (sin, cos) = angle.sin_cos();
+        let (dx, dy) = (x - px, y - py);
+        camera.center = [px + cos * dx - sin * dy, py + sin * dx + cos * dy];
         camera
+    }
+
+    /// The middle of the view before the swing round `pivot`: what
+    /// [`X`] and [`Y`] hold for this camera to stand where it does.
+    #[must_use]
+    pub fn unswung(&self, pivot: [f32; 2]) -> [f32; 2] {
+        let (sin, cos) = (-self.angle).sin_cos();
+        let (dx, dy) = (self.center[0] - pivot[0], self.center[1] - pivot[1]);
+        [
+            pivot[0] + cos * dx - sin * dy,
+            pivot[1] + sin * dx + cos * dy,
+        ]
+    }
+
+    /// [`Self::unswung`] when the centre of rotation is set on one axis
+    /// alone (`None` on the other), the missing axis following the middle
+    /// of the view before its swing, as [`values`] reads it; with neither
+    /// set the view turns about its own middle and nothing swings.
+    #[must_use]
+    pub fn unswung_about(&self, pivot: [Option<f32>; 2]) -> [f32; 2] {
+        let [cx, cy] = self.center;
+        let (sin, cos) = self.angle.sin_cos();
+        // Turned a quarter, the one known axis fixes nothing on its own:
+        // the middle of the view is taken unswung there.
+        let steep = cos.abs() < 1e-4;
+        match pivot {
+            [Some(px), Some(py)] => self.unswung([px, py]),
+            [None, None] => self.center,
+            // The centre at (px, y): the view's middle swings from
+            // (px + d, y) to (px + cos d, y + sin d).
+            [Some(px), None] => {
+                let d = if steep { 0.0 } else { (cx - px) / cos };
+                [px + d, cy - sin * d]
+            }
+            // The centre at (x, py): from (x, py + e) to (x - sin e,
+            // py + cos e).
+            [None, Some(py)] => {
+                let e = if steep { 0.0 } else { (cy - py) / cos };
+                [cx + sin * e, py + e]
+            }
+        }
     }
 
     /// The opacity the camera of `folder` gives its layers at `time`, when
@@ -311,6 +373,19 @@ pub fn keys(arena: &Arena, folder: EntityId) -> Vec<Time> {
     out
 }
 
+/// What [`X`] and [`Y`] of `folder`'s camera hold at `time` for it to
+/// stand as `camera` does: the middle of its view before the swing round
+/// the centre of rotation its keys (or own values) set there. A centre
+/// set on one axis alone follows the middle of the view on the other,
+/// as [`values`] reads it, and is solved for so.
+#[must_use]
+pub fn unswung_at(arena: &Arena, folder: EntityId, time: Time, camera: &Camera) -> [f32; 2] {
+    let pivot = arena.get_by_id(folder).map_or([None, None], |entity| {
+        [PIVOT_X, PIVOT_Y].map(|key| sampled(entity, Some(time), key).map(|value| value as f32))
+    });
+    camera.unswung_about(pivot)
+}
+
 /// The edit that keys `folder`'s camera at `time` standing as `camera`.
 #[must_use]
 pub fn key(arena: &Arena, folder: EntityId, time: Time, camera: Camera) -> Edit {
@@ -320,9 +395,12 @@ pub fn key(arena: &Arena, folder: EntityId, time: Time, camera: Camera) -> Edit 
         .and_then(|entity| entity.ext::<Animation>())
         .cloned()
         .unwrap_or_default();
+    // The middle of the view is kept before its swing round a centre of
+    // rotation, so the camera stands where it was shown.
+    let center = unswung_at(arena, folder, time, &camera);
     for (channel, value) in [
-        (X, camera.center[0]),
-        (Y, camera.center[1]),
+        (X, center[0]),
+        (Y, center[1]),
         (SCALE, camera.scale),
         (ANGLE, camera.angle),
     ] {
@@ -333,6 +411,24 @@ pub fn key(arena: &Arena, folder: EntityId, time: Time, camera: Camera) -> Edit 
         });
     }
     Edit::new(tr!("camera-keyframe")).then(SetExtension::set(folder, animation))
+}
+
+/// The edit that takes the key of `channel` (one of [`VALUES`]) of
+/// `folder`'s camera at `time` away, if it has one: the other values
+/// keep theirs.
+#[must_use]
+pub fn delete_value_key(
+    arena: &Arena,
+    folder: EntityId,
+    channel: &str,
+    time: Time,
+) -> Option<Edit> {
+    let mut animation = arena.get_by_id(folder).ok()?.ext::<Animation>()?.clone();
+    animation.channel(channel)?;
+    animation.channel_mut(channel).remove(time)?;
+    let curve = animation.channel(channel).map(smoothed).unwrap_or_default();
+    *animation.channel_mut(channel) = curve;
+    Some(Edit::new(tr!("delete-camera-keyframe")).then(SetExtension::set(folder, animation)))
 }
 
 /// The edit that takes `folder`'s camera keyframe at `time` away, if it has
@@ -597,5 +693,107 @@ mod tests {
         sue_core::ReversibleTransaction::revert(&mut smooth, &mut arena).unwrap();
         let linear = Camera::of(&arena, folder, Some(at(2)), size).angle;
         assert!((linear - 0.2 * std::f32::consts::FRAC_PI_2).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_camera_keyed_about_a_centre_stands_where_it_was_shown() {
+        let size = [100, 100];
+        let mut arena = Arena::new();
+        let (mut edit, picture) = create(&NewPicture {
+            width: 100,
+            height: 100,
+            ..NewPicture::default()
+        })
+        .unwrap();
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let (mut edit, folder) = new_camera(&arena, picture, None);
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let rate = sue_core::Rate::new(10, 1);
+        let at = time_of(4, rate);
+        // Nothing set: the canvas as it is, turning about its middle.
+        assert_eq!(
+            values(&arena, folder, Some(at), size),
+            [50.0, 50.0, 1.0, 0.0, 50.0, 50.0, 1.0]
+        );
+        for (channel, value) in [(PIVOT_X, 10.0), (PIVOT_Y, 20.0)] {
+            let mut edit = key_value(&arena, folder, channel, at, value, Ease::Linear);
+            sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        }
+        assert!(keyed(&arena, folder, PIVOT_X, at));
+        assert!(!keyed(&arena, folder, X, at));
+        // Keyed turned and moved: shown again exactly so.
+        let shown = Camera {
+            center: [70.0, 35.0],
+            scale: 1.5,
+            angle: 0.6,
+        };
+        let mut edit = key(&arena, folder, at, shown);
+        sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+        let again = Camera::of(&arena, folder, Some(at), size);
+        assert!(near(again.center, shown.center), "{again:?}");
+        assert!((again.angle - 0.6).abs() < 1e-5 && (again.scale - 1.5).abs() < 1e-5);
+        // One value's key goes, the others stay; undo brings it back with
+        // the arena as it was.
+        let before = format!("{:?}", arena.get_by_id(folder).unwrap().ext::<Animation>());
+        let mut gone = delete_value_key(&arena, folder, PIVOT_Y, at).unwrap();
+        sue_core::ReversibleTransaction::apply(&mut gone, &mut arena).unwrap();
+        assert!(!keyed(&arena, folder, PIVOT_Y, at));
+        assert!(keyed(&arena, folder, PIVOT_X, at) && keyed(&arena, folder, ANGLE, at));
+        assert!(delete_value_key(&arena, folder, PIVOT_Y, at).is_none());
+        let after = format!("{:?}", arena.get_by_id(folder).unwrap().ext::<Animation>());
+        sue_core::ReversibleTransaction::revert(&mut gone, &mut arena).unwrap();
+        assert_eq!(
+            format!("{:?}", arena.get_by_id(folder).unwrap().ext::<Animation>()),
+            before
+        );
+        sue_core::ReversibleTransaction::apply(&mut gone, &mut arena).unwrap();
+        assert_eq!(
+            format!("{:?}", arena.get_by_id(folder).unwrap().ext::<Animation>()),
+            after
+        );
+    }
+
+    #[test]
+    fn a_camera_keyed_with_its_centre_set_on_one_axis_stands_where_it_was_shown() {
+        let size = [100, 100];
+        let rate = sue_core::Rate::new(10, 1);
+        let at = time_of(2, rate);
+        for (channel, value) in [(PIVOT_X, 10.0), (PIVOT_Y, 80.0)] {
+            for angle in [0.6_f32, -2.2, std::f32::consts::FRAC_PI_2] {
+                let mut arena = Arena::new();
+                let (mut edit, picture) = create(&NewPicture {
+                    width: 100,
+                    height: 100,
+                    ..NewPicture::default()
+                })
+                .unwrap();
+                sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+                let (mut edit, folder) = new_camera(&arena, picture, None);
+                sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+                // One axis of the centre keyed alone, as its key button
+                // in Tool Property does.
+                let mut edit = key_value(&arena, folder, channel, at, value, Ease::Linear);
+                sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+                let shown = Camera {
+                    center: [64.0, 27.0],
+                    scale: 1.25,
+                    angle,
+                };
+                let mut edit = key(&arena, folder, at, shown);
+                sue_core::ReversibleTransaction::apply(&mut edit, &mut arena).unwrap();
+                let again = Camera::of(&arena, folder, Some(at), size);
+                // A quarter turn pins the view's middle to the centre on
+                // that axis: only the other axis can be kept.
+                let steep = (angle.cos()).abs() < 1e-3;
+                let kept = if steep {
+                    let axis = usize::from(channel == PIVOT_Y);
+                    (again.center[1 - axis] - shown.center[1 - axis]).abs() < 1e-2
+                } else {
+                    near(again.center, shown.center)
+                };
+                assert!(kept, "{channel} {angle}: {again:?} against {shown:?}");
+                assert!((again.angle - angle).abs() < 1e-5);
+            }
+        }
     }
 }

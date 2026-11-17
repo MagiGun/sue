@@ -42,12 +42,12 @@ struct Row {
     height: f32,
     /// How many folders with rows of their own it is inside.
     depth: usize,
-    /// The band over its cels: the strip of its named labels (`notes`)
+    /// The band over its cels: the strip of its labels (`notes`)
     /// and under it the strip of keys (a folder with keyframes on), 0
     /// when it has neither.
     band: f32,
-    /// The strip of named track labels at the top of the band, 0 when
-    /// the track has none.
+    /// The strip of named track labels and in-between marks at the top
+    /// of the band, 0 when the track has neither.
     notes: f32,
 }
 
@@ -106,10 +106,12 @@ fn rows(
     for track in order {
         let kind = kind_of(&sequence.tracks[track]);
         let at = place(&sequence.tracks[track]);
-        // Named track labels get a strip of their own over the cels, so
-        // they never run over a cel's name.
+        // Named track labels and in-between marks get a strip of their
+        // own over the cels (as in Clip Studio Paint), so they never run
+        // over a cel's name or picture.
         let notes = if kind == Kind::Cels
-            && !anim::editing::track_notes(&sequence.tracks[track]).is_empty()
+            && (!anim::editing::track_notes(&sequence.tracks[track]).is_empty()
+                || !anim::editing::track_labels(&sequence.tracks[track]).is_empty())
         {
             row
         } else {
@@ -728,6 +730,38 @@ impl SuePaint {
                 );
             }
         }
+        // Left of frame 1 the ruler goes on, numbered 0, -1 and on when
+        // it counts frames (seconds and timecode have no time before the
+        // first), and shaded like what lies past the end.
+        let numbered = self.anim_ui.unit == super::TimeUnit::Frames;
+        if origin < 0.0 {
+            let before = origin.floor() as i64;
+            for at in before..0 {
+                let x = frames_area.left() + (at as f32 - origin) * step;
+                painter.vline(
+                    x,
+                    below.y_range(),
+                    Stroke::new(theme.hairline().width, theme.fill_hover()),
+                );
+                if numbered && (at.rem_euclid(i64::from(every)) == 0 || every == 1) {
+                    painter.text(
+                        pos2(x + pad / 2.0, half_ruler + ruler / 4.0),
+                        Align2::LEFT_CENTER,
+                        (at + 1).to_string(),
+                        micro.clone(),
+                        theme.text_disabled(theme.panel),
+                    );
+                }
+            }
+            painter.rect_filled(
+                Rect::from_min_max(
+                    pos2(frames_area.left(), half_ruler),
+                    pos2(column(0), frames_area.bottom()),
+                ),
+                CornerRadius::ZERO,
+                theme.scrim(),
+            );
+        }
         painter.hline(frames_area.x_range(), half_ruler, theme.hairline());
         painter.hline(frames_area.x_range(), ruler_rect.bottom(), theme.hairline());
         // What lies past the end is shaded.
@@ -1087,8 +1121,23 @@ impl SuePaint {
                             .map_or(length, |(next, _)| *next)
                             .min(last_seen);
                         let x = column(*at);
+                        // A blank key that names a cel to come reads its
+                        // name, muted, until the cel is made.
+                        let wanted = if cel.is_none() {
+                            anim::editing::wanted_cels(track, sequence.rate)
+                                .into_iter()
+                                .find(|(frame, _)| frame == at)
+                                .map(|(_, name)| name)
+                        } else {
+                            None
+                        };
+                        let ink = if wanted.is_some() {
+                            theme.text_muted()
+                        } else {
+                            theme.text
+                        };
                         let name = cel.map_or_else(
-                            || "x".to_owned(),
+                            || wanted.unwrap_or_else(|| "x".to_owned()),
                             |cel| {
                                 cx.world.arena.get_by_id(cel).map_or_else(
                                     |_| "?".to_owned(),
@@ -1101,7 +1150,7 @@ impl SuePaint {
                             Align2::LEFT_CENTER,
                             name,
                             font.clone(),
-                            theme.text,
+                            ink,
                         );
                         if let Some(cel) = cel {
                             // A line for as long as it shows.
@@ -1124,11 +1173,19 @@ impl SuePaint {
                             }
                         }
                     }
-                    // Track labels: an in-between to draw an open circle,
-                    // one drawn a filled circle, a reverse sheet a bar.
+                    // Track labels, in the strip over the cels: an
+                    // in-between to draw an open circle, one drawn a
+                    // filled circle, a reverse sheet a bar.
                     for (at, label) in anim::editing::track_labels(track) {
-                        let center = pos2(column(at) + step / 2.0, top + row.height - pad);
+                        let center = pos2(column(at) + step / 2.0, top + row.notes / 2.0);
                         let radius = (step / 4.0).min(pad / 2.0 + 1.0);
+                        if below.contains(center) {
+                            crate::launchers::note_palette_mark(
+                                ui.ctx(),
+                                &format!("track-label.{}.{at}", row.track),
+                                center,
+                            );
+                        }
                         match label {
                             TrackLabel::InBetween => {
                                 cells_painter.circle_stroke(

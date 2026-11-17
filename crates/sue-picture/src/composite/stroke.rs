@@ -349,6 +349,9 @@ impl Compositor {
         }
         let step = step.max(1);
         let whole = [0, 0, self.size[0], self.size[1]];
+        // Where the canvas shows them: a layer the frame moves shows its
+        // pixels elsewhere.
+        let rects = &self.shown_rects(arena, rects, painted);
         let mut now = Vec::new();
         for rect in rects {
             let Some(rect) = meet(*rect, whole) else {
@@ -483,6 +486,59 @@ impl Compositor {
             self.forgotten = version;
         }
         self.seen = signature;
+    }
+
+    /// `rects` of `painted`'s own pixels (in the picture where its offset
+    /// puts them) where the canvas shows them: carried through the warp
+    /// the frame view gives that layer (its keyframes, the keyed folders
+    /// and 2D cameras round it), each the bounds of where it lands, a
+    /// pixel wider for the filtering. As they are when nothing moves it.
+    pub(super) fn shown_rects(
+        &self,
+        arena: &Arena,
+        rects: &[[u32; 4]],
+        painted: Option<EntityId>,
+    ) -> Vec<[u32; 4]> {
+        let warp = painted
+            .zip(self.view.as_ref())
+            .and_then(|(layer, view)| view.warp(arena, layer));
+        let Some([a, b, c, d, tx, ty]) = warp else {
+            return rects.to_vec();
+        };
+        // The warp says what each canvas point sees on the layer; the
+        // layer's pixels show where its inverse takes them.
+        let det = a * d - b * c;
+        if det.abs() < 1e-9 {
+            return vec![[0, 0, self.size[0], self.size[1]]];
+        }
+        let shown = |x: f32, y: f32| {
+            let (x, y) = (x - tx, y - ty);
+            [(d * x - b * y) / det, (a * y - c * x) / det]
+        };
+        let clamp = |value: f32, side: u32| value.clamp(0.0, side as f32) as u32;
+        rects
+            .iter()
+            .filter_map(|&[x0, y0, x1, y1]| {
+                let corners = [
+                    shown(x0 as f32, y0 as f32),
+                    shown(x1 as f32, y0 as f32),
+                    shown(x0 as f32, y1 as f32),
+                    shown(x1 as f32, y1 as f32),
+                ];
+                let (mut low, mut high) = ([f32::MAX; 2], [f32::MIN; 2]);
+                for [x, y] in corners {
+                    low = [low[0].min(x), low[1].min(y)];
+                    high = [high[0].max(x), high[1].max(y)];
+                }
+                let rect = [
+                    clamp(low[0].floor() - 1.0, self.size[0]),
+                    clamp(low[1].floor() - 1.0, self.size[1]),
+                    clamp(high[0].ceil() + 1.0, self.size[0]),
+                    clamp(high[1].ceil() + 1.0, self.size[1]),
+                ];
+                (rect[0] < rect[2] && rect[1] < rect[3]).then_some(rect)
+            })
+            .collect()
     }
 
     /// Brings up to `tiles` of the waiting tiles (the ones in `visible`

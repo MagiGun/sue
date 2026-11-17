@@ -325,6 +325,7 @@ impl SuePaint {
         };
         let painter = ui.painter().with_clip_rect(viewport);
         let corners = doc.view.corners(viewport, size);
+        crate::studio::probe_with(&doc.compositor);
         let (mut pixels, display_size, mut version) = doc.compositor.display();
         let mut salt = 0;
         if self.proof_on && display_size == size {
