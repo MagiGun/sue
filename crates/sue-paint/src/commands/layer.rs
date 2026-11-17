@@ -767,7 +767,16 @@ fn folder(paint: &mut SuePaint, cx: &mut AppletContext<'_>, insert: bool) {
     let layer = paint
         .layer()
         .filter(|layer| !doc::is_folder(&cx.world.arena, *layer));
-    let (edit, folder) = doc::new_folder(&cx.world.arena, picture, layer.or(paint.layer()), insert);
+    let inside = layer.or(paint.layer());
+    let (mut edit, folder) = doc::new_folder(&cx.world.arena, picture, inside, insert);
+    // A cel put in a folder of its own stays the cel: the folder takes its
+    // name and its frames on the timeline.
+    if insert
+        && let Some(cel) = inside
+        && let Some(kept) = crate::anim::cels::wrapped(&cx.world.arena, picture, cel, folder)
+    {
+        edit = edit.then(kept);
+    }
     apply_and_pick(paint, cx, edit, folder);
 }
 
@@ -1107,6 +1116,12 @@ fn merge_selected(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
     ids.extend(doc.layer);
     match doc::merge_layers(&cx.world.arena, picture, &ids) {
         Ok((edit, into)) => {
+            // A folder cel merged stays the cel: its frames show the layer
+            // it became.
+            let edit = match crate::anim::cels::rekeyed(&cx.world.arena, picture, &ids, into) {
+                Some(kept) => edit.then(kept),
+                None => edit,
+            };
             if SuePaint::apply(cx, edit)
                 && let Some(doc) = paint.doc_mut()
             {

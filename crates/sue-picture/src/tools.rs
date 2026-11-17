@@ -346,9 +346,16 @@ impl Tool {
             // Clip Studio Paint Ver. 4's order (A25V-22); its Lasso fill
             // is the Figure tool's, placed here by the layout.
             Self::Fill => vec![
-                plain("Refer Other Layers", 0)
-                    .tolerance(0.1)
-                    .referring(Refer::All),
+                {
+                    // Draft layers left out, as Clip Studio Paint's Refer
+                    // other layers starts: color lines on a draft layer
+                    // stop no fill (A25-4).
+                    let mut refer = plain("Refer Other Layers", 0)
+                        .tolerance(0.1)
+                        .referring(Refer::All);
+                    refer.exclude.drafts = true;
+                    refer
+                },
                 plain("Refer Only Editing Layer", 0).tolerance(0.1),
                 // Encircle lines: the areas they close off fill.
                 plain("Close and fill", CLOSE_AND_FILL).tolerance(0.1),

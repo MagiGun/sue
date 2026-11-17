@@ -79,6 +79,7 @@ pub(crate) const MENU: &[&str] = &[
     "anim.light_table.register",
     "anim.light_table.register_general",
     "anim.light_table.clear",
+    "anim.palette_color.clips",
     "anim.thumbnails.none",
     "anim.thumbnails.smallest",
     "anim.thumbnails.small",
@@ -219,6 +220,9 @@ pub(crate) struct AnimUi {
     pub picked_before: Option<EntityId>,
     /// A playback marker being dragged: the start (`true`) or the end.
     pub marker: Option<bool>,
+    /// Where the history stood as that drag began, so the whole drag
+    /// becomes one undo step when it ends.
+    pub marker_from: Option<sue_core::NodeId>,
     /// Each sound's waveform: its revision, and its peaks.
     pub peaks: HashMap<EntityId, (u64, Vec<f32>)>,
     /// Playback measured: when the frame last changed, and the frames a
@@ -235,6 +239,9 @@ pub(crate) struct AnimUi {
     /// The frame shown when the frames were last looked at, so a move by
     /// hand is told from standing still.
     pub scrubbed: Option<u32>,
+    /// Show Palette Color on Clips turned off: the clips are drawn in
+    /// the timeline's own colors (on by default).
+    pub palette_clips_hidden: bool,
 }
 
 /// The keys that run `command` now, as people read them (`Ctrl+K`), or

@@ -1409,6 +1409,14 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         cel_peek,
     )
     .state(peek_state),
+    c(
+        "anim.palette_color.clips",
+        "show-palette-color-on-clips",
+        "palette-color-set",
+        palette_clips,
+    )
+    .state(palette_clips_on)
+    .with(Flags::PALETTE),
 ];
 
 /// The cels of the folder of the current track: its track, when it is an
@@ -1482,6 +1490,17 @@ fn peek_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
 /// each frame reached.
 fn audio_scrub(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
     paint.anim_ui.scrub = !paint.anim_ui.scrub;
+}
+
+/// Show Palette Color on Clips: each track's clip in its layer's palette
+/// color, or not.
+fn palette_clips(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.anim_ui.palette_clips_hidden = !paint.anim_ui.palette_clips_hidden;
+}
+
+/// Checked while the clips show their palette colors.
+fn palette_clips_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    flag(!paint.anim_ui.palette_clips_hidden)
 }
 
 /// Checked while Audio Scrubbing is on.

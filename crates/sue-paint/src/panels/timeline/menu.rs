@@ -116,6 +116,10 @@ pub(crate) const TREE: &[Entry] = &[
             Item("anim.light_table.clear"),
         ],
     ),
+    Sub(
+        || tr!("show-palette-color"),
+        &[Item("anim.palette_color.clips")],
+    ),
     Line,
     Sub(
         || tr!("thumbnail-size"),
@@ -216,6 +220,7 @@ mod tests {
                 "[Timeline]",
                 "[Show Animation Cels]",
                 "[Light Table]",
+                "[Show Palette Color]",
                 "-",
                 "[Thumbnail Size]",
                 "[Time Unit]",

@@ -3509,3 +3509,6 @@ clip-report-rulers = the rulers
 clip-report-parts-for-sue = for Sue, not read by Clip Studio yet: { $names }
 workspace-keeps = Kept in the workspace: where the palettes are, the Command Bar and Quick Access, the keyboard shortcuts and the unit of lengths
 info-show-canvas = Show Canvas Information
+output-frame-label = Output frame
+show-palette-color = Show Palette Color
+show-palette-color-on-clips = Show Palette Color on Clips

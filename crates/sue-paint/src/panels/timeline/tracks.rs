@@ -429,6 +429,15 @@ impl SuePaint {
             MenuItem::Separator,
             item("anim.play_range.start"),
             item("anim.play_range.end"),
+            MenuItem::Separator,
+            // As Clip Studio Paint's right click on the timeline offers it.
+            MenuItem::Sub {
+                label: tr!("thumbnail-size"),
+                items: ["none", "smallest", "small", "medium", "large", "largest"]
+                    .iter()
+                    .map(|size| item(&format!("anim.thumbnails.{size}")))
+                    .collect(),
+            },
         ]);
         items
     }
@@ -704,6 +713,15 @@ impl SuePaint {
                 theme.scrim(),
             );
         }
+        // A click or drag on the ruler goes to that frame; hovering it
+        // names the frame under the pointer. It is sensed before the
+        // playback range's two handles, so a press on a handle drags the
+        // handle (the widget sensed last is on top).
+        let ruler_response = ui.interact(
+            ruler_rect,
+            ui.scope_id().with("timeline-ruler"),
+            Sense::click_and_drag(),
+        );
         // The playback range: the frames outside it are shaded on the
         // ruler, and its two ends are handles.
         let marker_width = pad;
@@ -759,6 +777,9 @@ impl SuePaint {
             );
             if response.drag_started() {
                 self.anim_ui.marker = Some(start);
+                // However many frames it passes, the drag is one undo step.
+                cx.typing.flush(cx.history);
+                self.anim_ui.marker_from = Some(cx.history.cursor());
             }
             if response.dragged()
                 && let Some(pos) = response.interact_pointer_pos()
@@ -770,6 +791,11 @@ impl SuePaint {
             }
             if response.drag_stopped() {
                 self.anim_ui.marker = None;
+                if let Some(mark) = self.anim_ui.marker_from.take() {
+                    let label = cx.history.label(cx.history.cursor());
+                    let label = label.unwrap_or_default().to_owned();
+                    crate::commands::fold_since(cx, mark, label);
+                }
             }
         }
         // Timeline labels: a tag and the name over their frame.
@@ -789,13 +815,6 @@ impl SuePaint {
                 theme.text,
             );
         }
-        // A click or drag on the ruler goes to that frame; hovering it
-        // names the frame under the pointer.
-        let ruler_response = ui.interact(
-            ruler_rect,
-            ui.scope_id().with("timeline-ruler"),
-            Sense::click_and_drag(),
-        );
         if !on_marker && let Some(pos) = ruler_response.hover_pos() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             let at = at_pointer(pos);
@@ -1022,7 +1041,9 @@ impl SuePaint {
                 });
             }
 
-            // The frames.
+            // The frames: the clips in the palette color, unless Show
+            // Palette Color on Clips is off.
+            let clip_tint = tint.filter(|_| !self.anim_ui.palette_clips_hidden);
             match row.kind {
                 Kind::Cels => {
                     let keys = anim::keys(track, sequence.rate);
@@ -1056,7 +1077,7 @@ impl SuePaint {
                             cells_painter.hline(
                                 (x + pad / 2.0)..=column(end) - pad / 2.0,
                                 top + row_size - pad / 2.0 + row.band,
-                                tint.map_or_else(
+                                clip_tint.map_or_else(
                                     || Stroke::new(theme.hairline().width, theme.text_muted()),
                                     |tint| Stroke::new(thick, tint),
                                 ),
@@ -1112,6 +1133,14 @@ impl SuePaint {
                             CornerRadius::same(theme.radius(wm_ui::Radius::Xs) as u8),
                             theme.surface(2),
                         );
+                        if let Some(tint) = clip_tint {
+                            // A band of the palette color along its top.
+                            cells_painter.rect_filled(
+                                Rect::from_min_size(bar.min, vec2(bar.width(), thick + thick)),
+                                CornerRadius::ZERO,
+                                tint,
+                            );
+                        }
                         cells_painter.rect_stroke(
                             bar,
                             CornerRadius::same(theme.radius(wm_ui::Radius::Xs) as u8),

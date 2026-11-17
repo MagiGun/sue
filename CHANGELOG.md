@@ -568,6 +568,16 @@ follow [Semantic Versioning](https://semver.org/).
   click on a small picture of the layer; Perlin Noise has Scale,
   Amplitude, Attenuation, Repetition and Offset X and Y; Smart Smoothing
   has Weak, Medium and Strong and Remove Noise.
+- Sue Paint, File, New, Animation: the overflow frame takes an Offset X
+  and an Offset Y, moving the output frame from its reference point.
+- Sue Paint: an animation's output frame is drawn on the canvas, named
+  under its lower left corner, with its title-safe area when that is on.
+- Sue Paint, Timeline palette menu: Show Palette Color, Show Palette
+  Color on Clips. On (as it starts), each track's clips carry its
+  layer's palette color: a band along a layer's clip, the line under an
+  animation folder's cels.
+- Sue Paint, Timeline: a right click on the frames offers Thumbnail
+  Size, as Clip Studio Paint's does.
 
 ### Changed
 
@@ -866,6 +876,9 @@ follow [Semantic Versioning](https://semver.org/).
   dialog and close with Escape.
 - Settings, Appearance, Icons shows each icon set as a card with its
   own icons as a preview; choose one with a click or the arrow keys.
+- Sue Paint, Fill tool: Refer Other Layers starts with draft layers left
+  out, as Clip Studio Paint's does, so color lines on a draft layer stop
+  no fill.
 
 ### Fixed
 
@@ -892,6 +905,8 @@ follow [Semantic Versioning](https://semver.org/).
   and the paper shows its color there instead of a clear canvas.
 - Sue Paint: Export as .psd keeps fill, gradient and image material
   layers, drawn as they look; they used to be left out.
+- Sue Paint, pens with Anti-aliasing None: the thin end of a tapered
+  line is solid pixels too, not a few lighter ones.
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its
   tip, and a flick no longer bends off the way the stroke was going.
 - Sue Paint: masks of older files become gray masks as the file opens,
@@ -1126,6 +1141,20 @@ follow [Semantic Versioning](https://semver.org/).
   middle of another goes into that button's group.
 - Sue Paint, Information palette: Show Canvas Information in its menu,
   so the palette can be emptied.
+- Sue Paint: renaming a layer or an Auto Action ends with Enter, Tab or a
+  click elsewhere and keeps the new name (the name typed was lost).
+- Sue Paint: a new animation lists every layer on the timeline, the
+  paper too, so it can be locked or hidden there; a layer made or
+  dragged out of an animation folder later gets its track at once, in
+  the same undo step.
+- Sue Paint: a cel put in a folder of its own (Create Folder and Insert
+  Layer, or dragged onto New Layer Folder) stays the cel: the folder
+  takes its name and its frames on the timeline.
+- Sue Paint: Merge Selected Layers on a folder cel keeps it the cel on
+  the timeline, on the frames it showed.
+- Sue Paint, Timeline: the playback range's start and end handles on the
+  ruler can be dragged again (a press there moved the playhead), and a
+  drag of one is a single undo step, however many frames it passes.
 
 ### Removed
 

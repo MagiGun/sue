@@ -779,8 +779,13 @@ impl SuePaint {
             let response = sue_wm::ui::text_field("sue-paint-auto-set-name", &mut typed)
                 .label(&name)
                 .show_at(&mut inner, picker, theme);
-            response.request_focus();
-            if response.lost_focus() {
+            // Looked at before focus is asked for again, so Enter, Tab or
+            // a click elsewhere ends the typing.
+            let lost = response.lost_focus();
+            if !lost {
+                response.request_focus();
+            }
+            if lost {
                 let typed = typed.trim().to_owned();
                 if !typed.is_empty() {
                     self.auto.set_name = typed;
@@ -859,8 +864,11 @@ impl SuePaint {
                                     let response =
                                         sue_wm::ui::text_field("sue-paint-auto-rename", typed)
                                             .show(ui, theme);
-                                    response.request_focus();
-                                    if response.lost_focus() {
+                                    let lost = response.lost_focus();
+                                    if !lost {
+                                        response.request_focus();
+                                    }
+                                    if lost {
                                         clicked = true;
                                     }
                                 }

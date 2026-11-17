@@ -343,6 +343,9 @@ pub(crate) struct NewDialog {
     /// The overflow frame, when on: its size and the point of it the
     /// output frame keeps to.
     pub overflow: Option<([u32; 2], u8)>,
+    /// How far the output frame is moved from that point, in pixels:
+    /// right and down.
+    pub overflow_offset: [i32; 2],
     /// The timeline's name, scene, shot and division line.
     pub timeline: String,
     pub scene: u32,
@@ -497,6 +500,7 @@ impl NewDialog {
             blank: [0; 4],
             title_safe: false,
             overflow: None,
+            overflow_offset: [0, 0],
             timeline: tr!("timeline-1"),
             scene: 1,
             shot: 1,
@@ -523,7 +527,7 @@ impl NewDialog {
             overflow: self.overflow.map(|(size, anchor)| Overflow {
                 size,
                 anchor,
-                offset: [0, 0],
+                offset: self.overflow_offset,
             }),
         })
     }
@@ -1299,6 +1303,23 @@ fn output_frame_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) {
             form.row(&bare(tr!("reference-point")), |ui| {
                 anchor_ui(ui, "sue-paint-new-overflow-anchor", anchor, theme);
             });
+            // The output frame moved from the reference point, as Clip
+            // Studio Paint's Offset X and Offset Y.
+            let side = i64::from(doc::MAX_SIDE);
+            for (index, name) in [tr!("offset-x"), tr!("offset-y")].into_iter().enumerate() {
+                form.row(&name, |ui| {
+                    let mut typed = f64::from(new.overflow_offset[index]);
+                    let reads = Reads {
+                        range: -(side as f64)..=side as f64,
+                        decimals: 0,
+                        suffix: &px,
+                    };
+                    let salt = format!("sue-paint-new-overflow-offset-{index}");
+                    if number(ui, &salt, &mut typed, &reads, &name, theme) {
+                        new.overflow_offset[index] = typed.round() as i32;
+                    }
+                });
+            }
             // The output frame fits inside the overflow frame.
             size[0] = size[0].max(new.width);
             size[1] = size[1].max(new.height);
@@ -1657,6 +1678,9 @@ mod tests {
         new.overflow = Some(([1500, 1200], 4));
         assert_eq!(new.canvas_size(), [1500, 1200]);
         assert_eq!(new.output_frame().unwrap().rect(), [210, 60, 1080, 1080]);
+        // Offset Y moves the output frame down from its reference point.
+        new.overflow_offset = [0, 8];
+        assert_eq!(new.output_frame().unwrap().rect(), [210, 68, 1080, 1080]);
     }
 
     #[test]
