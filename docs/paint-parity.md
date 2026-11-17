@@ -194,7 +194,7 @@ The order of work is the plan at the end.
 
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
-| Scale/Rotate | Edit > Transform | done | Drag the box, or type the size and angle in Tool Property or the bar; Interpolation: hard edges, smooth or bicubic |
+| Scale/Rotate | Edit > Transform | done | Drag the box, or type the size and angle in Tool Property or the bar; Interpolation (hard edges, smooth or bicubic) in Tool Property |
 | Scale alone, Rotate alone | Edit > Transform | done | Modes of the transform bar; the rotation centre moves anywhere |
 | Free Transform | Edit > Transform | done | Each corner on its own |
 | Distort, Skew | Edit > Transform | done | Modes of the transform bar; Ctrl on a corner distorts in any mode |

@@ -16,7 +16,7 @@ use crate::tools::{
 pub(super) fn zoom_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
     rows.choice_u8(
         ui,
-        "zoom-click",
+        "zoom-direction",
         Category::Operation,
         &tr!("tp-click"),
         &mut sub.mode,

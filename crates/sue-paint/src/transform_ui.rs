@@ -1318,35 +1318,6 @@ impl SuePaint {
                             prefs.keep_original = !prefs.keep_original;
                         }
                         sue_wm::ui::tooltip(flip, &Tip::new(&original), theme);
-                        if session.mesh.is_none() {
-                            // How the moved pixels are sampled.
-                            let choices = transform::Interpolation::ALL;
-                            let names: Vec<String> = choices
-                                .iter()
-                                .map(|choice| interpolation_label(*choice))
-                                .collect();
-                            let mut chosen = choices
-                                .iter()
-                                .position(|choice| *choice == prefs.interpolation)
-                                .unwrap_or(1);
-                            let name = tr!("tp-interpolation");
-                            // The name and its list wrap to a new line
-                            // together.
-                            ui.horizontal(|ui| {
-                                caption(ui, &name, theme);
-                                let picked = sue_wm::ui::dropdown(
-                                    "sue-paint-transform-interpolation",
-                                    &mut chosen,
-                                    &names,
-                                )
-                                .label(&name)
-                                .show(ui, theme);
-                                if picked.changed() {
-                                    prefs.interpolation = choices[chosen];
-                                }
-                                sue_wm::ui::tooltip(picked, &Tip::new(&name), theme);
-                            });
-                        }
                         let reset = tr!("reset");
                         let pressed = sue_wm::ui::button("sue-paint-transform-reset", &reset)
                             .icon(Icon::Reset)

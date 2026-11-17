@@ -349,7 +349,13 @@ fn choose(paint: &mut PaintDriver, row: &str, wanted: &str) {
         .into_iter()
         .filter(|(label, rect)| label == row && rect.top() > tab.bottom() && rect.width() > 0.0)
         .map(|(_, rect)| rect)
-        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        // The row's name is named so too: the drop-down is the wider.
+        .min_by(|a, b| {
+            a.top()
+                .round()
+                .total_cmp(&b.top().round())
+                .then(b.width().total_cmp(&a.width()))
+        })
         .unwrap_or_else(|| panic!("the row {row:?} in Tool Property: {:?}", paint.texts));
     click_with(paint, list.center(), Modifiers::NONE);
     // The choice in the list that opened, the one nearest the drop-down
@@ -366,6 +372,23 @@ fn choose(paint: &mut PaintDriver, row: &str, wanted: &str) {
         })
         .unwrap_or_else(|| panic!("{wanted:?} in the list: {:?}", paint.texts));
     click_with(paint, item.center(), Modifiers::NONE);
+}
+
+/// Turns the wheel over Tool Property by `by` points (less goes down).
+fn scroll_tool_property(paint: &mut PaintDriver, by: f32) {
+    let tab = paint.rect_of("Tool Property").expect("Tool Property");
+    let over = tab.center() + vec2(0.0, 120.0);
+    paint.step(vec![
+        Event::PointerMoved(over),
+        Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, by),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+        },
+    ]);
+    paint.settle(4);
 }
 
 /// Where the last frame drew the canvas mark `id`.
@@ -775,7 +798,10 @@ fn fg_00_49_17_transform_interpolation_scale_and_angle_numbers() {
             "Keep original image",
         ],
     );
+    // The last rows: Tool Property scrolled to its end.
+    scroll_tool_property(&mut paint, -600.0);
     choose(&mut paint, "Interpolation", "Hard edges");
+    scroll_tool_property(&mut paint, 600.0);
     let field = named(&mut paint, "Scale W").expect("the Scale W field");
     super::paint_anim::type_into(&mut paint, field, "200");
     paint.settle(2);

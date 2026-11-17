@@ -619,8 +619,7 @@ follow [Semantic Versioning](https://semver.org/).
   open (Reset, the flips, Cancel and OK, the mode, the centre of
   rotation, Keep original image, the scale across and down and the angle
   as numbers, the position) and an Interpolation choice: hard edges,
-  smooth, or sharp and smooth (bicubic). The bar over the canvas offers
-  the interpolation too.
+  smooth, or sharp and smooth (bicubic).
 - Sue Paint, Change Canvas Size: the new canvas shows on the canvas
   while the dialog is open, with a handle at each corner and side; drag
   them to set the size, or inside the box to place the picture in it.
