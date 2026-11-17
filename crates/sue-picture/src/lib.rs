@@ -47,6 +47,7 @@ pub mod fill;
 pub mod filters;
 pub mod gradient;
 pub mod gradient_map;
+pub mod hand_scan;
 pub mod manga;
 pub mod print;
 pub mod proof;

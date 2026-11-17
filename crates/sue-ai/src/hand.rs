@@ -230,13 +230,13 @@ fn best_palm(
 }
 
 /// Whether a hand that shows its palm to the camera is a right hand:
-/// seen so, a right hand's index finger is to the left of its little
-/// finger when the fingers point up.
+/// seen so, a right hand's index finger is to the right of its little
+/// finger when the fingers point up (its thumb is on the right).
 fn palm_up_is_right(points: &[[f32; 3]; POINTS]) -> bool {
     let from = points[0];
     let index = [points[5][0] - from[0], points[5][1] - from[1]];
     let little = [points[17][0] - from[0], points[17][1] - from[1]];
-    index[0] * little[1] - index[1] * little[0] > 0.0
+    index[0] * little[1] - index[1] * little[0] < 0.0
 }
 
 /// The hand tracker Sue ships the code for: MediaPipe's palm detector
@@ -404,7 +404,10 @@ impl OnnxHandTracker {
         let mut seen = HandObservation {
             points: [[0.0; 3]; POINTS],
             world: [[0.0; 3]; POINTS],
-            right: handed.values[0] > 0.5,
+            // The model was taught on mirrored pictures (a phone's front
+            // camera): what it calls left is a right hand in a picture as
+            // the camera took it.
+            right: handed.values[0] < 0.5,
             confidence,
             bounds: [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
         };
@@ -557,9 +560,9 @@ mod tests {
     fn a_palm_shown_tells_right_from_left() {
         let mut points = [[0.0; 3]; POINTS];
         points[0] = [100.0, 300.0, 0.0];
-        // A right hand, palm to the camera: index finger on the left.
-        points[5] = [70.0, 200.0, 0.0];
-        points[17] = [130.0, 210.0, 0.0];
+        // A right hand, palm to the camera: index finger on the right.
+        points[5] = [130.0, 200.0, 0.0];
+        points[17] = [70.0, 210.0, 0.0];
         assert!(palm_up_is_right(&points));
         points.swap(5, 17);
         assert!(!palm_up_is_right(&points));
