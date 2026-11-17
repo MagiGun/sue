@@ -175,6 +175,37 @@ impl Occupancy {
         Some(Self { columns, bits })
     }
 
+    /// The rectangle of a picture of `size` holding every tile the layer
+    /// has a pixel in, or `None` when it has none.
+    pub(super) fn bounds(&self, size: [u32; 2]) -> Option<[u32; 4]> {
+        let mut found: Option<[u32; 4]> = None;
+        for (word_index, word) in self.bits.iter().enumerate() {
+            let mut word = *word;
+            while word != 0 {
+                let index = word_index as u32 * 64 + word.trailing_zeros();
+                word &= word - 1;
+                let (tx, ty) = (index % self.columns.max(1), index / self.columns.max(1));
+                let tile = [tx, ty, tx + 1, ty + 1];
+                found = Some(found.map_or(tile, |[a, b, c, d]| {
+                    [
+                        a.min(tile[0]),
+                        b.min(tile[1]),
+                        c.max(tile[2]),
+                        d.max(tile[3]),
+                    ]
+                }));
+            }
+        }
+        found.map(|[x0, y0, x1, y1]| {
+            [
+                x0 * OCCUPANCY_TILE,
+                y0 * OCCUPANCY_TILE,
+                (x1 * OCCUPANCY_TILE).min(size[0]),
+                (y1 * OCCUPANCY_TILE).min(size[1]),
+            ]
+        })
+    }
+
     /// `true` if the layer has any pixel in the tile of picture pixel
     /// `(x, y)`.
     fn has(&self, x: u32, y: u32) -> bool {
@@ -687,7 +718,10 @@ impl Compositor {
             let Ok(entity) = arena.get_by_id(id) else {
                 continue;
             };
-            let revision = entity.revision();
+            // By the pixels' own revisions, not the entity's: a new
+            // name or a lock does not make the layer be read again.
+            let _ = entity;
+            let revision = pixel_stamp(raster);
             match self.occupancy.get(&id) {
                 Some((seen, at, tiles)) if *seen == revision && at == offset => {
                     layer.occupancy = Some(tiles.clone());
@@ -714,6 +748,15 @@ impl Compositor {
         let present: HashSet<EntityId> = all.iter().filter_map(|layer| layer.id).collect();
         self.occupancy.retain(|id, _| present.contains(id));
     }
+}
+
+/// A number that changes whenever `raster`'s pixels may have.
+fn pixel_stamp(raster: &RasterTile2D) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (raster.width(), raster.height()).hash(&mut hasher);
+    raster.tile_revisions().hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Every layer of `layers` with pixels of its own, the members of
