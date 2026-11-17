@@ -477,7 +477,8 @@ impl SuePaint {
             .into_iter()
             .filter_map(|cel| Some((arena.get_by_id(cel).ok()?.name().to_owned(), cel)))
             .collect();
-        let picks: Vec<editing::CelPick> = editing::cel_list(&form.cels)
+        let names: Vec<String> = cels.iter().map(|(name, _)| name.clone()).collect();
+        let picks: Vec<editing::CelPick> = editing::cel_list(&form.cels, &names)
             .into_iter()
             .map(|name| match cels.iter().find(|(known, _)| *known == name) {
                 Some((_, cel)) => editing::CelPick::Cel(*cel),

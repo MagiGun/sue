@@ -1164,11 +1164,17 @@ fn assign_multiple_cels_names_cels_to_come_and_create_all_supported_cels_makes_t
     history.apply(&mut arena, edit).unwrap();
     // "1-3" on twos from frame 0: cel 1 is the folder's, 2 and 3 are not
     // drawn yet.
-    let names = editing::cel_list("1-3");
+    let names = editing::cel_list("1-3", &[]);
     assert_eq!(names, ["1", "2", "3"]);
     assert_eq!(
-        editing::cel_list("b, a 4-2,x"),
+        editing::cel_list("b, a 4-2,x", &[]),
         ["b", "a", "4", "3", "2", "x"]
+    );
+    // A cel whose name holds a space stays one name.
+    let known = ["Walk 2".to_owned()];
+    assert_eq!(
+        editing::cel_list("1, Walk 2, a b", &known),
+        ["1", "Walk 2", "a", "b"]
     );
     let picks: Vec<editing::CelPick> = names
         .iter()

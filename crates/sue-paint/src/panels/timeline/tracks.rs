@@ -730,8 +730,10 @@ impl SuePaint {
                 );
             }
         }
-        // Left of frame 1 the ruler goes on, numbered 0, -1 and on, and
-        // shaded like what lies past the end.
+        // Left of frame 1 the ruler goes on, numbered 0, -1 and on when
+        // it counts frames (seconds and timecode have no time before the
+        // first), and shaded like what lies past the end.
+        let numbered = self.anim_ui.unit == super::TimeUnit::Frames;
         if origin < 0.0 {
             let before = origin.floor() as i64;
             for at in before..0 {
@@ -741,7 +743,7 @@ impl SuePaint {
                     below.y_range(),
                     Stroke::new(theme.hairline().width, theme.fill_hover()),
                 );
-                if at.rem_euclid(i64::from(every)) == 0 || every == 1 {
+                if numbered && (at.rem_euclid(i64::from(every)) == 0 || every == 1) {
                     painter.text(
                         pos2(x + pad / 2.0, half_ruler + ruler / 4.0),
                         Align2::LEFT_CENTER,

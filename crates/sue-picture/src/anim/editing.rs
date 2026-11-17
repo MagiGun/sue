@@ -947,18 +947,15 @@ pub enum CelPick {
 }
 
 /// The names a list typed into Assign Multiple Cels stands for, in order:
-/// names split by commas or spaces, and `a-b` between two whole numbers
-/// every number from `a` to `b` (down too). A run longer than 1,000 is
-/// cut there.
+/// names split by commas, or by spaces within a part that is not one of
+/// the `known` names whole (so a cel named `Walk 2` stays one name), and
+/// `a-b` between two whole numbers every number from `a` to `b` (down
+/// too). A run longer than 1,000 is cut there.
 #[must_use]
-pub fn cel_list(text: &str) -> Vec<String> {
+pub fn cel_list(text: &str, known: &[String]) -> Vec<String> {
     const MOST: usize = 1_000;
     let mut out = Vec::new();
-    for word in text.split(|c: char| c == ',' || c.is_whitespace()) {
-        let word = word.trim();
-        if word.is_empty() {
-            continue;
-        }
+    let word_of = |word: &str, out: &mut Vec<String>| {
         let run = word.split_once('-').and_then(|(from, to)| {
             Some((
                 from.trim().parse::<u32>().ok()?,
@@ -978,6 +975,22 @@ pub fn cel_list(text: &str) -> Vec<String> {
                 );
             }
             None => out.push(word.to_owned()),
+        }
+    };
+    for part in text.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if known.iter().any(|name| name.trim() == part) {
+            out.push(part.to_owned());
+        } else {
+            for word in part.split_whitespace() {
+                word_of(word, &mut out);
+                if out.len() >= MOST {
+                    break;
+                }
+            }
         }
         if out.len() >= MOST {
             out.truncate(MOST);
