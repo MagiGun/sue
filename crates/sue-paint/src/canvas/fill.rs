@@ -236,14 +236,15 @@ impl SuePaint {
         Some(mask)
     }
 
-    /// Lays `target`'s color (or clears) at `opacity` over the picture
-    /// pixels `mask` covers, as one undo step named `label`.
+    /// Lays `target`'s color (or clears) at an opacity, mixed by a
+    /// blending mode, over the picture pixels `mask` covers, as one undo
+    /// step named `label`.
     fn lay_area(
         &mut self,
         target: AreaTarget,
         mask: &[u8],
         size: [u32; 2],
-        opacity: f32,
+        (opacity, blend): (f32, sue_model::BlendMode),
         label: &str,
         cx: &mut AppletContext<'_>,
     ) {
@@ -259,6 +260,17 @@ impl SuePaint {
             id,
             label,
             |pixels, width, height| match color {
+                Some(rgb) if blend != sue_model::BlendMode::Normal => fill::paint_blended(
+                    pixels,
+                    [width, height],
+                    offset,
+                    mask,
+                    size,
+                    Some(rgb),
+                    opacity,
+                    blend,
+                    alpha_lock,
+                ),
                 Some(rgb) => fill::paint_mask(
                     pixels,
                     [width, height],
@@ -311,7 +323,8 @@ impl SuePaint {
         let Some(mask) = self.flood_mask(seeds, sub, size, &cx.world.arena, true) else {
             return;
         };
-        self.lay_area(target, &mask, size, sub.tip.opacity, &tr!("fill"), cx);
+        let paint = (sub.tip.opacity, sue_model::BlendMode::Normal);
+        self.lay_area(target, &mask, size, paint, &tr!("fill"), cx);
     }
 
     /// Lasso fill and Close and fill: the area drawn round (or, closing,
@@ -419,7 +432,14 @@ impl SuePaint {
             return;
         }
         let label = crate::localize(&sub.name);
-        self.lay_area(target, &mask, size, sub.tip.opacity, &label, cx);
+        // Lasso fill mixes with what is under it as its Blending mode
+        // says.
+        let blend = if sub.tool == crate::tools::Tool::Figure {
+            sub.blend
+        } else {
+            sue_model::BlendMode::Normal
+        };
+        self.lay_area(target, &mask, size, (sub.tip.opacity, blend), &label, cx);
     }
 
     /// The auto select tool: a flood fill that makes a selection.

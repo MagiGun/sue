@@ -81,6 +81,11 @@ pub(super) fn paint_properties(ui: &mut Ui, rows: &mut Rows<'_>, tool: Tool, sub
     ) {
         tip.opacity = opacity / 100.0;
     }
+    if tool == Tool::Figure && sub.mode == crate::tools::LASSO_FILL {
+        // How the fill mixes with what is under it.
+        super::blend_mode_row(ui, rows, "lasso-fill-blend", &mut sub.blend);
+    }
+    let tip = &mut sub.tip;
     rows.percent(
         ui,
         "hardness",

@@ -95,7 +95,7 @@ impl SuePaint {
             // The picture's grid (View, Grid Settings): its divisions
             // fainter than its main lines.
             let grid = crate::grid::Grid::of(&cx.world.arena, doc.picture);
-            let origin = grid.origin_in(size);
+            let origin = crate::grid::origin_of(&cx.world.arena, doc.picture, size);
             if grid.divisions > 1 {
                 lines(
                     grid.step(),

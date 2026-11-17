@@ -383,6 +383,27 @@ pub(crate) enum Gesture {
         line: [[f32; 2]; 2],
         end: usize,
     },
+    /// Move layer moving a pair of number properties of `entity` (a
+    /// layer's tone dots, the picture's grid): `keys` as they were
+    /// (`before`, read as `base`), from where the drag began (picture
+    /// pixels). The undo step `label` is made when it is let go.
+    Nudge {
+        entity: EntityId,
+        keys: [&'static str; 2],
+        base: [f64; 2],
+        before: [Option<Value>; 2],
+        start: Pos2,
+        label: String,
+    },
+    /// A handle of Change Canvas Size's box on the canvas dragged:
+    /// `handle` 0 to 3 the corners from the top left clockwise, 4 to 7
+    /// the edges from the top, 8 the inside; the box as it was when the
+    /// drag began, from `start` (picture pixels).
+    CanvasSize {
+        handle: usize,
+        start: Pos2,
+        from: crate::dialogs::CanvasDialog,
+    },
 }
 
 /// The Gradient tool's work between frames.
