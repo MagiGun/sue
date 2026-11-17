@@ -1031,6 +1031,7 @@ mod tests {
             name: String::new(),
             notes: String::new(),
             page: String::new(),
+            published: None,
             assets: vec![
                 asset.clone(),
                 Asset {
