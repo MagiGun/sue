@@ -44,7 +44,8 @@ impl WheelLayout {
         let swap = theme.space(Space::S5) + theme.space(Space::S1);
         let above = radius + swap * 0.85;
         let below = radius * 3.2 + swap;
-        let circles = vec2(radius * 3.25, above + below);
+        let reach = radius * 3.25;
+        let circles = vec2(reach, above + below);
         // A number cell: a letter, a gap and three digits.
         let font = theme.text_font(TextRole::Body);
         let painter = ui.painter();

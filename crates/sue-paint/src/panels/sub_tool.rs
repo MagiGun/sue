@@ -121,7 +121,8 @@ impl SuePaint {
         let pad = theme.space(Space::S3);
         let half_pad = pad / 2.0;
         let density = Density::of(ui);
-        let area = body;
+        let footer = density.icon_button() + pad;
+        let area = Rect::from_min_max(body.min, pos2(body.right(), body.bottom() - footer));
         let mut inner = child(ui, area.shrink(pad), "tool-panel");
         let slot = self.toolbox.current_slot();
         let entry = self.toolbox.current_entry().clone();
@@ -130,28 +131,10 @@ impl SuePaint {
         let pointer = inner.ctx().pointer_latest_pos();
         let released = inner.ctx().input(|input| input.pointer.any_released());
         let dragging = egui::DragAndDrop::payload::<ToolDrag>(inner.ctx()).map(|drag| *drag);
-        // One line over the list: the group tabs as chips that wrap at its
-        // leading end, the reset, duplicate and delete buttons at its
-        // trailing end, so the list keeps the palette's height.
-        let side = density.icon_button();
-        let buttons = Rect::from_min_size(
-            pos2(
-                inner.max_rect().right() - side * 3.0,
-                inner.max_rect().top(),
-            ),
-            vec2(side * 3.0, side),
-        );
-        self.sub_tool_buttons(ui, buttons, slot, theme);
+        // The group tabs, as chips that wrap.
         let mut chips: Vec<(usize, Rect)> = Vec::new();
         let mut menu_on_group = None;
-        let room = vec2(
-            (inner.available_width() - buttons.width() - pad).max(side),
-            side,
-        );
-        let wrap = egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true);
-        inner.allocate_ui_with_layout(room, wrap, |ui| {
-            // The line is as tall as the buttons beside it.
-            ui.allocate_space(vec2(0.0, side));
+        inner.horizontal_wrapped(|ui| {
             for (group, found) in entry.groups().iter().enumerate() {
                 let name = crate::localize(&found.name);
                 let chip = sue_wm::ui::chip(
@@ -291,7 +274,8 @@ impl SuePaint {
                         // Drawn at the display's own pixels, so the
                         // stroke is as sharp at 2.0 scale as at 1.0.
                         let scale = ui.ctx().pixels_per_point();
-                        let points = vec2(room.max(40.0), (tall - half_pad * 2.0).max(8.0));
+                        let high = tall - half_pad * 2.0;
+                        let points = vec2(room, high);
                         let size = [
                             ((points.x * scale).round() as u32).clamp(40, 1800),
                             ((points.y * scale).round() as u32).max(8),
@@ -419,6 +403,11 @@ impl SuePaint {
         if let Some((what, index)) = action {
             self.sub_tool_action(&what, slot, index);
         }
+        // The buttons under the list, at its trailing edge, where Clip
+        // Studio Paint has them.
+        let bar = Rect::from_min_max(pos2(body.left(), body.bottom() - footer), body.max)
+            .shrink2(egui::Vec2::X * pad);
+        self.sub_tool_buttons(ui, bar, slot, theme);
     }
 
     /// The Sub Tool palette's reset, duplicate and delete buttons, right

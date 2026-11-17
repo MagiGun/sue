@@ -137,14 +137,14 @@ pub(crate) fn classic_layout() -> Dock {
         Column {
             groups: vec![
                 // Sub Tool tall enough for five sub tools with their
-                // sample strokes on a 900 point high window and seven on
-                // a 1080 one, as Clip Studio Paint lists them; Tool
+                // sample strokes on a 900 point high window and six on a
+                // 1080 one, nearer the seven Clip Studio Paint lists; Tool
                 // Property its first rows, Opacity among them; Brush Size
                 // two rows of sizes; the color wheel the rest.
-                Group::one(Palette::SubTool, 0.33),
+                Group::one(Palette::SubTool, 0.36),
                 Group::one(Palette::ToolProperty, 0.28),
                 Group::one(Palette::BrushGrid, 0.165),
-                tabs(&COLOR_PALETTES, 0.225),
+                tabs(&COLOR_PALETTES, 0.195),
             ],
             // Wide enough for the six color tabs; the canvas starts where
             // it did before the styles.
@@ -178,10 +178,9 @@ pub(crate) fn classic_layout() -> Dock {
 }
 
 /// The Timeline's height under the canvas until a person drags it: room
-/// for its bar, the ruler and two whole tracks with their thumbnails at
-/// the default size (an animation folder's and the one under it), so a
-/// docked Timeline never opens on a track cut in half.
-pub(crate) const TIMELINE_HEIGHT: f32 = 270.0;
+/// for the ruler, a folder's row of frames with its thumbnails and two
+/// more tracks, as Clip Studio Paint's animation workspace gives it.
+pub(crate) const TIMELINE_HEIGHT: f32 = 250.0;
 
 /// The Timeline's height before 0.0.8, which a layout kept even when no
 /// one had dragged it.
