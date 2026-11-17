@@ -178,6 +178,22 @@ impl SueApplet for SuePaint {
             )
             .labeled("Opacity of selection layers"),
             RiceDeclaration::new(
+                crate::canvas::engine::SMART_HOLD,
+                RiceParameter::Bool { value: true },
+                "Holding the pen still at the end of a stroke makes the figure it was meant to be",
+            )
+            .labeled("Hold to create figures"),
+            RiceDeclaration::new(
+                crate::canvas::engine::SMART_HOLD_SECONDS,
+                RiceParameter::FloatRange {
+                    value: 0.7,
+                    min: Some(0.1),
+                    max: Some(5.0),
+                },
+                "How long the pen is held before the figure is made (seconds; Preferences, Tools, Smart Shape)",
+            )
+            .labeled("Length of long-press"),
+            RiceDeclaration::new(
                 "sue_paint.rotate_step",
                 int(15, 1, 90),
                 "How far Rotate Left and Rotate Right turn the view (degrees; Preferences, Canvas)",

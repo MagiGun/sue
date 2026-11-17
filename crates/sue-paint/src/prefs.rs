@@ -75,6 +75,16 @@ const CLIP_NAMES: &[(&str, &str, &str)] = &[
     ),
     ("pref-canvas", "pref-step", "sue_paint.rotate_step"),
     (
+        "pref-tools",
+        "pref-hold-to-create-figures",
+        "sue_paint.smart_shape_hold",
+    ),
+    (
+        "pref-tools",
+        "pref-length-of-long-press",
+        "sue_paint.smart_shape_hold_seconds",
+    ),
+    (
         "pref-file",
         "pref-save-recovery-data-every",
         "general.autosave_seconds",
@@ -125,6 +135,8 @@ pub(crate) fn page(title: &str) -> SettingsPage {
         "sue_paint.shift_line",
         "sue_paint.brush_cursor",
         "sue_paint.rotate_step",
+        "sue_paint.smart_shape_hold",
+        "sue_paint.smart_shape_hold_seconds",
         crate::panels::TOOL_COLOR_ICON,
     ]);
     pen.extend(

@@ -711,6 +711,11 @@ pub(crate) fn corrected(samples: &[Sample], level: u32, size: f32) -> Vec<Sample
     out
 }
 
+/// Hold to create figures (Preferences, Tools, Smart Shape; `Bool`).
+pub(crate) const SMART_HOLD: &str = "sue_paint.smart_shape_hold";
+/// Length of long-press, in seconds (0.1 to 5).
+pub(crate) const SMART_HOLD_SECONDS: &str = "sue_paint.smart_shape_hold_seconds";
+
 impl SuePaint {
     /// Takes this frame's pen samples from the stream and keeps those
     /// since the latest touch down, for a stroke that starts with it (at
@@ -1586,21 +1591,28 @@ impl SuePaint {
             self.gesture = Some(Gesture::Engine(stroke));
             return;
         }
+        // Preferences, Tools, Smart Shape: whether holding the pen makes
+        // a figure at all, and how long the hold is.
+        if !cx.world.rice.get_bool(SMART_HOLD).unwrap_or(true) {
+            return;
+        }
+        let hold = cx
+            .world
+            .rice
+            .get_f64(SMART_HOLD_SECONDS)
+            .unwrap_or(crate::smart::HOLD_SECONDS)
+            .clamp(0.1, 5.0);
         match stroke.rest {
             Some((since, at)) if at.distance(pointer) <= crate::smart::HOLD_REACH => {
                 let waited = now - since;
-                if waited < crate::smart::HOLD_SECONDS {
-                    ctx.request_repaint_after(std::time::Duration::from_secs_f64(
-                        crate::smart::HOLD_SECONDS - waited,
-                    ));
+                if waited < hold {
+                    ctx.request_repaint_after(std::time::Duration::from_secs_f64(hold - waited));
                     return;
                 }
             }
             _ => {
                 stroke.rest = Some((now, pointer));
-                ctx.request_repaint_after(std::time::Duration::from_secs_f64(
-                    crate::smart::HOLD_SECONDS,
-                ));
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(hold));
                 return;
             }
         }
