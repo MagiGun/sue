@@ -42,6 +42,8 @@ pub enum Action {
 #[derive(Default)]
 struct Press {
     download: bool,
+    /// Cancel the download that runs.
+    cancel: bool,
     again: bool,
     read: Option<Release>,
 }
@@ -356,6 +358,28 @@ impl Updater {
         };
     }
 
+    /// Stops the download that runs and goes back to offering the
+    /// update. The part it had is removed by the download itself.
+    fn cancel_download(&mut self) {
+        match std::mem::replace(&mut self.state, State::Idle) {
+            State::Downloading {
+                release,
+                plan,
+                download,
+            } => {
+                download.cancel();
+                self.state = State::Available { release, plan };
+            }
+            other => self.state = other,
+        }
+    }
+
+    /// `true` while an update downloads (for tests).
+    #[cfg(test)]
+    fn downloading(&self) -> bool {
+        matches!(self.state, State::Downloading { .. })
+    }
+
     /// Draws the window in the corner, when it shows.
     pub fn ui(&mut self, ctx: &egui::Context, theme: &Theme) -> Option<Action> {
         let mut action = None;
@@ -410,6 +434,9 @@ impl Updater {
             });
         if press.download {
             self.start_download();
+        }
+        if press.cancel {
+            self.cancel_download();
         }
         if press.again {
             self.hand_again();
@@ -590,15 +617,26 @@ impl Updater {
                     },
                 );
                 ui.add_space(theme.space(Space::S4));
-                if button(
-                    ui,
-                    theme,
-                    "sue-update-hide",
-                    &tr!("update-hide"),
-                    Look::Quiet,
-                ) {
-                    *close = true;
-                }
+                ui.horizontal(|ui| {
+                    if button(
+                        ui,
+                        theme,
+                        "sue-update-cancel",
+                        &tr!("update-cancel"),
+                        Look::Plain,
+                    ) {
+                        press.cancel = true;
+                    }
+                    if button(
+                        ui,
+                        theme,
+                        "sue-update-hide",
+                        &tr!("update-hide"),
+                        Look::Quiet,
+                    ) {
+                        *close = true;
+                    }
+                });
             }
             State::Handed {
                 release,

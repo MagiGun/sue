@@ -3862,6 +3862,7 @@ dependencies = [
  "sue-core",
  "sue-io",
  "sue-ios",
+ "sue-pkg",
  "sue-wayland",
  "sue-windows",
  "sue-winpen",

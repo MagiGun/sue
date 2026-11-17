@@ -472,6 +472,7 @@ pub fn check_latest(user_agent: &str) -> Job<Result<Release, String>> {
 pub struct Download {
     received: Arc<AtomicU64>,
     total: Arc<AtomicU64>,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
     answer: Job<Result<PathBuf, String>>,
 }
 
@@ -490,7 +491,16 @@ impl Download {
     pub fn take(&self) -> Option<Result<PathBuf, String>> {
         self.answer.take()
     }
+
+    /// Stops the download: it ends at its next piece, and the part it
+    /// had is removed. Its answer is then the error [`CANCELLED`].
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
 }
+
+/// What a cancelled download answers.
+pub const CANCELLED: &str = "cancelled";
 
 /// Downloads `asset` of `release` into `dir`, on a thread, and checks it
 /// against the release's `SHA256SUMS.txt`: a file it does not list, or
@@ -499,8 +509,10 @@ impl Download {
 pub fn download(release: &Release, asset: &Asset, dir: &Path, user_agent: &str) -> Download {
     let received = Arc::new(AtomicU64::new(0));
     let total = Arc::new(AtomicU64::new(asset.size));
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
     #[cfg(not(target_arch = "wasm32"))]
     let answer = {
+        let stop = Arc::clone(&cancelled);
         let sums = release.asset(SUMS).cloned();
         let asset = asset.clone();
         let dir = dir.to_path_buf();
@@ -511,7 +523,18 @@ pub fn download(release: &Release, asset: &Asset, dir: &Path, user_agent: &str) 
             let sums = net::get_text(&user_agent, &sums.url)?;
             let expected = sum_for(&sums, &asset.name)
                 .ok_or_else(|| format!("{SUMS} does not list {}", asset.name))?;
-            net::get_file(&user_agent, &asset, &dir, &expected, &received, &total)
+            if stop.load(Ordering::Relaxed) {
+                return Err(CANCELLED.to_owned());
+            }
+            net::get_file(
+                &user_agent,
+                &asset,
+                &dir,
+                &expected,
+                &received,
+                &total,
+                &|| stop.load(Ordering::Relaxed),
+            )
         })
     };
     #[cfg(target_arch = "wasm32")]
@@ -522,6 +545,7 @@ pub fn download(release: &Release, asset: &Asset, dir: &Path, user_agent: &str) 
     Download {
         received,
         total,
+        cancelled,
         answer,
     }
 }
@@ -815,6 +839,7 @@ mod net {
         expected: &str,
         received: &AtomicU64,
         total: &AtomicU64,
+        cancelled: &dyn Fn() -> bool,
     ) -> Result<PathBuf, String> {
         let fail = |error: &dyn std::fmt::Display| error.to_string();
         std::fs::create_dir_all(dir).map_err(|error| fail(&error))?;
@@ -831,6 +856,9 @@ mod net {
         let mut hasher = Sha256::new();
         let mut buffer = vec![0_u8; 64 * 1024];
         let copied = loop {
+            if cancelled() {
+                break Err(super::CANCELLED.to_owned());
+            }
             let read = match reader.read(&mut buffer) {
                 Ok(0) => break Ok(()),
                 Ok(read) => read,
@@ -875,6 +903,93 @@ mod net {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A cancelled update download stops in the middle and leaves no
+    /// file and no part behind.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_cancelled_update_download_stops_and_leaves_nothing() {
+        use std::io::{BufRead, BufReader, Write};
+
+        let body: Vec<u8> = (0..3_000_000_u32).map(|at| at as u8).collect();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+        let base = format!("http://{}", listener.local_addr().expect("an address"));
+        let sums = format!("{}  Sue-setup.exe\n", "0".repeat(64));
+        let served = body.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(2) {
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(stream.try_clone().expect("a clone"));
+                let mut first = String::new();
+                let _ = reader.read_line(&mut first);
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line.trim().is_empty() {
+                        break;
+                    }
+                }
+                let content: &[u8] = if first.contains("SHA256SUMS") {
+                    sums.as_bytes()
+                } else {
+                    &served
+                };
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    content.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                for piece in content.chunks(4096) {
+                    if stream.write_all(piece).is_err() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            }
+        });
+        let asset = Asset {
+            name: "Sue-setup.exe".to_owned(),
+            url: format!("{base}/Sue-setup.exe"),
+            size: body.len() as u64,
+        };
+        let release = Release {
+            tag: "v9.9.9".to_owned(),
+            name: String::new(),
+            notes: String::new(),
+            page: String::new(),
+            assets: vec![
+                asset.clone(),
+                Asset {
+                    name: SUMS.to_owned(),
+                    url: format!("{base}/{SUMS}"),
+                    size: 80,
+                },
+            ],
+        };
+        let dir = std::env::temp_dir().join(format!("sue-update-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let download = download(&release, &asset, &dir, "Sue/test");
+        let started = std::time::Instant::now();
+        while download.progress().0 == 0 {
+            assert!(download.take().is_none(), "ended before anything arrived");
+            assert!(started.elapsed().as_secs() < 20, "nothing arrived");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        download.cancel();
+        let answer = loop {
+            if let Some(answer) = download.take() {
+                break answer;
+            }
+            assert!(started.elapsed().as_secs() < 20, "the download went on");
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        assert_eq!(answer, Err(CANCELLED.to_owned()));
+        assert!(download.progress().0 < body.len() as u64);
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .map(|entries| entries.flatten().map(|entry| entry.file_name()).collect())
+            .unwrap_or_default();
+        assert!(left.is_empty(), "left {left:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn downloads_keep_a_clean_name_from_their_link() {

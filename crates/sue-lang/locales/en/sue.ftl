@@ -69,6 +69,7 @@ update-later = Later
 update-downloading = Downloading Sue { $version }
 update-progress = { $received } of { $total }
 update-hide = Hide
+update-cancel = Cancel Download
 update-close = Close
 update-quit-sue = Quit Sue
 update-failed = Sue could not update
