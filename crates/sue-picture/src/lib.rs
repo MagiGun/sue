@@ -43,6 +43,7 @@ pub mod decoration;
 pub mod doc;
 pub mod effects;
 pub mod figure;
+pub mod model3d;
 pub mod fill;
 pub mod filters;
 pub mod gradient;

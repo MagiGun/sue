@@ -812,17 +812,22 @@ fn shown_now(arena: &sue_core::Arena, layer: EntityId, model: Option<EntityId>) 
 }
 
 /// The properties of a figure's body shape.
-const BODY_KEYS: [&str; 5] = [
+const BODY_KEYS: [&str; 9] = [
+    crate::figure::GROUND,
     crate::figure::HEIGHT,
     crate::figure::HEADS,
     crate::figure::BUILD,
     crate::figure::SHAPE,
     crate::figure::FOLLOW,
+    crate::figure::PARTS_TEXT,
+    crate::figure::SIDE,
+    crate::figure::GUIDES,
 ];
 
 /// The properties of a 3D layer's model a drag may change: its placement
 /// and a figure's body shape.
-const MODEL_KEYS: [&str; 12] = [
+const MODEL_KEYS: [&str; 16] = [
+    crate::figure::GROUND,
     crate::three::OBJECT_X,
     crate::three::OBJECT_Y,
     crate::three::OBJECT_Z,
@@ -835,6 +840,9 @@ const MODEL_KEYS: [&str; 12] = [
     crate::figure::BUILD,
     crate::figure::SHAPE,
     crate::figure::FOLLOW,
+    crate::figure::PARTS_TEXT,
+    crate::figure::SIDE,
+    crate::figure::GUIDES,
 ];
 
 /// The properties of a 3D layer's view.
@@ -847,13 +855,17 @@ fn view_keys() -> Vec<&'static str> {
 }
 
 /// A body shape as the properties of its model.
-fn body_values(body: &crate::figure::Body) -> [(&'static str, Value); 5] {
+fn body_values(body: &crate::figure::Body) -> [(&'static str, Value); 9] {
     [
+        (crate::figure::GROUND, Value::from(body.ground)),
         (crate::figure::HEIGHT, Value::from(f64::from(body.height))),
         (crate::figure::HEADS, Value::from(f64::from(body.heads))),
         (crate::figure::BUILD, Value::from(body.build.key())),
         (crate::figure::SHAPE, Value::from(body.shape.to_text())),
         (crate::figure::FOLLOW, Value::from(body.follow)),
+        (crate::figure::PARTS_TEXT, Value::from(body.parts_text())),
+        (crate::figure::SIDE, Value::from(body.side.key())),
+        (crate::figure::GUIDES, Value::from(body.guides)),
     ]
 }
 

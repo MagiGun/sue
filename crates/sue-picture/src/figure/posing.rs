@@ -6,7 +6,7 @@
 
 use super::human::{self, at};
 use super::{
-    Body, HAND, IDENTITY, Kind, Mat3, Pose, Side, add, apply, between, degrees, euler, mul,
+    Body, HAND, IDENTITY, Kind, Mat3, Pose, Side, apply, between, degrees, euler, mul,
     transpose, unit,
 };
 
@@ -99,6 +99,7 @@ pub fn limits(body: &Body, joint: usize) -> Limits {
                 None => FREE,
             }
         }
+        Kind::Imported => FREE,
     }
 }
 
@@ -305,7 +306,7 @@ fn long(a: [f32; 3]) -> f32 {
 #[must_use]
 pub fn aimed_at(pose: &Pose, body: &Body, joint: usize, target: [f32; 3], keep: bool) -> Pose {
     let shaped = human::shaped(body);
-    let placed = human::solved(pose, &shaped, body.place.scale);
+    let placed = human::posed(pose, &shaped, body);
     let mut out = pose.clone();
     let Some(table) = shaped.joints.get(joint) else {
         return out;
@@ -329,25 +330,36 @@ pub fn aimed_at(pose: &Pose, body: &Body, joint: usize, target: [f32; 3], keep: 
     out
 }
 
-/// The two joints that carry `joint` to where it is dragged: the upper
-/// arm and forearm for a hand or forearm, the thigh and shin for a foot
-/// or shin. `None` for a part that turns by itself.
+/// The limb that carries `joint` to where it is dragged: the upper arm
+/// and forearm for a hand or forearm, the thigh and shin for a foot or
+/// shin (on an imported model, the two bones above a hand or foot).
+/// `None` for a part that turns by itself.
 #[must_use]
 pub fn limb_of(body: &Body, joint: usize) -> Option<[usize; 3]> {
-    if body.kind != Kind::Body {
-        return None;
-    }
-    at::ARMS
+    human::shaped(body)
+        .limbs
         .iter()
-        .chain(at::LEGS.iter())
         .find(|limb| limb[1] == joint || limb[2] == joint)
         .copied()
 }
 
+fn crossed(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn dotted(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
 /// `pose` with the limb `[upper, lower, end]` bent so that `end` (the
 /// wrist or ankle) comes to `target` (a point in the world), or as near
-/// as the limb reaches: the lower joint bends as a hinge, the upper one
-/// turns the least that carries the end there.
+/// as the limb reaches: the lower joint folds in the plane the limb is
+/// already bent in (or about its hinge when it is straight), the upper
+/// one turns the least that carries the end there.
 #[must_use]
 pub fn reached(
     pose: &Pose,
@@ -357,53 +369,54 @@ pub fn reached(
     keep: bool,
 ) -> Pose {
     let shaped = human::shaped(body);
-    let size = body.place.scale;
     let mut out = pose.clone();
-    if out.0.len() <= end {
-        out.0.resize(end + 1, [0.0; 3]);
+    let most = upper.max(lower).max(end);
+    if most >= shaped.joints.len() {
+        return out;
     }
-    let placed = human::solved(&out, &shaped, size);
-    let joints = &shaped.joints;
-    let (first, second) = (
-        joints[lower].offset.map(|value| value * size),
-        joints[end].offset.map(|value| value * size),
-    );
+    if out.0.len() <= most {
+        out.0.resize(most + 1, [0.0; 3]);
+    }
+    let placed = human::posed(&out, &shaped, body);
+    let (a, b, c) = (placed[upper].0, placed[lower].0, placed[end].0);
+    let (first, second) = (minus(b, a), minus(c, b));
     let (l1, l2) = (long(first), long(second));
-    let from = placed[upper].0;
-    let to = minus(own_space(body, target), from);
+    if l1 < 1e-6 || l2 < 1e-6 {
+        return out;
+    }
+    let to = minus(own_space(body, target), a);
     let far = long(to).clamp((l1 - l2).abs() + 1e-4, l1 + l2 - 1e-4);
-    // The hinge: straight at the limb's full reach, folded as the end
-    // comes in. Found by halving, since the two bones are not quite in
-    // line at rest.
+    let angle = |cos: f32| cos.clamp(-1.0, 1.0).acos().to_degrees();
+    // The angle inside the joint now, and the one that reaches.
+    let now = angle(-dotted(first, second) / (l1 * l2));
+    let want = angle((l1 * l1 + l2 * l2 - far * far) / (2.0 * l1 * l2));
+    // The plane it folds in: the one it is bent in, or square to its
+    // hinge when it is straight (a body's elbow and knee turn about
+    // their own x; the knee the other way).
     let range = limits(body, lower)[0];
     let way = if range[0].abs() > range[1].abs() {
         -1.0
     } else {
         1.0
     };
-    let twist = out.0[lower][1];
-    let span = |bend: f32| long(add(first, apply(&euler([bend, twist, 0.0]), second)));
-    let (mut open, mut shut) = (0.0_f32, 179.0_f32);
-    for _ in 0..24 {
-        let middle = (open + shut) / 2.0;
-        if span(way * middle) > far {
-            open = middle;
-        } else {
-            shut = middle;
-        }
-    }
-    let mut bend = way * (open + shut) / 2.0;
+    let hinge = apply(&placed[lower].1, [way, 0.0, 0.0]);
+    let axis = unit(crossed(first, second))
+        .filter(|_| now < 178.0)
+        .unwrap_or(hinge);
+    let fold = about(axis, now - want);
+    let lower_frame = mul(&fold, &placed[lower].1);
+    out.0[lower] = degrees(&mul(&transpose(&placed[upper].1), &lower_frame));
     if keep {
-        bend = bend.clamp(range[0], range[1]);
+        out.0[lower] = clamped(out.0[lower], &limits(body, lower));
     }
-    out.0[lower] = [bend, out.0[lower][1], 0.0];
-    // Where the end now is in the upper joint's frame, turned to the
-    // target.
-    let reach = add(first, apply(&euler(out.0[lower]), second));
-    let frame = placed[upper].1;
-    let parent = joints[upper].parent.map_or(IDENTITY, |parent| placed[parent].1);
-    if let (Some(now), Some(toward)) = (unit(apply(&frame, reach)), unit(to)) {
-        let turned = mul(&between(now, toward), &frame);
+    // Where the end now is, turned about the limb's top to the target.
+    let placed = human::posed(&out, &shaped, body);
+    let reach = minus(placed[end].0, a);
+    let parent = shaped.joints[upper]
+        .parent
+        .map_or(IDENTITY, |parent| placed[parent].1);
+    if let (Some(from), Some(toward)) = (unit(reach), unit(to)) {
+        let turned = mul(&between(from, toward), &placed[upper].1);
         out.0[upper] = degrees(&mul(&transpose(&parent), &turned));
     }
     if keep {
@@ -417,7 +430,7 @@ pub fn reached(
 /// pinned hand or foot in place while the rest of the body is posed.
 #[must_use]
 pub fn held(pose: &Pose, before: &Pose, body: &Body, pins: &[usize], keep: bool) -> Pose {
-    if body.kind != Kind::Body || pins.is_empty() {
+    if pins.is_empty() {
         return pose.clone();
     }
     let was = super::solve(before, body);
@@ -440,4 +453,191 @@ pub fn turned(turn: [f32; 3], axis: usize, by: f32) -> [f32; 3] {
     let mut step = [0.0; 3];
     step[axis.min(2)] = by;
     degrees(&mul(&euler(turn), &euler(step)))
+}
+
+/// How one of Sue's hand poses holds the hand: each of the index,
+/// middle, ring and little fingers' three curls and its spread, then
+/// the thumb's three bends (about the axes it really bends about) and
+/// how far it swings out.
+type HandShape = ([[f32; 4]; 4], [f32; 4]);
+
+const CURLED: [f32; 4] = [86.0, 100.0, 62.0, 0.0];
+const STRAIGHT: [f32; 4] = [0.0; 4];
+const THUMB_IN: [f32; 4] = [34.0, 40.0, 50.0, -6.0];
+
+/// Sue's hand poses, in [`super::HAND_PRESETS`]' order.
+const HAND_SHAPES: [HandShape; 16] = [
+    // Open hand.
+    (
+        [[0.0, 0.0, 0.0, 4.0], STRAIGHT, [0.0, 0.0, 0.0, -4.0], [0.0, 0.0, 0.0, -8.0]],
+        [0.0; 4],
+    ),
+    // Relaxed.
+    (
+        [
+            [10.0, 18.0, 10.0, 3.0],
+            [14.0, 22.0, 12.0, 0.0],
+            [18.0, 26.0, 14.0, -3.0],
+            [22.0, 30.0, 16.0, -7.0],
+        ],
+        [8.0, 10.0, 10.0, 0.0],
+    ),
+    // Fist.
+    ([CURLED, CURLED, CURLED, [90.0, 102.0, 64.0, 0.0]], THUMB_IN),
+    // Pointing.
+    ([[0.0, 0.0, 0.0, 2.0], CURLED, CURLED, CURLED], THUMB_IN),
+    // Peace sign.
+    (
+        [[0.0, 0.0, 0.0, 10.0], [0.0, 0.0, 0.0, -8.0], CURLED, CURLED],
+        [38.0, 42.0, 52.0, -6.0],
+    ),
+    // Thumbs up.
+    ([CURLED, CURLED, CURLED, CURLED], [-8.0, 0.0, 0.0, 26.0]),
+    // Holding.
+    (
+        [
+            [50.0, 48.0, 30.0, 3.0],
+            [52.0, 48.0, 30.0, 0.0],
+            [54.0, 50.0, 30.0, -3.0],
+            [56.0, 52.0, 32.0, -6.0],
+        ],
+        [18.0, 18.0, 20.0, 8.0],
+    ),
+    // Spread.
+    (
+        [
+            [0.0, 0.0, 0.0, 16.0],
+            [0.0, 0.0, 0.0, 4.0],
+            [0.0, 0.0, 0.0, -10.0],
+            [0.0, 0.0, 0.0, -24.0],
+        ],
+        [-4.0, 0.0, 0.0, 30.0],
+    ),
+    // Flat fold.
+    (
+        [[80.0, 6.0, 2.0, 0.0]; 4],
+        [16.0, 10.0, 10.0, 0.0],
+    ),
+    // OK sign.
+    (
+        [
+            [52.0, 62.0, 38.0, 4.0],
+            [6.0, 8.0, 6.0, 0.0],
+            [4.0, 6.0, 4.0, -6.0],
+            [2.0, 4.0, 4.0, -12.0],
+        ],
+        [30.0, 30.0, 36.0, 0.0],
+    ),
+    // Pinch.
+    (
+        [
+            [48.0, 50.0, 30.0, 2.0],
+            [46.0, 52.0, 32.0, 0.0],
+            [70.0, 80.0, 50.0, -2.0],
+            [76.0, 84.0, 52.0, -4.0],
+        ],
+        [30.0, 28.0, 30.0, 0.0],
+    ),
+    // Claw.
+    (
+        [
+            [8.0, 88.0, 66.0, 10.0],
+            [8.0, 88.0, 66.0, 2.0],
+            [8.0, 88.0, 66.0, -8.0],
+            [8.0, 88.0, 66.0, -16.0],
+        ],
+        [10.0, 40.0, 60.0, 14.0],
+    ),
+    // Rock.
+    (
+        [[0.0, 0.0, 0.0, 10.0], CURLED, CURLED, [0.0, 0.0, 0.0, -14.0]],
+        THUMB_IN,
+    ),
+    // Three.
+    (
+        [
+            [0.0, 0.0, 0.0, 10.0],
+            STRAIGHT,
+            [0.0, 0.0, 0.0, -10.0],
+            CURLED,
+        ],
+        [38.0, 42.0, 52.0, -6.0],
+    ),
+    // Call me.
+    (
+        [CURLED, CURLED, CURLED, [0.0, 0.0, 0.0, -18.0]],
+        [-6.0, 0.0, 0.0, 30.0],
+    ),
+    // Finger gun.
+    ([[0.0, 0.0, 0.0, 2.0], CURLED, CURLED, CURLED], [-8.0, 0.0, 0.0, 24.0]),
+];
+
+/// Hand pose `index` of Sue's own ([`super::HAND_PRESETS`]) for the
+/// hand figure `body` (or the body whose hand it is): the thumb bends
+/// about the axes that hand's thumb really bends about.
+#[must_use]
+pub fn hand_pose(body: &Body, index: usize) -> Pose {
+    let mut pose = Pose(vec![[0.0; 3]; HAND.len()]);
+    let Some((fingers, thumb)) = HAND_SHAPES.get(index) else {
+        return pose;
+    };
+    for (finger, [base, middle, tip, spread]) in fingers.iter().enumerate() {
+        let first = 1 + finger * 3;
+        pose.0[first] = [*base, 0.0, *spread];
+        pose.0[first + 1] = [*middle, 0.0, 0.0];
+        pose.0[first + 2] = [*tip, 0.0, 0.0];
+    }
+    let axes = &human::shaped(body).thumb_axes;
+    let axis = |part: usize| axes.get(part).copied().unwrap_or([1.0, 0.0, 0.0]);
+    let out = about([0.0, 0.0, 1.0], thumb[3]);
+    pose.0[13] = degrees(&mul(&out, &about(axis(0), thumb[0])));
+    pose.0[14] = degrees(&about(axis(1), thumb[1]));
+    pose.0[15] = degrees(&about(axis(2), thumb[2]));
+    pose
+}
+
+/// `pose` (made on a figure with the joints `from`) as it lies on a
+/// figure with the joints `to`: every joint takes the turn of the joint
+/// of the same name (whatever its case); a joint with no namesake keeps
+/// `base`'s turn. `None` when no name is shared.
+#[must_use]
+pub fn retargeted(
+    pose: &Pose,
+    from: &[super::Joint],
+    to: &[super::Joint],
+    base: &Pose,
+) -> Option<Pose> {
+    let mut out = Pose(
+        (0..to.len())
+            .map(|joint| base.0.get(joint).copied().unwrap_or([0.0; 3]))
+            .collect(),
+    );
+    let mut shared = false;
+    for (at, joint) in to.iter().enumerate() {
+        if let Some(same) = from
+            .iter()
+            .position(|other| other.name.eq_ignore_ascii_case(joint.name))
+            && let Some(turn) = pose.0.get(same)
+        {
+            out.0[at] = *turn;
+            shared = true;
+        }
+    }
+    shared.then_some(out)
+}
+
+/// The joint `joint` and every joint hanging from it.
+#[must_use]
+pub fn hanging(joints: &[super::Joint], joint: usize) -> Vec<usize> {
+    let mut found = vec![joint];
+    let mut at = 0;
+    while at < found.len() {
+        for (index, other) in joints.iter().enumerate() {
+            if other.parent == Some(found[at]) && !found.contains(&index) {
+                found.push(index);
+            }
+        }
+        at += 1;
+    }
+    found
 }

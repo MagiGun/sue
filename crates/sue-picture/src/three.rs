@@ -722,6 +722,23 @@ impl Camera {
         ]
     }
 
+    /// The model point the canvas pixel `pixel` shows, as far from the
+    /// camera as model point `like` is: where a drag of `like` across the
+    /// screen takes it.
+    #[must_use]
+    pub fn unproject(&self, pixel: [f32; 2], like: [f32; 3]) -> [f32; 3] {
+        let depth = self.see(like).1[2].max(0.05);
+        let across = (pixel[0] - self.size[0] / 2.0) / self.focal * depth;
+        let up = -(pixel[1] - self.size[1] / 2.0) / self.focal * depth;
+        [0, 1, 2].map(|axis| {
+            let world = self.eye[axis]
+                + self.right[axis] * across
+                + self.up[axis] * up
+                + self.forward[axis] * depth;
+            world / self.scale + self.middle[axis]
+        })
+    }
+
     /// Where model point `p` shows on the canvas, in pixels; `None` behind
     /// the camera.
     #[must_use]
@@ -1103,14 +1120,23 @@ pub fn render_model(
             place: *place,
             ..crate::figure::Body::of(model)
         };
-        return Some(render_framed(
-            &crate::figure::mesh(&pose, &body),
-            view,
-            size,
-            Some(body.frame()),
-        ));
+        return Some(crate::figure::render(&pose, &body, view, size));
     }
     let mesh = model.ext::<Geometry>()?.to_mesh();
+    // A model from a file is drawn smooth, its folds kept.
+    if model
+        .property(crate::model3d::SMOOTH)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        let placed = if place.is_identity() {
+            mesh.clone()
+        } else {
+            place.mesh(&mesh)
+        };
+        let surface = Surface::creased(placed.positions(), placed.indices(), 50.0);
+        return Some(render_surface(&surface, view, size, frame_of(&mesh)));
+    }
     if place.is_identity() {
         return Some(render_buffers(&mesh, view, size));
     }
@@ -1242,12 +1268,7 @@ pub fn new_layer_viewed(
     let buffers = if figure {
         let pose = crate::figure::Pose::of(&model);
         let body = crate::figure::Body::of(&model);
-        render_framed(
-            &crate::figure::mesh(&pose, &body),
-            &view,
-            size,
-            Some(body.frame()),
-        )
+        crate::figure::render(&pose, &body, &view, size)
     } else {
         let mesh = model
             .ext::<Geometry>()

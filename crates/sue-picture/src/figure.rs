@@ -81,11 +81,11 @@ use sue_model::{Geometry, PrimKind};
 
 use crate::doc::Edit;
 
-mod human;
+pub(crate) mod human;
 mod posing;
 pub use posing::{
-    HandSetup, Limits, aimed_at, hand_from_body, hand_onto_body, hand_setup, held, limb_of,
-    limited, limits, reached, turned,
+    HandSetup, Limits, aimed_at, hand_from_body, hand_onto_body, hand_pose, hand_setup, hanging,
+    held, limb_of, limited, limits, reached, retargeted, turned,
 };
 
 /// The class of a drawing figure's model entity.
@@ -113,6 +113,13 @@ pub const PARTS_TEXT: &str = "figure.parts";
 pub const SIDE: &str = "figure.side";
 /// The figure shows its guide lines (`Bool`, on unless set).
 pub const GUIDES: &str = "figure.guides";
+/// A body keeps to the ground as it is posed: it comes down when it
+/// sits or crouches (`Bool`; a figure from before this was kept does
+/// not).
+pub const GROUND: &str = "figure.ground";
+/// The hands and feet pinned where they are while the rest of the body
+/// is posed: their joint numbers, `,` between (`Text`).
+pub const PINS: &str = "figure.pins";
 
 /// A body's type: how its shoulders, waist and hips are built.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -352,6 +359,8 @@ pub enum Kind {
     Hand,
     /// A head ([`HEAD_JOINTS`]).
     Head,
+    /// A model imported from a file, posed by its own bones.
+    Imported,
 }
 
 impl Kind {
@@ -362,6 +371,7 @@ impl Kind {
             Self::Body => "body",
             Self::Hand => "hand",
             Self::Head => "head",
+            Self::Imported => "imported",
         }
     }
 
@@ -371,6 +381,7 @@ impl Kind {
         match key {
             "hand" => Self::Hand,
             "head" => Self::Head,
+            "imported" => Self::Imported,
             _ => Self::Body,
         }
     }
@@ -974,6 +985,10 @@ pub struct Body {
     pub side: Side,
     /// It shows its guide lines.
     pub guides: bool,
+    /// A body keeps to the ground as it is posed.
+    pub ground: bool,
+    /// An imported model's skeleton, by number (0 for Sue's own figures).
+    pub rig: u64,
     /// Where it stands, how it is turned and how large it is.
     pub place: crate::three::Placement,
 }
@@ -1030,6 +1045,15 @@ impl Body {
                 .property(GUIDES)
                 .and_then(Value::as_bool)
                 .unwrap_or(true),
+            ground: entity
+                .property(GROUND)
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            rig: if entity.property(KIND).and_then(Value::as_str) == Some("imported") {
+                crate::model3d::rig_of(entity)
+            } else {
+                0
+            },
             place: crate::three::Placement::of(entity),
         }
     }
@@ -1115,6 +1139,9 @@ impl Body {
     pub fn initialized(self) -> Self {
         Self {
             kind: self.kind,
+            side: self.side,
+            ground: self.ground,
+            rig: self.rig,
             place: self.place,
             ..Self::default()
         }
@@ -1177,6 +1204,9 @@ impl Body {
             Kind::Body => FRAME,
             Kind::Hand => ([0.0, 0.07, 0.0], 0.3),
             Kind::Head => ([0.0, 0.11, 0.02], 0.38),
+            Kind::Imported => {
+                return human::shaped(self).frame.unwrap_or(([0.0; 3], 2.0));
+            }
         };
         (middle.map(|value| value * scale), size * scale)
     }
@@ -1188,6 +1218,7 @@ impl Body {
             Kind::Body => &PRESETS,
             Kind::Hand => &HAND_PRESETS,
             Kind::Head => &HEAD_PRESETS,
+            Kind::Imported => &[],
         }
     }
 
@@ -1195,9 +1226,24 @@ impl Body {
     #[must_use]
     pub fn preset(&self, index: usize) -> Pose {
         match self.kind {
-            Kind::Body => preset(index),
-            Kind::Hand => hand_preset(index),
+            Kind::Body => {
+                // The body's pose, its hands relaxed (or as the pose
+                // holds them).
+                let mut pose = preset(index);
+                let hands = match index {
+                    15 => [2, 2],
+                    10 => [1, 0],
+                    5 | 14 => [0, 0],
+                    _ => [1, 1],
+                };
+                for (side, hand) in [Side::Left, Side::Right].into_iter().zip(hands) {
+                    hand_onto_body(self, &mut pose, side, &hand_pose(self, hand));
+                }
+                pose
+            }
+            Kind::Hand => hand_pose(self, index),
             Kind::Head => head_preset(index),
+            Kind::Imported => Pose(vec![[0.0; 3]; human::shaped(self).joints.len()]),
         }
     }
 
@@ -1241,6 +1287,8 @@ impl Default for Body {
             parts: SLIDERS_REST,
             side: Side::Left,
             guides: true,
+            ground: true,
+            rig: 0,
             place: crate::three::Placement::default(),
         }
     }
@@ -1338,10 +1386,31 @@ impl Pose {
 }
 
 /// What people read for the pose presets, in order.
-pub const PRESETS: [&str; 7] = ["Stand", "T-pose", "Walk", "Run", "Sit", "Arms up", "Think"];
+pub const PRESETS: [&str; 20] = [
+    "Stand",
+    "T-pose",
+    "Walk",
+    "Run",
+    "Sit",
+    "Arms up",
+    "Think",
+    "Contrapposto",
+    "Hands on hips",
+    "Arms crossed",
+    "Wave",
+    "Reach forward",
+    "Crouch",
+    "Kneel",
+    "Jump",
+    "Punch",
+    "Kick",
+    "Sit on the floor",
+    "Bow",
+    "Look back",
+];
 
 /// What people read for the hand's preset poses, in order.
-pub const HAND_PRESETS: [&str; 7] = [
+pub const HAND_PRESETS: [&str; 16] = [
     "Open hand",
     "Relaxed",
     "Fist",
@@ -1349,6 +1418,15 @@ pub const HAND_PRESETS: [&str; 7] = [
     "Peace sign",
     "Thumbs up",
     "Holding",
+    "Spread",
+    "Flat fold",
+    "OK sign",
+    "Pinch",
+    "Claw",
+    "Rock",
+    "Three",
+    "Call me",
+    "Finger gun",
 ];
 
 /// Hand preset pose `index` (see [`HAND_PRESETS`]).
@@ -1502,6 +1580,166 @@ pub fn preset(index: usize) -> Pose {
             set(5, [10.0, 0.0, 15.0]);
             set(6, [-90.0, 0.0, 0.0]);
         }
+        // Contrapposto: the weight on one leg, the hips and shoulders
+        // tilted against each other.
+        7 => {
+            set(0, [0.0, 0.0, 6.0]);
+            set(1, [0.0, 0.0, -5.0]);
+            set(2, [0.0, 8.0, -6.0]);
+            set(4, [0.0, -12.0, 4.0]);
+            set(11, [-4.0, 0.0, 2.0]);
+            set(14, [-14.0, 0.0, -10.0]);
+            set(15, [24.0, 0.0, 0.0]);
+            set(16, [-8.0, 0.0, 0.0]);
+            set(5, [5.0, 0.0, 14.0]);
+            set(6, [-18.0, 0.0, 0.0]);
+            set(8, [-8.0, 0.0, -16.0]);
+            set(9, [-30.0, 0.0, 0.0]);
+        }
+        // Hands on hips.
+        8 => {
+            set(5, [22.0, -70.0, 46.0]);
+            set(6, [-98.0, 0.0, 0.0]);
+            set(8, [22.0, 70.0, -46.0]);
+            set(9, [-98.0, 0.0, 0.0]);
+            set(11, [0.0, 0.0, 6.0]);
+            set(14, [0.0, 0.0, -6.0]);
+        }
+        // Arms crossed.
+        9 => {
+            set(5, [-34.0, -62.0, 14.0]);
+            set(6, [-104.0, 0.0, 0.0]);
+            set(8, [-28.0, 62.0, -14.0]);
+            set(9, [-112.0, 0.0, 0.0]);
+            set(4, [4.0, 0.0, 0.0]);
+        }
+        // Wave.
+        10 => {
+            set(8, [0.0, -90.0, -96.0]);
+            set(9, [-78.0, 0.0, 0.0]);
+            set(5, [0.0, 0.0, 10.0]);
+            set(6, [-10.0, 0.0, 0.0]);
+            set(4, [0.0, -8.0, -6.0]);
+            set(2, [0.0, 0.0, -4.0]);
+        }
+        // Reach forward.
+        11 => {
+            set(1, [16.0, 0.0, 0.0]);
+            set(2, [10.0, 12.0, 0.0]);
+            set(8, [-88.0, 0.0, -4.0]);
+            set(9, [-8.0, 0.0, 0.0]);
+            set(5, [22.0, 0.0, 12.0]);
+            set(6, [-20.0, 0.0, 0.0]);
+            set(11, [-24.0, 0.0, 3.0]);
+            set(12, [18.0, 0.0, 0.0]);
+            set(14, [16.0, 0.0, -3.0]);
+            set(15, [22.0, 0.0, 0.0]);
+        }
+        // Crouch.
+        12 => {
+            set(1, [28.0, 0.0, 0.0]);
+            set(2, [14.0, 0.0, 0.0]);
+            set(4, [-24.0, 0.0, 0.0]);
+            set(11, [-112.0, 0.0, 10.0]);
+            set(12, [132.0, 0.0, 0.0]);
+            set(13, [-22.0, 0.0, 0.0]);
+            set(14, [-112.0, 0.0, -10.0]);
+            set(15, [132.0, 0.0, 0.0]);
+            set(16, [-22.0, 0.0, 0.0]);
+            set(5, [-58.0, 0.0, 10.0]);
+            set(6, [-42.0, 0.0, 0.0]);
+            set(8, [-58.0, 0.0, -10.0]);
+            set(9, [-42.0, 0.0, 0.0]);
+        }
+        // Kneel, on one knee.
+        13 => {
+            set(11, [-88.0, 0.0, 4.0]);
+            set(12, [88.0, 0.0, 0.0]);
+            set(14, [6.0, 0.0, -4.0]);
+            set(15, [96.0, 0.0, 0.0]);
+            set(16, [38.0, 0.0, 0.0]);
+            set(5, [-36.0, 0.0, 8.0]);
+            set(6, [-48.0, 0.0, 0.0]);
+            set(8, [6.0, 0.0, -8.0]);
+            set(9, [-12.0, 0.0, 0.0]);
+        }
+        // Jump.
+        14 => {
+            set(1, [-10.0, 0.0, 0.0]);
+            set(11, [-72.0, 0.0, 6.0]);
+            set(12, [102.0, 0.0, 0.0]);
+            set(14, [22.0, 0.0, -6.0]);
+            set(15, [64.0, 0.0, 0.0]);
+            set(16, [30.0, 0.0, 0.0]);
+            set(5, [-10.0, 0.0, 142.0]);
+            set(6, [-12.0, 0.0, 0.0]);
+            set(8, [-10.0, 0.0, -152.0]);
+            set(9, [-12.0, 0.0, 0.0]);
+            set(4, [-12.0, 0.0, 0.0]);
+        }
+        // Punch.
+        15 => {
+            set(0, [0.0, 10.0, 0.0]);
+            set(2, [6.0, 24.0, 0.0]);
+            set(4, [0.0, -26.0, 0.0]);
+            set(8, [-84.0, 0.0, -8.0]);
+            set(9, [-6.0, 0.0, 0.0]);
+            set(5, [14.0, -40.0, 24.0]);
+            set(6, [-122.0, 0.0, 0.0]);
+            set(11, [-28.0, 0.0, 8.0]);
+            set(12, [28.0, 0.0, 0.0]);
+            set(14, [22.0, 0.0, -8.0]);
+            set(15, [18.0, 0.0, 0.0]);
+        }
+        // Kick.
+        16 => {
+            set(1, [-12.0, 0.0, 0.0]);
+            set(14, [-86.0, 0.0, -4.0]);
+            set(15, [10.0, 0.0, 0.0]);
+            set(16, [28.0, 0.0, 0.0]);
+            set(11, [6.0, 0.0, 4.0]);
+            set(12, [8.0, 0.0, 0.0]);
+            set(5, [-30.0, 0.0, 30.0]);
+            set(6, [-62.0, 0.0, 0.0]);
+            set(8, [36.0, 0.0, -26.0]);
+            set(9, [-40.0, 0.0, 0.0]);
+        }
+        // Sit on the floor, knees up, leaning on the hands.
+        17 => {
+            set(0, [-16.0, 0.0, 0.0]);
+            set(1, [10.0, 0.0, 0.0]);
+            set(11, [-84.0, 0.0, 12.0]);
+            set(12, [84.0, 0.0, 0.0]);
+            set(13, [-6.0, 0.0, 0.0]);
+            set(14, [-84.0, 0.0, -12.0]);
+            set(15, [84.0, 0.0, 0.0]);
+            set(16, [-6.0, 0.0, 0.0]);
+            set(5, [36.0, 0.0, 16.0]);
+            set(6, [-4.0, 0.0, 0.0]);
+            set(8, [36.0, 0.0, -16.0]);
+            set(9, [-4.0, 0.0, 0.0]);
+        }
+        // Bow.
+        18 => {
+            set(1, [36.0, 0.0, 0.0]);
+            set(2, [24.0, 0.0, 0.0]);
+            set(3, [10.0, 0.0, 0.0]);
+            set(5, [-6.0, 0.0, 6.0]);
+            set(8, [-6.0, 0.0, -6.0]);
+        }
+        // Look back over the shoulder.
+        19 => {
+            set(1, [0.0, 20.0, 0.0]);
+            set(2, [0.0, 32.0, 0.0]);
+            set(3, [0.0, 38.0, 0.0]);
+            set(4, [4.0, 24.0, 0.0]);
+            set(5, [10.0, 0.0, 12.0]);
+            set(6, [-14.0, 0.0, 0.0]);
+            set(8, [-14.0, 0.0, -14.0]);
+            set(9, [-22.0, 0.0, 0.0]);
+            set(14, [-10.0, 0.0, -4.0]);
+            set(15, [16.0, 0.0, 0.0]);
+        }
         _ => {
             set(5, [0.0, 0.0, 12.0]);
             set(8, [0.0, 0.0, -12.0]);
@@ -1549,7 +1787,7 @@ pub fn solve(pose: &Pose, body: &Body) -> Vec<([f32; 3], Mat3)> {
     let shaped = human::shaped(body);
     let stand = body.place.matrix();
     let flip = human::is_mirrored(body);
-    human::solved(pose, &shaped, body.place.scale)
+    human::posed(pose, &shaped, body)
         .into_iter()
         .map(|(mut at, mut frame)| {
             // A right hand: the left hand's mirror image.
@@ -1679,7 +1917,7 @@ pub fn aimed(
     pose
 }
 
-const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+pub(crate) const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 /// Each joint's bone, start and end, for `pose`.
 #[must_use]
@@ -1747,7 +1985,76 @@ pub fn new_of(name: &str, kind: Kind) -> Entity {
     };
     Entity::empty(name, CLASS)
         .with_property(KIND, Value::from(kind.key()))
+        .with_property(GROUND, Value::from(kind == Kind::Body))
         .with_property(POSE, Value::from(body.standing().to_text()))
+}
+
+/// The hands and feet pinned on figure model `entity`, by joint.
+#[must_use]
+pub fn pins_of(entity: &Entity) -> Vec<usize> {
+    entity
+        .property(PINS)
+        .and_then(Value::as_str)
+        .map(|text| {
+            text.split(',')
+                .filter_map(|joint| joint.trim().parse().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `pins` as [`PINS`] keeps them.
+#[must_use]
+pub fn pins_text(pins: &[usize]) -> String {
+    pins.iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The edit that makes the figure of 3D layer `layer` another of Sue's
+/// models (a body of a type, a hand of a side, or a head) in that
+/// model's first pose, and draws the layer again, as one step named
+/// `label`. `None` for an imported model, which is its own.
+#[must_use]
+pub fn set_model(
+    arena: &Arena,
+    layer: EntityId,
+    kind: Kind,
+    build: Build,
+    side: Side,
+    label: &str,
+) -> Option<Edit> {
+    let model = of_layer(arena, layer)?;
+    let now = Body::of(arena.get_by_id(model).ok()?);
+    if now.kind == Kind::Imported || kind == Kind::Imported {
+        return None;
+    }
+    let body = Body {
+        kind,
+        build,
+        side,
+        ground: kind == Kind::Body,
+        ..now
+    };
+    let pose = if kind == now.kind {
+        Pose::of(arena.get_by_id(model).ok()?)
+    } else {
+        body.standing()
+    };
+    let raster = crate::doc::raster(arena, layer)?;
+    let size = [raster.width(), raster.height()];
+    let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
+    let drawn = crate::three::draw(&render(&pose, &body, &view, size), &view)?;
+    Some(
+        Edit::new(label)
+            .then(SetProperty::new(model, KIND, kind.key()))
+            .then(SetProperty::new(model, BUILD, build.key()))
+            .then(SetProperty::new(model, SIDE, side.key()))
+            .then(SetProperty::new(model, GROUND, body.ground))
+            .then(SetProperty::new(model, POSE, pose.to_text()))
+            .then(ReplaceComponent::new(layer, drawn, label)),
+    )
 }
 
 /// `true` if `entity` is a drawing figure.
@@ -1822,7 +2129,8 @@ pub fn set_body(arena: &Arena, layer: EntityId, body: &Body, label: &str) -> Opt
         .then(SetProperty::new(model, HEIGHT, f64::from(body.height)))
         .then(SetProperty::new(model, HEADS, f64::from(body.heads)))
         .then(SetProperty::new(model, PARTS_TEXT, body.parts_text()))
-        .then(SetProperty::new(model, GUIDES, body.guides));
+        .then(SetProperty::new(model, GUIDES, body.guides))
+        .then(SetProperty::new(model, GROUND, body.ground));
     if body.kind == Kind::Hand {
         edit = edit.then(SetProperty::new(model, SIDE, body.side.key()));
     }
@@ -2167,7 +2475,13 @@ mod preview {
         save("female", &female, &female.standing(), &front, [700, 1000]);
         save("male-rest", &male, &Pose::rest(), &View3D { yaw: 0.0, ..front }, [700, 1000]);
         for (index, name) in PRESETS.iter().enumerate().skip(1) {
-            save(&format!("pose-{name}"), &male, &preset(index), &front, [500, 700]);
+            save(
+                &format!("pose-{index:02}-{name}"),
+                &male,
+                &male.preset(index),
+                &View3D { floor: false, ..front },
+                [300, 420],
+            );
         }
         let hand = Body {
             kind: Kind::Hand,
@@ -2182,8 +2496,20 @@ mod preview {
             ..View3D::default()
         };
         save("hand-back", &hand, &hand.preset(0), &back, [700, 800]);
-        save("hand-palm", &hand, &hand.preset(1), &View3D { yaw: 20.0, ..back }, [700, 800]);
-        save("hand-fist", &hand, &hand.preset(2), &back, [700, 800]);
+        let palm = View3D {
+            yaw: 20.0,
+            light: 45.0,
+            ..back
+        };
+        for (index, name) in HAND_PRESETS.iter().enumerate() {
+            save(
+                &format!("hand-{index:02}-{name}"),
+                &hand,
+                &hand.preset(index),
+                if index % 2 == 0 { &palm } else { &back },
+                [300, 340],
+            );
+        }
         let head = Body {
             kind: Kind::Head,
             ..male

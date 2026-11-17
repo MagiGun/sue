@@ -177,7 +177,7 @@ fn asset() -> &'static Asset {
 /// A figure shaped and ready to pose: its points at rest as modeled, how
 /// each follows the joints, its joints as poses turn them, and what lies
 /// on its surface.
-pub(crate) struct Shaped {
+pub struct Shaped {
     /// The points as modeled (the bind stance), at scale 1.
     pub rest: Vec<[f32; 3]>,
     /// Up to four joints and weights a point.
@@ -205,6 +205,12 @@ pub(crate) struct Shaped {
     /// For each of a hand's three thumb joints: the axis it really bends
     /// about, in the hand's own axes at rest.
     pub thumb_axes: Vec<[f32; 3]>,
+    /// The middle and size the figure is framed by, when it is not one
+    /// of Sue's own (an imported model).
+    pub frame: Option<([f32; 3], f32)>,
+    /// The limbs that follow a dragged hand or foot: the upper joint,
+    /// the lower one, and the hand or foot.
+    pub limbs: Vec<[usize; 3]>,
 }
 
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
@@ -1292,6 +1298,8 @@ fn shaped_body(body: &Body) -> Shaped {
         relief,
         hands,
         thumb_axes,
+        frame: None,
+        limbs: at::ARMS.iter().chain(at::LEGS.iter()).copied().collect(),
     }
 }
 
@@ -1377,6 +1385,8 @@ fn shaped_hand(body: &Body) -> Shaped {
         relief: Some(Arc::new(relief_of(&back))),
         hands: [IDENTITY; 2],
         thumb_axes: thumb.to_vec(),
+        frame: None,
+        limbs: Vec::new(),
     }
 }
 
@@ -1480,11 +1490,37 @@ fn shaped_head(body: &Body) -> Shaped {
         relief: None,
         hands: [IDENTITY; 2],
         thumb_axes: Vec::new(),
+        frame: None,
+        limbs: Vec::new(),
+    }
+}
+
+/// A figure with nothing to it: what an imported model whose file can
+/// no longer be read falls back to.
+fn shaped_nothing() -> Shaped {
+    Shaped {
+        order: Vec::new(),
+        rest: Vec::new(),
+        skin: Vec::new(),
+        tris: Vec::new(),
+        joints: Vec::new(),
+        bind: Vec::new(),
+        guides: Vec::new(),
+        detail: Vec::new(),
+        axes: Vec::new(),
+        relief: None,
+        hands: [IDENTITY; 2],
+        thumb_axes: Vec::new(),
+        frame: None,
+        limbs: Vec::new(),
     }
 }
 
 /// `body` shaped, from the last few shaped when it was among them.
 pub(crate) fn shaped(body: &Body) -> Arc<Shaped> {
+    if body.kind == Kind::Imported {
+        return crate::model3d::rig(body.rig).unwrap_or_else(|| Arc::new(shaped_nothing()));
+    }
     static SHAPED: Mutex<Vec<(Body, Arc<Shaped>)>> = Mutex::new(Vec::new());
     // What does not change the shape: where it stands, which hand it
     // is, and what is drawn on it.
@@ -1493,6 +1529,7 @@ pub(crate) fn shaped(body: &Body) -> Arc<Shaped> {
         side: Side::Left,
         guides: true,
         follow: false,
+        ground: true,
         ..*body
     };
     let mut kept = SHAPED.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -1507,6 +1544,7 @@ pub(crate) fn shaped(body: &Body) -> Arc<Shaped> {
         Kind::Body => shaped_body(&key),
         Kind::Hand => shaped_hand(&key),
         Kind::Head => shaped_head(&key),
+        Kind::Imported => shaped_nothing(),
     });
     let mut kept = SHAPED.lock().unwrap_or_else(|poison| poison.into_inner());
     if kept.len() >= 8 {
@@ -1537,6 +1575,38 @@ pub(crate) fn solved(pose: &Pose, shaped: &Shaped, size: f32) -> Vec<([f32; 3], 
     placed
 }
 
+/// How low the lowest part of the figure reaches for the joints placed
+/// as `placed`: the lower end of every bone, less the part's thickness.
+fn lowest(placed: &[([f32; 3], Mat3)], shaped: &Shaped, size: f32) -> f32 {
+    placed
+        .iter()
+        .zip(&shaped.joints)
+        .map(|((at, frame), joint)| {
+            let end = add(*at, apply(frame, scale(joint.bone, size)));
+            at[1].min(end[1]) - joint.start[0] * size
+        })
+        .fold(f32::INFINITY, f32::min)
+}
+
+/// [`solved`] for `body`: at its size, and, for a body that keeps to
+/// the ground, lifted or lowered so its lowest part stays where it is
+/// when standing (a figure that sits or crouches comes down; one that
+/// stands on its toes goes up).
+pub(crate) fn posed(pose: &Pose, shaped: &Shaped, body: &Body) -> Vec<([f32; 3], Mat3)> {
+    let size = body.place.scale;
+    let mut placed = solved(pose, shaped, size);
+    if body.ground && body.kind == Kind::Body && !placed.is_empty() {
+        let standing = solved(&Pose(Vec::new()), shaped, size);
+        let lift = lowest(&standing, shaped, size) - lowest(&placed, shaped, size);
+        if lift.is_finite() {
+            for (at, _) in &mut placed {
+                at[1] += lift;
+            }
+        }
+    }
+    placed
+}
+
 /// Whether `body` is drawn mirrored: a right hand is the left hand's
 /// mirror image.
 pub(crate) fn is_mirrored(body: &Body) -> bool {
@@ -1547,7 +1617,7 @@ pub(crate) fn is_mirrored(body: &Body) -> bool {
 pub(crate) fn surface(pose: &Pose, body: &Body) -> Surface {
     let shaped = shaped(body);
     let size = body.place.scale;
-    let placed = solved(pose, &shaped, size);
+    let placed = posed(pose, &shaped, body);
     // Each joint's turn and shift from where it was modeled.
     let moves: Vec<(Mat3, [f32; 3])> = placed
         .iter()

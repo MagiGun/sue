@@ -631,12 +631,7 @@ fn posed(material: &Material, size: [u32; 2]) -> Option<RasterTile2D> {
         distance: 4.4,
         ..crate::three::View3D::default()
     };
-    let buffers = crate::three::render_framed(
-        &crate::figure::mesh(&pose, &body),
-        &view,
-        size,
-        Some(body.frame()),
-    );
+    let buffers = crate::figure::render(&pose, &body, &view, size);
     crate::three::draw(&buffers, &view)
 }
 

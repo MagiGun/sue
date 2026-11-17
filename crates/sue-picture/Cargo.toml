@@ -23,6 +23,7 @@ sue-model.workspace = true
 sue-platform.workspace = true
 sue-type.workspace = true
 miniz_oxide.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
