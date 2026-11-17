@@ -46,6 +46,16 @@ pub(super) const KEYFRAME_ADD: Art = Art {
     solid: &[],
 };
 
+/// The diamond of a key, alone: one value keyed at this frame, solid
+/// when it is.
+const KEY_DIAMOND: &str = "M12 5.25 L18.75 12 L12 18.75 L5.25 12 Z";
+
+pub(super) const KEYFRAME: Art = Art {
+    keyline: Keyline::Square,
+    line: &[Part::Stroke(KEY_DIAMOND)],
+    solid: &[Part::Fill(KEY_DIAMOND), Part::Stroke(KEY_DIAMOND)],
+};
+
 /// A solid diamond on a track that runs through it: keyframes on.
 const KEY_ON_TRACK: &str = "M12 8 L16 12 L12 16 L8 12 Z";
 

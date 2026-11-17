@@ -985,79 +985,172 @@ impl SuePaint {
         };
         ui.spacing_mut().item_spacing.y = theme.space(Space::S2);
         let (frame, time) = self.frame_time(arena);
-        let mut camera = self.camera_now(arena, folder);
-        let before = camera;
+        let size = self
+            .picture()
+            .and_then(|picture| arena.get_by_id(picture).ok())
+            .and_then(sue_model::picture::size)
+            .unwrap_or([0, 0]);
+        // The seven values as keyed or set here; a drag of the camera
+        // frame on the canvas or a value being set shows what it makes.
+        let mut values = crate::camera::values(arena, folder, Some(time), size);
+        if let Some((pending, at, camera)) = self.camera_pending
+            && pending == folder
+            && at == frame
+        {
+            let center = camera.unswung([values[4] as f32, values[5] as f32]);
+            values[0] = f64::from(center[0]);
+            values[1] = f64::from(center[1]);
+            values[2] = f64::from(camera.scale);
+            values[3] = f64::from(camera.angle);
+        }
+        if let Some((pending, at, channel, value)) = self.camera_value
+            && pending == folder
+            && at == frame
+            && let Some(index) = crate::camera::VALUES.iter().position(|key| *key == channel)
+        {
+            values[index] = value;
+        }
         ui.label(caption(&tr!("camera-at-frame", value = frame + 1)));
-        let field = |ui: &mut Ui,
-                     salt: &str,
-                     name: &str,
-                     value: &mut f32,
-                     suffix: &str,
-                     range: std::ops::RangeInclusive<f64>| {
-            let mut wide = f64::from(*value);
-            let response = ui::number_field(("sue-paint-camera", salt), &mut wide)
-                .label(name)
-                .suffix(suffix)
-                .range(range)
-                .decimals(1)
-                .show(ui, theme);
-            let response = ui::tooltip(response, &Tip::new(name), theme);
-            if response.changed() {
-                *value = wide as f32;
-            }
-        };
+        // Each value as Clip Studio Paint's Tool Property lists them, how
+        // it reads (times shown), its unit, its range, and the key button
+        // beside it that keys it alone.
+        let rows: [(
+            &'static str,
+            String,
+            f64,
+            String,
+            std::ops::RangeInclusive<f64>,
+            &'static str,
+        ); 7] = [
+            (
+                crate::camera::X,
+                tr!("position-x"),
+                1.0,
+                tr!("px"),
+                f64::NEG_INFINITY..=f64::INFINITY,
+                "anim.camera.value_key.camera.x",
+            ),
+            (
+                crate::camera::Y,
+                tr!("position-y"),
+                1.0,
+                tr!("px"),
+                f64::NEG_INFINITY..=f64::INFINITY,
+                "anim.camera.value_key.camera.y",
+            ),
+            (
+                crate::camera::SCALE,
+                tr!("scale"),
+                100.0,
+                tr!("percent"),
+                1.0..=2000.0,
+                "anim.camera.value_key.camera.scale",
+            ),
+            (
+                crate::camera::ANGLE,
+                tr!("rotation"),
+                180.0 / std::f64::consts::PI,
+                tr!("deg"),
+                f64::NEG_INFINITY..=f64::INFINITY,
+                "anim.camera.value_key.camera.angle",
+            ),
+            (
+                crate::camera::PIVOT_X,
+                tr!("center-of-rotation-x"),
+                1.0,
+                tr!("px"),
+                f64::NEG_INFINITY..=f64::INFINITY,
+                "anim.camera.value_key.camera.pivot.x",
+            ),
+            (
+                crate::camera::PIVOT_Y,
+                tr!("center-of-rotation-y"),
+                1.0,
+                tr!("px"),
+                f64::NEG_INFINITY..=f64::INFINITY,
+                "anim.camera.value_key.camera.pivot.y",
+            ),
+            (
+                crate::camera::OPACITY,
+                tr!("layer-opacity"),
+                100.0,
+                tr!("percent"),
+                0.0..=100.0,
+                "anim.camera.value_key.camera.opacity",
+            ),
+        ];
+        let mut set: Option<(&'static str, f64, bool)> = None;
+        let mut command = None;
         ui::form_grid(ui, "sue-paint-camera", theme, |grid| {
-            grid.row(&tr!("position-x"), |ui| {
-                field(
-                    ui,
-                    "x",
-                    &tr!("position-x"),
-                    &mut camera.center[0],
-                    &tr!("px"),
-                    f64::NEG_INFINITY..=f64::INFINITY,
-                );
-            });
-            grid.row(&tr!("position-y"), |ui| {
-                field(
-                    ui,
-                    "y",
-                    &tr!("position-y"),
-                    &mut camera.center[1],
-                    &tr!("px"),
-                    f64::NEG_INFINITY..=f64::INFINITY,
-                );
-            });
-            grid.row(&tr!("scale"), |ui| {
-                let mut percent = camera.scale * 100.0;
-                field(
-                    ui,
-                    "scale",
-                    &tr!("scale"),
-                    &mut percent,
-                    &tr!("percent"),
-                    1.0..=2000.0,
-                );
-                camera.scale = percent / 100.0;
-            });
-            grid.row(&tr!("rotation"), |ui| {
-                let mut degrees = camera.angle.to_degrees();
-                field(
-                    ui,
-                    "angle",
-                    &tr!("rotation"),
-                    &mut degrees,
-                    &tr!("deg"),
-                    f64::NEG_INFINITY..=f64::INFINITY,
-                );
-                camera.angle = degrees.to_radians();
-            });
+            for (index, (channel, name, times, suffix, range, key_command)) in
+                rows.iter().enumerate()
+            {
+                grid.row(name, |ui| {
+                    let mut shown = values[index] * times;
+                    let response = ui::number_field(("sue-paint-camera", *channel), &mut shown)
+                        .label(name)
+                        .suffix(suffix)
+                        .range(range.clone())
+                        .decimals(1)
+                        .show(ui, theme);
+                    let response = ui::tooltip(response, &Tip::new(name), theme);
+                    // A drag of the field shows at once and is keyed once,
+                    // when the pointer lets go; typing is keyed on Enter
+                    // or when the field is left.
+                    let finished = response.drag_stopped()
+                        || response.lost_focus()
+                        || (response.changed()
+                            && !response.dragged()
+                            && !response.has_focus()
+                            && !response.is_pointer_button_down_on());
+                    if response.changed() {
+                        set = Some((*channel, shown / times, finished));
+                    } else if finished {
+                        set = Some((*channel, values[index], true));
+                    }
+                    let keyed = crate::camera::keyed(arena, folder, channel, time);
+                    let tip = if keyed {
+                        tr!("unkey-camera-value", name = name.as_str())
+                    } else {
+                        tr!("key-camera-value", name = name.as_str())
+                    };
+                    let response =
+                        ui::icon_button(("sue-paint-camera-key", *channel), Icon::Keyframe, &tip)
+                            .selected(keyed)
+                            .show(ui, theme);
+                    crate::launchers::note_palette_mark(
+                        ui.ctx(),
+                        &format!("camera.key.{channel}"),
+                        response.rect.center(),
+                    );
+                    if ui::tooltip(response, &Tip::new(&tip), theme).clicked() {
+                        command = Some(*key_command);
+                    }
+                });
+            }
         });
-        if camera != before {
-            self.camera_pending = Some((folder, frame, camera));
+        if let Some((channel, value, finished)) = set {
+            let index = crate::camera::VALUES
+                .iter()
+                .position(|key| *key == channel)
+                .unwrap_or(0);
+            let editing = self.camera_value.is_some_and(|(pending, at, was, _)| {
+                pending == folder && at == frame && was == channel
+            });
+            // A field left as it was keys nothing.
+            if editing || (value - values[index]).abs() > f64::EPSILON {
+                values[index] = value;
+                self.camera_value = Some((folder, frame, channel, value));
+                // The frame on the canvas follows at once.
+                self.camera_pending =
+                    Some((folder, frame, crate::camera::Camera::from_values(&values)));
+                if finished && command.is_none() {
+                    command = Some("anim.camera.value_set");
+                }
+            }
         }
         let keys = crate::camera::keys(arena, folder);
         let keyed = keys.contains(&time);
-        let mut command = None;
         ui.horizontal(|ui| {
             let (name, run) = if keyed {
                 (tr!("update-keyframe"), "anim.camera.key")

@@ -334,6 +334,92 @@ fn camera_unkey(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     }
 }
 
+/// The camera value Tool Property set: keyed alone at its frame, as one
+/// step, with the ease the camera's keys there have (Linear when none).
+fn camera_value_set(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let Some((folder, frame, channel, value)) = paint.camera_value.take() else {
+        return;
+    };
+    paint.camera_pending = None;
+    let arena = &cx.world.arena;
+    if paint.here(arena).is_none() || paint.doc().is_none_or(|doc| doc.frame != frame) {
+        return;
+    }
+    let (_, time) = paint.frame_time(arena);
+    let ease = anim::motion::ease_at(arena, folder, time).unwrap_or(anim::motion::Ease::Linear);
+    let edit = crate::camera::key_value(arena, folder, channel, time, value, ease);
+    SuePaint::apply(cx, edit);
+}
+
+/// The key button of one camera value (the argument is its channel, one
+/// of `camera::VALUES`): keys it alone at the frame shown as it stands,
+/// or takes its key there away.
+fn camera_value_key(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let Some(channel) = crate::camera::VALUES
+        .iter()
+        .copied()
+        .find(|channel| *channel == call.arg)
+    else {
+        return;
+    };
+    if paint.here(&cx.world.arena).is_none() {
+        return;
+    }
+    let Some(folder) = paint.camera_folder(&cx.world.arena) else {
+        return;
+    };
+    let arena = &cx.world.arena;
+    let (frame, time) = paint.frame_time(arena);
+    let edit = if crate::camera::keyed(arena, folder, channel, time) {
+        crate::camera::delete_value_key(arena, folder, channel, time)
+    } else {
+        let size = paint
+            .picture()
+            .and_then(|picture| arena.get_by_id(picture).ok())
+            .and_then(sue_model::picture::size)
+            .unwrap_or([0, 0]);
+        let mut values = crate::camera::values(arena, folder, Some(time), size);
+        // What is shown: a value being set, else a camera being moved.
+        if let Some((pending, at, camera)) = paint.camera_pending
+            && pending == folder
+            && at == frame
+        {
+            let center = camera.unswung([values[4] as f32, values[5] as f32]);
+            values[..4].copy_from_slice(&[
+                f64::from(center[0]),
+                f64::from(center[1]),
+                f64::from(camera.scale),
+                f64::from(camera.angle),
+            ]);
+        }
+        if let Some((pending, at, was, value)) = paint.camera_value
+            && pending == folder
+            && at == frame
+            && let Some(index) = crate::camera::VALUES.iter().position(|key| *key == was)
+        {
+            values[index] = value;
+        }
+        let index = crate::camera::VALUES
+            .iter()
+            .position(|key| *key == channel)
+            .unwrap_or(0);
+        let ease = anim::motion::ease_at(arena, folder, time).unwrap_or(anim::motion::Ease::Linear);
+        Some(crate::camera::key_value(
+            arena,
+            folder,
+            channel,
+            time,
+            values[index],
+            ease,
+        ))
+    };
+    if let Some(edit) = edit {
+        SuePaint::apply(cx, edit);
+    }
+    paint.camera_value = None;
+    paint.camera_pending = None;
+}
+
 // ----- Run: onion skin and playback ----------------------------------------
 
 /// Enable Onion Skin, and back.
@@ -1458,6 +1544,25 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     )
     .state(render_camera_state)
     .with(Flags::PALETTE),
+    // A key button by each camera value in Tool Property: keys that value
+    // alone at the frame shown, or takes its key there away.
+    Command::family(
+        "anim.camera.value_key.",
+        "camera-value-keyframe",
+        "anim",
+        camera_value_key,
+    )
+    .icon("keyframe")
+    .state(doc_open)
+    .with(Flags::RECORDABLE)
+    .with(Flags::HIDDEN),
+    c(
+        "anim.camera.value_set",
+        "set-camera-value",
+        "keyframe",
+        camera_value_set,
+    )
+    .with(Flags::HIDDEN),
 ];
 
 /// The cels of the folder of the current track: its track, when it is an

@@ -671,6 +671,9 @@ pub struct SuePaint {
     /// A camera being set up and not keyed yet: its folder, the frame and
     /// where it stands.
     pub(crate) camera_pending: Option<(EntityId, u32, crate::camera::Camera)>,
+    /// One camera value being set in Tool Property and not keyed yet:
+    /// its folder, the frame, the value's channel and what it is set to.
+    pub(crate) camera_value: Option<(EntityId, u32, &'static str, f64)>,
     /// The Material palette: the kind it shows (0 all, then by the kinds
     /// registered) and the material picked, by name.
     pub(crate) material_kind: u8,
@@ -994,6 +997,7 @@ impl Default for SuePaint {
             timeline_view: crate::panels::timeline::TimelineView::default(),
             anim_ui: crate::panels::timeline::AnimUi::default(),
             camera_pending: None,
+            camera_value: None,
             view3d_before: None,
             pending_view3d: None,
             figure_joint: None,

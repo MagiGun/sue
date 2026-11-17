@@ -1030,6 +1030,9 @@ icons! {
     /// A diamond outline, the mark of a key on the timeline, with a plus
     /// at its lower right. Add a keyframe.
     KeyframeAdd = "keyframe-add" => animation::KEYFRAME_ADD,
+    /// The diamond of a key alone, solid when its value is keyed at
+    /// this frame. Key one value.
+    Keyframe = "keyframe" => animation::KEYFRAME,
     /// A solid diamond on a level track that runs out of both its sides.
     /// Keyframes are on for this layer.
     Keyframes = "keyframes" => animation::KEYFRAMES,
