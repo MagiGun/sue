@@ -461,8 +461,8 @@ impl Writer<'_> {
     /// columns), this one gets a copy of the row and its strokes, so no
     /// two layers share one row; `out` then points at the copy.
     fn keep_stroke(&mut self, index: i64, id: i64, out: &mut NativeRow) {
-        if !self.vectors.kept.contains_key(&index) {
-            self.vectors.kept.insert(index, id);
+        if let std::collections::hash_map::Entry::Vacant(slot) = self.vectors.kept.entry(index) {
+            slot.insert(id);
             return;
         }
         let Some(payload) = kept_table_named(self.doc, "VectorObjectList")
