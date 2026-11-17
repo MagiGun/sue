@@ -63,6 +63,7 @@ mod shell;
 mod shell_polish;
 mod tutorial_animate_2025;
 mod tutorial_animate_beginners;
+mod tutorial_crash_tips;
 mod tutorial_workspace;
 mod windows;
 mod writer;

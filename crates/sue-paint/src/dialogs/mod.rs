@@ -680,8 +680,8 @@ impl SuePaint {
             Dialog::Shape3D(kind) => self.shape_3d_ok(cx, kind),
             Dialog::Timeline(fps, length) => self.timeline_ok(cx, fps, length),
             Dialog::Onion(onion) => self.onion_ok(cx, &onion),
-            Dialog::Correction(layer, filter, before, _) => {
-                Self::correction_ok(cx, layer, &filter, &before);
+            Dialog::Correction(layer, filter, before, made) => {
+                Self::correction_ok(cx, layer, &filter, &before, made);
             }
             Dialog::Canvas(canvas) => self.canvas_ok(cx, &canvas),
             Dialog::Resolution(resolution) => self.resolution_ok(cx, &resolution),

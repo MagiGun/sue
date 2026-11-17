@@ -3519,3 +3519,5 @@ change-frame-rate-ellipsis = Change Frame Rate...
 change-frame-rate = Change Frame Rate
 export-options = Export options
 dithering = Dithering
+snap-angle = Snap angle
+snap-angle-hint = Turns the view in steps of this angle; Shift snaps by the same step

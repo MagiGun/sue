@@ -1275,8 +1275,21 @@ impl SuePaint {
     /// The current layer if raster tools can work on it: not a vector
     /// layer, which only pens, brushes and erasers draw on.
     pub(crate) fn paintable(&self, arena: &Arena) -> Result<doc::LayerInfo, String> {
-        let info = self.drawable(arena)?;
-        if crate::vector::is_vector(arena, info.id) {
+        self.paintable_on(arena, false)
+    }
+
+    /// As [`Self::paintable`], for a tool that lays its pixels in the mask
+    /// while Edit Mask is on (Fill, Gradient, Edit Fill and Delete, the
+    /// Blend tool): a layer of any kind whose mask is edited is taken, a
+    /// folder's too (CT-1, CT-2).
+    pub(crate) fn mask_paintable(&self, arena: &Arena) -> Result<doc::LayerInfo, String> {
+        self.paintable_on(arena, true)
+    }
+
+    fn paintable_on(&self, arena: &Arena, masks: bool) -> Result<doc::LayerInfo, String> {
+        let info = self.drawable_on(arena, masks)?;
+        let on_mask = masks && self.editing_mask_of(arena, info.id);
+        if !on_mask && crate::vector::is_vector(arena, info.id) {
             return Err(tr!("vector-layer-draw-pens-brushes-pick", name = info.name));
         }
         Ok(info)
@@ -1303,15 +1316,32 @@ impl SuePaint {
 
     /// The current layer if pens and brushes can draw on it.
     pub(crate) fn drawable(&self, arena: &Arena) -> Result<doc::LayerInfo, String> {
+        self.drawable_on(arena, false)
+    }
+
+    /// As [`Self::drawable`], for pens, brushes and erasers, which draw in
+    /// the mask while Edit Mask is on: a layer of any kind whose mask is
+    /// edited is taken, a folder's too.
+    pub(crate) fn mask_drawable(&self, arena: &Arena) -> Result<doc::LayerInfo, String> {
+        self.drawable_on(arena, true)
+    }
+
+    fn drawable_on(&self, arena: &Arena, masks: bool) -> Result<doc::LayerInfo, String> {
         if let Some(info) = self.layer_info(arena)
             && crate::three::is_3d(arena, info.id)
         {
             return Err(tr!("n-3d-layer-draw-layer-above-use", name = info.name));
         }
         let info = self.layer_info(arena).ok_or(tr!("pick-layer-draw-first"))?;
+        // While its mask is edited, a folder or any other kind of layer
+        // with a mask takes the strokes of a tool that knows masks there,
+        // in the mask's gray pixels. Other tools (figures, filters, warps)
+        // work on the layer's own pixels, so they still refuse a folder.
+        let on_mask = masks && self.editing_mask_of(arena, info.id);
         match info.kind {
             LayerKind::Raster => {}
             LayerKind::Paper => return Err(tr!("paper-layer-cannot-drawn")),
+            LayerKind::Other if on_mask => {}
             LayerKind::Other if doc::is_folder(arena, info.id) => {
                 return Err(tr!("folder-pick-layer-draw", name = info.name));
             }
@@ -1323,10 +1353,18 @@ impl SuePaint {
         if !info.style.visible {
             return Err(tr!("is-hidden", name = info.name));
         }
-        if doc::raster(arena, info.id).is_none_or(|raster| raster.format() != PixelFormat::Rgba8) {
+        if !on_mask
+            && doc::raster(arena, info.id)
+                .is_none_or(|raster| raster.format() != PixelFormat::Rgba8)
+        {
             return Err(tr!("is-not-an-rgba-layer", name = info.name));
         }
         Ok(info)
+    }
+
+    /// Whether Edit Mask is on and `layer` has a mask to edit.
+    fn editing_mask_of(&self, arena: &Arena, layer: EntityId) -> bool {
+        self.doc().is_some_and(|doc| doc.mask_edit) && doc::mask_of(arena, layer).is_some()
     }
 
     // ----- Keeping up with the arena ---------------------------------------

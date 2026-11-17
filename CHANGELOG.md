@@ -36,6 +36,7 @@ follow [Semantic Versioning](https://semver.org/).
   its track to another frame (a layer's, a folder's or the 2D camera's),
   one undo step.
 
+- Sue Paint, New: points (pt) are a unit beside px, cm, mm and in.
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
   fill (click an area and the gradient runs from its outline inward).
@@ -930,6 +931,21 @@ follow [Semantic Versioning](https://semver.org/).
   Enter or a click elsewhere (the field took the keys back); a drag on a
   layer's opacity slider is one undo step, not two.
 
+- Sue Paint: a new correction layer and the setting its dialog gave
+  it are one undo step; one Ctrl+Z takes the new layer away instead of
+  leaving it with its first setting.
+- Sue Paint, New: a registered canvas preset keeps the paper color and
+  Record timelapse too.
+- Sue Paint: a layer folder's mask takes the pen, the eraser, Fill
+  and the Blend tool while it is edited, as a raster layer's mask does
+  (strokes used to be refused with "pick a layer in it to draw on").
+- Sue Paint, Layer palette: a double click on a layer's name selects
+  the whole name for typing over, and Enter or a click elsewhere keeps
+  the new name (the field used to hold the keys for good, so the name
+  never changed).
+- Sue Paint, Rotate: Tool Property shows the Snap angle check box and
+  its step, so the view can turn in steps without holding Shift (the
+  setting was kept but had no row).
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its
   tip, and a flick no longer bends off the way the stroke was going.
 - Sue Paint: masks of older files become gray masks as the file opens,

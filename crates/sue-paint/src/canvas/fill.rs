@@ -99,9 +99,7 @@ impl SuePaint {
     /// shows the layer and the transparent color hides it, as brushes do
     /// there.
     pub(crate) fn area_target(&self, arena: &Arena) -> Result<AreaTarget, String> {
-        let info = self
-            .mask_layer(arena)
-            .unwrap_or_else(|| self.paintable(arena))?;
+        let info = self.mask_paintable(arena)?;
         let clear = self.transparent;
         let editing_mask = self.doc().is_some_and(|doc| doc.mask_edit);
         if editing_mask && let Some(mask) = doc::mask_of(arena, info.id) {

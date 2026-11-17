@@ -24,10 +24,12 @@ pub(crate) enum Unit {
     Cm,
     Mm,
     In,
+    /// Points, 72 to the inch, as Clip Studio Paint's New offers them.
+    Pt,
 }
 
 impl Unit {
-    const ALL: [Self; 4] = [Self::Px, Self::Cm, Self::Mm, Self::In];
+    const ALL: [Self; 5] = [Self::Px, Self::Cm, Self::Mm, Self::In, Self::Pt];
 
     fn label(self) -> &'static str {
         match self {
@@ -35,6 +37,7 @@ impl Unit {
             Self::Cm => "cm",
             Self::Mm => "mm",
             Self::In => "in",
+            Self::Pt => "pt",
         }
     }
 
@@ -45,6 +48,7 @@ impl Unit {
             Self::Cm => 2.54,
             Self::Mm => 25.4,
             Self::In => 1.0,
+            Self::Pt => 72.0,
         }
     }
 
@@ -614,6 +618,15 @@ impl NewDialog {
         if let Some(moving) = text("moving") {
             self.moving = moving == "1";
         }
+        if let Some(color) = text("paper_color")
+            .and_then(|hex| u32::from_str_radix(hex.trim_start_matches('#'), 16).ok())
+        {
+            let [_, r, g, b] = color.to_be_bytes();
+            self.paper_color = [r, g, b];
+        }
+        if let Some(timelapse) = text("timelapse") {
+            self.timelapse = timelapse == "1";
+        }
         self.preset = Some(preset.name.clone());
         self.size = 0;
     }
@@ -640,6 +653,10 @@ impl NewDialog {
         if self.project.is_comic() {
             more.push(("pages".to_owned(), self.pages.to_string()));
         }
+        // Tip 45: the paper color and Record timelapse are kept too.
+        let [r, g, b] = self.paper_color;
+        more.push(("paper_color".to_owned(), format!("#{r:02x}{g:02x}{b:02x}")));
+        more.push(("timelapse".to_owned(), u8::from(self.timelapse).to_string()));
         CanvasPreset {
             name,
             width: self.width,
@@ -1609,6 +1626,27 @@ mod tests {
         assert!((mm - 210.0).abs() < 0.5, "{mm}");
         dialog.name = "  ".to_owned();
         assert_eq!(dialog.spec().name, "Illustration");
+    }
+
+    #[test]
+    fn a_preset_keeps_the_paper_color_and_timelapse() {
+        let mut new = NewDialog::new(&NewPicture::default());
+        new.paper_color = [250, 240, 200];
+        new.timelapse = true;
+        let kept = CanvasPreset::from_line(&new.to_preset("Warm".to_owned()).to_line()).unwrap();
+        let mut back = NewDialog::new(&NewPicture::default());
+        back.apply_preset(&kept.preset());
+        assert_eq!(back.paper_color, [250, 240, 200]);
+        assert!(back.timelapse);
+    }
+
+    #[test]
+    fn points_are_a_unit_of_new_at_72_to_the_inch() {
+        assert_eq!(Unit::from_label("pt"), Some(Unit::Pt));
+        // An inch at 350 dpi is 350 pixels and 72 points.
+        let pixels = 350.0;
+        let points = pixels / 350.0 * Unit::Pt.per_inch(350.0);
+        assert!((points - 72.0).abs() < 1e-9);
     }
 
     #[test]
