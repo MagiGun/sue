@@ -716,7 +716,6 @@ impl SuePaint {
                 if tool == Tool::Figure {
                     figure::figure_properties(ui, rows, sub);
                 }
-                paint::paint_properties(ui, rows, tool, sub);
             }
             Tool::Fill | Tool::AutoSelect => {
                 fill::fill_properties(ui, rows, tool, sub, &mut self.select_op);

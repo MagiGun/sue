@@ -111,8 +111,6 @@ pub(crate) enum Dialog {
     Timelapse(Box<TimelapseDialog>),
     /// Register Material, Image: its name, tags, place and settings.
     Material(register::RegisterForm),
-    /// Register Material, Image: its name.
-    Material(String),
     /// Register Material, Template: its name.
     Template(String),
     /// View, Webtoon Display Settings.
@@ -617,7 +615,6 @@ impl SuePaint {
             Dialog::Timeline(fps, length) => timeline_ui(ui, fps, length, theme),
             Dialog::Shape3D(kind) => shape_3d_ui(ui, kind, theme),
             Dialog::Material(form) => register::register_ui(ui, form, theme),
-            Dialog::Material(name) => material_ui(ui, name, theme),
             Dialog::Template(name) => assets::template_ui(ui, name, theme),
             Dialog::WebtoonDisplay(display) => assets::webtoon_display_ui(ui, display, theme),
             Dialog::Timelapse(dialog) => dialog.ui(ui, theme),
@@ -681,7 +678,6 @@ impl SuePaint {
             Dialog::Perspective(perspective) => self.perspective_ok(cx, perspective),
             Dialog::Timelapse(dialog) => self.ask_export_timelapse(cx, dialog.export),
             Dialog::Material(form) => self.register_material(cx, &form),
-            Dialog::Material(name) => self.register_material(cx, &name),
             Dialog::Template(name) => self.register_template(cx, &name),
             Dialog::WebtoonDisplay(display) => self.webtoon_display_ok(cx, display),
             Dialog::SelectBy(3, width) => self.outline_selection(cx, width),

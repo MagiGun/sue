@@ -987,18 +987,6 @@ pub struct SubTool {
     /// whole, instead of the selected pixels (Move layers in the selected
     /// area).
     pub move_in_selection: bool,
-}
-
-/// The Light table sub tool's click puts its layers back where they were
-/// ([`SubTool::click`]).
-pub const LIGHT_TABLE_CLICK_RESETS: u8 = 1;
-/// A drag does nothing ([`SubTool::drag`]).
-pub const DRAG_DOES_NOTHING: u8 = 1;
-/// What Move layer moves ([`SubTool::move_target`]): the layer, the
-/// current layer's tone dots, or the picture's grid.
-pub const MOVES_LAYER: u8 = 0;
-pub const MOVES_TONE: u8 = 1;
-pub const MOVES_GRID: u8 = 2;
     /// Where a balloon's or frame's line color comes from (Line color).
     pub line_color: ColorPick,
     /// Where a balloon's inside color comes from (Fill color).
@@ -1030,6 +1018,17 @@ pub const MOVES_GRID: u8 = 2;
     /// the panels it makes, in pixels (Vertical and Horizontal gutter).
     pub gutter: [f32; 2],
 }
+
+/// The Light table sub tool's click puts its layers back where they were
+/// ([`SubTool::click`]).
+pub const LIGHT_TABLE_CLICK_RESETS: u8 = 1;
+/// A drag does nothing ([`SubTool::drag`]).
+pub const DRAG_DOES_NOTHING: u8 = 1;
+/// What Move layer moves ([`SubTool::move_target`]): the layer, the
+/// current layer's tone dots, or the picture's grid.
+pub const MOVES_LAYER: u8 = 0;
+pub const MOVES_TONE: u8 = 1;
+pub const MOVES_GRID: u8 = 2;
 
 /// Where a color a tool lays comes from: the drawing color (the main or
 /// the sub color, whichever is picked), the other of the two, or one of
