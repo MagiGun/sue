@@ -322,7 +322,10 @@ fn keys_out(curve: &Curve, rate: Rate) -> (Vec<ClipKey>, bool) {
     (keys, lost)
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 fn timeline_out(
     arena: &Arena,
     picture: EntityId,
@@ -781,7 +784,10 @@ fn curve_in(keys: &[ClipKey], rate: Rate) -> Curve {
     motion::smoothed(&curve)
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 fn timeline_into(
     doc: &ClipDocument,
     timeline: &ClipTimeline,

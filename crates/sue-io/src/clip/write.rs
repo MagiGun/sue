@@ -487,7 +487,10 @@ impl Writer<'_> {
     /// its fill, gradient, text or vector lines where the survey shows
     /// how, its palette color and its layer color's sub color. A layer
     /// whose kept columns already say the same keeps them as they are.
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one pass from top to bottom; split up, its steps would be read out of order"
+    )]
     fn native(&mut self, layer: &ClipLayer, id: i64) -> NativeRow {
         let mut out = NativeRow::default();
         let int = Value::Integer;
@@ -1078,7 +1081,10 @@ fn highest(doc: &ClipDocument) -> i64 {
 /// When the canvas is empty or too large, or what is kept from another
 /// file does not fit (a kept table named as one Sue writes, a kept row of
 /// a table Sue does not write, a shape with no columns).
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
     if doc.width == 0 || doc.height == 0 || doc.width > 300_000 || doc.height > 300_000 {
         return Err(format!(

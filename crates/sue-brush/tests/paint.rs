@@ -416,7 +416,10 @@ const ROWS: &[(&str, &str)] = &[
 ];
 
 /// Draws row `name` and returns its flattened pixels.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 fn row(name: &str) -> Vec<u8> {
     let tips = pictures();
     let grain = Paper::builtin("grain").expect("grain");

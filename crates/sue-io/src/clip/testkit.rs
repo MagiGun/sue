@@ -344,7 +344,10 @@ pub fn raster_subset(width: u32, height: u32, seed: u64) -> ClipDocument {
 /// whole tables, columns on the layer, canvas and bitmap rows, rows no
 /// layer reaches (a second mipmap level with its own stored bitmap), and
 /// a column of `ExternalChunk`.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 pub fn add_foreign(doc: &mut ClipDocument, seed: u64) {
     let mut random = Seeded::new(seed);
     // Chunks of kinds no reader knows.

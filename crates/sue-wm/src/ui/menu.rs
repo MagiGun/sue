@@ -621,7 +621,7 @@ impl MenuState {
 
     /// One menu of the open ones.
     #[allow(clippy::too_many_arguments, reason = "one popup of a nested menu")]
-    #[allow(clippy::too_many_lines, reason = "one menu, row by row")]
+    #[expect(clippy::too_many_lines, reason = "one menu, row by row")]
     fn popup(
         &mut self,
         ctx: &Context,

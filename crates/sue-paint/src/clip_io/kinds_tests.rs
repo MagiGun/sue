@@ -34,7 +34,10 @@ fn named(arena: &Arena, picture: EntityId, name: &str) -> EntityId {
 /// A picture with a layer of every kind this package maps, comps,
 /// rulers and an animation: an animation folder of three cels and a
 /// blank key, a moving layer, a camera and a sound.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 fn a_rich_picture(arena: &mut Arena) -> EntityId {
     let (edit, picture) = doc::create(&NewPicture {
         width: 120,
@@ -785,7 +788,10 @@ fn the_bouncing_ball_of_the_tutorial_converts_both_ways() {
 /// driving Clip Studio) to open and note what Clip Studio shows.
 #[test]
 #[ignore = "writes files for a person to open in Clip Studio"]
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 fn write_kinds_for_the_hands_on_check() {
     let Some(dir) = std::env::var_os("SUE_CLIP_HANDS_ON") else {
         return;
@@ -1272,7 +1278,10 @@ fn a_layer_changed_in_sue_goes_back_in_clip_studios_storage_again() {
 /// Sue shows each once Clip Studio has saved it (Sue's own tables gone).
 #[test]
 #[ignore = "writes files for a person to open in Clip Studio"]
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 fn write_native_kinds_for_the_hands_on_check() {
     let Some(dir) = std::env::var_os("SUE_CLIP_INBOX") else {
         return;

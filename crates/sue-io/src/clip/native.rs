@@ -417,7 +417,10 @@ fn text_box(text: &ClipText, dpi: f64) -> [i32; 4] {
 /// The records of a text, in the order Clip Studio writes them. `full`
 /// gives the style runs their data (`TextLayerAttributes`); otherwise
 /// they are written short, as in `TextLayerAddAttributesV01`.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 fn text_records(text: &ClipText, dpi: f64, full: bool) -> Vec<Record> {
     let first = text.runs.first();
     let count = u32::try_from(text.plain().encode_utf16().count()).unwrap_or(u32::MAX);

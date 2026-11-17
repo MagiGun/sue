@@ -348,7 +348,10 @@ pub fn encode_content(content: &ClipContent) -> Vec<u8> {
 /// # Errors
 /// When `kind` is not a content part or the bytes are not laid out as
 /// this build writes them.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 pub fn decode_content(kind: &str, bytes: &[u8]) -> Result<ClipContent> {
     let mut r = Reader::new(bytes);
     let r = &mut r;

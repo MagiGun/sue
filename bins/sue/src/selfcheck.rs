@@ -858,7 +858,7 @@ fn check_picture_file(
     )
 }
 
-#[allow(
+#[expect(
     clippy::too_many_lines,
     reason = "one scripted session through the shell"
 )]

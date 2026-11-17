@@ -268,7 +268,7 @@ fn rgb(color: [u8; 3]) -> String {
 ///
 /// # Errors
 /// If a font cannot be read.
-#[allow(clippy::too_many_lines, reason = "one PDF, object by object")]
+#[expect(clippy::too_many_lines, reason = "one PDF, object by object")]
 pub fn write_pdf(doc: &PdfDocument) -> Result<Vec<u8>, String> {
     let mut objects = Objects {
         out: b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec(),

@@ -297,7 +297,10 @@ pub fn encode_psd(psd: &Psd, big: bool) -> Result<Vec<u8>, String> {
 /// # Errors
 /// If the document is larger than the version allows, or a layer's or
 /// mask's pixels do not fit its size.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 pub fn encode_psd_at(psd: &Psd, big: bool, dpi: Option<f64>) -> Result<Vec<u8>, String> {
     let max = if big { PSB_MAX_SIDE } else { PSD_MAX_SIDE };
     if psd.width == 0 || psd.height == 0 || psd.width.max(psd.height) > max {
@@ -547,7 +550,10 @@ fn tagged_layers(r: &mut Reader<'_>, end: usize, depth: u16) -> Result<Vec<PsdLa
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 fn read_layers(r: &mut Reader<'_>, depth: u16) -> Result<Vec<PsdLayer>, String> {
     let count = (r.u16()? as i16).unsigned_abs() as usize;
     let mut records = Vec::with_capacity(count);

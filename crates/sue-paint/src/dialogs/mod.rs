@@ -317,7 +317,7 @@ impl Look {
 
 impl Dialog {
     /// The dialog's title, width and footer.
-    #[allow(clippy::too_many_lines, reason = "one arm per dialog")]
+    #[expect(clippy::too_many_lines, reason = "one arm per dialog")]
     fn look(&self) -> Look {
         use Width::{Double, Form, Narrow, Wide};
         let ok = Footer::ok_cancel;

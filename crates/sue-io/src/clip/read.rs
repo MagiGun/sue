@@ -426,7 +426,10 @@ fn plain_part<'a>(rows: &Rows<'a>, row: usize, columns: &[&str]) -> Option<(Stri
 /// # Errors
 /// When `bytes` is not a `.clip`, a chunk or its database is broken, the
 /// canvas is not a valid size, or the layer tree loops.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 pub fn read(bytes: &[u8]) -> Result<ClipDocument, String> {
     let layout = layout(bytes)?;
     if let Some(problem) = layout.problem {

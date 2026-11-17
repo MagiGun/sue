@@ -125,7 +125,7 @@ fn arc(center: Pos2, radius: f32, from: f32, to: f32) -> Vec<Pos2> {
 }
 
 /// Draws `icon` inside `rect` in `color`.
-#[allow(clippy::too_many_lines, reason = "one drawing per icon")]
+#[expect(clippy::too_many_lines, reason = "one drawing per icon")]
 pub fn paint(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     let side = rect.width().min(rect.height());
     let area = Rect::from_center_size(rect.center(), vec2(side, side));

@@ -430,7 +430,6 @@ impl SuePaint {
         );
     }
 
-    #[allow(clippy::too_many_lines, reason = "the layer palette's tabs")]
     pub(crate) fn layer_panel(
         &mut self,
         ui: &mut Ui,
@@ -736,7 +735,7 @@ impl SuePaint {
 
     /// The rows of the list in `area`, scrolled on their own (`salt`).
     #[allow(clippy::too_many_arguments, reason = "one pane of the list")]
-    #[allow(clippy::too_many_lines, reason = "one row and all it shows")]
+    #[expect(clippy::too_many_lines, reason = "one row and all it shows")]
     fn layer_rows(
         &mut self,
         ui: &mut Ui,

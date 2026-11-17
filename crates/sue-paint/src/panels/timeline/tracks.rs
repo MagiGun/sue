@@ -489,7 +489,7 @@ impl SuePaint {
     }
 
     /// The tracks of the Timeline palette, in `area` under its bar.
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "the whole frames area, drawn in order"
     )]

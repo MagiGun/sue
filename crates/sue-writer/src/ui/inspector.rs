@@ -137,7 +137,7 @@ impl SueWriter {
     }
 
     /// What the inspector shows of `target`.
-    #[allow(clippy::too_many_lines, reason = "the inspector's sections in order")]
+    #[expect(clippy::too_many_lines, reason = "the inspector's sections in order")]
     fn inspector_body(
         &mut self,
         ui: &mut Ui,

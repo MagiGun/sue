@@ -242,7 +242,7 @@ impl SuePaint {
     }
 
     /// Puppet warp's bar over the canvas.
-    #[allow(clippy::too_many_lines, reason = "one control after another")]
+    #[expect(clippy::too_many_lines, reason = "one control after another")]
     fn puppet_bar(&mut self, ui: &mut Ui, viewport: Rect, theme: &Theme) -> Option<BarAction> {
         let pins = self.warp.as_ref().map_or(0, |warp| warp.pins.len());
         let settings = &mut self.transform_prefs.puppet;
