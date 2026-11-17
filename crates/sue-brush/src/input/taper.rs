@@ -10,7 +10,10 @@
 //! speed" stretches them by up to 1.7 times the share of full speed the
 //! pen had: at the start the mean over its first 25 ms, at the end the
 //! speed it has there (in fade mode the start's, so the fade is known
-//! as it is drawn).
+//! as it is drawn). A device with no pressure (a mouse) has nothing
+//! else to thin its ends, so by speed its tapers keep at least their set
+//! lengths and stretch from there: a slow mouse stroke still comes to a
+//! point, a quick one to a longer one, as a pen user's would.
 //!
 //! The ending is applied while the pen is down, at the stroke's end as
 //! it stands, so it does not change shape on the lift. Over the ending
@@ -59,10 +62,13 @@ pub(crate) struct Shaper {
     speeds: (f32, u32),
     /// The mean speed share over the starting time, once it is over.
     start_speed: Option<f32>,
+    /// The device has no pressure (a mouse): by speed, the tapers keep
+    /// at least their set lengths.
+    pressureless: bool,
 }
 
 impl Shaper {
-    pub fn new(taper: Taper, min_width: f32) -> Self {
+    pub fn new(taper: Taper, min_width: f32, pressureless: bool) -> Self {
         let clean = |length: f32| {
             if length.is_finite() {
                 length.max(0.0)
@@ -86,6 +92,18 @@ impl Shaper {
             start: None,
             speeds: (0.0, 0),
             start_speed: None,
+            pressureless,
+        }
+    }
+
+    /// How much "by speed" stretches a taper at speed share `share`: up
+    /// to [`BY_SPEED`] times at full speed, from nothing for a pen and
+    /// from its set length for a device with no pressure.
+    fn stretch(&self, share: f32) -> f32 {
+        if self.pressureless {
+            1.0 + (BY_SPEED - 1.0) * share
+        } else {
+            BY_SPEED * share
         }
     }
 
@@ -180,13 +198,12 @@ impl Shaper {
             _ => (self.taper.start, self.taper.end),
         };
         if self.taper.by_speed {
-            start *= BY_SPEED * start_speed;
-            end *= BY_SPEED
-                * if self.taper.mode == TaperMode::Fade {
-                    start_speed
-                } else {
-                    end_speed
-                };
+            start *= self.stretch(start_speed);
+            end *= self.stretch(if self.taper.mode == TaperMode::Fade {
+                start_speed
+            } else {
+                end_speed
+            });
         }
         if self.taper.mode == TaperMode::Fade {
             let up = if start > 0.0 { ease(s / start) } else { 1.0 };
@@ -226,8 +243,8 @@ impl Shaper {
             _ => (self.taper.start, self.taper.end),
         };
         if self.taper.by_speed {
-            start *= BY_SPEED * start_speed;
-            end *= BY_SPEED * end_speed;
+            start *= self.stretch(start_speed);
+            end *= self.stretch(end_speed);
         }
         let fit = (start + end) / (FIT * length);
         if fit > 1.0 {

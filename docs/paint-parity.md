@@ -388,7 +388,7 @@ The order of work is the plan at the end.
 | --- | --- | --- | --- |
 | Pen tools with sub tools | Tools | done | Clip Studio's eleven pens, G-pen to Flat marker |
 | Sketch tools: Pencil, Mechanical pencil, Charcoal, Crayon, Pastel, Chalk | Tool > Sketch | done | Clip Studio's six sketch tools |
-| Brush tools with color mixing | Tools | done | Watercolor and gouache pick up and drag the color underneath |
+| Brush tools with color mixing | Tools | done | Gouache, oil paint, pastel and the wet wash pick up and drag the color underneath, covering as fully as the pen presses; the watercolor brushes pool at their edge instead |
 | Airbrush | Tools | done | A soft sub tool |
 | Decoration tool | Tool | done | Eighteen sub tools on Sue's brush: scattered shapes (stars, hearts, sparkles, snow, flowers, bubbles), shapes along the line (leaves, chain, lace, stitches, dotted and dashed lines) and ribbons bent along the stroke (rope, rickrack, film strip, checkered band, stitched ribbon, lace ribbon). Tool Property has Lay as a ribbon, Turn along the line, Angle, Scatter, Size jitter and Turn jitter. Downloaded decorations come in with Add from downloads |
 | Tool palette in Clip Studio Paint 4's order, with the main and sub colors and the transparent color beneath | Tool palette | done | Move holds hand, zoom and move layer; Comic holds frame border and balloon |

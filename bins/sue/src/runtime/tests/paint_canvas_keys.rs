@@ -394,7 +394,16 @@ fn alt_picks_a_color_with_fill_and_a_right_click_picks_too() {
     };
     let [width, height] = size(&driver);
     let center = [i64::from(width / 2), i64::from(height / 2)];
-    assert!(pixel(&driver, layer, center)[3] > 0, "the line is there");
+    // The Pencil catches the paper's grain (0.0.8), so the middle pixel
+    // itself may be a valley the lead skipped: the line is there when
+    // pixels about it hold graphite.
+    let near = (-4..=4).flat_map(|dy| (-12..=12).map(move |dx| [dx, dy]));
+    assert!(
+        near.filter(|[dx, dy]| pixel(&driver, layer, [center[0] + dx, center[1] + dy])[3] > 0)
+            .count()
+            > 40,
+        "the line is there"
+    );
     // The Fill tool, Alt and a click on the white paper: white.
     driver.command("tool.fill");
     driver.settle(2);

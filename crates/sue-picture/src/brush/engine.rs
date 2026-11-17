@@ -6,10 +6,11 @@
 //! built-in sub tool whose tip is as Sue ships it, the built-in preset
 //! itself (with every paint behaviour the old text has no word for:
 //! spray, a dual brush, a watercolor edge); for a tip someone changed,
-//! the tip's text read as a preset, with the built-in's behaviours kept
-//! where the text says nothing of them. [`line_brush`] adds the tip's
-//! pictures, kept by hash, so a stroke paints the same in any run and a
-//! vector line keeps what it needs to be painted again.
+//! the tip's text read as a preset, with what of the built-in the text
+//! says nothing of kept (`sue_brush::presets::keep_unsaid`).
+//! [`line_brush`] adds the tip's pictures, kept by hash, so a stroke
+//! paints the same in any run and a vector line keeps what it needs to
+//! be painted again.
 
 use std::sync::Arc;
 
@@ -62,18 +63,10 @@ pub fn preset_of(tip: &Tip, base: Option<&BrushPreset>) -> BrushPreset {
         preset.tip = read.tip;
         return preset;
     }
-    // Changed: the tip's settings, and the built-in's behaviours the
-    // tip's text has no word for.
-    let mut preset = read;
-    for (key, bytes) in &base.extra {
-        if preset.extra(key).is_none() && !key.starts_with(BrushPreset::LEGACY) {
-            preset.extra.push((key.clone(), bytes.clone()));
-        }
-    }
-    for (key, value) in &base.params {
-        preset.params.entry(key.clone()).or_insert(*value);
-    }
-    preset
+    // Changed: the tip's settings, and what of the built-in the tip's
+    // text has no word for (its behaviours, its paper's size and mode,
+    // how it mixes, its other bindings).
+    sue_brush::presets::keep_unsaid(base, read)
 }
 
 /// The brush `tip` paints with on the engine (see [`preset_of`]), its
