@@ -101,6 +101,8 @@ impl SuePaint {
                     if matches!(self.gesture, Some(Gesture::Engine(_))) {
                         self.engine_abandon(cx);
                     }
+                    // Tone dots or the grid held: back where they were.
+                    self.nudge_abandon(cx);
                     self.gesture = None;
                 }
             }
@@ -272,6 +274,16 @@ impl SuePaint {
                     pressed: true,
                     modifiers,
                 } => {
+                    // Change Canvas Size open: its box's handles take
+                    // the press, though the dialog holds the rest.
+                    if button == PointerButton::Primary
+                        && self.gesture.is_none()
+                        && viewport.contains(pos)
+                        && !covered(pos)
+                        && self.canvas_size_press(pos, viewport, size)
+                    {
+                        continue;
+                    }
                     // Two fingers down are a pinch or a pan, never a stroke.
                     // A pen tapped quickly can come near, touch and go away
                     // within one frame: nothing is hovered by the frame's

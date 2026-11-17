@@ -63,7 +63,7 @@ pub(crate) enum Pivot {
 
 impl Pivot {
     /// The choices the bar lists, in reading order, then Free.
-    const LIST: [Self; 10] = [
+    pub(crate) const LIST: [Self; 10] = [
         Self::Point(0, 0),
         Self::Point(1, 0),
         Self::Point(2, 0),
@@ -76,7 +76,7 @@ impl Pivot {
         Self::Free,
     ];
 
-    fn label(self) -> String {
+    pub(crate) fn label(self) -> String {
         match self {
             Self::Middle | Self::Point(1, 1) => tr!("pivot-middle"),
             Self::Point(0, 0) => tr!("pivot-top-left"),
@@ -116,6 +116,8 @@ pub(crate) struct TransformPrefs {
     pub mesh: [usize; 2],
     /// Where a new transform puts its rotation centre.
     pub pivot: Pivot,
+    /// How the moved pixels are sampled (Interpolation method).
+    pub interpolation: transform::Interpolation,
     /// Puppet warp's settings.
     pub puppet: crate::warp::PuppetSettings,
 }
@@ -127,6 +129,7 @@ impl Default for TransformPrefs {
             keep_original: false,
             mesh: [4, 4],
             pivot: Pivot::Middle,
+            interpolation: transform::Interpolation::Smooth,
             // A mesh square of 16 pixels: as fine as a bend needs, and
             // coarse enough to see the drawing through its lines.
             puppet: crate::warp::PuppetSettings {
@@ -172,9 +175,9 @@ impl Part {
     }
 }
 
-/// What a transform's preview shows: the box, the lattice's points and
-/// whether the original stays under it.
-pub(crate) type Shown = (Quad, Option<Vec<[f32; 2]>>, bool);
+/// What a transform's preview shows: the box, the lattice's points,
+/// whether the original stays under it and how the pixels are sampled.
+pub(crate) type Shown = (Quad, Option<Vec<[f32; 2]>>, bool, transform::Interpolation);
 
 /// A transform in progress.
 #[derive(Clone, Debug)]
@@ -201,6 +204,9 @@ pub(crate) struct TransformSession {
     pub shown: Option<Shown>,
     /// The selection was transformed, so it moves along.
     pub selected: bool,
+    /// Tool Property's OK (`true`) or Cancel (`false`) was pressed: the
+    /// canvas ends the transform on its next frame.
+    pub asked: Option<bool>,
     /// The layers with only their piece, for the lattice to bend.
     alone: Vec<Vec<u8>>,
 }
@@ -270,7 +276,7 @@ impl TransformSession {
     }
 
     /// Back to where it started.
-    fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         let [x0, y0, x1, y1] = self.rect;
         self.center = [(x0 + x1) / 2.0, (y0 + y1) / 2.0];
         self.scale = [1.0, 1.0];
@@ -287,8 +293,14 @@ impl TransformSession {
         self.mesh.as_ref().map(|mesh| mesh.to.clone())
     }
 
-    /// The pixels of part `index` as the box puts them.
-    fn render(&self, index: usize, keep_original: bool) -> Vec<u8> {
+    /// The pixels of part `index` as the box puts them, sampled as
+    /// `interpolation` says.
+    fn render(
+        &self,
+        index: usize,
+        keep_original: bool,
+        interpolation: transform::Interpolation,
+    ) -> Vec<u8> {
         let part = &self.parts[index];
         let [w, h] = part.size;
         if let Some(mesh) = &self.mesh {
@@ -315,13 +327,14 @@ impl TransformSession {
             let [x, y] = transform::on_quad(&quad, at);
             [x - ox, y - oy]
         });
-        transform::place(
+        transform::place_with(
             part.base(keep_original),
             w,
             h,
             &part.piece,
             part.piece_size(),
             &local,
+            interpolation,
         )
     }
 }
@@ -520,28 +533,32 @@ impl SuePaint {
             mesh: mesh.then(|| Lattice::over(rect, columns, rows)),
             shown: None,
             selected: selection.is_some(),
+            asked: None,
             alone,
         };
         if session.pivot == Pivot::Free {
             session.pivot = Pivot::Middle;
         }
         session.reset();
-        session.shown = Some((session.quad(), session.points(), false));
+        // Every way of sampling shows an untouched box as it was.
+        let interpolation = self.transform_prefs.interpolation;
+        session.shown = Some((session.quad(), session.points(), false, interpolation));
         self.transform = Some(session);
     }
 
     /// Shows the layers with the pieces where the box puts them.
     pub(crate) fn transform_preview(&mut self, cx: &mut AppletContext<'_>) {
         let keep = self.transform_prefs.keep_original;
+        let interpolation = self.transform_prefs.interpolation;
         let Some(session) = self.transform.as_mut() else {
             return;
         };
-        let now = (session.quad(), session.points(), keep);
+        let now = (session.quad(), session.points(), keep, interpolation);
         if session.shown.as_ref() == Some(&now) {
             return;
         }
         for index in 0..session.parts.len() {
-            let pixels = session.render(index, keep);
+            let pixels = session.render(index, keep, interpolation);
             if let Some(bytes) = doc::raster_mut(&mut cx.world.arena, session.parts[index].layer)
                 .and_then(RasterTile2D::bytes_mut)
                 .filter(|bytes| bytes.len() == pixels.len())
@@ -564,6 +581,7 @@ impl SuePaint {
         };
         self.gesture = None;
         let keep_original = self.transform_prefs.keep_original;
+        let interpolation = self.transform_prefs.interpolation;
         let label = if session.mesh.is_some() {
             tr!("mesh-transformation")
         } else {
@@ -592,12 +610,19 @@ impl SuePaint {
                 // keeps what is moved off the canvas, so moving it back
                 // brings it back.
                 if session.mesh.is_none()
-                    && Self::grow_for_transform(cx, &session, index, &quad, keep_original, &label)
+                    && Self::grow_for_transform(
+                        cx,
+                        &session,
+                        index,
+                        &quad,
+                        (keep_original, interpolation),
+                        &label,
+                    )
                 {
                     continue;
                 }
                 let part = &session.parts[index];
-                let after = session.render(index, keep_original);
+                let after = session.render(index, keep_original, interpolation);
                 if let Some(bytes) = doc::raster_mut(&mut cx.world.arena, part.layer)
                     .and_then(RasterTile2D::bytes_mut)
                     .filter(|bytes| bytes.len() == after.len())
@@ -639,7 +664,7 @@ impl SuePaint {
         session: &TransformSession,
         index: usize,
         quad: &Quad,
-        keep_original: bool,
+        (keep_original, interpolation): (bool, transform::Interpolation),
         label: &str,
     ) -> bool {
         let part = &session.parts[index];
@@ -678,13 +703,14 @@ impl SuePaint {
             base[at..at + row].copy_from_slice(&source[y * row..(y + 1) * row]);
         }
         let moved: Quad = local.map(|[x, y]| [x - low[0] as f32, y - low[1] as f32]);
-        let after = transform::place(
+        let after = transform::place_with(
             &base,
             grown_width,
             grown_height,
             &part.piece,
             part.piece_size(),
             &moved,
+            interpolation,
         );
         let Ok(grown) = RasterTile2D::from_bytes(
             grown_width,
@@ -1067,6 +1093,16 @@ impl SuePaint {
         } else if escape && !typing {
             action = Some(BarAction::Cancel);
         }
+        // OK or Cancel pressed in Tool Property.
+        match self
+            .transform
+            .as_mut()
+            .and_then(|session| session.asked.take())
+        {
+            Some(true) => action = Some(BarAction::Ok),
+            Some(false) => action = Some(BarAction::Cancel),
+            None => {}
+        }
         match action {
             Some(BarAction::Reset) => {
                 if let Some(session) = self.transform.as_mut() {
@@ -1314,6 +1350,15 @@ impl SuePaint {
     }
 }
 
+/// What people read for an interpolation method.
+pub(crate) fn interpolation_label(choice: transform::Interpolation) -> String {
+    match choice {
+        transform::Interpolation::Nearest => tr!("tp-interpolation-nearest"),
+        transform::Interpolation::Smooth => tr!("tp-interpolation-smooth"),
+        transform::Interpolation::Bicubic => tr!("tp-interpolation-bicubic"),
+    }
+}
+
 /// A small muted name before the control it names, on a bar.
 pub(crate) fn caption(ui: &mut Ui, text: &str, theme: &Theme) {
     ui.label(
@@ -1460,6 +1505,7 @@ mod tests {
             mesh: None,
             shown: None,
             selected: false,
+            asked: None,
             alone: Vec::new(),
         };
         session.reset();

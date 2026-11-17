@@ -476,14 +476,17 @@ impl SuePaint {
             body.shrink2(vec2(pad, theme.space(Space::S3))),
             "tool-panel",
         );
-        // A gradient layer edited from Tool Property is named in the
-        // title, since the rows below are the layer's, not the sub tool's.
-        let sub_name = match self.edited_gradient_layer(&cx.world.arena) {
-            Some(layer) => self
+        // A gradient layer edited from Tool Property, or an open
+        // transform, is named in the title, since the rows below are the
+        // layer's or the transform's, not the sub tool's.
+        let transforming = self.transform_title();
+        let sub_name = match (&transforming, self.edited_gradient_layer(&cx.world.arena)) {
+            (Some(name), _) => name.clone(),
+            (None, Some(layer)) => self
                 .layer_info(&cx.world.arena)
                 .filter(|info| info.id == layer)
                 .map_or_else(|| tr!("gradient"), |info| info.name),
-            None => crate::localize(&self.toolbox.current().name),
+            (None, None) => crate::localize(&self.toolbox.current().name),
         };
         inner.horizontal(|ui| {
             ui.label(
@@ -492,6 +495,9 @@ impl SuePaint {
                     .strong()
                     .color(theme.text),
             );
+            if transforming.is_some() {
+                return;
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let detail = tr!("open-sub-tool-detail");
                 if sue_wm::ui::icon_button("sue-paint-open-detail", Icon::Wrench, &detail)
@@ -504,14 +510,14 @@ impl SuePaint {
                 self.sub_tool_header_buttons(ui, theme);
             });
         });
-        if self.toolbox.current().locked {
+        if self.toolbox.current().locked && transforming.is_none() {
             inner.label(
                 RichText::new(tr!("sub-tool-settings-locked"))
                     .size(theme.text_size(TextRole::Caption))
                     .color(theme.text_muted()),
             );
         }
-        if tool.paints() {
+        if tool.paints() && transforming.is_none() {
             self.stroke_preview(&mut inner, cx, theme);
         }
         let command = egui::ScrollArea::vertical()

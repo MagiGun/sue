@@ -12,6 +12,16 @@ use crate::fill::{Exclude, Refer};
 use crate::studio::SuePaint;
 use crate::tools::Tool;
 
+/// An Exclude row with every toggle off: the Eyedropper then reads what
+/// is shown as it is.
+const NOTHING_LEFT_OUT: Exclude = Exclude {
+    drafts: false,
+    text: false,
+    paper: false,
+    locked: false,
+    editing: false,
+};
+
 impl SuePaint {
     /// The topmost shown layer with paint under picture point `p`, less
     /// what `exclude` leaves out (Select layer's Exclude row).
@@ -89,7 +99,8 @@ impl SuePaint {
         }
     }
 
-    /// Picks the color under `pos`: as shown (`mode` 0), or from the
+    /// Picks the color under `pos`: as shown (`mode` 0, less what the
+    /// Eyedropper's Exclude row leaves out), or from the
     /// layers (1) the Eyedropper's Reference names, the editing one unless
     /// it says more, less what its Exclude row leaves out. Picking from
     /// layers where none has paint picks the transparent color.
@@ -109,8 +120,45 @@ impl SuePaint {
             return;
         }
         let (x, y) = (p.x as u32, p.y as u32);
+        let leaves_out = {
+            let sub = self.toolbox.of(Tool::Eyedropper);
+            (sub.exclude != NOTHING_LEFT_OUT).then_some(sub.exclude)
+        };
         let rgba = if mode == 0 {
-            doc.compositor.pixel(x, y)
+            match leaves_out {
+                // What is shown, less the layers its Exclude row leaves
+                // out; nothing shown there picks nothing.
+                Some(exclude) => {
+                    let arena = &cx.world.arena;
+                    let layers = crate::fill::ReferLayer::of_picture(arena, doc.picture);
+                    let keep =
+                        crate::fill::referred(&layers, doc.layer, &doc.picked, Refer::All, exclude);
+                    let mut view = self.frame_view(arena).unwrap_or_default();
+                    // Onion skins are seen, not picked.
+                    view.onion.clear();
+                    view.hidden.extend(
+                        layers
+                            .iter()
+                            .filter(|layer| !layer.folder && !keep.contains(&layer.id))
+                            .map(|layer| layer.id),
+                    );
+                    let pixel = crate::composite::render_view(
+                        arena,
+                        doc.picture,
+                        [x, y, x + 1, y + 1],
+                        crate::composite::RenderOptions {
+                            paper: !exclude.paper,
+                            drafts: !exclude.drafts,
+                        },
+                        Some(&view),
+                    );
+                    pixel
+                        .get(..4)
+                        .map(|pixel| [pixel[0], pixel[1], pixel[2], pixel[3]])
+                        .filter(|pixel| pixel[3] > 0)
+                }
+                None => doc.compositor.pixel(x, y),
+            }
         } else {
             let sub = self.toolbox.of(Tool::Eyedropper);
             let arena = &cx.world.arena;

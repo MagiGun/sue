@@ -3,8 +3,9 @@
 //! hands frame border and effect line layers, 3D layers and the camera
 //! frame to their own handles, as its Selectable object says. Select layer
 //! picks the layer painted where it is clicked, or every layer painted in
-//! the box it drags out. Light table drags the light table's layers, and
-//! Edit timeline steps through the frames by a click or a drag.
+//! the box it drags out. Light table drags the light table's layers (a
+//! click can put them back), and Edit timeline steps through the frames
+//! by a click or a drag, as their Tool Property says.
 
 use egui::{Modifiers, Pos2, Rect};
 use sue_core::EntityId;
@@ -259,6 +260,30 @@ impl SuePaint {
             doc.layer = Some(*first);
             doc.picked = rest.to_vec();
         }
+    }
+
+    /// The light table's layers let go. A press that moved nothing is a
+    /// click: with the Light table sub tool in hand and its Click set to
+    /// reset, the layers go back where they were.
+    pub(super) fn light_table_let_go(&mut self, gesture: Gesture, cx: &mut AppletContext<'_>) {
+        let Gesture::LightTable { layers, .. } = &gesture else {
+            return;
+        };
+        let still = layers.iter().all(|(layer, before, _)| {
+            cx.world
+                .arena
+                .get_by_id(*layer)
+                .is_ok_and(|entity| crate::anim::Place::of(entity) == *before)
+        });
+        let sub = self.toolbox.current();
+        let resets = self.toolbox.tool() == Tool::Operation
+            && sub.mode == OPERATION_LIGHT_TABLE
+            && sub.click == crate::tools::LIGHT_TABLE_CLICK_RESETS;
+        if still && resets {
+            self.run("anim.light_table.reset", cx);
+            return;
+        }
+        self.light_table_release(gesture, cx);
     }
 
     /// Edit timeline's click: one frame on, or back, as it says.

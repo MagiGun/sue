@@ -23,11 +23,102 @@ pub(crate) struct CanvasDialog {
     pub old: [u32; 2],
     /// 0 top left to 8 bottom right, row by row.
     pub anchor: u8,
+    /// Where the old top left corner lands once the box's handles on the
+    /// canvas were dragged; `None` while the reference point places it.
+    pub placed: Option<[i64; 2]>,
+    /// The picture it changes: the box shows on it alone, and OK does
+    /// nothing once another picture is in front.
+    pub picture: Option<EntityId>,
 }
 
+/// The most pixels a side of the canvas takes.
+const MOST: i64 = 30_000;
+
+/// How near the pointer must come to one of the canvas box's handles, in
+/// screen points, to grab it.
+const REACH: f32 = 10.0;
+
 impl CanvasDialog {
+    /// The dialog for `picture`, a canvas of `size`, kept to its middle.
+    pub(crate) fn new(size: [u32; 2], picture: Option<EntityId>) -> Self {
+        Self {
+            size,
+            old: size,
+            anchor: 4,
+            placed: None,
+            picture,
+        }
+    }
+
+    /// The new canvas in the old picture's pixels: left, top, right and
+    /// bottom.
+    pub(crate) fn rect(&self) -> [i64; 4] {
+        let [x, y] = self.shift();
+        [
+            -x,
+            -y,
+            i64::from(self.size[0]) - x,
+            i64::from(self.size[1]) - y,
+        ]
+    }
+
+    /// The box's handle `handle` (0 to 3 the corners from the top left
+    /// clockwise, 4 to 7 the edges from the top, 8 the whole box) moved by
+    /// `by` picture pixels from this box: the new size and place.
+    #[must_use]
+    pub(crate) fn dragged(&self, handle: usize, by: [i64; 2]) -> Self {
+        let [mut left, mut top, mut right, mut bottom] = self.rect();
+        let (moves_left, moves_top, moves_right, moves_bottom) = match handle {
+            0 => (true, true, false, false),
+            1 => (false, true, true, false),
+            2 => (false, false, true, true),
+            3 => (true, false, false, true),
+            4 => (false, true, false, false),
+            5 => (false, false, true, false),
+            6 => (false, false, false, true),
+            7 => (true, false, false, false),
+            _ => (true, true, true, true),
+        };
+        if moves_left {
+            left += by[0];
+        }
+        if moves_right {
+            right += by[0];
+        }
+        if moves_top {
+            top += by[1];
+        }
+        if moves_bottom {
+            bottom += by[1];
+        }
+        // Never narrower than a pixel or wider than the most: the edge
+        // that moves stops.
+        if right - left < 1 || right - left > MOST {
+            if moves_left && !moves_right {
+                left = right - (right - left).clamp(1, MOST);
+            } else {
+                right = left + (right - left).clamp(1, MOST);
+            }
+        }
+        if bottom - top < 1 || bottom - top > MOST {
+            if moves_top && !moves_bottom {
+                top = bottom - (bottom - top).clamp(1, MOST);
+            } else {
+                bottom = top + (bottom - top).clamp(1, MOST);
+            }
+        }
+        Self {
+            size: [(right - left) as u32, (bottom - top) as u32],
+            placed: Some([-left, -top]),
+            ..*self
+        }
+    }
+
     /// Where the old top left corner lands.
     pub(crate) fn shift(&self) -> [i64; 2] {
+        if let Some(placed) = self.placed {
+            return placed;
+        }
         let (column, row) = (i64::from(self.anchor % 3), i64::from(self.anchor / 3));
         [
             (i64::from(self.size[0]) - i64::from(self.old[0])) * column / 2,
@@ -242,7 +333,17 @@ pub(super) fn canvas_ui(ui: &mut Ui, canvas: &mut CanvasDialog, theme: &Theme) -
             );
         });
         form.row(&bare(tr!("reference-point")), |ui| {
-            anchor_ui(ui, "sue-paint-canvas-anchor", &mut canvas.anchor, theme);
+            // Placed by the box's handles: no reference point holds it,
+            // so none is lit. One picked places the picture by it again.
+            let mut shown = if canvas.placed.is_some() {
+                u8::MAX
+            } else {
+                canvas.anchor
+            };
+            if anchor_ui(ui, "sue-paint-canvas-anchor", &mut shown, theme) {
+                canvas.anchor = shown;
+                canvas.placed = None;
+            }
         });
     });
     note(
@@ -250,7 +351,148 @@ pub(super) fn canvas_ui(ui: &mut Ui, canvas: &mut CanvasDialog, theme: &Theme) -
         &tr!("now-by-px", value = canvas.old[0], value2 = canvas.old[1]),
         theme,
     );
+    note(ui, &tr!("canvas-size-drag-handles"), theme);
     Outcome::Open
+}
+
+impl SuePaint {
+    /// The box of Change Canvas Size, while it is open, on the canvas in
+    /// `viewport`: the new canvas's edge with a handle at each corner and
+    /// in the middle of each side, and what falls outside it dimmed.
+    pub(crate) fn canvas_size_marks(&self, ui: &Ui, viewport: Rect, size: [u32; 2], theme: &Theme) {
+        let Some(super::Dialog::Canvas(canvas)) = &self.dialog else {
+            return;
+        };
+        if canvas.picture != self.picture() {
+            return;
+        }
+        let Some(view) = self.doc().map(|doc| doc.view) else {
+            return;
+        };
+        let painter = ui.painter().with_clip_rect(viewport);
+        let points = canvas_size_points(canvas, |p| {
+            view.to_screen(viewport, size, egui::pos2(p[0], p[1]))
+        });
+        // What the new canvas leaves out of the old picture, dimmed.
+        let [left, top, right, bottom] = canvas.rect().map(|value| value as f32);
+        let (w, h) = (size[0] as f32, size[1] as f32);
+        let screen = |x: f32, y: f32| view.to_screen(viewport, size, egui::pos2(x, y));
+        let shade = theme.scrim();
+        for [x0, y0, x1, y1] in [
+            [0.0, 0.0, w, top.max(0.0)],
+            [0.0, bottom.min(h), w, h],
+            [0.0, top.max(0.0), left.max(0.0), bottom.min(h)],
+            [right.min(w), top.max(0.0), w, bottom.min(h)],
+        ] {
+            if x1 > x0 && y1 > y0 {
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        screen(x0, y0),
+                        screen(x1, y0),
+                        screen(x1, y1),
+                        screen(x0, y1),
+                    ],
+                    shade,
+                    egui::Stroke::NONE,
+                ));
+            }
+        }
+        crate::canvas::marks::guide(&painter, points[..4].to_vec(), true, theme);
+        let held = match &self.gesture {
+            Some(crate::studio::Gesture::CanvasSize { handle, .. }) => Some(*handle),
+            _ => None,
+        };
+        for (index, at) in points.iter().enumerate() {
+            crate::canvas::marks::handle(&painter, *at, held == Some(index), theme);
+            crate::launchers::note_mark(ui.ctx(), &format!("canvas_size.{index}"), *at);
+        }
+    }
+
+    /// A press on the canvas while Change Canvas Size is open, at `pos`
+    /// on screen: grabs a handle of its box, or the box itself. `false`
+    /// when the press is not the box's.
+    pub(crate) fn canvas_size_press(
+        &mut self,
+        pos: egui::Pos2,
+        viewport: Rect,
+        size: [u32; 2],
+    ) -> bool {
+        let Some(super::Dialog::Canvas(canvas)) = &self.dialog else {
+            return false;
+        };
+        if canvas.picture != self.picture() {
+            return false;
+        }
+        let Some(view) = self.doc().map(|doc| doc.view) else {
+            return false;
+        };
+        let points = canvas_size_points(canvas, |p| {
+            view.to_screen(viewport, size, egui::pos2(p[0], p[1]))
+        });
+        let near = points
+            .iter()
+            .enumerate()
+            .map(|(index, at)| (index, at.distance(pos)))
+            .filter(|(_, distance)| *distance <= REACH)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(index, _)| index);
+        let inside = egui::Rect::from_points(&points[..4]).contains(pos);
+        let Some(handle) = near.or(inside.then_some(8)) else {
+            return false;
+        };
+        self.gesture = Some(crate::studio::Gesture::CanvasSize {
+            handle,
+            start: view.to_picture(viewport, size, pos),
+            from: *canvas,
+        });
+        true
+    }
+
+    /// Change Canvas Size's box dragged to `pos` (on screen): its size
+    /// and place follow, in whole pixels.
+    pub(crate) fn canvas_size_drag(&mut self, pos: egui::Pos2, viewport: Rect, size: [u32; 2]) {
+        let Some(crate::studio::Gesture::CanvasSize {
+            handle,
+            start,
+            from,
+        }) = &self.gesture
+        else {
+            return;
+        };
+        let Some(view) = self.doc().map(|doc| doc.view) else {
+            return;
+        };
+        let p = view.to_picture(viewport, size, pos);
+        let by = [
+            (p.x - start.x).round() as i64,
+            (p.y - start.y).round() as i64,
+        ];
+        let next = from.dragged(*handle, by);
+        if let Some(super::Dialog::Canvas(canvas)) = self.dialog.as_mut() {
+            *canvas = next;
+        }
+    }
+}
+
+/// The screen points of `canvas`'s box handles: its four corners from
+/// the top left clockwise, then the middles of its sides from the top.
+fn canvas_size_points(
+    canvas: &CanvasDialog,
+    screen: impl Fn([f32; 2]) -> egui::Pos2,
+) -> [egui::Pos2; 8] {
+    let [left, top, right, bottom] = canvas.rect().map(|value| value as f32);
+    let (mx, my) = ((left + right) / 2.0, (top + bottom) / 2.0);
+    [
+        [left, top],
+        [right, top],
+        [right, bottom],
+        [left, bottom],
+        [mx, top],
+        [right, my],
+        [mx, bottom],
+        [left, my],
+    ]
+    .map(screen)
 }
 
 /// Change Image Resolution: the size in pixels (keeping its shape) and the
@@ -891,6 +1133,19 @@ impl SuePaint {
 
     /// Changes the canvas size.
     pub(super) fn canvas_ok(&mut self, cx: &mut AppletContext<'_>, canvas: &CanvasDialog) {
+        // The canvas stays in reach while the dialog is open: another
+        // picture come to the front, or this one's size changed since
+        // (undone, say), is left as it is.
+        let same = canvas.picture.is_some()
+            && self.picture() == canvas.picture
+            && self
+                .picture()
+                .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
+                .and_then(sue_model::picture::size)
+                == Some(canvas.old);
+        if !same {
+            return;
+        }
         if let Some(picture) = self.picture() {
             match doc::resize_canvas(&cx.world.arena, picture, canvas.size, canvas.shift()) {
                 Ok(edit) => {

@@ -1,8 +1,9 @@
 //! The view tools on the canvas: Hand (scroll, or turn with its Rotate
 //! sub tool, in steps of its Snap angle or of 45 degrees with Shift) and
-//! Zoom (a click zooms by half again, a drag zooms as it goes or around
-//! the area dragged out), and the scroll and turn drags that the middle
-//! button and the Space and Shift keys borrow.
+//! Zoom (a click zooms by half again, a drag zooms as it goes, around
+//! the area dragged out, or not at all, as its Tool Property says), and
+//! the scroll and turn drags that the middle button and the Space and
+//! Shift keys borrow.
 
 use egui::{Pos2, Rect};
 use sue_wm::AppletContext;
@@ -26,6 +27,9 @@ const SCRUB_FRAME: f32 = 16.0;
 /// The Zoom tool's drag: 0 zooms as the pointer goes (right zooms in),
 /// 1 zooms to the area dragged out (Zoom tool, Tool Property).
 pub(crate) const ZOOM_AREA: u8 = 1;
+
+/// The Zoom tool's drag does nothing; a click still zooms.
+pub(crate) const ZOOM_DRAG_NONE: u8 = 2;
 
 /// The Shift step of a turn when the Rotate sub tool has no Snap angle.
 const SHIFT_STEP: f32 = 45.0;
@@ -189,10 +193,10 @@ impl SuePaint {
     ) {
         let Some(Gesture::Scrub {
             tool,
+            sub,
             start,
             base,
             moved,
-            ..
         }) = self.gesture.as_mut()
         else {
             return;
@@ -201,6 +205,14 @@ impl SuePaint {
             return;
         }
         *moved = true;
+        // A drag set to do nothing: no longer a click either.
+        let still = match *tool {
+            Tool::Zoom => sub.kind == ZOOM_DRAG_NONE,
+            _ => sub.drag == crate::tools::DRAG_DOES_NOTHING,
+        };
+        if still {
+            return;
+        }
         let (tool, start, base, across) = (*tool, *start, *base, pos.x - start.x);
         if tool == Tool::Zoom {
             if let Some(doc) = self.docs.get_mut(self.active) {

@@ -175,6 +175,8 @@ impl SuePaint {
         self.tone_overlay(ui, viewport, size, cx);
         self.page_frames(ui, viewport, size, cx, theme);
         self.overlays(ui, viewport, size, &response, cx, theme);
+        // Change Canvas Size's box, while the dialog is open.
+        self.canvas_size_marks(ui, viewport, size, theme);
         self.comic_overlay(ui, viewport, size, cx, theme);
         self.view_marks(ui, viewport, size, cx, theme);
         self.typing_ui(ui, viewport, size, cx);

@@ -605,6 +605,18 @@ pub fn write_snapshots_with(
     height: u32,
     options: &Options,
 ) -> Result<Vec<PathBuf>, String> {
+    tour_with(dir, width, height, options, scenes::run)
+}
+
+/// Boots Sue as [`write_snapshots_with`] does and runs `run` on the tour
+/// in place of every scene: a part of the tour, to look at one area.
+fn tour_with(
+    dir: &Path,
+    width: u32,
+    height: u32,
+    options: &Options,
+    run: impl FnOnce(&mut Tour<'_>) -> Result<(), String>,
+) -> Result<Vec<PathBuf>, String> {
     let theme = options.preset.as_deref().map(preset).transpose()?;
     std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
     let gpu = GpuContext::headless().map_err(|error| error.to_string())?;
@@ -662,7 +674,7 @@ pub fn write_snapshots_with(
         desktop: [width, height],
         keep_notices: false,
     };
-    scenes::run(&mut tour)?;
+    run(&mut tour)?;
     let Tour {
         mut written,
         entering,

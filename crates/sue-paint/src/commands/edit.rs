@@ -438,11 +438,10 @@ fn canvas_size(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     let Some((size, _)) = canvas_measures(paint, cx) else {
         return;
     };
-    paint.dialog = Some(Dialog::Canvas(crate::dialogs::CanvasDialog {
-        size,
-        old: size,
-        anchor: 4,
-    }));
+    let picture = paint.picture();
+    paint.dialog = Some(Dialog::Canvas(crate::dialogs::CanvasDialog::new(
+        size, picture,
+    )));
 }
 
 /// Clip Studio Paint's Change canvas height: the canvas's size, for a

@@ -15,6 +15,37 @@ pub const DIVISIONS: &str = "paint.grid.divisions";
 /// Where the grid starts: 0 the top left corner, 1 the middle (`Int`).
 pub const ORIGIN: &str = "paint.grid.origin";
 
+/// How far the grid is moved from where it starts, across and down, in
+/// pixels (`Float`; Move layer's Move grid).
+pub const SHIFT_X: &str = "paint.grid.shift_x";
+pub const SHIFT_Y: &str = "paint.grid.shift_y";
+
+/// How far `picture`'s grid is moved from its origin, in pixels.
+#[must_use]
+pub fn shift_of(arena: &Arena, picture: EntityId) -> [f32; 2] {
+    let Ok(entity) = arena.get_by_id(picture) else {
+        return [0.0; 2];
+    };
+    [SHIFT_X, SHIFT_Y].map(|key| {
+        entity
+            .property(key)
+            .and_then(Value::as_f64)
+            .filter(|value| value.is_finite())
+            .map_or(0.0, |value| value as f32)
+    })
+}
+
+/// Where `picture`'s grid starts on a picture of `size`: its origin,
+/// moved by its shift, kept within one cell of the origin since a grid
+/// moved by a whole cell looks the same.
+#[must_use]
+pub fn origin_of(arena: &Arena, picture: EntityId, size: [u32; 2]) -> [f32; 2] {
+    let grid = Grid::of(arena, picture);
+    let origin = grid.origin_in(size);
+    let shift = shift_of(arena, picture);
+    [0, 1].map(|axis| origin[axis] + shift[axis].rem_euclid(grid.gap))
+}
+
 /// The smallest and largest gap a grid takes.
 pub const GAPS: std::ops::RangeInclusive<f64> = 2.0..=4096.0;
 /// The most parts a cell is divided into.
@@ -136,5 +167,28 @@ mod tests {
         assert_eq!(Grid::of(&arena, picture), Grid::default());
         history.redo(&mut arena).unwrap();
         assert_eq!(Grid::of(&arena, picture), grid);
+    }
+
+    #[test]
+    fn a_moved_grid_starts_where_it_was_moved_to() {
+        let mut arena = Arena::new();
+        let mut history = UndoStack::new();
+        let (edit, picture) = create(&NewPicture {
+            width: 200,
+            height: 100,
+            ..NewPicture::default()
+        })
+        .unwrap();
+        history.apply(&mut arena, edit).unwrap();
+        assert_eq!(origin_of(&arena, picture, [200, 100]), [0.0, 0.0]);
+        let moved = Edit::new("move grid")
+            .then(SetProperty::new(picture, SHIFT_X, 10.0))
+            .then(SetProperty::new(picture, SHIFT_Y, -4.0));
+        history.apply(&mut arena, moved).unwrap();
+        assert_eq!(shift_of(&arena, picture), [10.0, -4.0]);
+        // Down by -4 is up by 60 within a 64 pixel cell.
+        assert_eq!(origin_of(&arena, picture, [200, 100]), [10.0, 60.0]);
+        history.undo(&mut arena).unwrap();
+        assert_eq!(shift_of(&arena, picture), [0.0, 0.0]);
     }
 }

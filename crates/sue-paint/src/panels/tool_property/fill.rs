@@ -151,7 +151,7 @@ fn area_rows(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
 /// Refer multiple: whether more than the editing layer is looked at,
 /// which layers, and the five kinds of layer it can leave out, as a row
 /// of toggles (lit: left out).
-fn refer_rows(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
+pub(super) fn refer_rows(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
     rows.check(
         ui,
         "refer-multiple",
@@ -180,14 +180,21 @@ fn refer_rows(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
     }
     let mut exclude = sub.exclude;
     rows.row(ui, "exclude", Category::Reference, |ui, theme, enabled| {
-        exclude_row(ui, &mut exclude, enabled, theme);
+        exclude_row(ui, &mut exclude, true, enabled, theme);
     });
     sub.exclude = exclude;
 }
 
-/// The Exclude row: draft, text, editing, paper and locked layers, each
-/// a toggle with its name in its tooltip.
-fn exclude_row(ui: &mut Ui, exclude: &mut Exclude, enabled: bool, theme: &Theme) {
+/// The Exclude row: draft, text, editing (when `editing` offers it),
+/// paper and locked layers, each a toggle with its name in its tooltip.
+pub(super) fn exclude_row(
+    ui: &mut Ui,
+    exclude: &mut Exclude,
+    editing: bool,
+    enabled: bool,
+    theme: &Theme,
+) {
+    let offers_editing = editing;
     let Exclude {
         drafts,
         text,
@@ -216,6 +223,9 @@ fn exclude_row(ui: &mut Ui, exclude: &mut Exclude, enabled: bool, theme: &Theme)
         ui.spacing_mut().item_spacing.x = theme.space(Space::S1);
         super::name_cell(ui, &tr!("exclude"), super::name_width(theme), theme);
         for (salt, icon, name, on) in toggles {
+            if salt == "editing" && !offers_editing {
+                continue;
+            }
             let response = ui::icon_button(("sue-paint-exclude", salt), icon, &name)
                 .selected(*on)
                 .enabled(enabled)
@@ -302,24 +312,7 @@ pub(super) fn gradient_properties(
         0.0,
         100.0,
     );
-    let modes: Vec<String> = sue_model::BlendMode::ALL
-        .iter()
-        .map(|mode| sue_lang::translate("model", mode.label()))
-        .collect();
-    let mut chosen = sue_model::BlendMode::ALL
-        .iter()
-        .position(|mode| *mode == sub.blend)
-        .unwrap_or(0);
-    if rows.choice(
-        ui,
-        "gradient-blend",
-        Category::Ink,
-        &tr!("blending-mode"),
-        &mut chosen,
-        &modes,
-    ) {
-        sub.blend = sue_model::BlendMode::ALL[chosen];
-    }
+    super::blend_mode_row(ui, rows, "gradient-blend", &mut sub.blend);
     if !contour {
         rows.hint(ui, &tr!("gradient-drag-hint"));
     }

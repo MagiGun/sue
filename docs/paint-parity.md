@@ -194,7 +194,7 @@ The order of work is the plan at the end.
 
 | Feature | Clip Studio | Sue | Notes |
 | --- | --- | --- | --- |
-| Scale/Rotate | Edit > Transform | done | Drag the box, or type the size and angle |
+| Scale/Rotate | Edit > Transform | done | Drag the box, or type the size and angle in Tool Property or the bar; Interpolation (hard edges, smooth or bicubic) in Tool Property |
 | Scale alone, Rotate alone | Edit > Transform | done | Modes of the transform bar; the rotation centre moves anywhere |
 | Free Transform | Edit > Transform | done | Each corner on its own |
 | Distort, Skew | Edit > Transform | done | Modes of the transform bar; Ctrl on a corner distorts in any mode |
@@ -203,7 +203,7 @@ The order of work is the plan at the end.
 | Puppet Warp | Edit > Transform | done | Pins that pick together (Shift), turn (their ring) and bend each part alone; its Tool Property on the bar |
 | Flip Horizontal, Flip Vertical, Rotate 180 (the layer) | Edit > Transform | done | |
 | Change Image Resolution | Edit > Change Image Resolution | done | Bicubic, through the resampler every export uses |
-| Change Canvas Size | Edit > Change Canvas Size | done | Around a reference point |
+| Change Canvas Size | Edit > Change Canvas Size | done | Around a reference point, or by the handles of its box on the canvas |
 | Change Canvas Height (webtoons) | Edit > Change Canvas Height | partial | It opens Change Canvas Size to do it |
 | Crop | Edit > Crop | done | To the selection |
 | Canvas Properties | Edit > Canvas Properties | partial | Command exists; verify |

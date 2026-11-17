@@ -516,6 +516,11 @@ impl SuePaint {
         if look.enter_is_the_bodys {
             host = host.enter_is_the_bodys();
         }
+        if matches!(dialog, Dialog::Canvas(_)) {
+            // Change Canvas Size's box is dragged on the canvas while it
+            // is open: the canvas stays in reach.
+            host = host.modeless();
+        }
         if look.footer.is_empty() {
             // The body's own buttons are the way out (Escape and the
             // window's close box still cancel).

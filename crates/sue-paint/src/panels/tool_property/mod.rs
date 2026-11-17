@@ -13,12 +13,14 @@ mod correct;
 mod effect;
 mod fill;
 mod lines;
+mod operation;
 mod paint;
 mod ruler;
 mod select;
 mod shape;
 mod text;
 mod three;
+mod transform;
 
 use std::ops::RangeInclusive;
 
@@ -648,6 +650,36 @@ pub(crate) fn name_cell(ui: &mut Ui, label: &str, width: f32, theme: &Theme) {
     );
 }
 
+/// A Blending mode row over `blend`: how the tool's color mixes with
+/// the pixels under it. Returns `true` when another was picked.
+pub(crate) fn blend_mode_row(
+    ui: &mut Ui,
+    rows: &mut Rows<'_>,
+    id: &str,
+    blend: &mut sue_model::BlendMode,
+) -> bool {
+    let modes: Vec<String> = sue_model::BlendMode::ALL
+        .iter()
+        .map(|mode| sue_lang::translate("model", mode.label()))
+        .collect();
+    let mut chosen = sue_model::BlendMode::ALL
+        .iter()
+        .position(|mode| mode == blend)
+        .unwrap_or(0);
+    let changed = rows.choice(
+        ui,
+        id,
+        Category::Ink,
+        &tr!("blending-mode"),
+        &mut chosen,
+        &modes,
+    );
+    if changed {
+        *blend = sue_model::BlendMode::ALL[chosen];
+    }
+    changed
+}
+
 /// The names of `options` in the language in use.
 pub(crate) fn names(options: &[&str]) -> Vec<String> {
     options
@@ -697,37 +729,18 @@ impl SuePaint {
                 fill::gradient_properties(ui, rows, self.toolbox.current_mut(), parts);
             }
             Tool::Select => select::select_properties(ui, rows, sub, &mut self.select_op),
-            Tool::Eyedropper => {
-                rows.choice_u8(
-                    ui,
-                    "eyedropper-reference",
-                    Category::Operation,
-                    &tr!("refer"),
-                    &mut sub.mode,
-                    &[tr!("obtain-display-color"), tr!("obtain-layer-color")],
-                );
-            }
-            Tool::Zoom => {
-                rows.choice_u8(
-                    ui,
-                    "zoom-direction",
-                    Category::Operation,
-                    &tr!("mode"),
-                    &mut sub.mode,
-                    &[tr!("zoom-in-on-click"), tr!("zoom-out-on-click")],
-                );
-                rows.hint(ui, &tr!("alt-click-does-the-opposite"));
-            }
+            Tool::Eyedropper => operation::eyedropper_properties(ui, rows, sub),
+            Tool::Zoom => operation::zoom_properties(ui, rows, sub),
             Tool::Hand => hand_properties(ui, rows, sub),
-            Tool::MoveLayer => rows.hint(ui, &tr!("drag-move-current-layer")),
+            Tool::MoveLayer => operation::move_properties(ui, rows, sub),
             Tool::Ruler => command = ruler::ruler_properties(ui, rows, sub),
             Tool::CorrectLine => correct::correct_line_properties(ui, rows, sub),
             Tool::Blend => paint::blend_properties(ui, rows, sub),
             Tool::Frame => comic::frame_properties(ui, rows, sub),
             Tool::Balloon => comic::balloon_properties(ui, rows, sub),
             Tool::Text => text::text_properties(ui, rows, sub, self.typing.as_mut(), theme),
-            // The Object tool: what it does on the layer in hand.
-            Tool::Operation => rows.hint(ui, &tr!("object-tool-hint")),
+            // The Operation tool's four sub tools.
+            Tool::Operation => operation::operation_properties(ui, rows, sub),
             _ => rows.hint(ui, &tr!("tool-arrives-later-sue-paint")),
         }
         command
@@ -759,6 +772,12 @@ impl SuePaint {
         arena: &sue_core::Arena,
         theme: &Theme,
     ) -> Option<&'static str> {
+        // A transform open: its settings, whatever the tool (not Move
+        // layer's drag of selected pixels, which lifts them the same way).
+        if self.transforming() {
+            self.transform_properties(ui, theme);
+            return None;
+        }
         if tool == Tool::Operation
             && let Some(folder) = self.camera_folder(arena)
         {

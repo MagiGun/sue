@@ -649,6 +649,31 @@ follow [Semantic Versioning](https://semver.org/).
   animation folder's cels.
 - Sue Paint, Timeline: a right click on the frames offers Thumbnail
   Size, as Clip Studio Paint's does.
+- Sue Paint, Tool Property: the Zoom tool sets what a click does and
+  what a drag does (zoom as it goes, zoom to the area dragged out, or
+  nothing). Object sets what a press on a layer's clear part does (move
+  the layer, pick the layer painted there, nothing) and which things it
+  picks. Select layer has an Exclude row (draft, text, paper and locked
+  layers). Light table sets its drag (move or turn) and its click
+  (nothing, or put the layers back); Edit timeline its click (next or
+  previous frame) and its drag (step through the frames, or nothing).
+- Sue Paint, Move layer: it can move the current layer's tone dots
+  (its paint stays) or the grid, and with "Move layers in the selection"
+  every layer painted inside the selection moves whole. Each move is one
+  undo step.
+- Sue Paint, Eyedropper: Obtain Display Color has an Exclude row, so a
+  draft or a locked layer over the colors can be looked past; Obtain
+  Layer Color shows Refer multiple with its layers and Exclude row.
+- Sue Paint, Lasso fill: a Blending mode row; the fill mixes with the
+  paint under it as it says.
+- Sue Paint, transforms: Tool Property shows the transform while it is
+  open (Reset, the flips, Cancel and OK, the mode, the centre of
+  rotation, Keep original image, the scale across and down and the angle
+  as numbers, the position) and an Interpolation choice: hard edges,
+  smooth, or sharp and smooth (bicubic).
+- Sue Paint, Change Canvas Size: the new canvas shows on the canvas
+  while the dialog is open, with a handle at each corner and side; drag
+  them to set the size, or inside the box to place the picture in it.
 
 ### Changed
 

@@ -167,6 +167,8 @@ impl SuePaint {
             Some(Gesture::Keyed { .. }) => self.keyed_drag(pos, viewport, size, cx),
             Some(Gesture::Lines(_)) => self.lines_drag(pos, viewport, size, cx),
             Some(Gesture::GradientLine { .. }) => self.gradient_line_drag(pos, viewport, size),
+            Some(Gesture::Nudge { .. }) => self.nudge_drag(pos, viewport, size, cx),
+            Some(Gesture::CanvasSize { .. }) => self.canvas_size_drag(pos, viewport, size),
         }
     }
 
@@ -269,7 +271,7 @@ impl SuePaint {
             }
             Gesture::Outline { sub, points } => self.balloon_drawn(points, &sub, cx),
             Gesture::Comic(edit) => self.finish_comic_edit(*edit, cx),
-            gesture @ Gesture::LightTable { .. } => self.light_table_release(gesture, cx),
+            gesture @ Gesture::LightTable { .. } => self.light_table_let_go(gesture, cx),
             Gesture::LassoFill { sub, close, points } => {
                 self.lasso_fill(&sub, close, &points, size, cx);
             }
@@ -291,6 +293,8 @@ impl SuePaint {
             gesture @ Gesture::ShrinkLasso { .. } => self.shrink_release(gesture, size, cx),
             Gesture::Lines(gesture) => self.lines_release(*gesture, cx),
             gesture @ Gesture::GradientLine { .. } => self.gradient_line_release(gesture, cx),
+            gesture @ Gesture::Nudge { .. } => self.nudge_release(gesture, cx),
+            Gesture::CanvasSize { .. } => {}
         }
     }
 }
