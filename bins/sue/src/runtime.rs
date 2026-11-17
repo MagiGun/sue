@@ -458,7 +458,7 @@ impl Runtime {
                     .get_bool("updates.check_automatically")
                     .unwrap_or(true)
             {
-                self.updater.check_if_due(unix_now());
+                self.updater.check_at_start();
             }
         }
         self.poll_system_dialogs(textures, now);

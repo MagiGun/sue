@@ -179,7 +179,7 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
         declare(
             "updates.check_automatically",
             toggle(true),
-            "Look for a newer Sue when it starts, at most once a day",
+            "Look for a newer Sue every time it starts",
         ),
     ]
 }

@@ -184,7 +184,7 @@ packages-require_signatures = Only signed packages
 ## [updates]
 
 updates-check_automatically = Check automatically
-    .description = Look for a newer Sue when it starts, at most once a day
+    .description = Look for a newer Sue every time it starts
 
 ## [sue_paint]
 

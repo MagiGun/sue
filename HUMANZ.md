@@ -3540,11 +3540,14 @@ GitHub releases of MagiGun/sue. The OS side lives in
   `api.github.com/repos/MagiGun/sue/releases/latest` on a thread (`ureq`
   with rustls, ring and Mozilla's roots from `webpki-roots`, so no system TLS
   library; not in the browser) and reads the tag, notes, page and files into
-  a `Release`. `is_newer(tag, SUE_VERSION)` compares with `semver` after
-  dropping build metadata, so a development build after a release
-  (`0.0.4+dev.3`) is not offered that release. At startup the runtime checks
-  when `updates.check_automatically` is on and the last automatic check
-  (`<data>/updates/checked.txt`) is a day old; Check for Updates
+  a `Release`. `is_update(release, SUE_VERSION, built)` decides: the same version
+  (build metadata dropped, so `0.0.4+dev.3` is not offered 0.0.4) is never
+  an update, and otherwise a release published after this copy was built
+  (`SUE_BUILD_DATE`, noted by `bins/sue/build.rs`) is one, whatever its
+  number: 0.0.8 sorts below 0.0.75 as a semantic version, which hid it
+  from 0.0.75. Without a date `is_newer` compares with `semver` as before.
+  At startup the runtime checks, every start, when
+  `updates.check_automatically` is on; Check for Updates
   (`app.check_updates`) is in the Sue menu and in Settings.
 - **Choosing.** `Install::detect` tells how this copy was installed: Program
   Files (setup or .msi, winget's too), a portable folder or Scoop on

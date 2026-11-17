@@ -191,7 +191,7 @@ top or bottom, or by itself as the keys move.
 
 ### Keeping Sue up to date
 
-When Sue starts it looks for a newer release, at most once a day, without
+When Sue starts it looks for a newer release, every time, without
 getting in your way: if there is one, a small window in the bottom right
 corner says so and shows what is new. **Check for Updates** in the Sue menu
 (or in Settings, under Packages & Updates) looks right away. Turn **Check
