@@ -752,3 +752,21 @@ fn a_kept_pen_stored_with_whole_numbers_is_found_again() {
     assert_eq!(table(&bytes, "BrushStyle").unwrap().1.len(), 1);
     assert_eq!(table(&bytes, "BrushEffectorGraphData").unwrap().1.len(), 2);
 }
+
+#[test]
+fn a_kept_stroke_row_stays_while_its_layer_points_at_it() {
+    // A layer whose kept columns point at a stroke row, with content of
+    // another kind (as a newer Sue might write): the row and its chunk
+    // stay, since only new strokes may take a row's place.
+    let doc = picture();
+    let saved = without_sue_tables(&write(&doc).unwrap());
+    let mut opened = read(&saved).unwrap();
+    opened.root.children[3].content = Some(text("Words"));
+    let bytes = write(&opened).unwrap();
+    assert_eq!(table(&bytes, "VectorObjectList").unwrap().1.len(), 1);
+    let back = read(&bytes).unwrap();
+    assert!(matches!(
+        back.root.children[3].content,
+        Some(ClipContent::Text(_))
+    ));
+}

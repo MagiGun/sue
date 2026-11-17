@@ -500,10 +500,14 @@ impl Writer<'_> {
                 .and_then(|index| kept_strokes(self.doc, index))
                 .map(ClipContent::Vector)
         });
-        if reads.is_some() && kept == reads {
-            if let Some(index) = stroke {
-                self.vectors.kept.insert(index, id);
-            }
+        // A kept stroke row stays unless new strokes take its place.
+        let replaced = !(reads.is_some() && kept == reads);
+        if let Some(index) = stroke
+            && !(replaced && matches!(content, ClipContent::Vector(_)))
+        {
+            self.vectors.kept.insert(index, id);
+        }
+        if !replaced {
             return out;
         }
         match content {
