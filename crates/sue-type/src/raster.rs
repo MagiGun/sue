@@ -496,6 +496,45 @@ fn rule(
     line: &LaidLine,
     under: bool,
 ) -> Vec<[[f32; 2]; 4]> {
+    joined(glyph_rules(spec, metrics, line, under))
+}
+
+/// `bands` with each one that carries straight on from the one before
+/// (its start edge is the last one's end edge, the same way along) made
+/// one with it: a rule drawn in pieces shows faint seams where the
+/// pieces' soft edges meet.
+fn joined(bands: Vec<[[f32; 2]; 4]>) -> Vec<[[f32; 2]; 4]> {
+    let same = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 0.01 && (a[1] - b[1]).abs() < 0.01;
+    let along = |band: &[[f32; 2]; 4]| {
+        let d = [band[1][0] - band[0][0], band[1][1] - band[0][1]];
+        let length = d[0].hypot(d[1]);
+        (length > 0.0).then(|| [d[0] / length, d[1] / length])
+    };
+    let mut out: Vec<[[f32; 2]; 4]> = Vec::with_capacity(bands.len());
+    for band in bands {
+        if let Some(last) = out.last_mut()
+            && same(last[1], band[0])
+            && same(last[2], band[3])
+            && let (Some(a), Some(b)) = (along(last), along(&band))
+            && (a[0] * b[1] - a[1] * b[0]).abs() < 1e-3
+            && a[0] * b[0] + a[1] * b[1] > 0.0
+        {
+            last[1] = band[1];
+            last[2] = band[2];
+            continue;
+        }
+        out.push(band);
+    }
+    out
+}
+
+/// The rule of [`rule`] as a band along each glyph.
+fn glyph_rules(
+    spec: &TextSpec<'_>,
+    metrics: &Metrics<'_>,
+    line: &LaidLine,
+    under: bool,
+) -> Vec<[[f32; 2]; 4]> {
     let thick = (spec.size / 20.0).max(1.0);
     let half = thick / 2.0;
     if spec.vertical {
@@ -507,11 +546,13 @@ fn rule(
                 let [[right, top], [left, _]] = pair[0];
                 let bottom = pair[1][0][1];
                 let x = if under { right } else { (right + left) / 2.0 };
+                // From the top edge (first and last corners) to the
+                // bottom one (second and third), as the bands across go.
                 [
                     [x - half, top],
-                    [x + half, top],
-                    [x + half, bottom],
                     [x - half, bottom],
+                    [x + half, bottom],
+                    [x + half, top],
                 ]
             })
             .collect();
@@ -619,18 +660,25 @@ pub fn draw_text(
             [x0.min(a), y0.min(b), x1.max(c), y1.max(d)]
         }));
     };
-    // A made bold is the glyph drawn again a little along the line.
+    // A made bold is the glyph drawn again a little along the line and
+    // a little up, so upright and level strokes both grow (stems and
+    // bars alike), centred on where the glyph sits.
     let heavier = spec.size * EMBOLDEN;
-    let passes: &[f32] = if made_bold { &[0.0, 0.5, 1.0] } else { &[0.0] };
+    let passes: &[[f32; 2]] = if made_bold {
+        &[[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]]
+    } else {
+        &[[0.0, 0.0]]
+    };
     for line in &laid {
         for &(ch, origin, turn) in &line.glyphs {
             let Some(id) = metrics.face.glyph_index(ch) else {
                 continue;
             };
-            for pass in passes {
+            for &[ahead, up] in passes {
+                // Up from the baseline is against the turn's normal.
                 let at = [
-                    origin[0] + turn[0] * heavier * pass,
-                    origin[1] + turn[1] * heavier * pass,
+                    origin[0] + (turn[0] * ahead + turn[1] * up) * heavier,
+                    origin[1] + (turn[1] * ahead - turn[0] * up) * heavier,
                 ];
                 if let Some(drawn) = glyph(
                     &metrics.face,
@@ -835,13 +883,15 @@ mod tests {
         let (ink, rows, _) = inked(&plain);
         assert!(ink > 0);
         let styled = |style: TextStyle| TextSpec { style, ..plain };
-        // Bold: more ink in the same rows.
+        // Bold: more ink.
         let (bold, bold_rows, _) = inked(&styled(TextStyle {
             bold: true,
             ..TextStyle::default()
         }));
         assert!(bold > ink * 11 / 10, "heavier: {bold} against {ink}");
-        assert_eq!(bold_rows.first(), rows.first());
+        // Grown by a few pixels at most, up as well as across.
+        let (top, bold_top) = (*rows.first().unwrap(), *bold_rows.first().unwrap());
+        assert!(bold_top <= top && top - bold_top <= 2, "{bold_top} {top}");
         // Italic: the tops lean right, so the ink reaches further right.
         let (_, _, upright) = inked(&plain);
         let (_, _, leaning) = inked(&styled(TextStyle {
@@ -873,6 +923,65 @@ mod tests {
             ..column
         });
         assert!(column_lined > column_ink);
+    }
+
+    #[test]
+    fn an_underline_is_one_even_line_and_a_made_bold_thickens_bars_too() {
+        // The underline's middle row is solid from end to end: no faint
+        // seams where one letter's piece of it met the next one's.
+        let (width, height) = (400_u32, 120_u32);
+        let words = TextSpec {
+            style: TextStyle {
+                underline: true,
+                ..TextStyle::default()
+            },
+            ..spec("Bold words", false)
+        };
+        let mut lined = vec![0; (width * height * 4) as usize];
+        draw_text(&mut lined, width, height, &words);
+        let mut plain = vec![0; (width * height * 4) as usize];
+        draw_text(&mut plain, width, height, &spec("Bold words", false));
+        let alpha = |pixels: &[u8], x: u32, y: u32| pixels[((y * width + x) * 4 + 3) as usize];
+        // The row with the most ink the plain words do not have.
+        let row = (0..height)
+            .max_by_key(|&y| {
+                (0..width)
+                    .filter(|&x| alpha(&lined, x, y) > 0 && alpha(&plain, x, y) == 0)
+                    .count()
+            })
+            .unwrap();
+        let inked: Vec<u32> = (0..width).filter(|&x| alpha(&lined, x, row) > 0).collect();
+        let (first, last) = (inked[0], *inked.last().unwrap());
+        let even = alpha(&lined, (first + last) / 2, row);
+        assert!(even > 100, "{even}");
+        for x in first + 2..last - 1 {
+            let at = alpha(&lined, x, row);
+            assert!(
+                at.abs_diff(even) <= 2,
+                "a seam at {x} of {first}..{last}: {at} against {even}"
+            );
+        }
+        // A made bold grows level strokes as well as upright ones: the
+        // letters reach higher than plain ones.
+        let top = |pixels: &[u8]| {
+            (0..height)
+                .find(|&y| (0..width).any(|x| alpha(pixels, x, y) > 64))
+                .unwrap()
+        };
+        let mut bold = vec![0; (width * height * 4) as usize];
+        draw_text(
+            &mut bold,
+            width,
+            height,
+            &TextSpec {
+                style: TextStyle {
+                    bold: true,
+                    ..TextStyle::default()
+                },
+                ..spec("Bold words", false)
+            },
+        );
+        assert!(top(&bold) < top(&plain), "{} {}", top(&bold), top(&plain));
     }
 
     #[test]
