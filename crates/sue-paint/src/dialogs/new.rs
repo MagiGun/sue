@@ -814,16 +814,25 @@ pub(super) fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome
             output_frame_ui(&mut columns[0], new, theme);
             timeline_ui(&mut columns[1], new, theme);
         });
+    } else if new.project.is_comic() {
+        // A comic's own settings stand beside its canvas, as an
+        // animation's timeline beside its frame: in one column they ran
+        // past the foot of a small window and had to be scrolled to.
+        ui.columns(2, |columns| {
+            form_grid(&mut columns[0], "sue-paint-new-canvas", theme, |form| {
+                canvas_ui(form, new, theme);
+                template_ui(form, new, theme);
+            });
+            form_grid(&mut columns[1], "sue-paint-new-comic", theme, |form| {
+                comic_ui(form, new, theme);
+            });
+        });
     } else {
         // One form for the canvas and the project's own settings, so
         // their controls stand in one column.
         form_grid(ui, "sue-paint-new-canvas", theme, |form| {
             canvas_ui(form, new, theme);
-            if new.project.is_comic() {
-                comic_ui(form, new, theme);
-            } else {
-                moving_ui(form, new, theme);
-            }
+            moving_ui(form, new, theme);
             template_ui(form, new, theme);
         });
     }
@@ -1385,26 +1394,32 @@ fn output_frame_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) {
         } else {
             form.section(&tr!("blank-space"));
             let px = tr!("px");
-            for (index, name) in [
+            // Two to a row (top with bottom, left with right): four rows
+            // of their own pushed Record timelapse out of a small
+            // window.
+            let names = [
                 tr!("blank-top"),
                 tr!("blank-bottom"),
                 tr!("blank-left"),
                 tr!("blank-right"),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                form.row(&name, |ui| {
-                    if count_field(
-                        ui,
-                        &format!("sue-paint-new-blank-{index}"),
-                        &mut new.blank[index],
-                        0..=doc::MAX_SIDE,
-                        &px,
-                        &name,
-                        theme,
-                    ) {
-                        new.preset = None;
+            ];
+            for pair in [[0_usize, 1], [2, 3]] {
+                form.row(&names[pair[0]], |ui| {
+                    for index in pair {
+                        if index == pair[1] {
+                            label(ui, &names[index], theme);
+                        }
+                        if count_field(
+                            ui,
+                            &format!("sue-paint-new-blank-{index}"),
+                            &mut new.blank[index],
+                            0..=doc::MAX_SIDE,
+                            &px,
+                            &names[index],
+                            theme,
+                        ) {
+                            new.preset = None;
+                        }
                     }
                 });
             }

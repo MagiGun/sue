@@ -313,3 +313,149 @@ fn a_new_webtoon_opens_draws_saves_and_reopens() {
 fn a_new_animation_opens_draws_saves_and_reopens() {
     new_work_round_trip("p81-bugs-animation", "Animation", |_| {});
 }
+
+/// What one frame of a window of `size` shows: every piece of text and
+/// every control named to assistive technology, with their rects.
+struct Seen {
+    texts: Vec<(String, egui::Rect)>,
+    named: Vec<(String, egui::Rect)>,
+}
+
+impl Seen {
+    fn text(&self, text: &str) -> Option<egui::Rect> {
+        self.texts
+            .iter()
+            .filter(|(found, _)| found == text)
+            .map(|(_, rect)| *rect)
+            .max_by(|a, b| a.top().total_cmp(&b.top()))
+    }
+
+    fn named(&self, name: &str) -> Option<egui::Rect> {
+        self.named
+            .iter()
+            .filter(|(found, _)| found == name)
+            .map(|(_, rect)| *rect)
+            .max_by(|a, b| a.top().total_cmp(&b.top()))
+    }
+}
+
+/// One frame of a window of `size` with `events`.
+fn look(driver: &mut PaintDriver, size: egui::Vec2, events: Vec<egui::Event>) -> Seen {
+    driver.ctx.enable_accesskit();
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, size)),
+        events,
+        time: Some(driver.ctx.input(|input| input.time) + 0.016),
+        ..egui::RawInput::default()
+    };
+    driver.now += Duration::from_millis(16);
+    let runtime = &mut driver.runtime;
+    let now = driver.now;
+    let output = driver
+        .ctx
+        .run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now));
+    let named = output
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| update.nodes.iter())
+        .filter_map(|(_, node)| {
+            let bounds = node.bounds()?;
+            Some((
+                node.label()?.to_owned(),
+                egui::Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                ),
+            ))
+        })
+        .collect();
+    let texts = text_rects(&output);
+    output.drop_without_applying_deltas();
+    driver.ctx.disable_accesskit();
+    Seen { texts, named }
+}
+
+/// A click at `at` in a window of `size`, and the frames after.
+fn click_in(driver: &mut PaintDriver, size: egui::Vec2, at: Pos2) -> Seen {
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    look(driver, size, vec![egui::Event::PointerMoved(at)]);
+    look(driver, size, vec![press(true)]);
+    look(driver, size, vec![press(false)]);
+    let mut seen = look(driver, size, Vec::new());
+    for _ in 0..12 {
+        seen = look(driver, size, Vec::new());
+    }
+    seen
+}
+
+/// New shows everything it holds for every kind of work in a window of
+/// 1366 by 768: its last rows stand above its buttons, and the dialog
+/// and its buttons are inside the window. Nothing has to be scrolled to.
+/// (People did not notice that New went on below.)
+#[test]
+fn new_shows_all_it_holds_in_a_small_window() {
+    let size = vec2(1366.0, 768.0);
+    let mut driver = PaintDriver::new("p81-bugs-new-size");
+    for _ in 0..10 {
+        look(&mut driver, size, Vec::new());
+    }
+    look(
+        &mut driver,
+        size,
+        vec![key(egui::Key::N, egui::Modifiers::COMMAND)],
+    );
+    for _ in 0..20 {
+        look(&mut driver, size, Vec::new());
+    }
+    for (kind, last_rows) in [
+        ("Illustration", vec!["Template", "Record timelapse"]),
+        ("Webtoon", vec!["Template", "Record timelapse"]),
+        (
+            "Comic",
+            vec!["Inner border", "Template", "Record timelapse"],
+        ),
+        (
+            "Printing of fanzine",
+            vec!["Inner border", "Template", "Record timelapse"],
+        ),
+        (
+            "Show all comic settings",
+            vec!["First page number", "Template", "Record timelapse"],
+        ),
+        (
+            "Animation",
+            vec!["Division line", "Left", "Right", "Record timelapse"],
+        ),
+    ] {
+        let seen = look(&mut driver, size, Vec::new());
+        let at = seen
+            .named(kind)
+            .unwrap_or_else(|| panic!("{kind} is offered"))
+            .center();
+        let seen = click_in(&mut driver, size, at);
+        let ok = seen
+            .text("OK")
+            .unwrap_or_else(|| panic!("{kind}: OK shows"));
+        let cancel = seen.text("Cancel").expect("Cancel shows");
+        assert!(
+            ok.bottom() <= size.y && cancel.bottom() <= size.y && ok.top() > 0.0,
+            "{kind}: the buttons are in the window: {ok:?}"
+        );
+        for row in last_rows {
+            let rect = seen
+                .text(row)
+                .or_else(|| seen.named(row))
+                .unwrap_or_else(|| panic!("{kind}: {row} is drawn"));
+            assert!(
+                rect.bottom() <= ok.top() && rect.top() >= 0.0,
+                "{kind}: {row} shows above the buttons, not scrolled away: {rect:?} over {ok:?}"
+            );
+        }
+    }
+}

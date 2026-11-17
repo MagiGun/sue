@@ -7,7 +7,37 @@
 use egui::{Pos2, pos2, vec2};
 
 use super::super::Tour;
-use super::paint_dialogs::{click, click_named};
+use super::paint_dialogs::click;
+
+/// Clicks the control named `name` that is lowest on the screen (New's
+/// kind of work, not the menu of the same name), found by what it tells
+/// assistive technology.
+fn click_named(tour: &mut Tour<'_>, name: &str) -> Result<(), String> {
+    tour.camera.ctx.enable_accesskit();
+    let output = tour.camera.frame(&mut tour.runtime);
+    tour.camera
+        .painter
+        .apply_textures(output.textures_delta.clone());
+    let at = output
+        .platform_output
+        .accesskit_update
+        .iter()
+        .flat_map(|update| update.nodes.iter())
+        .filter(|(_, node)| node.label() == Some(name))
+        .filter_map(|(_, node)| node.bounds())
+        .map(|bounds| {
+            pos2(
+                ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                ((bounds.y0 + bounds.y1) / 2.0) as f32,
+            )
+        })
+        .max_by(|a, b| a.y.total_cmp(&b.y))
+        .ok_or_else(|| format!("no control is named {name:?}"))?;
+    tour.camera.ctx.disable_accesskit();
+    tour.camera.click(at);
+    tour.settle();
+    Ok(())
+}
 
 /// A wavy line across the canvas's middle.
 fn stroke(tour: &mut Tour<'_>) {
@@ -88,11 +118,53 @@ pub(super) fn sub_tools(tour: &mut Tour<'_>) -> Result<(), String> {
     Ok(())
 }
 
+/// New for each kind of work, and the other tall dialogs, in a window
+/// of 1366 by 768: everything a dialog holds shows, or it is plain that
+/// it goes on below.
+pub(super) fn dialogs(tour: &mut Tour<'_>) -> Result<(), String> {
+    let size = tour.camera.size;
+    tour.camera.size = [1366, 768];
+    for (kind, name) in [
+        ("Illustration", "illustration"),
+        ("Webtoon", "webtoon"),
+        ("Comic", "comic"),
+        ("Printing of fanzine", "fanzine"),
+        ("Animation", "animation"),
+        ("Show all comic settings", "comic-all"),
+    ] {
+        tour.paint_go(&["dialog/close", "dialog/new"]);
+        tour.settle();
+        click_named(tour, kind)?;
+        tour.shoot(&format!("bugs-new-{name}"))?;
+    }
+    // In a window too low for it the body scrolls, and shows that it
+    // does: a scrollbar and a fade where it is cut.
+    tour.camera.size = [1000, 520];
+    tour.shoot("bugs-new-comic-all-low")?;
+    tour.camera.size = [1366, 768];
+    for (command, name) in [
+        ("edit.canvas_properties", "canvas-properties"),
+        ("edit.canvas_size", "canvas-size"),
+        ("file.timelapse.export", "timelapse"),
+        ("file.export.png", "export"),
+    ] {
+        tour.paint_go(&["dialog/close"]);
+        tour.paint_command(command);
+        tour.shoot(&format!("bugs-dialog-{name}"))?;
+    }
+    tour.paint_go(&["dialog/close"]);
+    tour.camera.size = size;
+    Ok(())
+}
+
 /// The scenes `only` asks for: all of them for `bugs`.
 pub(super) fn scenes(tour: &mut Tour<'_>, only: &str) -> Result<(), String> {
     let all = only == "bugs";
     if all || only == "bugs-comic" {
         comics(tour)?;
+    }
+    if all || only == "bugs-new" {
+        dialogs(tour)?;
     }
     if all || only == "bugs-subtool" {
         sub_tools(tour)?;

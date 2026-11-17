@@ -117,6 +117,25 @@ follow [Semantic Versioning](https://semver.org/).
   triangle's tip no longer turns the hue, and picking inside the shape
   never drifts the hue by a fraction of a degree. From @propaneko's
   pull request (#10).
+- Sue Paint: a new comic no longer closes Sue. Every blank page took
+  all of its memory at once (835 MB for the eight pages New starts
+  with at 600 dpi, more than a computer has for a few hundred pages).
+  Blank pages and blank layers now cost no memory until you draw on
+  them, and a canvas too large for the computer says so.
+- Sue Paint: the Layer palette keeps up. Renaming, locking, folding,
+  hiding, dragging and the opacity slider redraw only the part of the
+  canvas the layer covers (a name or a lock redraws nothing), where
+  each used to redraw the whole picture: on 60 layers at 3000 by 4000
+  an opacity drag went from 400 ms a step to 27.
+- Sue Paint: the Round and Flat watercolor brushes show a stroke in
+  the Sub Tool palette, not a comb of bars.
+- Sue Paint: New shows everything it holds. A dialog in its own
+  window grows to what it holds (it stayed three rows tall and
+  scrolled the rest), a comic's settings stand beside its canvas, and
+  a dialog too tall for the window shows a scrollbar and fades where
+  it is cut.
+- Dialogs in their own window no longer make the canvas load again on
+  every frame while they are open.
 
 ## [0.0.8] - 2026-11-17
 

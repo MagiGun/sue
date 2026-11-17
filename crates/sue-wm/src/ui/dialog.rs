@@ -647,12 +647,30 @@ impl<'a> Dialog<'a> {
                     } else {
                         scroll.auto_shrink([false, true])
                     };
+                    // A body taller than its room says so: its scrollbar
+                    // always shows (egui's own floats in on hover only),
+                    // and it is shaded where it is cut. People did not
+                    // notice that a dialog went on below.
+                    let scroll_style = ui.spacing().scroll;
+                    ui.spacing_mut().scroll = egui::style::ScrollStyle::solid();
                     let shown = scroll.show(ui, |ui| {
+                        ui.spacing_mut().scroll = scroll_style;
                         ui.spacing_mut().item_spacing =
                             vec2(theme.space(Space::S4), theme.form_row_gap());
                         body(ui)
                     });
+                    ui.spacing_mut().scroll = scroll_style;
                     body_height = shown.content_size.y;
+                    let seen = shown.inner_rect;
+                    let hidden_above = shown.state.clamped_offset().y;
+                    let hidden_below = shown.content_size.y - seen.height() - hidden_above;
+                    let fade = theme.space(Space::S7).min(seen.height() / 3.0);
+                    if hidden_above > 1.0 {
+                        cut_fade(ui, seen, fade, true, theme.scrim());
+                    }
+                    if hidden_below > 1.0 {
+                        cut_fade(ui, seen, fade, false, theme.scrim());
+                    }
                     shown.inner
                 })
                 .inner;
@@ -812,6 +830,33 @@ impl<'a> Dialog<'a> {
             None => return,
         };
         ctx.memory_mut(|memory| memory.request_focus(id));
+    }
+}
+
+/// Shades the top (`above`) or the bottom `fade` points of `seen`, a
+/// scrolled body's room, with `shade`, deepest at the edge: the body
+/// goes on under it that way. (A shade of black only: a fade to the
+/// dialog's own fill came out as a gray band where it was half clear.)
+fn cut_fade(ui: &Ui, seen: Rect, fade: f32, above: bool, shade: Color32) {
+    // In bands, each a little more of the fill toward the cut edge.
+    const BANDS: usize = 12;
+    let painter = ui.painter().with_clip_rect(seen);
+    let band = fade / BANDS as f32;
+    for index in 0..BANDS {
+        let cover = (index + 1) as f32 / BANDS as f32;
+        let from = fade - band * (index + 1) as f32;
+        let rect = if above {
+            Rect::from_min_max(
+                pos2(seen.left(), seen.top() + from),
+                pos2(seen.right(), seen.top() + from + band),
+            )
+        } else {
+            Rect::from_min_max(
+                pos2(seen.left(), seen.bottom() - from - band),
+                pos2(seen.right(), seen.bottom() - from),
+            )
+        };
+        painter.rect_filled(rect, 0.0, shade.gamma_multiply(cover * cover));
     }
 }
 

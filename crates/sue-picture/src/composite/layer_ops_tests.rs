@@ -111,12 +111,15 @@ fn a_folder(arena: &Arena, picture: EntityId) -> EntityId {
         .expect("a folder")
 }
 
+/// Makes a layer operation's edit for the arena as it is.
+type MakeEdit = Box<dyn Fn(&Arena) -> doc::Edit>;
+
 /// Each layer operation of the Layer palette, as (its name, the edit).
 fn operations(
     arena: &Arena,
     picture: EntityId,
     layers: &[EntityId],
-) -> Vec<(&'static str, Box<dyn Fn(&Arena) -> doc::Edit>)> {
+) -> Vec<(&'static str, MakeEdit)> {
     let small = layers[7];
     let folder = a_folder(arena, picture);
     let step = |edit: SetProperty| doc::Edit::new("step").then(edit);

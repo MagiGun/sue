@@ -125,7 +125,7 @@ pub(super) fn families(tour: &mut Tour<'_>) -> Result<(), String> {
 
 /// Clicks the control named `name`, found by what it tells assistive
 /// technology (an icon button has no text drawn).
-pub(super) fn click_named(tour: &mut Tour<'_>, name: &str) -> Result<(), String> {
+fn click_named(tour: &mut Tour<'_>, name: &str) -> Result<(), String> {
     tour.camera.ctx.enable_accesskit();
     let output = tour.camera.frame(&mut tour.runtime);
     tour.camera
