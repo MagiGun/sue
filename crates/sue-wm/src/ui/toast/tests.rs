@@ -150,6 +150,34 @@ fn the_clock_stops_while_the_pointer_is_over_the_stack() {
     assert_eq!(gone, vec![ToastEvent::Expired(id)]);
 }
 
+/// A pointer that rests on a notice (to read it) keeps it solid; a
+/// press held across it (a stroke over the canvas) lets the work under
+/// it show, and it comes back once the press ends.
+#[test]
+fn a_notice_stays_solid_to_read_and_clears_under_a_press() {
+    let mut bench = Bench::new();
+    let mut toasts = Toasts::new("see-through");
+    let id = toasts.push(Toast::info("Copied").sticky());
+    run(&mut bench, &mut toasts, 30);
+    let over = toasts.rects(id).expect("drawn").toast.left_center() + egui::vec2(24.0, 0.0);
+    show(&mut bench, &mut toasts, vec![Event::PointerMoved(over)]);
+    run(&mut bench, &mut toasts, 30);
+    assert_eq!(toasts.see_through(id), Some(0.0), "solid while read");
+    let button = |pressed| Event::PointerButton {
+        pos: over,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    show(&mut bench, &mut toasts, vec![button(true)]);
+    run(&mut bench, &mut toasts, 30);
+    let clear = toasts.see_through(id).expect("still there");
+    assert!(clear > 0.9, "clears under a press: {clear}");
+    show(&mut bench, &mut toasts, vec![button(false)]);
+    run(&mut bench, &mut toasts, 30);
+    assert_eq!(toasts.see_through(id), Some(0.0), "solid again");
+}
+
 #[test]
 fn a_sticky_notice_stays_until_it_is_closed() {
     let mut bench = Bench::new();

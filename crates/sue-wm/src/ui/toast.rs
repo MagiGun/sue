@@ -73,7 +73,7 @@ const MAX_WIDTH: f32 = 420.0;
 /// How many card edges show behind a folded stack, at most.
 const EDGES: usize = 2;
 
-/// How much of a notice fades while the pointer is over it (not on its
+/// How much of a notice fades while a press is held over it (not on its
 /// buttons), so the work under it shows through.
 const SEE_THROUGH: f32 = 0.75;
 
@@ -319,6 +319,9 @@ struct Entry {
     leaving: Option<f64>,
     /// Where it was drawn last; `None` while it is folded.
     rects: Option<ToastRects>,
+    /// How far it had faded to show the work under it, last frame (0
+    /// solid, 1 as clear as it goes).
+    see_through: f32,
 }
 
 /// The stack of notices of one window.
@@ -396,6 +399,7 @@ impl Toasts {
             dismissed: false,
             leaving: None,
             rects: None,
+            see_through: 0.0,
         });
         id
     }
@@ -453,6 +457,17 @@ impl Toasts {
             .iter()
             .find(|entry| entry.id == id)
             .and_then(|entry| entry.rects)
+    }
+
+    /// How far the notice `id` had faded to let the work under it show
+    /// in the last frame: 0 solid, 1 as clear as it goes (scripted runs
+    /// and tests).
+    #[must_use]
+    pub fn see_through(&self, id: ToastId) -> Option<f32> {
+        self.entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.see_through)
     }
 
     /// How many notices were folded behind the shown ones in the last
@@ -558,6 +573,7 @@ impl Toasts {
 
         // The clock: it stands still while the pointer is over the stack.
         let pointer = ctx.pointer_hover_pos();
+        let pressed = ctx.input(|input| input.pointer.any_down());
         let hovered = !modal
             && pointer.is_some_and(|at| {
                 self.entries
@@ -818,8 +834,10 @@ impl Toasts {
                 let place = *place;
                 let id = stack.with(entry.id);
                 let mut child = ui.new_child(UiBuilder::new().max_rect(place).id_salt(id));
-                // A pointer over the card (not on its buttons) sees
-                // through it to the work under it.
+                // A press held over the card (not on its buttons), a
+                // stroke drawn across it, sees through it to the work
+                // under it. A pointer that only rests there (to read it,
+                // which stops its clock) keeps it solid.
                 let row_top = place.top() + pad.y;
                 let action_width = toast
                     .action
@@ -829,9 +847,11 @@ impl Toasts {
                     pos2(place.right() - tight - control - action_width, row_top),
                     pos2(place.right(), row_top + control),
                 );
-                let through =
-                    !modal && pointer.is_some_and(|at| place.contains(at) && !buttons.contains(at));
+                let through = !modal
+                    && pressed
+                    && pointer.is_some_and(|at| place.contains(at) && !buttons.contains(at));
                 let clear = motion::hover_t(ctx, id.with("sue-see-through"), through);
+                entry.see_through = clear;
                 let opacity = toast.presence * (1.0 - SEE_THROUGH * clear);
                 child.set_opacity(opacity);
                 let body = child.interact(place, id.with("sue-toast"), Sense::hover());

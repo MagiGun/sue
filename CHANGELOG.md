@@ -921,9 +921,10 @@ follow [Semantic Versioning](https://semver.org/).
 - Paper: every piece of text draws at its full weight, so secondary
   text (a layer's 100 % Normal, captions, a field's unit) reads clearly.
 - Notices take no clicks from what lies under them, only on their own
-  buttons, and fade while the pointer is over them; in Sue Paint they
-  always stand in the canvas's view, never over a docked Timeline or a
-  palette, even when the view is small or no canvas is open.
+  buttons, and fade while a stroke or a drag passes over them; in Sue
+  Paint they always stand in the canvas's view, never over a docked
+  Timeline or a palette, even when the view is small or no canvas is
+  open.
 - Settings: an empty folder or device setting says in its field what
   empty means (Sue Paint's own folder, next to the source file).
 

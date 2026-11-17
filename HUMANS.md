@@ -650,7 +650,8 @@ Once a canvas is open:
 - **Notices** (Copied, a file saved, an export running) stand in the
   canvas's view, never over a palette or the Timeline, and never take a
   click from what lies under them: only their own buttons can be
-  pressed, and a notice fades while the pointer is over it.
+  pressed, and a notice fades while a stroke or a drag passes over it
+  (a pointer that only rests on it keeps it solid and its time stopped).
 - **Shortcuts:** Sue Paint uses Clip Studio Paint's default keys: the tool
   letters (`P`, `B`, `E`, `G`, `M`, `W`, `I`, `K`, `H`, `R`, `/` and the
   rest), `,` and `.` for the previous and next sub tool, `[` and `]` for the
