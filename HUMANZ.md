@@ -1663,7 +1663,9 @@ which the shell delivers to the asking applet's `picked`; a pick with no
 applet behind it (opening a file or a project, saving the project, exporting
 the rice) goes to the engine. A headless run keeps the pick for a script to
 answer (`Runtime::answer_pick`), which is how the tests and snapshots choose
-files.
+files. A pick made with `FilePick::many` lets several files be chosen on
+desktops (`sue_platform::pick_open_files`): the first comes back as the
+path and the rest in `FilePick::also` (`FilePick::chosen` gives them all).
 
 **Studio themes.** A studio or tool whose rice section (its id with `-` as
 `_`) has a `theme` wears `Theme::for_studio`: a preset's colors, the Sue theme
@@ -2602,7 +2604,9 @@ tonal correction (one `Filter::to_text` can keep).
 
 **Smart Shape.** While a stroke's pen rests (`smart::HOLD_SECONDS` within
 `smart::HOLD_REACH` screen points), `smart::recognize` reads the stroke's
-samples and answers a line, arc (a circle through its ends and middle),
+samples and answers a line (the tenth of the samples that stray most is
+left out, so a spike does not spoil it), arc (the least-squares circle,
+fitted again over the samples that stayed with it),
 ellipse or polygon (Ramer-Douglas-Peucker corners that every sample lies
 near), densely; `Stroke::reshape` puts the pixels from before back and
 draws the shape, so it is still one stroke to undo. The pen does not have to
