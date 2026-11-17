@@ -5,5 +5,6 @@
 # curve), the stabilizer's drain only goes forward along the pen's way,
 # and an ending comes to a clean point or is a round end. Then again
 # for Sue's papers made of noise with no grid in it, and for mixing
-# brushes that carry what they pick up.
-engine 1 1e14ca8478bca1f9
+# brushes that carry what they pick up, and for blend tools whose dabs
+# work by the way they moved.
+engine 1 51c7c1b2dacac72e
