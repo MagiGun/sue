@@ -8,9 +8,13 @@ gets each layer as it was made: a fill stays a fill, text stays text,
 a timeline stays a timeline.
 
 Sue keeps its own tables for everything whose storage in Clip Studio's
-tables has not been observed yet. Whatever Clip Studio itself wrote in a
-file (its own tables, columns and chunks) is kept untouched beside them
-and written back.
+tables has not been observed yet. Where it has been (fill layers,
+linear gradients, text, vector lines, palette color and the layer
+color's second color; see "What Clip Studio sees" below), Sue writes
+Clip Studio's own storage too, and its own part as well, for what Clip
+Studio has no place for. Whatever Clip Studio itself wrote in a file
+(its own tables, columns and chunks) is kept untouched beside them and
+written back.
 
 This page describes only Sue's tables. Anyone may read or write them.
 
@@ -151,12 +155,39 @@ How Sue Paint fills these in (since 0.0.8):
 
 ## What Clip Studio sees
 
-Clip Studio reads its own tables only. For a layer with a content part,
-it sees a raster layer (a folder for `frame`, `animation-folder` and
-`camera`) holding the pixels Sue drew for it. Text, lines, corrections,
-fills, gradients, rulers, effects, comps and the timeline are therefore
-not live in Clip Studio until Sue writes them in Clip Studio's own
-storage, which needs that storage observed first.
+Clip Studio reads its own tables only. Since 0.0.8 Sue also writes, in
+Clip Studio's own storage, the parts of a layer whose storage was seen
+in files Clip Studio made:
+
+| Part | Written as Clip Studio stores it |
+| --- | --- |
+| `fill` | a fill layer: `LayerType` 2, a white mask, the color in `GradationFillInfo` with its plain color on |
+| `gradient`, linear and holding its end colors | a gradient layer: `LayerType` 2, a white mask, the stops and the line in `GradationFillInfo` |
+| `text` | a text layer: `LayerType` 0, the words in `TextLayerString`, the font, size, color and place in `TextLayerAttributes` (one style for all the words) |
+| `vector` | a vector layer: `LayerType` 0, a `VectorObjectList` row whose strokes (points, width, taper, color, opacity) sit in a chunk of their own, drawn with a plain pen Sue adds to the document's brush tables once |
+| `palette-color` | `LayerUsePaletteColor` and the three palette color columns |
+| `effects`, the second color of the layer color | the three `DrawColorSub` columns |
+
+Sue's own part is written beside each, so Sue gets back what Clip Studio
+has no place for (a text's runs, bold and italic, its box, alignment and
+line spacing; a vector line's own brush, pressure and corners). When a
+file is opened, a layer whose Clip Studio storage says something other
+than Sue's part (it was changed in Clip Studio after Sue wrote it) is
+read from Clip Studio's storage; a file Clip Studio saved, which has
+lost Sue's tables, is read from Clip Studio's storage alone.
+
+For any other content part (a circle or ellipse gradient, a gradient
+that repeats, a correction, a frame, a balloon, a 3D layer, an animation
+folder, the camera), Clip Studio sees a raster layer (a folder for
+`frame`, `animation-folder` and `camera`) holding the pixels Sue drew for
+it. Rulers, the other effects, comps and the timeline are not live in
+Clip Studio until Sue writes them in Clip Studio's own storage, which
+needs that storage observed first.
+
+Whether Clip Studio opens the layers Sue writes in its own storage the
+way the survey's files open is not yet checked by hand: the test files
+are written by `write_native_kinds_for_the_hands_on_check` (run with
+`SUE_CLIP_INBOX`).
 
 ## Opened in Clip Studio (checked 2026-11-16)
 
