@@ -1460,3 +1460,54 @@ fn write_native_kinds_for_the_hands_on_check() {
         }
     }
 }
+
+#[test]
+fn a_line_whose_pressure_or_tapers_shape_it_says_clip_studio_shows_it_evener() {
+    // Clip Studio draws a vector point at its stored width alone, so a
+    // line the pen's pressure or the tip's tapers shape goes out native
+    // and approximated; a plain line goes out native and whole.
+    let line = |tip: Tip, pressure: f32| {
+        let mut line = vector::figure_line(
+            &[[10.0, 10.0], [60.0, 40.0], [110.0, 20.0]],
+            tip,
+            [[0.0, 0.0, 0.0]; 2],
+            false,
+        );
+        for sample in &mut line.samples {
+            sample.pressure = pressure;
+        }
+        line
+    };
+    let plain = Tip {
+        size: 8.0,
+        size_by: crate::brush::Dynamics::NONE,
+        ..Tip::default()
+    };
+    let by_pressure = Tip {
+        size_by: crate::brush::Dynamics::pressure(0.2),
+        ..plain.clone()
+    };
+    let tapered = Tip {
+        taper_end: 20.0,
+        ..plain.clone()
+    };
+    for (lines, approximated) in [
+        (vec![line(plain.clone(), 0.5)], false),
+        (vec![line(by_pressure.clone(), 1.0)], false),
+        (vec![line(by_pressure, 0.5)], true),
+        (vec![line(tapered, 1.0)], true),
+    ] {
+        let mut arena = Arena::new();
+        let picture = base(&mut arena, 120, 60);
+        let pixels = vector::render(&lines, 120, 60).unwrap();
+        let ink = Entity::new("Ink", pixels)
+            .with_class(vector::CLASS)
+            .with_ext(vector::to_geometry(&lines));
+        let spawn = doc::landed(&arena, picture, None, ink);
+        apply(&mut arena, spawn);
+        let (_, wrote) = encode_with_report(&arena, picture).unwrap();
+        let ink = wrote.lines.iter().find(|line| line.name == "Ink").unwrap();
+        assert_eq!(ink.outcome, Outcome::Native, "{}", wrote.summary());
+        assert_eq!(ink.approximated, approximated, "{}", wrote.summary());
+    }
+}

@@ -176,6 +176,13 @@ than Sue's part (it was changed in Clip Studio after Sue wrote it) is
 read from Clip Studio's storage; a file Clip Studio saved, which has
 lost Sue's tables, is read from Clip Studio's storage alone.
 
+Clip Studio draws a vector point at the width stored for it alone. What
+the pen's pressure and the tip's tapers add to a line in Sue is not in
+that width, so Clip Studio shows such a line evener than Sue does, and
+the conversion report marks the layer approximated. A layer duplicated
+in Sue gets a stroke row and a stroke chunk of its own, so no two layers
+share one row.
+
 For any other content part (a circle or ellipse gradient, a gradient
 that repeats, a correction, a frame, a balloon, a 3D layer, an animation
 folder, the camera), Clip Studio sees a raster layer (a folder for

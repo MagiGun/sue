@@ -332,7 +332,15 @@ fn vector_out(lines: &[Line], at: [f32; 2]) -> (ClipContent, bool) {
                 || line.samples.iter().any(|sample| {
                     sample.speed != 0.0 || sample.tilt != 0.0 || sample.lean != [0.0, 0.0]
                 })
-                || line.colors[1] != line.colors[0];
+                || line.colors[1] != line.colors[0]
+                // Clip Studio draws each point at its stored width alone:
+                // what the pen's pressure and the tip's tapers add to it
+                // is Sue's, so Clip Studio shows such a line evener.
+                || line.tip.taper_start > 0.0
+                || line.tip.taper_end > 0.0
+                || line.samples.iter().any(|sample| {
+                    (line.tip.size_by.factor(sample.pressure, 0.0, 0.0, 1.0) - 1.0).abs() > 1e-3
+                });
             let [r, g, b] = crate::color::bytes(line.colors[0]);
             ClipLine {
                 points: line
