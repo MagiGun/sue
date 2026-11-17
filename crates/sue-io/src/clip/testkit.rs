@@ -284,6 +284,18 @@ pub fn raster_subset(width: u32, height: u32, seed: u64) -> ClipDocument {
     doc.root.children = vec![
         paper, back, off, gray, masked, unmasked, inner, blends, empty,
     ];
+    // Every folder holds its empty bitmap, as in a file Clip Studio
+    // saves (the writer would add it, and the file read back would then
+    // differ from what was built).
+    fn bitmaps_on_folders(layers: &mut [ClipLayer], width: u32, height: u32) {
+        for layer in layers {
+            if layer.is_folder() && layer.pixels.is_none() {
+                layer.pixels = Some(ClipBitmap::empty(width, height));
+            }
+            bitmaps_on_folders(&mut layer.children, width, height);
+        }
+    }
+    bitmaps_on_folders(&mut doc.root.children, width, height);
     doc.sue = Some(b"SUE\0FILE a picture's own project".to_vec());
     doc
 }
@@ -1830,5 +1842,53 @@ mod tests {
         }
         println!("{} files", files.len());
         assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// Clip Studio draws a paper layer as its bitmap seen through the
+    /// paper color, so the bitmap must be opaque black everywhere, an
+    /// odd sized canvas's edge tiles included.
+    #[test]
+    fn a_paper_layer_is_opaque_black_under_its_color() {
+        let mut doc = ClipDocument::new(300, 130, 72.0);
+        doc.root.children = vec![ClipLayer::paper("Paper", [250, 240, 200], 300, 130)];
+        let back = read(&write(&doc).unwrap()).unwrap();
+        let paper = &back.layers()[0];
+        assert_eq!(paper.draw_color.color(), [250, 240, 200]);
+        let pixels = decoded(paper.pixels.as_ref().unwrap());
+        assert_eq!(
+            (pixels.width, pixels.height, pixels.channels),
+            (300, 130, 4)
+        );
+        assert!(
+            pixels.data.chunks(4).all(|px| px == [0, 0, 0, 255]),
+            "a paper pixel is not opaque black"
+        );
+    }
+
+    /// Clip Studio closes when a folder has no bitmap: a folder built
+    /// without one is written with an empty one, like the root.
+    #[test]
+    fn a_folder_built_without_a_bitmap_is_written_with_an_empty_one() {
+        let mut doc = ClipDocument::new(64, 48, 72.0);
+        let mut folder = ClipLayer::folder("Folder");
+        assert!(folder.pixels.is_none());
+        folder.children = vec![ClipLayer::raster(
+            "Inside",
+            0,
+            0,
+            ClipBitmap::color(64, 48, &[]),
+        )];
+        doc.root.children = vec![folder];
+        let bytes = write(&doc).unwrap();
+        let back = read(&bytes).unwrap();
+        let folder = &back.layers()[0];
+        let pixels = decoded(folder.pixels.as_ref().expect("the folder has a bitmap"));
+        assert_eq!((pixels.width, pixels.height), (64, 48));
+        assert!(pixels.data.iter().all(|byte| *byte == 0));
+        assert_eq!(
+            write(&back).unwrap(),
+            bytes,
+            "writing it again changes nothing"
+        );
     }
 }

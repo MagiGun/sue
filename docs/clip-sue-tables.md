@@ -157,3 +157,45 @@ it sees a raster layer (a folder for `frame`, `animation-folder` and
 fills, gradients, rulers, effects, comps and the timeline are therefore
 not live in Clip Studio until Sue writes them in Clip Studio's own
 storage, which needs that storage observed first.
+
+## Opened in Clip Studio (checked 2026-11-16)
+
+The P5-1 test files (`write_files_for_the_hands_on_check` and
+`write_kinds_for_the_hands_on_check`, run with `SUE_CLIP_HANDS_ON`)
+were opened in Clip Studio Paint EX 5.0.4 on Windows, by passing each
+file to the program; nothing was saved over them.
+
+Found and fixed in Sue on the way:
+
+- Every file with a folder (a plain folder, an animation folder, a
+  camera folder) closed Clip Studio at once, with no message. A folder
+  in a `.clip` needs a bitmap, an empty one at the least; Sue wrote
+  folders with none. The writer now gives such a folder an empty
+  bitmap.
+- The paper showed as a clear canvas. Clip Studio draws a paper layer
+  as its bitmap seen through the paper color (a light pixel comes out
+  lighter than the color, a clear one shows nothing), so Sue now
+  writes the paper's bitmap opaque black, which shows exactly the
+  paper's color. Checked with red, cream and white paper.
+
+With those fixes, what Clip Studio shows:
+
+| File | Opens | What shows |
+| --- | --- | --- |
+| 01-fill | yes | `Fill` as a raster layer at 50%, the disc bluish through it, white paper |
+| 02-gradient | yes | `Gradient` as a raster layer holding the gradient as Sue drew it |
+| 03-corrections | yes | `Posterize` and `Hue` as empty raster layers; the orange and the dark disc unchanged |
+| 04-text | yes | the words as pixels on a raster layer `Sue Paint` |
+| 05-vector | yes | the bent black line and the red line as pixels on `Vector` |
+| 06-effects | yes | the layer color effect is on (Clip Studio's own setting): the dark disc shows blue, lighter than the set color because Clip Studio mixes the layer color by the pixel's lightness; the border, palette color and tone do not show |
+| 07-comps | yes | the layers as usual, no layer comps |
+| 08-rulers | yes | the layers as usual, no rulers |
+| 09-everything | yes | every layer and folder; the animation folder and the camera folder as ordinary folders (`Folder 1`, `Camera 1`), the three cels inside the first; no timeline |
+| 10-bouncing-ball | yes | the five cels as raster layers in an ordinary folder, all shown at once; the sketch at 30%; no timeline |
+| sue-picture | yes | folders with their blend mode and opacity, the clipped layer, the glow mode, a mask, and the draft and reference layers |
+| raster-subset-through-sue | yes | every layer and the 27 blend layers; a clear area at the top left, where the generated `Gray` layer lies (300 by 200 at 5, 7). That layer goes back unchanged, so the file still holds it as a one channel bitmap, which the test kit builds by itself and which was never seen in a file Clip Studio saved; Sue reads it as opaque gray. Open: either a gray layer is not stored that way by Clip Studio, or Sue reads such a layer wrong. Check with a gray layer made in Clip Studio |
+
+Each file also has the layer `Layer 1` that a new Sue picture starts
+with. Clip Studio's own Layer Property palette was not opened (the
+check could click but not type), so whether it lists the layer color
+as on was read from the canvas and the layer's icon only.

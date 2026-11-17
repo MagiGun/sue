@@ -402,14 +402,17 @@ impl ClipLayer {
         }
     }
 
-    /// A paper layer of `color` over a canvas of `width` by `height`. Its
-    /// bitmap has its (empty) blocks, as every layer that is not a folder
-    /// gets: Clip Studio calls a pixel layer without them broken.
+    /// A paper layer of `color` over a canvas of `width` by `height`.
+    /// Clip Studio draws a paper layer as its bitmap seen through the
+    /// layer color: where the bitmap is clear nothing shows, and a light
+    /// pixel comes out lighter than the color. So the bitmap is opaque
+    /// black all over, which shows exactly `color` (seen in Clip Studio
+    /// Paint 5.0.4 on 2026-11-16; an empty bitmap left the canvas clear).
     #[must_use]
     pub fn paper(name: &str, color: [u8; 3], width: u32, height: u32) -> Self {
         Self {
             draw_color: ClipDrawColor::rgb(color),
-            pixels: Some(ClipBitmap::color(width, height, &[])),
+            pixels: Some(ClipBitmap::filled(width, height, [0, 0, 0])),
             ..Self::blank(name, PAPER, 0)
         }
     }
