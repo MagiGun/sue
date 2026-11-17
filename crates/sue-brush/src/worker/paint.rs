@@ -93,6 +93,10 @@ pub(crate) struct Core {
     closed: bool,
 }
 
+/// Tiles laid for the live view: each with its pixels (straight RGBA8),
+/// or `None` where it shows the layer as it was.
+type LaidTiles = Vec<(TileKey, Option<Box<[u8]>>)>;
+
 /// Fewer changed tiles than this are laid on one thread.
 const WORTH_SHARING: usize = 12;
 
@@ -282,11 +286,8 @@ impl Painter {
     ///
     /// # Errors
     /// When a job of the pool failed.
-    pub(crate) fn laid(
-        &self,
-        keys: &[TileKey],
-    ) -> Result<Vec<(TileKey, Option<Box<[u8]>>)>, String> {
-        let lay = |core: &Core, keys: &[TileKey]| -> Vec<(TileKey, Option<Box<[u8]>>)> {
+    pub(crate) fn laid(&self, keys: &[TileKey]) -> Result<LaidTiles, String> {
+        let lay = |core: &Core, keys: &[TileKey]| -> LaidTiles {
             keys.iter().map(|&key| (key, core.laid_tile(key))).collect()
         };
         let shared = self

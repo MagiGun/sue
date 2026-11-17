@@ -63,7 +63,7 @@ pub struct Resources {
 enum Target {
     Coverage(StrokeBuffer),
     Color(ColorBuffer),
-    Wet(WetCanvas),
+    Wet(Box<WetCanvas>),
 }
 
 /// A ribbon's path so far: one tip picture bent along the whole stroke.
@@ -169,7 +169,7 @@ impl PaintStroke {
         }
         .or_else(|| preset.mix.map(|mixing| Wet::new(mixing, 1.0)));
         let target = match wet {
-            Some(wet) => Target::Wet(
+            Some(wet) => Target::Wet(Box::new(
                 // A brush with paint of its own lays it once a stroke,
                 // unless it builds up; a blend tool's dabs stack.
                 WetCanvas::new(wet, jitter.main()).capped(
@@ -177,7 +177,7 @@ impl PaintStroke {
                         && wet.amount > 0.0
                         && !matches!(preset.engine, EngineKind::Blend(_)),
                 ),
-            ),
+            )),
             None if jitter.varies() => {
                 Target::Color(ColorBuffer::new(combine, behaviours.tip_blend))
             }

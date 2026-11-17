@@ -696,7 +696,7 @@ impl StrokeWorker {
     #[must_use]
     pub fn work_left(&self, guess: u64) -> u64 {
         let (laid, work) = self.live.progress();
-        let each = if laid == 0 { guess } else { work / laid };
+        let each = work.checked_div(laid).unwrap_or(guess);
         self.pushed.saturating_sub(laid).saturating_mul(each.max(1))
     }
 
