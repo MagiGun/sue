@@ -55,9 +55,9 @@ const FIT: f32 = 0.8;
 /// The shortest pointed ending, in widths of the line near its end.
 pub(crate) const ENDING_PER_WIDTH: f32 = 2.0;
 
-/// How many times its set length an ending is made at most to come to
-/// a clean point.
-const LONGEST_STRETCH: f32 = 3.0;
+/// How much longer an ending is made at most to come to a clean point,
+/// as an area: its length times the brush's size, in square pixels.
+const EXTRA_WORK: f32 = 6000.0;
 
 /// The share of the shortest pointed ending under which an ending is a
 /// round end and is left as it is.
@@ -156,13 +156,16 @@ impl Shaper {
     /// The longest ending window a stroke of this brush can have in
     /// length mode, at any speed and width: its set length (stretched
     /// at full speed), made longer for a clean point by at most
-    /// [`LONGEST_STRETCH`] times. A very wide brush with a short ending
-    /// is not given an ending many times longer than was asked for (and
-    /// a tail that long to draw again on every frame).
+    /// [`EXTRA_WORK`] square pixels of the line. The ending is drawn
+    /// again on every frame while the pen is down, so a very wide brush
+    /// with a short ending is not given a long one (its frames would
+    /// slow down), and at that width the short ending reads as a round
+    /// end anyway.
     pub fn longest_ending(&self) -> f32 {
         let stretch = if self.taper.by_speed { BY_SPEED } else { 1.0 };
         let set = self.taper.end * stretch;
-        (ENDING_PER_WIDTH * self.base_size).clamp(set, set * LONGEST_STRETCH)
+        let wanted = (ENDING_PER_WIDTH * self.base_size - set).max(0.0);
+        set + wanted.min(EXTRA_WORK / self.base_size.max(1.0))
     }
 
     /// How much "by speed" stretches a taper at speed share `share`: up
