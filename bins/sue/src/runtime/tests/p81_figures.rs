@@ -69,6 +69,15 @@ fn on_screen(paint: &PaintDriver, layer: sue_core::EntityId, p: [f32; 3]) -> Pos
     screen_of(paint, lens.project(p).expect("in front of the camera"))
 }
 
+/// The layer added since `before`.
+fn added(paint: &PaintDriver, before: &[sue_paint::doc::LayerInfo]) -> sue_core::EntityId {
+    layers(paint)
+        .into_iter()
+        .find(|info| !before.iter().any(|old| old.id == info.id))
+        .expect("a new layer")
+        .id
+}
+
 fn undo(paint: &mut PaintDriver) {
     paint.command("edit.undo");
     paint.settle(4);
@@ -93,7 +102,12 @@ fn undo_pair(
     assert!(!check(paint), "{what}: not so before");
     change(paint);
     paint.settle(4);
-    assert!(check(paint), "{what}: so after");
+    assert!(
+        check(paint),
+        "{what}: so after ({:?}, {} layers)",
+        paint.runtime.shell.message().map(|(text, _)| text.to_string()),
+        layers(paint).len()
+    );
     assert_eq!(
         paint.runtime.engine.history.depth(),
         depth + 1,
@@ -119,6 +133,8 @@ fn p81_a_figure_is_added_made_another_model_and_shaped_part_by_part() {
         },
         |paint| layers(paint).len() == count + 1,
     );
+    // One figure from here on.
+    undo(&mut paint);
     let layer = new_3d(&mut paint, "layer.new.figure");
     let body = |paint: &PaintDriver| Body::of(model(paint, layer));
     assert_eq!(body(&paint).kind, Kind::Body);
@@ -346,12 +362,55 @@ fn material_folder(paint: &mut PaintDriver, folder: &str) -> Vec<(String, egui::
         .collect()
 }
 
+/// The thumbnail named `name` of the Material palette's open folder,
+/// brought near the top of the list (where `first`, the first thumbnail,
+/// was before any scrolling) with the wheel.
+fn scrolled_to(paint: &mut PaintDriver, name: &str, first: egui::Rect) -> egui::Rect {
+    let thumbs = |paint: &mut PaintDriver| -> Vec<(String, egui::Rect)> {
+        step_told(paint, Vec::new())
+            .into_iter()
+            .filter(|(_, role, rect)| {
+                *role == egui::accesskit::Role::Button
+                    && rect.width() > 40.0
+                    && (rect.width() - rect.height()).abs() < 2.0
+            })
+            .map(|(name, _, rect)| (name, rect))
+            .collect()
+    };
+    let over = first.center();
+    for _ in 0..80 {
+        let shown = thumbs(paint);
+        let found = shown
+            .iter()
+            .find(|(shown, _)| shown == name)
+            .unwrap_or_else(|| panic!("{name} among {shown:?}"))
+            .1;
+        if found.top() < first.top() + first.height() * 1.6 && found.top() >= first.top() - 1.0 {
+            return found;
+        }
+        let by = if found.top() > first.top() { -30.0 } else { 30.0 };
+        paint.step(vec![
+            egui::Event::PointerMoved(over),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, by),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Wheel,
+            },
+        ]);
+        paint.settle(2);
+    }
+    panic!("{name} never scrolled into view");
+}
+
 #[test]
 fn p81_a_hand_pose_material_closes_the_hands_of_a_body() {
     let mut paint = PaintDriver::new("p81-hand-pose");
+    let had = layers(&paint);
     paint.command("layer.new.figure");
     paint.settle(6);
-    let layer = layers(&paint).last().unwrap().id;
+    let layer = added(&paint, &had);
     let poses = material_folder(&mut paint, "Poses");
     let names: Vec<&str> = poses.iter().map(|(name, _)| name.as_str()).collect();
     // Sue's own library: the body poses and the hand poses.
@@ -359,7 +418,12 @@ fn p81_a_hand_pose_material_closes_the_hands_of_a_body() {
         assert!(names.contains(&name), "{name} among {names:?}");
     }
     assert!(names.len() >= 12 + 12, "{}", names.len());
-    let fist = poses.iter().find(|(name, _)| name == "Fist").unwrap().1;
+    let first = poses
+        .iter()
+        .map(|(_, rect)| *rect)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("thumbnails");
+    let fist = scrolled_to(&mut paint, "Fist", first);
     let (start, body, _) = sight(&paint, layer);
     let to = paint_middle(&paint.runtime);
     let layer_count = layers(&paint).len();
@@ -390,7 +454,7 @@ fn p81_a_hand_pose_material_closes_the_hands_of_a_body() {
         }
     }
     // A body pose dropped the same way poses the body.
-    let crouch = poses.iter().find(|(name, _)| name == "Crouch").unwrap().1;
+    let crouch = scrolled_to(&mut paint, "Crouch", first);
     undo_pair(
         &mut paint,
         "Crouch dropped onto the body",
@@ -424,13 +488,13 @@ fn p81_gltf_and_obj_files_import_as_3d_layers_and_a_skinned_one_poses() {
     // The skinned glTF: a 3D layer whose model is a figure of its own
     // bones, the file kept whole inside the model.
     let count = layers(&paint).len();
-    undo_pair(
-        &mut paint,
-        "a glTF model imported",
-        |paint| import(paint, &post),
-        |paint| layers(paint).len() == count + 1,
-    );
-    let layer = layers(&paint).last().unwrap().id;
+    let empty = arena_bytes(&paint);
+    let depth = paint.runtime.engine.history.depth();
+    let had = layers(&paint);
+    import(&mut paint, &post);
+    assert_eq!(layers(&paint).len(), count + 1, "a glTF model imported");
+    let layer = added(&paint, &had);
+    assert_eq!(paint.runtime.engine.history.depth(), depth + 1, "one step");
     let entity = model(&paint, layer);
     let body = Body::of(entity);
     assert_eq!(body.kind, Kind::Imported);
@@ -461,15 +525,25 @@ fn p81_gltf_and_obj_files_import_as_3d_layers_and_a_skinned_one_poses() {
         },
         |paint| sight(paint, layer).0.0[1] != rest.0[1],
     );
+    // The drag and the import undo to the canvas exactly as it was, and
+    // redo.
+    let posed = arena_bytes(&paint);
+    undo(&mut paint);
+    undo(&mut paint);
+    assert!(arena_bytes(&paint) == empty, "the import undone exactly");
+    redo(&mut paint);
+    redo(&mut paint);
+    assert!(arena_bytes(&paint) == posed, "and redone exactly");
     // The OBJ: a plain model, its file kept too.
     let count = layers(&paint).len();
+    let had = layers(&paint);
     undo_pair(
         &mut paint,
         "an OBJ model imported",
         |paint| import(paint, &pyramid),
         |paint| layers(paint).len() == count + 1,
     );
-    let layer = layers(&paint).last().unwrap().id;
+    let layer = added(&paint, &had);
     let entity = model(&paint, layer);
     assert!(!sue_paint::figure::is_figure(entity));
     assert_eq!(sue_paint::model3d::file_of(entity).unwrap().1, "obj");
