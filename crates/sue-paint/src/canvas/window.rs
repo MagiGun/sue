@@ -37,6 +37,8 @@ pub(crate) struct Chrome {
     /// when they come back as files handed to Sue Paint they become its
     /// layers.
     drops: Vec<(PathBuf, usize)>,
+    /// How many pictures the drop noted in `drops` held.
+    dropped: usize,
     /// The right-click menu of a tab: which canvas it is for, where it
     /// opened, and the menu.
     pub(super) tab_menu: Option<(usize, egui::Pos2)>,
@@ -280,6 +282,7 @@ impl SuePaint {
                     self.chrome.drops.retain(|(seen, _)| seen != path);
                     self.chrome.drops.push((path.clone(), index));
                 }
+                self.chrome.dropped = self.chrome.drops.len();
             }
         }
         let dropped = if floating { Vec::new() } else { dropped };
@@ -388,6 +391,12 @@ impl SuePaint {
             .filter(|path| crate::studio::opens(path))
             .collect();
         self.chrome.drops = pictures.into_iter().map(|path| (path, index)).collect();
+        self.chrome.dropped = self.chrome.drops.len();
+    }
+
+    /// `true` when the drop a picture just came from held several.
+    pub(crate) fn dropped_together(&self) -> bool {
+        self.chrome.dropped > 1
     }
 
     /// `true` once for a file that was dropped on a canvas this frame,

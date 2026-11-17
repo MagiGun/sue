@@ -1195,7 +1195,40 @@ pub fn import_frames(
     frames: &[sue_core::RasterTile2D],
     fps: f64,
 ) -> Result<(Edit, usize), String> {
-    if frames.is_empty() {
+    let cels = frames
+        .iter()
+        .enumerate()
+        .map(|(index, frame)| (format!("{name} {}", index + 1), frame.clone()))
+        .collect();
+    import_cels(
+        arena,
+        picture,
+        below,
+        name,
+        cels,
+        fps,
+        &tr!("import-movie", name = name),
+    )
+}
+
+/// The edit, called `label`, that brings `pictures` (each with the name
+/// its cel gets) into `picture` as cels of a new animation folder named
+/// `name`, one frame each from the start, at `fps` when the picture has
+/// no timeline yet. Each picture is made to fit the canvas. Returns the
+/// folder's track too.
+///
+/// # Errors
+/// If there are no pictures or the picture has no size.
+pub fn import_cels(
+    arena: &Arena,
+    picture: EntityId,
+    below: Option<EntityId>,
+    name: &str,
+    pictures: Vec<(String, sue_core::RasterTile2D)>,
+    fps: f64,
+    label: &str,
+) -> Result<(Edit, usize), String> {
+    if pictures.is_empty() {
         return Err(tr!("the-movie-has-no-frames"));
     }
     let size = arena
@@ -1203,16 +1236,15 @@ pub fn import_frames(
         .ok()
         .and_then(sue_model::picture::size)
         .ok_or(tr!("the-picture-has-no-size"))?;
-    let cels: Vec<(String, sue_core::RasterTile2D)> = frames
-        .iter()
-        .enumerate()
-        .filter_map(|(index, frame)| {
+    let cels: Vec<(String, sue_core::RasterTile2D)> = pictures
+        .into_iter()
+        .filter_map(|(cel, frame)| {
             let tile = if [frame.width(), frame.height()] == size {
-                frame.clone()
+                frame
             } else {
-                crate::doc::fitted(frame, size)?
+                crate::doc::fitted(&frame, size)?
             };
-            Some((format!("{name} {}", index + 1), tile))
+            Some((cel, tile))
         })
         .collect();
     let count = cels.len() as u32;
@@ -1233,7 +1265,7 @@ pub fn import_frames(
     for (frame, cel) in ids.iter().enumerate() {
         sequence = assign(&sequence, track, frame as u32, Some(*cel), picture, length);
     }
-    let mut edit = Edit::new(tr!("import-movie", name = name));
+    let mut edit = Edit::new(label);
     for spawn in spawns {
         edit = edit.then(spawn);
     }

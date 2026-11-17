@@ -1337,9 +1337,21 @@ impl Runtime {
             .start
             .clone()
             .unwrap_or_else(|| self.engine.paths.home_dir.clone());
+        let mut pick = pick;
         let answer = match &pick.save_as {
             Some(name) => sue_platform::pick_save_file(&pick.title, Some(&start), name, &filters),
             None if pick.folders => sue_platform::pick_folder(&pick.title, Some(&start)),
+            // Several files: the first is the answer, the rest go with it.
+            None if pick.many => {
+                match sue_platform::pick_open_files(&pick.title, Some(&start), &filters) {
+                    Ok(mut files) => {
+                        let first = files.remove(0);
+                        pick.also = files;
+                        Picking::Chosen(first)
+                    }
+                    Err(answer) => answer,
+                }
+            }
             None => sue_platform::pick_open_file(&pick.title, Some(&start), &filters),
         };
         self.answered(pick, answer);

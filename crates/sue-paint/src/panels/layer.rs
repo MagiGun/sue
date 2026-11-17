@@ -1600,20 +1600,30 @@ impl SuePaint {
         if let Some(dragged) = events.dropped {
             self.layer_drag = None;
             let recorded = cx.history.len();
+            let unkeyed = self.unkeyed_cels(&cx.world.arena);
             let from = self.picture().and_then(|picture| {
                 doc::layers(&cx.world.arena, picture)
                     .iter()
                     .position(|info| info.id == dragged)
             });
-            self.drop_layer(dragged, events.onto, events.pointer, cx);
+            // Let go over a frame of the timeline: the layer is placed
+            // there; anywhere else it moves in the stack.
+            let placed = events
+                .pointer
+                .is_some_and(|at| self.place_dropped(dragged, at, cx));
+            if !placed {
+                self.drop_layer(dragged, events.onto, events.pointer, cx);
+            }
             // An Auto Action being recorded keeps where the layer went.
             if let Some(from) = from
                 && cx.history.len() != recorded
             {
                 self.record_layer_move(&cx.world.arena, dragged, from);
             }
-            // A layer dragged out of an animation folder gets a track.
+            // A layer dragged out of an animation folder gets a track,
+            // and one dragged into one a cel on its timeline.
             self.track_new_layers(cx, recorded);
+            self.cel_new_layers(cx, unkeyed.as_deref(), recorded);
         }
         if let Some((id, filter, text)) = events.reopen {
             self.dialog = Some(crate::dialogs::Dialog::Correction(id, filter, text, false));

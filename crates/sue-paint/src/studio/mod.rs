@@ -32,6 +32,7 @@ mod edit;
 pub(crate) mod exports;
 mod files;
 mod frame;
+pub(crate) mod import_many;
 mod layers;
 pub(crate) use layers::ASK_DELETE_FOLDERS;
 mod materials;

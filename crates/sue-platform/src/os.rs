@@ -314,6 +314,42 @@ pub enum PickNews {
     Failed(String),
 }
 
+/// Asks the person for one file or several to open with the system's
+/// own dialog, on desktops: `Ok` holds what was chosen (never empty), in
+/// the dialog's order. Phones, tablets and the browser choose one file,
+/// as [`pick_open_file`] does.
+///
+/// # Errors
+/// The answer when nothing was chosen here: cancelled, waiting for a
+/// dialog beside Sue, or failed.
+pub fn pick_open_files(
+    title: &str,
+    start: Option<&Path>,
+    filters: &[FileFilter],
+) -> Result<Vec<PathBuf>, Picking> {
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_arch = "wasm32")))]
+    {
+        let mut dialog = rfd::FileDialog::new().set_title(title);
+        if let Some(start) = start.filter(|start| start.is_dir()) {
+            dialog = dialog.set_directory(start);
+        }
+        for filter in filters {
+            dialog = dialog.add_filter(filter.name.clone(), &filter.extensions);
+        }
+        dialog
+            .pick_files()
+            .filter(|files| !files.is_empty())
+            .ok_or(Picking::Cancelled)
+    }
+    #[cfg(any(target_os = "android", target_os = "ios", target_arch = "wasm32"))]
+    {
+        match pick_open_file(title, start, filters) {
+            Picking::Chosen(path) => Ok(vec![path]),
+            other => Err(other),
+        }
+    }
+}
+
 /// Asks the person for a file to open with the system's own dialog.
 /// Desktops block until it closes; phones and tablets answer
 /// [`Picking::Waiting`] and copy the chosen document into Sue's cache,

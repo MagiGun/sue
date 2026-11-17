@@ -941,6 +941,17 @@ fn cel_show(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
     );
 }
 
+/// Place Layer Here: the layer named by the command's end shows on the
+/// current track from the current frame on, going into the track's
+/// animation folder first when it is not one of its cels.
+fn cel_place(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let (Some(doc), Ok(layer)) = (paint.doc(), call.arg.parse::<EntityId>()) else {
+        return;
+    };
+    let (track, frame) = (doc.track, doc.frame);
+    paint.place_layer_on_cel(cx, track, frame, layer);
+}
+
 /// Keys the current layer at the frame shown.
 fn key_layer(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.key_layer_here(cx);
@@ -1445,6 +1456,10 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     .state(time_unit_state)
     .with(Flags::PALETTE),
     c("anim.cel.show.", "show-cel", "cel", cel_show)
+        .state(on_timeline)
+        .with(Flags::FAMILY)
+        .with(Flags::PALETTE),
+    c("anim.cel.place.", "place-layer-here", "cel", cel_place)
         .state(on_timeline)
         .with(Flags::FAMILY)
         .with(Flags::PALETTE),

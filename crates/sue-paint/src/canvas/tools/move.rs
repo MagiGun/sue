@@ -99,11 +99,27 @@ impl SuePaint {
             }
             return;
         }
-        let wanted = if doc::is_folder(&cx.world.arena, target) {
-            doc::members(&cx.world.arena, picture, target)
+        // The layers picked with the one that moves go with it, each
+        // keeping its place beside the others, as one step.
+        let picked = self.picked_layers(&cx.world.arena);
+        let group = if picked.len() > 1 && picked.contains(&target) {
+            picked
         } else {
             vec![target]
         };
+        let mut wanted = Vec::new();
+        for id in group {
+            let ids = if doc::is_folder(&cx.world.arena, id) {
+                doc::members(&cx.world.arena, picture, id)
+            } else {
+                vec![id]
+            };
+            for id in ids {
+                if !wanted.contains(&id) {
+                    wanted.push(id);
+                }
+            }
+        }
         self.start_layer_move(picture, &wanted, p, cx);
     }
 
