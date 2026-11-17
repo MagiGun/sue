@@ -11,6 +11,7 @@
 //! and the whole arrangement reads from and writes to a text file
 //! ([`layout`]). Sue Paint's own arrangement is such a file too.
 
+pub mod brush_rows;
 pub mod layout;
 
 use crate::brush::{AntiAlias, Tip};
@@ -311,18 +312,22 @@ impl Tool {
                 plain("Ellipse", 1),
                 plain("Lasso", 2),
                 plain("Polyline", 3),
+                // Stabilization starts off: the pen lays where it is.
                 SubTool::new(
                     self,
                     "Selection pen",
                     4,
                     tip(20.0, |t| t.size_by.pressure = false),
-                ),
+                )
+                .stabilization(0),
+                // Stabilization starts off: the pen lays where it is.
                 SubTool::new(
                     self,
                     "Erase selection",
                     5,
                     tip(20.0, |t| t.size_by.pressure = false),
-                ),
+                )
+                .stabilization(0),
                 // A lasso whose selection shrinks to what is drawn in it.
                 plain("Shrink selection", crate::select::SHRINK_SELECTION),
             ],
@@ -815,6 +820,10 @@ pub struct SubTool {
     /// texture, watercolor edge, dual brush and the rest), over what its
     /// built-in brush has; `None` while they are as Sue ships them.
     pub behaviours: Option<sue_brush::paint::Behaviours>,
+    /// The brush settings its tip has no word for, and how the canvas
+    /// treats its strokes (snapping, anti-overflow, post correction's
+    /// kind): [`brush_rows::BrushRows`].
+    pub brush_rows: brush_rows::BrushRows,
 }
 
 impl SubTool {
@@ -871,6 +880,7 @@ impl SubTool {
             close_target: Target::All,
             adjust_angle: false,
             behaviours: None,
+            brush_rows: brush_rows::BrushRows::default(),
         }
     }
 
@@ -1342,6 +1352,12 @@ impl Toolbox {
         };
         slot.subs[index] = SubTool { name, ..original };
         true
+    }
+
+    /// Every sub tool of every tool, to change their settings (the
+    /// defaults a person saved, put back when Sue Paint starts).
+    pub fn every_sub_mut(&mut self) -> impl Iterator<Item = &mut SubTool> {
+        self.slots.iter_mut().flat_map(|slot| slot.subs.iter_mut())
     }
 
     /// The picked sub tool of the current tool.

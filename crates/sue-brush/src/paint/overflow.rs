@@ -154,6 +154,39 @@ impl Region {
         Self::from_cover(rect, |x, y| self.at(x, y).min(other.at(x, y)))
     }
 
+    /// The region grown by `pixels` past its edge, or, below 0, drawn
+    /// back from it by as many (anti-overflow's Area scaling), one pixel
+    /// in each of the eight directions a step, at most 32 steps.
+    #[must_use]
+    pub fn scaled(&self, pixels: i32) -> Self {
+        let r = self.rect;
+        let (w, h) = ((r.x1 - r.x0).max(0), (r.y1 - r.y0).max(0));
+        let mut mask = self.mask.clone();
+        let grow = pixels > 0;
+        for _ in 0..pixels.unsigned_abs().min(32) {
+            let was = mask.clone();
+            for y in 0..h {
+                for x in 0..w {
+                    let mut pick = was[(y * w + x) as usize];
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            let (nx, ny) = (x + dx, y + dy);
+                            // Past the rectangle nothing lies in it.
+                            let near = if nx >= 0 && ny >= 0 && nx < w && ny < h {
+                                was[(ny * w + nx) as usize]
+                            } else {
+                                0.0
+                            };
+                            pick = if grow { pick.max(near) } else { pick.min(near) };
+                        }
+                    }
+                    mask[(y * w + x) as usize] = pick;
+                }
+            }
+        }
+        Self { rect: r, mask }
+    }
+
     /// How much of layer pixel `(x, y)` lies in the region, 0 to 1.
     #[must_use]
     pub fn at(&self, x: i32, y: i32) -> f32 {
@@ -189,6 +222,19 @@ mod tests {
             }
         }
         raster
+    }
+
+    #[test]
+    fn area_scaling_grows_and_draws_back_the_region() {
+        let region = Region::enclosing(&ring(), [100, 50], [120, 65], 0.5).expect("a region");
+        let grown = region.scaled(2);
+        assert_eq!(grown.at(109, 65), 1.0, "two past the line's inner pixel");
+        assert_eq!(grown.at(108, 65), 0.0);
+        let back = region.scaled(-3);
+        assert_eq!(back.at(114, 65), 1.0);
+        assert_eq!(back.at(113, 65), 0.0, "three back from the reached pixel");
+        assert!(back.count() < region.count() && region.count() < grown.count());
+        assert_eq!(region.scaled(0), region);
     }
 
     #[test]

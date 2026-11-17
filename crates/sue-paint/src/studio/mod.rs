@@ -901,6 +901,9 @@ pub struct SuePaint {
     pub(crate) edited_cel_only: bool,
     /// Check Cel Motion or Check Surrounding Cels by Key Input under way.
     pub(crate) cel_peek: Option<crate::panels::timeline::CelPeek>,
+    /// The sub tools saved as defaults, the brush shapes registered and
+    /// the brush tip picker (`brush_rows`).
+    pub(crate) brush_work: crate::brush_rows::BrushWork,
 }
 
 /// How the brush engine took a stroke (for the runtime tests).
@@ -1127,6 +1130,7 @@ impl Default for SuePaint {
             exports: exports::Exports::default(),
             edited_cel_only: false,
             cel_peek: None,
+            brush_work: crate::brush_rows::BrushWork::default(),
         }
     }
 }
