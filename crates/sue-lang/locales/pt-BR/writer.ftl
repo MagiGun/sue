@@ -172,14 +172,11 @@ restore-snapshot = Restaurar instantanea
 before-restoring = Antes de restaurar
 ## studio.rs
 
-made = { $title } criado
 open-a-project-first = Abre un proyecto primero
 put-picture-text = Colocar la imagen en el texto
-added-to-research = Anadido a Investigacion
 imported = Importado
 could-not-read = Não foi possível ler { $path }: { $error }
 import = Importar
-imported-2 = Importado { $name }
 kib = { $name }, { $value } KiB
 could-not-write = Não foi possível gravar { $path }: { $error }
 export-as-2 = Exportar como { $name }

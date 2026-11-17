@@ -197,6 +197,7 @@ fn updates(tour: &mut Tour<'_>) -> Result<(), String> {
         .join("\n"),
         page: "https://example.com/releases/v9.9.9".to_owned(),
         assets: Vec::new(),
+        published: None,
     };
     tour.runtime.updater_mut().offer(release);
     tour.settle();

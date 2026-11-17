@@ -458,7 +458,7 @@ impl Runtime {
                     .get_bool("updates.check_automatically")
                     .unwrap_or(true)
             {
-                self.updater.check_if_due(unix_now());
+                self.updater.check_at_start();
             }
         }
         self.poll_system_dialogs(textures, now);
@@ -1337,9 +1337,21 @@ impl Runtime {
             .start
             .clone()
             .unwrap_or_else(|| self.engine.paths.home_dir.clone());
+        let mut pick = pick;
         let answer = match &pick.save_as {
             Some(name) => sue_platform::pick_save_file(&pick.title, Some(&start), name, &filters),
             None if pick.folders => sue_platform::pick_folder(&pick.title, Some(&start)),
+            // Several files: the first is the answer, the rest go with it.
+            None if pick.many => {
+                match sue_platform::pick_open_files(&pick.title, Some(&start), &filters) {
+                    Ok(mut files) => {
+                        let first = files.remove(0);
+                        pick.also = files;
+                        Picking::Chosen(first)
+                    }
+                    Err(answer) => answer,
+                }
+            }
             None => sue_platform::pick_open_file(&pick.title, Some(&start), &filters),
         };
         self.answered(pick, answer);
@@ -1590,14 +1602,14 @@ impl Runtime {
         self.kept_at = None;
         self.kept = None;
         self.autosave_seen = self.engine.world.arena.revision();
-        self.shell.notify(
-            tr!(
-                "opened-2",
-                value = file_name(path),
-                value2 = if replaced { REPLACED } else { "" }
-            ),
-            false,
-        );
+        // Opening shows the file itself; only what happened behind it
+        // (the work before it was kept) is worth a notice.
+        if replaced {
+            self.shell.notify(
+                tr!("opened-2", value = file_name(path), value2 = REPLACED),
+                false,
+            );
+        }
         Ok(())
     }
 

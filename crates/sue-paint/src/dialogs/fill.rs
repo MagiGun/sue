@@ -187,7 +187,7 @@ pub(super) fn check(
 
 /// Advanced Fill's dialog, laid out as Clip Studio Paint's: the color and
 /// how it lays down, then what it fills, then what it refers to.
-#[allow(clippy::too_many_lines, reason = "the whole Advanced Fill dialog")]
+#[expect(clippy::too_many_lines, reason = "the whole Advanced Fill dialog")]
 pub(super) fn advanced_fill_ui(
     ui: &mut Ui,
     fill: &mut AdvancedFill,

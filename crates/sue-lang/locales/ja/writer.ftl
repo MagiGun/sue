@@ -172,14 +172,11 @@ restore-snapshot = スナップショットを復元
 before-restoring = 復元前
 ## studio.rs
 
-made = { $title } を作成しました
 open-a-project-first = 先にプロジェクトを開いてください
 put-picture-text = 画像をテキスト内に配置
-added-to-research = 資料に追加しました
 imported = インポート完了
 could-not-read = { $path } を読み込めませんでした: { $error }
 import = インポート
-imported-2 = { $name } をインポートしました
 kib = { $name }, { $value } KiB
 could-not-write = { $path } に書き込めませんでした: { $error }
 export-as-2 = { $name } としてエクスポート

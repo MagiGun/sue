@@ -49,6 +49,9 @@ pub struct Release {
     pub page: String,
     /// Its files.
     pub assets: Vec<Asset>,
+    /// When it was published, in seconds since 1970 (GitHub's
+    /// `published_at`), when the release says.
+    pub published: Option<u64>,
 }
 
 impl Release {
@@ -97,6 +100,7 @@ impl Release {
             } else {
                 page
             },
+            published: unix_seconds(&text(&value, "published_at")),
             tag,
             assets,
         })
@@ -112,6 +116,71 @@ impl Release {
     #[must_use]
     pub fn asset(&self, name: &str) -> Option<&Asset> {
         self.assets.iter().find(|asset| asset.name == name)
+    }
+}
+
+/// The seconds since 1970 of a time as GitHub writes it
+/// (`2026-11-17T12:36:09Z`, always in UTC).
+#[must_use]
+pub fn unix_seconds(time: &str) -> Option<u64> {
+    let time = time.trim().strip_suffix('Z')?;
+    let (date, clock) = time.split_once('T')?;
+    let mut date = date.split('-').map(str::parse::<i64>);
+    let (year, month, day) = (date.next()?.ok()?, date.next()?.ok()?, date.next()?.ok()?);
+    let mut clock = clock
+        .split(':')
+        .map(|part| part.split('.').next().unwrap_or(part).parse::<i64>());
+    let (hour, minute, second) = (
+        clock.next()?.ok()?,
+        clock.next()?.ok()?,
+        clock.next()?.ok()?,
+    );
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    // Days from 1970-01-01 to a date of the Gregorian calendar.
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let of_era = year.rem_euclid(400);
+    let of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let days = era * 146_097 + of_era * 365 + of_era / 4 - of_era / 100 + of_year - 719_468;
+    u64::try_from(days * 86_400 + hour * 3600 + minute * 60 + second).ok()
+}
+
+/// `true` when `release`, the latest one GitHub has, is an update for a
+/// copy of Sue that reports the version `current` and was built at
+/// `built` (seconds since 1970).
+///
+/// The version numbers alone cannot tell. Sue's releases went 0.0.7,
+/// 0.0.71 to 0.0.75 and then 0.0.8, which reads as "the next one" to
+/// people but sorts below 0.0.75 as a semantic version (8 is less than
+/// 75), so [`is_newer`] kept 0.0.75 from ever seeing 0.0.8. So the order
+/// of the numbers no longer decides alone:
+///
+/// - the same version (whatever the build metadata) is never an update;
+/// - a release published after this copy was built is one, whatever its
+///   number: GitHub's latest release is the newest by date, so a
+///   different one made after this copy is newer than it;
+/// - a release published before this copy was built is not (a build of a
+///   version on its way to release is not sent back to the last one);
+/// - when either date is unknown the numbers decide, as they used to.
+///
+/// 0.0.81 reaches everyone both ways. Copies already out use the old
+/// rule, and 0.0.81 is above 0.0.8 and above 0.0.75 as a semantic version
+/// (81 is more than 8 and more than 75). Copies from here on use this
+/// rule, and 0.0.81 is published after both were built.
+#[must_use]
+pub fn is_update(release: &Release, current: &str, built: Option<u64>) -> bool {
+    let bare = |text: &str| {
+        let text = text.trim().trim_start_matches('v');
+        text.split('+').next().unwrap_or(text).to_owned()
+    };
+    if bare(&release.tag) == bare(current) {
+        return false;
+    }
+    match (release.published, built) {
+        (Some(published), Some(built)) => published > built,
+        _ => is_newer(&release.tag, current),
     }
 }
 
@@ -399,6 +468,22 @@ pub fn sum_for(sums: &str, name: &str) -> Option<String> {
         (file == name && digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit()))
             .then(|| digest.to_ascii_lowercase())
     })
+}
+
+/// Whether a downloaded file whose SHA-256 is `digest` is the one the
+/// release's sums list as `expected`: anything else is refused, so a
+/// damaged or swapped installer never runs.
+///
+/// # Errors
+/// Says which file does not match, and its digest.
+pub fn matches_sum(name: &str, digest: &str, expected: &str) -> Result<(), String> {
+    if digest.eq_ignore_ascii_case(expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "{name} does not match {SUMS} (its SHA-256 is {digest}), so it was thrown away"
+        ))
+    }
 }
 
 /// Work done on a thread, whose answer is taken once.
@@ -878,17 +963,7 @@ mod net {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
-        let checked = flushed.and_then(|()| {
-            if digest == expected {
-                Ok(())
-            } else {
-                Err(format!(
-                    "{} does not match {} (its SHA-256 is {digest})",
-                    asset.name,
-                    super::SUMS
-                ))
-            }
-        });
+        let checked = flushed.and_then(|()| super::matches_sum(&asset.name, &digest, expected));
         if let Err(error) = checked {
             let _ = std::fs::remove_file(&part);
             return Err(error);

@@ -179,7 +179,7 @@ pub fn shell_declarations() -> Vec<RiceDeclaration> {
         declare(
             "updates.check_automatically",
             toggle(true),
-            "Look for a newer Sue when it starts, at most once a day",
+            "Look for a newer Sue every time it starts",
         ),
     ]
 }
@@ -390,7 +390,7 @@ impl Engine {
         self.catalog = self.build_catalog();
     }
 
-    #[allow(clippy::too_many_lines, reason = "the Settings pages, as data")]
+    #[expect(clippy::too_many_lines, reason = "the Settings pages, as data")]
     fn build_catalog(&self) -> Catalog {
         let rice = &self.world.rice;
         let _language = sue_lang::scope(&sue_wm::sue_language(rice));

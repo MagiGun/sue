@@ -703,8 +703,7 @@ impl SuePaint {
                 .find(|name| !taken(name))
                 .unwrap_or_default();
             self.canvas_presets.push(new.to_preset(name.clone()));
-            new.preset = Some(name.clone());
-            cx.notify(tr!("canvas-preset-registered", name = name));
+            new.preset = Some(name);
         } else if let Some(name) = new.preset.take() {
             self.canvas_presets.retain(|preset| preset.name != name);
         }
@@ -797,7 +796,6 @@ fn project_row(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) {
 /// row, the file name and preset, the Canvas, then the project's own
 /// settings and Record timelapse at the bottom. OK, Cancel and Register
 /// preset are in the footer.
-#[allow(clippy::too_many_lines, reason = "the whole New dialog")]
 pub(super) fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome {
     let animation = new.project == Project::Animation;
     form_grid(ui, "sue-paint-new-top", theme, |form| {

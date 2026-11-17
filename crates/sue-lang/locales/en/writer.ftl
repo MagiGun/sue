@@ -174,14 +174,11 @@ before-restoring = Before restoring
 
 ## studio.rs
 
-made = Made { $title }
 open-a-project-first = Open a project first
 put-picture-text = Put the picture in the text
-added-to-research = Added to Research
 imported = Imported
 could-not-read = Could not read { $path }: { $error }
 import = Import
-imported-2 = Imported { $name }
 kib = { $name }, { $value } KiB
 could-not-write = Could not write { $path }: { $error }
 export-as-2 = Export as { $name }

@@ -172,14 +172,11 @@ restore-snapshot = Restaurar instantanea
 before-restoring = Antes de restaurar
 ## studio.rs
 
-made = 已创建 { $title }
 open-a-project-first = Abre un proyecto primero
 put-picture-text = Colocar la imagen en el texto
-added-to-research = Anadido a Investigacion
 imported = Importado
 could-not-read = 无法读取 { $path }: { $error }
 import = Importar
-imported-2 = 已导入 { $name }
 kib = { $name }, { $value } KiB
 could-not-write = 无法写入 { $path }: { $error }
 export-as-2 = 导出为 { $name }

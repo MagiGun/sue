@@ -174,7 +174,7 @@ impl SueWriter {
         density_for(size).scope(ui, |ui| self.format_row(ui, cx, theme, run));
     }
 
-    #[allow(clippy::too_many_lines, reason = "one row of controls")]
+    #[expect(clippy::too_many_lines, reason = "one row of controls")]
     fn format_row(
         &mut self,
         ui: &mut Ui,

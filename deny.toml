@@ -82,8 +82,24 @@ confidence-threshold = 0.9
 ignore = true
 
 [bans]
-# Two versions of one crate (windows-sys, hashbrown and others) cost build
-# time, not correctness, so they are allowed.
+# Two versions of one crate cost build time, not correctness, so they are
+# allowed. Every one of them today is upstream's: Sue's own crates ask for
+# one version of each dependency (the workspace's `[workspace.dependencies]`
+# table), and the second version comes from a dependency that has not
+# moved yet. `cargo tree -d --workspace` lists them. The ones that stay,
+# and whose they are:
+# - windows-sys, windows and their core crates: winit, cpal,
+#   audio_thread_priority and arboard each pin the release they were
+#   written against.
+# - bitflags 1 (symphonia) beside bitflags 2 (egui and nearly all else).
+# - hashbrown (gpu-allocator beside indexmap), rustc-hash and bit-set (naga
+#   beside fluent and tract), itertools (prost beside egui), miniz_oxide
+#   (png beside flate2), getrandom (ring beside rand), syn, serde, log and
+#   the digest family: two crates of the tree on either side of a major
+#   release.
+# None can be joined from here without forking a dependency or holding one
+# back, and each goes by itself when its upstream moves. A duplicate that
+# Sue's own manifests cause is a mistake: fix the manifest instead.
 multiple-versions = "allow"
 wildcards = "deny"
 # Sue's own crates depend on each other by path.

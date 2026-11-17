@@ -496,7 +496,10 @@ fn extra(preset: &mut BrushPreset, key: &str, bytes: &[u8]) {
 /// Every built-in brush, tool by tool in [`TOOLS`] order, each tool's in
 /// the order its Sub Tool palette lists them.
 #[must_use]
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 pub fn builtin() -> Vec<BrushPreset> {
     use AntiAlias::{None as Hard, Strong, Weak};
     use TextureMode::{Height, Multiply, Subtract};

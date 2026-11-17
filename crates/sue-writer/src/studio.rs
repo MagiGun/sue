@@ -588,7 +588,6 @@ impl SueWriter {
             return;
         }
         self.open_project(cx, root, None);
-        cx.notify(tr!("made", title = title));
     }
 
     /// Saves the open project as a template in the templates folder, so
@@ -717,7 +716,6 @@ impl SueWriter {
             let _ = end;
             if cx.apply(ArenaEdit(step)).is_ok() {
                 self.expanded.insert(research);
-                cx.notify(tr!("added-to-research"));
             }
         }
     }
@@ -933,7 +931,6 @@ impl SueWriter {
             self.apply(cx, batch);
             let _ = cx.apply(ArenaEdit(project::rename(doc, &name)));
             self.editor.select(doc, 0..0);
-            cx.notify(tr!("imported-2", name = name));
             return;
         }
         let parent = self
@@ -959,7 +956,6 @@ impl SueWriter {
                 self.open = Some(id);
                 self.selected = Some(id);
                 self.editor.select(id, 0..0);
-                cx.notify(tr!("imported-2", name = name));
             }
         }
     }

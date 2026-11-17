@@ -191,7 +191,7 @@ top or bottom, or by itself as the keys move.
 
 ### Keeping Sue up to date
 
-When Sue starts it looks for a newer release, at most once a day, without
+When Sue starts it looks for a newer release, every time, without
 getting in your way: if there is one, a small window in the bottom right
 corner says so and shows what is new. **Check for Updates** in the Sue menu
 (or in Settings, under Packages & Updates) looks right away. Turn **Check
@@ -713,7 +713,9 @@ Once a canvas is open:
   brush. With **Vector magnet** on (pen, pencil, brush and Figure
   tools), the ends of a line you draw on a vector layer join the ends
   of lines near them. Correct Line closes a shape when you drag a
-  line's open end onto its other end. With several layers picked, the
+  line's open end onto its other end. With several layers picked (Ctrl+click adds one, Shift+click a run), the
+  Move Layer tool moves them all together and Duplicate Layer copies them
+  all, each as one step; the
   Vector eraser erases on every picked vector layer at once. Fill's **Fill up to
   vector path** fills in under vector lines to their middle. Layer,
   **Update Lines to New Brush Engine** moves a layer's lines to the new
@@ -760,7 +762,11 @@ Once a canvas is open:
   ellipse or circle, or a polygon such as a rectangle or triangle. Lift the
   pen to keep it. Before you lift, a drag still adjusts it, as in Clip Studio
   Paint: a line's far end follows the pen, and a shape turns and grows around
-  its middle. Each pen and brush has it on or off in Tool Property.
+  its middle. Each pen and brush has it on or off in Tool Property. A slip
+  of the hand (a spike in a line, a bite out of an arc) is read past.
+  Settings, Sue Paint, Pen and tools has **Hold to create figures** (off:
+  the pen never makes a figure by resting) and **Length of long-press**
+  (0.1 to 5 seconds, 0.7 to begin with).
 - **Text** (T): click and type right on the canvas, as in Clip Studio
   Paint, with a caret that follows the words; Enter starts a new line and
   Esc, Ctrl and Enter, or another tool keeps them as one step. Tool
@@ -865,7 +871,12 @@ Once a canvas is open:
   them side by side as spreads: click one to choose it, double-click to open
   it, move it earlier or later. Export All Pages saves every page. File,
   Import, **Batch import** brings every picture in a folder in, one a page
-  in name order, such as a stack of scans. Story, Change Story Information
+  in name order, such as a stack of scans. File, Import, Image lets you
+  choose several pictures at once, and several dropped on the canvas
+  together count the same: Sue Paint asks whether they become separate
+  layers, the frames of a new animation folder or separate canvases, and
+  brings them in by name the way people count (img2 before img10), as
+  one step to undo. Story, Change Story Information
   numbers the pages (the folio), at their outer corners or centered, and
   sets whether page 1 starts alone or facing page 2.
 - **The Page Manager and the bound book:** the Page Manager is part of
@@ -951,7 +962,10 @@ Once a canvas is open:
   folded away with it, as in Clip Studio Paint. New Animation Cel puts
   the cel in the folder you picked (or the one your cel is in). Drag a
   layer onto the folder to make it a cel; drag a cel out and it leaves
-  the timeline. Animations made with Sue 0.0.74 or earlier get their
+  the timeline. A layer that comes to be in an animation folder (imported or dragged there) shows on the timeline at once, from
+  the frame shown. To put a layer you already have on a frame, drag it
+  from the Layer palette onto that frame of the folder's row, or right
+  click the frame and choose **Place Layer Here**. Animations made with Sue 0.0.74 or earlier get their
   folders the first time you open them; Undo takes that back.
   File, Export Animation saves an animated GIF, an animated sticker
   (APNG), an animated WebP, a movie or every frame as a picture.

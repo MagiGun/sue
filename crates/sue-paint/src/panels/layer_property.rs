@@ -365,7 +365,7 @@ impl SuePaint {
     /// Clip Studio Paint's Layer Property effects: Border effect,
     /// Watercolor edge, Extract line, Tone and Layer color, and the
     /// Expression color. A folder takes the layer color only.
-    #[allow(clippy::too_many_lines, reason = "every effect and its settings")]
+    #[expect(clippy::too_many_lines, reason = "every effect and its settings")]
     fn layer_effects(
         &mut self,
         ui: &mut Ui,

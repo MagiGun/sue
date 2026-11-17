@@ -374,6 +374,12 @@ pub struct FilePick {
     /// The kinds of file to choose between ("save as type"), first the
     /// default. The chosen file's extension says which was picked.
     pub types: Vec<FileType>,
+    /// `true` to let the person choose several files at once (desktops;
+    /// elsewhere the dialog still gives one).
+    pub many: bool,
+    /// The other files chosen with the one handed back, when several
+    /// were (see [`Self::many`]), in the order the dialog gave them.
+    pub also: Vec<PathBuf>,
 }
 
 /// One kind of file a pick offers, e.g. `PNG picture` with `png`.
@@ -430,6 +436,22 @@ impl FilePick {
     pub fn extensions(mut self, extensions: &[&str]) -> Self {
         self.extensions = extensions.iter().map(|&ext| ext.to_owned()).collect();
         self
+    }
+
+    /// The same request, letting the person choose several files: the
+    /// first comes back as the path, the rest in [`Self::also`].
+    #[must_use]
+    pub fn many(mut self) -> Self {
+        self.many = true;
+        self
+    }
+
+    /// Every file chosen: `path` (the one handed back) and the others.
+    #[must_use]
+    pub fn chosen(&self, path: &Path) -> Vec<PathBuf> {
+        let mut all = vec![path.to_path_buf()];
+        all.extend(self.also.iter().cloned());
+        all
     }
 
     /// The same request, for a folder instead of a file.

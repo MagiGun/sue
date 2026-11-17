@@ -558,7 +558,9 @@ impl SuePaint {
                 &title,
             )
             .extensions(OPENS)
-            .starting_in(start),
+            .starting_in(start)
+            // Several pictures can be chosen at once.
+            .many(),
         ));
     }
 
@@ -674,44 +676,7 @@ impl SuePaint {
         if sue_io::clip::sniff(bytes) {
             return self.open_clip(cx, path, &name, &file, bytes, as_layer);
         }
-        let formats = sue_io::formats(sue_model::registry());
-        let imported = formats.import(bytes, &file, &Properties::new());
-        // Some pictures (WebP, GIF, TIFF, ...) come in kept as their file,
-        // and some (TGA, QOI, ...) no format handler reads; Sue Paint
-        // decodes those itself.
-        let read = imported.as_ref().ok().and_then(|bundle| {
-            bundle
-                .entities
-                .iter()
-                .find_map(|entity| entity.component(ComponentKind::RasterTile2D)?.as_raster())
-                .map(|raster| (raster.format(), to_rgba(raster)))
-        });
-        // Float pixels come in as an 8-bit copy: Save must not write that
-        // over the file.
-        let format = read
-            .as_ref()
-            .map_or(sue_core::PixelFormat::Rgba8, |(format, _)| *format);
-        let read = read.map(|(_, rgba)| rgba);
-        let rgba = match read {
-            Some(rgba) => rgba,
-            None => sue_io::decode_png(bytes)
-                .map(|decoded| decoded.tile)
-                .or_else(|_| sue_io::decode_jpeg(bytes).map(|decoded| decoded.tile))
-                // The extension names the format where the bytes cannot
-                // (TGA has no signature).
-                .or_else(|_| {
-                    let hint = path
-                        .extension()
-                        .and_then(|extension| extension.to_str())
-                        .and_then(sue_io::PictureFormat::from_extension);
-                    sue_io::decode_picture(bytes, hint)
-                })
-                .map(|raster| to_rgba(&raster))
-                .map_err(|_| match &imported {
-                    Ok(_) => tr!("has-no-pixels-sue-paint-can", file = file),
-                    Err(error) => tr!("cannot-open", file = file, error = error),
-                })?,
-        };
+        let (format, rgba) = read_pixels(path, &file, bytes)?;
         let target = self.picture().filter(|_| as_layer);
         match target {
             Some(picture) => {
@@ -1134,6 +1099,57 @@ impl SuePaint {
 }
 
 /// The JPEG quality Settings has for exports.
+/// The pixels of the picture file `bytes` (read from `path`, named
+/// `file`) as straight RGBA, and the format they had in the file.
+///
+/// # Errors
+/// If no format reads the file as pixels.
+pub(super) fn read_pixels(
+    path: &Path,
+    file: &str,
+    bytes: &[u8],
+) -> Result<(sue_core::PixelFormat, RasterTile2D), String> {
+    let formats = sue_io::formats(sue_model::registry());
+    let imported = formats.import(bytes, file, &Properties::new());
+    // Some pictures (WebP, GIF, TIFF, ...) come in kept as their file,
+    // and some (TGA, QOI, ...) no format handler reads; Sue Paint
+    // decodes those itself.
+    let read = imported.as_ref().ok().and_then(|bundle| {
+        bundle
+            .entities
+            .iter()
+            .find_map(|entity| entity.component(ComponentKind::RasterTile2D)?.as_raster())
+            .map(|raster| (raster.format(), to_rgba(raster)))
+    });
+    // Float pixels come in as an 8-bit copy: Save must not write that
+    // over the file.
+    let format = read
+        .as_ref()
+        .map_or(sue_core::PixelFormat::Rgba8, |(format, _)| *format);
+    let read = read.map(|(_, rgba)| rgba);
+    let rgba: RasterTile2D = match read {
+        Some(rgba) => rgba,
+        None => sue_io::decode_png(bytes)
+            .map(|decoded| decoded.tile)
+            .or_else(|_| sue_io::decode_jpeg(bytes).map(|decoded| decoded.tile))
+            // The extension names the format where the bytes cannot
+            // (TGA has no signature).
+            .or_else(|_| {
+                let hint = path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .and_then(sue_io::PictureFormat::from_extension);
+                sue_io::decode_picture(bytes, hint)
+            })
+            .map(|raster| to_rgba(&raster))
+            .map_err(|_| match &imported {
+                Ok(_) => tr!("has-no-pixels-sue-paint-can", file = file),
+                Err(error) => tr!("cannot-open", file = file, error = error),
+            })?,
+    };
+    Ok((format, rgba))
+}
+
 pub(super) fn jpeg_quality(cx: &AppletContext<'_>) -> u8 {
     cx.rice()
         .get_i64("io.jpeg_quality")

@@ -94,6 +94,8 @@ pub(crate) enum Dialog {
     /// The exposure sheet (Clip Studio Paint EX).
     Exposure,
     Frame(crate::comic::FrameSpec),
+    /// Several pictures came in at once: what they become.
+    ImportMany(crate::studio::import_many::ImportMany),
     Canvas(CanvasDialog),
     Resolution(ResolutionDialog),
     /// The Text tool's words: the text layer they go to (new if `None`).
@@ -319,7 +321,7 @@ impl Look {
 
 impl Dialog {
     /// The dialog's title, width and footer.
-    #[allow(clippy::too_many_lines, reason = "one arm per dialog")]
+    #[expect(clippy::too_many_lines, reason = "one arm per dialog")]
     fn look(&self) -> Look {
         use Width::{Double, Form, Narrow, Wide};
         let ok = Footer::ok_cancel;
@@ -369,6 +371,7 @@ impl Dialog {
                 .room(14.0)
                 .enter_is_the_bodys(),
             Dialog::Frame(_) => Look::new(tr!("new-frame-border-folder"), Form, ok()),
+            Dialog::ImportMany(_) => Look::new(tr!("import-pictures-title"), Form, ok()),
             Dialog::Canvas(_) => Look::new(tr!("change-canvas-size"), Narrow, ok()),
             Dialog::Resolution(_) => Look::new(tr!("change-image-resolution"), Narrow, ok()),
             Dialog::Text(..) => Look::new(tr!("text"), Wide, ok()).enter_is_the_bodys(),
@@ -597,6 +600,7 @@ impl SuePaint {
             Dialog::Comps(comps) => self.comps_ui(ui, comps, cx, theme),
             Dialog::Exposure => self.exposure_ui(ui, cx, theme),
             Dialog::Frame(frame) => frame_ui(ui, frame, theme),
+            Dialog::ImportMany(many) => crate::studio::import_many::import_many_ui(ui, many, theme),
             Dialog::Text(_, lettering) => text_ui(ui, lettering, self.main, self.sub, theme),
             Dialog::Onion(onion) => onion_ui(ui, onion, theme),
             Dialog::SelectBy(kind, amount) => select_by_ui(ui, kind, amount, theme),
@@ -680,6 +684,7 @@ impl SuePaint {
             Dialog::Filter(filter) => self.keep_filter(cx, &filter),
             Dialog::Pressure(pressure) => Self::pressure_ok(cx, &pressure),
             Dialog::Frame(frame) => self.add_frame_layer(cx, frame),
+            Dialog::ImportMany(many) => self.import_many_ok(cx, &many),
             Dialog::Text(layer, lettering) => self.put_text(cx, layer, &lettering),
             Dialog::Perspective(perspective) => self.perspective_ok(cx, perspective),
             Dialog::Timelapse(dialog) => self.ask_export_timelapse(cx, dialog.export),
@@ -746,6 +751,7 @@ impl SuePaint {
             | Dialog::Comps(_)
             | Dialog::Exposure
             | Dialog::Frame(_)
+            | Dialog::ImportMany(_)
             | Dialog::Canvas(_)
             | Dialog::Resolution(_)
             | Dialog::Text(..)
@@ -827,7 +833,7 @@ fn label(ui: &mut Ui, text: &str, theme: &Theme) {
 }
 
 /// A line of help under a group of controls, in the caption size.
-fn note(ui: &mut Ui, text: &str, theme: &Theme) {
+pub(crate) fn note(ui: &mut Ui, text: &str, theme: &Theme) {
     ui.add(
         egui::Label::new(
             egui::RichText::new(text)

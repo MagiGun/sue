@@ -5,7 +5,7 @@
 //! answers the shape's outline, densely, for the brush to draw again.
 
 /// How long the pen rests before the stroke turns into its shape, seconds.
-pub const HOLD_SECONDS: f64 = 0.6;
+pub const HOLD_SECONDS: f64 = 0.7;
 /// How far the pen may wander while resting, screen points.
 pub const HOLD_REACH: f32 = 4.0;
 
@@ -29,10 +29,10 @@ pub fn recognize(points: &[[f32; 2]], step: f32) -> Option<Vec<[f32; 2]>> {
         .sum();
     // A straight line: nowhere far from the line between its ends.
     let chord = distance(first, last);
-    let off = points
-        .iter()
-        .map(|p| line_distance(*p, first, last))
-        .fold(0.0, f32::max);
+    // A hand that slips once (a spike, a small correction) still drew a
+    // line: the samples that strayed are left out of the reading, as
+    // long as they are few.
+    let off = most(points.iter().map(|p| line_distance(*p, first, last)));
     if chord > diagonal * 0.8 && off < chord * 0.06 {
         return Some(densify(&[first, last], step, false));
     }
@@ -84,14 +84,30 @@ pub fn recognize(points: &[[f32; 2]], step: f32) -> Option<Vec<[f32; 2]>> {
         }
         return None;
     }
-    // An arc: a circle through both ends and the middle, close all along.
+    // An arc: the circle that fits the samples best (least squares),
+    // fitted again over the samples that stayed with it, so a bite out
+    // of the arc does not pull the circle away or throw the reading out.
     let middle = points[points.len() / 2];
-    if let Some((center, radius)) = circle_through(first, middle, last)
+    let near = |center: [f32; 2], radius: f32| {
+        move |p: &[f32; 2]| (distance(*p, center) - radius).abs() < radius.max(1.0) * 0.08
+    };
+    let circle = circle_fit(&points)
+        .map(|(center, radius)| {
+            let kept: Vec<[f32; 2]> = points
+                .iter()
+                .copied()
+                .filter(near(center, radius))
+                .collect();
+            circle_fit(&kept).unwrap_or((center, radius))
+        })
+        .or_else(|| circle_through(first, middle, last));
+    if let Some((center, radius)) = circle
         && radius < diagonal * 4.0
     {
-        let fits = points
-            .iter()
-            .all(|p| (distance(*p, center) - radius).abs() < radius.max(1.0) * 0.08);
+        let with_it = points.iter().filter(|p| near(center, radius)(p)).count();
+        let fits = with_it as f32 >= points.len() as f32 * KEPT
+            && near(center, radius)(&first)
+            && near(center, radius)(&last);
         if fits {
             let angle = |p: [f32; 2]| (p[1] - center[1]).atan2(p[0] - center[0]);
             let (a0, am, a1) = (angle(first), angle(middle), angle(last));
@@ -129,6 +145,58 @@ pub fn recognize(points: &[[f32; 2]], step: f32) -> Option<Vec<[f32; 2]>> {
         return Some(densify(&corners, step, false));
     }
     None
+}
+
+/// The share of a stroke's samples a shape has to hold: the few that
+/// stray (a spike, a bite) do not count against it.
+const KEPT: f32 = 0.9;
+
+/// The largest of `values` once the few that stray most are left out
+/// (the share past [`KEPT`]).
+fn most(values: impl Iterator<Item = f32>) -> f32 {
+    let mut values: Vec<f32> = values.collect();
+    values.sort_by(f32::total_cmp);
+    let kept = ((values.len() as f32 * KEPT).ceil() as usize).clamp(1, values.len().max(1));
+    values.get(kept - 1).copied().unwrap_or(0.0)
+}
+
+/// The circle that lies closest to `points` in the least-squares sense
+/// (the algebraic fit: x^2 + y^2 + a x + b y + c = 0 solved for a, b and
+/// c). `None` for fewer than three points or points on a line.
+fn circle_fit(points: &[[f32; 2]]) -> Option<([f32; 2], f32)> {
+    if points.len() < 3 {
+        return None;
+    }
+    let count = points.len() as f64;
+    // About the mean, for the sums to stay small.
+    let (mx, my) = points.iter().fold((0.0_f64, 0.0_f64), |(x, y), p| {
+        (x + f64::from(p[0]), y + f64::from(p[1]))
+    });
+    let (mx, my) = (mx / count, my / count);
+    let (mut suu, mut suv, mut svv, mut suuu, mut svvv, mut suvv, mut svuu) = (
+        0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64,
+    );
+    for p in points {
+        let (u, v) = (f64::from(p[0]) - mx, f64::from(p[1]) - my);
+        suu += u * u;
+        suv += u * v;
+        svv += v * v;
+        suuu += u * u * u;
+        svvv += v * v * v;
+        suvv += u * v * v;
+        svuu += v * u * u;
+    }
+    let det = suu * svv - suv * suv;
+    if det.abs() < 1e-6 * (suu + svv).max(1.0).powi(2) {
+        return None;
+    }
+    let (right_u, right_v) = ((suuu + suvv) / 2.0, (svvv + svuu) / 2.0);
+    let uc = (right_u * svv - right_v * suv) / det;
+    let vc = (right_v * suu - right_u * suv) / det;
+    let radius = (uc * uc + vc * vc + (suu + svv) / count).sqrt();
+    radius
+        .is_finite()
+        .then_some(([(uc + mx) as f32, (vc + my) as f32], radius as f32))
 }
 
 fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -339,6 +407,55 @@ mod tests {
         } else {
             "polyline"
         }
+    }
+
+    /// A hand that slips once still drew the shape: a line with a spike
+    /// 40 pixels high is read as the line, and an arc with a bite out of
+    /// it as the arc, on the circle it was drawn on.
+    #[test]
+    fn a_spike_in_a_line_and_a_bite_in_an_arc_are_read_past() {
+        let mut line: Vec<[f32; 2]> = (0..=100)
+            .map(|i| [i as f32 * 4.0, i as f32 * 1.5])
+            .collect();
+        for (index, up) in [(48, 20.0), (49, 40.0), (50, 40.0), (51, 20.0)] {
+            line[index][1] -= up;
+        }
+        let read = recognize(&line, 2.0).expect("a line");
+        assert_eq!(kind(&line), "line");
+        let (first, last) = (read[0], read[read.len() - 1]);
+        assert!(distance(first, [0.0, 0.0]) < 1.0 && distance(last, [400.0, 150.0]) < 1.0);
+
+        let mut arc: Vec<[f32; 2]> = (0..=80)
+            .map(|i| {
+                let a = std::f32::consts::PI * (1.0 + i as f32 / 80.0 * 0.7);
+                [100.0 + 80.0 * a.cos(), 100.0 + 80.0 * a.sin()]
+            })
+            .collect();
+        for point in &mut arc[38..43] {
+            // A bite toward the middle of the circle.
+            point[0] += (100.0 - point[0]) * 0.2;
+            point[1] += (100.0 - point[1]) * 0.2;
+        }
+        assert_eq!(kind(&arc), "arc");
+        let read = recognize(&arc, 2.0).expect("an arc");
+        for point in &read {
+            let off = (distance(*point, [100.0, 100.0]) - 80.0).abs();
+            assert!(off < 2.0, "the arc lies on its circle: {off}");
+        }
+    }
+
+    #[test]
+    fn the_best_circle_through_samples_is_found() {
+        let circle: Vec<[f32; 2]> = (0..30)
+            .map(|i| {
+                let a = i as f32 / 30.0 * 2.0;
+                [40.0 + 25.0 * a.cos(), -10.0 + 25.0 * a.sin()]
+            })
+            .collect();
+        let (center, radius) = circle_fit(&circle).expect("a circle");
+        assert!(distance(center, [40.0, -10.0]) < 0.05 && (radius - 25.0).abs() < 0.05);
+        let line: Vec<[f32; 2]> = (0..30).map(|i| [i as f32, i as f32 * 2.0]).collect();
+        assert_eq!(circle_fit(&line), None);
     }
 
     #[test]

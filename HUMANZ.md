@@ -1663,7 +1663,9 @@ which the shell delivers to the asking applet's `picked`; a pick with no
 applet behind it (opening a file or a project, saving the project, exporting
 the rice) goes to the engine. A headless run keeps the pick for a script to
 answer (`Runtime::answer_pick`), which is how the tests and snapshots choose
-files.
+files. A pick made with `FilePick::many` lets several files be chosen on
+desktops (`sue_platform::pick_open_files`): the first comes back as the
+path and the rest in `FilePick::also` (`FilePick::chosen` gives them all).
 
 **Studio themes.** A studio or tool whose rice section (its id with `-` as
 `_`) has a `theme` wears `Theme::for_studio`: a preset's colors, the Sue theme
@@ -2625,7 +2627,9 @@ tonal correction (one `Filter::to_text` can keep).
 
 **Smart Shape.** While a stroke's pen rests (`smart::HOLD_SECONDS` within
 `smart::HOLD_REACH` screen points), `smart::recognize` reads the stroke's
-samples and answers a line, arc (a circle through its ends and middle),
+samples and answers a line (the tenth of the samples that stray most is
+left out, so a spike does not spoil it), arc (the least-squares circle,
+fitted again over the samples that stayed with it),
 ellipse or polygon (Ramer-Douglas-Peucker corners that every sample lies
 near), densely; `Stroke::reshape` puts the pixels from before back and
 draws the shape, so it is still one stroke to undo. The pen does not have to
@@ -3593,11 +3597,14 @@ GitHub releases of MagiGun/sue. The OS side lives in
   `api.github.com/repos/MagiGun/sue/releases/latest` on a thread (`ureq`
   with rustls, ring and Mozilla's roots from `webpki-roots`, so no system TLS
   library; not in the browser) and reads the tag, notes, page and files into
-  a `Release`. `is_newer(tag, SUE_VERSION)` compares with `semver` after
-  dropping build metadata, so a development build after a release
-  (`0.0.4+dev.3`) is not offered that release. At startup the runtime checks
-  when `updates.check_automatically` is on and the last automatic check
-  (`<data>/updates/checked.txt`) is a day old; Check for Updates
+  a `Release`. `is_update(release, SUE_VERSION, built)` decides: the same version
+  (build metadata dropped, so `0.0.4+dev.3` is not offered 0.0.4) is never
+  an update, and otherwise a release published after this copy was built
+  (`SUE_BUILD_DATE`, noted by `bins/sue/build.rs`) is one, whatever its
+  number: 0.0.8 sorts below 0.0.75 as a semantic version, which hid it
+  from 0.0.75. Without a date `is_newer` compares with `semver` as before.
+  At startup the runtime checks, every start, when
+  `updates.check_automatically` is on; Check for Updates
   (`app.check_updates`) is in the Sue menu and in Settings.
 - **Choosing.** `Install::detect` tells how this copy was installed: Program
   Files (setup or .msi, winget's too), a portable folder or Scoop on

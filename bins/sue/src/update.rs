@@ -1,5 +1,5 @@
-//! Sue's own updates in the window: the check at startup (at most once a
-//! day, unless `updates.check_automatically` is off), Check for Updates in
+//! Sue's own updates in the window: the check at startup (every start,
+//! unless `updates.check_automatically` is off), Check for Updates in
 //! the Sue menu and in Settings, and a small window in the corner that
 //! names the new release, shows its notes and updates the way this copy
 //! was installed ([`sue_platform::update`] does the asking, choosing,
@@ -19,8 +19,12 @@ use sue_wm::ui::{self, Answer, Dialog, Elevation, Layer, ScrollView, Space, Text
 
 use crate::util::human_bytes;
 
-/// How long Sue waits between automatic checks.
-const DAY: u64 = 24 * 60 * 60;
+/// When this copy of Sue was built, in seconds since 1970 (the build
+/// script notes it), to tell a release made after it from one made
+/// before it.
+fn built() -> Option<u64> {
+    option_env!("SUE_BUILD_DATE")?.parse().ok()
+}
 
 /// How often a running check or download is looked at.
 pub const POLL: Duration = Duration::from_millis(250);
@@ -88,8 +92,6 @@ pub struct Updater {
     /// The release whose whole notes are open, over everything.
     reading: Option<Release>,
     install: Install,
-    /// When the last automatic check ran (seconds since 1970).
-    stamp: PathBuf,
     /// Where setup programs, disk images and APKs are downloaded.
     downloads: PathBuf,
     /// Where packages for a package manager are downloaded.
@@ -106,7 +108,6 @@ impl Updater {
             shown: false,
             reading: None,
             install: Install::detect(),
-            stamp: paths.data_dir.join("updates").join("checked.txt"),
             downloads: paths.cache_dir.join("updates"),
             packages: if downloads.is_dir() {
                 downloads
@@ -116,23 +117,13 @@ impl Updater {
         }
     }
 
-    /// Checks now when the last automatic check was a day ago or more
-    /// (and notes the time).
-    pub fn check_if_due(&mut self, now: u64) {
+    /// The check when Sue starts, quietly: the window shows only when
+    /// there is a newer release. Every start asks, so a check that
+    /// failed (no network yet) is not the last one for a day.
+    pub fn check_at_start(&mut self) {
         if self.install == Install::Browser || !matches!(self.state, State::Idle) {
             return;
         }
-        let last = sue_platform::fs::read_to_string(&self.stamp)
-            .ok()
-            .and_then(|text| text.trim().parse::<u64>().ok())
-            .unwrap_or(0);
-        if now.saturating_sub(last) < DAY {
-            return;
-        }
-        if let Some(dir) = self.stamp.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let _ = sue_platform::write_atomic(&self.stamp, now.to_string().as_bytes());
         self.check(true);
     }
 
@@ -151,6 +142,48 @@ impl Updater {
             error,
         };
         self.shown = true;
+    }
+
+    /// Takes the answer of a check made by a copy of Sue that reports the
+    /// version `current` and was built at `built`: a release that is an
+    /// update is offered, another one says Sue is up to date, and a
+    /// failed check says why it failed.
+    pub(crate) fn answered(
+        &mut self,
+        answer: Result<Release, String>,
+        current: &str,
+        built: Option<u64>,
+    ) {
+        self.state = match answer {
+            Ok(release) if update::is_update(&release, current, built) => {
+                let plan = update::plan(&release, &self.install, std::env::consts::ARCH);
+                self.shown = true;
+                State::Available { release, plan }
+            }
+            Ok(release) => State::UpToDate(Some(release)),
+            Err(error) => State::Failed {
+                release: None,
+                error: tr!("update-check-failed", error = error),
+            },
+        };
+    }
+
+    /// The version the window offers, when it offers one.
+    #[cfg(test)]
+    pub(crate) fn offered(&self) -> Option<&str> {
+        match &self.state {
+            State::Available { release, .. } => Some(release.version()),
+            _ => None,
+        }
+    }
+
+    /// Why the last check or download failed, when it did.
+    #[cfg(test)]
+    pub(crate) fn failure(&self) -> Option<&str> {
+        match &self.state {
+            State::Failed { error, .. } => Some(error),
+            _ => None,
+        }
     }
 
     /// Asks for the latest release. A quiet check (at startup) shows the
@@ -191,23 +224,10 @@ impl Updater {
             State::Checking { job, quiet } => {
                 let quiet = *quiet;
                 let answer = job.take()?;
-                self.state = match answer {
-                    Ok(release) if update::is_newer(&release.tag, SUE_VERSION) => {
-                        let plan = update::plan(&release, &self.install, std::env::consts::ARCH);
-                        self.shown = true;
-                        State::Available { release, plan }
-                    }
-                    Ok(release) => State::UpToDate(Some(release)),
-                    Err(error) => {
-                        if quiet {
-                            eprintln!("sue: could not check for updates: {error}");
-                        }
-                        State::Failed {
-                            release: None,
-                            error,
-                        }
-                    }
-                };
+                if quiet && let Err(error) = &answer {
+                    eprintln!("sue: could not check for updates: {error}");
+                }
+                self.answered(answer, SUE_VERSION, built());
                 None
             }
             State::Downloading { download, .. } => {
@@ -222,7 +242,7 @@ impl Updater {
                     Err(error) => {
                         self.state = State::Failed {
                             release: Some(release),
-                            error,
+                            error: tr!("update-download-failed", error = error),
                         };
                         self.shown = true;
                         None
@@ -825,7 +845,7 @@ fn notes(ui: &mut egui::Ui, theme: &Theme, release: &Release) {
     ScrollView::vertical("sue-update-notes")
         .max_height(theme.space(Space::S9) * 5.5)
         .auto_shrink(false, true)
-        .show(ui, theme, |ui| markdown(ui, theme, text));
+        .show(ui, theme, |ui| markdown(ui, theme, notes_body(text)));
 }
 
 /// A release's whole notes over everything, in Sue's dialog: the width of
@@ -849,13 +869,36 @@ fn read_notes(
         .extra(tr!("update-release-page"))
         .scrim_cancels()
         .show(ctx, |ui| {
-            ScrollView::vertical("sue-release-notes-text")
-                .show(ui, theme, |ui| markdown(ui, theme, &release.notes));
+            ScrollView::vertical("sue-release-notes-text").show(ui, theme, |ui| {
+                markdown(ui, theme, notes_body(&release.notes))
+            });
         });
     match shown.answer {
         Some(Answer::Accept | Answer::Cancel) => *close = true,
         Some(Answer::Extra) => *action = Some(Action::OpenUrl(release.page.clone())),
         Some(Answer::Alternate) | None => {}
+    }
+}
+
+/// A release's notes without a first heading that only says what the
+/// window around them already says. The Release workflow starts the
+/// notes with `## What's new in 0.0.8`; under the dialog's own title
+/// (What is new in Sue 0.0.8) and the card's (Sue 0.0.8 is out) that
+/// read twice.
+fn notes_body(notes: &str) -> &str {
+    let text = notes.trim_start();
+    let (first, rest) = text.split_once('\n').unwrap_or((text, ""));
+    let title = first
+        .trim()
+        .trim_start_matches('#')
+        .trim()
+        .to_lowercase()
+        .replace('\u{2019}', "'");
+    let says_new = title.starts_with("what's new") || title.starts_with("what is new");
+    if first.trim_start().starts_with('#') && says_new {
+        rest.trim_start()
+    } else {
+        text
     }
 }
 
@@ -971,5 +1014,137 @@ mod tests {
             "Updates itself. See the page and sue."
         );
         assert_eq!(plain("a [b] c"), "a [b] c");
+    }
+
+    /// What GitHub answers for the latest release, cut to what Sue reads.
+    fn latest(version: &str, published: &str) -> Release {
+        let json = format!(
+            r###"{{"tag_name":"v{version}","name":"Sue v{version}",
+            "published_at":"{published}",
+            "html_url":"https://github.com/MagiGun/sue/releases/tag/v{version}",
+            "body":"## What's new in {version}\n\n### Added\n\n- Something.\n",
+            "assets":[{{"name":"SHA256SUMS.txt","size":1,
+            "browser_download_url":"https://example.com/SHA256SUMS.txt"}}]}}"###
+        );
+        Release::parse(&json).expect("a release")
+    }
+
+    /// When each release was published (0.0.81's is a day to come).
+    const OUT_0075: &str = "2026-11-09T10:00:00Z";
+    const OUT_008: &str = "2026-11-17T12:36:09Z";
+    const OUT_0081: &str = "2026-11-18T09:00:00Z";
+
+    /// A copy built an hour before its release went out.
+    fn built_for(published: &str) -> Option<u64> {
+        update::unix_seconds(published).map(|at| at - 3600)
+    }
+
+    fn updater() -> Updater {
+        let home = std::env::temp_dir().join("sue-update-tests");
+        Updater::new(&PlatformPaths {
+            home_dir: home.clone(),
+            data_dir: home.join("data"),
+            config_dir: home.join("config"),
+            cache_dir: home.join("cache"),
+        })
+    }
+
+    #[test]
+    fn github_times_read_as_seconds() {
+        assert_eq!(update::unix_seconds("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(
+            update::unix_seconds("2026-11-17T12:36:09Z"),
+            Some(1_794_918_969)
+        );
+        assert_eq!(update::unix_seconds("soon"), None);
+    }
+
+    /// The report: 0.0.75 said it was up to date while 0.0.8 was out,
+    /// because 0.0.8 is below 0.0.75 as a semantic version.
+    #[test]
+    fn sue_0075_is_offered_008_and_0081() {
+        assert!(!update::is_newer("v0.0.8", "0.0.75"), "the old rule hid it");
+        for (version, out) in [("0.0.8", OUT_008), ("0.0.81", OUT_0081)] {
+            let mut updater = updater();
+            updater.answered(Ok(latest(version, out)), "0.0.75", built_for(OUT_0075));
+            assert_eq!(updater.offered(), Some(version));
+        }
+        // The copies of 0.0.75 already out still use the old rule: it
+        // shows them 0.0.81 too.
+        assert!(update::is_newer("v0.0.81", "0.0.75"));
+    }
+
+    #[test]
+    fn sue_008_is_offered_0081_by_the_old_rule_and_the_new() {
+        assert!(update::is_newer("v0.0.81", "0.0.8"), "the old rule");
+        let mut updater = updater();
+        updater.answered(Ok(latest("0.0.81", OUT_0081)), "0.0.8", built_for(OUT_008));
+        assert_eq!(updater.offered(), Some("0.0.81"));
+        // Without a build date the numbers decide, as before.
+        let mut updater = updater_without_date("0.0.81", "0.0.8");
+        assert_eq!(updater.offered(), Some("0.0.81"));
+        updater.answered(Ok(latest("0.0.8", OUT_008)), "0.0.81", None);
+        assert_eq!(updater.offered(), None);
+    }
+
+    fn updater_without_date(release: &str, current: &str) -> Updater {
+        let mut updater = updater();
+        updater.answered(Ok(latest(release, OUT_0081)), current, None);
+        updater
+    }
+
+    #[test]
+    fn the_same_version_and_an_older_release_are_not_updates() {
+        let mut updater = updater();
+        updater.answered(Ok(latest("0.0.8", OUT_008)), "0.0.8", built_for(OUT_008));
+        assert_eq!(updater.offered(), None);
+        // A development build after the release is not sent back to it,
+        updater.answered(Ok(latest("0.0.8", OUT_008)), "0.0.8+dev.3", None);
+        assert_eq!(updater.offered(), None);
+        // nor is a build of the next version, made after the last
+        // release went out, although 0.0.8 differs from 0.0.81.
+        let later = update::unix_seconds(OUT_008).map(|at| at + 3600);
+        updater.answered(Ok(latest("0.0.8", OUT_008)), "0.0.81", later);
+        assert_eq!(updater.offered(), None);
+    }
+
+    #[test]
+    fn a_failed_check_says_why() {
+        let _english = sue_lang::scope(sue_lang::ENGLISH);
+        let mut updater = updater();
+        updater.answered(Err("http status: 403".to_owned()), "0.0.8", None);
+        let why = updater.failure().expect("it failed");
+        assert!(why.contains("http status: 403"), "{why}");
+        assert!(why.contains("GitHub"), "{why}");
+    }
+
+    /// The notes begin with the heading the Release workflow writes; the
+    /// window's own title says the same, so it is read once.
+    #[test]
+    fn the_notes_do_not_say_what_is_new_twice() {
+        let release = latest("0.0.8", OUT_008);
+        assert!(release.notes.starts_with("## What's new in 0.0.8"));
+        let body = notes_body(&release.notes);
+        assert!(body.starts_with("### Added"), "{body}");
+        assert!(!body.to_lowercase().contains("what's new"), "{body}");
+        // Any other first heading stays.
+        assert_eq!(notes_body("## Fixed\n\n- A bug."), "## Fixed\n\n- A bug.");
+        assert_eq!(notes_body("What's new is this."), "What's new is this.");
+    }
+
+    /// An installer whose digest is not the one the release published
+    /// is refused, with the reason.
+    #[test]
+    fn a_download_that_does_not_match_the_sums_is_refused() {
+        let good = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+        let sums = format!("{good}  Sue-0.0.81-windows-x64-setup.exe\n");
+        let name = "Sue-0.0.81-windows-x64-setup.exe";
+        let expected = update::sum_for(&sums, name).expect("listed");
+        assert_eq!(update::matches_sum(name, good, &expected), Ok(()));
+        let other = "0".repeat(64);
+        let refused = update::matches_sum(name, &other, &expected).expect_err("refused");
+        assert!(refused.contains(name) && refused.contains("SHA256SUMS.txt"));
+        // A file the sums do not list has nothing to match.
+        assert_eq!(update::sum_for(&sums, "Sue-0.0.81-other.exe"), None);
     }
 }

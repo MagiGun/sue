@@ -737,7 +737,7 @@ pub(super) fn segment_distance(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
 /// accent, faint while their snapping (`[special, linear]`) is off,
 /// with the first line of a vanishing point still to be drawn dashed.
 #[allow(clippy::too_many_arguments, reason = "the rulers and how they show")]
-#[allow(clippy::too_many_lines, reason = "one block per ruler")]
+#[expect(clippy::too_many_lines, reason = "one block per ruler")]
 fn ruler_overlay(
     painter: &egui::Painter,
     rulers: &crate::rulers::Rulers,

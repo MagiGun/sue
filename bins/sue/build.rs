@@ -53,6 +53,23 @@ fn res_of(ico: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn main() {
+    // When this copy was built, for the update check: a release made
+    // after it is newer than it, whatever the version numbers say.
+    // A reproducible build names its own time.
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    println!("cargo:rerun-if-env-changed=SUE_VERSION");
+    let built = std::env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|epoch| epoch.trim().parse::<u64>().ok())
+        .or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|since| since.as_secs())
+        });
+    if let Some(built) = built {
+        println!("cargo:rustc-env=SUE_BUILD_DATE={built}");
+    }
     let icon = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default())
         .join("../../assets/icons/sue_icon.ico");
     println!("cargo:rerun-if-changed={}", icon.display());

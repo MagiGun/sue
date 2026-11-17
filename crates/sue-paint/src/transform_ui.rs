@@ -1120,7 +1120,7 @@ impl SuePaint {
     /// Property (mode, rotation centre, Keep aspect ratio, Keep original
     /// image, scale, angle and position; for Mesh Transformation its
     /// points across and down) and Reset, Cancel and OK.
-    #[allow(clippy::too_many_lines, reason = "one control after another")]
+    #[expect(clippy::too_many_lines, reason = "one control after another")]
     fn transform_bar(
         &mut self,
         ui: &mut Ui,

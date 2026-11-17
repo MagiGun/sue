@@ -524,7 +524,7 @@ impl Toasts {
     /// Draws the stack at the bottom of `within`, the part of the window
     /// notices may cover (leave the status bar and a tab bar out of it),
     /// and says what happened to which notice.
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "one frame of the stack, from the clock to the drawing"
     )]

@@ -367,7 +367,7 @@ pub fn set_canvases(menus: &mut [Menu], names: &[String]) -> bool {
 
 /// The menus, left to right.
 #[must_use]
-#[allow(clippy::too_many_lines, reason = "the whole menu bar as one table")]
+#[expect(clippy::too_many_lines, reason = "the whole menu bar as one table")]
 pub fn menus() -> Vec<Menu> {
     let mut window = vec![
         sub(&tr!("canvas"), canvas_items(&[])),

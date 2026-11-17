@@ -587,11 +587,29 @@ fn new_paper(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 }
 
 fn duplicate(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
-    if let (Some(picture), Some(layer)) = (paint.picture(), paint.layer()) {
-        match doc::duplicate(&cx.world.arena, picture, layer) {
-            Ok((spawn, id)) => apply_and_pick(paint, cx, spawn, id),
+    let (Some(picture), Some(layer)) = (paint.picture(), paint.layer()) else {
+        return;
+    };
+    // Every picked layer is copied, as one step; the copies are picked.
+    let picked = paint.picked_layers(&cx.world.arena);
+    if picked.len() > 1 {
+        match doc::duplicate_layers(&cx.world.arena, picture, &picked) {
+            Ok((edit, copies)) => {
+                if SuePaint::apply(cx, edit)
+                    && let Some(doc) = paint.doc_mut()
+                    && let Some((top, rest)) = copies.split_last()
+                {
+                    doc.layer = Some(*top);
+                    doc.picked = rest.to_vec();
+                }
+            }
             Err(error) => cx.fail(error),
         }
+        return;
+    }
+    match doc::duplicate(&cx.world.arena, picture, layer) {
+        Ok((spawn, id)) => apply_and_pick(paint, cx, spawn, id),
+        Err(error) => cx.fail(error),
     }
 }
 

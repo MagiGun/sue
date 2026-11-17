@@ -261,7 +261,7 @@ struct TableRead {
 ///
 /// # Errors
 /// If it is not an OpenDocument text.
-#[allow(clippy::too_many_lines, reason = "one pass over the document")]
+#[expect(clippy::too_many_lines, reason = "one pass over the document")]
 pub fn read_odt(bytes: &[u8]) -> Result<Imported, String> {
     let files: HashMap<String, Vec<u8>> = read_zip(bytes)?.into_iter().collect();
     let read = |name: &str| {

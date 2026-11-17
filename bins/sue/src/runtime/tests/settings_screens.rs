@@ -403,6 +403,7 @@ fn release() -> sue_platform::update::Release {
                 .to_owned(),
         page: "https://example.com/releases/v9.9.9".to_owned(),
         assets: Vec::new(),
+        published: None,
     }
 }
 

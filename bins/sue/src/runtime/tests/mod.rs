@@ -19,6 +19,7 @@ mod p6_tools_a;
 mod p6_tools_b;
 mod p81_figures;
 mod p81_scanner;
+mod p81_issue12;
 mod paint_3d;
 mod paint_anim;
 mod paint_basics;

@@ -73,6 +73,50 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint, Pose scanner and Hand scanner (image to pose): a model
   download that is cancelled or fails leaves no folder behind.
 
+- Sue Paint: several pictures come in at once. File, Import, Image lets
+  you choose several files, and several dropped on the canvas together
+  count the same: a dialog asks whether they become separate layers,
+  the frames of a new animation folder or separate canvases. They come
+  in by name the way people count (img2 before img10), as one step to
+  undo. Suggested by @mahesh-labs (#12).
+- Sue Paint, Timeline: a layer that comes to be in an animation folder
+  (imported or dragged there) shows on the timeline at
+  once, from the frame shown. A layer you already have goes on a frame
+  by dragging it from the Layer palette onto that frame, or with Place
+  Layer Here in the frame's right click list. Suggested by @mahesh-labs
+  (#12).
+- Sue Paint: with several layers picked, the Move Layer tool moves them
+  all on the canvas, each keeping its place beside the others, and
+  Duplicate Layer copies them all, each as one step to undo. Suggested
+  by @mahesh-labs (#12).
+- Sue Paint, Smart Shape: a slip of the hand is read past, so a line
+  with a spike is still the line and an arc with a bite out of it still
+  the arc, on the circle that fits it best. Settings has Hold to create
+  figures and Length of long-press (0.1 to 5 seconds). From @propaneko's
+  pull request (#11).
+
+### Changed
+
+- Sue looks for a newer release every time it starts (it was once a
+  day), so a start without network is not the last try for a day.
+- Fewer notices: Sue no longer says what you just did and can see
+  (a file opened, a document made or imported in Sue Writer, the
+  language or interface changed, a preset or sub tool kept), and Sue
+  Paint no longer tells you at the first stroke that your pen's
+  pressure works. Errors, finished exports and the like still show.
+
+### Fixed
+
+- Updates: Sue 0.0.75 said it was up to date while 0.0.8 was out,
+  because 0.0.8 counts as lower than 0.0.75 when version numbers are
+  compared part by part. Sue now offers the latest release whenever it
+  was published after your copy was built, whatever its number.
+- Updates: the release notes no longer say "What is new" twice, and a
+  check or download that fails says what failed.
+- The color wheel: a press on the square's corner or just past the
+  triangle's tip no longer turns the hue, and picking inside the shape
+  never drifts the hue by a fraction of a degree. From @propaneko's
+  pull request (#10).
 
 ## [0.0.8] - 2026-11-17
 

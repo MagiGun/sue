@@ -124,7 +124,7 @@ impl Shell {
             .show(&mut buttons, theme);
         self.hub.buttons.push((HubButton::Open, open.rect));
         if open.clicked() {
-            acts.push(HubAct::Request(ShellRequest::Command(
+            acts.push(HubAct::request(ShellRequest::Command(
                 "file.open".to_owned(),
             )));
         }
@@ -166,7 +166,7 @@ impl Shell {
             .and_then(|command| command.strip_prefix("hub-new:")?.parse::<usize>().ok())
             .and_then(|index| all.get(index))
         {
-            acts.push(HubAct::Request(ShellRequest::Create {
+            acts.push(HubAct::request(ShellRequest::Create {
                 applet: applet.clone(),
                 key: template.key.clone(),
             }));
@@ -421,7 +421,7 @@ impl Shell {
                     self.hub.buttons.push((button, response.rect));
                     self.hub.walk.push(response.clone());
                     if response.clicked() {
-                        acts.push(HubAct::Request(ShellRequest::Create {
+                        acts.push(HubAct::request(ShellRequest::Create {
                             applet: id.clone(),
                             key: template.key.clone(),
                         }));
@@ -506,7 +506,7 @@ impl Shell {
                     self.hub.buttons.push((button.clone(), response.rect));
                     self.hub.walk.push(response.clone());
                     if response.clicked() {
-                        acts.push(HubAct::Request(request.clone()));
+                        acts.push(HubAct::request(request.clone()));
                     }
                 }
             });
@@ -600,7 +600,7 @@ impl Shell {
                             HubButton::Work(shelf) => acts.push(HubAct::Work(*shelf)),
                             HubButton::Folder => {
                                 if let Some(home) = &home {
-                                    acts.push(HubAct::Request(ShellRequest::Command(format!(
+                                    acts.push(HubAct::request(ShellRequest::Command(format!(
                                         "reveal:{}",
                                         home.display()
                                     ))));

@@ -178,6 +178,22 @@ impl SueApplet for SuePaint {
             )
             .labeled("Opacity of selection layers"),
             RiceDeclaration::new(
+                crate::canvas::engine::SMART_HOLD,
+                RiceParameter::Bool { value: true },
+                "Holding the pen still at the end of a stroke makes the figure it was meant to be",
+            )
+            .labeled("Hold to create figures"),
+            RiceDeclaration::new(
+                crate::canvas::engine::SMART_HOLD_SECONDS,
+                RiceParameter::FloatRange {
+                    value: 0.7,
+                    min: Some(0.1),
+                    max: Some(5.0),
+                },
+                "How long the pen is held before the figure is made (seconds; Preferences, Tools, Smart Shape)",
+            )
+            .labeled("Length of long-press"),
+            RiceDeclaration::new(
                 "sue_paint.rotate_step",
                 int(15, 1, 90),
                 "How far Rotate Left and Rotate Right turn the view (degrees; Preferences, Canvas)",
@@ -523,66 +539,12 @@ impl SueApplet for SuePaint {
         {
             cx.request(ShellRequest::Open(me_id()));
         }
-        if self.place_picked(&pick.purpose, path, cx)
-            || self.bar_picked(&pick.purpose, path, cx)
-            || self.auto_picked(&pick.purpose, path, cx)
-            || self.bank_picked(&pick.purpose, path, cx)
-        {
-            return;
-        }
-        // Batch Convert Pictures' files and output folder.
-        if self.batch_picked(cx, &pick.purpose, path) {
-            return;
-        }
-        match pick.purpose.as_str() {
-            "new-from-movie" => self.new_from_movie(path, cx),
-            "open" => self.open_picked(cx, path, false),
-            // A picture dropped on a canvas becomes its layer.
-            "import" if self.take_canvas_drop(path) => self.open_picked(cx, path, true),
-            // A file opened anywhere in Sue that Sue Paint takes itself
-            // (see `opens_file`).
-            "import" => self.take_file(cx, path),
-            "layer" => self.open_picked(cx, path, true),
-            "import-layers" => self.open_picked(cx, path, true),
-            "file-object" => self.make_file_object(cx, path),
-            "batch-import" => self.batch_import(cx, path),
-            "story-text" => self.import_text(cx, path),
-            "brush-import" => self.import_brushes(cx, path),
-            "tool-layout" => self.import_tool_layout(cx, path),
-            "batch" => self.export_canvases(cx, path),
-            "import-vector" | "import-movie" | "import-pattern" => {
-                self.import_file(cx, pick.purpose.as_str(), path)
-            }
-            "export" => {
-                if let Some(bytes) = self.pending_export.take() {
-                    self.write_export(cx, path, &bytes);
-                }
-            }
-            "save-as" => self.save_as_to(cx, path),
-            "story-pages" => self.export_pages(cx, path),
-            "book-pdf" => self.export_book(cx, path, false),
-            "book-epub" => self.export_book(cx, path, true),
-            "anim-gif" => self.export_animation(cx, path, true),
-            "anim-movie" => self.export_movie(cx, path),
-            "webtoon" => self.export_webtoon(cx, path),
-            "vectors" => self.export_vectors(cx, path),
-            "layer-comps" => self.export_comps(cx, path),
-            "exposure-sheet-out" => self.export_exposure_sheet(cx, path),
-            "light-table-file" => self.light_table_file(cx, path),
-            "pose-scanner" => self.scan(cx, path, false),
-            "hand-scanner" => self.scan(cx, path, true),
-            "exposure-sheet-in" => self.import_exposure_sheet(cx, path),
-            "anim-cels" => self.export_cels(cx, path),
-            "timelapse" => self.export_timelapse(cx, path),
-            "anim-sequence" => self.export_animation(cx, path, false),
-            "subview" => self.add_reference(path, cx),
-            "model3d" => self.import_3d(cx, path),
-            "anim-audio" => self.import_audio(cx, path),
-            "anim-sound" => self.write_audio(cx, path),
-            "colorset-import" => self.import_color_set(cx, path),
-            "colorset-export" => self.export_color_set(cx, path),
-            _ => {}
-        }
+        let recorded = cx.history.len();
+        let unkeyed = self.unkeyed_cels(&cx.world.arena);
+        self.take_picked(pick, path, cx);
+        // A picture that came in as a layer of an animation folder
+        // shows on its timeline at once.
+        self.cel_new_layers(cx, unkeyed.as_deref(), recorded);
     }
 
     fn templates(&self) -> Vec<sue_wm::FileTemplate> {
@@ -873,5 +835,91 @@ impl SueApplet for SuePaint {
     /// The window of a canvas closed: the canvas goes back in the tabs.
     fn view_closed(&mut self, view: &str, cx: &mut AppletContext<'_>) {
         self.canvas_window_closed(view, cx);
+    }
+}
+
+impl SuePaint {
+    /// Carries out a file the system's dialog picked for Sue Paint.
+    fn take_picked(&mut self, pick: &FilePick, path: &Path, cx: &mut AppletContext<'_>) {
+        // Several pictures chosen at once: as layers of this canvas they
+        // ask what they become; opened, each is a canvas.
+        if !pick.also.is_empty() && matches!(pick.purpose.as_str(), "open" | "layer") {
+            let files = pick.chosen(path);
+            if pick.purpose == "layer" {
+                self.ask_import_many(cx, files);
+            } else {
+                for file in &files {
+                    self.open_picked(cx, file, false);
+                }
+            }
+            return;
+        }
+        if self.place_picked(&pick.purpose, path, cx)
+            || self.bar_picked(&pick.purpose, path, cx)
+            || self.auto_picked(&pick.purpose, path, cx)
+            || self.bank_picked(&pick.purpose, path, cx)
+        {
+            return;
+        }
+        // Batch Convert Pictures' files and output folder.
+        if self.batch_picked(cx, &pick.purpose, path) {
+            return;
+        }
+        match pick.purpose.as_str() {
+            "new-from-movie" => self.new_from_movie(path, cx),
+            "open" => self.open_picked(cx, path, false),
+            // A picture dropped on a canvas becomes its layer.
+            "import" if self.take_canvas_drop(path) => {
+                // Several dropped together ask what they become.
+                if self.dropped_together() {
+                    self.add_to_import_many(cx, path);
+                } else {
+                    self.open_picked(cx, path, true);
+                }
+            }
+            // A file opened anywhere in Sue that Sue Paint takes itself
+            // (see `opens_file`).
+            "import" => self.take_file(cx, path),
+            "layer" => self.open_picked(cx, path, true),
+            "import-layers" => self.open_picked(cx, path, true),
+            "file-object" => self.make_file_object(cx, path),
+            "batch-import" => self.batch_import(cx, path),
+            "story-text" => self.import_text(cx, path),
+            "brush-import" => self.import_brushes(cx, path),
+            "tool-layout" => self.import_tool_layout(cx, path),
+            "batch" => self.export_canvases(cx, path),
+            "import-vector" | "import-movie" | "import-pattern" => {
+                self.import_file(cx, pick.purpose.as_str(), path)
+            }
+            "export" => {
+                if let Some(bytes) = self.pending_export.take() {
+                    self.write_export(cx, path, &bytes);
+                }
+            }
+            "save-as" => self.save_as_to(cx, path),
+            "story-pages" => self.export_pages(cx, path),
+            "book-pdf" => self.export_book(cx, path, false),
+            "book-epub" => self.export_book(cx, path, true),
+            "anim-gif" => self.export_animation(cx, path, true),
+            "anim-movie" => self.export_movie(cx, path),
+            "webtoon" => self.export_webtoon(cx, path),
+            "vectors" => self.export_vectors(cx, path),
+            "layer-comps" => self.export_comps(cx, path),
+            "exposure-sheet-out" => self.export_exposure_sheet(cx, path),
+            "light-table-file" => self.light_table_file(cx, path),
+            "pose-scanner" => self.scan(cx, path, false),
+            "hand-scanner" => self.scan(cx, path, true),
+            "exposure-sheet-in" => self.import_exposure_sheet(cx, path),
+            "anim-cels" => self.export_cels(cx, path),
+            "timelapse" => self.export_timelapse(cx, path),
+            "anim-sequence" => self.export_animation(cx, path, false),
+            "subview" => self.add_reference(path, cx),
+            "model3d" => self.import_3d(cx, path),
+            "anim-audio" => self.import_audio(cx, path),
+            "anim-sound" => self.write_audio(cx, path),
+            "colorset-import" => self.import_color_set(cx, path),
+            "colorset-export" => self.export_color_set(cx, path),
+            _ => {}
+        }
     }
 }

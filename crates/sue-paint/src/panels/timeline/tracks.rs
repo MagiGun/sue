@@ -402,6 +402,28 @@ impl SuePaint {
                 items.push(MenuItem::Separator);
                 items.push(item("anim.cel.new"));
                 items.push(item("anim.cel.assign"));
+                // Place Layer Here: a layer from outside the folder
+                // becomes its cel, shown from this frame on.
+                let folder = anim::track_folder(&sequence.tracks[row.track]);
+                let outside: Vec<MenuItem> = crate::doc::layers(arena, picture)
+                    .into_iter()
+                    .rev()
+                    .filter(|info| {
+                        Some(info.id) != folder
+                            && crate::doc::folder_of(arena, info.id) != folder
+                            && folder.is_none_or(|folder| {
+                                !crate::doc::folders_around(arena, folder).contains(&info.id)
+                            })
+                    })
+                    .take(40)
+                    .map(|info| MenuItem::action(info.name, format!("anim.cel.place.{}", info.id)))
+                    .collect();
+                if folder.is_some() && !outside.is_empty() {
+                    items.push(MenuItem::Sub {
+                        label: tr!("place-layer-here"),
+                        items: outside,
+                    });
+                }
                 items.push(MenuItem::Separator);
             }
             Kind::Camera | Kind::Layer => {}
@@ -467,7 +489,7 @@ impl SuePaint {
     }
 
     /// The tracks of the Timeline palette, in `area` under its bar.
-    #[allow(
+    #[expect(
         clippy::too_many_lines,
         reason = "the whole frames area, drawn in order"
     )]
@@ -900,6 +922,8 @@ impl SuePaint {
         };
         let hovered_row = hover.and_then(|pos| row_at(pos.y));
         let mut menu_picked: Option<String> = None;
+        self.anim_ui.cel_rows.clear();
+        self.anim_ui.frames_at = Some((frames_area.left(), origin, step, length));
         let mut audio_drop: Option<(usize, i64)> = None;
         for (index, row) in layout.iter().copied().enumerate() {
             let top = rows_top + row.top - down;
@@ -913,6 +937,9 @@ impl SuePaint {
                 pos2(frames_area.left(), top),
                 vec2(frames_area.width(), row.height),
             );
+            if row.kind == Kind::Cels {
+                self.anim_ui.cel_rows.push((cells, row.track));
+            }
             let chosen = row.track == current_track;
             if chosen {
                 names_painter.rect_filled(name_rect, CornerRadius::ZERO, theme.fill_selected());

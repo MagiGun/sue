@@ -184,7 +184,7 @@ packages-require_signatures = Only signed packages
 ## [updates]
 
 updates-check_automatically = Check automatically
-    .description = Look for a newer Sue when it starts, at most once a day
+    .description = Look for a newer Sue every time it starts
 
 ## [sue_paint]
 
@@ -260,6 +260,10 @@ sue_paint-brush_cursor = Brush cursor
     .dot = Dot
 sue_paint-selection_layer_opacity = Opacity of selection layers
     .description = Opacity of a new selection layer (%)
+sue_paint-smart_shape_hold = Hold to create figures
+    .description = Holding the pen still at the end of a stroke makes the figure it was meant to be
+sue_paint-smart_shape_hold_seconds = Length of long-press
+    .description = How long the pen is held before the figure is made (seconds; Preferences, Tools, Smart Shape)
 sue_paint-rotate_step = Rotation step
     .description = How far Rotate Left and Rotate Right turn the view (degrees)
     .description = How far Rotate Left and Rotate Right turn the view (degrees; Preferences, Canvas)

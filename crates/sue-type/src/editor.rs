@@ -2929,7 +2929,7 @@ impl Editor {
         }
     }
 
-    #[allow(clippy::too_many_lines, reason = "one match over the editing keys")]
+    #[expect(clippy::too_many_lines, reason = "one match over the editing keys")]
     fn key(
         &mut self,
         cx: &mut AppletContext<'_>,

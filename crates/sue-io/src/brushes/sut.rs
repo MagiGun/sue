@@ -676,7 +676,10 @@ fn value(preset: &BrushPreset, key: &str) -> f32 {
 }
 
 /// Every part of the mapping, in the order import applies them.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 fn aspects() -> Vec<Aspect> {
     vec![
         // Size, its unit and what drives it.

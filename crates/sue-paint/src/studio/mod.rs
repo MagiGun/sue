@@ -32,6 +32,7 @@ mod edit;
 pub(crate) mod exports;
 mod files;
 mod frame;
+pub(crate) mod import_many;
 mod layers;
 pub(crate) use layers::ASK_DELETE_FOLDERS;
 mod materials;
@@ -805,7 +806,6 @@ pub struct SuePaint {
     /// The pen pressure curve every tool uses (Pen Pressure Settings).
     pub(crate) pen_curve: sue_model::Response,
     /// The hint about fitting pen pressure was given (once a run).
-    pub(crate) pen_hinted: bool,
     /// The pen's eraser end picks the Eraser, and turning the pen back the
     /// tool before (Clip Studio Paint).
     pub(crate) eraser_end: crate::tools::EraserEnd,
@@ -1107,7 +1107,6 @@ impl Default for SuePaint {
             pen_curve: crate::dialogs::DEFAULT_PEN_PRESSURE
                 .parse()
                 .unwrap_or_default(),
-            pen_hinted: false,
             eraser_end: crate::tools::EraserEnd::default(),
             panels: Panels::default(),
             color_tab: 0,

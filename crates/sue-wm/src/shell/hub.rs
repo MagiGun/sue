@@ -143,9 +143,17 @@ enum HubAct {
     /// Pin a studio, or take its pin away.
     Pin(AppletId),
     /// Hand the engine a request.
-    Request(ShellRequest),
+    Request(Box<ShellRequest>),
     /// Open a file, or forget it with a word when it is gone.
     OpenFile(PathBuf),
+}
+
+impl HubAct {
+    /// A request for the engine (boxed: a request is far larger than
+    /// the other things the Hub does).
+    fn request(request: ShellRequest) -> Self {
+        Self::Request(Box::new(request))
+    }
 }
 
 /// The Hub's state between frames.
@@ -397,7 +405,7 @@ impl Shell {
                 let again = super::pinned(&io.world.rice, io.applets).as_ref() == Some(&id);
                 self.pin((!again).then_some(id), io);
             }
-            HubAct::Request(request) => io.requests.push(request),
+            HubAct::Request(request) => io.requests.push(*request),
             HubAct::OpenFile(path) => {
                 self.discard_armed = None;
                 if sue_platform::fs::exists(&path) {

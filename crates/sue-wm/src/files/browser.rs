@@ -115,7 +115,10 @@ pub fn projects_ui(
 /// labels on the left (chips over the cards when compact); search, type
 /// chips, the toolbar and the cards on the right. Kept work's cards carry
 /// Recover and a Discard that asks once more.
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one pass from top to bottom; split up, its steps would be read out of order"
+)]
 pub fn browse(
     ui: &mut Ui,
     body: Rect,

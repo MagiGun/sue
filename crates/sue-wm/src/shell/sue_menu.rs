@@ -38,18 +38,8 @@ impl Shell {
         }
         let txn = SetRiceValue::new(crate::LANGUAGE_KEY, RiceValue::Text(setting.to_owned()));
         io.typing.flush(io.history);
-        match io.apply_sue(RiceEdit(txn)) {
-            Ok(_) => {
-                let _language = sue_lang::scope(&crate::sue_language(&io.world.rice));
-                self.notify(
-                    tr!(
-                        "language-changed",
-                        language = sue_lang::name(&sue_lang::current())
-                    ),
-                    false,
-                );
-            }
-            Err(error) => self.notify(tr!("could-not-change-language", error = error), true),
+        if let Err(error) = io.apply_sue(RiceEdit(txn)) {
+            self.notify(tr!("could-not-change-language", error = error), true);
         }
     }
 
@@ -76,8 +66,6 @@ impl Shell {
                 if let Ok(config) = WmConfig::from_rice(&io.world.rice) {
                     self.config = config;
                 }
-                let layout = layout_name(self.form_factor());
-                self.notify(tr!("interface-changed", interface = layout), false);
             }
             Err(error) => self.notify(tr!("could-not-change-interface", error = error), true),
         }
