@@ -257,9 +257,11 @@ fn sue_paint_makes_manga_frames_balloons_and_focus_lines() {
         );
     }
     assert_eq!(panels(&runtime), 5, "undone");
-    // The Frame Border tool's division cuts the middle panel in two.
+    // The Frame Border tool's division cuts the middle panel in two (past
+    // the Frame pen, after the Polyline frame).
     step(&mut runtime, vec![key(egui::Key::U, plain)]);
     step(&mut runtime, vec![key(egui::Key::U, plain)]);
+    step(&mut runtime, vec![key(egui::Key::Period, plain)]);
     step(&mut runtime, vec![key(egui::Key::Period, plain)]);
     let depth = runtime.engine.history.depth();
     drag(

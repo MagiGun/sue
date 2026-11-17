@@ -139,7 +139,7 @@ fn click(paint: &mut PaintDriver, at: Pos2) {
 }
 
 /// The Figure tool's sub tools in the Sub Tool palette's order.
-const FIGURE: [&str; 12] = [
+const FIGURE: [&str; 16] = [
     "Straight Line",
     "Rectangle",
     "Ellipse",
@@ -151,6 +151,10 @@ const FIGURE: [&str; 12] = [
     "Bezier Curve",
     "Polygon",
     "Saturated Line",
+    "Scattered saturated line",
+    "Dense saturated line",
+    "Dark saturated line",
+    "Burst",
     "Speed Line",
 ];
 

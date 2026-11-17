@@ -987,14 +987,24 @@ impl SuePaint {
 
     /// Adds `panel` as one undo step called `label`: in a frame folder of
     /// its own when the sub tool's How to add says so (Clip Studio
-    /// Paint's Create new folder), else to the frame border layer (a new
-    /// one when there is none).
+    /// Paint's Create new folder) and the current layer is no frame
+    /// border layer, else to the frame border layer (a new one when there
+    /// is none).
     fn add_panel(&mut self, cx: &mut AppletContext<'_>, panel: Panel, sub: &SubTool, label: &str) {
         let Some((_, [width, height], paper)) = self.page(&cx.world.arena) else {
             return;
         };
         let border = if sub.edge { sub.tip.size.max(0.5) } else { 0.0 };
-        if sub.new_layer {
+        // A new frame folder (How to add), unless the layer being worked
+        // on is a frame border layer: then the panel joins it, as in a
+        // frame folder made with a layout.
+        let on_frame = self.layer().is_some_and(|layer| {
+            cx.world
+                .arena
+                .get_by_id(layer)
+                .is_ok_and(|entity| entity.class() == manga::FRAME)
+        });
+        if sub.new_layer && !on_frame {
             self.add_frame_folder(cx, panel, sub, border, label);
             return;
         }

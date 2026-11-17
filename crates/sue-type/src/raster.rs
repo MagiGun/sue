@@ -192,7 +192,6 @@ fn blend(
     clippy::too_many_arguments,
     reason = "a glyph, where, and the pixels it lands on"
 )]
-#[allow(clippy::too_many_arguments, reason = "one glyph and where it goes")]
 fn glyph(
     face: &Face<'_>,
     id: ttf_parser::GlyphId,
