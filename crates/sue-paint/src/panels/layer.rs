@@ -1181,15 +1181,31 @@ impl SuePaint {
                         )
                         .label(&tr!("change-layer-name-ellipsis"))
                         .show_at(ui, field, theme);
-                        // Focus is held while the name is typed, but asked
-                        // for only after looking whether it just went:
-                        // asked first, Enter, Tab or a click elsewhere
-                        // would never end the typing.
-                        let lost = edit.lost_focus();
-                        if !lost {
+                        // The field takes the keys once, as it opens, with
+                        // the whole name selected for typing over; asking
+                        // every frame would keep the focus through Enter,
+                        // so the new name would never be taken. It asks
+                        // once the double click that opened it is over: a
+                        // press or release beside the field in the frame
+                        // it asks would take the focus straight back.
+                        let opened = Id::unique(("sue-paint-rename-opened", info.id.to_u128()));
+                        let clicking = ui.input(|input| {
+                            input.pointer.any_down() || input.pointer.any_released()
+                        });
+                        if !clicking
+                            && !ui.data(|data| data.get_temp::<bool>(opened).unwrap_or(false))
+                        {
+                            ui.data_mut(|data| data.insert_temp(opened, true));
                             edit.request_focus();
+                            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), edit.id) {
+                                state.cursor.set_char_range(Some(
+                                    egui::text::CCursorRange::select_all_str(&name),
+                                ));
+                                state.store(ui.ctx(), edit.id);
+                            }
                         }
-                        if lost {
+                        if edit.lost_focus() {
+                            ui.data_mut(|data| data.remove::<bool>(opened));
                             events.rename = Some((
                                 info.id,
                                 name.clone(),
@@ -1198,6 +1214,12 @@ impl SuePaint {
                         }
                         self.renaming = Some((info.id, name));
                     } else {
+                        // A rename that ended without the field letting go
+                        // (Layer, Change Layer Name moved it to another
+                        // layer) leaves no mark, so the next one takes the
+                        // keys again.
+                        let opened = Id::unique(("sue-paint-rename-opened", info.id.to_u128()));
+                        ui.data_mut(|data| data.remove::<bool>(opened));
                         let arena = &cx.world.arena;
                         // An animation folder names the cel it shows now.
                         let shows = (is_folder && crate::anim::is_animation_folder(arena, info.id))
