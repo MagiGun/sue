@@ -941,9 +941,8 @@ follow [Semantic Versioning](https://semver.org/).
   (before, going to another frame picked the cel shown); the playback
   range's markers on the Timeline's ruler can be dragged again (the ruler
   took the pointer from them).
-- Sue Paint, Layer palette: a name typed after a double click is kept on
-  Enter or a click elsewhere (the field took the keys back); a drag on a
-  layer's opacity slider is one undo step, not two.
+- Sue Paint, Layer palette: a drag on a layer's opacity slider is one
+  undo step, not two.
 
 - Sue Paint: a new correction layer and the setting its dialog gave
   it are one undo step; one Ctrl+Z takes the new layer away instead of
@@ -954,9 +953,9 @@ follow [Semantic Versioning](https://semver.org/).
   and the Blend tool while it is edited, as a raster layer's mask does
   (strokes used to be refused with "pick a layer in it to draw on").
 - Sue Paint, Layer palette: a double click on a layer's name selects
-  the whole name for typing over, and Enter or a click elsewhere keeps
-  the new name (the field used to hold the keys for good, so the name
-  never changed).
+  the whole name for typing over, and Enter, Tab or a click elsewhere
+  keeps the new name (the field used to hold the keys for good, so the
+  name never changed). Renaming an Auto Action ends the same way.
 - Sue Paint, Rotate: Tool Property shows the Snap angle check box and
   its step, so the view can turn in steps without holding Shift (the
   setting was kept but had no row).
@@ -1203,8 +1202,6 @@ follow [Semantic Versioning](https://semver.org/).
   middle of another goes into that button's group.
 - Sue Paint, Information palette: Show Canvas Information in its menu,
   so the palette can be emptied.
-- Sue Paint: renaming a layer or an Auto Action ends with Enter, Tab or a
-  click elsewhere and keeps the new name (the name typed was lost).
 - Sue Paint: a new animation lists every layer on the timeline, the
   paper too, so it can be locked or hidden there; a layer made or
   dragged out of an animation folder later gets its track at once, in
