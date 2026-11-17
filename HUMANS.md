@@ -1059,8 +1059,9 @@ Templates, Poses, 3D backgrounds, 3D objects and your own pictures and
 brush tips); Window, **Material Folders** opens the palette at each.
 Everything in it Sue Paint brings is of its own making: drag a tone, a
 pattern or focus lines over the canvas, a balloon (white inside) where it
-goes, a room or a chair as a 3D layer, a pose onto the figure you want
-posed. Edit, Register Material, **Template** keeps the canvas's layers as
+goes, a room or a chair as a 3D layer (a room, street or corridor shows
+from inside, at eye height, ready to draw over), a pose onto the figure
+you want posed. Edit, Register Material, **Template** keeps the canvas's layers as
 a template (a `.clip` file you can share), and File, New's **Template**
 row starts a new canvas with one. Layer, New Layer, **File Object** shows
 a picture file on a layer; **Update File Object** shows it as the file is
@@ -1076,7 +1077,8 @@ makes the interface color darker or lighter; text always stays readable.
 
 **Auto Actions that remember your hands.** While an action records, a
 layer you drag in the Layer palette and the strokes you draw are kept as
-steps too. The second box of a step shows its dialog while the action
+steps too, and a step keeps the settings its dialog had when you
+recorded it. The second box of a step shows its dialog while the action
 plays: the action waits for you to press OK, and Cancel stops it.
 
 ---

@@ -523,7 +523,7 @@ decorations. Light and heavy pressure and a flick need a tablet.
 | Object list of several objects on one 3D layer | Tool Property | missing | One object per 3D layer |
 | Display settings for editing | Tool Property | missing | Clip Studio's draw quality while a 3D object is edited; Sue Paint draws the model at full quality on every frame of a drag, so there is nothing to lower yet |
 | Hand pose on the figure itself, poses dragged onto the model, the 3D object launcher | 3D | partial | A pose dragged from the Material palette poses the figure of its kind under the pointer, whichever layer is current, and makes a new figure where none is; hands are their own 3D layer, so a hand pose does not pose a body figure's hands, and there is no object launcher |
-| Characters with physics, 3D backgrounds, motion materials | Materials | missing | Later (risk R6: Sue's own materials only) |
+| Characters with physics, 3D backgrounds, motion materials | Materials | partial | 3D backgrounds (room, street, corridor, stairs, rooftop) and small 3D objects of Sue Paint's own, each a 3D layer; characters with physics and motion materials are downloaded materials in Clip Studio Paint and are left out (risk R6: Sue's own materials only) |
 | Batch texture export (EX) | File > Export | missing | |
 | FBX import (5.1) | File > Import | missing | |
 
@@ -588,7 +588,7 @@ decorations. Light and heavy pressure and a flick need a tablet.
 | Palettes: Color Wheel, Color Slider, Color Set, Color History, Intermediate Color, Approximate Color | Window | done | |
 | Palettes: Navigator, Sub View, Layer, Layer Property, History | Window | done | |
 | Palettes: Timeline, Animation Cels, Material | Window | done | |
-| Auto Action palette (recorded sequences) | Window > Auto Action Palette | done | Records and plays menu commands, layers dragged in the Layer palette and strokes drawn on the canvas; each step has its on box and a box that shows its dialog while playing (the action waits for it) |
+| Auto Action palette (recorded sequences) | Window > Auto Action Palette | done | Records and plays menu commands, layers dragged in the Layer palette and strokes drawn on the canvas; each step has its on box and a box that shows its dialog while playing (the action waits for it), and keeps the settings its dialog had when it was recorded |
 | Item Bank palette | Window > Item Bank | done | Keeps sub tools to add again |
 | Information palette | Window > Information | done | The canvas, the memory its pixels take, the pointer's place and color, a drag's length, in the unit chosen; its menu shows or hides each, so it can be emptied into a spacer |
 | Cascade, Tile, New Window | Window > Canvas | done | New Window adds a tab and leaves tiling alone; a canvas can also go into a window of its own (tear its tab off, or Canvas in Its Own Window), on any screen |

@@ -21,7 +21,9 @@ follow [Semantic Versioning](https://semver.org/).
   (round, thought, shout, whisper, wavy, caption box) with white inside,
   frame templates, every preset pose, and 3D backgrounds (room, street,
   corridor, stairs, rooftop) and objects (chair, desk, table, bed,
-  bookshelf, door, street lamp, crate) that land as 3D layers. A row of
+  bookshelf, door, street lamp, crate) that land as 3D layers; a
+  background lands seen from inside, at eye height in one point
+  perspective, ready to draw over. A row of
   buttons opens the palette at each folder, and Window, Material Folders
   lists them too.
 - Sue Paint: templates. Edit, Register Material, Template keeps a
@@ -39,8 +41,10 @@ follow [Semantic Versioning](https://semver.org/).
   canvas's width to the window.
 - Sue Paint, Auto Action: each step has a second box that shows its
   dialog while the action plays (the action waits for OK; Cancel stops
-  it), and recording keeps layers dragged in the Layer palette and the
-  strokes you draw on the canvas.
+  it), a step keeps the settings its dialog had when it was recorded (a
+  blur recorded at 12 pixels plays at 12 pixels), and recording keeps
+  layers dragged in the Layer palette and the strokes you draw on the
+  canvas. A dialog cancelled while recording leaves no step behind.
 - Sue Paint, Preferences: Adjust density makes the interface color
   darker or lighter; text always stays readable.
 - Sue Paint: a pose dragged from the Material palette onto a drawing

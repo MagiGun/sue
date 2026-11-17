@@ -11,32 +11,13 @@
 use egui::Color32;
 
 use crate::Theme;
+use crate::ui::tokens::contrast;
 
 /// How far the strongest density moves a surface toward black or white.
 const REACH: f32 = 0.6;
 
 /// The least contrast body text keeps against the bars (WCAG AA).
 const LEAST: f32 = 4.5;
-
-/// The relative luminance of `color` (sRGB), 0 to 1.
-fn luminance(color: Color32) -> f32 {
-    let channel = |value: u8| {
-        let c = f32::from(value) / 255.0;
-        if c <= 0.039_28 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    0.2126 * channel(color.r()) + 0.7152 * channel(color.g()) + 0.0722 * channel(color.b())
-}
-
-/// The contrast between two colors, 1 to 21.
-#[must_use]
-pub fn contrast(a: Color32, b: Color32) -> f32 {
-    let (la, lb) = (luminance(a), luminance(b));
-    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
-}
 
 /// `color` moved `share` of the way to `to`, its alpha kept.
 fn toward(color: Color32, to: u8, share: f32) -> Color32 {
@@ -130,6 +111,10 @@ impl Theme {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn luminance(color: Color32) -> u32 {
+        u32::from(color.r()) + u32::from(color.g()) + u32::from(color.b())
+    }
 
     fn dark() -> Theme {
         Theme::from_rice(&sue_rice::RiceSchema::default())

@@ -626,6 +626,88 @@ fn step_00_20_56_fgv_16_dialog_switch_and_recorded_layer_drag_and_strokes() {
     assert!(arena_bytes(&paint) == after, "redone");
 }
 
+/// 00:20:56, FGV-16: a step keeps the settings its dialog had when it
+/// was recorded. A blur recorded at a radius of its own plays at that
+/// radius with its dialog hidden (not at the dialog's first radius), and
+/// a dialog cancelled while recording leaves no step behind.
+#[test]
+fn step_00_20_56_fgv_16_a_step_keeps_the_settings_of_its_dialog() {
+    let mut paint = PaintDriver::new("p6-auto-settings");
+    let layer = new_layer(&mut paint);
+    pen_stroke(&mut paint, 0.0);
+    let drawn = pixels(&paint, layer);
+    let file = paint
+        .root
+        .join("data")
+        .join("paint")
+        .join("auto_actions.txt");
+    // Cancelled while recording: nothing is kept.
+    paint.command("auto.new");
+    paint.settle(4);
+    paint.command("filter.gaussian");
+    paint.settle(4);
+    press(&mut paint, egui::Key::Escape);
+    paint.settle(4);
+    assert_eq!(pixels(&paint, layer), drawn, "cancelled");
+    // Recorded at a radius of its own, near the slider's far end.
+    paint.command("filter.gaussian");
+    paint.settle(4);
+    let radius = named(&mut paint, &label_of_text("radius"));
+    click_at(&mut paint, pos2(radius.right() - 6.0, radius.center().y));
+    press(&mut paint, egui::Key::Enter);
+    paint.command("auto.record");
+    paint.settle(4);
+    let blurred = pixels(&paint, layer);
+    assert_ne!(blurred, drawn, "blurred");
+    let kept = sue_platform::fs::read_to_string(&file).unwrap();
+    let action = kept
+        .split("[")
+        .last()
+        .expect("the action recorded last")
+        .to_owned();
+    assert_eq!(
+        action.matches("step ").count(),
+        1,
+        "the cancelled dialog left no step: {action}"
+    );
+    let settings = action
+        .lines()
+        .find_map(|line| line.strip_prefix("settings filter:gaussian="))
+        .unwrap_or_else(|| panic!("the radius is kept: {action}"));
+    let kept_radius: f32 = settings.parse().unwrap();
+    assert!(
+        kept_radius > 8.0,
+        "the radius set, not the first: {kept_radius}"
+    );
+    // Played on the drawing as it was, the dialog hidden: the same blur.
+    undo(&mut paint);
+    assert_eq!(pixels(&paint, layer), drawn);
+    paint.command("auto.play");
+    paint.settle(6);
+    assert!(!names(&mut paint).contains(&"OK".to_owned()), "no dialog");
+    assert_eq!(pixels(&paint, layer), blurred, "played at the kept radius");
+    // With its dialog shown, the dialog opens at the kept radius: OK
+    // gives the same blur again.
+    undo(&mut paint);
+    let switch = format!(
+        "Show the dialog of {} while playing",
+        label_of("filter.gaussian")
+    );
+    step_rows(&mut paint);
+    click_named(&mut paint, &switch);
+    paint.command("auto.play");
+    paint.settle(6);
+    assert!(names(&mut paint).contains(&"OK".to_owned()), "the dialog");
+    press(&mut paint, egui::Key::Enter);
+    paint.settle(4);
+    assert_eq!(pixels(&paint, layer), blurred);
+}
+
+/// A string of Sue Paint's language database.
+fn label_of_text(key: &str) -> String {
+    sue_lang::text("paint", key)
+}
+
 // C. Preferences, New and templates.
 
 /// The opaque rectangles one frame paints, by color.
@@ -979,6 +1061,7 @@ fn step_00_54_01_monochrome_patterns_and_manga_materials_of_sue_paints_own() {
     // A monochrome pattern covers the canvas in the drawing color.
     let patterns = material_folder(&mut paint, "Patterns");
     let count = layers(&paint).len();
+    let stack = layers(&paint);
     undo_pair(
         &mut paint,
         "a pattern dropped on the canvas",
@@ -991,6 +1074,29 @@ fn step_00_54_01_monochrome_patterns_and_manga_materials_of_sue_paints_own() {
         },
         |paint| layers(paint).len() == count + 1,
     );
+    // Its ink reaches every corner of the canvas, in the drawing color
+    // (black), and leaves room between its lines.
+    let pattern = added(&paint, &stack);
+    let bytes = pixels(&paint, pattern);
+    let inked: Vec<&[u8; 4]> = bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| pixel[3] > 128)
+        .collect();
+    let share = inked.len() as f32 / (bytes.len() / 4) as f32;
+    assert!((0.05..0.8).contains(&share), "lines and room: {share}");
+    assert!(
+        inked.iter().all(|pixel| pixel[..3] == [0, 0, 0]),
+        "black ink"
+    );
+    for (x, y) in [(0, 0), (w - 24, 0), (0, h - 24), (w - 24, h - 24)] {
+        let corner: u32 = (0..24)
+            .flat_map(|dy| (0..24).map(move |dx| (x + dx, y + dy)))
+            .map(|(x, y)| u32::from(alpha(&paint, pattern, x, y)))
+            .sum();
+        assert!(corner > 0, "ink at the corner {x}, {y}");
+    }
 }
 
 // E. 3D.
@@ -1082,6 +1188,7 @@ fn step_00_58_56_3d_backgrounds_and_small_objects() {
         let thumbs = material_folder(&mut paint, folder);
         assert!(thumbs.len() >= 5, "{folder}: {thumbs:?}");
         let count = layers(&paint).len();
+        let stack = layers(&paint);
         let to = middle(&paint);
         undo_pair(
             &mut paint,
@@ -1095,12 +1202,36 @@ fn step_00_58_56_3d_backgrounds_and_small_objects() {
             },
             |paint| layers(paint).len() == count + 1,
         );
-        let layer = layers(&paint).last().unwrap().id;
+        // The layer it made (not the one made before it).
+        let layer = added(&paint, &stack);
+        assert_eq!(
+            layers(&paint)
+                .iter()
+                .find(|info| info.id == layer)
+                .map(|info| info.name.clone()),
+            Some(name.to_owned())
+        );
         let arena = &paint.runtime.engine.world.arena;
         assert!(
             sue_paint::three::is_3d(arena, layer),
             "{name} is a 3D layer"
         );
         assert!(ink(&paint, layer) > 0, "{name} shows");
+        // A background is seen from inside, where a person would stand:
+        // it fills the canvas (a room has walls, a floor and a ceiling all
+        // round); an object stands in the middle with room round it.
+        let shown = pixels(&paint, layer);
+        let covered = shown
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[3] > 0)
+            .count() as f32
+            / (shown.len() / 4) as f32;
+        if folder == "3D backgrounds" {
+            assert!(covered > 0.95, "{name} fills the canvas: {covered}");
+        } else {
+            assert!(covered < 0.5, "{name} stands in the middle: {covered}");
+        }
     }
 }

@@ -20,8 +20,9 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
         tour.paint_command(&format!("material.folder.{kind}"));
         tour.shoot(name)?;
     }
-    // The Material palette goes again, so the Layer palette shows.
+    // The Material palette goes again, and the Layer palette shows.
     tour.paint_command("window.material");
+    tour.paint_go(&["extras/show/layer"]);
     // p6e. Palette colors in the parent folder and on the canvas.
     tour.paint_command("layer.palette_color.red");
     tour.set("sue_paint.palette_in_folder", RiceValue::Bool(true));
@@ -52,17 +53,18 @@ pub(super) fn scenes(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.paint_command("edit.material.template");
     tour.shoot("p6i-sue-paint-register-template")?;
     tour.paint_go(&["dialog/close"]);
-    // p6j. An action recorded with a step that opens a dialog: each step
-    // has its on box and its dialog box.
+    // p6j. An action recorded in a set of its own, so it shows at the
+    // top: each step has its on box and its dialog box.
+    tour.paint_command("auto.new_set");
     tour.paint_command("auto.new");
-    tour.paint_command("filter.gaussian");
-    tour.paint_go(&["dialog/close"]);
     tour.paint_command("view.fit_width");
+    tour.paint_command("view.fit");
     tour.paint_command("auto.record");
     tour.paint_go(&["extras/show/auto_action"]);
     tour.shoot("p6j-sue-paint-auto-action-dialog-boxes")?;
     tour.paint_command("auto.delete");
-    tour.paint_command("view.fit");
+    tour.paint_command("auto.delete_set");
+    tour.paint_go(&["dialog/close"]);
     // p6k and p6l. The interface color, denser and lighter.
     tour.set("sue_paint.theme_density", RiceValue::Int(60));
     tour.shoot("p6k-sue-paint-density-darker")?;
