@@ -3584,7 +3584,10 @@ pinch-add-point-hint = Leaves a control point where the line was pulled
 drag-box-fill-leftover = Drag a box to fill the small gaps left in the ink there, or click to fill them on the whole layer.
 drag-box-select-garbage = Drag a box to select the specks there, or click to select them on the whole layer.
 no-leftover-that-small-there = No gaps that small there.
-garbage-selected = { $count } specks selected.
+garbage-selected = { $count ->
+    [one] One speck selected.
+   *[other] { $count } specks selected.
+}
 name-fill-leftover = Fill leftover
 name-select-garbage = Select garbage
 link-ruler-to-layer = Link Ruler to Layer
