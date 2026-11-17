@@ -601,11 +601,7 @@ impl SuePaint {
         scale: f32,
     ) -> Option<egui::TextureId> {
         use std::hash::{Hash, Hasher};
-        let mut sub = sub.clone();
-        // Thin pens stay thin and big brushes fit the row.
-        sub.tip.size = (sub.tip.size * 0.7 * scale).clamp(scale, size[1] as f32 * 0.4);
-        // An eraser's sample is drawn as ink, so it shows.
-        sub.tip.eraser = false;
+        let sub = Self::list_sample(sub, size, scale);
         let key = {
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             format!("{:?}{}{:?}{size:?}", sub.tool, sub.name, sub.tip).hash(&mut hasher);
@@ -622,6 +618,17 @@ impl SuePaint {
             .texture(0x5355_4253_5452_4b45 ^ key, 1, size, 4, pixels, false)
     }
 
+    /// `sub` as its sample in the Sub Tool list is drawn, `size` pixels
+    /// at `scale` pixels to the point.
+    fn list_sample(sub: &SubTool, size: [u32; 2], scale: f32) -> SubTool {
+        let mut sub = sub.clone();
+        // Thin pens stay thin and big brushes fit the row.
+        sub.tip.size = (sub.tip.size * 0.7 * scale).clamp(scale, size[1] as f32 * 0.4);
+        // An eraser's sample is drawn as ink, so it shows.
+        sub.tip.eraser = false;
+        sub
+    }
+
     /// A sample stroke of `sub` in white over nothing, `size` pixels.
     fn render_stroke(sub: &SubTool, [width, height]: [u32; 2]) -> Option<Vec<u8>> {
         let mut raster =
@@ -636,7 +643,19 @@ impl SuePaint {
             })
             .collect();
         sample_stroke(sub, [1.0; 3], &points, &mut raster)?;
-        raster.bytes().map(<[u8]>::to_vec)
+        // White ink by its cover alone, premultiplied as textures are
+        // drawn. The brush engine may leave color in pixels it cleared
+        // again (a watercolor edge does, a tile at a time); sent as they
+        // were, those lit up as a comb of bars beside the stroke.
+        let bytes = raster.bytes()?;
+        Some(
+            bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|pixel| [pixel[3]; 4])
+                .collect(),
+        )
     }
 
     /// A sample stroke drawn with the current brush, over the light
@@ -797,6 +816,104 @@ fn sub_tool_menu() -> Vec<MenuItem> {
 mod tests {
     use super::*;
     use crate::tools::{Tool, Toolbox};
+
+    /// The columns of a `width` wide sample between the first and the
+    /// last inked one that hold no ink at all: a stroke drawn in one go
+    /// has none.
+    fn empty_columns(pixels: &[u8], width: usize) -> Vec<usize> {
+        let inked: Vec<bool> = (0..width)
+            .map(|x| pixels.chunks(width * 4).any(|row| row[x * 4 + 3] > 0))
+            .collect();
+        let first = inked.iter().position(|ink| *ink).unwrap_or(0);
+        let last = inked.iter().rposition(|ink| *ink).unwrap_or(0);
+        (first..=last).filter(|x| !inked[*x]).collect()
+    }
+
+    /// The first and the last column of a `width` wide sample with ink.
+    fn span(pixels: &[u8], width: usize) -> (usize, usize) {
+        let inked = |x: usize| pixels.chunks(width * 4).any(|row| row[x * 4 + 3] > 0);
+        (
+            (0..width).find(|x| inked(*x)).unwrap_or(0),
+            (0..width).rfind(|x| inked(*x)).unwrap_or(0),
+        )
+    }
+
+    /// The Sub Tool list's sample of every built-in sub tool that lays
+    /// a line (pens, pencils, paint brushes, erasers and the airbrushes
+    /// that do not spray drops) is one stroke from end to end at every
+    /// size a row has: no column inside it is empty, and nothing shows
+    /// beside it. The watercolor brushes came out as a comb of bars:
+    /// the color the engine left in pixels it had cleared again.
+    #[test]
+    fn every_line_sample_in_the_list_is_one_stroke() {
+        let toolbox = Toolbox::default();
+        let mut failures = Vec::new();
+        for tool in [
+            Tool::Pen,
+            Tool::Pencil,
+            Tool::Brush,
+            Tool::Airbrush,
+            Tool::Decoration,
+            Tool::Eraser,
+        ] {
+            for sub in toolbox.subs(tool) {
+                // Sprays and dots are dots by nature.
+                let dots = tool == Tool::Decoration
+                    || [
+                        "Spray",
+                        "Droplet",
+                        "Tone scraping",
+                        "Running color",
+                        "Pointillism",
+                    ]
+                    .iter()
+                    .any(|name| sub.name.contains(name));
+                for (size, scale) in [
+                    ([120_u32, 20_u32], 1.0_f32),
+                    ([137, 22], 1.0),
+                    ([164, 24], 1.0),
+                    ([205, 28], 1.25),
+                    ([274, 44], 2.0),
+                    ([40, 8], 1.0),
+                ] {
+                    let sample = SuePaint::list_sample(sub, size, scale);
+                    let pixels = SuePaint::render_stroke(&sample, size).expect("a sample");
+                    // Nothing shows where the stroke is not: no color
+                    // without cover.
+                    assert!(
+                        pixels.chunks(4).all(|pixel| pixel[..3] == [pixel[3]; 3]),
+                        "{} at {size:?}: white by its cover alone",
+                        sub.name
+                    );
+                    if dots {
+                        continue;
+                    }
+                    // A grainy pencil's faint ends may skip a pixel of
+                    // paper; its body may not.
+                    let all = empty_columns(&pixels, size[0] as usize);
+                    let (first, last) = span(&pixels, size[0] as usize);
+                    let ends = (last - first) / 8;
+                    let empty: Vec<usize> = all
+                        .into_iter()
+                        .filter(|x| *x > first + ends && *x < last - ends)
+                        .collect();
+                    if !empty.is_empty() {
+                        failures.push(format!(
+                            "{} at {size:?}: {} empty columns",
+                            sub.name,
+                            empty.len()
+                        ));
+                        if let Ok(dir) = std::env::var("SUE_SUB_FAILURES") {
+                            let name = format!("{}-{}x{}.png", sub.name, size[0], size[1]);
+                            let png = sue_io::encode_png_rgba(size[0], size[1], &pixels).unwrap();
+                            std::fs::write(std::path::Path::new(&dir).join(name), png).unwrap();
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
 
     /// Every built-in brush sub tool's sample stroke paints, with the
     /// brush engine and the sub tool's whole built-in brush: a sub tool

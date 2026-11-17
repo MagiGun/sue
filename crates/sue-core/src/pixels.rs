@@ -567,6 +567,13 @@ impl<'a> PixelReader<'a> {
                 _ => return Ok(None),
             }
         }
+        // Nothing drawn: a blank raster, which shares its zeros with the
+        // other blank layers of its size (a comic's untouched pages).
+        if solids.is_empty() && blobs.is_empty() {
+            return RasterTile2D::blank(width, height, format)
+                .map(Some)
+                .map_err(|error| input.error(error.to_string()));
+        }
         let decoded = parallel_map(&blobs, |(_, blob)| decode_blob(blob, format));
         let len = (width as usize)
             .checked_mul(height as usize)

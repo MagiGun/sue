@@ -201,6 +201,8 @@ enum Width {
     Wide,
     /// Two columns of settings side by side.
     Double,
+    /// Two whole forms side by side, each with its labels and fields.
+    Forms,
     /// As wide as a shared component asks.
     Points(f32),
 }
@@ -215,6 +217,7 @@ impl Width {
             Self::Form => unit * 10.0,
             Self::Wide => unit * 13.0,
             Self::Double => unit * 18.0,
+            Self::Forms => unit * 22.0,
             Self::Points(points) => points,
         }
     }
@@ -328,7 +331,9 @@ impl Dialog {
         match self {
             Dialog::New(new) => Look::new(
                 tr!("new-2"),
-                if new.project == Project::Animation {
+                if new.project.is_comic() {
+                    Width::Forms
+                } else if new.project == Project::Animation {
                     Double
                 } else {
                     Wide

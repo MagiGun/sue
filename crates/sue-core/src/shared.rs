@@ -70,6 +70,18 @@ impl<T> Shared<T> {
     pub fn get_mut(&mut self) -> Option<&mut T> {
         Arc::get_mut(&mut self.0)
     }
+
+    /// A handle that does not keep the buffer alive, for a cache that
+    /// must never be the reason a write copies (see [`Self::revive`]).
+    pub(crate) fn watch(&self) -> std::sync::Weak<T> {
+        Arc::downgrade(&self.0)
+    }
+
+    /// Another handle to the buffer `watched` saw, if a handle to it is
+    /// still alive.
+    pub(crate) fn revive(watched: &std::sync::Weak<T>) -> Option<Self> {
+        watched.upgrade().map(Self)
+    }
 }
 
 impl<T: Clone> Shared<T> {
@@ -77,14 +89,13 @@ impl<T: Clone> Shared<T> {
     /// counts that in [`copies`]); the other handles keep the buffer as it
     /// was.
     pub fn make_mut(&mut self) -> &mut T {
-        // `Shared` never hands out a weak handle, so the buffer moves to a
-        // new allocation exactly when it was copied.
-        let before = Arc::as_ptr(&self.0);
-        let value = Arc::make_mut(&mut self.0);
-        if !std::ptr::eq(before, value) {
+        // Copied exactly when another handle shares it. (A watcher of a
+        // blank buffer, see `watch`, is no handle: the buffer is then
+        // only moved to a new count, its samples stay where they are.)
+        if Arc::strong_count(&self.0) > 1 {
             count_copy();
         }
-        value
+        Arc::make_mut(&mut self.0)
     }
 
     /// The buffer itself, copied only if other handles exist (and counted

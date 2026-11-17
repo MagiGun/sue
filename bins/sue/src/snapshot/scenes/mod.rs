@@ -16,6 +16,7 @@ mod menus;
 mod p6_brush_rows;
 mod p6_tools_a;
 mod p6_tools_b;
+mod p81_bugs;
 mod p81_figures;
 mod paint_3d;
 mod paint_assets;
@@ -82,6 +83,20 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
         open_paint(tour);
         tour.settle();
         return scanner::scenes(tour);
+    }
+    // `SUE_SNAPSHOT_ONLY=bugs` runs the scenes of the bugs reported
+    // against 0.0.8 alone (`bugs-comic`, `bugs-subtool` and `bugs-new`
+    // one part of them).
+    if let Ok(only) = std::env::var("SUE_SNAPSHOT_ONLY")
+        && only.starts_with("bugs")
+    {
+        tour.runtime
+            .with_context(&mut tour.camera.painter, tour.camera.now, |cx| {
+                sue_paint::sample_picture(cx, 1600, 1200)
+            });
+        open_paint(tour);
+        tour.settle();
+        return p81_bugs::scenes(tour, &only);
     }
     // 00 to 03. The Hub and what the shell lays over it.
     hub::opening(tour)?;

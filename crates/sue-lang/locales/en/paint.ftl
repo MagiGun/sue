@@ -4090,3 +4090,4 @@ hand-scanner-camera-busy = Another program is using the camera. Close it there, 
 hand-scanner-camera-denied = Windows does not let Sue use the camera. Turn on "Let desktop apps access your camera" in Windows Settings, Privacy and security, Camera, then choose Try Again.
 hand-scanner-camera-gone = The camera stopped sending pictures. Plug it in again, then choose Try Again.
 hand-scanner-camera-failed = The camera could not be started: { $why }
+canvas-no-memory = There is not enough memory to show this canvas. Close other canvases, or make it smaller with Edit, Change Image Resolution.

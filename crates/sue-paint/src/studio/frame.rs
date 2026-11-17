@@ -239,6 +239,9 @@ impl SuePaint {
         if let Some(doc) = self.docs.get_mut(self.active) {
             doc.compositor.set_palette_colors(palette);
             doc.compositor.sync(&cx.world.arena);
+            if doc.compositor.take_starved() {
+                cx.fail(tr!("canvas-no-memory"));
+            }
         }
         // File, New's template, on the canvas New just made.
         if let Some(key) = self.pending_template.take() {

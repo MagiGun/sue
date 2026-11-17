@@ -78,7 +78,7 @@ fn texts(tour: &mut Tour<'_>) -> Vec<(String, egui::Rect)> {
 }
 
 /// Clicks the last `text` drawn (the dialog's, over the studio's).
-fn click(tour: &mut Tour<'_>, text: &str) -> Result<(), String> {
+pub(super) fn click(tour: &mut Tour<'_>, text: &str) -> Result<(), String> {
     let at = texts(tour)
         .into_iter()
         .filter(|(found, _)| found == text)
