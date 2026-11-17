@@ -349,9 +349,22 @@ impl SuePaint {
                     .color(theme.text_muted()),
             );
         };
+        // An empty bank says so once, in its middle, with what to do,
+        // instead of two headings over nothing.
+        let empty = names.is_empty() && pictures.is_empty();
+        if empty {
+            let detail = tr!("item-bank-empty-detail");
+            sue_wm::ui::empty_state("sue-paint-bank-empty", &tr!("item-bank-empty"))
+                .icon(Icon::PaletteItemBank)
+                .detail(&detail)
+                .show(&mut inner, theme);
+        }
         sue_wm::ui::ScrollView::vertical("sue-paint-bank")
             .on(theme.panel)
             .show(&mut inner, theme, |ui| {
+                if empty {
+                    return;
+                }
                 sue_wm::ui::heading(ui, &tr!("item-bank-sub-tools"), theme);
                 if names.is_empty() {
                     caption(ui, tr!("kept-sub-tools-show-here-add"));

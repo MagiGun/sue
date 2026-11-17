@@ -3525,3 +3525,5 @@ snap-angle-hint = Turns the view in steps of this angle; Shift snaps by the same
 track-label-ellipsis = Track Label...
 label-name = Label name
 track-label-at-frame = On the picked track, from frame { $value }. An empty name takes the label away.
+item-bank-empty = Nothing kept yet
+item-bank-empty-detail = Keep the current sub tool, a layer or a picture with the buttons below, to use it again on any canvas.

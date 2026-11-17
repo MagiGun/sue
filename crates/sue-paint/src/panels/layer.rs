@@ -313,14 +313,20 @@ impl SuePaint {
         let (mut x, mut y) = (body.left() + metrics.pad, top);
         let mut buttons = Vec::new();
         let mut targets = Vec::new();
+        // How many buttons a line holds; a set that needs more than one
+        // line is spread evenly over its lines (six and six, not ten and
+        // two), so no line ends with a lone pair.
+        let room = body.width() - metrics.pad * 2.0;
+        let fits = (((room + metrics.gap) / step).floor() as usize).max(1);
         for (row, commands) in [&SWITCHES[..], &ACTIONS[..]].into_iter().enumerate() {
             if row > 0 {
                 x = body.left() + metrics.pad;
                 y += step;
             }
-            for command in commands {
-                if x + metrics.button > body.right() - metrics.pad && x > body.left() + metrics.pad
-                {
+            let lines = commands.len().div_ceil(fits);
+            let per_line = commands.len().div_ceil(lines.max(1));
+            for (index, command) in commands.iter().enumerate() {
+                if index > 0 && index % per_line == 0 {
                     x = body.left() + metrics.pad;
                     y += step;
                 }

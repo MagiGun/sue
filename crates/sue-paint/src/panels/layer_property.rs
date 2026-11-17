@@ -88,7 +88,19 @@ impl SuePaint {
         theme: &Theme,
     ) {
         let Some(info) = current else {
-            caption(ui, &tr!("no-layer"), theme);
+            // In the middle of the palette, as the Layer palette says it.
+            let text = if self.picture().is_none() {
+                tr!("no-canvas")
+            } else {
+                tr!("no-layer")
+            };
+            ui.painter().text(
+                ui.max_rect().center(),
+                egui::Align2::CENTER_CENTER,
+                text,
+                theme.text_font(TextRole::Caption),
+                theme.text_muted(),
+            );
             return;
         };
         let folder = doc::is_folder(&cx.world.arena, info.id);
