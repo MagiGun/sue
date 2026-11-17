@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use sue_core::RasterTile2D;
+use sue_core::{JobPool, RasterTile2D};
 use sue_model::BrushPreset;
 use sue_model::brush::{EngineKind, Spacing};
 
@@ -25,7 +25,7 @@ use super::overflow::Region;
 use super::plan::{PlanSettings, Planned, Planner, edge_of};
 use super::settings::{Behaviours, DualBrush, TipOrder};
 use super::stamp::{Tips, stamp_coverage};
-use super::wet::{Backdrop, Wet, WetCanvas, blender};
+use super::wet::{Backdrop, SharedTips, Wet, WetCanvas, blender};
 use crate::buffer::{Combine, MergeError, StrokeBuffer, TILE, TileKey};
 use crate::input::StrokePoint;
 use crate::raster::{Disc, PixelRect, Ribbon, RibbonPoint, TipImage};
@@ -131,6 +131,12 @@ pub struct PaintStroke {
     /// A ribbon brush (its tip bent along the stroke), when the stroke
     /// is one.
     ribbon: Option<RibbonPath>,
+    /// The threads big dabs are laid on, when the stroke has some
+    /// ([`Self::share`]).
+    pool: Option<Arc<JobPool>>,
+    /// What went wrong on those threads, if anything did: the stroke
+    /// cannot be trusted any more.
+    failed: Option<String>,
 }
 
 impl PaintStroke {
@@ -254,7 +260,27 @@ impl PaintStroke {
             edge,
             texture,
             overflow: resources.overflow,
+            pool: None,
+            failed: None,
         }
+    }
+
+    /// Lets the stroke lay its big dabs on `pool`'s threads, `bands` of
+    /// them at most (1 to 8). The dabs still go down one after another
+    /// and every pixel is worked out the same way, so the stroke lays
+    /// the same bytes as on one thread.
+    pub fn share(&mut self, pool: Arc<JobPool>, bands: usize) {
+        if let Target::Wet(canvas) = &mut self.target {
+            canvas.sharing(bands);
+        }
+        self.pool = Some(pool);
+    }
+
+    /// What went wrong on the pool's threads, if anything did: the
+    /// stroke cannot be trusted any more.
+    #[must_use]
+    pub fn failure(&self) -> Option<&str> {
+        self.failed.as_deref()
     }
 
     /// `true` when the stroke mixes with the picture (a wet canvas).
@@ -363,7 +389,23 @@ impl PaintStroke {
                 // A wet stroke reads what it laid a moment before, so
                 // only final points paint it.
                 if let (false, Some(backdrop)) = (tail, backdrop) {
-                    canvas.stamp(backdrop, dabs, &tips, texture);
+                    match &self.pool {
+                        Some(pool) => {
+                            let shared = SharedTips {
+                                pictures: Arc::clone(&self.pictures),
+                                edge: self.edge,
+                                texture: self
+                                    .texture
+                                    .as_ref()
+                                    .filter(|(_, settings)| settings.per_dab)
+                                    .cloned(),
+                            };
+                            if let Err(error) = canvas.stamp_shared(backdrop, dabs, &shared, pool) {
+                                self.failed = Some(error);
+                            }
+                        }
+                        None => canvas.stamp(backdrop, dabs, &tips, texture),
+                    }
                 }
             }
         }
@@ -661,6 +703,34 @@ impl PaintStroke {
                 ))
             }
             _ => None,
+        }
+    }
+
+    /// For a mixing stroke, [`Self::wet_pixel`] for every pixel of tile
+    /// `key` the stroke changed: `each` is given the pixel's place in
+    /// the tile (row times the tile's side plus column) and its color.
+    /// Answers `false`, having called nothing, for a stroke that is not
+    /// wet or a tile it never met.
+    pub fn wet_tile(
+        &self,
+        backdrop: &dyn Backdrop,
+        key: TileKey,
+        keep_alpha: bool,
+        each: impl FnMut(usize, [f32; 4]),
+    ) -> bool {
+        match &self.target {
+            Target::Wet(canvas) => {
+                let paper = self.paper();
+                canvas.laid_tile(
+                    backdrop,
+                    key,
+                    self.overflow.as_deref(),
+                    paper.as_ref(),
+                    keep_alpha,
+                    each,
+                )
+            }
+            _ => false,
         }
     }
 

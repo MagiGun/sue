@@ -228,6 +228,19 @@ impl Stroke {
         }
     }
 
+    /// Lets a stroke with paint behaviours share its big work with
+    /// `pool`'s threads: a big dab of a mixing brush is worked out and
+    /// written on several, and the tiles an update changed are laid for
+    /// the live view on several. Every pixel is still the same
+    /// arithmetic in the same order, so the stroke lays the same bytes
+    /// as on one thread. (A round tip's coverage is shared by its bands
+    /// already.)
+    pub fn share(&mut self, pool: Arc<JobPool>) {
+        if let Painting::Paint(painter) = &mut self.painting {
+            painter.share(pool);
+        }
+    }
+
     /// `true` when the stroke lays its paint through its paint
     /// behaviours ([`crate::paint::PaintStroke`]), not as a round tip's
     /// coverage.
@@ -351,9 +364,12 @@ impl Stroke {
                 if !self.closed && queue.is_empty() {
                     painter.tail();
                 }
+                if let Some(error) = painter.failure() {
+                    return Err(error);
+                }
                 let dirty = painter.take_dirty();
                 self.live
-                    .show_pixels(painter.laid(&dirty), painter.bounds());
+                    .show_pixels(painter.laid(&dirty)?, painter.bounds());
                 self.dirty.extend(dirty);
             }
         }
@@ -386,9 +402,12 @@ impl Stroke {
             }
             Painting::Paint(painter) => {
                 painter.close();
+                if let Some(error) = painter.failure() {
+                    return Err(error);
+                }
                 let dirty = painter.take_dirty();
                 self.live
-                    .show_pixels(painter.laid(&dirty), painter.bounds());
+                    .show_pixels(painter.laid(&dirty)?, painter.bounds());
                 self.dirty.extend(dirty);
             }
         }
@@ -496,7 +515,10 @@ impl StrokeWorker {
     #[must_use]
     pub fn start_on(pool: Arc<JobPool>, brush: &Brush, settings: Settings, canvas: Canvas) -> Self {
         let bands = pool.threads().clamp(1, MOST_BANDS);
-        let stroke = Stroke::on(brush, settings, bands, canvas);
+        let mut stroke = Stroke::on(brush, settings, bands, canvas);
+        if pool.threads() > 1 {
+            stroke.share(Arc::clone(&pool));
+        }
         Self {
             live: stroke.live(),
             pool,

@@ -29,8 +29,9 @@
 //! drags their clearness along as a finger does.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
-use sue_core::{PixelFormat, RasterTile2D};
+use sue_core::{JobPool, PixelFormat, RasterTile2D};
 use sue_model::brush::Mixing;
 
 use super::math::unit;
@@ -39,7 +40,7 @@ use super::plan::Planned;
 use super::stamp::{Stamp, Tips};
 use crate::buffer::{AREA, MergeError, TILE, TileKey};
 use crate::raster::{PixelRect, Shape};
-use crate::texture::Texture;
+use crate::texture::{Paper, Texture, TextureSettings};
 
 /// Where a wet stroke reads the picture under it: straight RGBA, 0 to
 /// 1, of a layer pixel. Outside the picture it is clear.
@@ -245,12 +246,280 @@ struct WetTile {
     paint: Box<[f32]>,
 }
 
+impl WetTile {
+    /// Pixel `i` of the tile, premultiplied.
+    fn pixel(&self, i: usize) -> [f32; 4] {
+        let p = &self.pixels[i * 4..i * 4 + 4];
+        [p[0], p[1], p[2], p[3]]
+    }
+}
+
+/// The tile rows `y` with `y mod n == k`, for band `k` of `n`: the tiles
+/// one thread writes while a dab is laid on several (see
+/// [`WetCanvas::sharing`]). A tile is found by its key in `index` and
+/// kept in `tiles`, so a dab looks each tile up once, not each pixel.
+#[derive(Clone, Debug, Default)]
+struct Band {
+    index: BTreeMap<TileKey, u32>,
+    tiles: Vec<WetTile>,
+}
+
+impl Band {
+    fn get(&self, key: TileKey) -> Option<&WetTile> {
+        self.index.get(&key).map(|&at| &self.tiles[at as usize])
+    }
+}
+
+/// The most threads one dab is laid on.
+const MOST_BANDS: usize = 8;
+
+/// A dab with fewer pixels than this is laid on one thread: handing it
+/// out would cost more than it saves.
+const WORTH_SHARING: usize = 96 * 96;
+
+/// Marks a tile of a dab's [`Grid`] nobody has asked for yet.
+const UNKNOWN: u32 = u32::MAX;
+
+/// The tiles under one dab, each found once: where tile `key` is kept
+/// in its band, for the tiles of a rectangle.
+#[derive(Debug)]
+struct Grid {
+    x0: i32,
+    y0: i32,
+    width: i32,
+    height: i32,
+    slots: Vec<u32>,
+}
+
+impl Grid {
+    /// A grid over the tiles of `rect`; with none for a rectangle so
+    /// large that its tiles are better looked up one by one.
+    fn over(rect: PixelRect, mut slots: Vec<u32>) -> Self {
+        let (k0, k1) = (
+            TileKey::of_pixel(rect.x0, rect.y0),
+            TileKey::of_pixel(rect.x1 - 1, rect.y1 - 1),
+        );
+        let (width, height) = (
+            i64::from(k1.x) - i64::from(k0.x) + 1,
+            i64::from(k1.y) - i64::from(k0.y) + 1,
+        );
+        slots.clear();
+        if width <= 0 || height <= 0 || width * height > 1 << 16 {
+            return Self {
+                x0: 0,
+                y0: 0,
+                width: 0,
+                height: 0,
+                slots,
+            };
+        }
+        slots.resize((width * height) as usize, UNKNOWN);
+        Self {
+            x0: k0.x,
+            y0: k0.y,
+            width: width as i32,
+            height: height as i32,
+            slots,
+        }
+    }
+
+    /// Where the grid keeps tile `key`, if it covers it.
+    fn cell(&self, key: TileKey) -> Option<usize> {
+        let (x, y) = (key.x.wrapping_sub(self.x0), key.y.wrapping_sub(self.y0));
+        (x >= 0 && x < self.width && y >= 0 && y < self.height)
+            .then(|| (y * self.width + x) as usize)
+    }
+}
+
+/// One dab, worked out as far as every pixel shares it: what the write
+/// of each pixel reads. Shared by the threads that write the dab.
+#[derive(Debug)]
+struct DabWork {
+    /// The dab's own rectangle, and its width.
+    rect: PixelRect,
+    w: usize,
+    /// The blur's reach around it, and the width of `under`.
+    reach: usize,
+    ow: usize,
+    /// The picture under the dab and the reach around it, before the dab.
+    under: Vec<[f32; 4]>,
+    /// `under` blurred, for a brush that blurs.
+    blurred: Vec<[f32; 4]>,
+    blurs: bool,
+    /// What a smearing brush carries to each pixel of the dab.
+    carried: Vec<[f32; 4]>,
+    smears: bool,
+    /// The dab's coverage of each of its pixels.
+    cover: Vec<f32>,
+    paint: [f32; 4],
+    local: f32,
+    wet: Wet,
+    share: f32,
+    capped: bool,
+}
+
+impl Default for DabWork {
+    fn default() -> Self {
+        Self {
+            rect: PixelRect {
+                x0: 0,
+                y0: 0,
+                x1: 0,
+                y1: 0,
+            },
+            w: 0,
+            reach: 0,
+            ow: 0,
+            under: Vec::new(),
+            blurred: Vec::new(),
+            blurs: false,
+            carried: Vec::new(),
+            smears: false,
+            cover: Vec::new(),
+            paint: [0.0; 4],
+            local: 0.0,
+            wet: Wet {
+                pickup: 0.0,
+                amount: 0.0,
+                stretch: 0.0,
+                blur: 0.0,
+                density: 0.0,
+                smear: 0.0,
+            },
+            share: 0.0,
+            capped: false,
+        }
+    }
+}
+
+impl DabWork {
+    /// Writes the dab into the tiles of `band` (band `k` of `n`), and
+    /// adds the tiles it changed to `dirty`.
+    fn write(&self, band: &mut Band, k: i32, n: i32, dirty: &mut Vec<TileKey>) {
+        let rect = self.rect;
+        let (k0, k1) = (
+            TileKey::of_pixel(rect.x0, rect.y0),
+            TileKey::of_pixel(rect.x1 - 1, rect.y1 - 1),
+        );
+        let wet = self.wet;
+        for ty in k0.y..=k1.y {
+            if ty.rem_euclid(n) != k {
+                continue;
+            }
+            for tx in k0.x..=k1.x {
+                let key = TileKey { x: tx, y: ty };
+                let Some(&at) = band.index.get(&key) else {
+                    continue;
+                };
+                let tile = &mut band.tiles[at as usize];
+                let [ox, oy] = key.origin();
+                let mut any = false;
+                for py in rect.y0.max(oy)..rect.y1.min(oy + TILE) {
+                    let y = (py - rect.y0) as usize;
+                    for px in rect.x0.max(ox)..rect.x1.min(ox + TILE) {
+                        let x = (px - rect.x0) as usize;
+                        let c = self.cover[y * self.w + x];
+                        if c <= 0.0 {
+                            continue;
+                        }
+                        let ui = (y + self.reach) * self.ow + x + self.reach;
+                        let u = self.under[ui];
+                        let paint = self.paint;
+                        let mut target: [f32; 4] = if self.blurs {
+                            let b = self.blurred[ui];
+                            std::array::from_fn(|k| paint[k] + (b[k] - paint[k]) * wet.blur)
+                        } else {
+                            paint
+                        };
+                        // Where it lands on wet paint, the paint it lays
+                        // mixes with that paint on the spot (its color,
+                        // never its clearness), as a loaded brush does the
+                        // moment it touches: white laid into black goes
+                        // down gray at once.
+                        if self.local > 0.0 && u[3] > 0.0 && target[3] > 0.0 {
+                            let w = self.local * u[3].min(1.0);
+                            for k in 0..3 {
+                                let there = u[k] / u[3] * target[3];
+                                target[k] += (there - target[k]) * w;
+                            }
+                        }
+                        let i = ((py - oy) * TILE + (px - ox)) as usize;
+                        let t = c * wet.density * self.share;
+                        let mut out: [f32; 4] = if self.capped {
+                            // The pixel is the paint over what the stroke
+                            // found there, as strongly as its strongest
+                            // dab laid it. This dab's paint takes over the
+                            // paint there as strongly as it lays beside
+                            // that strongest one: a dab as strong replaces
+                            // it, the rim of a later dab only tints it. So
+                            // paint does not stack, and the first dabs'
+                            // paint (unmixed yet) does not stay as a spot
+                            // where they were strongest.
+                            let held = tile.held[i];
+                            let now = held.max(t);
+                            if now <= 0.0 {
+                                continue;
+                            }
+                            let w = t / now;
+                            let j = i * 4;
+                            let mut laid = [0.0; 4];
+                            for k in 0..4 {
+                                let p = tile.paint[j + k] + (target[k] - tile.paint[j + k]) * w;
+                                tile.paint[j + k] = p;
+                                laid[k] = tile.base[j + k] + (p - tile.base[j + k]) * now;
+                            }
+                            tile.held[i] = now;
+                            laid
+                        } else {
+                            std::array::from_fn(|k| u[k] + (target[k] - u[k]) * t)
+                        };
+                        if self.smears {
+                            let d = self.carried[y * self.w + x];
+                            out = std::array::from_fn(|k| out[k] + (d[k] - out[k]) * wet.smear);
+                        }
+                        tile.pixels[i * 4..i * 4 + 4].copy_from_slice(&out);
+                        tile.touched[i] = true;
+                        any = true;
+                    }
+                }
+                if any {
+                    dirty.push(key);
+                }
+            }
+        }
+    }
+}
+
+/// What dabs are stamped with, owned, so a dab's coverage can be worked
+/// out on several threads: the tip's pictures, the width of a hard
+/// rim's antialiasing, and the paper laid dab by dab.
+#[derive(Clone, Debug)]
+pub struct SharedTips {
+    /// The tip's pictures.
+    pub pictures: Arc<[crate::raster::TipImage]>,
+    /// The width of a hard round rim's antialiasing.
+    pub edge: f32,
+    /// The paper laid dab by dab, if any.
+    pub texture: Option<(Arc<Paper>, TextureSettings)>,
+}
+
+/// The coverage of rows `rows` of `rect` by `shape`, row by row.
+fn cover_rows(shape: &impl Shape, rect: PixelRect, rows: std::ops::Range<i32>, out: &mut [f32]) {
+    let w = (rect.x1 - rect.x0) as usize;
+    for (row, py) in out.chunks_mut(w.max(1)).zip(rows) {
+        for (c, px) in row.iter_mut().zip(rect.x0..rect.x1) {
+            *c = unit(shape.coverage([px as f32 + 0.5, py as f32 + 0.5]));
+        }
+    }
+}
+
 /// The picture under a wet stroke, as the stroke has left it so far.
 #[derive(Clone, Debug)]
 pub struct WetCanvas {
     wet: Wet,
     color: [f32; 3],
-    tiles: BTreeMap<TileKey, WetTile>,
+    /// The tiles, by the band of their row.
+    bands: Vec<Band>,
     /// The reservoir: premultiplied RGBA the brush carries; `None`
     /// before the first dab.
     reservoir: Option<[f32; 4]>,
@@ -262,6 +531,24 @@ pub struct WetCanvas {
     /// Paint of its own does not stack within the stroke (see
     /// [`Self::capped`]).
     capped: bool,
+    /// The last dab's buffers, kept for the next one.
+    scratch: Scratch,
+}
+
+/// Buffers a dab works in, kept from dab to dab so a stroke does not
+/// ask for memory at every dab.
+#[derive(Debug, Default)]
+struct Scratch {
+    work: DabWork,
+    slots: Vec<u32>,
+    line: Vec<[f32; 4]>,
+}
+
+impl Clone for Scratch {
+    /// A copy starts with buffers of its own, empty.
+    fn clone(&self) -> Self {
+        Self::default()
+    }
 }
 
 impl WetCanvas {
@@ -271,11 +558,12 @@ impl WetCanvas {
         Self {
             wet,
             color: color.map(unit),
-            tiles: BTreeMap::new(),
+            bands: vec![Band::default()],
             reservoir: None,
             last_at: None,
             dirty: BTreeSet::new(),
             capped: false,
+            scratch: Scratch::default(),
         }
     }
 
@@ -293,66 +581,124 @@ impl WetCanvas {
         self
     }
 
-    /// The premultiplied pixel at layer pixel `(x, y)` as the stroke has
-    /// left it, loading its tile from `backdrop` first.
-    fn load(&mut self, backdrop: &dyn Backdrop, key: TileKey) -> &mut WetTile {
-        let capped = self.capped;
-        self.tiles.entry(key).or_insert_with(|| {
-            let [ox, oy] = key.origin();
-            let mut pixels = vec![0.0; AREA * 4].into_boxed_slice();
-            for y in 0..TILE {
-                for x in 0..TILE {
-                    let [r, g, b, a] = backdrop.pixel(ox + x, oy + y);
-                    let i = ((y * TILE + x) * 4) as usize;
-                    pixels[i..i + 4].copy_from_slice(&[r * a, g * a, b * a, a]);
+    /// Keeps the tiles in `bands` bands of tile rows (1 to 8), so a big
+    /// dab can be written on that many threads at once
+    /// ([`Self::stamp_shared`]). Every pixel of a dab is worked out from
+    /// what lay there before the dab alone, so the pixels do not depend
+    /// on how many bands there are.
+    pub fn sharing(&mut self, bands: usize) {
+        let bands = bands.clamp(1, MOST_BANDS);
+        if bands == self.bands.len() {
+            return;
+        }
+        let old = std::mem::replace(&mut self.bands, vec![Band::default(); bands]);
+        for band in old {
+            let mut tiles: Vec<Option<WetTile>> = band.tiles.into_iter().map(Some).collect();
+            for (key, at) in band.index {
+                if let Some(tile) = tiles[at as usize].take() {
+                    let into = &mut self.bands[key.y.rem_euclid(bands as i32) as usize];
+                    into.index.insert(key, into.tiles.len() as u32);
+                    into.tiles.push(tile);
                 }
             }
-            WetTile {
-                touched: vec![false; AREA].into_boxed_slice(),
-                held: vec![0.0; AREA].into_boxed_slice(),
-                base: if capped { pixels.clone() } else { Box::new([]) },
-                paint: vec![0.0; if capped { AREA * 4 } else { 0 }].into_boxed_slice(),
-                pixels,
+        }
+    }
+
+    /// The band tile `key` is kept in.
+    fn band_of(&self, key: TileKey) -> usize {
+        key.y.rem_euclid(self.bands.len() as i32) as usize
+    }
+
+    /// Tile `key`, if the stroke has loaded it.
+    fn tile(&self, key: TileKey) -> Option<&WetTile> {
+        self.bands[self.band_of(key)].get(key)
+    }
+
+    /// Every tile with its key, in the keys' order.
+    fn sorted(&self) -> Vec<(TileKey, &WetTile)> {
+        let mut all: Vec<(TileKey, &WetTile)> = self
+            .bands
+            .iter()
+            .flat_map(|band| {
+                band.index
+                    .iter()
+                    .map(|(key, &at)| (*key, &band.tiles[at as usize]))
+            })
+            .collect();
+        all.sort_unstable_by_key(|(key, _)| *key);
+        all
+    }
+
+    /// Where tile `key` is kept in its band, loading it from `backdrop`
+    /// first.
+    fn load(&mut self, backdrop: &dyn Backdrop, key: TileKey) -> u32 {
+        let capped = self.capped;
+        let at = self.band_of(key);
+        let band = &mut self.bands[at];
+        if let Some(&at) = band.index.get(&key) {
+            return at;
+        }
+        let [ox, oy] = key.origin();
+        let mut pixels = vec![0.0; AREA * 4].into_boxed_slice();
+        for y in 0..TILE {
+            for x in 0..TILE {
+                let [r, g, b, a] = backdrop.pixel(ox + x, oy + y);
+                let i = ((y * TILE + x) * 4) as usize;
+                pixels[i..i + 4].copy_from_slice(&[r * a, g * a, b * a, a]);
             }
-        })
+        }
+        let at = band.tiles.len() as u32;
+        band.tiles.push(WetTile {
+            touched: vec![false; AREA].into_boxed_slice(),
+            held: vec![0.0; AREA].into_boxed_slice(),
+            base: if capped { pixels.clone() } else { Box::new([]) },
+            paint: vec![0.0; if capped { AREA * 4 } else { 0 }].into_boxed_slice(),
+            pixels,
+        });
+        band.index.insert(key, at);
+        at
     }
 
-    /// The strongest share of paint a dab of the stroke has laid on
-    /// layer pixel `(x, y)` (0 where none has, or the canvas is not
-    /// capped).
-    fn held_at(&self, x: i32, y: i32) -> f32 {
-        let key = TileKey::of_pixel(x, y);
-        let [ox, oy] = key.origin();
-        self.tiles
-            .get(&key)
-            .map_or(0.0, |tile| tile.held[((y - oy) * TILE + (x - ox)) as usize])
+    /// Where tile `key` is kept in its band, loading it first; found
+    /// through `grid` when the grid covers it.
+    fn slot(&mut self, backdrop: &dyn Backdrop, key: TileKey, grid: &mut Grid) -> u32 {
+        match grid.cell(key) {
+            Some(cell) if grid.slots[cell] != UNKNOWN => grid.slots[cell],
+            Some(cell) => {
+                let at = self.load(backdrop, key);
+                grid.slots[cell] = at;
+                at
+            }
+            None => self.load(backdrop, key),
+        }
     }
 
-    /// The premultiplied pixel `(x, y)`.
-    fn read(&mut self, backdrop: &dyn Backdrop, x: i32, y: i32) -> [f32; 4] {
+    /// The premultiplied pixel `(x, y)`, its tile loaded first.
+    fn read(&mut self, backdrop: &dyn Backdrop, x: i32, y: i32, grid: &mut Grid) -> [f32; 4] {
         let key = TileKey::of_pixel(x, y);
         let [ox, oy] = key.origin();
-        let tile = self.load(backdrop, key);
-        let i = (((y - oy) * TILE + (x - ox)) * 4) as usize;
-        [
-            tile.pixels[i],
-            tile.pixels[i + 1],
-            tile.pixels[i + 2],
-            tile.pixels[i + 3],
-        ]
+        let at = self.slot(backdrop, key, grid);
+        self.bands[self.band_of(key)].tiles[at as usize]
+            .pixel(((y - oy) * TILE + (x - ox)) as usize)
     }
 
     /// The premultiplied picture at `(x, y)` in pixel numbers (pixel
     /// `(1, 2)` is at `(1.0, 2.0)`), read between the four nearest
     /// pixels.
-    fn read_between(&mut self, backdrop: &dyn Backdrop, x: f32, y: f32) -> [f32; 4] {
+    fn read_between(
+        &mut self,
+        backdrop: &dyn Backdrop,
+        x: f32,
+        y: f32,
+        grid: &mut Grid,
+    ) -> [f32; 4] {
         let (fx, fy) = (x.floor(), y.floor());
         let (tx, ty) = (x - fx, y - fy);
         let (ix, iy) = (fx as i32, fy as i32);
-        let a = self.read(backdrop, ix, iy);
-        let b = self.read(backdrop, ix + 1, iy);
-        let c = self.read(backdrop, ix, iy + 1);
-        let d = self.read(backdrop, ix + 1, iy + 1);
+        let a = self.read(backdrop, ix, iy, grid);
+        let b = self.read(backdrop, ix + 1, iy, grid);
+        let c = self.read(backdrop, ix, iy + 1, grid);
+        let d = self.read(backdrop, ix + 1, iy + 1, grid);
         std::array::from_fn(|k| {
             let top = a[k] + (b[k] - a[k]) * tx;
             let bottom = c[k] + (d[k] - c[k]) * tx;
@@ -366,20 +712,10 @@ impl WetCanvas {
     pub fn pixel(&self, backdrop: &dyn Backdrop, x: i32, y: i32) -> [f32; 4] {
         let key = TileKey::of_pixel(x, y);
         let [ox, oy] = key.origin();
-        let Some(tile) = self.tiles.get(&key) else {
+        let Some(tile) = self.tile(key) else {
             return backdrop.pixel(x, y);
         };
-        let i = (((y - oy) * TILE + (x - ox)) * 4) as usize;
-        let a = tile.pixels[i + 3];
-        if a <= 0.0 {
-            return [0.0; 4];
-        }
-        [
-            tile.pixels[i] / a,
-            tile.pixels[i + 1] / a,
-            tile.pixels[i + 2] / a,
-            a,
-        ]
+        straight(tile.pixel(((y - oy) * TILE + (x - ox)) as usize))
     }
 
     /// The straight color layer pixel `(x, y)` will have once the stroke
@@ -406,6 +742,40 @@ impl WetCanvas {
         )
     }
 
+    /// [`Self::laid`] for every pixel of tile `key` the stroke changed,
+    /// row by row: `each` is given the pixel's place in the tile (row
+    /// times [`TILE`] plus column) and its straight color. Answers
+    /// `false`, having called nothing, for a tile the stroke never
+    /// loaded.
+    pub fn laid_tile(
+        &self,
+        backdrop: &dyn Backdrop,
+        key: TileKey,
+        region: Option<&Region>,
+        paper: Option<&Texture<'_>>,
+        keep_alpha: bool,
+        mut each: impl FnMut(usize, [f32; 4]),
+    ) -> bool {
+        let Some(tile) = self.tile(key) else {
+            return false;
+        };
+        let [ox, oy] = key.origin();
+        for (i, _) in tile.touched.iter().enumerate().filter(|(_, t)| **t) {
+            let (x, y) = (ox + (i as i32 % TILE), oy + (i as i32 / TILE));
+            let before = backdrop.pixel(x, y);
+            each(
+                i,
+                settle(
+                    before,
+                    straight(tile.pixel(i)),
+                    share(region, paper, x, y),
+                    keep_alpha,
+                ),
+            );
+        }
+        true
+    }
+
     /// Lays `dabs` one by one, each reading what the ones before left.
     pub fn stamp(
         &mut self,
@@ -426,6 +796,102 @@ impl WetCanvas {
         }
     }
 
+    /// [`Self::stamp`] with a big dab's pixels worked out and written on
+    /// the threads of `pool` (as many as the canvas has bands, see
+    /// [`Self::sharing`]). The dabs still go down one by one, each
+    /// reading what the ones before left, and every pixel is the same
+    /// arithmetic in the same order: the bytes are those of
+    /// [`Self::stamp`].
+    ///
+    /// # Errors
+    /// When a job of the pool failed: the canvas cannot be trusted.
+    pub fn stamp_shared(
+        &mut self,
+        backdrop: &dyn Backdrop,
+        dabs: &[Planned],
+        tips: &SharedTips,
+        pool: &JobPool,
+    ) -> Result<(), String> {
+        let texture = tips
+            .texture
+            .as_ref()
+            .map(|(paper, settings)| Texture::new(paper, *settings));
+        let borrowed = Tips {
+            pictures: &tips.pictures,
+            edge: tips.edge,
+        };
+        let bands = self.bands.len();
+        for planned in dabs {
+            let stamp = Stamp::new(planned, &borrowed, texture.as_ref());
+            let rect = stamp.bounds();
+            if rect.is_empty() {
+                continue;
+            }
+            let area = (rect.x1 - rect.x0) as usize * (rect.y1 - rect.y0) as usize;
+            let share = (bands > 1 && pool.threads() > 1 && area >= WORTH_SHARING).then_some(pool);
+            let mut failed = None;
+            let cover = |out: &mut [f32]| match share {
+                None => cover_rows(&stamp, rect, rect.y0..rect.y1, out),
+                Some(pool) => {
+                    // The dab's rows in as many runs as bands: the first
+                    // here, the others on the pool.
+                    let w = (rect.x1 - rect.x0) as usize;
+                    let rows = (rect.y1 - rect.y0) as usize;
+                    let per = rows.div_ceil(bands);
+                    let jobs: Vec<_> = (1..bands)
+                        .filter(|run| run * per < rows)
+                        .map(|run| {
+                            let (from, to) = (run * per, ((run + 1) * per).min(rows));
+                            let (planned, tips) = (*planned, tips.clone());
+                            let job = pool.spawn("brush dab", move |_| {
+                                let texture = tips
+                                    .texture
+                                    .as_ref()
+                                    .map(|(paper, settings)| Texture::new(paper, *settings));
+                                let borrowed = Tips {
+                                    pictures: &tips.pictures,
+                                    edge: tips.edge,
+                                };
+                                let stamp = Stamp::new(&planned, &borrowed, texture.as_ref());
+                                let mut out = vec![0.0_f32; (to - from) * w];
+                                let rows = rect.y0 + from as i32..rect.y0 + to as i32;
+                                cover_rows(&stamp, rect, rows, &mut out);
+                                Ok(out)
+                            });
+                            (from * w, job)
+                        })
+                        .collect();
+                    let first = per.min(rows);
+                    cover_rows(
+                        &stamp,
+                        rect,
+                        rect.y0..rect.y0 + first as i32,
+                        &mut out[..first * w],
+                    );
+                    for (at, job) in jobs {
+                        match job.wait() {
+                            Ok(part) => out[at..at + part.len()].copy_from_slice(&part),
+                            Err(error) => failed = Some(error.to_string()),
+                        }
+                    }
+                }
+            };
+            let written = self.dab_with(
+                backdrop,
+                rect,
+                cover,
+                planned.disc.at,
+                planned.disc.radius,
+                planned.wet,
+                share,
+            );
+            if let Some(error) = failed.or(written.err()) {
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
     /// One dab of `shape`, whose radius is `radius`; `driven` holds what
     /// a pen made of the amount of paint and the color stretch (as
     /// multipliers of the brush's own) and the density of paint here
@@ -442,6 +908,24 @@ impl WetCanvas {
         if rect.is_empty() {
             return;
         }
+        let cover = |out: &mut [f32]| cover_rows(shape, rect, rect.y0..rect.y1, out);
+        // On one thread nothing can fail.
+        let _ = self.dab_with(backdrop, rect, cover, at, radius, driven, None);
+    }
+
+    /// One dab over `rect`, whose coverage of each pixel `cover` writes
+    /// (row by row); written on `pool`'s threads when there is one.
+    #[allow(clippy::too_many_arguments)]
+    fn dab_with(
+        &mut self,
+        backdrop: &dyn Backdrop,
+        rect: PixelRect,
+        cover: impl FnOnce(&mut [f32]),
+        at: [f32; 2],
+        radius: f32,
+        driven: [f32; 3],
+        pool: Option<&JobPool>,
+    ) -> Result<(), String> {
         let (w, h) = ((rect.x1 - rect.x0) as usize, (rect.y1 - rect.y0) as usize);
         // The blur reaches a third of the radius around each pixel.
         let reach = if self.wet.blur > 0.0 {
@@ -457,43 +941,83 @@ impl WetCanvas {
             y1: rect.y1 + reach,
         };
         let ow = (outer.x1 - outer.x0) as usize;
-        let mut under = Vec::with_capacity(ow * (outer.y1 - outer.y0) as usize);
-        for y in outer.y0..outer.y1 {
-            for x in outer.x0..outer.x1 {
-                under.push(self.read(backdrop, x, y));
+        let mut scratch = std::mem::take(&mut self.scratch);
+        let mut work = std::mem::take(&mut scratch.work);
+        let mut grid = Grid::over(outer, std::mem::take(&mut scratch.slots));
+        work.under.clear();
+        work.under
+            .resize(ow * (outer.y1 - outer.y0) as usize, [0.0; 4]);
+        let (k0, k1) = (
+            TileKey::of_pixel(outer.x0, outer.y0),
+            TileKey::of_pixel(outer.x1 - 1, outer.y1 - 1),
+        );
+        for ty in k0.y..=k1.y {
+            for tx in k0.x..=k1.x {
+                let key = TileKey { x: tx, y: ty };
+                let [ox, oy] = key.origin();
+                let slot = self.slot(backdrop, key, &mut grid);
+                let tile = &self.bands[self.band_of(key)].tiles[slot as usize];
+                let (x0, x1) = (outer.x0.max(ox), outer.x1.min(ox + TILE));
+                let pixels = tile.pixels.as_chunks::<4>().0;
+                for y in outer.y0.max(oy)..outer.y1.min(oy + TILE) {
+                    let from = ((y - oy) * TILE + (x0 - ox)) as usize;
+                    let to = (y - outer.y0) as usize * ow + (x0 - outer.x0) as usize;
+                    let n = (x1 - x0) as usize;
+                    work.under[to..to + n].copy_from_slice(&pixels[from..from + n]);
+                }
             }
         }
+        work.cover.clear();
+        work.cover.resize(w * h, 0.0);
+        cover(&mut work.cover);
         // A brush with paint of its own takes up the paint it meets: the
         // pixels its stroke has not laid paint on yet (its leading edge,
         // as the hairs meet the wet paint ahead), not what it laid a dab
         // ago, which is its own color again. A blend tool takes up all.
         let fresh_only = self.capped && self.wet.amount > 0.0;
-        let mut cover = vec![0.0_f32; w * h];
         let mut picked = [0.0_f32; 4];
         let mut weight = 0.0;
         let mut met = 0.0;
         for y in 0..h {
-            for x in 0..w {
-                let (px, py) = (rect.x0 + x as i32, rect.y0 + y as i32);
-                let c = unit(shape.coverage([px as f32 + 0.5, py as f32 + 0.5]));
-                cover[y * w + x] = c;
-                if c > 0.0 {
-                    let u = under[(y + reach as usize) * ow + x + reach as usize];
-                    let m = if fresh_only {
-                        c * (1.0 - self.held_at(px, py))
-                    } else {
-                        c
-                    };
-                    for k in 0..4 {
-                        picked[k] += u[k] * m;
+            let py = rect.y0 + y as i32;
+            let mut px = rect.x0;
+            while px < rect.x1 {
+                // A run of the row inside one tile.
+                let key = TileKey::of_pixel(px, py);
+                let [ox, oy] = key.origin();
+                let end = rect.x1.min(ox + TILE);
+                let held = if fresh_only {
+                    self.tile(key).map(|tile| &tile.held[..])
+                } else {
+                    None
+                };
+                for qx in px..end {
+                    let x = (qx - rect.x0) as usize;
+                    let c = work.cover[y * w + x];
+                    if c > 0.0 {
+                        let u = work.under[(y + reach as usize) * ow + x + reach as usize];
+                        let m = if fresh_only {
+                            let held = held
+                                .map_or(0.0, |held| held[((py - oy) * TILE + (qx - ox)) as usize]);
+                            c * (1.0 - held)
+                        } else {
+                            c
+                        };
+                        for k in 0..4 {
+                            picked[k] += u[k] * m;
+                        }
+                        weight += c;
+                        met += m;
                     }
-                    weight += c;
-                    met += m;
                 }
+                px = end;
             }
         }
         if weight <= 0.0 {
-            return;
+            scratch.work = work;
+            scratch.slots = grid.slots;
+            self.scratch = scratch;
+            return Ok(());
         }
         // How much of the dab met paint it had not laid itself.
         let fresh = met / weight;
@@ -565,13 +1089,14 @@ impl WetCanvas {
         } else {
             0.0
         };
-        let blurred = (reach > 0).then(|| {
-            let mut out = under.clone();
+        work.blurs = reach > 0;
+        if work.blurs {
+            work.blurred.clear();
+            work.blurred.extend_from_slice(&work.under);
             for _ in 0..2 {
-                blur_box(&mut out, ow, reach as usize);
+                blur_box(&mut work.blurred, ow, reach as usize, &mut scratch.line);
             }
-            out
-        });
+        }
         // A smearing brush moves the picture along with it, as a finger
         // pushes wet paint: each pixel takes what lay behind it by the
         // dab's step, scaled by how hard the dab presses there and by the
@@ -594,88 +1119,92 @@ impl WetCanvas {
                 ((dx * dx + dy * dy).sqrt() / radius.max(0.5)).clamp(0.02, 1.0)
             })
         };
-        let smear = match last_at {
-            Some(from) if wet.smear > 0.0 => {
-                let step = [at[0] - from[0], at[1] - from[1]];
-                let mut carried = Vec::with_capacity(w * h);
-                for y in 0..h {
-                    for x in 0..w {
-                        let pull = cover[y * w + x] * wet.density * wet.stretch;
-                        let px = (rect.x0 + x as i32) as f32 - step[0] * pull;
-                        let py = (rect.y0 + y as i32) as f32 - step[1] * pull;
-                        carried.push(self.read_between(backdrop, px, py));
-                    }
-                }
-                Some(carried)
-            }
-            _ => None,
-        };
-        for y in 0..h {
-            for x in 0..w {
-                let c = cover[y * w + x];
-                if c <= 0.0 {
-                    continue;
-                }
-                let ui = (y + reach as usize) * ow + x + reach as usize;
-                let u = under[ui];
-                let mut target: [f32; 4] = match &blurred {
-                    Some(b) => std::array::from_fn(|k| paint[k] + (b[ui][k] - paint[k]) * wet.blur),
-                    None => paint,
-                };
-                // Where it lands on wet paint, the paint it lays mixes
-                // with that paint on the spot (its color, never its
-                // clearness), as a loaded brush does the moment it
-                // touches: white laid into black goes down gray at once.
-                if local > 0.0 && u[3] > 0.0 && target[3] > 0.0 {
-                    let w = local * u[3].min(1.0);
-                    for k in 0..3 {
-                        let there = u[k] / u[3] * target[3];
-                        target[k] += (there - target[k]) * w;
-                    }
-                }
-                let (px, py) = (rect.x0 + x as i32, rect.y0 + y as i32);
-                let key = TileKey::of_pixel(px, py);
-                let [ox, oy] = key.origin();
-                let capped = self.capped;
-                let tile = self.load(backdrop, key);
-                let i = ((py - oy) * TILE + (px - ox)) as usize;
-                let t = c * wet.density * share;
-                let mut out: [f32; 4] = if capped {
-                    // The pixel is the paint over what the stroke found
-                    // there, as strongly as its strongest dab laid it.
-                    // This dab's paint takes over the paint there as
-                    // strongly as it lays beside that strongest one: a
-                    // dab as strong replaces it, the rim of a later dab
-                    // only tints it. So paint does not stack, and the
-                    // first dabs' paint (unmixed yet) does not stay as a
-                    // spot where they were strongest.
-                    let held = tile.held[i];
-                    let now = held.max(t);
-                    if now <= 0.0 {
-                        continue;
-                    }
-                    let w = t / now;
-                    let j = i * 4;
-                    let mut laid = [0.0; 4];
-                    for k in 0..4 {
-                        let p = tile.paint[j + k] + (target[k] - tile.paint[j + k]) * w;
-                        tile.paint[j + k] = p;
-                        laid[k] = tile.base[j + k] + (p - tile.base[j + k]) * now;
-                    }
-                    tile.held[i] = now;
-                    laid
+        work.smears = false;
+        if let Some(from) = last_at.filter(|_| wet.smear > 0.0) {
+            let step = [at[0] - from[0], at[1] - from[1]];
+            // The tiles a pixel may be carried from: as far as the step.
+            let far = |v: f32| {
+                if v.is_finite() {
+                    v.abs().min(4096.0).ceil() as i32 + 2
                 } else {
-                    std::array::from_fn(|k| u[k] + (target[k] - u[k]) * t)
-                };
-                if let Some(carried) = &smear {
-                    let d = carried[y * w + x];
-                    out = std::array::from_fn(|k| out[k] + (d[k] - out[k]) * wet.smear);
+                    2
                 }
-                tile.pixels[i * 4..i * 4 + 4].copy_from_slice(&out);
-                tile.touched[i] = true;
-                self.dirty.insert(key);
+            };
+            let around = PixelRect {
+                x0: rect.x0 - far(step[0]),
+                y0: rect.y0 - far(step[1]),
+                x1: rect.x1 + far(step[0]),
+                y1: rect.y1 + far(step[1]),
+            };
+            let mut near = Grid::over(around, std::mem::take(&mut grid.slots));
+            work.carried.clear();
+            for y in 0..h {
+                for x in 0..w {
+                    let pull = work.cover[y * w + x] * wet.density * wet.stretch;
+                    let px = (rect.x0 + x as i32) as f32 - step[0] * pull;
+                    let py = (rect.y0 + y as i32) as f32 - step[1] * pull;
+                    let carried = self.read_between(backdrop, px, py, &mut near);
+                    work.carried.push(carried);
+                }
+            }
+            work.smears = true;
+            grid.slots = near.slots;
+        }
+        work.rect = rect;
+        work.w = w;
+        work.reach = reach as usize;
+        work.ow = ow;
+        work.paint = paint;
+        work.local = local;
+        work.wet = wet;
+        work.share = share;
+        work.capped = self.capped;
+        let n = self.bands.len();
+        let mut dirty = Vec::new();
+        let mut failed = None;
+        match pool.filter(|_| n > 1) {
+            None => {
+                for (k, band) in self.bands.iter_mut().enumerate() {
+                    work.write(band, k as i32, n as i32, &mut dirty);
+                }
+            }
+            Some(pool) => {
+                // Bands 1.. are written by jobs that own them; band 0
+                // here meanwhile.
+                let shared = Arc::new(work);
+                let jobs: Vec<_> = self.bands[1..]
+                    .iter_mut()
+                    .enumerate()
+                    .map(|(index, band)| {
+                        let mut owned = std::mem::take(band);
+                        let work = Arc::clone(&shared);
+                        pool.spawn("brush dab", move |_| {
+                            let mut dirty = Vec::new();
+                            work.write(&mut owned, index as i32 + 1, n as i32, &mut dirty);
+                            drop(work);
+                            Ok((owned, dirty))
+                        })
+                    })
+                    .collect();
+                shared.write(&mut self.bands[0], 0, n as i32, &mut dirty);
+                for (slot, job) in self.bands[1..].iter_mut().zip(jobs) {
+                    match job.wait() {
+                        Ok((band, keys)) => {
+                            *slot = band;
+                            dirty.extend(keys);
+                        }
+                        Err(error) => failed = Some(error.to_string()),
+                    }
+                }
+                // Every job has let go of it: the buffers come back.
+                work = Arc::try_unwrap(shared).unwrap_or_default();
             }
         }
+        self.dirty.extend(dirty);
+        scratch.work = work;
+        scratch.slots = grid.slots;
+        self.scratch = scratch;
+        failed.map_or(Ok(()), Err)
     }
 
     /// The tiles dabs changed since the last call, in order: what is
@@ -689,17 +1218,16 @@ impl WetCanvas {
     pub fn touched(&self, x: i32, y: i32) -> bool {
         let key = TileKey::of_pixel(x, y);
         let [ox, oy] = key.origin();
-        self.tiles
-            .get(&key)
+        self.tile(key)
             .is_some_and(|tile| tile.touched[((y - oy) * TILE + (x - ox)) as usize])
     }
 
     /// The tiles the stroke changed a pixel of, in order.
     pub fn keys(&self) -> impl Iterator<Item = TileKey> + '_ {
-        self.tiles
-            .iter()
+        self.sorted()
+            .into_iter()
             .filter(|(_, tile)| tile.touched.iter().any(|&t| t))
-            .map(|(key, _)| *key)
+            .map(|(key, _)| key)
     }
 
     /// Replaces the pixels the stroke changed in `raster` (whose pixel
@@ -718,11 +1246,31 @@ impl WetCanvas {
     ) -> Result<Vec<PixelRect>, MergeError> {
         let (w, h) = (raster.width() as i32, raster.height() as i32);
         let format = raster.format();
-        if !matches!(format, PixelFormat::Rgba8 | PixelFormat::RgbaF32) {
-            return Err(MergeError::Format(format));
+        match format {
+            PixelFormat::Rgba8 => {
+                let bytes = raster.bytes_mut().ok_or(MergeError::Format(format))?;
+                Ok(self.merge_into(bytes, [w, h], origin, region, paper, keep_alpha))
+            }
+            PixelFormat::RgbaF32 => {
+                let samples = raster.f32_samples_mut().ok_or(MergeError::Format(format))?;
+                Ok(self.merge_into(samples, [w, h], origin, region, paper, keep_alpha))
+            }
+            other => Err(MergeError::Format(other)),
         }
+    }
+
+    /// [`Self::merge`] into the samples of a raster of `size`.
+    fn merge_into<C: Stored>(
+        &self,
+        samples: &mut [C],
+        [w, h]: [i32; 2],
+        origin: [i32; 2],
+        region: Option<&Region>,
+        paper: Option<&Texture<'_>>,
+        keep_alpha: bool,
+    ) -> Vec<PixelRect> {
         let mut changed = Vec::new();
-        for (key, tile) in &self.tiles {
+        for (key, tile) in self.sorted() {
             let [ox, oy] = key.origin();
             let mut rect: Option<PixelRect> = None;
             for y in 0..TILE {
@@ -744,28 +1292,12 @@ impl WetCanvas {
                     };
                     let j = ((ry * w + rx) * 4) as usize;
                     let (lx, ly) = (ox + x, oy + y);
-                    let before = RasterBackdrop { raster, origin }.pixel(lx, ly);
+                    let before = C::straight(&samples[j..j + 4]);
                     let straight = settle(before, wet, share(region, paper, lx, ly), keep_alpha);
                     if straight == before {
                         continue;
                     }
-                    match format {
-                        PixelFormat::Rgba8 => {
-                            let bytes = raster
-                                .bytes_mut()
-                                .ok_or(MergeError::Format(PixelFormat::Rgba8))?;
-                            for (b, v) in bytes[j..j + 4].iter_mut().zip(straight) {
-                                *b = <u8 as crate::raster::kernel::Channel>::from_unit(v);
-                            }
-                        }
-                        PixelFormat::RgbaF32 => {
-                            let samples = raster
-                                .f32_samples_mut()
-                                .ok_or(MergeError::Format(PixelFormat::RgbaF32))?;
-                            samples[j..j + 4].copy_from_slice(&straight);
-                        }
-                        other => return Err(MergeError::Format(other)),
-                    }
+                    C::store(&mut samples[j..j + 4], straight);
                     rect = Some(match rect {
                         None => PixelRect {
                             x0: lx,
@@ -784,8 +1316,46 @@ impl WetCanvas {
             }
             changed.extend(rect);
         }
-        Ok(changed)
+        changed
     }
+}
+
+/// A raster's sample, read as [`RasterBackdrop`] reads a pixel and
+/// written as the merge writes one.
+trait Stored: Copy {
+    fn straight(pixel: &[Self]) -> [f32; 4];
+    fn store(pixel: &mut [Self], straight: [f32; 4]);
+}
+
+impl Stored for u8 {
+    fn straight(b: &[Self]) -> [f32; 4] {
+        [b[0], b[1], b[2], b[3]].map(|v| f32::from(v) / 255.0)
+    }
+
+    fn store(pixel: &mut [Self], straight: [f32; 4]) {
+        for (b, v) in pixel.iter_mut().zip(straight) {
+            *b = <u8 as crate::raster::kernel::Channel>::from_unit(v);
+        }
+    }
+}
+
+impl Stored for f32 {
+    fn straight(s: &[Self]) -> [f32; 4] {
+        [s[0], s[1], s[2], s[3]]
+    }
+
+    fn store(pixel: &mut [Self], straight: [f32; 4]) {
+        pixel.copy_from_slice(&straight);
+    }
+}
+
+/// A premultiplied pixel of the canvas as a straight color.
+fn straight(p: [f32; 4]) -> [f32; 4] {
+    let a = p[3];
+    if a <= 0.0 {
+        return [0.0; 4];
+    }
+    [p[0] / a, p[1] / a, p[2] / a, a]
 }
 
 /// How much of the wet paint layer pixel `(x, y)` takes: `region`'s
@@ -836,42 +1406,45 @@ fn settle(before: [f32; 4], wet: [f32; 4], region: Option<f32>, keep_alpha: bool
 }
 
 /// Box blurs premultiplied pixels (`width` wide) by `radius` each way,
-/// rows then columns, holding the edge pixels beyond the border.
-fn blur_box(pixels: &mut [[f32; 4]], width: usize, radius: usize) {
+/// rows then columns, holding the edge pixels beyond the border. `line`
+/// is a buffer to work in.
+fn blur_box(pixels: &mut [[f32; 4]], width: usize, radius: usize, line: &mut Vec<[f32; 4]>) {
     if width == 0 || radius == 0 {
         return;
     }
     let height = pixels.len() / width;
     let span = (2 * radius + 1) as f32;
-    let mut line = Vec::new();
-    let run = |line: &[[f32; 4]], out: &mut dyn FnMut(usize, [f32; 4])| {
-        let n = line.len() as isize;
-        let at = |i: isize| line[i.clamp(0, n - 1) as usize];
-        let r = radius as isize;
-        let mut sum = [0.0_f32; 4];
-        for i in -r..=r {
-            let p = at(i);
-            for k in 0..4 {
-                sum[k] += p[k];
-            }
-        }
-        for i in 0..n {
-            out(i as usize, sum.map(|s| s / span));
-            let (add, sub) = (at(i + r + 1), at(i - r));
-            for k in 0..4 {
-                sum[k] += add[k] - sub[k];
-            }
-        }
-    };
     for y in 0..height {
         line.clear();
         line.extend_from_slice(&pixels[y * width..(y + 1) * width]);
-        run(&line, &mut |x, v| pixels[y * width + x] = v);
+        blur_run(line, radius, span, |x, v| pixels[y * width + x] = v);
     }
     for x in 0..width {
         line.clear();
         line.extend((0..height).map(|y| pixels[y * width + x]));
-        run(&line, &mut |y, v| pixels[y * width + x] = v);
+        blur_run(line, radius, span, |y, v| pixels[y * width + x] = v);
+    }
+}
+
+/// The running mean of `line` over `radius` each way (`span` values),
+/// each handed to `out` with its place.
+fn blur_run(line: &[[f32; 4]], radius: usize, span: f32, mut out: impl FnMut(usize, [f32; 4])) {
+    let n = line.len() as isize;
+    let at = |i: isize| line[i.clamp(0, n - 1) as usize];
+    let r = radius as isize;
+    let mut sum = [0.0_f32; 4];
+    for i in -r..=r {
+        let p = at(i);
+        for k in 0..4 {
+            sum[k] += p[k];
+        }
+    }
+    for i in 0..n {
+        out(i as usize, sum.map(|s| s / span));
+        let (add, sub) = (at(i + r + 1), at(i - r));
+        for k in 0..4 {
+            sum[k] += add[k] - sub[k];
+        }
     }
 }
 
