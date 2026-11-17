@@ -117,6 +117,9 @@ fn sue_paint_runs_every_figure_command() {
             "figure.hand_scanner_camera",
             "figure.flip",
             "figure.reset",
+            "figure.reset_part",
+            "figure.pin",
+            "figure.model.",
             "figure.preset.",
             "figure.object.ground",
             "figure.object.reset_position",
@@ -125,6 +128,7 @@ fn sue_paint_runs_every_figure_command() {
             "figure.object.angle.",
             "figure.body.initialize",
             "figure.body.register",
+            "figure.slider.",
         ]
     );
 
