@@ -133,6 +133,11 @@ remember_layout = true         # Sue Paint opens with its palettes where they we
 tool_color_icon = true         # The Tool palette shows the main and sub colors under its tools (Tool palette menu, Show Color Icon)
 language = "sue"              # @text Language: sue follows Sue's language, a language tag sets this one apart
 ask_delete_folders = true      # Ask before deleting picked layer folders (the question's "Do not show again" turns it off)
+palette_in_folder = false      # A folder's row shows the palette colors of the layers in it (Layer, Layer Settings)
+palette_on_canvas = false      # Each layer with a palette color shows its drawing in that color on the canvas; the picture itself is unchanged (Layer, Layer Settings)
+webtoon_guides = false         # The canvas shows where each screen of a reader's device ends (View, Webtoon Display Settings)
+webtoon_screen = "tall-phone"  # {tall-phone|phone|tablet|desktop} The device a webtoon is read on, which sets how tall one screen is (View, Webtoon Display Settings)
+theme_density = 0              # [-100..100] Adjust density of the interface color: above 0 darker, below 0 lighter; text always stays readable (%; Preferences, Interface)
 
 [sue_paint_colors]
 void = "#2b2b2b"               # Around the picture

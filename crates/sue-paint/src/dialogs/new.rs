@@ -356,6 +356,12 @@ pub(crate) struct NewDialog {
     pub shot: u32,
     pub division: u32,
     pub time_unit: TimeUnit,
+    /// Start from a template: its layers go onto the new canvas.
+    pub template: bool,
+    /// Which of `templates` is chosen.
+    pub template_pick: usize,
+    /// Every template, by library key and name, as the dialog shows them.
+    pub templates: Vec<(String, String)>,
 }
 
 /// A canvas preset someone registered in the New dialog: its size,
@@ -510,6 +516,9 @@ impl NewDialog {
             shot: 1,
             division: 6,
             time_unit: TimeUnit::Frames,
+            template: false,
+            template_pick: 0,
+            templates: Vec::new(),
         }
     }
 
@@ -817,6 +826,7 @@ pub(super) fn new_ui(ui: &mut Ui, new: &mut NewDialog, theme: &Theme) -> Outcome
             } else {
                 moving_ui(form, new, theme);
             }
+            template_ui(form, new, theme);
         });
     }
     let [width, height] = new.canvas_size();
@@ -1182,6 +1192,40 @@ fn moving_ui(form: &mut FormGrid<'_, '_>, new: &mut NewDialog, theme: &Theme) {
     }
 }
 
+/// Template: a check box and the templates to start from (Sue Paint's
+/// frame templates and the ones registered with Edit, Register Material,
+/// Template).
+fn template_ui(form: &mut FormGrid<'_, '_>, new: &mut NewDialog, theme: &Theme) {
+    form.wide(|ui| {
+        let name = tr!("template");
+        let help = tr!("new-template-hint");
+        check(
+            ui,
+            "sue-paint-new-template",
+            &mut new.template,
+            &name,
+            &help,
+            theme,
+        );
+        ui.add_enabled_ui(new.template && !new.templates.is_empty(), |ui| {
+            let names: Vec<String> = new
+                .templates
+                .iter()
+                .map(|(_, name)| crate::localize(name))
+                .collect();
+            let label = bare(tr!("new-template-pick"));
+            let response = dropdown(
+                "sue-paint-new-template-pick",
+                &mut new.template_pick,
+                &names,
+            )
+            .label(&label)
+            .show(ui, theme);
+            tip(response, &label, "", theme);
+        });
+    });
+}
+
 /// Frame rate and playback time, as rows of `form`.
 fn rate_and_time(form: &mut sue_wm::ui::FormGrid<'_, '_>, new: &mut NewDialog, theme: &Theme) {
     let fps = tr!("fps");
@@ -1504,6 +1548,13 @@ impl SuePaint {
         {
             Self::apply(cx, edit);
         }
+        // The template's layers go onto the first page, as a step of the
+        // new canvas's own history (it is in focus from the next frame).
+        if new.template
+            && let Some((key, _)) = new.templates.get(new.template_pick)
+        {
+            self.pending_template = Some(key.clone());
+        }
     }
 
     /// The New dialog, and Register preset or Delete preset when it asks.
@@ -1515,6 +1566,12 @@ impl SuePaint {
         theme: &Theme,
     ) -> Outcome {
         new.own.clone_from(&self.canvas_presets);
+        new.templates = self
+            .templates(cx)
+            .into_iter()
+            .map(|material| (material.key(), material.name))
+            .collect();
+        new.template_pick = new.template_pick.min(new.templates.len().saturating_sub(1));
         let outcome = new_ui(ui, new, theme);
         if let Some(register) = new.preset_action.take() {
             self.canvas_preset(cx, new, register);

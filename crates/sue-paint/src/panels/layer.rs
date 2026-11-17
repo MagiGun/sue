@@ -833,6 +833,45 @@ impl SuePaint {
                     if let Some(tint) = tint {
                         painter.rect_filled(lead, CornerRadius::ZERO, tint.linear_multiply(TINT));
                     }
+                    // Layer Settings, Display palette colors in parent
+                    // folder: a folder's row shows the palette colors of
+                    // what it holds, one chip each, at its right.
+                    if is_folder
+                        && cx
+                            .rice()
+                            .get_bool(crate::commands::PALETTE_IN_FOLDER)
+                            .unwrap_or(false)
+                    {
+                        let side = (metrics.icon * 0.5).round().max(6.0);
+                        let mut right = full.right() - metrics.pad;
+                        for (name, color) in Self::palette_colors_inside(arena, info.id) {
+                            let chip = Rect::from_min_size(
+                                pos2(right - side, mid - side / 2.0),
+                                egui::Vec2::splat(side),
+                            );
+                            painter.rect_filled(chip, theme.radius(Radius::Xs), color);
+                            painter.rect_stroke(
+                                chip,
+                                theme.radius(Radius::Xs),
+                                theme.hairline(),
+                                StrokeKind::Inside,
+                            );
+                            let said = tr!("palette-color-inside", name = name.as_str());
+                            ui.interact(
+                                chip,
+                                egui::Id::unique((
+                                    "sue-paint-folder-palette",
+                                    info.id.to_u128(),
+                                    right as i64,
+                                )),
+                                Sense::hover(),
+                            )
+                            .widget_info(|| {
+                                egui::WidgetInfo::labeled(egui::Role::Image, true, &said)
+                            });
+                            right -= side + metrics.gap;
+                        }
+                    }
                     // A draft layer: a dashed bar at the row's left edge.
                     if info.style.draft {
                         let edge = full.left() + metrics.gap;
@@ -1532,7 +1571,18 @@ impl SuePaint {
         if let Some(dragged) = events.dropped {
             self.layer_drag = None;
             let recorded = cx.history.len();
+            let from = self.picture().and_then(|picture| {
+                doc::layers(&cx.world.arena, picture)
+                    .iter()
+                    .position(|info| info.id == dragged)
+            });
             self.drop_layer(dragged, events.onto, events.pointer, cx);
+            // An Auto Action being recorded keeps where the layer went.
+            if let Some(from) = from
+                && cx.history.len() != recorded
+            {
+                self.record_layer_move(&cx.world.arena, dragged, from);
+            }
             // A layer dragged out of an animation folder gets a track.
             self.track_new_layers(cx, recorded);
         }
@@ -1651,6 +1701,40 @@ impl SuePaint {
             .copied()
             .filter(|id| doc.layer != Some(*id))
             .collect();
+    }
+
+    /// The palette colors of the layers inside `folder`, each once, in
+    /// the order they stand from the top, with their names.
+    pub(crate) fn palette_colors_inside(
+        arena: &sue_core::Arena,
+        folder: EntityId,
+    ) -> Vec<(String, Color32)> {
+        let Some(picture) = sue_model::picture::picture_of(arena, folder) else {
+            return Vec::new();
+        };
+        let mut out: Vec<(String, Color32)> = Vec::new();
+        for info in doc::layers(arena, picture).into_iter().rev() {
+            if !doc::folders_around(arena, info.id).contains(&folder) {
+                continue;
+            }
+            let Some(color) = doc::palette_color(arena, info.id) else {
+                continue;
+            };
+            let [r, g, b] = crate::color::bytes(color.to_space(sue_core::ColorSpace::Srgb).rgb);
+            let shown = Color32::from_rgb(r, g, b);
+            if out.iter().any(|(_, known)| *known == shown) {
+                continue;
+            }
+            let name = doc::PALETTE_COLORS
+                .iter()
+                .find(|(_, of)| *of == [r, g, b])
+                .and_then(|(name, _)| {
+                    crate::commands::registry().label(&format!("layer.palette_color.{name}"))
+                })
+                .unwrap_or_else(|| format!("#{r:02x}{g:02x}{b:02x}"));
+            out.push((name, shown));
+        }
+        out
     }
 
     /// A dragged layer let go: onto New Raster Layer it is copied, onto

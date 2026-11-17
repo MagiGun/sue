@@ -11,6 +11,7 @@
 //! of fixed sizes.
 
 mod anim;
+pub(crate) mod assets;
 mod canvas;
 mod color;
 mod colorize;
@@ -108,6 +109,10 @@ pub(crate) enum Dialog {
     Timelapse(Box<TimelapseDialog>),
     /// Register Material, Image: its name.
     Material(String),
+    /// Register Material, Template: its name.
+    Template(String),
+    /// View, Webtoon Display Settings.
+    WebtoonDisplay(assets::WebtoonDisplay),
     /// Expand with round corners (0), Shrink (1), Blur the border of (2),
     /// Outline (3) or Expand with square corners (4) the selection, by
     /// pixels.
@@ -365,6 +370,8 @@ impl Dialog {
             Dialog::Onion(_) => Look::new(tr!("onion-skin-settings"), Form, ok()),
             Dialog::Timelapse(_) => Look::new(tr!("export-timelapse"), Form, ok()),
             Dialog::Material(_) => Look::new(tr!("register-material"), Form, ok()),
+            Dialog::Template(_) => Look::new(tr!("register-template"), Form, ok()),
+            Dialog::WebtoonDisplay(_) => Look::new(tr!("webtoon-display-settings"), Form, ok()),
             Dialog::SelectBy(kind, _) => Look::new(
                 match kind {
                     0 | 4 => tr!("expand-selected-area-2"),
@@ -601,6 +608,8 @@ impl SuePaint {
             Dialog::Timeline(fps, length) => timeline_ui(ui, fps, length, theme),
             Dialog::Shape3D(kind) => shape_3d_ui(ui, kind, theme),
             Dialog::Material(name) => material_ui(ui, name, theme),
+            Dialog::Template(name) => assets::template_ui(ui, name, theme),
+            Dialog::WebtoonDisplay(display) => assets::webtoon_display_ui(ui, display, theme),
             Dialog::Timelapse(dialog) => dialog.ui(ui, theme),
             Dialog::Perspective(perspective) => perspective_ui(ui, perspective, theme),
             Dialog::Correction(_, filter, ..) => self.correction_dialog_ui(ui, filter, cx, theme),
@@ -649,7 +658,7 @@ impl SuePaint {
     }
 
     /// What OK (or Enter) does, for each kind of dialog.
-    fn dialog_ok(&mut self, cx: &mut AppletContext<'_>, dialog: Dialog) {
+    pub(crate) fn dialog_ok(&mut self, cx: &mut AppletContext<'_>, dialog: Dialog) {
         match dialog {
             Dialog::New(new) => self.new_ok(cx, &new),
             Dialog::AdvancedFill => self.advanced_fill_now(cx),
@@ -660,6 +669,8 @@ impl SuePaint {
             Dialog::Perspective(perspective) => self.perspective_ok(cx, perspective),
             Dialog::Timelapse(dialog) => self.ask_export_timelapse(cx, dialog.export),
             Dialog::Material(name) => self.register_material(cx, &name),
+            Dialog::Template(name) => self.register_template(cx, &name),
+            Dialog::WebtoonDisplay(display) => self.webtoon_display_ok(cx, display),
             Dialog::SelectBy(3, width) => self.outline_selection(cx, width),
             Dialog::SelectBy(kind, amount) => self.select_by_ok(kind, amount),
             Dialog::Gamut(tolerance, all) => self.select_gamut(cx, tolerance, all),
@@ -702,6 +713,8 @@ impl SuePaint {
     /// What Cancel (or Escape, or closing its window) does, for each kind
     /// of dialog.
     fn dialog_cancel(&mut self, cx: &mut AppletContext<'_>, dialog: Dialog) {
+        // Cancel in a dialog an Auto Action showed stops the action.
+        self.auto.queue.clear();
         match dialog {
             Dialog::Filter(filter) => self.filter_cancel(cx, &filter),
             Dialog::Correction(layer, _, before, made) => {
@@ -722,6 +735,8 @@ impl SuePaint {
             | Dialog::Onion(_)
             | Dialog::Timelapse(_)
             | Dialog::Material(_)
+            | Dialog::Template(_)
+            | Dialog::WebtoonDisplay(_)
             | Dialog::SelectBy(..)
             | Dialog::Gamut(..)
             | Dialog::Webtoon(..)

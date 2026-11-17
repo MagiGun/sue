@@ -27,6 +27,11 @@ pub enum Placement {
     /// It goes onto a 3D drawing figure, hand or head: it poses it (pose
     /// materials) or shapes it (body shape materials).
     Pose,
+    /// Its layers go onto the canvas (templates).
+    Layers,
+    /// It goes onto the canvas as a 3D layer of its own (3D backgrounds
+    /// and objects).
+    Model,
 }
 
 /// Finds the materials of a kind in the materials location, if any.
@@ -55,11 +60,13 @@ pub struct MaterialKinds {
 }
 
 impl MaterialKinds {
-    /// Sue Paint's own kinds: tones, patterns, pictures and brush tips.
+    /// Sue Paint's own kinds: tones, patterns, pictures, brush tips,
+    /// poses and body shapes, effect lines, balloons, templates, and 3D
+    /// backgrounds and objects.
     #[must_use]
     pub fn builtin() -> Self {
         let mut kinds = Self::default();
-        let own: [(&str, &str, Glyph, Placement, Scan); 6] = [
+        let own: [(&str, &str, Glyph, Placement, Scan); 11] = [
             (TONE, "Tones", Glyph::Tone, Placement::Cover, scan_tones),
             (
                 PATTERN,
@@ -78,6 +85,33 @@ impl MaterialKinds {
                 Placement::Pose,
                 scan_bodies,
             ),
+            (
+                EFFECT,
+                "Effect lines",
+                Glyph::Pattern,
+                Placement::Cover,
+                |_| scan_own(EFFECT, Placement::Cover),
+            ),
+            (BALLOON, "Balloons", Glyph::Bubble, Placement::Fit, |_| {
+                scan_own(BALLOON, Placement::Fit)
+            }),
+            (
+                TEMPLATE,
+                "Templates",
+                Glyph::Projects,
+                Placement::Layers,
+                scan_templates,
+            ),
+            (
+                BACKGROUND,
+                "3D backgrounds",
+                Glyph::Cube,
+                Placement::Model,
+                |_| scan_own(BACKGROUND, Placement::Model),
+            ),
+            (OBJECT, "3D objects", Glyph::Cube, Placement::Model, |_| {
+                scan_own(OBJECT, Placement::Model)
+            }),
         ];
         for (id, name, glyph, placement, scan) in own {
             kinds
@@ -139,6 +173,23 @@ pub const TIP: &str = "sue_paint.tip";
 pub const POSE: &str = "sue_paint.pose";
 /// Body shapes of 3D drawing figures, kept to use again.
 pub const BODY: &str = "sue_paint.body";
+/// Effect lines: focus lines, speed lines and the like, over the canvas.
+pub const EFFECT: &str = "sue_paint.effect";
+/// Balloons for the words of a comic.
+pub const BALLOON: &str = "sue_paint.balloon";
+/// Templates: layers (frame borders, guides, anything) that a new canvas
+/// starts with or that go onto a canvas together.
+pub const TEMPLATE: &str = "sue_paint.template";
+/// 3D backgrounds: rooms, streets and the like, as 3D layers.
+pub const BACKGROUND: &str = "sue_paint.background3d";
+/// Small 3D objects: furniture and props, as 3D layers.
+pub const OBJECT: &str = "sue_paint.object3d";
+/// The extension of a template file: a layered `.clip` picture, so a
+/// template can be shared and opened anywhere a `.clip` opens.
+pub const TEMPLATE_EXTENSION: &str = "clip";
+
+mod own;
+use own::{Art, OWN};
 
 /// One material in the library.
 #[derive(Clone, Debug, PartialEq)]
@@ -165,10 +216,9 @@ impl Material {
     #[must_use]
     pub fn key(&self) -> String {
         match &self.source {
-            Source::Builtin(index) => format!(
-                "builtin:{}",
-                BUILTIN.get(*index).map_or("", |(name, ..)| *name)
-            ),
+            Source::Builtin(index) => {
+                format!("builtin:{}", OWN.get(*index).map_or("", |(name, ..)| *name))
+            }
             Source::File(path) => format!("file:{}", path.display()),
         }
     }
@@ -183,83 +233,6 @@ pub enum Source {
     File(PathBuf),
 }
 
-/// Sue Paint's own tones and patterns: a name, a kind and how much ink
-/// each pixel has.
-type Builtin = (&'static str, &'static str, fn(f32, f32) -> f32);
-
-/// Halftone dots on a 45 degree grid of 8 pixel cells covering `share`.
-fn dots(x: f32, y: f32, share: f32) -> f32 {
-    let cell = 8.0;
-    let (s, c) = std::f32::consts::FRAC_PI_4.sin_cos();
-    let (u, v) = ((x * c + y * s) / cell, (-x * s + y * c) / cell);
-    let (du, dv) = (u - u.round(), v - v.round());
-    let away = du.hypot(dv) * cell;
-    let radius = cell * (share / std::f32::consts::PI).sqrt();
-    (radius - away + 0.5).clamp(0.0, 1.0)
-}
-
-fn noise(x: f32, y: f32) -> f32 {
-    let mut h =
-        (x as i64 as u32).wrapping_mul(0x9E37_79B1) ^ (y as i64 as u32).wrapping_mul(0x85EB_CA6B);
-    h ^= h >> 15;
-    h = h.wrapping_mul(0x2C1B_3C6D);
-    h ^= h >> 12;
-    (h & 0xFF) as f32 / 255.0
-}
-
-const BUILTIN: [Builtin; 12] = [
-    ("Dot 10%", TONE, |x, y| dots(x, y, 0.1)),
-    ("Dot 20%", TONE, |x, y| dots(x, y, 0.2)),
-    ("Dot 30%", TONE, |x, y| dots(x, y, 0.3)),
-    ("Dot 50%", TONE, |x, y| dots(x, y, 0.5)),
-    ("Lines 20%", TONE, |_, y| {
-        if y.rem_euclid(6.0) < 1.2 { 1.0 } else { 0.0 }
-    }),
-    (
-        "Sand",
-        TONE,
-        |x, y| {
-            if noise(x, y) > 0.82 { 1.0 } else { 0.0 }
-        },
-    ),
-    ("Crosshatch", PATTERN, |x, y| {
-        let a = (x + y).rem_euclid(8.0) < 1.0;
-        let b = (x - y).rem_euclid(8.0) < 1.0;
-        if a || b { 1.0 } else { 0.0 }
-    }),
-    ("Grid", PATTERN, |x, y| {
-        if x.rem_euclid(16.0) < 1.0 || y.rem_euclid(16.0) < 1.0 {
-            1.0
-        } else {
-            0.0
-        }
-    }),
-    ("Checker", PATTERN, |x, y| {
-        if ((x / 16.0).floor() + (y / 16.0).floor()).rem_euclid(2.0) < 1.0 {
-            1.0
-        } else {
-            0.0
-        }
-    }),
-    ("Bricks", PATTERN, |x, y| {
-        let row = (y / 12.0).floor();
-        let shift = if row.rem_euclid(2.0) < 1.0 { 0.0 } else { 12.0 };
-        if y.rem_euclid(12.0) < 1.5 || (x + shift).rem_euclid(24.0) < 1.5 {
-            1.0
-        } else {
-            0.0
-        }
-    }),
-    ("Stripes", PATTERN, |x, y| {
-        if (x + y).rem_euclid(12.0) < 4.0 {
-            1.0
-        } else {
-            0.0
-        }
-    }),
-    ("Speckles", PATTERN, |x, y| noise(x, y) * 0.6),
-];
-
 /// Every material of Sue Paint's own kinds found in `folder`, the
 /// materials location.
 #[must_use]
@@ -268,9 +241,8 @@ pub fn library(folder: Option<&Path>) -> Vec<Material> {
 }
 
 /// Sue Paint's own materials of `kind`.
-fn scan_builtin(kind: &str, placement: Placement) -> Vec<Material> {
-    BUILTIN
-        .iter()
+fn scan_own(kind: &str, placement: Placement) -> Vec<Material> {
+    OWN.iter()
         .enumerate()
         .filter(|(_, (_, of, _))| *of == kind)
         .map(|(index, (name, _, _))| Material {
@@ -283,11 +255,23 @@ fn scan_builtin(kind: &str, placement: Placement) -> Vec<Material> {
 }
 
 fn scan_tones(_: Option<&Path>) -> Vec<Material> {
-    scan_builtin(TONE, Placement::Cover)
+    scan_own(TONE, Placement::Cover)
 }
 
 fn scan_patterns(_: Option<&Path>) -> Vec<Material> {
-    scan_builtin(PATTERN, Placement::Cover)
+    scan_own(PATTERN, Placement::Cover)
+}
+
+/// Sue Paint's frame templates, then the templates people registered:
+/// the `.clip` files in `templates/`.
+fn scan_templates(folder: Option<&Path>) -> Vec<Material> {
+    let mut found = scan_own(TEMPLATE, Placement::Layers);
+    let mut files = scan_files(folder, "templates", TEMPLATE_EXTENSION, TEMPLATE);
+    for file in &mut files {
+        file.placement = Placement::Layers;
+    }
+    found.extend(files);
+    found
 }
 
 fn scan_images(folder: Option<&Path>) -> Vec<Material> {
@@ -299,7 +283,9 @@ fn scan_tips(folder: Option<&Path>) -> Vec<Material> {
 }
 
 fn scan_poses(folder: Option<&Path>) -> Vec<Material> {
-    scan_files(folder, "poses", "pose", POSE)
+    let mut found = scan_own(POSE, Placement::Pose);
+    found.extend(scan_files(folder, "poses", "pose", POSE));
+    found
 }
 
 fn scan_bodies(folder: Option<&Path>) -> Vec<Material> {
@@ -343,8 +329,18 @@ fn scan_files(folder: Option<&Path>, dir: &str, extension: &str, kind: &str) -> 
 /// the second.
 #[must_use]
 pub fn pose_of(material: &Material) -> Option<(crate::figure::Kind, crate::figure::Pose)> {
-    let Source::File(path) = &material.source else {
-        return None;
+    let path = match &material.source {
+        Source::Builtin(index) => {
+            let Some((_, _, Art::Pose(kind, preset))) = OWN.get(*index) else {
+                return None;
+            };
+            let body = crate::figure::Body {
+                kind: *kind,
+                ..crate::figure::Body::default()
+            };
+            return Some((*kind, body.preset(*preset)));
+        }
+        Source::File(path) => path,
     };
     let text = String::from_utf8(sue_platform::fs::read(path).ok()?).ok()?;
     let mut lines = text.lines();
@@ -456,7 +452,7 @@ fn scan_pngs(dir: Option<PathBuf>, kind: &str) -> Vec<Material> {
         .collect()
 }
 
-/// `ink` (0 to 1 a pixel) as black on clear, `size`.
+/// `ink` (0 to 1 a pixel) in `color` on clear, `size`.
 fn draw(size: [u32; 2], color: [u8; 3], ink: fn(f32, f32) -> f32) -> RasterTile2D {
     let mut pixels = Vec::with_capacity((size[0] * size[1] * 4) as usize);
     for y in 0..size[1] {
@@ -469,45 +465,170 @@ fn draw(size: [u32; 2], color: [u8; 3], ink: fn(f32, f32) -> f32) -> RasterTile2
         .unwrap_or_else(|_| RasterTile2D::new(1, 1, PixelFormat::Rgba8).expect("one pixel"))
 }
 
+/// A material drawn whole into a `size` box: its ink in `color` over
+/// white paper, on clear.
+fn draw_framed(
+    size: [u32; 2],
+    color: [u8; 3],
+    ink: fn(f32, f32, f32, f32) -> [f32; 2],
+) -> RasterTile2D {
+    let (w, h) = (size[0].max(1), size[1].max(1));
+    // The box runs from -1 to 1 down; a pixel is this wide.
+    let px = 2.0 / h as f32;
+    let aspect = w as f32 / h as f32;
+    let mut pixels = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (u, v) = ((x as f32 + 0.5) * px - aspect, (y as f32 + 0.5) * px - 1.0);
+            let [ink, paper] = ink(u, v, aspect, px);
+            let (ink, paper) = (ink.clamp(0.0, 1.0), paper.clamp(0.0, 1.0));
+            let alpha = ink + (1.0 - ink) * paper;
+            let mut pixel = [0_u8; 4];
+            if alpha > 0.0 {
+                // Ink over white paper.
+                let share = ink / alpha;
+                for (out, of) in pixel.iter_mut().zip(color) {
+                    *out = (f32::from(of) * share + 255.0 * (1.0 - share)).round() as u8;
+                }
+                pixel[3] = (alpha * 255.0).round() as u8;
+            }
+            pixels.extend_from_slice(&pixel);
+        }
+    }
+    RasterTile2D::from_bytes(w, h, PixelFormat::Rgba8, pixels)
+        .unwrap_or_else(|_| RasterTile2D::new(1, 1, PixelFormat::Rgba8).expect("one pixel"))
+}
+
+/// The largest box of `aspect` (width over height) inside `size`.
+fn box_in(size: [u32; 2], aspect: f32) -> [u32; 2] {
+    let (w, h) = (size[0].max(1) as f32, size[1].max(1) as f32);
+    if w / h > aspect {
+        [((h * aspect).round() as u32).max(1), size[1].max(1)]
+    } else {
+        [size[0].max(1), ((w / aspect).round() as u32).max(1)]
+    }
+}
+
+/// The frame borders of layout `layout` on a `size` page, as a picture.
+fn draw_frames(size: [u32; 2], layout: usize) -> Option<RasterTile2D> {
+    let [w, h] = size;
+    let rows = crate::manga::LAYOUTS.get(layout)?.1;
+    let unit = w.min(h) as f32;
+    let panels = crate::manga::layout(
+        rows,
+        w as f32,
+        h as f32,
+        unit * 0.06,
+        unit * 0.025,
+        unit * 0.04,
+    );
+    let pixels = crate::manga::render_frames(&panels, w, h, (unit * 0.008).max(1.0), [255; 3]);
+    RasterTile2D::from_bytes(w, h, PixelFormat::Rgba8, pixels).ok()
+}
+
+/// The model of a 3D background or object material: a model entity
+/// named after it.
+#[must_use]
+pub fn model_of(material: &Material) -> Option<Entity> {
+    let Source::Builtin(index) = material.source else {
+        return None;
+    };
+    let (_, _, Art::Model(build)) = OWN.get(index)? else {
+        return None;
+    };
+    Some(Entity::empty(crate::localize(&material.name), sue_model::class::MODEL).with_ext(build()))
+}
+
+/// The frame layout of one of Sue Paint's frame templates.
+#[must_use]
+pub fn frames_of(material: &Material) -> Option<usize> {
+    let Source::Builtin(index) = material.source else {
+        return None;
+    };
+    match OWN.get(index)? {
+        (_, _, Art::Frames(layout)) => Some(*layout),
+        _ => None,
+    }
+}
+
 /// The material as a picture: Sue Paint's own at `size` in `color`, a
 /// registered one as it is.
 #[must_use]
 pub fn picture(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<RasterTile2D> {
     match &material.source {
-        Source::Builtin(index) => BUILTIN
-            .get(*index)
-            .map(|(_, _, ink)| draw(size, color, *ink)),
-        Source::File(_) if material.placement == Placement::Pose => {
-            // The posed figure, or the body shape standing, drawn.
-            let (pose, body) = if material.kind == BODY {
-                (crate::figure::Pose::default(), body_of(material)?)
-            } else {
-                let (kind, pose) = pose_of(material)?;
-                let body = crate::figure::Body {
-                    kind,
-                    ..crate::figure::Body::default()
+        Source::Builtin(index) => match OWN.get(*index)?.2 {
+            Art::Tiled(ink) => Some(draw(size, color, ink)),
+            // Effect lines take the canvas's shape; balloons keep theirs.
+            Art::Framed { ink, .. } if material.placement == Placement::Cover => {
+                Some(draw_framed(size, color, ink))
+            }
+            Art::Framed { aspect, ink } => Some(draw_framed(box_in(size, aspect), color, ink)),
+            Art::Pose(..) => posed(material, size),
+            Art::Model(build) => {
+                // A background is looked into from its open side; an
+                // object from a corner above.
+                let (yaw, pitch) = if material.kind == BACKGROUND {
+                    (0.0, 14.0)
+                } else {
+                    (32.0, 22.0)
                 };
-                (pose, body)
-            };
-            let view = crate::three::View3D {
-                yaw: 18.0,
-                pitch: 6.0,
-                distance: 4.4,
-                ..crate::three::View3D::default()
-            };
-            let buffers = crate::three::render_framed(
-                &crate::figure::mesh(&pose, &body),
-                &view,
-                size,
-                Some(body.frame()),
-            );
-            crate::three::draw(&buffers, &view)
+                let view = crate::three::View3D {
+                    yaw,
+                    pitch,
+                    ..crate::three::View3D::default()
+                };
+                let buffers = crate::three::render_buffers(&build().to_mesh(), &view, size);
+                crate::three::draw(&buffers, &view)
+            }
+            Art::Frames(layout) => {
+                draw_frames(box_in(size, std::f32::consts::FRAC_1_SQRT_2), layout)
+            }
+        },
+        Source::File(_) if material.placement == Placement::Pose => posed(material, size),
+        Source::File(path) if material.placement == Placement::Layers => {
+            // A template: its layers flattened.
+            let bytes = sue_platform::fs::read(path).ok()?;
+            let (arena, picture) = crate::clip_io::picture_arena(&bytes)?;
+            let flat = crate::composite::flatten(
+                &arena,
+                picture,
+                crate::composite::RenderOptions::default(),
+            )?;
+            crate::doc::fitted(&flat, size)
         }
         Source::File(path) => {
             let bytes = sue_platform::fs::read(path).ok()?;
             sue_io::decode_png(&bytes).ok().map(|decoded| decoded.tile)
         }
     }
+}
+
+/// A pose or body shape material: the posed figure, or the body shape
+/// standing, drawn at `size`.
+fn posed(material: &Material, size: [u32; 2]) -> Option<RasterTile2D> {
+    let (pose, body) = if material.kind == BODY {
+        (crate::figure::Pose::default(), body_of(material)?)
+    } else {
+        let (kind, pose) = pose_of(material)?;
+        let body = crate::figure::Body {
+            kind,
+            ..crate::figure::Body::default()
+        };
+        (pose, body)
+    };
+    let view = crate::three::View3D {
+        yaw: 18.0,
+        pitch: 6.0,
+        distance: 4.4,
+        ..crate::three::View3D::default()
+    };
+    let buffers = crate::three::render_framed(
+        &crate::figure::mesh(&pose, &body),
+        &view,
+        size,
+        Some(body.frame()),
+    );
+    crate::three::draw(&buffers, &view)
 }
 
 /// The layer that puts `material` on a `size` canvas: tones and patterns
@@ -517,7 +638,14 @@ pub fn layer(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<Rast
     if material.placement == Placement::Cover {
         return picture(material, size, color);
     }
-    let tile = picture(material, size, color)?;
+    // One of Sue Paint's own balloons is drawn at half the canvas, so it
+    // is crisp at the size it lands at.
+    let drawn = if matches!(material.source, Source::Builtin(_)) {
+        [size[0] / 2, size[1] / 2]
+    } else {
+        size
+    };
+    let tile = picture(material, drawn, color)?;
     fitted(&tile, size)
 }
 
@@ -908,6 +1036,78 @@ mod tests {
             / (bytes.len() / 4) as f32
     }
 
+    /// Every one of Sue Paint's own materials drawn on one sheet, for a
+    /// person to look at: written to the folder `SUE_REVIEW_DIR` names
+    /// (`cargo test -p sue-paint review_sheet -- --ignored`).
+    #[test]
+    #[ignore = "writes a picture for review"]
+    fn review_sheet_of_sue_paints_own_materials() {
+        let Some(dir) = std::env::var_os("SUE_REVIEW_DIR") else {
+            return;
+        };
+        let own: Vec<Material> = library(None)
+            .into_iter()
+            .filter(|material| matches!(material.source, Source::Builtin(_)))
+            .collect();
+        let (cell, columns) = (144_u32, 10_u32);
+        let rows = (own.len() as u32).div_ceil(columns);
+        let (w, h) = (cell * columns, cell * rows);
+        let mut sheet = vec![255_u8; (w * h * 4) as usize];
+        for (index, material) in own.iter().enumerate() {
+            let size = [cell - 8, cell - 8];
+            let tile = match material.placement {
+                Placement::Fit => layer(material, size, [0; 3]),
+                _ => picture(material, size, [0; 3]),
+            }
+            .unwrap_or_else(|| panic!("{} draws", material.name));
+            let tile = crate::doc::fitted(&tile, size).unwrap_or(tile);
+            let bytes = tile.bytes().unwrap();
+            let (x0, y0) = (
+                (index as u32 % columns) * cell + 4,
+                (index as u32 / columns) * cell + 4,
+            );
+            for y in 0..tile.height() {
+                for x in 0..tile.width() {
+                    let from = ((y * tile.width() + x) * 4) as usize;
+                    let to = (((y0 + y) * w + x0 + x) * 4) as usize;
+                    let alpha = u32::from(bytes[from + 3]);
+                    for channel in 0..3 {
+                        let under = u32::from(sheet[to + channel]);
+                        sheet[to + channel] = ((u32::from(bytes[from + channel]) * alpha
+                            + under * (255 - alpha))
+                            / 255) as u8;
+                    }
+                }
+            }
+        }
+        let png = sue_io::encode_png_rgba(w, h, &sheet).unwrap();
+        let path = std::path::Path::new(&dir).join("own-materials.png");
+        sue_platform::fs::write(&path, png).unwrap();
+        // The effect lines at a canvas's own shape.
+        for name in [
+            "Focus lines",
+            "Speed lines",
+            "Flash",
+            "Gloom lines",
+            "Dot gradation",
+        ] {
+            let material = own.iter().find(|material| material.name == name).unwrap();
+            let tile = picture(material, [480, 320], [0; 3]).unwrap();
+            let mut flat = tile.bytes().unwrap().to_vec();
+            for pixel in flat.chunks_mut(4) {
+                let alpha = u32::from(pixel[3]);
+                for value in pixel.iter_mut().take(3) {
+                    *value = ((u32::from(*value) * alpha + 255 * (255 - alpha)) / 255) as u8;
+                }
+                pixel[3] = 255;
+            }
+            let png = sue_io::encode_png_rgba(480, 320, &flat).unwrap();
+            let file = name.to_lowercase().replace(' ', "-");
+            sue_platform::fs::write(std::path::Path::new(&dir).join(format!("{file}.png")), png)
+                .unwrap();
+        }
+    }
+
     #[test]
     fn poses_register_as_materials_and_come_back() {
         use crate::figure::{Body, Kind};
@@ -922,7 +1122,7 @@ mod tests {
         assert_eq!(path, folder.join("poses").join("Hand pose 1.pose"));
         let found: Vec<Material> = library(Some(&folder))
             .into_iter()
-            .filter(|material| material.kind == POSE)
+            .filter(|material| material.kind == POSE && material.removable())
             .collect();
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].name, "Hand pose 1");
@@ -993,9 +1193,10 @@ mod tests {
                 scan: |_| Vec::new(),
             })
             .unwrap();
-        // Tones, patterns, images, brush tips, poses, body shapes, and the
+        // Tones, patterns, images, brush tips, poses, body shapes, effect
+        // lines, balloons, templates, 3D backgrounds and objects, and the
         // new one.
-        assert_eq!(kinds.iter().count(), 7);
+        assert_eq!(kinds.iter().count(), 12);
 
         let folder = std::env::temp_dir().join(format!("sue-library-{}", std::process::id()));
         let _ = sue_platform::fs::remove_dir_all(&folder);

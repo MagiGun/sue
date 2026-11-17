@@ -205,8 +205,23 @@ impl SuePaint {
         self.poll_exports(cx);
         self.animate(cx, &ui.ctx().clone());
         self.record_timelapse(cx, &ui.ctx().clone());
+        // Layer Settings, Display palette colors on canvas.
+        let palette = cx
+            .rice()
+            .get_bool(crate::commands::PALETTE_ON_CANVAS)
+            .unwrap_or(false);
         if let Some(doc) = self.docs.get_mut(self.active) {
+            doc.compositor.set_palette_colors(palette);
             doc.compositor.sync(&cx.world.arena);
+        }
+        // File, New's template, on the canvas New just made.
+        if let Some(key) = self.pending_template.take() {
+            self.new_from_template(cx, &key);
+        }
+        // An Auto Action waiting on a dialog it showed goes on once the
+        // dialog is closed.
+        if !self.auto.queue.is_empty() && self.dialog.is_none() {
+            self.auto_continue(cx);
         }
         let ctx = ui.ctx().clone();
         if self.ready {

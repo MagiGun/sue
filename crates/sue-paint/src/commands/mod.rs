@@ -16,6 +16,7 @@ use crate::doc;
 use crate::studio::{KEYS_SECTION, SuePaint};
 
 mod anim;
+mod assets;
 mod canvas;
 mod color;
 mod edit;
@@ -34,6 +35,9 @@ mod touch;
 mod view;
 mod window;
 
+pub(crate) use assets::{
+    FOLDER_PREFIX, MOVE_BY_PREFIX, PALETTE_IN_FOLDER, PALETTE_ON_CANVAS, STROKE_PREFIX,
+};
 pub(crate) use story::{WEBTOON_READING, webtoon_right_to_left};
 pub(crate) use view::{ViewMarks, special_snaps};
 
@@ -71,6 +75,7 @@ pub fn registry() -> &'static CommandRegistry<SuePaint> {
         registry.add(tool_palette::COMMANDS);
         registry.add(color::COMMANDS);
         registry.add(touch::COMMANDS);
+        registry.add(assets::COMMANDS);
         registry
     })
 }

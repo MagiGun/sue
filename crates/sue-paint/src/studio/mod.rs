@@ -25,6 +25,8 @@ use crate::tools::Toolbox;
 use crate::view::View;
 
 mod applet;
+mod assets;
+pub(crate) use assets::{FILE_OBJECT, THEME_DENSITY};
 mod clipboard;
 mod edit;
 pub(crate) mod exports;
@@ -901,6 +903,9 @@ pub struct SuePaint {
     pub(crate) edited_cel_only: bool,
     /// Check Cel Motion or Check Surrounding Cels by Key Input under way.
     pub(crate) cel_peek: Option<crate::panels::timeline::CelPeek>,
+    /// File, New's template, put on the new canvas on the next frame, so
+    /// it is a step of that canvas's own history.
+    pub(crate) pending_template: Option<String>,
 }
 
 /// How the brush engine took a stroke (for the runtime tests).
@@ -1127,6 +1132,7 @@ impl Default for SuePaint {
             exports: exports::Exports::default(),
             edited_cel_only: false,
             cel_peek: None,
+            pending_template: None,
         }
     }
 }
@@ -1333,6 +1339,11 @@ impl SuePaint {
             return Err(tr!("n-3d-layer-draw-layer-above-use", name = info.name));
         }
         let info = self.layer_info(arena).ok_or(tr!("pick-layer-draw-first"))?;
+        // A File Object layer shows its file: it is rasterized first.
+        if !(masks && self.editing_mask_of(arena, info.id)) && Self::is_file_object(arena, info.id)
+        {
+            return Err(tr!("file-object-rasterize-to-draw", name = info.name));
+        }
         // While its mask is edited, a folder or any other kind of layer
         // with a mask takes the strokes of a tool that knows masks there,
         // in the mask's gray pixels. Other tools (figures, filters, warps)

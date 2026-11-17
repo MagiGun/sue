@@ -943,8 +943,80 @@ impl SuePaint {
         }
     }
 
+    /// Draws a stroke through `points` (picture pixels and pressure) with
+    /// the current sub tool, as the pen would have drawn it: a stroke an
+    /// Auto Action recorded, played. One undo step, as any stroke.
+    pub(crate) fn engine_replay(&mut self, points: &[[f32; 3]], cx: &mut AppletContext<'_>) {
+        let Some([first, rest @ ..]) = Some(points).filter(|points| points.len() >= 2) else {
+            return;
+        };
+        self.engine_settle(cx);
+        let Some(doc) = self.docs.get(self.active) else {
+            return;
+        };
+        let Some(size) = cx
+            .world
+            .arena
+            .get_by_id(doc.picture)
+            .ok()
+            .and_then(sue_model::picture::size)
+        else {
+            return;
+        };
+        // Any viewport places the stroke right: the picture points go
+        // through the same view both ways.
+        let viewport = if self.viewport.is_positive() {
+            self.viewport
+        } else {
+            Rect::from_min_size(Pos2::ZERO, egui::vec2(1024.0, 768.0))
+        };
+        let view = doc.view;
+        let at = view.to_screen(viewport, size, Pos2::new(first[0], first[1]));
+        let sub = self.toolbox.current().clone();
+        // No pen of the moment takes part: the stroke is the recording's.
+        let stream = std::mem::take(&mut self.pen_stream);
+        let pressure = self.pressure.replace(first[2]);
+        let started = self.engine_press(at, &sub, Modifiers::NONE, viewport, size, cx);
+        self.pressure = pressure;
+        self.pen_stream = stream;
+        if !started {
+            return;
+        }
+        if let Some(Gesture::Engine(stroke)) = &mut self.gesture {
+            let offset = stroke.offset;
+            let mut time = stroke.last.time;
+            for point in rest {
+                time += 1.0 / 120.0;
+                let mut sample = Sample::new(
+                    Kind::Move,
+                    [point[0] - offset[0] as f32, point[1] - offset[1] as f32],
+                    time,
+                );
+                sample.pressure = Some(point[2]);
+                stroke.feed(sample);
+            }
+        }
+        self.engine_settle(cx);
+    }
+
     /// Finishes `stroke` and records it.
     pub(crate) fn engine_end(&mut self, stroke: EngineStroke, cx: &mut AppletContext<'_>) {
+        // An Auto Action being recorded keeps the stroke, in picture
+        // pixels.
+        if self.auto.recording.is_some() {
+            let points: Vec<[f32; 3]> = stroke
+                .raw
+                .iter()
+                .map(|sample| {
+                    [
+                        sample.pos[0] + stroke.offset[0] as f32,
+                        sample.pos[1] + stroke.offset[1] as f32,
+                        sample.pressure.unwrap_or(1.0),
+                    ]
+                })
+                .collect();
+            self.record_stroke(&points);
+        }
         let EngineStroke {
             copies,
             layer,
