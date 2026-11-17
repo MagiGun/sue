@@ -644,7 +644,7 @@ pub fn builtin() -> Vec<BrushPreset> {
         thick("sue.brush.gouache", "Gouache", 60.0)
             .hardness(0.9)
             .mix(0.6)
-            .wet(0.85, 0.25, 0.0)
+            .wet(0.96, 0.25, 0.0)
             .density_pressure(0.25)
             .aa(Weak)
             .pressure_min(0.7)

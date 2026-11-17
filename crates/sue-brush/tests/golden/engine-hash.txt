@@ -4,5 +4,6 @@
 # stroke sheets: sparse samples are joined by arcs (the resampler's
 # curve), the stabilizer's drain only goes forward along the pen's way,
 # and an ending comes to a clean point or is a round end. Then again
-# for Sue's papers made of noise with no grid in it.
-engine 1 22e834fe2f85b9aa
+# for Sue's papers made of noise with no grid in it, and for mixing
+# brushes that carry what they pick up.
+engine 1 18186f894cf4ce19
