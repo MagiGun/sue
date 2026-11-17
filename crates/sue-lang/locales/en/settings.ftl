@@ -202,4 +202,5 @@ packages-install-file = Install from a File
 packages-install-file-hint = Installs a package someone shared: choose its .suepkg file. Files it names by a path are taken from the same folder.
 packages-added = { $name } is being installed.
 packages-file-refused = That file could not be used as a package: { $why }
+packages-file-unsigned = A package from a file carries no signature, and Trust (below) accepts only signed packages. Turn "Only signed packages" off to install it.
 packages-folder = Packages are kept in { $path }

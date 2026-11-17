@@ -453,6 +453,11 @@ pub(crate) struct HandScan {
     pumped: u64,
     /// The last picture looked at, as a texture, with its size.
     picture: Option<(egui::TextureHandle, [f32; 2])>,
+    /// The figure's layer as it is drawn now, small, with its size: the
+    /// dialog stands over the canvas, so it shows the posed hand itself.
+    model: Option<(egui::TextureHandle, [f32; 2])>,
+    /// The layer was drawn again since `model` was made.
+    model_stale: bool,
     /// The hand in that picture, if one was found.
     hand: Option<HandObservation>,
     /// When a hand was last found, for the smoother's clock.
@@ -493,6 +498,10 @@ fn apart(a: &Pose, b: &Pose) -> f32 {
 const DRAW_EVERY: Duration = Duration::from_millis(50);
 /// ...and only when a joint moved at least this many degrees.
 const DRAW_FROM: f32 = 0.6;
+/// The longer side of the small picture of the figure, in pixels.
+const MODEL_SIDE: usize = 420;
+/// The gray under the figure in that picture: a canvas's paper.
+const MODEL_GROUND: u32 = 238;
 /// A hand not seen for this long is a new hand to the smoother.
 const FORGET_AFTER: Duration = Duration::from_millis(600);
 
@@ -645,6 +654,8 @@ impl SuePaint {
             tracking: None,
             pumped: 0,
             picture: None,
+            model: None,
+            model_stale: true,
             hand: None,
             last_found: None,
             smoother: Smoother::default(),
@@ -669,6 +680,69 @@ impl SuePaint {
         ) && edit.apply(&mut cx.world.arena).is_ok()
         {
             scan.shown = pose;
+            scan.model_stale = true;
+        }
+    }
+
+    /// Makes the small picture of the figure's layer the dialog shows,
+    /// when the layer was drawn again since the last one.
+    fn hand_scanner_model(cx: &AppletContext<'_>, scan: &mut HandScan, ctx: &egui::Context) {
+        if !std::mem::take(&mut scan.model_stale) {
+            return;
+        }
+        let Some(raster) = crate::doc::raster(&cx.world.arena, scan.layer) else {
+            return;
+        };
+        let (width, height) = (raster.width() as usize, raster.height() as usize);
+        let Some(bytes) = raster
+            .bytes()
+            .filter(|bytes| bytes.len() == width * height * 4)
+        else {
+            return;
+        };
+        // Every `step`th pixel, each the mean of four around it, over
+        // the light ground a canvas has.
+        let step = width.max(height).div_ceil(MODEL_SIDE).max(1);
+        let size = [(width / step).max(1), (height / step).max(1)];
+        let half = step / 2;
+        let mut pixels = Vec::with_capacity(size[0] * size[1]);
+        for y in 0..size[1] {
+            for x in 0..size[0] {
+                let mut sum = [0_u32; 4];
+                for (dx, dy) in [(0, 0), (half, 0), (0, half), (half, half)] {
+                    let at = ((y * step + dy).min(height - 1) * width
+                        + (x * step + dx).min(width - 1))
+                        * 4;
+                    for (channel, total) in sum.iter_mut().enumerate() {
+                        *total += u32::from(bytes[at + channel]);
+                    }
+                }
+                let alpha = sum[3] / 4;
+                let over = |channel: usize| {
+                    ((sum[channel] / 4) * alpha + MODEL_GROUND * (255 - alpha)) / 255
+                };
+                pixels.push(Color32::from_rgb(
+                    over(0) as u8,
+                    over(1) as u8,
+                    over(2) as u8,
+                ));
+            }
+        }
+        let image = egui::ColorImage::new(size, pixels);
+        let shape = [size[0] as f32, size[1] as f32];
+        match &mut scan.model {
+            Some((texture, kept)) => {
+                texture.set(image, egui::TextureOptions::LINEAR);
+                *kept = shape;
+            }
+            None => {
+                let texture = ctx.load_texture(
+                    "sue-paint-hand-scanner-model",
+                    image,
+                    egui::TextureOptions::LINEAR,
+                );
+                scan.model = Some((texture, shape));
+            }
         }
     }
 
@@ -837,12 +911,34 @@ impl SuePaint {
 
         // The camera's picture, as a mirror shows it, with the hand
         // boxed and its bones drawn.
-        let width = ui.available_width();
-        let room = vec2(width, (width * 0.6).min(theme.space(Space::S9) * 7.0));
-        let (area, _) = ui.allocate_exact_size(room, egui::Sense::hover());
-        let painter = ui.painter_at(area);
+        Self::hand_scanner_model(cx, scan, ui.ctx());
+        // Side by side: what the camera sees, and the figure as it is
+        // posed (the dialog stands over the canvas).
+        let gap = theme.space(Space::S3);
+        let side = ((ui.available_width() - gap) / 2.0).floor();
+        let room = vec2(side * 2.0 + gap, (side * 0.75).round());
+        let (both, _) = ui.allocate_exact_size(room, egui::Sense::hover());
+        let area = Rect::from_min_size(both.min, vec2(side, room.y));
+        let model_area = Rect::from_min_size(pos2(area.right() + gap, both.top()), area.size());
+        let painter = ui.painter_at(both);
         let corner = theme.corner(ui::Radius::Md);
         painter.rect_filled(area, corner, theme.surface(0));
+        painter.rect_filled(model_area, corner, Color32::from_gray(MODEL_GROUND as u8));
+        if let Some((texture, shape)) = &scan.model {
+            let scale = (model_area.width() / shape[0]).min(model_area.height() / shape[1]);
+            painter.image(
+                texture.id(),
+                Rect::from_center_size(model_area.center(), vec2(shape[0], shape[1]) * scale),
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+        painter.rect_stroke(
+            model_area,
+            corner,
+            theme.hairline(),
+            egui::StrokeKind::Inside,
+        );
         let camera_error = scan.stream.as_ref().and_then(CameraStream::error);
         let tracker_error = scan.tracking.as_ref().and_then(Tracking::failed);
         if let Some((texture, shape)) = &scan.picture {

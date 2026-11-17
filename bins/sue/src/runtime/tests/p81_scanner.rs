@@ -615,6 +615,26 @@ fn settings_packages_installs_cancels_and_uninstalls() {
             .map(|pick| pick.purpose.as_str()),
         Some("package-manifest")
     );
+    // A file carries no signature: while only signed packages are
+    // accepted it is refused, and the page says why.
+    let now = paint.now;
+    assert!(paint.runtime.answer_pick(&manifest, &mut NoTextures, now));
+    paint.settle(3);
+    assert!(shows(&paint, "carries no signature"));
+    assert!(center.package("shared-inks").is_none());
+    let runtime = &mut paint.runtime;
+    runtime
+        .engine
+        .history
+        .apply(
+            &mut runtime.engine.world,
+            RiceEdit(sue_rice::SetRiceValue::new(
+                "packages.require_signatures",
+                sue_rice::RiceValue::Bool(false),
+            )),
+        )
+        .unwrap();
+    paint.click_text("Install from a File");
     let now = paint.now;
     assert!(paint.runtime.answer_pick(&manifest, &mut NoTextures, now));
     until(&mut paint, "the shared package", |_| {

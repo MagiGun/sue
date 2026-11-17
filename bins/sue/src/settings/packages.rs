@@ -54,6 +54,16 @@ impl PackagesUi {
         let Some(center) = center(cx) else {
             return;
         };
+        // A manifest file carries no signature: while Trust asks for
+        // signed packages only, it is refused, and the page says why.
+        if cx
+            .rice()
+            .get_bool("packages.require_signatures")
+            .unwrap_or(true)
+        {
+            self.message = Some((tr!("packages-file-unsigned"), true));
+            return;
+        }
         self.message = Some(match center.add_file(path) {
             Ok(id) => {
                 let name = center.package(&id).map_or(id, |package| package.name);

@@ -45,6 +45,7 @@ mod paint_touch;
 mod paint_vector;
 mod paint_view;
 mod rich_text;
+mod scanner;
 mod settings;
 mod shell;
 mod shell_polish;
@@ -69,6 +70,18 @@ use super::Tour;
 
 /// Runs every scene, in the order of the tour.
 pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
+    // `SUE_SNAPSHOT_ONLY=scanner` runs the Hand Scanner's and Packages'
+    // scenes alone, on a sample canvas, for a quick look at them; they
+    // also end the whole tour.
+    if std::env::var("SUE_SNAPSHOT_ONLY").as_deref() == Ok("scanner") {
+        tour.runtime
+            .with_context(&mut tour.camera.painter, tour.camera.now, |cx| {
+                sue_paint::sample_picture(cx, 1600, 1200)
+            });
+        open_paint(tour);
+        tour.settle();
+        return scanner::scenes(tour);
+    }
     // 00 to 03. The Hub and what the shell lays over it.
     hub::opening(tour)?;
     // 00n to 00q. Notices: folded, unfolded, under a dialog, on a phone.
@@ -211,6 +224,10 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_engine::pen_stroke(tour)?;
     // 08x. A line of each family of brushes, after 08s.
     paint_engine::brush_strokes(tour)?;
+    // 81a to 81e. The Hand Scanner and Packages, after everything: they
+    // put their own center over the packages folder.
+    paint_at_rest(tour);
+    scanner::scenes(tour)?;
     Ok(())
 }
 
