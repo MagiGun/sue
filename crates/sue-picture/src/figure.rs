@@ -19,6 +19,61 @@
 //! head (neck, skull, jaw, nose, eyes and ears, to turn and tilt). Each
 //! kind has its own joints, framing and preset poses, and poses, draws
 //! and is posed by dragging its parts the same way.
+//!
+//! # Hand joints
+//!
+//! The stable contract for everything that reads or writes a hand's pose
+//! (the Hand Scanner, hand pose materials, the hand setup pad). A hand
+//! figure ([`Kind::Hand`]) has the sixteen joints of [`HAND`], in this
+//! order, and its [`Pose`] holds one `[x, y, z]` turn in degrees for each:
+//!
+//! | Index | Name | x (curl) | y (twist) | z (spread) |
+//! | --- | --- | --- | --- | --- |
+//! | 0 | Palm | free | free | free |
+//! | 1 | Index finger base | -30 to 95 | -15 to 15 | -30 to 30 |
+//! | 2 | Index finger middle | 0 to 115 | 0 | 0 |
+//! | 3 | Index finger tip | -10 to 85 | 0 | 0 |
+//! | 4 | Middle finger base | -30 to 95 | -15 to 15 | -30 to 30 |
+//! | 5 | Middle finger middle | 0 to 115 | 0 | 0 |
+//! | 6 | Middle finger tip | -10 to 85 | 0 | 0 |
+//! | 7 | Ring finger base | -30 to 95 | -15 to 15 | -30 to 30 |
+//! | 8 | Ring finger middle | 0 to 115 | 0 | 0 |
+//! | 9 | Ring finger tip | -10 to 85 | 0 | 0 |
+//! | 10 | Little finger base | -30 to 95 | -15 to 15 | -30 to 30 |
+//! | 11 | Little finger middle | 0 to 115 | 0 | 0 |
+//! | 12 | Little finger tip | -10 to 85 | 0 | 0 |
+//! | 13 | Thumb base | -45 to 75 | -60 to 60 | -80 to 45 |
+//! | 14 | Thumb middle | -20 to 80 | -20 to 20 | -30 to 30 |
+//! | 15 | Thumb tip | -30 to 95 | -10 to 10 | -15 to 15 |
+//!
+//! The axes are the hand's own, the same for every joint at rest: the
+//! palm faces +z, the fingers point up +y, the thumb is on the -x side
+//! and the little finger on the +x side (a left hand; a right hand is
+//! its mirror image and takes the same numbers). A joint with no turn is
+//! the open flat hand. Turning about x by a positive angle curls the
+//! joint toward the palm (a fist is about 88, 100, 62 down a finger).
+//! Turning about z by a positive angle swings the finger toward the
+//! thumb side, a negative one toward the little finger side. Turning
+//! about y twists the finger about its own length. The three turns
+//! compose as z, then y, then x (`Rz * Ry * Rx`), and each joint's turn
+//! is in its parent's frame: the base joints hang from the palm, each
+//! middle joint from its base, each tip from its middle.
+//!
+//! The ranges are the joint angle limits ([`limits`]) that posing keeps
+//! to while Joint angle limits is on; a pose text may hold any numbers
+//! and still loads. A pose is kept as text by [`Pose::to_text`]
+//! (`v1;x,y,z;x,y,z;...`, joints in the order above) and read back by
+//! [`Pose::from_text_for`]; joints a text lacks stay unturned and
+//! joints it has too many of are dropped, so older and newer texts both
+//! load. [`Pose::of`] reads a figure model's pose, [`set_pose`] is the
+//! one undo step that poses it, and [`aimed`] makes a pose from the
+//! directions bones should point in (what a camera sees).
+//!
+//! A body figure's hands carry the same fifteen finger joints, named
+//! with their side (`Left index finger base` and so on) after the
+//! body's first seventeen joints, so body pose texts from before the
+//! fingers existed load unchanged. [`hand_onto_body`] lays a hand pose
+//! onto one of a body's hands and [`hand_from_body`] reads it back.
 
 use sue_core::txn::{ReplaceComponent, SetProperty};
 use sue_core::{Arena, Entity, EntityId, MeshBuffer3D, Value};
