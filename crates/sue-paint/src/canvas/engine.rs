@@ -968,7 +968,7 @@ impl SuePaint {
         let viewport = if self.viewport.is_positive() {
             self.viewport
         } else {
-            Rect::from_min_size(Pos2::ZERO, egui::vec2(1024.0, 768.0))
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(size[0] as f32, size[1] as f32))
         };
         let view = doc.view;
         let at = view.to_screen(viewport, size, Pos2::new(first[0], first[1]));
