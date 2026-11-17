@@ -1197,7 +1197,9 @@ mod tests {
         assert!(text.contains("block headers: [raw size 327680, 256 by 256] (x6)"));
         assert!(text.contains("a block inflates to: 327680 bytes (x4)"));
         assert!(text.contains("BlockStatus: header 12 6 4; values 1 (x6)"));
-        assert!(text.contains("BlockCheckSum: header 12 6 4; values 0 (x6)"));
+        // Each block with data has its checksum, an empty one 0.
+        assert!(text.contains("BlockCheckSum: header 12 6 4; values "));
+        assert!(!text.contains("BlockCheckSum: header 12 6 4; values 0 (x6)"));
         assert!(text.contains(". Foot at byte "));
         // The database, each table with its CREATE text and row count.
         assert!(text.contains("pages of 4096 bytes, text in UTF-8"));
@@ -1348,17 +1350,23 @@ mod tests {
 
     #[test]
     fn a_diff_sees_bytes_that_change_where_the_shape_does_not() {
-        // The same square in another color: the same blocks, other pixels.
+        // The same square in another color: the same blocks, other pixels,
+        // so other block checksums.
         let before = picture();
         let mut after = picture();
         after.layers[0] = square("Back", 0, 280, [10, 200, 10]);
         let (a, b) = (file(&before, None), file(&after, None));
         let text = diff(("a.clip", &a), ("b.clip", &b), Options::default()).unwrap();
         assert!(
-            text.contains(
-                "BlockData: the stored bitmap it names differs\n    \
-                 the same blocks and lists, other data: "
-            ),
+            text.contains("BlockData: the stored bitmap it names differs\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("\n    before: BlockCheckSum: header 12 6 4; values "),
+            "{text}"
+        );
+        assert!(
+            text.contains("\n    after:  BlockCheckSum: header 12 6 4; values "),
             "{text}"
         );
         assert!(!text.contains("no differences"), "{text}");
