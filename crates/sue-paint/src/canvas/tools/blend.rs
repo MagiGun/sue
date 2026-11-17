@@ -20,7 +20,10 @@ impl SuePaint {
     }
 
     /// The Blend tool pressed: a blend drag begins (Copy stamp needs its
-    /// source set first).
+    /// source set first). A blender of the brush engine (Blend, Painterly
+    /// blender and the rest) is a stroke of the engine on the layer's own
+    /// pixels; in a layer mask, which holds only how much shows, it
+    /// softens the mask as Blur does.
     pub(super) fn blend_press(&mut self, press: &Press, sub: &SubTool, cx: &mut AppletContext<'_>) {
         let p = press.p;
         if self.refuse_keyframed(cx) {
@@ -41,6 +44,17 @@ impl SuePaint {
             .filter(|doc| doc.mask_edit)
             .and_then(|_| doc::mask_of(arena, info.id))
             .zip(doc::mask_offset(arena, info.id));
+        if mask.is_none() && crate::canvas::engine::is_blender(sub) {
+            self.engine_press(
+                press.pos,
+                sub,
+                press.modifiers,
+                press.viewport,
+                press.size,
+                cx,
+            );
+            return;
+        }
         let (target, offset) = mask.unwrap_or((info.id, info.style.offset));
         let Some(raster) = doc::raster(arena, target) else {
             return;
@@ -144,7 +158,14 @@ impl SuePaint {
                             )
                         })
                     } else {
-                        crate::blend::dab(
+                        // Liquify keeps its middle whole as far out as
+                        // its Hardness says (crash course CC-4).
+                        let hardness = if crate::blend::is_liquify(sub.mode) {
+                            sub.tip.hardness
+                        } else {
+                            0.0
+                        };
+                        crate::blend::dab_hard(
                             pixels,
                             width,
                             height,
@@ -153,6 +174,7 @@ impl SuePaint {
                             radius,
                             sub.tip.opacity,
                             motion,
+                            hardness,
                         )
                     };
                     if let Some([x0, y0, x1, y1]) = changed {

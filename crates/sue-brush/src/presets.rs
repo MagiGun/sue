@@ -20,8 +20,17 @@ use sue_model::brush::{
 };
 
 /// The tools whose sub tools are brushes, by the key their presets' ids
-/// carry, in the tool palette's order.
-pub const TOOLS: [&str; 6] = ["pen", "pencil", "brush", "airbrush", "decoration", "eraser"];
+/// carry, in the tool palette's order. The Blend tool's blenders are
+/// brushes of the engine too (they paint nothing of their own).
+pub const TOOLS: [&str; 7] = [
+    "pen",
+    "pencil",
+    "brush",
+    "airbrush",
+    "decoration",
+    "eraser",
+    "blend",
+];
 
 /// Fields this module stores on a preset, beside the brush model's own
 /// and the paint behaviours' (`docs/brush-files.md` lists them).
@@ -102,6 +111,8 @@ struct Make {
     watercolor: Option<(f32, f32, f32, f32)>,
     /// Opacity follows pressure down to this (with `opacity_pressure`).
     opacity_min: f32,
+    /// A blend tool: the blender it is (`paint::wet::BLENDERS`).
+    blender: Option<&'static str>,
 }
 
 impl Make {
@@ -133,6 +144,7 @@ impl Make {
             density_pressure: None,
             watercolor: None,
             opacity_min: 0.0,
+            blender: None,
         }
     }
 
@@ -333,6 +345,19 @@ impl Make {
         self
     }
 
+    /// A blend tool: paints nothing of its own and works the paint under
+    /// it as blender `name` does.
+    fn blender(mut self, name: &'static str) -> Self {
+        self.blender = Some(name);
+        self
+    }
+
+    /// Sets the paint behaviours' flag `key`.
+    fn flag(mut self, key: &str) -> Self {
+        extra(&mut self.preset, key, &[1]);
+        self
+    }
+
     fn vector_erase(mut self, index: usize) -> Self {
         self.preset.extra.push((
             field::VECTOR_ERASE.to_owned(),
@@ -452,6 +477,9 @@ impl Make {
             (TipSource::Round, _) if preset.build_up || self.mix > 0.0 => EngineKind::Dab,
             (TipSource::Round, _) => EngineKind::Stroke,
         };
+        if let Some(name) = self.blender {
+            preset.engine = EngineKind::Blend(name.to_owned());
+        }
         preset
     }
 }
@@ -471,7 +499,7 @@ fn extra(preset: &mut BrushPreset, key: &str, bytes: &[u8]) {
 #[allow(clippy::too_many_lines)]
 pub fn builtin() -> Vec<BrushPreset> {
     use AntiAlias::{None as Hard, Strong, Weak};
-    use TextureMode::{Height, Subtract};
+    use TextureMode::{Height, Multiply, Subtract};
     let pen = |id: &str, name: &str, size: f32| Make::csp(id, name, "Pen", size);
     let marker = |id: &str, name: &str, size: f32| Make::csp(id, name, "Marker", size);
     let pencil = |id: &str, name: &str, size: f32| Make::csp(id, name, "Pencil", size);
@@ -481,6 +509,15 @@ pub fn builtin() -> Vec<BrushPreset> {
     let ink = |id: &str, name: &str, size: f32| Make::csp(id, name, "Ink", size);
     let airbrush = |id: &str, name: &str, size: f32| Make::csp(id, name, "Airbrush", size);
     let eraser = |id: &str, name: &str, size: f32| Make::csp(id, name, "Eraser", size).eraser();
+    // The Blend tool's blenders: no paint of their own, the size the pen
+    // does not change, a soft round tip.
+    let blend = |id: &str, name: &str, blender: &'static str| {
+        Make::csp(id, name, "Blend", 60.0)
+            .blender(blender)
+            .hardness(0.5)
+            .no_size_pressure()
+            .stabilization(2)
+    };
     let effect = |id: &str, name: &str, shape: &'static str, size: f32, spacing: f32| {
         Make::deco(id, name, "Effect", shape, size, spacing)
     };
@@ -644,7 +681,7 @@ pub fn builtin() -> Vec<BrushPreset> {
         thick("sue.brush.gouache", "Gouache", 60.0)
             .hardness(0.9)
             .mix(0.6)
-            .wet(0.85, 0.25, 0.0)
+            .wet(0.96, 0.25, 0.0)
             .density_pressure(0.25)
             .aa(Weak)
             .pressure_min(0.7)
@@ -731,6 +768,19 @@ pub fn builtin() -> Vec<BrushPreset> {
             .size_jitter(0.85)
             .shape("Dot")
             .no_size_pressure(),
+        // Scrapes a screen tone: a soft spray that takes the paint away
+        // in a halftone of dots, more of them the harder it presses (full
+        // guide 00:27:43).
+        airbrush("sue.airbrush.tone_scraping", "Tone scraping", 120.0)
+            .eraser()
+            .hardness(0.0)
+            .build_up()
+            .flow(0.12)
+            .flag(paint_field::TONE)
+            .set(paint_key::TONE_CELL, 6.0)
+            .set(paint_key::TONE_ANGLE, 45.0)
+            .no_size_pressure()
+            .opacity_pressure(),
         // The Decoration tool: shapes scattered about the stroke, or
         // running along it and turning with it, in groups as Clip Studio
         // Paint lists its own (effect, flower, clothing, lines).
@@ -835,11 +885,59 @@ pub fn builtin() -> Vec<BrushPreset> {
             .aa(Weak)
             .opacity_pressure()
             .stabilization(2),
+        // Erases every visible layer it can at once, not only the
+        // current one (crash course tip 23).
+        eraser("sue.eraser.multiple_layers", "Multiple layers", 30.0)
+            .flag(paint_field::ALL_LAYERS)
+            .no_size_pressure()
+            .stabilization(10),
+        // On a vector layer it takes a line away up to where it crosses
+        // another, so the overhang of crossing lines goes in one touch
+        // (crash course, V-9).
+        eraser("sue.eraser.snap", "Snap eraser", 10.0)
+            .aa(Hard)
+            .no_size_pressure()
+            .vector_erase(1)
+            .stabilization(10),
+        // The Blend tool's blenders, beside Sue Paint's own Blur, Finger
+        // Tip and Copy stamp (crash course CC-5, full guide 00:28:00).
+        // Clip Studio's tools of the same names were watched for what
+        // they do; the numbers are Sue's own (`paint::wet::BLENDERS`).
+        blend("sue.blend.blend", "Blend", "blend"),
+        blend("sue.blend.painterly", "Painterly blender", "painterly").hardness(0.8),
+        blend("sue.blend.wet_bleed", "Wet bleed blender", "wet-bleed").hardness(0.3),
+        // Works the paint as far as the paper's tooth lets it, dab by
+        // dab: the grain shows in the blend, never a pixel left untouched.
+        blend("sue.blend.textured", "Textured blender", "textured")
+            .hardness(0.7)
+            .grain(1.0)
+            .paper("rough", Multiply, 1.0)
+            .set(paint_key::TEXTURE_CONTRAST, 0.5)
+            .flag(paint_field::TEXTURE_PER_DAB),
+        blend(
+            "sue.blend.soothing_watercolor",
+            "Soothing watercolor",
+            "soothing-watercolor",
+        )
+        .hardness(0.0),
     ]
     .into_iter()
     .map(Make::done)
     .collect()
 }
+
+/// The brushes 0.0.8 adds, which 0.0.75 had no sub tool for, each with
+/// where it comes from.
+pub const ADDED: &[(&str, &str)] = &[
+    ("sue.airbrush.tone_scraping", "full guide 00:27:43"),
+    ("sue.eraser.multiple_layers", "crash course tip 23"),
+    ("sue.eraser.snap", "crash course V-9"),
+    ("sue.blend.blend", "crash course CC-5"),
+    ("sue.blend.painterly", "crash course CC-5"),
+    ("sue.blend.wet_bleed", "full guide 00:28:00"),
+    ("sue.blend.textured", "crash course CC-5"),
+    ("sue.blend.soothing_watercolor", "full guide 00:28:00"),
+];
 
 /// The brushes tuned in 0.0.8 (package "Brush presets tuned") so
 /// each has the character its name promises: they no longer paint
@@ -949,6 +1047,10 @@ pub fn keep_unsaid(base: &BrushPreset, mut read: BrushPreset) -> BrushPreset {
         mixing.load = kept.load;
         mixing.pull = kept.pull;
         mixing.blur = kept.blur;
+    }
+    // The old text has no word for a blender: it stays one.
+    if matches!(base.engine, EngineKind::Blend(_)) {
+        read.engine = base.engine.clone();
     }
     for binding in &base.dynamics {
         let has = read
@@ -1186,6 +1288,7 @@ mod tests {
             "brush" => "Brush",
             "airbrush" => "Airbrush",
             "decoration" => "Decoration",
+            "blend" => "Blend",
             _ => "Eraser",
         }
     }
@@ -1220,8 +1323,12 @@ mod tests {
             }
             assert_eq!(legacy_text(preset), text, "{name} ({tool})");
         }
-        assert_eq!(matched, presets.len(), "every preset was a 0.0.75 brush");
-        for (id, why) in RETUNED {
+        assert_eq!(
+            matched + ADDED.len(),
+            presets.len(),
+            "every preset was a 0.0.75 brush, but those 0.0.8 adds"
+        );
+        for (id, why) in RETUNED.iter().chain(ADDED) {
             assert!(find(id).is_some(), "{id}: {why}");
         }
     }
@@ -1312,7 +1419,7 @@ mod tests {
     fn ids_are_unique_stable_and_name_their_tool() {
         let presets = builtin();
         let mut ids: Vec<&str> = presets.iter().map(|preset| preset.id.as_str()).collect();
-        assert_eq!(ids.len(), 53);
+        assert_eq!(ids.len(), 53 + ADDED.len());
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), presets.len(), "no id twice");
@@ -1336,7 +1443,8 @@ mod tests {
             find("sue.pen.g_pen").map(|preset| preset.name),
             Some("G-pen".into())
         );
-        assert_eq!(of_tool("airbrush").len(), 3);
+        assert_eq!(of_tool("airbrush").len(), 4);
+        assert_eq!(of_tool("blend").len(), 5);
     }
 
     #[test]

@@ -175,66 +175,69 @@ impl Stabilizer {
     }
 
     /// The brush's way to the pen after the lift, whose record was the
-    /// last tick taken. Two ways are blended. One feeds the drain's end
-    /// again and again until the window holds nothing else, as if the
-    /// pen stood there: its first step moves the brush almost as the
-    /// tick before did, so the line runs on without a kink, but it cuts
-    /// across a curve. The other follows the pen's own path with a
-    /// centred average that narrows toward the pen. The blend
-    /// starts all on the first and ends all on the second, easing over
-    /// (`3u^2 - 2u^3`), so the line leaves smoothly and lands on the pen
-    /// along the path the pen took. The pressure along the way is the
-    /// pen's own at each place, not an average, so a pen that eased off
-    /// before it lifted thins out as it did. The blend reaches the
-    /// smoothed path a few milliseconds before the pen's last packet;
-    /// from there the line runs straight on along that path as far as
-    /// the pen got, so it ends where the pen lifted and that packet's
-    /// jitter does not bend the end into a hook. The window stays the
-    /// one the brush trailed with at the lift (a longer one would pull
-    /// it back).
+    /// last tick taken. The brush follows the pen's own path, smoothed
+    /// by a centred average that narrows toward the pen, from the place
+    /// on it nearest the brush to just before the pen's last packet;
+    /// how far the brush stood off that path (inside a curve, where an
+    /// average cuts across) it lets go of as it goes, easing
+    /// (`3u^2 - 2u^3`). So the line runs on from where it was without a
+    /// kink, only ever forward along the pen's way (never back over
+    /// what it drew, however far a quick pen had pulled it), and lands
+    /// on the pen along the path the pen took. The pressure along the
+    /// way is the pen's own at each place, not an average, so a pen
+    /// that eased off before it lifted thins out as it did. From a few
+    /// milliseconds before the pen's last packet the line runs straight
+    /// on along the smoothed path as far as the pen got, so it ends
+    /// where the pen lifted and that packet's jitter does not bend the
+    /// end into a hook.
     pub fn drain(&mut self) -> Vec<Record> {
         let Some(newest) = self.held.back().copied() else {
             return Vec::new();
         };
         let path: Vec<Tick> = self.held.iter().copied().collect();
         let window = self.used;
-        let steps = (window * RATE).ceil() as u64;
-        // Where along the path, in time, the brush stands now.
-        let from = self
+        let half = window / 4.0;
+        let smoothed = |at: f64| centred(&path, at, half.min(newest.at - at));
+        // Where along the path, in time, the brush stands now: the place
+        // of the path nearest it, from its own time on (a brush pulled
+        // toward a quick pen stands further along than its time says).
+        let mut from = self
             .last
             .map_or(newest.at, |r| r.time)
             .clamp(path[0].at, newest.at);
-        let half = window / 4.0;
+        if let Some(brush) = self.last {
+            let mut best = distance(smoothed(from).pos, brush.pos);
+            let mut at = from;
+            while at < newest.at {
+                at = (at + 0.25 / RATE).min(newest.at);
+                let gap = distance(smoothed(at).pos, brush.pos);
+                if gap < best {
+                    best = gap;
+                    from = at;
+                }
+            }
+        }
         let to = (newest.at - END_HALF.min(half)).max(from);
         // Where the drain ends: the pen's path, smoothed, just before
         // its last packet.
-        let target = centred(&path, to, half.min(newest.at - to));
+        let target = smoothed(to);
+        let start = smoothed(from);
+        let offset = self.last.map_or([0.0; 2], |brush| {
+            [brush.pos[0] - start.pos[0], brush.pos[1] - start.pos[1]]
+        });
+        let steps = ((to - from) * RATE).ceil().max(1.0) as u64;
         let mut out = Vec::with_capacity(steps as usize + 8);
-        for step in 1..=steps.max(1) {
-            let tick = Tick {
-                at: newest.at + step as f64 / RATE,
-                record: target,
-            };
-            self.held.push_back(tick);
-            while self
-                .held
-                .front()
-                .is_some_and(|old| tick.at - old.at >= window)
-            {
-                self.held.pop_front();
-            }
-            let standing = self.average(&tick, window);
-            let u = step as f64 / steps.max(1) as f64;
-            // The centred window never reaches past the pen's last
-            // packet, so it never turns one-sided.
-            // Along the path as far, in time, as the standing brush.
-            let at = standing.time.clamp(from, to);
-            let mut following = centred(&path, at, half.min(newest.at - at));
+        for step in 1..=steps {
+            let u = step as f64 / steps as f64;
+            let at = from + (to - from) * u;
+            let mut record = smoothed(at);
             // The pen's own pressure there, not an average: a pen that
             // eased off before it lifted ends as thin as it did.
-            following.pressure = centred(&path, at, 0.0).pressure;
-            let ease = (u * u * (3.0 - 2.0 * u)) as f32;
-            out.push(standing.lerp(&following, ease));
+            record.pressure = centred(&path, at, 0.0).pressure;
+            let keep = 1.0 - (u * u * (3.0 - 2.0 * u)) as f32;
+            record.pos[0] += offset[0] * keep;
+            record.pos[1] += offset[1] * keep;
+            out.push(record);
         }
         // The last stretch, to the pen's last packet: straight on along
         // the smoothed path as far as the pen got, so the line reaches

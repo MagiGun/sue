@@ -224,13 +224,13 @@ impl Curve {
 }
 
 /// A centripetal Catmull-Rom segment between its middle two points.
-struct Spline {
+pub(crate) struct Spline {
     p: [[f32; 2]; 4],
     t: [f32; 4],
 }
 
 impl Spline {
-    fn new(p: [[f32; 2]; 4]) -> Self {
+    pub(crate) fn new(p: [[f32; 2]; 4]) -> Self {
         let mut t = [0.0_f32; 4];
         for i in 1..4 {
             // The square root of the distance, kept off zero.
@@ -241,7 +241,7 @@ impl Spline {
 
     /// The point `u` of the way along (0 is the second point, 1 the
     /// third), by the Barry and Goldman pyramid.
-    fn at(&self, u: f32) -> [f32; 2] {
+    pub(crate) fn at(&self, u: f32) -> [f32; 2] {
         let [t0, t1, t2, t3] = self.t;
         let [p0, p1, p2, p3] = self.p;
         let t = t1 + (t2 - t1) * u;

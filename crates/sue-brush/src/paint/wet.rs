@@ -9,13 +9,18 @@
 //!
 //! Each dab:
 //!
-//! 1. picks up the mean color under it, weighted by its coverage;
+//! 1. picks up the mean color under it, weighted by its coverage: a
+//!    brush with paint of its own only where its stroke has laid none
+//!    yet (the paint its leading edge meets, not its own of a dab ago);
 //! 2. carries it in its reservoir, which takes up the new color by the
 //!    brush's pickup (`mix.amount`), less the more color stretch
-//!    (`mix.pull`) it has: with a long stretch the color it picked up is
-//!    dragged far along the stroke;
-//! 3. mixes the reservoir with the brush's own color by the amount of
-//!    paint (`mix.load`): at 0 it only moves what is there;
+//!    (`mix.pull`) it has, while its own paint flows back in by the
+//!    amount of paint (`mix.load`) for each width it travels, slower the
+//!    longer the stretch: so white dragged out of black carries the
+//!    black on and lightens as it goes, as on a real canvas;
+//! 3. lays what it carries, with some fresh paint from the tip (all of
+//!    it at full amount of paint, the eighth power of the amount
+//!    below): at 0 it only moves what is there;
 //! 4. softens what is under it by the blur (`mix.blur`), toward a local
 //!    mean around each pixel;
 //! 5. lays the result by its coverage and the density of paint.
@@ -80,8 +85,9 @@ impl Backdrop for RasterBackdrop<'_> {
 pub struct Wet {
     /// How much of the color under it the reservoir takes up a dab.
     pub pickup: f32,
-    /// Clip Studio's amount of paint: the brush's own color in what it
-    /// lays.
+    /// Clip Studio's amount of paint: how fast the brush's own color
+    /// flows back into what it carries, and how much fresh paint it lays
+    /// with it.
     pub amount: f32,
     /// Clip Studio's color stretch: how long it keeps what it picked up.
     pub stretch: f32,
@@ -110,6 +116,20 @@ impl Wet {
         }
     }
 }
+
+/// A dab of a brush with paint meets new paint only at its leading
+/// edge (a few tenths of it): its take up is counted that many times
+/// over, so what it meets fills its hairs as a whole dab would.
+const PICKUP_BOOST: f32 = 1.5;
+
+/// How strongly a brush with paint mixes with the wet paint right under
+/// it, at full pickup and no fresh paint of its own.
+const LOCAL_MIX: f32 = 0.5;
+
+/// How much of a brush's own paint flows back into what it carries for
+/// each of its widths it travels, at full amount of paint and no color
+/// stretch.
+const REFILL: f32 = 0.7;
 
 /// The blend tools and painterly blenders Sue offers, by stored name,
 /// as wet settings with no paint of their own. A name is never taken
@@ -183,10 +203,10 @@ pub const BLENDERS: &[(&str, Wet)] = &[
         Wet {
             pickup: 0.5,
             amount: 0.0,
-            stretch: 0.75,
+            stretch: 0.8,
             blur: 0.0,
-            density: 1.0,
-            smear: 0.0,
+            density: 0.8,
+            smear: 0.35,
         },
     ),
     // Like blend, broken up by the paper (give it a texture laid by dab).
@@ -197,7 +217,7 @@ pub const BLENDERS: &[(&str, Wet)] = &[
             amount: 0.0,
             stretch: 0.5,
             blur: 0.25,
-            density: 0.9,
+            density: 0.7,
             smear: 0.0,
         },
     ),
@@ -295,6 +315,17 @@ impl WetCanvas {
                 pixels,
             }
         })
+    }
+
+    /// The strongest share of paint a dab of the stroke has laid on
+    /// layer pixel `(x, y)` (0 where none has, or the canvas is not
+    /// capped).
+    fn held_at(&self, x: i32, y: i32) -> f32 {
+        let key = TileKey::of_pixel(x, y);
+        let [ox, oy] = key.origin();
+        self.tiles
+            .get(&key)
+            .map_or(0.0, |tile| tile.held[((y - oy) * TILE + (x - ox)) as usize])
     }
 
     /// The premultiplied pixel `(x, y)`.
@@ -432,36 +463,52 @@ impl WetCanvas {
                 under.push(self.read(backdrop, x, y));
             }
         }
+        // A brush with paint of its own takes up the paint it meets: the
+        // pixels its stroke has not laid paint on yet (its leading edge,
+        // as the hairs meet the wet paint ahead), not what it laid a dab
+        // ago, which is its own color again. A blend tool takes up all.
+        let fresh_only = self.capped && self.wet.amount > 0.0;
         let mut cover = vec![0.0_f32; w * h];
         let mut picked = [0.0_f32; 4];
         let mut weight = 0.0;
+        let mut met = 0.0;
         for y in 0..h {
             for x in 0..w {
-                let c = unit(shape.coverage([
-                    (rect.x0 + x as i32) as f32 + 0.5,
-                    (rect.y0 + y as i32) as f32 + 0.5,
-                ]));
+                let (px, py) = (rect.x0 + x as i32, rect.y0 + y as i32);
+                let c = unit(shape.coverage([px as f32 + 0.5, py as f32 + 0.5]));
                 cover[y * w + x] = c;
                 if c > 0.0 {
                     let u = under[(y + reach as usize) * ow + x + reach as usize];
+                    let m = if fresh_only {
+                        c * (1.0 - self.held_at(px, py))
+                    } else {
+                        c
+                    };
                     for k in 0..4 {
-                        picked[k] += u[k] * c;
+                        picked[k] += u[k] * m;
                     }
                     weight += c;
+                    met += m;
                 }
             }
         }
         if weight <= 0.0 {
             return;
         }
-        let picked = picked.map(|v| v / weight);
+        // How much of the dab met paint it had not laid itself.
+        let fresh = met / weight;
+        let picked = if met > 0.0 {
+            picked.map(|v| v / met)
+        } else {
+            [0.0; 4]
+        };
         let wet = Wet {
             amount: unit(self.wet.amount * driven[0]),
             stretch: unit(self.wet.stretch * driven[1]),
             density: unit(self.wet.density * driven[2]),
             ..self.wet
         };
-        let mut take = wet.pickup * (1.0 - wet.stretch);
+        let mut take = wet.pickup * (1.0 - wet.stretch) * (fresh * PICKUP_BOOST).min(1.0);
         let own = [self.color[0], self.color[1], self.color[2], 1.0];
         // A brush with paint of its own picks up paint, not clearness:
         // over clear pixels it finds nothing to take up and keeps what
@@ -480,15 +527,44 @@ impl WetCanvas {
         };
         // A brush with paint of its own lands full of it and takes up
         // what it passes from the next dab on; one with none (a blend
-        // tool) lands holding what it lands on.
+        // tool) lands holding what it lands on. What it carries is what
+        // it lays, as a real brush lays the paint on its hairs: what it
+        // picked up stays in it, and its own paint flows back in only
+        // as fast as the amount of paint allows, slower the longer its
+        // color stretch. So white dragged out of black lays a gray that
+        // carries the black on and lightens as it goes.
         let reservoir = match self.reservoir {
             None if self.wet.amount > 0.0 => own,
             None => picked,
-            Some(r) => std::array::from_fn(|k| r[k] + (picked[k] - r[k]) * take),
+            Some(r) => {
+                let carried: [f32; 4] = std::array::from_fn(|k| r[k] + (picked[k] - r[k]) * take);
+                // Measured by the way the brush went since the last dab,
+                // in its widths, so dabs closer together refill no faster.
+                let travelled = self.last_at.map_or(0.0, |from| {
+                    let (dx, dy) = (at[0] - from[0], at[1] - from[1]);
+                    (dx * dx + dy * dy).sqrt() / (2.0 * radius).max(1.0)
+                });
+                let refill = (wet.amount * (1.0 - wet.stretch) * REFILL * travelled).min(1.0);
+                std::array::from_fn(|k| carried[k] + (own[k] - carried[k]) * refill)
+            }
         };
         self.reservoir = Some(reservoir);
+        // Fresh paint from the tip goes down with it: all of it at full
+        // amount of paint, little at less (the share falls as the eighth
+        // power, so a brush that is not full lays mostly what it
+        // carries).
+        let squared = wet.amount * wet.amount;
+        let fourth = squared * squared;
+        let direct = fourth * fourth;
         let paint: [f32; 4] =
-            std::array::from_fn(|k| reservoir[k] + (own[k] - reservoir[k]) * wet.amount);
+            std::array::from_fn(|k| reservoir[k] + (own[k] - reservoir[k]) * direct);
+        // How much a brush with paint mixes with the wet paint right
+        // under each pixel: by its pickup, less the fuller it is.
+        let local = if self.wet.amount > 0.0 {
+            wet.pickup * (1.0 - direct) * LOCAL_MIX
+        } else {
+            0.0
+        };
         let blurred = (reach > 0).then(|| {
             let mut out = under.clone();
             for _ in 0..2 {
@@ -505,6 +581,19 @@ impl WetCanvas {
         // out behind it, so a longer stretch drags it further. Read between
         // pixels, all before any is written, so nothing is lost or doubled.
         let last_at = self.last_at.replace(at);
+        // A blend tool's dabs stack, so each works by the share of the
+        // brush it moved on since the last (twice that, as a dab covers
+        // a pixel about half as strongly on average): the stroke as a
+        // whole works the paint by its density, however close its dabs
+        // fall, and does not wash every mark into one mean color.
+        let share = if self.wet.amount > 0.0 {
+            1.0
+        } else {
+            last_at.map_or(0.15, |from| {
+                let (dx, dy) = (at[0] - from[0], at[1] - from[1]);
+                ((dx * dx + dy * dy).sqrt() / radius.max(0.5)).clamp(0.02, 1.0)
+            })
+        };
         let smear = match last_at {
             Some(from) if wet.smear > 0.0 => {
                 let step = [at[0] - from[0], at[1] - from[1]];
@@ -529,17 +618,28 @@ impl WetCanvas {
                 }
                 let ui = (y + reach as usize) * ow + x + reach as usize;
                 let u = under[ui];
-                let target: [f32; 4] = match &blurred {
+                let mut target: [f32; 4] = match &blurred {
                     Some(b) => std::array::from_fn(|k| paint[k] + (b[ui][k] - paint[k]) * wet.blur),
                     None => paint,
                 };
+                // Where it lands on wet paint, the paint it lays mixes
+                // with that paint on the spot (its color, never its
+                // clearness), as a loaded brush does the moment it
+                // touches: white laid into black goes down gray at once.
+                if local > 0.0 && u[3] > 0.0 && target[3] > 0.0 {
+                    let w = local * u[3].min(1.0);
+                    for k in 0..3 {
+                        let there = u[k] / u[3] * target[3];
+                        target[k] += (there - target[k]) * w;
+                    }
+                }
                 let (px, py) = (rect.x0 + x as i32, rect.y0 + y as i32);
                 let key = TileKey::of_pixel(px, py);
                 let [ox, oy] = key.origin();
                 let capped = self.capped;
                 let tile = self.load(backdrop, key);
                 let i = ((py - oy) * TILE + (px - ox)) as usize;
-                let t = c * wet.density;
+                let t = c * wet.density * share;
                 let mut out: [f32; 4] = if capped {
                     // The pixel is the paint over what the stroke found
                     // there, as strongly as its strongest dab laid it.
@@ -905,16 +1005,21 @@ mod tests {
         let full = paint(1.0, 1.0, 8.0, 20.0);
         assert!(full[1] > 0.95 && full[0] < 0.05, "{full:?}");
         // A brush lands full of its own paint (0.0.8: it no longer lands
-        // holding what is under it): its first dab lays its own color
-        // even with half paint.
+        // holding what is under it), mixed on the spot with the wet paint
+        // it touches as a loaded brush is: by its pickup (all of it
+        // here), at most half and half.
         let landing = paint(0.5, 1.0, 8.0, 8.0);
-        assert!(landing[1] > 0.95 && landing[0] < 0.05, "{landing:?}");
-        // From the next dab on, half paint lays half the brush's color
-        // and half of what it picked up: a second dab in the same place
-        // picks up the red under the first dab's rim.
+        assert!(
+            landing[1] >= 0.45 && landing[0] > 0.05 && landing[0] <= 0.55,
+            "{landing:?}"
+        );
+        // From the next dab on, half paint lays the brush's color and
+        // what it picked up and met together: a second dab in the same
+        // place picks up the red under the first dab's rim, and lays a
+        // mix of red and green.
         let half = paint(0.5, 1.0, 8.0, 9.0);
         assert!(
-            half[0] > 0.05 && half[1] > 0.5 && half[1] < 0.95,
+            half[0] > 0.05 && half[1] > 0.3 && half[1] < 0.95,
             "{half:?}"
         );
         let thin = paint(1.0, 0.3, 8.0, 8.0);

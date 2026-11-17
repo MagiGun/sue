@@ -740,7 +740,9 @@ fn committed_points_never_change() {
         let tail = pipeline.tail();
         // Past the starting (whose taper is settled once the stroke is
         // long enough for both), the tail is the ending window and the
-        // curve's last segments, not the stroke.
+        // curve's last segments (and the one packet the resampler's
+        // curve waits for), not the stroke. The ending is at least two
+        // widths long (32 pixels here) to come to a clean point.
         if let (Some(first), Some(last)) = (tail.first(), tail.last())
             && first.arc > 100.0
         {
@@ -748,7 +750,7 @@ fn committed_points_never_change() {
         }
     }
     assert!(
-        longest_tail > 20.0 && longest_tail < 30.0 + 5.0,
+        longest_tail > 20.0 && longest_tail < 32.0 + 8.0,
         "{longest_tail}"
     );
     assert!(seen.last().unwrap().arc > 300.0);

@@ -147,6 +147,9 @@ pub(super) fn paint_properties(ui: &mut Ui, rows: &mut Rows<'_>, tool: Tool, sub
         &mut sub.smart_shape,
     );
     tip_properties(ui, rows, &mut sub.tip);
+    if tool != Tool::Figure {
+        behaviour_properties(ui, rows, sub);
+    }
     if tool == Tool::Figure {
         rows.hint(ui, &tr!("drag-canvas-draw-shape"));
     }
@@ -295,6 +298,323 @@ fn tip_properties(ui: &mut Ui, rows: &mut Rows<'_>, tip: &mut Tip) {
     color_jitter(ui, rows, &mut tip.jitter, stamps);
 }
 
+/// The paint behaviours a brush's text has no word for, set per sub tool
+/// (`SubTool::behaviours`): the paper texture's choice and how it is
+/// laid (full guide 00:31:45, FGV-27), the watercolor edge (00:12:49,
+/// 00:32:23) and the dual brush (00:32:06, FGV-28).
+fn behaviour_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
+    use sue_brush::paint::{DualBrush, DualMode, PaperChoice, TextureChoice, WatercolorEdge};
+    use sue_brush::texture::{TextureMode, TextureSettings};
+    let before = crate::canvas::engine::behaviours_of(sub);
+    let mut b = before.clone();
+    // The paper: none, or one of Sue's own (or a person's picture,
+    // kept as it is).
+    let papers = sue_brush::texture::BUILTIN;
+    let mut names = vec![tr!("texture-none")];
+    names.extend(papers.iter().map(|name| paper_label(name)));
+    let picture = matches!(
+        b.texture.as_ref().map(|t| &t.paper),
+        Some(PaperChoice::Picture(_))
+    );
+    if picture {
+        names.push(tr!("texture-own-picture"));
+    }
+    let mut chosen = match b.texture.as_ref().map(|t| &t.paper) {
+        None => 0,
+        Some(PaperChoice::Builtin(name)) => papers
+            .iter()
+            .position(|found| found == name)
+            .map_or(0, |at| at + 1),
+        Some(PaperChoice::Picture(_)) => papers.len() + 1,
+    };
+    if rows.choice(
+        ui,
+        "texture-paper",
+        Category::Texture,
+        &tr!("texture"),
+        &mut chosen,
+        &names,
+    ) {
+        b.texture = match chosen {
+            0 => None,
+            at if at <= papers.len() => Some(TextureChoice {
+                paper: PaperChoice::Builtin(papers[at - 1].to_owned()),
+                settings: b
+                    .texture
+                    .as_ref()
+                    .map_or_else(TextureSettings::default, |t| t.settings),
+            }),
+            _ => b.texture.clone(),
+        };
+    }
+    if let Some(texture) = &mut b.texture {
+        let s = &mut texture.settings;
+        let mut scale = s.scale * 100.0;
+        if rows.slider(
+            ui,
+            "texture-scale",
+            Category::Texture,
+            &tr!("texture-scale-ratio"),
+            &mut scale,
+            10.0..=400.0,
+            " %",
+            false,
+        ) {
+            s.scale = scale / 100.0;
+        }
+        rows.slider(
+            ui,
+            "texture-rotation",
+            Category::Texture,
+            &tr!("texture-rotation-angle"),
+            &mut s.rotation,
+            -180.0..=180.0,
+            "\u{b0}",
+            false,
+        );
+        rows.percent(
+            ui,
+            "texture-brightness",
+            Category::Texture,
+            &tr!("texture-brightness"),
+            &mut s.brightness,
+            -100.0,
+            100.0,
+        );
+        rows.percent(
+            ui,
+            "texture-contrast",
+            Category::Texture,
+            &tr!("texture-contrast"),
+            &mut s.contrast,
+            -100.0,
+            100.0,
+        );
+        rows.check(
+            ui,
+            "texture-invert",
+            Category::Texture,
+            &tr!("texture-invert"),
+            None,
+            &mut s.invert,
+        );
+        rows.check(
+            ui,
+            "texture-emphasize",
+            Category::Texture,
+            &tr!("texture-emphasize-density"),
+            Some(&tr!("texture-emphasize-density-hint")),
+            &mut s.emphasize,
+        );
+        let modes = TextureMode::ALL;
+        let labels: Vec<String> = modes.iter().map(|mode| texture_mode_label(*mode)).collect();
+        let mut at = modes.iter().position(|mode| *mode == s.mode).unwrap_or(0);
+        if rows.choice(
+            ui,
+            "texture-mode",
+            Category::Texture,
+            &tr!("texture-mode"),
+            &mut at,
+            &labels,
+        ) {
+            s.mode = modes[at];
+        }
+        rows.check(
+            ui,
+            "texture-per-dab",
+            Category::Texture,
+            &tr!("texture-apply-by-each-plot"),
+            Some(&tr!("texture-apply-by-each-plot-hint")),
+            &mut s.per_dab,
+        );
+    }
+    // The watercolor edge.
+    let mut edge_on = b.watercolor.is_some();
+    if rows.check(
+        ui,
+        "watercolor-edge",
+        Category::WatercolorEdge,
+        &tr!("watercolor-edge"),
+        Some(&tr!("watercolor-edge-hint")),
+        &mut edge_on,
+    ) {
+        b.watercolor = edge_on.then(WatercolorEdge::default);
+    }
+    if let Some(edge) = &mut b.watercolor {
+        rows.slider(
+            ui,
+            "watercolor-range",
+            Category::WatercolorEdge,
+            &tr!("watercolor-range"),
+            &mut edge.range,
+            0.0..=100.0,
+            &tr!("px"),
+            false,
+        );
+        rows.percent(
+            ui,
+            "watercolor-opacity",
+            Category::WatercolorEdge,
+            &tr!("watercolor-opacity"),
+            &mut edge.opacity,
+            0.0,
+            100.0,
+        );
+        rows.percent(
+            ui,
+            "watercolor-darkness",
+            Category::WatercolorEdge,
+            &tr!("watercolor-darkness"),
+            &mut edge.darkness,
+            0.0,
+            100.0,
+        );
+        rows.slider(
+            ui,
+            "watercolor-blur",
+            Category::WatercolorEdge,
+            &tr!("watercolor-blurring-width"),
+            &mut edge.blur,
+            0.0..=20.0,
+            &tr!("px"),
+            false,
+        );
+        rows.check(
+            ui,
+            "watercolor-after",
+            Category::WatercolorEdge,
+            &tr!("watercolor-process-after-stroke"),
+            Some(&tr!("watercolor-process-after-stroke-hint")),
+            &mut edge.after_stroke,
+        );
+    }
+    // The dual brush: a second round tip the stroke is laid through.
+    let mut dual_on = b.dual.is_some();
+    if rows.check(
+        ui,
+        "dual-brush",
+        Category::DualBrush,
+        &tr!("dual-brush"),
+        Some(&tr!("dual-brush-hint")),
+        &mut dual_on,
+    ) {
+        b.dual = dual_on.then(DualBrush::default);
+    }
+    if let Some(dual) = &mut b.dual {
+        let modes = DualMode::ALL;
+        let labels: Vec<String> = modes.iter().map(|mode| dual_mode_label(*mode)).collect();
+        let mut at = modes
+            .iter()
+            .position(|mode| *mode == dual.mode)
+            .unwrap_or(0);
+        if rows.choice(
+            ui,
+            "dual-mode",
+            Category::DualBrush,
+            &tr!("dual-brush-mode"),
+            &mut at,
+            &labels,
+        ) {
+            dual.mode = modes[at];
+        }
+        rows.check(
+            ui,
+            "dual-linked",
+            Category::DualBrush,
+            &tr!("dual-brush-link-to-main-size"),
+            None,
+            &mut dual.linked,
+        );
+        if dual.linked {
+            rows.percent(
+                ui,
+                "dual-size",
+                Category::DualBrush,
+                &tr!("dual-brush-size"),
+                &mut dual.size,
+                1.0,
+                200.0,
+            );
+        } else {
+            rows.slider(
+                ui,
+                "dual-size",
+                Category::DualBrush,
+                &tr!("dual-brush-size"),
+                &mut dual.size,
+                0.5..=1000.0,
+                &tr!("px"),
+                true,
+            );
+        }
+        rows.percent(
+            ui,
+            "dual-spacing",
+            Category::DualBrush,
+            &tr!("dual-brush-spacing"),
+            &mut dual.spacing,
+            1.0,
+            200.0,
+        );
+        rows.percent(
+            ui,
+            "dual-scatter",
+            Category::DualBrush,
+            &tr!("dual-brush-scatter"),
+            &mut dual.scatter,
+            0.0,
+            300.0,
+        );
+        rows.percent(
+            ui,
+            "dual-hardness",
+            Category::DualBrush,
+            &tr!("dual-brush-hardness"),
+            &mut dual.hardness,
+            0.0,
+            100.0,
+        );
+    }
+    if b != before {
+        sub.behaviours = Some(b);
+    }
+}
+
+/// What people read for one of Sue's papers.
+fn paper_label(name: &str) -> String {
+    match name {
+        "grain" => tr!("paper-grain-name"),
+        "canvas" => tr!("paper-canvas"),
+        "cold-press" => tr!("paper-cold-press"),
+        "rough" => tr!("paper-rough"),
+        other => other.to_owned(),
+    }
+}
+
+/// What people read for a texture mode.
+fn texture_mode_label(mode: sue_brush::texture::TextureMode) -> String {
+    use sue_brush::texture::TextureMode;
+    match mode {
+        TextureMode::Multiply => tr!("texture-mode-multiply"),
+        TextureMode::Subtract => tr!("texture-mode-subtract"),
+        TextureMode::Height => tr!("texture-mode-height"),
+        TextureMode::Darken => tr!("texture-mode-darken"),
+        TextureMode::Overlay => tr!("texture-mode-overlay"),
+    }
+}
+
+/// What people read for a dual brush mode.
+fn dual_mode_label(mode: sue_brush::paint::DualMode) -> String {
+    use sue_brush::paint::DualMode;
+    match mode {
+        DualMode::Multiply => tr!("texture-mode-multiply"),
+        DualMode::Darken => tr!("texture-mode-darken"),
+        DualMode::Subtract => tr!("texture-mode-subtract"),
+        DualMode::Overlay => tr!("texture-mode-overlay"),
+        DualMode::Height => tr!("texture-mode-height"),
+    }
+}
+
 /// The Blend tool: its size and strength, and what the sub tool does.
 pub(super) fn blend_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
     rows.slider(
@@ -316,6 +636,20 @@ pub(super) fn blend_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTo
         1.0,
         100.0,
     );
+    // How far out from the middle Liquify and the blenders work in full
+    // before they fall off (crash course CC-4 and CC-5).
+    let blender = crate::canvas::engine::is_blender(sub);
+    if blender || crate::blend::is_liquify(sub.mode) {
+        rows.percent(
+            ui,
+            "blend-hardness",
+            Category::Ink,
+            &tr!("hardness"),
+            &mut sub.tip.hardness,
+            0.0,
+            100.0,
+        );
+    }
     // Liquify's mode, one of its seven (`blend::LiquifyMode`).
     if let Some(mode) = crate::blend::LiquifyMode::of_mode(sub.mode) {
         let modes = crate::blend::LiquifyMode::ALL;
@@ -331,6 +665,19 @@ pub(super) fn blend_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTo
         ) {
             sub.mode = modes[chosen].mode();
         }
+    }
+    if blender {
+        rows.hint(
+            ui,
+            &match sub.name.as_str() {
+                "Painterly blender" => tr!("blender-painterly-hint"),
+                "Wet bleed blender" => tr!("blender-wet-bleed-hint"),
+                "Textured blender" => tr!("blender-textured-hint"),
+                "Soothing watercolor" => tr!("blender-soothing-watercolor-hint"),
+                _ => tr!("blender-blend-hint"),
+            },
+        );
+        return;
     }
     rows.hint(
         ui,
