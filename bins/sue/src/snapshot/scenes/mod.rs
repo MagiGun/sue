@@ -13,6 +13,7 @@ mod gallery;
 mod hub;
 mod icons;
 mod menus;
+mod p6_tools_a;
 mod paint_3d;
 mod paint_canvas;
 mod paint_canvas_chrome;
@@ -119,6 +120,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_command_bar::scenes(tour)?;
     paint_extras::scenes(tour)?;
     paint_tools::palettes(tour)?;
+    // 37a to 37n. Tool Property of the view, pick and move tools, the
+    // transform's settings and Change Canvas Size's box on the canvas.
+    p6_tools_a::scenes(tour)?;
 
     // 12 and 13. Back to the Hub, then into Sue Paint again.
     shell::entering(tour)?;
