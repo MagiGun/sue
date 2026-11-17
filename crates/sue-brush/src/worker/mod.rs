@@ -60,6 +60,11 @@ use self::round::Round;
 /// frame at 60 Hz).
 pub const SLICE_PIXELS: u64 = 1 << 18;
 
+/// About how long a job on the pool lays samples before it shows what
+/// it laid and goes on with the rest: most of a frame, so a stroke the
+/// worker is behind on still grows on the screen frame by frame.
+const SLICE: std::time::Duration = std::time::Duration::from_millis(12);
+
 /// The pool painting shares with compositing: made on first use, one
 /// core left for the interface (at most eight threads), and kept for the
 /// life of the program. Where no thread can start it has none, and work
@@ -179,6 +184,22 @@ pub struct Stroke {
     dirty: Vec<TileKey>,
     /// The open run has been closed after the lift.
     closed: bool,
+    /// The stroke's edit worked out apart from its layer
+    /// ([`Self::prepare`]), until it is taken.
+    ready: Option<Result<RasterEdit, MergeError>>,
+}
+
+/// A layer as a finished stroke finds it, for working the stroke's edit
+/// out away from the interface ([`StrokeWorker::settle`]).
+#[derive(Clone, Debug)]
+pub struct Landing {
+    /// The raster the stroke goes into (a clone, which shares the
+    /// pixels): its pixel `(0, 0)` is the stroke's pixel `(0, 0)`.
+    pub raster: RasterTile2D,
+    /// The entity the edit is of.
+    pub layer: EntityId,
+    /// The edit's label.
+    pub label: String,
 }
 
 impl Stroke {
@@ -225,6 +246,90 @@ impl Stroke {
             live: Arc::new(LiveView::new(brush.ink())),
             dirty: Vec::new(),
             closed: false,
+            ready: None,
+        }
+    }
+
+    /// Works out what merging the finished stroke into `raster` (layer
+    /// `layer`, the stroke's pixel `(0, 0)` its pixel `(0, 0)`) changes,
+    /// without writing to it: the edit [`Self::commit`] would answer,
+    /// patch for patch, kept until [`Self::take_edit`]. It is made on a
+    /// copy of the part of the raster the stroke spans, so it can be
+    /// done on a worker thread while the interface goes on, and the
+    /// interface then only writes the patches (`RasterEdit::apply`).
+    /// Lets go of the stroke's snapshot of the layer, as
+    /// [`Self::let_go_of_layer`] does.
+    pub fn prepare(&mut self, raster: &RasterTile2D, layer: EntityId, label: &str) {
+        let edit = self.edit_apart(raster, layer, label);
+        self.let_go_of_layer();
+        self.ready = Some(edit);
+    }
+
+    /// The edit [`Self::prepare`] worked out, once: `None` when none
+    /// was (then [`Self::commit`] merges the stroke).
+    pub fn take_edit(&mut self) -> Option<Result<RasterEdit, MergeError>> {
+        self.ready.take()
+    }
+
+    /// `true` while an edit worked out by [`Self::prepare`] waits to be
+    /// taken.
+    #[must_use]
+    pub fn is_prepared(&self) -> bool {
+        self.ready.is_some()
+    }
+
+    /// [`Self::commit`] on a copy of the part of `raster` the stroke
+    /// spans, its patches placed where they lie in `raster`.
+    fn edit_apart(
+        &self,
+        raster: &RasterTile2D,
+        layer: EntityId,
+        label: &str,
+    ) -> Result<RasterEdit, MergeError> {
+        let empty = || Ok(RasterEdit::new(layer, label, Vec::new()));
+        let Some(bounds) = self.bounds() else {
+            return empty();
+        };
+        let (width, height) = (raster.width() as i32, raster.height() as i32);
+        // Whole tiles of the layer, so the patches are cut as a merge
+        // into the layer itself cuts them.
+        let x0 = (bounds.x0.div_euclid(TILE) * TILE).max(0);
+        let y0 = (bounds.y0.div_euclid(TILE) * TILE).max(0);
+        let x1 = ((bounds.x1 + TILE - 1).div_euclid(TILE) * TILE).min(width);
+        let y1 = ((bounds.y1 + TILE - 1).div_euclid(TILE) * TILE).min(height);
+        if x0 >= x1 || y0 >= y1 {
+            return empty();
+        }
+        let (w, h) = ((x1 - x0) as u32, (y1 - y0) as u32);
+        let format = raster.format();
+        let part = RasterPatch::read(raster, x0 as u32, y0 as u32, w, h)
+            .and_then(|bytes| RasterTile2D::from_bytes(w, h, format, bytes).ok());
+        let Some(mut part) = part else {
+            return Err(MergeError::Format(format));
+        };
+        let edit = self.commit(&mut part, [x0, y0], layer, label)?;
+        let patches = edit
+            .patches()
+            .iter()
+            .map(|patch| RasterPatch {
+                x: patch.x + x0 as u32,
+                y: patch.y + y0 as u32,
+                ..patch.clone()
+            })
+            .collect();
+        Ok(RasterEdit::new(layer, label, patches))
+    }
+
+    /// Lets a stroke with paint behaviours share its big work with
+    /// `pool`'s threads: a big dab of a mixing brush is worked out and
+    /// written on several, and the tiles an update changed are laid for
+    /// the live view on several. Every pixel is still the same
+    /// arithmetic in the same order, so the stroke lays the same bytes
+    /// as on one thread. (A round tip's coverage is shared by its bands
+    /// already.)
+    pub fn share(&mut self, pool: Arc<JobPool>) {
+        if let Painting::Paint(painter) = &mut self.painting {
+            painter.share(pool);
         }
     }
 
@@ -268,6 +373,17 @@ impl Stroke {
         }
     }
 
+    /// How many stroke points the stroke holds on to: the ones that
+    /// may still change. It stays small however long the stroke is,
+    /// since the points that are final are laid and let go.
+    #[must_use]
+    pub fn held_points(&self) -> usize {
+        match &self.painting {
+            Painting::Round(stroke) => stroke.pipeline.held(),
+            Painting::Paint(painter) => painter.held(),
+        }
+    }
+
     /// The tiles laid since the last call, in order.
     pub fn take_dirty(&mut self) -> Vec<TileKey> {
         std::mem::take(&mut self.dirty)
@@ -285,6 +401,23 @@ impl Stroke {
         budget: Option<u64>,
         pool: Option<&JobPool>,
     ) -> Result<(), String> {
+        self.update_until(queue, budget, pool, &|| false)
+    }
+
+    /// [`Self::update`] that also stops, leaving the rest in `queue`,
+    /// once `stop` says so (asked after every sample; at least one is
+    /// laid). How the samples are cut into updates does not change what
+    /// is painted.
+    ///
+    /// # Errors
+    /// When a job of the pool failed: the stroke cannot be trusted.
+    pub fn update_until(
+        &mut self,
+        queue: &mut VecDeque<Sample>,
+        budget: Option<u64>,
+        pool: Option<&JobPool>,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<(), String> {
         if queue.is_empty() || self.closed {
             queue.clear();
             return Ok(());
@@ -298,10 +431,12 @@ impl Stroke {
                 } = &mut **stroke;
                 let mut work = Work::default();
                 let mut reach = 0;
+                let mut taken = 0;
                 while let Some(sample) = queue.pop_front() {
+                    taken += 1;
                     pipeline.push(sample);
                     let before = work.committed.len();
-                    round.committed(pipeline.committed(), &mut work.committed);
+                    round.fresh(&pipeline.take_committed(), &mut work.committed);
                     reach += work.committed[before..]
                         .iter()
                         .map(bands::reach)
@@ -312,7 +447,7 @@ impl Stroke {
                         queue.clear();
                         break;
                     }
-                    if budget.is_some_and(|budget| reach >= budget) {
+                    if budget.is_some_and(|budget| reach >= budget) || stop() {
                         break;
                     }
                 }
@@ -333,27 +468,34 @@ impl Stroke {
                 }
                 let dirty = bands.take_dirty();
                 self.live.show(bands, &dirty);
+                self.live.went_on(taken, reach);
                 self.dirty.extend(dirty);
             }
             Painting::Paint(painter) => {
                 let mut reach = 0;
+                let mut taken = 0;
                 while let Some(sample) = queue.pop_front() {
+                    taken += 1;
                     reach += painter.push(sample);
                     if painter.is_closed() {
                         self.closed = true;
                         queue.clear();
                         break;
                     }
-                    if budget.is_some_and(|budget| reach >= budget) {
+                    if budget.is_some_and(|budget| reach >= budget) || stop() {
                         break;
                     }
                 }
                 if !self.closed && queue.is_empty() {
                     painter.tail();
                 }
+                if let Some(error) = painter.failure() {
+                    return Err(error);
+                }
                 let dirty = painter.take_dirty();
                 self.live
-                    .show_pixels(painter.laid(&dirty), painter.bounds());
+                    .show_pixels(painter.laid(&dirty)?, painter.bounds());
+                self.live.went_on(taken, reach);
                 self.dirty.extend(dirty);
             }
         }
@@ -386,9 +528,12 @@ impl Stroke {
             }
             Painting::Paint(painter) => {
                 painter.close();
+                if let Some(error) = painter.failure() {
+                    return Err(error);
+                }
                 let dirty = painter.take_dirty();
                 self.live
-                    .show_pixels(painter.laid(&dirty), painter.bounds());
+                    .show_pixels(painter.laid(&dirty)?, painter.bounds());
                 self.dirty.extend(dirty);
             }
         }
@@ -481,6 +626,11 @@ pub struct StrokeWorker {
     state: State,
     live: Arc<LiveView>,
     dirty: Vec<TileKey>,
+    /// Samples pushed so far.
+    pushed: u64,
+    /// Where the finished stroke goes, once the pen has lifted and the
+    /// stroke is to settle without the interface waiting for it.
+    landing: Option<Landing>,
 }
 
 impl StrokeWorker {
@@ -496,14 +646,58 @@ impl StrokeWorker {
     #[must_use]
     pub fn start_on(pool: Arc<JobPool>, brush: &Brush, settings: Settings, canvas: Canvas) -> Self {
         let bands = pool.threads().clamp(1, MOST_BANDS);
-        let stroke = Stroke::on(brush, settings, bands, canvas);
+        let mut stroke = Stroke::on(brush, settings, bands, canvas);
+        if pool.threads() > 1 {
+            stroke.share(Arc::clone(&pool));
+        }
         Self {
             live: stroke.live(),
             pool,
             queue: VecDeque::new(),
             state: State::Idle(Box::new(stroke)),
             dirty: Vec::new(),
+            pushed: 0,
+            landing: None,
         }
+    }
+
+    /// The pen has lifted (push the lift first): once every sample is
+    /// laid, the stroke's edit of `landing` is worked out on the pool
+    /// too, away from the interface ([`Stroke::prepare`]). Keep calling
+    /// [`Self::poll`]; when [`Self::is_settled`], [`Self::finish`]
+    /// answers at once with the stroke and its edit
+    /// ([`Stroke::take_edit`]). The layer must stay as `landing` holds it
+    /// until then.
+    pub fn settle(&mut self, landing: Landing) {
+        self.landing = Some(landing);
+    }
+
+    /// `true` when nothing is left to wait for: every sample pushed is
+    /// laid and, after [`Self::settle`], the edit is worked out (or a
+    /// job failed and the stroke is lost).
+    #[must_use]
+    pub fn is_settled(&self) -> bool {
+        match &self.state {
+            State::Idle(stroke) => {
+                self.queue.is_empty()
+                    && stroke.is_done()
+                    && (self.landing.is_none() || stroke.is_prepared())
+            }
+            State::Busy(_) => false,
+            State::Failed => true,
+        }
+    }
+
+    /// About how many pixels of work are left before the stroke has
+    /// laid every sample pushed so far: the samples not laid yet, each
+    /// taken to cost what the laid ones did on average (`guess` pixels
+    /// each while none is laid). What an interface asks before it
+    /// decides to wait for the stroke or to let it settle on its own.
+    #[must_use]
+    pub fn work_left(&self, guess: u64) -> u64 {
+        let (laid, work) = self.live.progress();
+        let each = work.checked_div(laid).unwrap_or(guess);
+        self.pushed.saturating_sub(laid).saturating_mul(each.max(1))
     }
 
     /// What the compositor shows of the stroke.
@@ -515,11 +709,13 @@ impl StrokeWorker {
     /// Queues the device's next sample. Nothing is laid here.
     pub fn push(&mut self, sample: Sample) {
         self.queue.push_back(sample);
+        self.pushed += 1;
     }
 
     /// Queues samples, as a frame hands them over.
     pub fn push_all(&mut self, samples: &[Sample]) {
         self.queue.extend(samples.iter().copied());
+        self.pushed += samples.len() as u64;
     }
 
     /// `true` while a job lays the stroke.
@@ -556,14 +752,17 @@ impl StrokeWorker {
     /// compositor shows again.
     pub fn poll(&mut self) -> Vec<TileKey> {
         self.harvest(false);
-        if let State::Idle(_) = self.state
-            && !self.queue.is_empty()
+        if let State::Idle(stroke) = &self.state
+            && (!self.queue.is_empty()
+                || (self.landing.is_some() && stroke.is_done() && !stroke.is_prepared()))
         {
             self.kick();
         }
         // An inline pool finished its job as it was spawned.
         self.harvest(false);
         let mut dirty = std::mem::take(&mut self.dirty);
+        // What a job under way has laid already shows too.
+        dirty.extend(self.live.take_fresh());
         dirty.sort_unstable();
         dirty.dedup();
         dirty
@@ -603,6 +802,9 @@ impl StrokeWorker {
             // No threads: one slice here, the rest on the next frames.
             self.state = match stroke.update(&mut self.queue, Some(SLICE_PIXELS), None) {
                 Ok(()) => {
+                    if let (true, Some(landing)) = (stroke.is_done(), &self.landing) {
+                        stroke.prepare(&landing.raster, landing.layer, &landing.label);
+                    }
                     self.dirty.extend(stroke.take_dirty());
                     State::Idle(stroke)
                 }
@@ -612,8 +814,25 @@ impl StrokeWorker {
         }
         let mut queue = std::mem::take(&mut self.queue);
         let pool = Arc::clone(&self.pool);
-        self.state = State::Busy(self.pool.spawn("brush stroke", move |_| {
-            stroke.update(&mut queue, None, Some(&pool))?;
+        let landing = self.landing.clone();
+        self.state = State::Busy(self.pool.spawn("brush stroke", move |job| {
+            // A slice at a time: after each the live view shows what was
+            // laid, so a worker that is behind the pen still shows the
+            // stroke growing, and a stroke given up stops at once.
+            while !queue.is_empty() {
+                let began = std::time::Instant::now();
+                let stop = || job.is_cancelled() || began.elapsed() >= SLICE;
+                stroke.update_until(&mut queue, None, Some(&pool), &stop)?;
+                if job.is_cancelled() {
+                    return Err("the stroke was given up".to_owned());
+                }
+            }
+            if let (true, Some(landing)) = (stroke.is_done(), landing) {
+                stroke.prepare(&landing.raster, landing.layer, &landing.label);
+                // The job's hold on the layer's pixels goes before the
+                // stroke comes back, so writing the layer copies nothing.
+                drop(landing);
+            }
             Ok(stroke)
         }));
     }
@@ -622,7 +841,9 @@ impl StrokeWorker {
     /// still queued (push the lift first). Answers the finished stroke to
     /// [commit](Stroke::commit), or `None` when a job failed. What is
     /// shown keeps showing until the caller [ends](LiveView::end) it,
-    /// once the stroke is in its layer.
+    /// once the stroke is in its layer. This waits for the worker: an
+    /// interface that must not asks [`Self::work_left`] first, and lets a
+    /// stroke with much left [settle](Self::settle) instead.
     #[must_use]
     pub fn finish(mut self) -> Option<Stroke> {
         self.harvest(true);
@@ -632,6 +853,8 @@ impl StrokeWorker {
         let pool = (self.pool.threads() > 0).then_some(self.pool.as_ref());
         stroke.update(&mut self.queue, None, pool).ok()?;
         stroke.close(pool).ok()?;
+        // The worker's own hold on the layer's pixels goes with it.
+        self.landing = None;
         Some(*stroke)
     }
 
@@ -652,7 +875,10 @@ impl Drop for StrokeWorker {
     /// here keeps one stroke job at a time on the pool. It costs at most
     /// one update's work, once, when a stroke is given up.
     fn drop(&mut self) {
-        if let State::Busy(_) = self.state {
+        if let State::Busy(job) = &self.state {
+            // Nobody wants the rest: the job stops after the sample it
+            // is laying.
+            job.cancel();
             self.harvest(true);
         }
     }

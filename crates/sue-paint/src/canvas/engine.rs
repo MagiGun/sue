@@ -44,8 +44,9 @@ use sue_brush::paint::Colors;
 use sue_brush::paint::overflow::Region;
 use sue_brush::raster::PixelRect;
 use sue_brush::replay::{self, Recorder};
-use sue_brush::worker::{Brush, Canvas, LiveView, StrokeWorker};
+use sue_brush::worker::{Brush, Canvas, Landing, LiveView, StrokeWorker};
 use sue_core::EntityId;
+use sue_core::ReversibleTransaction;
 use sue_core::txn::Batch;
 use sue_model::BrushPreset;
 use sue_model::brush::{EngineKind, TipSource, param};
@@ -142,7 +143,28 @@ pub(crate) struct EngineStroke {
     rest: Option<(f64, Pos2)>,
     /// The shape the stroke became, while the pen is still down.
     shaping: Option<Shaping>,
+    /// The pen has lifted and the worker is still laying the stroke:
+    /// it goes into its layer by itself once the worker is through
+    /// (see [`SETTLE_HERE`]).
+    ending: bool,
+    /// The pen's reach so far in the stroke's pixels, `[x0, y0, x1,
+    /// y1]` around every sample sent.
+    reach: Option<[f32; 4]>,
 }
+
+/// About how many pixels of work a lift waits for on the spot. A
+/// stroke with more left (a long one of a heavy brush the worker is
+/// still behind on, or one post correction draws again) is let go
+/// instead: the interface goes on, the worker lays the rest and works
+/// the undo step out, and the stroke lands a few frames later, the same
+/// pixels. A sixteenth of a second of work at the engine's slowest.
+const SETTLE_HERE: u64 = 16 << 20;
+
+/// A stroke that spans more pixels than this is let go on the lift too,
+/// however far its worker is: merging it into its layer and cutting its
+/// undo step take as long as the place it spans is big (a watercolor
+/// edge is shaped over all of it), and that is the worker's to do.
+const SETTLE_SPAN: f64 = (1_u64 << 19) as f64;
 
 /// The tool key of the built-in brushes of `tool` (`sue_brush::presets`).
 fn brush_key(tool: Tool) -> Option<&'static str> {
@@ -380,9 +402,23 @@ impl EngineStroke {
             }
         }
         self.raw.push(sample);
+        let [x, y] = sample.pos;
+        self.reach = Some(match self.reach {
+            Some([x0, y0, x1, y1]) => [x0.min(x), y0.min(y), x1.max(x), y1.max(y)],
+            None => [x, y, x, y],
+        });
         if sample.kind == Kind::Up {
             self.lifted = true;
         }
+    }
+
+    /// About how many pixels the stroke spans: the box around the pen's
+    /// way, the brush's size around it.
+    fn span(&self) -> f64 {
+        let size = f64::from(self.size());
+        self.reach.map_or(0.0, |[x0, y0, x1, y1]| {
+            (f64::from(x1 - x0) + size) * (f64::from(y1 - y0) + size)
+        })
     }
 
     /// One sample of the pen, in the stroke's pixels: snapped to its ruler,
@@ -724,7 +760,10 @@ impl SuePaint {
     pub(super) fn engine_take_samples(&mut self) -> bool {
         let mut pressed = false;
         for sample in sue_platform::stylus::take_pen_samples() {
-            if sample.kind == PenKind::Down && !matches!(self.gesture, Some(Gesture::Engine(_))) {
+            // (A stroke that has lifted and is only settling is no
+            // stroke under way.)
+            let drawing = matches!(&self.gesture, Some(Gesture::Engine(stroke)) if !stroke.ending);
+            if sample.kind == PenKind::Down && !drawing {
                 self.pen_stream.clear();
             }
             pressed |= sample.source.is_pen() && sample.pressure.is_some();
@@ -1101,6 +1140,8 @@ impl SuePaint {
             smart: sub.smart_shape,
             rest: None,
             shaping: None,
+            ending: false,
+            reach: None,
         };
         for sample in first {
             stroke.feed(sample);
@@ -1172,7 +1213,9 @@ impl SuePaint {
         size: [u32; 2],
         cx: &mut AppletContext<'_>,
     ) {
-        self.engine_feed(viewport, size);
+        if !self.engine_ending() {
+            self.engine_feed(viewport, size);
+        }
         let (visible, step) = self.on_screen;
         let now = self.clock.0;
         let Some(Gesture::Engine(stroke)) = &mut self.gesture else {
@@ -1206,21 +1249,33 @@ impl SuePaint {
             .iter_mut()
             .flat_map(|copy| copy.worker.poll())
             .collect();
-        if dirty.is_empty() {
-            return;
+        // A lifted stroke the worker is through with goes into its layer.
+        let settled = stroke.ending && stroke.copies.iter().all(|copy| copy.worker.is_settled());
+        if !dirty.is_empty() {
+            dirty.sort_unstable();
+            dirty.dedup();
+            let (layer, offset) = (stroke.layer, stroke.offset);
+            let lives = stroke.lives();
+            let rects = match stroke.lay.as_mut() {
+                Some(lay) => lay.lay(&mut cx.world.arena, &dirty, &lives, offset),
+                None => tile_rects(dirty.iter().map(|key| key.origin()), offset),
+            };
+            if let Some(doc) = self.docs.get_mut(self.active) {
+                doc.compositor
+                    .refresh_view(&cx.world.arena, &rects, Some(layer), visible, step);
+            }
         }
-        dirty.sort_unstable();
-        dirty.dedup();
-        let (layer, offset) = (stroke.layer, stroke.offset);
-        let lives = stroke.lives();
-        let rects = match stroke.lay.as_mut() {
-            Some(lay) => lay.lay(&mut cx.world.arena, &dirty, &lives, offset),
-            None => tile_rects(dirty.iter().map(|key| key.origin()), offset),
-        };
-        if let Some(doc) = self.docs.get_mut(self.active) {
-            doc.compositor
-                .refresh_view(&cx.world.arena, &rects, Some(layer), visible, step);
+        if settled && let Some(Gesture::Engine(stroke)) = self.gesture.take() {
+            self.engine_end(*stroke, cx);
         }
+    }
+
+    /// `true` while a stroke whose pen has lifted is still being laid by
+    /// its worker (see [`SETTLE_HERE`]): it lands by itself, and whatever
+    /// needs the picture as it will be settles it first
+    /// ([`Self::engine_settle`]).
+    pub(crate) fn engine_ending(&self) -> bool {
+        matches!(&self.gesture, Some(Gesture::Engine(stroke)) if stroke.ending)
     }
 
     /// The button was let go at `pos`: the stroke ends where the pen last
@@ -1232,6 +1287,10 @@ impl SuePaint {
         size: [u32; 2],
         cx: &mut AppletContext<'_>,
     ) {
+        if self.engine_ending() {
+            // Lifted already, and settling.
+            return;
+        }
         self.engine_feed(viewport, size);
         let Some(Gesture::Engine(mut stroke)) = self.gesture.take() else {
             return;
@@ -1257,6 +1316,32 @@ impl SuePaint {
         if stroke.correction > 0 && !stroke.line && !stroke.snapped() && stroke.shaping.is_none() {
             let samples = stroke.corrected();
             self.engine_redraw(&mut stroke, samples, cx);
+        }
+        // A stroke with much left to lay is not waited for: it settles
+        // on its worker and lands when that is through.
+        let each = {
+            let size = f64::from(stroke.size());
+            (size * size) as u64
+        };
+        let left: u64 = stroke
+            .copies
+            .iter()
+            .map(|copy| copy.worker.work_left(each))
+            .fold(0, u64::saturating_add);
+        if left > SETTLE_HERE || stroke.span() > SETTLE_SPAN {
+            if stroke.lay.is_none()
+                && let Some(raster) = doc::raster(&cx.world.arena, stroke.target)
+                && let Some(copy) = stroke.copies.first_mut()
+            {
+                copy.worker.settle(Landing {
+                    raster: raster.clone(),
+                    layer: stroke.target,
+                    label: stroke.label.clone(),
+                });
+            }
+            stroke.ending = true;
+            self.gesture = Some(Gesture::Engine(stroke));
+            return;
         }
         self.engine_end(*stroke, cx);
     }
@@ -1307,6 +1392,7 @@ impl SuePaint {
             );
         }
         stroke.raw.clear();
+        stroke.reach = None;
         stroke.lifted = false;
         for sample in samples {
             stroke.send(sample);
@@ -1416,8 +1502,12 @@ impl SuePaint {
             keep,
             transforms,
             settings,
+            canvas,
             ..
         } = stroke;
+        // The stroke's own hold on the layer's pixels goes before the
+        // layer is written, so nothing is copied for it.
+        drop(canvas);
         let lives: Vec<Arc<LiveView>> = copies.iter().map(|copy| Arc::clone(&copy.live)).collect();
         let mut finished = Vec::new();
         for copy in copies {
@@ -1445,11 +1535,20 @@ impl SuePaint {
             }
             None => {
                 let edit = finished
-                    .first()
-                    .and_then(Option::as_ref)
-                    .and_then(|finished| {
-                        let raster = doc::raster_mut(&mut cx.world.arena, target)?;
-                        finished.commit(raster, [0, 0], target, &label).ok()
+                    .first_mut()
+                    .and_then(Option::as_mut)
+                    .and_then(|finished| match finished.take_edit() {
+                        // Worked out by the worker already: only its
+                        // patches are written here.
+                        Some(edit) => {
+                            let mut edit = edit.ok()?;
+                            edit.apply(&mut cx.world.arena).ok()?;
+                            Some(edit)
+                        }
+                        None => {
+                            let raster = doc::raster_mut(&mut cx.world.arena, target)?;
+                            finished.commit(raster, [0, 0], target, &label).ok()
+                        }
                     });
                 let rects = edit.as_ref().map_or_else(Vec::new, |edit| {
                     tile_rects(
@@ -1512,6 +1611,11 @@ impl SuePaint {
 
     /// Gives the stroke under way up: nothing of it stays.
     pub(super) fn engine_abandon(&mut self, cx: &mut AppletContext<'_>) {
+        if self.engine_ending() {
+            // Its pen lifted: the stroke was drawn, and stays.
+            self.engine_settle(cx);
+            return;
+        }
         let Some(Gesture::Engine(mut stroke)) = self.gesture.take() else {
             return;
         };
@@ -1540,7 +1644,8 @@ impl SuePaint {
     }
 
     /// Settles a stroke under way when the studio closes: it ends where
-    /// the pen last was.
+    /// the pen last was. A stroke that has lifted and is still being laid
+    /// is waited for here, and lands.
     pub(crate) fn engine_settle(&mut self, cx: &mut AppletContext<'_>) {
         let Some(Gesture::Engine(mut stroke)) = self.gesture.take() else {
             return;

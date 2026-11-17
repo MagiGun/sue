@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use sue_core::txn::{RasterEdit, RasterPatch};
-use sue_core::{EntityId, PixelFormat, RasterTile2D};
+use sue_core::{EntityId, JobPool, PixelFormat, RasterTile2D};
 
 use crate::buffer::{MergeError, TILE, TileKey};
 use crate::input::{Kind, Pipeline, Sample, Settings};
@@ -65,24 +65,55 @@ impl Backdrop for Snapshot {
 }
 
 /// One copy of the stroke: its own pipeline and paint.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Copy {
     transform: Option<[f32; 6]>,
     pipeline: Pipeline,
     paint: PaintStroke,
-    /// How many of the pipeline's committed points the paint has.
-    done: usize,
 }
 
 /// A stroke with paint behaviours, painted on the worker.
 #[derive(Debug)]
 pub(crate) struct Painter {
+    /// The stroke itself. Shared only while the tiles it changed are
+    /// laid for the live view, with the jobs that lay them.
+    core: Arc<Core>,
+    /// The threads big work is shared with, when there are some.
+    pool: Option<Arc<JobPool>>,
+}
+
+/// The stroke a [`Painter`] paints: what laying a tile reads.
+#[derive(Clone, Debug)]
+pub(crate) struct Core {
     copies: Vec<Copy>,
     lay: Lay,
     wet: bool,
     snapshot: Arc<Snapshot>,
     keep_alpha: bool,
     closed: bool,
+}
+
+/// Tiles laid for the live view: each with its pixels (straight RGBA8),
+/// or `None` where it shows the layer as it was.
+type LaidTiles = Vec<(TileKey, Option<Box<[u8]>>)>;
+
+/// Fewer changed tiles than this are laid on one thread.
+const WORTH_SHARING: usize = 12;
+
+impl std::ops::Deref for Painter {
+    type Target = Core;
+
+    fn deref(&self) -> &Core {
+        &self.core
+    }
+}
+
+impl std::ops::DerefMut for Painter {
+    /// The stroke, to change it. No job holds it between two calls of
+    /// [`Painter::laid`], so nothing is copied.
+    fn deref_mut(&mut self) -> &mut Core {
+        Arc::make_mut(&mut self.core)
+    }
 }
 
 impl Painter {
@@ -118,20 +149,39 @@ impl Painter {
                     transform,
                     pipeline,
                     paint,
-                    done: 0,
                 }
             })
             .collect();
         let lay = copies[0].paint.lay();
         let wet = copies[0].paint.is_wet();
         Self {
-            copies,
-            lay,
-            wet,
-            snapshot: Arc::new(Snapshot(canvas.snapshot)),
-            keep_alpha: canvas.keep_alpha,
-            closed: false,
+            core: Arc::new(Core {
+                copies,
+                lay,
+                wet,
+                snapshot: Arc::new(Snapshot(canvas.snapshot)),
+                keep_alpha: canvas.keep_alpha,
+                closed: false,
+            }),
+            pool: None,
         }
+    }
+
+    /// Lets the stroke share its big work (a big dab, many changed
+    /// tiles to lay) with `pool`'s threads. The bytes stay the same.
+    pub(crate) fn share(&mut self, pool: Arc<JobPool>) {
+        let bands = pool.threads().clamp(1, super::MOST_BANDS);
+        for copy in &mut self.copies {
+            copy.paint.share(Arc::clone(&pool), bands);
+        }
+        self.pool = Some(pool);
+    }
+
+    /// What went wrong on the pool's threads, if anything did.
+    pub(crate) fn failure(&self) -> Option<String> {
+        self.copies
+            .iter()
+            .find_map(|copy| copy.paint.failure().map(str::to_owned))
     }
 
     /// Lets go of the snapshot of the layer (see
@@ -141,7 +191,7 @@ impl Painter {
     }
 
     /// `true` once the pen has lifted and everything is laid.
-    pub(crate) const fn is_closed(&self) -> bool {
+    pub(crate) fn is_closed(&self) -> bool {
         self.closed
     }
 
@@ -151,15 +201,17 @@ impl Painter {
         let backdrop: Option<&dyn Backdrop> =
             self.wet.then_some(snapshot.as_ref() as &dyn Backdrop);
         let mut work = 0_u64;
-        for copy in &mut self.copies {
+        let core: &mut Core = self;
+        for copy in &mut core.copies {
             let sample = copy
                 .transform
                 .as_ref()
                 .map_or(sample, |m| through(&sample, m));
             copy.pipeline.push(sample);
-            let committed = copy.pipeline.committed();
-            if committed.len() > copy.done {
-                let fresh = &committed[copy.done..];
+            // The points are the paint's from here: the pipeline keeps
+            // none of them, however long the stroke gets.
+            let fresh = copy.pipeline.take_committed();
+            if !fresh.is_empty() {
                 work += fresh
                     .iter()
                     .map(|p| {
@@ -167,21 +219,26 @@ impl Painter {
                         (d * d) as u64
                     })
                     .sum::<u64>();
-                copy.paint.commit(fresh, backdrop);
-                copy.done = committed.len();
+                copy.paint.commit(&fresh, backdrop);
             }
             if sample.kind != Kind::Up {
                 let tail = copy.pipeline.tail();
                 copy.paint.hold(sample.time, tail.last(), backdrop);
             }
         }
-        if self.copies.iter().all(|copy| copy.pipeline.is_done()) {
-            for copy in &mut self.copies {
+        if core.copies.iter().all(|copy| copy.pipeline.is_done()) {
+            for copy in &mut core.copies {
                 copy.paint.finish(backdrop);
             }
-            self.closed = true;
+            core.closed = true;
         }
         work
+    }
+
+    /// How many stroke points the stroke holds on to (its pipelines'):
+    /// bounded, however long the stroke is.
+    pub(crate) fn held(&self) -> usize {
+        self.copies.iter().map(|copy| copy.pipeline.held()).sum()
     }
 
     /// Draws the provisional tail of every copy.
@@ -224,6 +281,51 @@ impl Painter {
         keys
     }
 
+    /// The laid pixels of tiles `keys`, for the live view: many of them
+    /// on the pool's threads at once, each tile on its own.
+    ///
+    /// # Errors
+    /// When a job of the pool failed.
+    pub(crate) fn laid(&self, keys: &[TileKey]) -> Result<LaidTiles, String> {
+        let lay = |core: &Core, keys: &[TileKey]| -> LaidTiles {
+            keys.iter().map(|&key| (key, core.laid_tile(key))).collect()
+        };
+        let shared = self
+            .pool
+            .as_ref()
+            .filter(|pool| pool.threads() > 1 && keys.len() >= WORTH_SHARING);
+        let Some(pool) = shared else {
+            return Ok(lay(&self.core, keys));
+        };
+        let runs = pool.threads().clamp(1, super::MOST_BANDS);
+        let per = keys.len().div_ceil(runs);
+        let mut chunks = keys.chunks(per);
+        let first = chunks.next().unwrap_or(&[]);
+        let jobs: Vec<_> = chunks
+            .map(|chunk| {
+                let (core, chunk) = (Arc::clone(&self.core), chunk.to_vec());
+                pool.spawn("brush tiles", move |_| {
+                    let laid = lay(&core, &chunk);
+                    // Let go before the answer goes back, so the stroke
+                    // is the painter's alone again.
+                    drop(core);
+                    Ok(laid)
+                })
+            })
+            .collect();
+        let mut laid = lay(&self.core, first);
+        let mut failed = None;
+        for job in jobs {
+            match job.wait() {
+                Ok(part) => laid.extend(part),
+                Err(error) => failed = Some(error.to_string()),
+            }
+        }
+        failed.map_or(Ok(laid), Err)
+    }
+}
+
+impl Core {
     /// The pixels the stroke spans so far.
     pub(crate) fn bounds(&self) -> Option<PixelRect> {
         self.copies
@@ -281,27 +383,14 @@ impl Painter {
         if self.wet {
             let backdrop = self.snapshot.as_ref();
             let bytes = tile.bytes_mut()?;
-            for y in 0..TILE {
-                for x in 0..TILE {
-                    let (lx, ly) = (ox + x, oy + y);
-                    // Each copy over the ones before it, where it mixed.
-                    let Some(copy) = self
-                        .copies
-                        .iter()
-                        .rev()
-                        .find(|copy| copy.paint.wet_touched(lx, ly))
-                    else {
-                        continue;
-                    };
-                    let Some(pixel) = copy.paint.wet_pixel(backdrop, lx, ly, self.keep_alpha)
-                    else {
-                        continue;
-                    };
-                    let i = ((y * TILE + x) * 4) as usize;
-                    for (b, v) in bytes[i..i + 4].iter_mut().zip(pixel) {
-                        *b = u8::from_unit(v);
-                    }
-                }
+            // Each copy over the ones before it, where it mixed.
+            for copy in &self.copies {
+                copy.paint
+                    .wet_tile(backdrop, key, self.keep_alpha, |at, pixel| {
+                        for (b, v) in bytes[at * 4..at * 4 + 4].iter_mut().zip(pixel) {
+                            *b = u8::from_unit(v);
+                        }
+                    });
             }
         } else {
             let rect = PixelRect {
@@ -315,11 +404,6 @@ impl Painter {
         }
         let bytes = tile.bytes()?;
         (bytes != before.as_slice()).then(|| bytes.to_vec().into_boxed_slice())
-    }
-
-    /// The laid pixels of tiles `keys`, for the live view.
-    pub(crate) fn laid(&self, keys: &[TileKey]) -> Vec<(TileKey, Option<Box<[u8]>>)> {
-        keys.iter().map(|&key| (key, self.laid_tile(key))).collect()
     }
 
     /// Merges the finished stroke into `raster` (its pixel `(0, 0)` is

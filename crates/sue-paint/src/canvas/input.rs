@@ -254,6 +254,11 @@ impl SuePaint {
                     pressed: true,
                     modifiers,
                 } => {
+                    // A stroke still settling lands first, so the press
+                    // finds the picture as that stroke leaves it.
+                    if self.engine_ending() {
+                        self.engine_settle(cx);
+                    }
                     // Change Canvas Size open: its box's handles take
                     // the press, though the dialog holds the rest.
                     if button == PointerButton::Primary
@@ -389,6 +394,10 @@ impl SuePaint {
         // The new engine's stroke: this frame's samples to its worker, and
         // what it laid since the last frame.
         self.engine_frame(viewport, size, cx);
+        if self.engine_ending() {
+            // The worker is still laying a lifted stroke: a quiet mark.
+            ctx.set_cursor_icon(egui::CursorIcon::Progress);
+        }
         if self.gesture.is_some() {
             ctx.request_repaint();
         } else if let Some(doc) = self.docs.get_mut(self.active) {

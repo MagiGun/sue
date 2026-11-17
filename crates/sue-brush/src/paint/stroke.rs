@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use sue_core::RasterTile2D;
+use sue_core::{JobPool, RasterTile2D};
 use sue_model::BrushPreset;
 use sue_model::brush::{EngineKind, Spacing};
 
@@ -24,8 +24,8 @@ use super::lay::{EraseTarget, Lay, lay_field};
 use super::overflow::Region;
 use super::plan::{PlanSettings, Planned, Planner, edge_of};
 use super::settings::{Behaviours, DualBrush, TipOrder};
-use super::stamp::{Tips, stamp_coverage};
-use super::wet::{Backdrop, Wet, WetCanvas, blender};
+use super::stamp::{Tips, stamp_coverage, stamp_coverage_shared};
+use super::wet::{Backdrop, SharedTips, Wet, WetCanvas, blender};
 use crate::buffer::{Combine, MergeError, StrokeBuffer, TILE, TileKey};
 use crate::input::StrokePoint;
 use crate::raster::{Disc, PixelRect, Ribbon, RibbonPoint, TipImage};
@@ -63,7 +63,7 @@ pub struct Resources {
 enum Target {
     Coverage(StrokeBuffer),
     Color(ColorBuffer),
-    Wet(WetCanvas),
+    Wet(Box<WetCanvas>),
 }
 
 /// A ribbon's path so far: one tip picture bent along the whole stroke.
@@ -131,6 +131,17 @@ pub struct PaintStroke {
     /// A ribbon brush (its tip bent along the stroke), when the stroke
     /// is one.
     ribbon: Option<RibbonPath>,
+    /// The threads big dabs are laid on, when the stroke has some
+    /// ([`Self::share`]).
+    pool: Option<Arc<JobPool>>,
+    /// What went wrong on those threads, if anything did: the stroke
+    /// cannot be trusted any more.
+    failed: Option<String>,
+    /// How many runs a big dab's rows are worked out in.
+    runs: usize,
+    /// A buffer big dabs' coverage is worked out in, kept from dab to
+    /// dab.
+    cover: Vec<f32>,
 }
 
 impl PaintStroke {
@@ -158,7 +169,7 @@ impl PaintStroke {
         }
         .or_else(|| preset.mix.map(|mixing| Wet::new(mixing, 1.0)));
         let target = match wet {
-            Some(wet) => Target::Wet(
+            Some(wet) => Target::Wet(Box::new(
                 // A brush with paint of its own lays it once a stroke,
                 // unless it builds up; a blend tool's dabs stack.
                 WetCanvas::new(wet, jitter.main()).capped(
@@ -166,7 +177,7 @@ impl PaintStroke {
                         && wet.amount > 0.0
                         && !matches!(preset.engine, EngineKind::Blend(_)),
                 ),
-            ),
+            )),
             None if jitter.varies() => {
                 Target::Color(ColorBuffer::new(combine, behaviours.tip_blend))
             }
@@ -254,7 +265,30 @@ impl PaintStroke {
             edge,
             texture,
             overflow: resources.overflow,
+            pool: None,
+            failed: None,
+            runs: 1,
+            cover: Vec::new(),
         }
+    }
+
+    /// Lets the stroke lay its big dabs on `pool`'s threads, `bands` of
+    /// them at most (1 to 8). The dabs still go down one after another
+    /// and every pixel is worked out the same way, so the stroke lays
+    /// the same bytes as on one thread.
+    pub fn share(&mut self, pool: Arc<JobPool>, bands: usize) {
+        if let Target::Wet(canvas) = &mut self.target {
+            canvas.sharing(bands);
+        }
+        self.runs = bands.clamp(1, 8);
+        self.pool = Some(pool);
+    }
+
+    /// What went wrong on the pool's threads, if anything did: the
+    /// stroke cannot be trusted any more.
+    #[must_use]
+    pub fn failure(&self) -> Option<&str> {
+        self.failed.as_deref()
     }
 
     /// `true` when the stroke mixes with the picture (a wet canvas).
@@ -351,7 +385,30 @@ impl PaintStroke {
                 } else {
                     buffer.committed()
                 };
-                stamp_coverage(&mut painter, dabs, &tips, texture);
+                match self.pool.as_ref().filter(|pool| pool.threads() > 1) {
+                    Some(pool) => {
+                        let shared = SharedTips {
+                            pictures: Arc::clone(&self.pictures),
+                            edge: self.edge,
+                            texture: self
+                                .texture
+                                .as_ref()
+                                .filter(|(_, settings)| settings.per_dab)
+                                .cloned(),
+                        };
+                        if let Err(error) = stamp_coverage_shared(
+                            &mut painter,
+                            dabs,
+                            &shared,
+                            self.runs,
+                            pool,
+                            &mut self.cover,
+                        ) {
+                            self.failed = Some(error);
+                        }
+                    }
+                    None => stamp_coverage(&mut painter, dabs, &tips, texture),
+                }
             }
             Target::Color(buffer) => {
                 if tail {
@@ -363,7 +420,23 @@ impl PaintStroke {
                 // A wet stroke reads what it laid a moment before, so
                 // only final points paint it.
                 if let (false, Some(backdrop)) = (tail, backdrop) {
-                    canvas.stamp(backdrop, dabs, &tips, texture);
+                    match &self.pool {
+                        Some(pool) => {
+                            let shared = SharedTips {
+                                pictures: Arc::clone(&self.pictures),
+                                edge: self.edge,
+                                texture: self
+                                    .texture
+                                    .as_ref()
+                                    .filter(|(_, settings)| settings.per_dab)
+                                    .cloned(),
+                            };
+                            if let Err(error) = canvas.stamp_shared(backdrop, dabs, &shared, pool) {
+                                self.failed = Some(error);
+                            }
+                        }
+                        None => canvas.stamp(backdrop, dabs, &tips, texture),
+                    }
                 }
             }
         }
@@ -664,32 +737,77 @@ impl PaintStroke {
         }
     }
 
+    /// For a mixing stroke, [`Self::wet_pixel`] for every pixel of tile
+    /// `key` the stroke changed: `each` is given the pixel's place in
+    /// the tile (row times the tile's side plus column) and its color.
+    /// Answers `false`, having called nothing, for a stroke that is not
+    /// wet or a tile it never met.
+    pub fn wet_tile(
+        &self,
+        backdrop: &dyn Backdrop,
+        key: TileKey,
+        keep_alpha: bool,
+        each: impl FnMut(usize, [f32; 4]),
+    ) -> bool {
+        match &self.target {
+            Target::Wet(canvas) => {
+                let paper = self.paper();
+                canvas.laid_tile(
+                    backdrop,
+                    key,
+                    self.overflow.as_deref(),
+                    paper.as_ref(),
+                    keep_alpha,
+                    each,
+                )
+            }
+            _ => false,
+        }
+    }
+
     /// The tiles whose laid pixels may have changed since the last call,
     /// in order: those the stroke's dabs (and its dual brush's) touched,
     /// and around them as far as the shaping of the whole stroke reads
     /// (a watercolor edge).
     pub fn take_dirty(&mut self) -> Vec<TileKey> {
-        let mut keys: Vec<TileKey> = match &mut self.target {
-            Target::Coverage(buffer) => buffer.take_dirty(),
-            Target::Color(buffer) => buffer.take_dirty(),
-            Target::Wet(canvas) => canvas.take_dirty(),
+        let apron = self.finishing(false).apron();
+        // A whole tile, for what says only which tile changed.
+        let whole = |key: TileKey| {
+            let [x, y] = key.origin();
+            let rect = PixelRect {
+                x0: x,
+                y0: y,
+                x1: x + TILE,
+                y1: y + TILE,
+            };
+            (key, rect)
+        };
+        let mut changed: Vec<(TileKey, PixelRect)> = match &mut self.target {
+            // Coverage knows which pixels of a tile changed: the shaping
+            // reads an apron around each, no further.
+            Target::Coverage(buffer) if apron > 0 => buffer.take_dirty_rects(),
+            Target::Coverage(buffer) => buffer.take_dirty().into_iter().map(whole).collect(),
+            Target::Color(buffer) => buffer.take_dirty().into_iter().map(whole).collect(),
+            Target::Wet(canvas) => canvas.take_dirty().into_iter().map(whole).collect(),
         };
         if let Some(dual) = &mut self.dual {
-            keys.extend(dual.buffer.take_dirty());
+            changed.extend(dual.buffer.take_dirty().into_iter().map(whole));
         }
-        let apron = self.finishing(false).apron();
-        if apron > 0 && !keys.is_empty() {
-            let reach = (apron + TILE - 1) / TILE;
-            let mut grown = Vec::with_capacity(keys.len() * 9);
-            for key in &keys {
-                let [x, y] = key.origin();
-                for dy in -reach..=reach {
-                    for dx in -reach..=reach {
-                        grown.push(TileKey::of_pixel(x + dx * TILE, y + dy * TILE));
-                    }
+        let mut keys: Vec<TileKey> = Vec::with_capacity(changed.len());
+        for (key, rect) in changed {
+            if apron == 0 {
+                keys.push(key);
+                continue;
+            }
+            let (k0, k1) = (
+                TileKey::of_pixel(rect.x0 - apron, rect.y0 - apron),
+                TileKey::of_pixel(rect.x1 - 1 + apron, rect.y1 - 1 + apron),
+            );
+            for y in k0.y..=k1.y {
+                for x in k0.x..=k1.x {
+                    keys.push(TileKey { x, y });
                 }
             }
-            keys = grown;
         }
         keys.sort_unstable();
         keys.dedup();

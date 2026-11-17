@@ -99,6 +99,9 @@ pub(crate) struct Shaper {
     /// tapers.
     pending: Vec<StrokePoint>,
     committed: Vec<StrokePoint>,
+    /// The newest committed point, once the committed points were
+    /// taken away ([`Self::take_committed`]).
+    taken_last: Option<StrokePoint>,
     /// The first point's time.
     start: Option<f64>,
     /// The speeds seen over the starting time: their sum and count.
@@ -135,6 +138,7 @@ impl Shaper {
             },
             pending: Vec::new(),
             committed: Vec::new(),
+            taken_last: None,
             start: None,
             speeds: (0.0, 0),
             start_speed: None,
@@ -185,7 +189,24 @@ impl Shaper {
 
     /// The newest point taken so far, pending or committed.
     pub fn last(&self) -> Option<&StrokePoint> {
-        self.pending.last().or_else(|| self.committed.last())
+        self.pending
+            .last()
+            .or_else(|| self.committed.last())
+            .or(self.taken_last.as_ref())
+    }
+
+    /// How many points are held: committed and not taken, and pending.
+    pub fn held(&self) -> usize {
+        self.committed.len() + self.pending.len()
+    }
+
+    /// Takes the committed points away, so a long stroke does not keep
+    /// every point it ever made: whoever lays them has them now.
+    pub fn take_committed(&mut self) -> Vec<StrokePoint> {
+        if let Some(last) = self.committed.last() {
+            self.taken_last = Some(last.clone());
+        }
+        std::mem::take(&mut self.committed)
     }
 
     /// Notes a point's speed while the starting time lasts.

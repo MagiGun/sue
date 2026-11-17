@@ -99,6 +99,11 @@ pub(crate) fn shortcut_table() -> &'static [sue_wm::shortcuts::Shortcut] {
 impl SuePaint {
     /// Runs a command of the menus, the command bar or a shortcut.
     pub(crate) fn run(&mut self, command: &str, cx: &mut AppletContext<'_>) {
+        // A lifted stroke its worker is still laying lands first, so the
+        // command finds the picture and the history in order.
+        if self.engine_ending() {
+            self.engine_settle(cx);
+        }
         // Words being typed are kept before anything else happens.
         self.finish_typing(cx);
         // A tool's command (a key, a script or Auto Actions) picks the
