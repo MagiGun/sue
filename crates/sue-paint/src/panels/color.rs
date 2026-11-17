@@ -19,6 +19,101 @@ const LABEL_ROWS: f32 = 0.9;
 /// How many colors a color slider's track is painted with.
 const STOPS: usize = 13;
 
+/// Where the Color Wheel palette puts its parts in `body`: the wheel as
+/// large as the palette allows, the main and sub color circles at its
+/// lower left, and the drawing color's red, green and blue as a small
+/// table at its lower right, so the three read as one balanced group.
+/// A palette too narrow for that puts the circles and the numbers in a
+/// row under the wheel.
+struct WheelLayout {
+    /// The wheel's square.
+    wheel: Rect,
+    /// The center of the main color circle (see `color_circles`).
+    main_at: egui::Pos2,
+    /// One cell per channel: the letter at its left, the number at its
+    /// right.
+    values: [Rect; 3],
+}
+
+impl WheelLayout {
+    fn new(ui: &Ui, body: Rect, theme: &Theme) -> Self {
+        // The color circles' reach around the main circle's center, as
+        // `color_circles` draws them: the sub circle down and right, the
+        // swap button above it, the transparent color under both.
+        let radius = theme.space(Space::S5);
+        let swap = theme.space(Space::S5) + theme.space(Space::S1);
+        let above = radius + swap * 0.85;
+        let below = radius * 3.2 + swap;
+        let circles = vec2(radius * 3.25, above + below);
+        // A number cell: a letter, a gap and three digits.
+        let font = theme.text_font(TextRole::Body);
+        let painter = ui.painter();
+        let measure = |text: &str| {
+            painter
+                .layout_no_wrap(text.to_owned(), font.clone(), theme.text)
+                .size()
+        };
+        let digits = measure("888");
+        let letter = measure("G");
+        let gap = theme.space(Space::S4);
+        let cell = vec2(
+            letter.x + theme.space(Space::S3) + digits.x,
+            digits.y.max(letter.y) + theme.space(Space::S2),
+        );
+        let row = Density::of(ui).control_height().max(cell.y);
+        // Beside: circles, wheel, numbers in one band.
+        let flanks = circles.x.max(cell.x) * 2.0 + gap * 2.0;
+        let beside = (body.width() - flanks).min(body.height());
+        // Under: the wheel above a band that holds the circles.
+        let under = body.width().min(body.height() - circles.y - gap);
+        if beside >= under {
+            let side = beside.max(circles.y);
+            let wheel = Rect::from_center_size(
+                pos2(body.center().x, body.top() + side / 2.0),
+                vec2(side, side),
+            );
+            // Both flanks sit on the wheel's lower edge, centered in the
+            // room beside it.
+            let flank = (wheel.left() - body.left()).max(circles.x);
+            let main_at = pos2(
+                body.left() + (flank - circles.x) / 2.0 + radius,
+                wheel.bottom() - below,
+            );
+            let x = wheel.right() + (body.right() - wheel.right() - cell.x) / 2.0;
+            let top = wheel.bottom() - row * 3.0;
+            let values = [0.0, 1.0, 2.0].map(|line| {
+                Rect::from_min_size(pos2(x, top + line * row + (row - cell.y) / 2.0), cell)
+            });
+            Self {
+                wheel,
+                main_at,
+                values,
+            }
+        } else {
+            let side = under.max(row * 3.0);
+            let wheel = Rect::from_min_size(
+                pos2(body.center().x - side / 2.0, body.top()),
+                vec2(side, side),
+            );
+            let band = wheel.bottom() + gap;
+            let main_at = pos2(wheel.left() + radius, band + above);
+            // The three cells spread over the rest of the wheel's width,
+            // level with the circles' middle.
+            let start = main_at.x + circles.x - radius + gap;
+            let room = (wheel.right() - start).max(cell.x * 3.0);
+            let step = (room - cell.x) / 2.0;
+            let y = band + circles.y / 2.0 - cell.y / 2.0;
+            let values = [0.0, 1.0, 2.0]
+                .map(|index| Rect::from_min_size(pos2(start + index * step, y), cell));
+            Self {
+                wheel,
+                main_at,
+                values,
+            }
+        }
+    }
+}
+
 /// The colors along a color slider's track: what `at(t)` gives from `t`
 /// 0 to 1.
 fn stops(at: impl Fn(f32) -> [u8; 3]) -> Vec<egui::Color32> {
@@ -362,14 +457,9 @@ impl SuePaint {
     }
 
     fn color_wheel(&mut self, ui: &mut Ui, body: Rect, theme: &Theme) {
-        // Room under the wheel for the color circles and the numbers.
-        let density = Density::of(ui);
-        let below = density.control_height() * 3.0;
-        let side = body.width().min(body.height() - below).max(below);
-        let area = Rect::from_min_size(
-            pos2(body.center().x - side / 2.0, body.top()),
-            vec2(side, side),
-        );
+        let layout = WheelLayout::new(ui, body, theme);
+        let area = layout.wheel;
+        let side = area.width();
         // Sue's own color wheel, the one every color control shares.
         let [r, g, b] = self.drawing_color();
         let mut rgba = [r, g, b, u8::MAX];
@@ -382,31 +472,25 @@ impl SuePaint {
             }
             self.set_drawing_color([rgba[0], rgba[1], rgba[2]]);
         }
-        // The main and sub color under the wheel, then the numbers.
-        let row = Rect::from_min_max(
-            pos2(body.left(), area.bottom() + theme.space(Space::S3)),
-            body.max,
-        );
-        let circles = theme.space(Space::S6);
-        self.color_circles(ui, row.min + vec2(circles, circles), theme);
+        // The main and sub color beside (or under) the wheel, and the
+        // numbers of the drawing color.
+        self.color_circles(ui, layout.main_at, theme);
         let rgb = self.drawing_color();
-        let font = theme.text_font(TextRole::Caption);
-        let start = row.left() + circles * 3.0 + theme.space(Space::S2);
-        let step = ((body.right() - start) / 3.0).max(circles * 2.0);
+        let font = theme.text_font(TextRole::Body);
         let letters = [tr!("color-r"), tr!("color-g"), tr!("color-b")];
-        for (index, (value, letter)) in rgb.iter().zip(letters).enumerate() {
-            let x = start + index as f32 * step;
-            let y = row.top() + circles;
-            let name = ui.painter().text(
-                pos2(x, y),
+        for ((value, letter), cell) in rgb.iter().zip(letters).zip(layout.values) {
+            // The letter at the cell's left, the number at its right, so
+            // the digits of the three line up whatever their count.
+            ui.painter().text(
+                cell.left_center(),
                 Align2::LEFT_CENTER,
                 letter,
                 font.clone(),
                 theme.text_muted(),
             );
             ui.painter().text(
-                pos2(name.right() + theme.space(Space::S1), y),
-                Align2::LEFT_CENTER,
+                cell.right_center(),
+                Align2::RIGHT_CENTER,
                 value.to_string(),
                 font.clone(),
                 theme.text,
