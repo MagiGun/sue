@@ -795,6 +795,8 @@ pub fn menus() -> Vec<Menu> {
                     vec![
                         item("layer.ruler.delete"),
                         item("layer.ruler.show"),
+                        item("layer.ruler.link_layer"),
+                        item("layer.ruler.link_guide"),
                         SEP,
                         item("layer.ruler.perspective"),
                         item("layer.ruler.symmetry"),

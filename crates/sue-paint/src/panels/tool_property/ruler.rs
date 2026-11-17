@@ -13,9 +13,55 @@ pub(super) fn ruler_properties(
     sub: &mut SubTool,
 ) -> Option<&'static str> {
     let mut command = None;
+    // Where the ruler is laid: on the layer being edited, or on a new
+    // layer of its own.
+    if sub.mode != 1 {
+        rows.check(
+            ui,
+            "ruler-at-editing-layer",
+            Category::Operation,
+            &tr!("create-at-editing-layer"),
+            Some(&tr!("create-at-editing-layer-hint")),
+            &mut sub.at_editing_layer,
+        );
+    }
+    if matches!(sub.mode, 5 | 2) {
+        rows.slider(
+            ui,
+            "ruler-step-of-angle",
+            Category::Operation,
+            &tr!("step-of-angle"),
+            &mut sub.angle_step,
+            0.0..=90.0,
+            &tr!("degrees-short"),
+            false,
+        );
+    }
     match sub.mode {
+        crate::tools::GUIDE_RULER => {
+            rows.hint(ui, &tr!("drag-lay-guide"));
+        }
         6 => {
-            rows.hint(ui, &tr!("click-place-points-click-last-one"));
+            rows.choice_u8(
+                ui,
+                "ruler-curve",
+                Category::Operation,
+                &tr!("curve"),
+                &mut sub.kind,
+                &[
+                    tr!("curve-spline"),
+                    tr!("curve-quadratic-bezier"),
+                    tr!("curve-cubic-bezier"),
+                ],
+            );
+            rows.hint(
+                ui,
+                &match sub.kind {
+                    1 => tr!("click-quadratic-bezier"),
+                    2 => tr!("click-cubic-bezier"),
+                    _ => tr!("click-place-points-click-last-one"),
+                },
+            );
             rows.hint(ui, &tr!("ctrl-1-snap-ruler-turns-rulers"));
         }
         7 => {
@@ -31,6 +77,29 @@ pub(super) fn ruler_properties(
         }
         8 => rows.hint(ui, &tr!("draw-ruler-freehand-strokes-start-follow")),
         5 => {
+            let mut marks = sub.ruler_scale >= 1.0;
+            if rows.check(
+                ui,
+                "ruler-scale",
+                Category::Operation,
+                &tr!("ruler-scale"),
+                Some(&tr!("ruler-scale-hint")),
+                &mut marks,
+            ) {
+                sub.ruler_scale = if marks { 10.0 } else { 0.0 };
+            }
+            if marks {
+                rows.slider(
+                    ui,
+                    "ruler-scale-step",
+                    Category::Operation,
+                    &tr!("ruler-scale-step"),
+                    &mut sub.ruler_scale,
+                    1.0..=200.0,
+                    &tr!("px"),
+                    false,
+                );
+            }
             rows.hint(ui, &tr!("drag-lay-straight-ruler-strokes-start"));
             rows.hint(ui, &tr!("ctrl-1-snap-ruler-turns-off"));
         }

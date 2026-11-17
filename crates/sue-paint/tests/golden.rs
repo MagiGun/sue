@@ -2763,6 +2763,7 @@ fn generate_the_comic() {
             rulers::Path::curve(&[[6.0, 6.0], [20.0, 12.0], [30.0, 6.0]]),
             rulers::Path::figure([40.0, 40.0], [56.0, 52.0], true),
         ],
+        ..rulers::Rulers::default()
     };
     for key in rulers::ALL {
         apply(&mut arena, rulers::edit(page, key, all.text(key), "Ruler"));

@@ -15,6 +15,7 @@ mod icons;
 mod menus;
 mod p6_brush_rows;
 mod p6_tools_a;
+mod p6_tools_b;
 mod paint_3d;
 mod paint_canvas;
 mod paint_canvas_chrome;
@@ -126,6 +127,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     // 37a to 37n. Tool Property of the view, pick and move tools, the
     // transform's settings and Change Canvas Size's box on the canvas.
     p6_tools_a::scenes(tour)?;
+    // 36p1 to 36p11. Tool Property of the comic, figure, text, ruler and
+    // Correct Line sub tools (Phase 6).
+    p6_tools_b::tool_rows(tour)?;
 
     // 12 and 13. Back to the Hub, then into Sue Paint again.
     shell::entering(tour)?;

@@ -27,6 +27,76 @@ pub const SYMMETRY: &str = "ruler.symmetry";
 pub const PATHS: &str = "ruler.paths";
 /// Every ruler a picture keeps.
 pub const ALL: [&str; 5] = [LINEAR, SPECIAL, PERSPECTIVE, SYMMETRY, PATHS];
+/// Guides: straight lines right across the picture, level (`h:y`) or
+/// upright (`v:x`), apart by spaces. Clip Studio Paint's Guide.
+pub const GUIDES: &str = "ruler.guides";
+/// The linear ruler's scale: unit marks this many picture pixels apart
+/// along it (a number as text; none, no marks).
+pub const LINEAR_SCALE: &str = "ruler.linear_scale";
+/// What a picture keeps beside [`ALL`]: guides and the linear ruler's
+/// scale (not written to `.clip` files).
+pub const MORE: [&str; 2] = [GUIDES, LINEAR_SCALE];
+/// The rulers move with the layer they belong to (`Bool`; Link Ruler to
+/// Layer).
+pub const LINK_LAYER: &str = "ruler.link_layer";
+/// Where the rulers' layer was when they were linked to it, `x,y`: they
+/// show moved by how far it has moved since.
+pub const ANCHOR: &str = "ruler.anchor";
+/// Guides show and guide strokes only where the rulers do (`Bool`; Link
+/// guide to ruler); off, they show on every layer.
+pub const LINK_GUIDE: &str = "ruler.link_guide";
+
+/// A guide: a straight line right across the picture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GuideLine {
+    /// Upright, at `at` across; else level, at `at` down.
+    pub upright: bool,
+    /// Where it is, in picture pixels.
+    pub at: f32,
+}
+
+impl GuideLine {
+    fn text(self) -> String {
+        format!("{}:{}", if self.upright { "v" } else { "h" }, self.at)
+    }
+
+    fn from_text(text: &str) -> Option<Self> {
+        let (kind, at) = text.split_once(':')?;
+        let at = at.trim().parse().ok()?;
+        match kind {
+            "v" => Some(Self { upright: true, at }),
+            "h" => Some(Self { upright: false, at }),
+            _ => None,
+        }
+    }
+
+    /// The guide a drag from `from` to `to` lays: through where it began,
+    /// level when it runs more across than down, else upright.
+    #[must_use]
+    pub fn dragged(from: [f32; 2], to: [f32; 2]) -> Self {
+        let upright = (to[1] - from[1]).abs() > (to[0] - from[0]).abs();
+        Self {
+            upright,
+            at: if upright { from[0] } else { from[1] },
+        }
+    }
+
+    /// The guide as a line to follow.
+    #[must_use]
+    pub fn line(self) -> Guide {
+        if self.upright {
+            Guide::Line {
+                origin: [self.at, 0.0],
+                direction: [0.0, 1.0],
+            }
+        } else {
+            Guide::Line {
+                origin: [0.0, self.at],
+                direction: [1.0, 0.0],
+            }
+        }
+    }
+}
 
 /// A ruler along a path: a curve ruler, a figure ruler or one drawn with
 /// the ruler pen (picture pixels).
@@ -39,6 +109,39 @@ pub struct Path {
 }
 
 impl Path {
+    /// A Bezier curve ruler: from the first of `points` to the last, the
+    /// ones between pulling it (one for a quadratic curve, two for a
+    /// cubic), sampled every 2 pixels or so.
+    #[must_use]
+    pub fn bezier(points: &[[f32; 2]]) -> Self {
+        let n = points.len();
+        if n < 3 {
+            return Self::curve(points);
+        }
+        let reach: f32 = points
+            .windows(2)
+            .map(|pair| distance(pair[0], pair[1]))
+            .sum();
+        let steps = (reach / 2.0).ceil().clamp(8.0, 2000.0) as usize;
+        // De Casteljau: the curve of any number of points.
+        let at = |t: f32| {
+            let mut work = points.to_vec();
+            for round in 1..n {
+                for index in 0..n - round {
+                    let (a, b) = (work[index], work[index + 1]);
+                    work[index] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+                }
+            }
+            work[0]
+        };
+        Self {
+            points: (0..=steps)
+                .map(|step| at(step as f32 / steps as f32))
+                .collect(),
+            closed: false,
+        }
+    }
+
     /// A curve ruler through `points`: a smooth curve (Catmull-Rom) sampled
     /// every 2 pixels.
     #[must_use]
@@ -394,16 +497,56 @@ pub struct Rulers {
     pub symmetry: Option<([f32; 2], f32)>,
     /// Curve, figure and pen rulers.
     pub paths: Vec<Path>,
+    /// Guides.
+    pub guides: Vec<GuideLine>,
+    /// The linear ruler's unit marks, this many pixels apart.
+    pub linear_scale: Option<f32>,
 }
 
 impl Rulers {
-    /// The rulers on `picture`.
+    /// The rulers on `picture` where they show: moved with their layer
+    /// since they were linked to it ([`link_shift`]).
     #[must_use]
     pub fn of(arena: &Arena, picture: EntityId) -> Self {
+        let stored = Self::stored(arena, picture);
+        let shift = link_shift(arena, picture);
+        if shift == [0.0, 0.0] {
+            stored
+        } else {
+            stored.shifted(shift)
+        }
+    }
+
+    /// The rulers as `picture` keeps them, not moved with their layer.
+    #[must_use]
+    pub fn stored(arena: &Arena, picture: EntityId) -> Self {
         let Ok(entity) = arena.get_by_id(picture) else {
             return Self::default();
         };
-        let text = |key: &str| entity.property(key).and_then(Value::as_str);
+        Self::read(|key| entity.property(key).and_then(Value::as_str))
+    }
+
+    /// The rulers `seen` while `editing` is the layer edited: none where
+    /// their showing area leaves it out, but for guides not linked to
+    /// the rulers (Link guide to ruler off), which show everywhere.
+    #[must_use]
+    pub fn seen(arena: &Arena, picture: EntityId, editing: Option<EntityId>) -> Self {
+        let all = Self::of(arena, picture);
+        if shown(arena, picture, editing) {
+            return all;
+        }
+        if guides_linked(arena, picture) {
+            Self::default()
+        } else {
+            Self {
+                guides: all.guides,
+                ..Self::default()
+            }
+        }
+    }
+
+    /// The rulers that `text` gives for each key.
+    fn read<'t>(text: impl Fn(&str) -> Option<&'t str>) -> Self {
         Self {
             linear: text(LINEAR).and_then(|text| match numbers(text).as_slice() {
                 &[x0, y0, x1, y1] => Some([[x0, y0], [x1, y1]]),
@@ -418,6 +561,16 @@ impl Rulers {
             paths: text(PATHS)
                 .map(|text| text.split('|').filter_map(Path::from_text).collect())
                 .unwrap_or_default(),
+            guides: text(GUIDES)
+                .map(|text| {
+                    text.split_whitespace()
+                        .filter_map(GuideLine::from_text)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            linear_scale: text(LINEAR_SCALE)
+                .and_then(|text| text.trim().parse::<f32>().ok())
+                .filter(|step| *step >= 1.0),
         }
     }
 
@@ -448,6 +601,15 @@ impl Rulers {
                     closed: path.closed,
                 })
                 .collect(),
+            guides: self
+                .guides
+                .iter()
+                .map(|guide| GuideLine {
+                    at: guide.at + if guide.upright { by[0] } else { by[1] },
+                    ..*guide
+                })
+                .collect(),
+            linear_scale: self.linear_scale,
         }
     }
 
@@ -545,9 +707,166 @@ impl Rulers {
                     .collect::<Vec<_>>()
                     .join("|")
             }),
+            GUIDES => (!self.guides.is_empty()).then(|| {
+                self.guides
+                    .iter()
+                    .map(|guide| guide.text())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }),
+            LINEAR_SCALE => self.linear_scale.map(|step| step.to_string()),
             _ => None,
         }
     }
+}
+
+/// How far `picture`'s rulers show from where they are kept: how far the
+/// layer they belong to has moved since Link Ruler to Layer linked them
+/// (nothing while they are not linked).
+#[must_use]
+pub fn link_shift(arena: &Arena, picture: EntityId) -> [f32; 2] {
+    let Ok(entity) = arena.get_by_id(picture) else {
+        return [0.0, 0.0];
+    };
+    let linked = entity
+        .property(LINK_LAYER)
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let owner = entity.property(LAYER).and_then(Value::as_entity);
+    let (true, Some(owner)) = (linked, owner) else {
+        return [0.0, 0.0];
+    };
+    let Ok(layer) = arena.get_by_id(owner) else {
+        return [0.0, 0.0];
+    };
+    let now = sue_model::picture::LayerStyle::of(layer).offset;
+    let anchor = entity
+        .property(ANCHOR)
+        .and_then(Value::as_str)
+        .map(numbers)
+        .and_then(|values| match values.as_slice() {
+            &[x, y] => Some([x, y]),
+            _ => None,
+        })
+        .unwrap_or([0.0, 0.0]);
+    [now[0] as f32 - anchor[0], now[1] as f32 - anchor[1]]
+}
+
+/// `true` while `picture`'s rulers move with their layer (Link Ruler to
+/// Layer).
+#[must_use]
+pub fn layer_linked(arena: &Arena, picture: EntityId) -> bool {
+    flag(arena, picture, LINK_LAYER)
+}
+
+/// `true` while `picture`'s guides show only where its rulers do (Link
+/// guide to ruler).
+#[must_use]
+pub fn guides_linked(arena: &Arena, picture: EntityId) -> bool {
+    flag(arena, picture, LINK_GUIDE)
+}
+
+fn flag(arena: &Arena, picture: EntityId, key: &str) -> bool {
+    arena
+        .get_by_id(picture)
+        .ok()
+        .and_then(|entity| entity.property(key))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// The edit that sets `key` of `picture` to `text`, a ruler where it
+/// shows ([`Rulers::of`]): kept where that is before the rulers moved
+/// with their layer, so it shows where it was laid. Named `label`.
+#[must_use]
+pub fn edit_shown(
+    arena: &Arena,
+    picture: EntityId,
+    key: &str,
+    text: Option<String>,
+    label: &str,
+) -> Edit {
+    edit(picture, key, kept_text(arena, picture, key, text), label)
+}
+
+/// `text`, ruler `key` where it shows, as `picture` keeps it: moved back
+/// by how far the rulers' layer moved since they were linked to it.
+#[must_use]
+pub fn kept_text(
+    arena: &Arena,
+    picture: EntityId,
+    key: &str,
+    text: Option<String>,
+) -> Option<String> {
+    let shift = link_shift(arena, picture);
+    match text {
+        Some(text) if shift != [0.0, 0.0] => {
+            Rulers::read(|wanted| (wanted == key).then_some(text.as_str()))
+                .shifted([-shift[0], -shift[1]])
+                .text(key)
+                .or(Some(text))
+        }
+        other => other,
+    }
+}
+
+/// The edit that links `picture`'s rulers to their layer (`on`) or
+/// unlinks them, named `label`; the rulers stay where they show. Linked
+/// with no layer of their own, they take `current`. `None` when there is
+/// no such layer.
+#[must_use]
+pub fn link_layer_edit(
+    arena: &Arena,
+    picture: EntityId,
+    on: bool,
+    current: Option<EntityId>,
+    label: &str,
+) -> Option<Edit> {
+    let entity = arena.get_by_id(picture).ok()?;
+    if on {
+        let owner = entity
+            .property(LAYER)
+            .and_then(Value::as_entity)
+            .filter(|owner| arena.get_by_id(*owner).is_ok())
+            .or(current)?;
+        let at = sue_model::picture::LayerStyle::of(arena.get_by_id(owner).ok()?).offset;
+        let mut out = Edit::new(label)
+            .then(SetProperty::new(picture, LINK_LAYER, true))
+            .then(SetProperty::new(
+                picture,
+                ANCHOR,
+                format!("{},{}", at[0], at[1]),
+            ));
+        if entity.property(LAYER).and_then(Value::as_entity) != Some(owner) {
+            out = out.then(SetProperty::new(picture, LAYER, Value::Entity(owner)));
+        }
+        return Some(out);
+    }
+    // The rulers kept where they show now, then no link.
+    let shown = Rulers::of(arena, picture);
+    let mut out = Edit::new(label);
+    if link_shift(arena, picture) != [0.0, 0.0] {
+        for key in ALL.into_iter().chain(MORE) {
+            if let Some(text) = shown.text(key) {
+                out = out.then(SetProperty::new(picture, key, text));
+            }
+        }
+    }
+    Some(
+        out.then(SetProperty::remove(picture, LINK_LAYER))
+            .then(SetProperty::remove(picture, ANCHOR)),
+    )
+}
+
+/// The edit that links `picture`'s guides to its rulers' showing area
+/// (`on`) or shows them everywhere, named `label`.
+#[must_use]
+pub fn link_guide_edit(picture: EntityId, on: bool, label: &str) -> Edit {
+    Edit::new(label).then(if on {
+        SetProperty::new(picture, LINK_GUIDE, true)
+    } else {
+        SetProperty::remove(picture, LINK_GUIDE)
+    })
 }
 
 /// A part of a ruler that can be dragged.
@@ -746,6 +1065,19 @@ impl Snap {
                 direction,
             };
             if distance(line.project(start), start) <= reach {
+                return Some(Self::On(line));
+            }
+        }
+        if ruler {
+            // A guide the stroke starts on.
+            let near = rulers
+                .guides
+                .iter()
+                .map(|guide| guide.line())
+                .map(|line| (distance(line.project(start), start), line))
+                .filter(|(away, _)| *away <= reach)
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            if let Some((_, line)) = near {
                 return Some(Self::On(line));
             }
         }
@@ -1098,5 +1430,109 @@ mod tests {
             assert_eq!(ShowRange::from_id(range.id()), Some(range));
             assert!(!range.label().is_empty());
         }
+    }
+
+    #[test]
+    fn guides_read_back_and_linked_rulers_move_with_their_layer() {
+        use sue_core::{ReversibleTransaction, UndoStack};
+        // Guides and the scale round-trip through their text.
+        let rulers = Rulers {
+            guides: vec![
+                GuideLine {
+                    upright: false,
+                    at: 12.5,
+                },
+                GuideLine {
+                    upright: true,
+                    at: 40.0,
+                },
+            ],
+            linear: Some([[0.0, 0.0], [10.0, 0.0]]),
+            linear_scale: Some(8.0),
+            ..Rulers::default()
+        };
+        let text = |key: &str| rulers.text(key);
+        let (guides, scale) = (text(GUIDES).unwrap(), text(LINEAR_SCALE).unwrap());
+        let back = Rulers::read(|key| match key {
+            GUIDES => Some(guides.as_str()),
+            LINEAR_SCALE => Some(scale.as_str()),
+            LINEAR => Some("0,0,10,0"),
+            _ => None,
+        });
+        assert_eq!(back, rulers);
+        assert_eq!(
+            GuideLine::dragged([5.0, 9.0], [50.0, 12.0]),
+            GuideLine {
+                upright: false,
+                at: 9.0
+            }
+        );
+        // A stroke started on a guide follows it.
+        let mut snap = Snap::begin(&rulers, [30.0, 13.5], true, false, 4.0).unwrap();
+        assert!(near(snap.follow([60.0, 30.0], 0.0).unwrap(), [60.0, 12.5]));
+        // Linked to its layer, the ruler shows moved with it.
+        let mut arena = Arena::new();
+        let (mut make, picture) = crate::doc::create(&crate::doc::NewPicture {
+            name: "Rulers".to_owned(),
+            width: 64,
+            height: 64,
+            dpi: 72.0,
+            paper: None,
+            timelapse: false,
+        })
+        .unwrap();
+        make.apply(&mut arena).unwrap();
+        let layer = crate::doc::layers(&arena, picture).last().unwrap().id;
+        let mut stack = UndoStack::new();
+        stack
+            .apply(&mut arena, edit(picture, LINEAR, text(LINEAR), "Ruler"))
+            .unwrap();
+        let link = link_layer_edit(&arena, picture, true, Some(layer), "Link").unwrap();
+        stack.apply(&mut arena, link).unwrap();
+        assert!(layer_linked(&arena, picture));
+        stack
+            .apply(
+                &mut arena,
+                Edit::new("Move")
+                    .then(SetProperty::new(layer, sue_model::picture::X, 5_i64))
+                    .then(SetProperty::new(layer, sue_model::picture::Y, 3_i64)),
+            )
+            .unwrap();
+        assert_eq!(link_shift(&arena, picture), [5.0, 3.0]);
+        assert_eq!(
+            Rulers::of(&arena, picture).linear,
+            Some([[5.0, 3.0], [15.0, 3.0]])
+        );
+        assert_eq!(
+            Rulers::stored(&arena, picture).linear,
+            Some([[0.0, 0.0], [10.0, 0.0]])
+        );
+        // A ruler laid where it shows is kept where that is before the move.
+        let kept = kept_text(&arena, picture, LINEAR, Some("5,3,25,3".to_owned()));
+        assert_eq!(kept.as_deref(), Some("0,0,20,0"));
+        // Unlinked, the rulers stay where they show; undo puts all back.
+        let before = arena.get_by_id(picture).unwrap().clone();
+        let unlink = link_layer_edit(&arena, picture, false, None, "Unlink").unwrap();
+        stack.apply(&mut arena, unlink).unwrap();
+        assert!(!layer_linked(&arena, picture));
+        assert_eq!(
+            Rulers::of(&arena, picture).linear,
+            Some([[5.0, 3.0], [15.0, 3.0]])
+        );
+        stack.undo(&mut arena).unwrap();
+        assert_eq!(*arena.get_by_id(picture).unwrap(), before);
+        // Guides linked to the ruler hide with it.
+        stack
+            .apply(&mut arena, edit(picture, GUIDES, text(GUIDES), "Guide"))
+            .unwrap();
+        let elsewhere = ShowRange::EditingLayer.edit(picture, Some(layer), "Only");
+        stack.apply(&mut arena, elsewhere).unwrap();
+        assert_eq!(Rulers::seen(&arena, picture, None).guides.len(), 2);
+        assert!(Rulers::seen(&arena, picture, None).linear.is_none());
+        stack
+            .apply(&mut arena, link_guide_edit(picture, true, "Link guide"))
+            .unwrap();
+        assert!(Rulers::seen(&arena, picture, None).guides.is_empty());
+        assert_eq!(Rulers::seen(&arena, picture, Some(layer)).guides.len(), 2);
     }
 }

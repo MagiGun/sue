@@ -71,7 +71,7 @@ impl SuePaint {
                 return;
             }
         } else {
-            let ready = if filled(sub.mode) {
+            let ready = if filled(&sub) {
                 self.paintable(&cx.world.arena).map(|_| ())
             } else {
                 self.drawable(&cx.world.arena).map(|_| ())
@@ -248,10 +248,11 @@ impl SuePaint {
             speed,
             a,
             b,
-            count: if speed { 90 } else { 120 },
+            count: sub.effect.count,
             line: sub.tip.size.max(0.5),
             seed: (a[0].to_bits() ^ b[1].to_bits().rotate_left(7)) | 1,
             rgb: self.drawing_color(),
+            style: sub.effect.clamped(),
         };
         // The layer takes the sub tool's name (CTV-15).
         let name = crate::localize(&sub.name);

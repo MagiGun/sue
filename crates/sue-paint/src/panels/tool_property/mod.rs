@@ -11,6 +11,7 @@ mod brush;
 mod comic;
 mod correct;
 mod effect;
+mod figure;
 mod fill;
 mod lines;
 mod operation;
@@ -712,6 +713,10 @@ impl SuePaint {
                 }
                 let sub = self.toolbox.current_mut();
                 command = paint::paint_properties(ui, rows, tool, sub, &mut self.brush_work);
+                if tool == Tool::Figure {
+                    figure::figure_properties(ui, rows, sub);
+                }
+                paint::paint_properties(ui, rows, tool, sub);
             }
             Tool::Fill | Tool::AutoSelect => {
                 fill::fill_properties(ui, rows, tool, sub, &mut self.select_op);

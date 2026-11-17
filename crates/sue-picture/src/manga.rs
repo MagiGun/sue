@@ -121,6 +121,13 @@ pub fn signed_distance(polygon: &[[f32; 2]], p: [f32; 2]) -> f32 {
     out
 }
 
+/// How far `p` is outside panel `polygon`, convex or not (negative
+/// inside), as [`render_frames`] measures it.
+#[must_use]
+pub fn outside(polygon: &[[f32; 2]], p: [f32; 2]) -> f32 {
+    polygon_distance(polygon, p)
+}
+
 /// How far `p` is outside any simple polygon, convex or not (negative
 /// inside): the distance to its nearest edge, signed by the even-odd rule.
 fn polygon_distance(polygon: &[[f32; 2]], p: [f32; 2]) -> f32 {
@@ -555,6 +562,20 @@ fn ink_line(
     rgb: [u8; 3],
     profile: impl Fn(f32) -> f32,
 ) {
+    ink_path(raster, [from, to], 0.0, width, rgb, profile);
+}
+
+/// [`ink_line`] bowed to one side by `bend` times its length (a
+/// quadratic curve whose middle sits that far off the straight line;
+/// 0 is straight).
+fn ink_path(
+    raster: &mut RasterTile2D,
+    [from, to]: [[f32; 2]; 2],
+    bend: f32,
+    width: f32,
+    rgb: [u8; 3],
+    profile: impl Fn(f32) -> f32,
+) {
     use sue_brush::input::{Device, Kind, Sample, Settings};
     use sue_model::brush::{Binding, input, param};
     let mut preset = sue_model::BrushPreset::new("Pen");
@@ -578,9 +599,12 @@ fn ink_line(
     let steps = (length / 6.0).ceil().max(2.0) as u32;
     for step in 0..=steps {
         let t = step as f32 / steps as f32;
+        // The control point twice the bend off the middle puts the
+        // curve's middle one bend off it.
+        let off = 2.0 * bend * t * (1.0 - t) * 2.0;
         let at = [
-            from[0] + (to[0] - from[0]) * t,
-            from[1] + (to[1] - from[1]) * t,
+            from[0] + (to[0] - from[0]) * t - (to[1] - from[1]) * off,
+            from[1] + (to[1] - from[1]) * t + (to[0] - from[0]) * off,
         ];
         let kind = if step == 0 { Kind::Down } else { Kind::Move };
         stroke.samples.push(
@@ -646,6 +670,86 @@ pub fn focus_lines(
     });
 }
 
+/// How effect lines are laid, beyond where and how many: the settings
+/// of the Figure tool's saturated and speed line sub tools, kept with
+/// the lines they made so Tool Property changes them later.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EffectStyle {
+    /// How many lines.
+    pub count: u32,
+    /// Each line bowed to one side by this much of its length (Make
+    /// curve; 0 straight).
+    pub curve: f32,
+    /// How long the lines are, 0.05 to 1: saturated lines start this far
+    /// out from the rim toward beyond the edges, speed lines run this
+    /// much of the way across.
+    pub length: f32,
+    /// How much the lengths differ from line to line, 0 to 1.
+    pub jitter: f32,
+    /// Lines come in bunches of this many with room between the bunches
+    /// (Grouping; 1 for none).
+    pub group: u32,
+    /// How far past the reference ellipse saturated lines end, or how
+    /// much of the picture across speed lines cover, 0 to 1 (Gap from
+    /// reference position).
+    pub spread: f32,
+}
+
+impl Default for EffectStyle {
+    /// Saturated lines as they were drawn before these settings.
+    fn default() -> Self {
+        Self {
+            count: 120,
+            curve: 0.0,
+            length: 1.0,
+            jitter: 0.0,
+            group: 1,
+            spread: 0.35,
+        }
+    }
+}
+
+impl EffectStyle {
+    /// Speed lines as they were drawn before these settings.
+    #[must_use]
+    pub fn speed() -> Self {
+        Self {
+            count: 90,
+            length: 0.6,
+            jitter: 0.6,
+            spread: 1.0,
+            ..Self::default()
+        }
+    }
+
+    /// The same with every value in its range.
+    #[must_use]
+    pub fn clamped(self) -> Self {
+        Self {
+            count: self.count.clamp(1, 2000),
+            curve: self.curve.clamp(-1.0, 1.0),
+            length: self.length.clamp(0.05, 1.0),
+            jitter: self.jitter.clamp(0.0, 1.0),
+            group: self.group.clamp(1, 50),
+            spread: self.spread.clamp(0.0, 1.0),
+        }
+    }
+
+    /// Where line `index` lies (0 to 1 round, or across): evenly apart,
+    /// scattered a little, bunched by [`Self::group`].
+    fn place(&self, index: u32, seed: u32) -> f32 {
+        let wobble = chance(seed, index, 1) - 0.5;
+        if self.group <= 1 {
+            return (index as f32 + wobble * 0.9) / self.count.max(1) as f32;
+        }
+        // Bunches spread evenly, the lines of one close together.
+        let bunches = self.count.div_ceil(self.group).max(1) as f32;
+        let (bunch, within) = (index / self.group, index % self.group);
+        let tight = 0.4 / self.group as f32;
+        (bunch as f32 + wobble * 0.1 + within as f32 * tight) / bunches
+    }
+}
+
 /// Effect lines that stay editable (Clip Studio Paint's saturated and
 /// speed line layers): what they are, where, and how many.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -665,6 +769,8 @@ pub struct EffectLines {
     pub seed: u32,
     /// Their ink, sRGB.
     pub rgb: [u8; 3],
+    /// How they are laid (its count is not read: [`Self::count`] is).
+    pub style: EffectStyle,
 }
 
 impl EffectLines {
@@ -673,16 +779,19 @@ impl EffectLines {
     pub fn draw(&self, width: u32, height: u32) -> Vec<u8> {
         let mut pixels = vec![0; (width * height * 4) as usize];
         let (a, b) = (self.a, self.b);
+        let style = EffectStyle {
+            count: self.count,
+            ..self.style
+        }
+        .clamped();
         if self.speed {
             let angle = (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees();
-            speed_lines(
+            laid_speed_lines(
                 &mut pixels,
-                width,
-                height,
-                self.count,
+                [width, height],
                 angle,
                 self.line,
-                0.6,
+                &style,
                 self.seed,
                 self.rgb,
             );
@@ -693,13 +802,12 @@ impl EffectLines {
                 a[0].max(b[0]),
                 a[1].max(b[1]),
             ];
-            saturated_lines(
+            laid_saturated_lines(
                 &mut pixels,
-                width,
-                height,
+                [width, height],
                 rect,
-                self.count,
                 self.line,
+                &style,
                 self.seed,
                 self.rgb,
             );
@@ -707,12 +815,22 @@ impl EffectLines {
         pixels
     }
 
+    /// The style a kind of lines had before the style was kept.
+    fn plain(speed: bool) -> EffectStyle {
+        if speed {
+            EffectStyle::speed()
+        } else {
+            EffectStyle::default()
+        }
+    }
+
     /// As text: `kind;ax,ay,bx,by;count;line;seed;r,g,b`, the kind `s`
-    /// (saturated) or `v` (speed).
+    /// (saturated) or `v` (speed), then `;curve,length,jitter,group,spread`
+    /// when the style is not the one lines had before it was kept.
     #[must_use]
     pub fn encode(&self) -> String {
         let [r, g, b] = self.rgb;
-        format!(
+        let mut text = format!(
             "{};{},{},{},{};{};{};{};{r},{g},{b}",
             if self.speed { "v" } else { "s" },
             self.a[0],
@@ -722,14 +840,32 @@ impl EffectLines {
             self.count,
             self.line,
             self.seed,
-        )
+        );
+        let style = self.style;
+        let plain = Self::plain(self.speed);
+        if (EffectStyle {
+            count: plain.count,
+            ..style
+        }) != plain
+        {
+            text.push_str(&format!(
+                ";{},{},{},{},{}",
+                style.curve, style.length, style.jitter, style.group, style.spread
+            ));
+        }
+        text
     }
 
     /// Read back from [`EffectLines::encode`].
     #[must_use]
     pub fn decode(text: &str) -> Option<Self> {
         let parts: Vec<&str> = text.split(';').collect();
-        let [kind, at, count, line, seed, rgb] = parts.as_slice() else {
+        let (head, extra) = match parts.len() {
+            6 => (&parts[..], None),
+            7 => (&parts[..6], Some(parts[6])),
+            _ => return None,
+        };
+        let [kind, at, count, line, seed, rgb] = head else {
             return None;
         };
         let numbers = |text: &str| -> Vec<f32> {
@@ -741,16 +877,118 @@ impl EffectLines {
         else {
             return None;
         };
+        let speed = *kind == "v";
+        let count: u32 = count.parse().ok()?;
+        let mut style = Self::plain(speed);
+        if let Some(extra) = extra {
+            let &[curve, length, jitter, group, spread] = numbers(extra).as_slice() else {
+                return None;
+            };
+            style = EffectStyle {
+                count,
+                curve,
+                length,
+                jitter,
+                group: group.max(1.0) as u32,
+                spread,
+            };
+        }
+        style.count = count;
         Some(Self {
-            speed: *kind == "v",
+            speed,
             a: [ax, ay],
             b: [bx, by],
-            count: count.parse().ok()?,
+            count,
             line: line.parse().ok()?,
             seed: seed.parse().ok()?,
             rgb: [r, g, b].map(|value| value.clamp(0.0, 255.0) as u8),
+            style,
         })
     }
+}
+
+/// Saturated lines with their style: from `style.length` of the way
+/// toward beyond the picture's edges in to the ellipse in `rect`, each
+/// ending up to `style.spread` past its rim, tapering to a point, bowed
+/// by `style.curve` and bunched by `style.group`.
+fn laid_saturated_lines(
+    pixels: &mut [u8],
+    [width, height]: [u32; 2],
+    rect: [f32; 4],
+    line: f32,
+    style: &EffectStyle,
+    seed: u32,
+    rgb: [u8; 3],
+) {
+    let [x0, y0, x1, y1] = rect;
+    let center = [(x0 + x1) / 2.0, (y0 + y1) / 2.0];
+    let (rx, ry) = (((x1 - x0) / 2.0).max(1.0), ((y1 - y0) / 2.0).max(1.0));
+    let far = (width as f32).hypot(height as f32) + rx.max(ry);
+    with_raster(pixels, width, height, |raster| {
+        for index in 0..style.count {
+            let angle = style.place(index, seed) * std::f32::consts::TAU;
+            let (dx, dy) = (angle.cos(), angle.sin());
+            // Where the ray meets the ellipse, then a little either side.
+            let rim = 1.0 / ((dx / rx).powi(2) + (dy / ry).powi(2)).sqrt();
+            let reach = rim * (0.92 + style.spread * chance(seed, index, 2));
+            // How far out it starts: beyond the edges at full length.
+            let out = style.length * (1.0 - style.jitter * chance(seed, index, 5));
+            let start = reach + (far - reach) * out.max(0.02);
+            let from = [center[0] + dx * start, center[1] + dy * start];
+            let to = [center[0] + dx * reach, center[1] + dy * reach];
+            let thick = line * (0.5 + chance(seed, index, 3));
+            // Full width most of the way in, coming to a point near the
+            // rim (Clip Studio Paint's In of about a third).
+            let length = (start - reach).max(1.0);
+            let taper = (rim * 1.2 / length).clamp(0.1, 0.6);
+            ink_path(raster, [from, to], style.curve, thick, rgb, |t| {
+                ((1.0 - t) / taper).min(1.0)
+            });
+        }
+    });
+}
+
+/// Speed lines with their style: parallel lines at `angle` degrees,
+/// `style.length` of the way across give or take `style.jitter`, over
+/// `style.spread` of the picture across, tapering at both ends.
+fn laid_speed_lines(
+    pixels: &mut [u8],
+    [width, height]: [u32; 2],
+    angle: f32,
+    line: f32,
+    style: &EffectStyle,
+    seed: u32,
+    rgb: [u8; 3],
+) {
+    let (w, h) = (width as f32, height as f32);
+    let radians = angle.to_radians();
+    let (dx, dy) = (radians.cos(), radians.sin());
+    let (nx, ny) = (-dy, dx);
+    let span = w.hypot(h);
+    let center = [w / 2.0, h / 2.0];
+    with_raster(pixels, width, height, |raster| {
+        for index in 0..style.count {
+            let place = if style.group <= 1 {
+                chance(seed, index, 1)
+            } else {
+                style.place(index, seed)
+            };
+            let across = (place - 0.5) * span * style.spread.max(0.05);
+            let along = (chance(seed, index, 2) - 0.5) * span * 0.6;
+            // Before the style, lengths ran 0.6 less up to 0.45 of the span.
+            let length = span * style.length * (1.0 - 0.75 * style.jitter * chance(seed, index, 3));
+            let middle = [
+                center[0] + nx * across + dx * along,
+                center[1] + ny * across + dy * along,
+            ];
+            let from = [middle[0] - dx * length / 2.0, middle[1] - dy * length / 2.0];
+            let to = [middle[0] + dx * length / 2.0, middle[1] + dy * length / 2.0];
+            let thick = line * (0.4 + chance(seed, index, 4));
+            ink_path(raster, [from, to], style.curve, thick, rgb, |t| {
+                (t * std::f32::consts::PI).sin()
+            });
+        }
+    });
 }
 
 /// A closed curve through `points` (Catmull-Rom), `steps` points between
@@ -1113,10 +1351,18 @@ mod tests {
             line: 3.5,
             seed: 12_345,
             rgb: [10, 20, 30],
+            style: EffectStyle {
+                count: 77,
+                ..EffectStyle::default()
+            },
         };
         assert_eq!(EffectLines::decode(&lines.encode()), Some(lines));
         let speed = EffectLines {
             speed: true,
+            style: EffectStyle {
+                count: 77,
+                ..EffectStyle::speed()
+            },
             ..lines
         };
         assert_eq!(EffectLines::decode(&speed.encode()), Some(speed));

@@ -1068,7 +1068,8 @@ impl SuePaint {
         let ruler = crate::rulers::Perspective::new(perspective.count, size);
         let edit = Edit::new(label.clone())
             .then(spawn)
-            .then(crate::rulers::edit(
+            .then(crate::rulers::edit_shown(
+                arena,
                 picture,
                 crate::rulers::PERSPECTIVE,
                 Some(ruler.to_text()),

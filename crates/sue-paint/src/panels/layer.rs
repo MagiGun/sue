@@ -660,6 +660,11 @@ impl SuePaint {
         let mut open = true;
         let mut chosen = None;
         let mut show = false;
+        let mut link: Option<&str> = None;
+        let linked = [
+            crate::rulers::layer_linked(&cx.world.arena, picture),
+            crate::rulers::guides_linked(&cx.world.arena, picture),
+        ];
         let now = crate::rulers::ShowRange::of(&cx.world.arena, picture);
         let showing = self.doc().is_some_and(|doc| doc.show_rulers);
         sue_wm::ui::popover(
@@ -691,10 +696,28 @@ impl SuePaint {
                         chosen = Some(range);
                     }
                 }
+                sue_wm::ui::divider(ui, theme);
+                for (command, on) in [
+                    ("layer.ruler.link_guide", linked[1]),
+                    ("layer.ruler.link_layer", linked[0]),
+                ] {
+                    let label = crate::commands::registry()
+                        .label(command)
+                        .unwrap_or_default();
+                    if sue_wm::ui::checkbox(("sue-paint-ruler-link", command), &label, on)
+                        .show(ui, theme)
+                        .clicked()
+                    {
+                        link = Some(command);
+                    }
+                }
             },
         );
         if show {
             self.run("layer.ruler.show", cx);
+        }
+        if let Some(command) = link {
+            self.run(command, cx);
         }
         if let Some(range) = chosen {
             let layer = (range != crate::rulers::ShowRange::AllLayers)
@@ -702,7 +725,7 @@ impl SuePaint {
                 .flatten();
             Self::apply(cx, range.edit(picture, layer, &range.label()));
         }
-        self.layer_palette.ruler_menu = open && chosen.is_none() && !show;
+        self.layer_palette.ruler_menu = open && chosen.is_none() && !show && link.is_none();
     }
 
     /// The rows of the list in `area`, scrolled on their own (`salt`).

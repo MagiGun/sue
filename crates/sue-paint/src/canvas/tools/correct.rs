@@ -23,8 +23,9 @@ impl SuePaint {
         let Some(doc) = self.docs.get(self.active) else {
             return;
         };
-        if sub.mode == 7 {
-            // Remove dust: drag a box, or click for the whole layer.
+        if matches!(sub.mode, 7..=9) {
+            // Remove dust, Fill leftover, Select garbage: drag a box, or
+            // click for the whole layer.
             if let Err(error) = self.paintable(&cx.world.arena) {
                 cx.fail(error);
                 return;
@@ -190,7 +191,7 @@ impl SuePaint {
                         by,
                         sub.amount.max(1.0),
                         sub.level,
-                        sub.kind == 0,
+                        sub.kind,
                     );
                     edited = true;
                 }
@@ -253,6 +254,7 @@ impl SuePaint {
             layer,
             before,
             geometry,
+            base,
             mut lines,
             grab,
             path,
@@ -275,11 +277,42 @@ impl SuePaint {
         let mut traced = match sub.mode {
             5 => {
                 let points: Vec<[f32; 2]> = path.iter().map(|(point, _)| *point).collect();
-                crate::correct::redraw(&mut lines, &points, reach)
+                // Simplify: the trace smoothed before it is laid.
+                let points = if sub.amount > 0.0 && points.len() > 2 {
+                    crate::correct::simplified_points(&points, sub.amount)
+                } else {
+                    points
+                };
+                let redrawn = crate::correct::redraw(&mut lines, &points, reach, sub.kind == 1);
+                if redrawn && sub.connect {
+                    let at = crate::correct::line_at(&lines, points[points.len() - 1], reach)
+                        .map(|(line, _)| line);
+                    if let Some(line) = at {
+                        connect_ends(&mut lines, line, reach);
+                    }
+                }
+                redrawn
             }
             6 => crate::correct::redraw_width(&mut lines, &path, reach),
             _ => false,
         };
+        // Pinch: a control point where it was pulled (Add control
+        // point), and its ends joined to lines they reach (Connect lines).
+        if sub.mode == 1
+            && changed
+            && let Some((line, _, along)) = grab
+            && line < lines.len()
+        {
+            if sub.add_points
+                && let Some(base) = base.get(line)
+            {
+                crate::correct::add_control_after(&mut lines[line], base, along);
+                traced = true;
+            }
+            if sub.connect {
+                traced |= connect_ends(&mut lines, line, reach);
+            }
+        }
         // An end dragged onto the line's other end, or onto another
         // line's end, joins it.
         if sub.mode == 0
@@ -319,8 +352,8 @@ impl SuePaint {
         cx.record(ArenaEdit(edit));
     }
 
-    /// Remove dust over the box from `from` to `to` (picture pixels), or the
-    /// whole layer for a click.
+    /// Remove dust, Fill leftover or Select garbage over the box from
+    /// `from` to `to` (picture pixels), or the whole layer for a click.
     pub(super) fn remove_dust(
         &mut self,
         from: Pos2,
@@ -355,8 +388,53 @@ impl SuePaint {
         };
         let mut after = before.clone();
         let size = sub.amount.round().max(1.0) as u32;
-        if crate::correct::remove_dust(&mut after, width, height, rect, size) == 0 {
-            cx.notify(tr!("no-dust-that-small-there"));
+        if sub.mode == crate::tools::SELECT_GARBAGE {
+            // The specks become the selection; the layer is left alone.
+            let (mask, found) = crate::correct::dust_mask(&before, width, height, rect, size, true);
+            if found == 0 {
+                cx.notify(tr!("no-dust-that-small-there"));
+                return;
+            }
+            let Some(picture_size) = self
+                .docs
+                .get(self.active)
+                .map(|doc| doc.compositor.display().1)
+            else {
+                return;
+            };
+            let [pw, ph] = picture_size;
+            let mut shown = vec![0_u8; (pw * ph) as usize];
+            for y in 0..height {
+                for x in 0..width {
+                    let (px, py) = (i64::from(x) + offset[0], i64::from(y) + offset[1]);
+                    if px >= 0 && py >= 0 && px < i64::from(pw) && py < i64::from(ph) {
+                        shown[(py as u32 * pw + px as u32) as usize] =
+                            mask[(y * width + x) as usize];
+                    }
+                }
+            }
+            if let Some(shape) = crate::select::Selection::from_mask(pw, ph, shown) {
+                self.select_shape(
+                    &shape,
+                    crate::select::Op::Replace,
+                    crate::brush::AntiAlias::None,
+                );
+            }
+            cx.notify(tr!("garbage-selected", count = found));
+            return;
+        }
+        let done = if sub.mode == crate::tools::FILL_LEFTOVER {
+            let [r, g, b] = self.drawing_color();
+            crate::correct::fill_leftover(&mut after, width, height, rect, size, [r, g, b, 255])
+        } else {
+            crate::correct::remove_dust(&mut after, width, height, rect, size)
+        };
+        if done == 0 {
+            cx.notify(if sub.mode == crate::tools::FILL_LEFTOVER {
+                tr!("no-leftover-that-small-there")
+            } else {
+                tr!("no-dust-that-small-there")
+            });
             return;
         }
         if let Some(raster) = doc::raster_mut(&mut cx.world.arena, info.id)
@@ -367,7 +445,7 @@ impl SuePaint {
         if let Some(patch) = doc::diff_patch(&before, &after, width, height) {
             cx.record(ArenaEdit(sue_core::txn::RasterEdit::new(
                 info.id,
-                tr!("remove-dust"),
+                crate::localize(&sub.name),
                 vec![patch],
             )));
         }
@@ -376,4 +454,32 @@ impl SuePaint {
                 .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
         }
     }
+}
+
+/// Connect lines: each end of `lines[line]` within `reach` of another
+/// line's end goes onto it and the two become one line. `true` when any
+/// did.
+fn connect_ends(lines: &mut Vec<crate::vector::Line>, line: usize, reach: f32) -> bool {
+    let mut joined = false;
+    let mut ends = Vec::new();
+    for at_start in [true, false] {
+        let Some(count) = lines.get(line).map(|found| found.samples.len()) else {
+            break;
+        };
+        if count == 0 {
+            break;
+        }
+        let index = if at_start { 0 } else { count - 1 };
+        let snapped = crate::canvas::lines::join_dragged_end(lines, line, index, reach);
+        let point = lines[line].samples[index].at;
+        // Onto its own other end closes the line: nothing to join.
+        let other = lines[line].samples[count - 1 - index].at;
+        if snapped && (point[0] - other[0]).hypot(point[1] - other[1]) > 0.5 {
+            ends.push(point);
+        }
+    }
+    for point in ends {
+        joined |= crate::correct::connect(lines, point, 0.5);
+    }
+    joined
 }

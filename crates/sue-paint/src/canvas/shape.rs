@@ -19,8 +19,8 @@ use crate::rulers::{Rulers, Snap};
 use crate::select::{Aspect, Op, Selection};
 use crate::studio::{Doc, SuePaint};
 use crate::tools::{
-    BEZIER_CURVE, CONTINUOUS_CURVE, CURVE, POLYGON, POLYLINE, SATURATED_LINES, SPEED_LINES,
-    SubTool, Tool,
+    BEZIER_CURVE, CONTINUOUS_CURVE, CURVE, FIGURE_FILL, FIGURE_LINE, POLYGON, POLYLINE,
+    SATURATED_LINES, SPEED_LINES, SubTool, Tool,
 };
 
 /// Points around an ellipse inside two corners.
@@ -78,7 +78,7 @@ impl Guides {
             return Self::default();
         }
         Self {
-            rulers: Rulers::of(arena, doc.picture),
+            rulers: Rulers::seen(arena, doc.picture, doc.layer),
             ruler: doc.snap_ruler,
             special: doc.ruler_on && crate::commands::special_snaps(arena, doc.picture),
             reach: 24.0 / doc.view.zoom.max(0.01),
@@ -150,9 +150,23 @@ pub(crate) struct Outline {
     pub closed: bool,
 }
 
-/// `true` for the Figure sub tools that fill their shape.
-pub(crate) fn filled(mode: u8) -> bool {
-    matches!(mode, 3 | 4)
+/// `true` for the Figure sub tools that fill their shape: the filled
+/// rectangle and ellipse, and a rectangle, ellipse or polygon whose
+/// Line/Fill fills.
+pub(crate) fn filled(sub: &SubTool) -> bool {
+    matches!(sub.mode, 3 | 4) || (box_shape(sub.mode) && sub.line_fill != FIGURE_LINE)
+}
+
+/// `true` for the Figure sub tools that draw their outline: all but the
+/// filled ones and a box shape whose Line/Fill only fills.
+pub(crate) fn outlined(sub: &SubTool) -> bool {
+    !matches!(sub.mode, 3 | 4) && !(box_shape(sub.mode) && sub.line_fill == FIGURE_FILL)
+}
+
+/// `true` for the Figure modes Line/Fill applies to: the rectangle,
+/// the ellipse and the polygon.
+pub(crate) fn box_shape(mode: u8) -> bool {
+    matches!(mode, 1 | 2 | POLYGON)
 }
 
 /// The direction `angle` (radians) of a line kept to its steps: every
@@ -609,13 +623,13 @@ impl SuePaint {
             .map(|doc| Guides::of(&cx.world.arena, doc))
             .unwrap_or_default();
         let shape = outline(sub, [from.x, from.y], [to.x, to.y], shift, &guides);
-        if !filled(sub.mode) {
-            let mut points = shape.points;
-            if shape.closed
-                && let Some(first) = points.first().copied()
-            {
-                points.push(first);
-            }
+        let mut points = shape.points.clone();
+        if shape.closed
+            && let Some(first) = points.first().copied()
+        {
+            points.push(first);
+        }
+        if !filled(sub) {
             // On a vector layer the figure is laid as one vector line.
             if self.figure_on_vector(&points, sub.mode != 2, sub, cx) {
                 return;
@@ -626,7 +640,14 @@ impl SuePaint {
         let Ok(info) = self.paintable(&cx.world.arena) else {
             return;
         };
-        let rgb = color::unit(self.drawing_color());
+        // Line and fill: the inside in the other drawing color, so the
+        // outline in the drawing color shows round it.
+        let both = outlined(sub);
+        let rgb = color::unit(if both {
+            if self.sub_active { self.main } else { self.sub }
+        } else {
+            self.drawing_color()
+        });
         let to = constrained(sub, [from.x, from.y], [to.x, to.y], shift);
         let (min, max) = (
             [from.x.min(to[0]), from.y.min(to[1])],
@@ -634,7 +655,8 @@ impl SuePaint {
         );
         let mut area = Selection::new(size[0], size[1]);
         let plain = guides.perspective_box([from.x, from.y], to).is_none();
-        if plain && sub.mode == 3 && sub.roundness < 0.5 {
+        let (rectangle, ellipse) = (matches!(sub.mode, 1 | 3), matches!(sub.mode, 2 | 4));
+        if plain && rectangle && sub.roundness < 0.5 {
             let clamp = |value: f32, limit: u32| value.round().clamp(0.0, limit as f32) as u32;
             area.rect(
                 [
@@ -645,7 +667,7 @@ impl SuePaint {
                 ],
                 Op::Replace,
             );
-        } else if plain && sub.mode == 4 {
+        } else if plain && ellipse {
             area.ellipse([min[0], min[1], max[0], max[1]], Op::Replace);
         } else {
             area.polygon(&shape.points, Op::Replace);
@@ -662,6 +684,28 @@ impl SuePaint {
             })
             .collect();
         let (offset, alpha_lock, opacity) = (info.style.offset, info.alpha_locked, sub.tip.opacity);
+        if both {
+            // The fill in place, then the line over it: one undo step
+            // from before the fill.
+            let Some(before) = doc::raster(&cx.world.arena, info.id).cloned() else {
+                return;
+            };
+            let Some(pixels) = doc::raster_mut(&mut cx.world.arena, info.id)
+                .and_then(sue_core::RasterTile2D::bytes_mut)
+            else {
+                return;
+            };
+            let layer = [before.width(), before.height()];
+            fill::paint_mask(pixels, layer, offset, &mask, size, rgb, opacity, alpha_lock);
+            let filled_rect = [
+                (min[0] - offset[0] as f32).floor() as i32 - 1,
+                (min[1] - offset[1] as f32).floor() as i32 - 1,
+                (max[0] - offset[0] as f32).ceil() as i32 + 1,
+                (max[1] - offset[1] as f32).ceil() as i32 + 1,
+            ];
+            self.stroke_line_over(points, sub, cx, Some((before, filled_rect)));
+            return;
+        }
         if let Ok(Some(edit)) = doc::rewrite(
             &cx.world.arena,
             info.id,
@@ -692,6 +736,19 @@ impl SuePaint {
         points: Vec<[f32; 2]>,
         sub: &SubTool,
         cx: &mut AppletContext<'_>,
+    ) {
+        self.stroke_line_over(points, sub, cx, None);
+    }
+
+    /// [`Self::stroke_line`] over a change already made in place: the
+    /// layer's pixels `before` it and where it changed them (layer
+    /// pixels, `[x0, y0, x1, y1]`), kept in the same undo step.
+    pub(crate) fn stroke_line_over(
+        &mut self,
+        points: Vec<[f32; 2]>,
+        sub: &SubTool,
+        cx: &mut AppletContext<'_>,
+        prior: Option<(sue_core::RasterTile2D, [i32; 4])>,
     ) {
         let info = match self.drawable(&cx.world.arena) {
             Ok(info) => info,
@@ -731,13 +788,18 @@ impl SuePaint {
             .filter(|_| !vector)
             .map(|selection| std::sync::Arc::new(selection_region(&selection)));
         let lock = info.alpha_locked && !plain.eraser && !vector;
-        let Some(before) = doc::raster(&cx.world.arena, info.id).cloned() else {
-            return;
+        let (before, earlier) = match prior {
+            Some((before, rect)) => (before, Some(rect)),
+            None => match doc::raster(&cx.world.arena, info.id).cloned() {
+                Some(before) => (before, None),
+                None => return,
+            },
         };
         let Some(raster) = doc::raster_mut(&mut cx.world.arena, info.id) else {
             return;
         };
-        let rects = line.paint_into(raster, lock, clip);
+        let mut rects = line.paint_into(raster, lock, clip);
+        rects.extend(earlier);
         let kept = vector.then_some(line);
         let Some(raster) = doc::raster(&cx.world.arena, info.id) else {
             return;

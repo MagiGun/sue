@@ -174,6 +174,8 @@ const CASES: &[Case] = &[
     case("layer.palette_color.green", &[], 1),
     case("layer.palette_color.blue", &[], 1),
     case("layer.palette_color.purple", &[], 1),
+    case("layer.ruler.link_layer", &[], 1),
+    case("layer.ruler.link_guide", &[], 1),
 ];
 
 #[test]

@@ -269,6 +269,9 @@ impl SuePaint {
             Gesture::Outline { sub, points } if sub.tool == Tool::Text => {
                 self.text_on_curve(&points, cx);
             }
+            Gesture::Outline { sub, points } if sub.tool == Tool::Frame => {
+                self.frame_drawn(points, &sub, cx);
+            }
             Gesture::Outline { sub, points } => self.balloon_drawn(points, &sub, cx),
             Gesture::Comic(edit) => self.finish_comic_edit(*edit, cx),
             gesture @ Gesture::LightTable { .. } => self.light_table_let_go(gesture, cx),

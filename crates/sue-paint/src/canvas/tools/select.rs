@@ -190,7 +190,7 @@ impl SuePaint {
 
     /// `shape` (a mask over the picture, as made with [`Op::Replace`])
     /// softened by `aa` and combined into the selection as `op` says.
-    fn select_shape(&mut self, shape: &Selection, op: Op, aa: AntiAlias) {
+    pub(super) fn select_shape(&mut self, shape: &Selection, op: Op, aa: AntiAlias) {
         let Some(doc) = self.docs.get_mut(self.active) else {
             return;
         };

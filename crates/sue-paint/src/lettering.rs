@@ -10,6 +10,7 @@ use sue_wm::AppletContext;
 
 use crate::manga;
 use crate::studio::SuePaint;
+use crate::tools::{STYLE_BOLD, STYLE_ITALIC, STYLE_STRIKE, STYLE_UNDERLINE};
 use sue_type::raster::Justify;
 
 /// The class of a text layer.
@@ -34,6 +35,14 @@ const PATH: &str = "text.path";
 const BOX: &str = "text.box";
 /// Readings over the words (ruby): a line each, `start,end,reading`.
 const RUBY: &str = "text.ruby";
+/// The style: heavier letters (`Bool`; off when missing).
+const BOLD: &str = "text.bold";
+/// The style: slanted letters (`Bool`).
+const ITALIC: &str = "text.italic";
+/// The style: a line under the words (`Bool`).
+const UNDERLINE: &str = "text.underline";
+/// The style: a line through the words (`Bool`).
+const STRIKE: &str = "text.strike";
 
 type Edit = sue_core::txn::Batch<sue_core::Arena>;
 
@@ -57,6 +66,8 @@ pub(crate) struct Lettering {
     pub path: Vec<[f32; 2]>,
     /// Readings set small over some of the words (ruby, furigana).
     pub ruby: Vec<sue_type::raster::Ruby>,
+    /// Bold, italic, underline and strike through.
+    pub style: sue_type::raster::TextStyle,
 }
 
 impl Lettering {
@@ -75,6 +86,7 @@ impl Lettering {
             justify: Justify::Start,
             path: Vec::new(),
             ruby: Vec::new(),
+            style: sue_type::raster::TextStyle::default(),
         }
     }
 
@@ -141,6 +153,7 @@ impl Lettering {
             justify: self.justify,
             path: &self.path,
             ruby: &self.ruby,
+            style: self.style,
         }
     }
 
@@ -210,6 +223,12 @@ impl Lettering {
                     })
                 })
                 .collect(),
+            style: sue_type::raster::TextStyle {
+                bold: flag(BOLD),
+                italic: flag(ITALIC),
+                underline: flag(UNDERLINE),
+                strike: flag(STRIKE),
+            },
         })
     }
 
@@ -268,6 +287,10 @@ impl Lettering {
                 ),
             ),
             (BOX, Value::from(area)),
+            (BOLD, Value::from(self.style.bold)),
+            (ITALIC, Value::from(self.style.italic)),
+            (UNDERLINE, Value::from(self.style.underline)),
+            (STRIKE, Value::from(self.style.strike)),
         ]
     }
 }
@@ -535,6 +558,19 @@ impl Typing {
     }
 }
 
+/// The Text tool's style bits (`tools::STYLE_*`) of `style`.
+fn style_bits(style: sue_type::raster::TextStyle) -> u8 {
+    [
+        (style.bold, STYLE_BOLD),
+        (style.italic, STYLE_ITALIC),
+        (style.underline, STYLE_UNDERLINE),
+        (style.strike, STYLE_STRIKE),
+    ]
+    .into_iter()
+    .filter(|(on, _)| *on)
+    .fold(0, |bits, (_, bit)| bits | bit)
+}
+
 /// How the Text tool letters: everything but the words and where.
 #[derive(Clone, Debug, PartialEq)]
 struct Look {
@@ -546,6 +582,7 @@ struct Look {
     tracking: f32,
     leading: f32,
     justify: Justify,
+    style: sue_type::raster::TextStyle,
 }
 
 impl Look {
@@ -559,6 +596,7 @@ impl Look {
         lettering.tracking = self.tracking;
         lettering.leading = self.leading;
         lettering.justify = self.justify;
+        lettering.style = self.style;
     }
 }
 
@@ -643,6 +681,7 @@ impl SuePaint {
             sub.tracking = lettering.tracking;
             sub.leading = lettering.leading;
             sub.justify = lettering.justify as u8;
+            sub.text_style = style_bits(lettering.style);
         }
         let settings = self.text_look();
         let mut typing = Typing {
@@ -721,6 +760,12 @@ impl SuePaint {
                 1 => Justify::Middle,
                 2 => Justify::End,
                 _ => Justify::Start,
+            },
+            style: sue_type::raster::TextStyle {
+                bold: sub.text_style & STYLE_BOLD != 0,
+                italic: sub.text_style & STYLE_ITALIC != 0,
+                underline: sub.text_style & STYLE_UNDERLINE != 0,
+                strike: sub.text_style & STYLE_STRIKE != 0,
             },
         }
     }
@@ -971,6 +1016,11 @@ mod tests {
                 range: 0..2,
                 text: "he, lo".to_owned(),
             }],
+            style: sue_type::raster::TextStyle {
+                bold: true,
+                underline: true,
+                ..sue_type::raster::TextStyle::default()
+            },
         };
         let (pixels, covered) = lettering.draw(200, 200);
         assert!(covered.is_some());

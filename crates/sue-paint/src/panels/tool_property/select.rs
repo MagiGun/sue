@@ -118,7 +118,7 @@ pub(super) fn select_properties(
 }
 
 /// Aspect: any shape, a square (or circle), or a ratio of its own.
-fn aspect_rows(ui: &mut Ui, rows: &mut Rows<'_>, aspect: &mut Aspect) {
+pub(super) fn aspect_rows(ui: &mut Ui, rows: &mut Rows<'_>, aspect: &mut Aspect) {
     let mut chosen = match aspect {
         Aspect::Free => 0,
         Aspect::Square => 1,
