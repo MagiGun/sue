@@ -15,6 +15,9 @@ use crate::tools::Tool;
 /// New's preview shows it).
 const TITLE_SAFE: f32 = 0.8;
 
+/// A pinned joint's square, in small rings across.
+const PIN_SIDE: f32 = 2.6;
+
 impl SuePaint {
     pub(super) fn overlays(
         &mut self,
@@ -606,12 +609,10 @@ impl SuePaint {
                 };
                 if pins.contains(&joint) {
                     // A pinned hand or foot: a square round its joint.
+                    let side = marks::ring_small(theme) * PIN_SIDE;
                     painter.rect_stroke(
-                        egui::Rect::from_center_size(
-                            a,
-                            egui::Vec2::splat(marks::ring_small(theme) * 2.6),
-                        ),
-                        0.0,
+                        egui::Rect::from_center_size(a, egui::Vec2::new(side, side)),
+                        egui::CornerRadius::ZERO,
                         Stroke::new(marks::heavy(theme), Color32::from_rgb(255, 170, 40)),
                         egui::StrokeKind::Middle,
                     );

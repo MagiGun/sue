@@ -326,10 +326,10 @@ fn hand_pad(ui: &mut Ui, theme: &Theme, setup: &mut HandSetup) -> Slid {
         .min(density.control_height() * 5.0)
         .max(density.control_height() * 3.0);
     let label = theme.text_size(TextRole::Caption) + theme.space(Space::S2);
-    let (outer, _) = ui.allocate_exact_size(
-        vec2(ui.available_width(), side * 0.87 + label * 2.0),
-        Sense::hover(),
-    );
+    // An even sided triangle is 0.87 of its side tall; a label above
+    // and one below.
+    let tall = side * 0.87 + label + label;
+    let (outer, _) = ui.allocate_exact_size(vec2(ui.available_width(), tall), Sense::hover());
     let top = pos2(outer.center().x, outer.top() + label);
     let left = pos2(outer.center().x - side / 2.0, top.y + side * 0.87);
     let right = pos2(outer.center().x + side / 2.0, top.y + side * 0.87);

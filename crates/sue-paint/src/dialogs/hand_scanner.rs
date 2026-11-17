@@ -1058,7 +1058,7 @@ impl SuePaint {
                     .map(|camera| camera.name.clone())
                     .collect()
             };
-            let label = tr!("hand-scanner-camera");
+            let label = tr!("hand-scanner-camera-choice");
             words(ui, &label, TextRole::Body, theme.text, theme);
             let mut chosen = scan.chosen.min(names.len() - 1);
             let response = ui::dropdown("sue-paint-hand-scanner-camera", &mut chosen, &names)
@@ -1155,7 +1155,7 @@ impl SuePaint {
         ui.add_space(theme.space(Space::S2));
         words(
             ui,
-            &tr!("hand-scanner-hint"),
+            &tr!("hand-scanner-palm-hint"),
             TextRole::Body,
             theme.text,
             theme,

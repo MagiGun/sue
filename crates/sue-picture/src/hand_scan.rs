@@ -740,36 +740,32 @@ mod tests {
 
     #[test]
     fn a_bodys_hand_takes_the_fingers_by_name() {
-        // A body with finger joints after its own, named with their side.
-        let mut joints: Vec<Joint> = crate::figure::JOINTS.to_vec();
-        let names: Vec<&'static str> = Side::ALL
-            .into_iter()
-            .flat_map(|side| {
-                HAND[1..].iter().map(move |joint| {
-                    let name = format!("{} {}", side.word(), joint.name.to_lowercase());
-                    &*Box::leak(name.into_boxed_str())
-                })
-            })
-            .collect();
-        for name in names {
-            joints.push(Joint { name, ..HAND[1] });
-        }
+        // The body's own finger joints, named with their side.
+        let joints: &[Joint] = &crate::figure::JOINTS;
         let angles = solve(&points_of(&hand_preset(2))).expect("a hand");
         let mut pose = Pose(vec![[0.0; 3]; joints.len()]);
-        assert!(pose_body(&mut pose, &joints, Side::Right, &angles));
-        let first = crate::figure::JOINTS.len();
-        assert_eq!(pose.0[first], [0.0; 3], "the left hand is left alone");
-        assert_eq!(pose.0[first + 15], angles.fingers[0]);
-        assert_eq!(pose.0[first + 29], angles.fingers[14]);
-        assert!(pose.0[..first].iter().all(|turn| *turn == [0.0; 3]));
+        assert!(pose_body(&mut pose, joints, Side::Right, &angles));
+        let right = body_fingers(joints, Side::Right).expect("right fingers");
+        let left = body_fingers(joints, Side::Left).expect("left fingers");
+        for (place, turn) in right.into_iter().zip(angles.fingers) {
+            assert_eq!(pose.0[place], turn);
+        }
+        for place in left {
+            assert_eq!(pose.0[place], [0.0; 3], "the left hand is left alone");
+        }
+        let touched = pose.0.iter().filter(|turn| **turn != [0.0; 3]).count();
+        assert!(touched <= 15, "only the right hand's fingers turn");
         // A body without finger joints takes nothing.
-        let mut plain = Pose(vec![[0.0; 3]; crate::figure::JOINTS.len()]);
-        assert!(!pose_body(
-            &mut plain,
-            &crate::figure::JOINTS,
-            Side::Left,
-            &angles
-        ));
+        let plain_joints: Vec<Joint> = joints
+            .iter()
+            .filter(|joint| {
+                !joint.name.to_lowercase().contains("finger")
+                    && !joint.name.to_lowercase().contains("thumb")
+            })
+            .copied()
+            .collect();
+        let mut plain = Pose(vec![[0.0; 3]; plain_joints.len()]);
+        assert!(!pose_body(&mut plain, &plain_joints, Side::Left, &angles));
         assert!(plain.0.iter().all(|turn| *turn == [0.0; 3]));
     }
 

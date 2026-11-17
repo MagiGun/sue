@@ -2813,7 +2813,6 @@ fn step_00_55_07_body_types_shape_chart_camera_and_object_buttons() {
             "Object scale",
             "Register body shape",
             "Light source",
-            "Outline width",
             "Manga Perspective",
         ],
         "3D figure",
