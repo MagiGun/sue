@@ -26,6 +26,9 @@ pub(crate) struct CanvasDialog {
     /// Where the old top left corner lands once the box's handles on the
     /// canvas were dragged; `None` while the reference point places it.
     pub placed: Option<[i64; 2]>,
+    /// The picture it changes: the box shows on it alone, and OK does
+    /// nothing once another picture is in front.
+    pub picture: Option<EntityId>,
 }
 
 /// The most pixels a side of the canvas takes.
@@ -36,13 +39,14 @@ const MOST: i64 = 30_000;
 const REACH: f32 = 10.0;
 
 impl CanvasDialog {
-    /// The dialog for a canvas of `size`, kept to its middle.
-    pub(crate) fn new(size: [u32; 2]) -> Self {
+    /// The dialog for `picture`, a canvas of `size`, kept to its middle.
+    pub(crate) fn new(size: [u32; 2], picture: Option<EntityId>) -> Self {
         Self {
             size,
             old: size,
             anchor: 4,
             placed: None,
+            picture,
         }
     }
 
@@ -329,8 +333,15 @@ pub(super) fn canvas_ui(ui: &mut Ui, canvas: &mut CanvasDialog, theme: &Theme) -
             );
         });
         form.row(&bare(tr!("reference-point")), |ui| {
-            // A reference point picked places the picture by it again.
-            if anchor_ui(ui, "sue-paint-canvas-anchor", &mut canvas.anchor, theme) {
+            // Placed by the box's handles: no reference point holds it,
+            // so none is lit. One picked places the picture by it again.
+            let mut shown = if canvas.placed.is_some() {
+                u8::MAX
+            } else {
+                canvas.anchor
+            };
+            if anchor_ui(ui, "sue-paint-canvas-anchor", &mut shown, theme) {
+                canvas.anchor = shown;
                 canvas.placed = None;
             }
         });
@@ -352,6 +363,9 @@ impl SuePaint {
         let Some(super::Dialog::Canvas(canvas)) = &self.dialog else {
             return;
         };
+        if canvas.picture != self.picture() {
+            return;
+        }
         let Some(view) = self.doc().map(|doc| doc.view) else {
             return;
         };
@@ -406,6 +420,9 @@ impl SuePaint {
         let Some(super::Dialog::Canvas(canvas)) = &self.dialog else {
             return false;
         };
+        if canvas.picture != self.picture() {
+            return false;
+        }
         let Some(view) = self.doc().map(|doc| doc.view) else {
             return false;
         };
@@ -1131,13 +1148,16 @@ impl SuePaint {
 
     /// Changes the canvas size.
     pub(super) fn canvas_ok(&mut self, cx: &mut AppletContext<'_>, canvas: &CanvasDialog) {
-        // The canvas stays in reach while the dialog is open: a picture
-        // of another size (another canvas came to the front) is left.
-        let same = self
-            .picture()
-            .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
-            .and_then(sue_model::picture::size)
-            == Some(canvas.old);
+        // The canvas stays in reach while the dialog is open: another
+        // picture come to the front, or this one's size changed since
+        // (undone, say), is left as it is.
+        let same = canvas.picture.is_some()
+            && self.picture() == canvas.picture
+            && self
+                .picture()
+                .and_then(|picture| cx.world.arena.get_by_id(picture).ok())
+                .and_then(sue_model::picture::size)
+                == Some(canvas.old);
         if !same {
             return;
         }

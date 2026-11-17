@@ -113,6 +113,12 @@ impl SuePaint {
     pub(super) fn settle(&mut self, cx: &mut AppletContext<'_>) {
         // A stroke of the new brush engine ends where the pen last was.
         self.engine_settle(cx);
+        // Tone dots or the grid held by Move layer: kept as one step.
+        if matches!(self.gesture, Some(Gesture::Nudge { .. }))
+            && let Some(gesture) = self.gesture.take()
+        {
+            self.nudge_release(gesture, cx);
+        }
         if let Some(Gesture::Move { layers, .. }) = self.gesture.take() {
             let mut steps = Batch::new(tr!("move-layer"));
             for (layer, _, old) in layers {

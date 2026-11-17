@@ -3559,6 +3559,7 @@ tp-move-select = The moved layer becomes current
 tp-move-tone-hint = Drag to move the tone dots of the current layer; its paint stays
 tp-move-grid-hint = Drag to move the grid
 tp-no-tone-to-move = This layer has no tone to move: turn on Tone in Layer Property
+tp-nothing-in-selection = No layer is painted inside the selection
 tp-move-tone-step = Move Tone Dots
 tp-move-grid-step = Move Grid
 canvas-size-drag-handles = Drag the handles on the canvas to set the size and place

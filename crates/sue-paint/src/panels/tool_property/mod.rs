@@ -632,8 +632,9 @@ impl SuePaint {
         arena: &sue_core::Arena,
         theme: &Theme,
     ) -> Option<&'static str> {
-        // A transform open: its settings, whatever the tool.
-        if self.transform.is_some() {
+        // A transform open: its settings, whatever the tool (not Move
+        // layer's drag of selected pixels, which lifts them the same way).
+        if self.transforming() {
             self.transform_properties(ui, theme);
             return None;
         }

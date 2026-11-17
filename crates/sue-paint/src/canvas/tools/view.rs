@@ -1,8 +1,9 @@
 //! The view tools on the canvas: Hand (scroll, or turn with its Rotate
 //! sub tool, in steps of its Snap angle or of 45 degrees with Shift) and
 //! Zoom (a click zooms by half again, a drag zooms as it goes, around
-//! the area dragged out, or not at all, as its Tool Property says), and the scroll and turn drags that the middle
-//! button and the Space and Shift keys borrow.
+//! the area dragged out, or not at all, as its Tool Property says), and
+//! the scroll and turn drags that the middle button and the Space and
+//! Shift keys borrow.
 
 use egui::{Pos2, Rect};
 use sue_wm::AppletContext;

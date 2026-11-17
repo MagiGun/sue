@@ -56,6 +56,23 @@ fn number_row(
 }
 
 impl SuePaint {
+    /// Whether Tool Property holds an open transform's settings: one is
+    /// open, and it is not Move layer's drag of selected pixels.
+    pub(crate) fn transforming(&self) -> bool {
+        self.transform.is_some() && !self.move_lift
+    }
+
+    /// What Tool Property's title says while a transform is open: the
+    /// transform's name, as its undo step names it.
+    pub(crate) fn transform_title(&self) -> Option<String> {
+        let session = self.transform.as_ref().filter(|_| !self.move_lift)?;
+        Some(if session.mesh.is_some() {
+            tr!("mesh-transformation")
+        } else {
+            self.transform_label(session.free)
+        })
+    }
+
     /// Tool Property's body while a transform is open.
     pub(super) fn transform_properties(&mut self, ui: &mut Ui, theme: &Theme) {
         let Self {

@@ -68,6 +68,10 @@ impl SuePaint {
                     ],
                 ];
                 let inside = self.layers_painted_in(&cx.world.arena, area, Exclude::default());
+                if inside.is_empty() {
+                    cx.fail(tr!("tp-nothing-in-selection"));
+                    return;
+                }
                 if let Some(first) = inside.first()
                     && let Some(doc) = self.doc_mut()
                 {
@@ -314,9 +318,30 @@ impl SuePaint {
             .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
     }
 
-    /// The tone dots or the grid let go: put back as they were, then
-    /// moved as one undo step.
-    pub(super) fn nudge_release(&mut self, gesture: Gesture, cx: &mut AppletContext<'_>) {
+    /// The tone dots or the grid taken back as if never moved (a second
+    /// finger came down): nothing to undo.
+    pub(crate) fn nudge_abandon(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(Gesture::Nudge {
+            entity,
+            keys,
+            before,
+            ..
+        }) = self.gesture.take()
+        else {
+            return;
+        };
+        if let Ok(found) = cx.world.arena.get_by_id_mut(entity) {
+            put_back(found, keys, &before);
+        }
+        if let Some(doc) = self.doc_mut() {
+            doc.compositor
+                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+        }
+    }
+
+    /// The tone dots or the grid let go (or the studio closing while they
+    /// are held): put back as they were, then moved as one undo step.
+    pub(crate) fn nudge_release(&mut self, gesture: Gesture, cx: &mut AppletContext<'_>) {
         let Gesture::Nudge {
             entity,
             keys,
@@ -334,16 +359,7 @@ impl SuePaint {
         if now == before {
             return;
         }
-        for (key, value) in keys.into_iter().zip(&before) {
-            match value {
-                Some(value) => {
-                    found.properties_mut().set(key, value.clone());
-                }
-                None => {
-                    found.properties_mut().remove(key);
-                }
-            }
-        }
+        put_back(found, keys, &before);
         let mut edit = crate::doc::Edit::new(label);
         for (key, value) in keys.into_iter().zip(now) {
             if let Some(value) = value {
@@ -429,4 +445,22 @@ fn moved(arena: &mut sue_core::Arena, layer: EntityId, next: [i64; 2]) -> Option
         a[2].max(b[2]).min(i64::from(u32::MAX)) as u32,
         a[3].max(b[3]).min(i64::from(u32::MAX)) as u32,
     ])
+}
+
+/// `keys` of `entity` set back to `before` (removed where it had none).
+fn put_back(
+    entity: &mut sue_core::Entity,
+    keys: [&'static str; 2],
+    before: &[Option<sue_core::Value>; 2],
+) {
+    for (key, value) in keys.into_iter().zip(before) {
+        match value {
+            Some(value) => {
+                entity.properties_mut().set(key, value.clone());
+            }
+            None => {
+                entity.properties_mut().remove(key);
+            }
+        }
+    }
 }

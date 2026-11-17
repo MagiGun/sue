@@ -975,3 +975,131 @@ fn ct_47_lasso_fill_blending_mode() {
         "black multiplied stays"
     );
 }
+
+// The review's checks.
+
+/// 00:49:17, FGV-49: while transforming, Tool Property is the
+/// transform's: the pen's name, sample stroke and buttons give way to it,
+/// and come back when it ends.
+#[test]
+fn fg_00_49_17_tool_property_is_the_transforms_while_open() {
+    let mut paint = PaintDriver::new("p6a-transform-title");
+    let at = middle(&paint);
+    inked(&mut paint, at - vec2(40.0, 10.0), at + vec2(40.0, 10.0));
+    paint.click_text("Tool Property");
+    paint.settle(2);
+    // The pen's own name and rows.
+    let name = in_tool_property(&paint, "Pencil").is_some();
+    assert!(name && in_tool_property(&paint, "Stabilization").is_some());
+    paint.command("edit.transform.scale");
+    paint.settle(3);
+    assert!(
+        in_tool_property(&paint, "Pencil").is_none()
+            && in_tool_property(&paint, "Stabilization").is_none(),
+        "the pen gives way: {:?}",
+        paint.texts
+    );
+    shows_rows(&mut paint, &["Mode", "Scale W"]);
+    paint.step(vec![key(Key::Escape, Modifiers::NONE)]);
+    paint.settle(4);
+    assert!(
+        in_tool_property(&paint, "Pencil").is_some(),
+        "the pen again"
+    );
+}
+
+/// 00:49:39, FG-38: Change Canvas Size's box belongs to the picture it
+/// was opened on. With another canvas in front its handles are not drawn
+/// there, and OK changes neither picture.
+#[test]
+fn fg_00_49_39_canvas_size_box_stays_with_its_picture() {
+    let mut paint = PaintDriver::new("p6a-canvas-size-two");
+    paint.command("file.new");
+    paint.step(vec![key(Key::Enter, Modifiers::NONE)]);
+    paint.settle(10);
+    let second = picture(&paint);
+    paint.command("window.next_tab");
+    paint.settle(4);
+    let first = picture(&paint);
+    assert_ne!(first, second, "two canvases");
+    let size_of = |paint: &PaintDriver, id| sue_model::picture::size(entity(paint, id)).unwrap();
+    let sizes = [size_of(&paint, first), size_of(&paint, second)];
+    paint.command("edit.canvas_size");
+    paint.settle(4);
+    let corner = mark(&paint, "canvas_size.2");
+    paint.drag(corner, corner + vec2(-80.0, -50.0), PointerButton::Primary);
+    paint.command("window.next_tab");
+    paint.settle(4);
+    assert_eq!(picture(&paint), second, "the other canvas in front");
+    let drawn = sue_paint::shown_buttons(&paint.ctx)
+        .into_iter()
+        .any(|(found, _)| found.starts_with("mark.canvas_size."));
+    assert!(!drawn, "the box is not drawn on another picture");
+    paint.step(vec![key(Key::Enter, Modifiers::NONE)]);
+    paint.settle(6);
+    assert_eq!(
+        [size_of(&paint, first), size_of(&paint, second)],
+        sizes,
+        "neither picture changed"
+    );
+}
+
+/// 00:23:22, FGV-18: Move layers in the selection over a selection with
+/// nothing painted in it says so, and moves nothing.
+#[test]
+fn fg_00_23_22_move_layers_in_an_empty_selection_says_so() {
+    let mut paint = PaintDriver::new("p6a-move-empty");
+    let at = middle(&paint);
+    paint.command("layer.new");
+    paint.settle(2);
+    paint.command("select.none");
+    paint.command("tool.selection");
+    paint.settle(2);
+    // A corner of the canvas the sample leaves clear.
+    let [w, h] = picture_size(&paint);
+    let scale = zoom(&paint) / 100.0;
+    let corner = at - vec2(w as f32 / 2.0 * scale - 6.0, h as f32 / 2.0 * scale - 6.0);
+    stroke(&mut paint, corner, corner + vec2(20.0, 20.0));
+    pick_sub(&mut paint, "tool.move_layer", "Move Layer");
+    paint.click_text("Move layers in the selection");
+    paint.runtime.shell.notify("(test: nothing said)", false);
+    let before = arena_bytes(&paint);
+    stroke(
+        &mut paint,
+        corner + vec2(10.0, 10.0),
+        corner + vec2(60.0, 60.0),
+    );
+    paint.settle(4);
+    let said = paint
+        .runtime
+        .shell
+        .message()
+        .map(|(text, _)| text.to_string());
+    assert_eq!(
+        said.as_deref(),
+        Some("No layer is painted inside the selection")
+    );
+    assert!(arena_bytes(&paint) == before, "nothing moved");
+}
+
+/// 00:49:17, FGV-49: a transform opened with Tool Property showing its
+/// numbers, left untouched for a while and cancelled, changes nothing:
+/// the fields only change the box when a person changes them.
+#[test]
+fn fg_00_49_17_an_untouched_transform_leaves_the_layer_alone() {
+    let mut paint = PaintDriver::new("p6a-transform-untouched");
+    let at = middle(&paint);
+    let layer = inked(&mut paint, at - vec2(43.0, 11.0), at + vec2(37.0, 17.0));
+    paint.click_text("Tool Property");
+    paint.settle(2);
+    let before = arena_bytes(&paint);
+    let was = pixels(&paint, layer);
+    paint.command("edit.transform.scale");
+    paint.settle(12);
+    let shown = pixels(&paint, layer);
+    let differ = was.iter().zip(&shown).filter(|(a, b)| a != b).count();
+    assert_eq!(differ, 0, "the open transform shows the layer as it was");
+    paint.step(vec![key(Key::Escape, Modifiers::NONE)]);
+    paint.settle(4);
+    assert!(arena_bytes(&paint) == before, "cancel changes nothing");
+}

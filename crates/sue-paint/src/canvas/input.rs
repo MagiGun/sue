@@ -101,6 +101,8 @@ impl SuePaint {
                     if matches!(self.gesture, Some(Gesture::Engine(_))) {
                         self.engine_abandon(cx);
                     }
+                    // Tone dots or the grid held: back where they were.
+                    self.nudge_abandon(cx);
                     self.gesture = None;
                 }
             }
