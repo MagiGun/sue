@@ -289,6 +289,14 @@ impl Theme {
         } else {
             Visuals::dark()
         };
+        // egui draws dark text on a light page from the font's raw
+        // coverage, which leaves the light interface font thin and gray
+        // at caption sizes: secondary text (a layer's "100 % Normal", a
+        // field's number) read faint. The same ramp the dark themes use
+        // gives every glyph its full weight, so Paper's text is as solid
+        // as Void's.
+        visuals.text_options.color_transfer_function =
+            egui::epaint::FontColorTransferFunction::TwoCoverageMinusCoverageSq;
         visuals.override_text_color = None;
         visuals.weak_text_color = Some(self.text_muted());
         visuals.widgets = Widgets {
@@ -726,5 +734,32 @@ mod tests {
         // Its own colors still win over egui's light ones.
         assert_eq!(visuals.widgets.inactive.fg_stroke.color, paper.text);
         assert_eq!(visuals.window_fill, paper.panel);
+    }
+
+    /// Phase 6 polish: Paper's secondary text (a layer's "100 % Normal",
+    /// a caption, a field's unit) read faint, since egui drew dark glyphs
+    /// on light pages from their raw coverage, thin in the light
+    /// interface font. Every preset now draws glyphs at full weight, and
+    /// its secondary text reads at 4.5 to 1 or more on every surface.
+    #[test]
+    fn every_preset_draws_secondary_text_readably() {
+        let mut rice = RiceSchema::new();
+        crate::register_rice(&mut rice).unwrap();
+        let sue = Theme::from_rice(&rice);
+        for preset in sue_rice::builtin_presets() {
+            let theme = sue.clone().with_preset(&preset);
+            let visuals = theme.visuals(None);
+            assert_eq!(
+                visuals.text_options.color_transfer_function,
+                egui::epaint::FontColorTransferFunction::TwoCoverageMinusCoverageSq,
+                "{}",
+                preset.id
+            );
+            for level in 0..=3 {
+                let surface = theme.surface(level);
+                let ratio = crate::ui::contrast(theme.text_muted(), surface);
+                assert!(ratio >= 4.5, "{} on surface {level}: {ratio}", preset.id);
+            }
+        }
     }
 }
