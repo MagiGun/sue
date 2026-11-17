@@ -31,9 +31,9 @@ pub(super) fn figures(tour: &mut Tour<'_>) -> Result<(), String> {
     tour.paint_command("layer.new.figure");
     tour.paint_go(&["tab/tool/1"]);
     tour.shoot("81a-sue-paint-figure-male")?;
-    scrolled(tour, "81b-sue-paint-figure-model-chooser", 26)?;
-    scrolled(tour, "81c-sue-paint-figure-body-shape-by-part", 44)?;
-    scrolled(tour, "81d-sue-paint-figure-pose-and-hand-setup", 64)?;
+    scrolled(tour, "81b-sue-paint-figure-model-chooser", 20)?;
+    scrolled(tour, "81c-sue-paint-figure-body-shape-by-part", 33)?;
+    scrolled(tour, "81d-sue-paint-figure-pose-and-hand-setup", 47)?;
     tour.paint_command("figure.model.1");
     tour.paint_command("figure.preset.7");
     tour.shoot("81e-sue-paint-figure-female-posed")?;

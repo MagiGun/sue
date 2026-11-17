@@ -17,11 +17,41 @@ use crate::studio::SuePaint;
 /// Sue's own models, as the chooser lists them: the command that makes
 /// the current figure that model, what it is called, and what it is.
 pub(crate) const MODELS: [(&str, &str, Kind, Build, Side); 5] = [
-    ("figure.model.0", "Male body", Kind::Body, Build::Male, Side::Left),
-    ("figure.model.1", "Female body", Kind::Body, Build::Female, Side::Left),
-    ("figure.model.2", "Left hand", Kind::Hand, Build::Male, Side::Left),
-    ("figure.model.3", "Right hand", Kind::Hand, Build::Male, Side::Right),
-    ("figure.model.4", "Head", Kind::Head, Build::Male, Side::Left),
+    (
+        "figure.model.0",
+        "Male body",
+        Kind::Body,
+        Build::Male,
+        Side::Left,
+    ),
+    (
+        "figure.model.1",
+        "Female body",
+        Kind::Body,
+        Build::Female,
+        Side::Left,
+    ),
+    (
+        "figure.model.2",
+        "Left hand",
+        Kind::Hand,
+        Build::Male,
+        Side::Left,
+    ),
+    (
+        "figure.model.3",
+        "Right hand",
+        Kind::Hand,
+        Build::Male,
+        Side::Right,
+    ),
+    (
+        "figure.model.4",
+        "Head",
+        Kind::Head,
+        Build::Male,
+        Side::Left,
+    ),
 ];
 
 /// Which of [`MODELS`] `body` is.
@@ -192,8 +222,7 @@ impl SuePaint {
                         tr!("pin-joint")
                     };
                     let response = ui::button("figure.pin", &name).show(ui, theme);
-                    let response =
-                        ui::tooltip(response, &Tip::new(&tr!("pin-joint-help")), theme);
+                    let response = ui::tooltip(response, &Tip::new(&tr!("pin-joint-help")), theme);
                     if response.clicked() {
                         self.pending_command = Some("figure.pin");
                     }
@@ -318,7 +347,8 @@ fn hand_pad(ui: &mut Ui, theme: &Theme, setup: &mut HandSetup) -> Slid {
         && (response.dragged() || response.clicked() || response.drag_started())
     {
         // Where the pointer is between the three corners.
-        let area = |a: Pos2, b: Pos2, c: Pos2| (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        let area =
+            |a: Pos2, b: Pos2, c: Pos2| (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
         let whole = area(top, left, right);
         let mut fist = (area(top, pointer, right) / whole).max(0.0);
         let mut fold = (area(top, left, pointer) / whole).max(0.0);
@@ -348,9 +378,21 @@ fn hand_pad(ui: &mut Ui, theme: &Theme, setup: &mut HandSetup) -> Slid {
         let ink = theme.text_muted();
         let gap = theme.space(Space::S1);
         for (text, at, align) in [
-            (tr!("hand-open"), pos2(top.x, top.y - gap), egui::Align2::CENTER_BOTTOM),
-            (tr!("hand-fist"), pos2(left.x, left.y + gap), egui::Align2::LEFT_TOP),
-            (tr!("hand-fold"), pos2(right.x, right.y + gap), egui::Align2::RIGHT_TOP),
+            (
+                tr!("hand-open"),
+                pos2(top.x, top.y - gap),
+                egui::Align2::CENTER_BOTTOM,
+            ),
+            (
+                tr!("hand-fist"),
+                pos2(left.x, left.y + gap),
+                egui::Align2::LEFT_TOP,
+            ),
+            (
+                tr!("hand-fold"),
+                pos2(right.x, right.y + gap),
+                egui::Align2::RIGHT_TOP,
+            ),
         ] {
             painter.text(at, align, text, font.clone(), ink);
         }

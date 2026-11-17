@@ -271,10 +271,8 @@ fn mirrored(m: &Mat3) -> Mat3 {
 fn morphed(body: &Body) -> (Vec<[f32; 3]>, Vec<[[f32; 3]; 2]>) {
     let asset = asset();
     let sex = body.build.key();
-    let mut weights: Vec<(String, f32)> = vec![
-        (sex.to_string(), 1.0),
-        (format!("{sex}:ideal"), 0.5),
-    ];
+    let mut weights: Vec<(String, f32)> =
+        vec![(sex.to_string(), 1.0), (format!("{sex}:ideal"), 0.5)];
     let mut slide = |name: &str, value: f32| {
         if value > 1e-4 {
             weights.push((format!("{name}+"), value));
@@ -286,7 +284,11 @@ fn morphed(body: &Body) -> (Vec<[f32; 3]>, Vec<[[f32; 3]; 2]>) {
     // A heavy build goes past the heaviest the targets were made for.
     slide(
         &format!("{sex}:fat"),
-        if whole[0] > 0.0 { whole[0] * 1.6 } else { whole[0] },
+        if whole[0] > 0.0 {
+            whole[0] * 1.6
+        } else {
+            whole[0]
+        },
     );
     slide(&format!("{sex}:muscle"), whole[1]);
     slide("head_fat", head[0]);
@@ -449,6 +451,7 @@ fn hand_axes(joints: &[[[f32; 3]; 2]], side: usize) -> Mat3 {
 /// measured from: the trunk, head and legs as modeled; the arms hanging
 /// straight down, bending forward at the elbow; the fingers as the hand
 /// figure's. Also each hand's carrying turn and the thumbs' real axes.
+#[allow(clippy::needless_range_loop)]
 fn body_frames(joints: &[[[f32; 3]; 2]]) -> (Vec<Mat3>, [Mat3; 2], Vec<[f32; 3]>) {
     let mut frames = vec![IDENTITY; joints.len()];
     let mut hands = [IDENTITY; 2];
@@ -620,14 +623,13 @@ fn blended(parts: &[(&[(u8, f32); 4], f32)]) -> [(u8, f32); 4] {
     out
 }
 
+/// A piece of mesh: its points, their skin and its faces.
+type Cut = (Vec<[f32; 3]>, Vec<[(u8, f32); 4]>, Vec<Vec<u32>>);
+
 /// One step of Catmull-Clark subdivision: every face split into quads
 /// round its middle and the whole surface smoothed, the skin weights
 /// carried along.
-fn subdivided(
-    points: &[[f32; 3]],
-    skin: &[[(u8, f32); 4]],
-    faces: &[Vec<u32>],
-) -> (Vec<[f32; 3]>, Vec<[(u8, f32); 4]>, Vec<Vec<u32>>) {
+fn subdivided(points: &[[f32; 3]], skin: &[[(u8, f32); 4]], faces: &[Vec<u32>]) -> Cut {
     let count = points.len();
     // Each new point as shares of the old ones.
     let mut shares: Vec<Vec<(u32, f32)>> = Vec::new();
@@ -754,7 +756,7 @@ fn cut(
     skin: &[[(u8, f32); 4]],
     keep: impl Fn(usize) -> bool,
     flat: ([f32; 3], [f32; 3]),
-) -> (Vec<[f32; 3]>, Vec<[(u8, f32); 4]>, Vec<Vec<u32>>) {
+) -> Cut {
     let asset = asset();
     let mut slot: Vec<Option<u32>> = vec![None; points.len()];
     let (mut out_points, mut out_skin, mut faces) = (Vec::new(), Vec::new(), Vec::new());
@@ -818,10 +820,8 @@ fn cut(
             middle = add(middle, out_points[v as usize]);
         }
         let middle = scale(middle, 1.0 / ring.len() as f32);
-        let parts: Vec<(&[(u8, f32); 4], f32)> = ring
-            .iter()
-            .map(|&v| (&out_skin[v as usize], 1.0))
-            .collect();
+        let parts: Vec<(&[(u8, f32); 4], f32)> =
+            ring.iter().map(|&v| (&out_skin[v as usize], 1.0)).collect();
         let middle_skin = blended(&parts);
         let hub = out_points.len() as u32;
         out_points.push(middle);
@@ -851,8 +851,8 @@ fn smoothstep(from: f32, to: f32, x: f32) -> f32 {
 /// (0 to 1) the nearest point is.
 fn to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> (f32, f32) {
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-    let along =
-        (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy).max(1e-12)).clamp(0.0, 1.0);
+    let along = (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy).max(1e-12))
+        .clamp(0.0, 1.0);
     let (qx, qy) = (a[0] + dx * along, a[1] + dy * along);
     (((p[0] - qx).powi(2) + (p[1] - qy).powi(2)).sqrt(), along)
 }
@@ -982,7 +982,8 @@ impl Back {
         for (from, to) in &self.tendons {
             let (far, along) = to_segment(p, *from, *to);
             ridge = ridge.max(
-                0.001 * self.size
+                0.001
+                    * self.size
                     * bell(far / (0.0046 * self.size))
                     * smoothstep(0.15, 0.75, along)
                     * (1.0 - smoothstep(0.93, 1.0, along) * 0.5),
@@ -1102,14 +1103,7 @@ fn body_guides(
         t.iter()
             .all(|&v| length(sub(points[v as usize], at)) < reach)
     };
-    let trunk = [
-        at::HIPS,
-        at::SPINE,
-        at::CHEST,
-        at::NECK,
-        at::HEAD,
-        at::JAW,
-    ];
+    let trunk = [at::HIPS, at::SPINE, at::CHEST, at::NECK, at::HEAD, at::JAW];
     sliced(
         points,
         tris,
@@ -1139,7 +1133,10 @@ fn body_guides(
         tris,
         along(at::CHEST, 0.5),
         up,
-        |t| within(t, &[at::SPINE, at::CHEST, 17, 18], 0.9) && near(t, along(at::CHEST, 0.5), 0.13 * tall),
+        |t| {
+            within(t, &[at::SPINE, at::CHEST, 17, 18], 0.9)
+                && near(t, along(at::CHEST, 0.5), 0.13 * tall)
+        },
         &mut guides,
     );
     sliced(
@@ -1147,7 +1144,10 @@ fn body_guides(
         tris,
         along(at::NECK, 0.45),
         sub(joints[at::NECK][1], joints[at::NECK][0]),
-        |t| within(t, &[at::NECK, at::HEAD, at::CHEST, at::JAW], 0.9) && near(t, along(at::NECK, 0.45), 0.06 * tall),
+        |t| {
+            within(t, &[at::NECK, at::HEAD, at::CHEST, at::JAW], 0.9)
+                && near(t, along(at::NECK, 0.45), 0.06 * tall)
+        },
         &mut guides,
     );
     // The eye line round the head.
@@ -1342,7 +1342,8 @@ fn shaped_hand(body: &Body) -> Shaped {
         |index| {
             local[index][1] > foot[1]
                 && length(local[index]) < 0.3 * size
-                && follows(&asset.skin[index], &chain) + follows(&asset.skin[index], &[at::ARMS[0][1]])
+                && follows(&asset.skin[index], &chain)
+                    + follows(&asset.skin[index], &[at::ARMS[0][1]])
                     > 0.5
         },
         (foot, [0.0, 1.0, 0.0]),

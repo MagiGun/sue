@@ -206,6 +206,7 @@ struct Sample {
 /// surface covers (so its edge is soft), its guide lines and its shadow
 /// on the floor. `view.fast` draws without the finer picture, for while
 /// something is dragged.
+#[allow(clippy::needless_range_loop)]
 #[must_use]
 pub fn render_surface(
     surface: &Surface,
@@ -283,7 +284,10 @@ pub fn render_surface(
         .then(|| ShadowMap::from_points(&worlds, &surface.indices, light));
     let f = fine as f32;
     let to_tile = |s: [f32; 3]| [(s[0] - x0 as f32) * f, (s[1] - y0 as f32) * f, s[2]];
-    let relief = surface.relief.as_deref().filter(|_| !surface.detail.is_empty());
+    let relief = surface
+        .relief
+        .as_deref()
+        .filter(|_| !surface.detail.is_empty());
     for t in surface.indices.as_chunks::<3>().0 {
         let [ia, ib, ic] = t.map(|i| i as usize);
         if !(screen[ia][0].is_finite() && screen[ib][0].is_finite() && screen[ic][0].is_finite()) {
@@ -368,7 +372,14 @@ pub fn render_surface(
     }
     // Guide lines, lying on the surface: drawn where nothing nearer hides
     // them.
-    let mut guide = vec![0.0_f32; if surface.guides.is_empty() { 0 } else { tw * th }];
+    let mut guide = vec![
+        0.0_f32;
+        if surface.guides.is_empty() {
+            0
+        } else {
+            tw * th
+        }
+    ];
     if !surface.guides.is_empty() {
         let half = 0.55 * f;
         for [a, b] in &surface.guides {

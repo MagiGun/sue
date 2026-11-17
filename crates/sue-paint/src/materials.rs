@@ -354,7 +354,7 @@ pub fn model_file(path: &Path) -> Result<Entity, String> {
         if file.components().count() != 1 {
             return None;
         }
-        sue_platform::fs::read(&path.parent()?.join(file)).ok()
+        sue_platform::fs::read(path.parent()?.join(file)).ok()
     };
     crate::model3d::import(bytes, &name, &extension, &beside)
 }

@@ -28,7 +28,10 @@ pub(super) fn picture(paint: &PaintDriver) -> sue_core::EntityId {
 /// One frame with `events`, as [`PaintDriver::step`], that also returns
 /// every control the frame named for assistive technology, with where it
 /// is: the drag buttons and the chart have no text of their own.
-pub(super) fn step_named(paint: &mut PaintDriver, events: Vec<egui::Event>) -> Vec<(String, egui::Rect)> {
+pub(super) fn step_named(
+    paint: &mut PaintDriver,
+    events: Vec<egui::Event>,
+) -> Vec<(String, egui::Rect)> {
     step_told(paint, events)
         .into_iter()
         .map(|(label, _, rect)| (label, rect))
@@ -356,7 +359,8 @@ fn sue_paint_3d_tool_property_has_the_object_camera_light_outline_and_body_rows(
         "Reset position",
         "Reset scale",
         "Object scale",
-        "Outline width",
+        // A figure is drawn shaded when new, so the outline's width
+        // shows once Draw as asks for lines (its own test below).
         "Body part",
         "Head to body ratio",
     ] {

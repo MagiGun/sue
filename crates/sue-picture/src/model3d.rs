@@ -197,7 +197,11 @@ impl Gltf {
                 out.push(match kind {
                     5120 => {
                         let value = f32::from(raw[0] as i8);
-                        if normalized { (value / 127.0).max(-1.0) } else { value }
+                        if normalized {
+                            (value / 127.0).max(-1.0)
+                        } else {
+                            value
+                        }
                     }
                     5121 => {
                         let value = f32::from(raw[0]);
@@ -205,7 +209,11 @@ impl Gltf {
                     }
                     5122 => {
                         let value = f32::from(i16::from_le_bytes([raw[0], raw[1]]));
-                        if normalized { (value / 32767.0).max(-1.0) } else { value }
+                        if normalized {
+                            (value / 32767.0).max(-1.0)
+                        } else {
+                            value
+                        }
                     }
                     5123 => {
                         let value = f32::from(u16::from_le_bytes([raw[0], raw[1]]));
@@ -239,9 +247,21 @@ impl Gltf {
             .unwrap_or([0.0, 0.0, 0.0, 1.0]);
         let s = list("scale", 3).unwrap_or_else(|| vec![1.0; 3]);
         let turn = [
-            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
-            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
-            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+            [
+                1.0 - 2.0 * (y * y + z * z),
+                2.0 * (x * y - z * w),
+                2.0 * (x * z + y * w),
+            ],
+            [
+                2.0 * (x * y + z * w),
+                1.0 - 2.0 * (x * x + z * z),
+                2.0 * (y * z - x * w),
+            ],
+            [
+                2.0 * (x * z - y * w),
+                2.0 * (y * z + x * w),
+                1.0 - 2.0 * (x * x + y * y),
+            ],
         ];
         let mut out = ONE;
         for row in 0..3 {
@@ -342,7 +362,9 @@ fn parse(gltf: &Gltf) -> Result<Parsed, String> {
         let Some(mesh) = node["mesh"].as_u64() else {
             continue;
         };
-        let skin = node["skin"].as_u64().and_then(|skin| skins.get(skin as usize));
+        let skin = node["skin"]
+            .as_u64()
+            .and_then(|skin| skins.get(skin as usize));
         // How each of the skin's joints carries a point as modeled.
         let carried: Vec<(usize, Mat4)> = skin
             .map(|skin| {
@@ -359,7 +381,8 @@ fn parse(gltf: &Gltf) -> Result<Parsed, String> {
                             .filter(|(parts, values)| *parts == 16 && values.len() >= (at + 1) * 16)
                             .map_or(ONE, |(_, values)| {
                                 let m = &values[at * 16..at * 16 + 16];
-                                [0, 1, 2, 3].map(|row| [0, 1, 2, 3].map(|column| m[column * 4 + row]))
+                                [0, 1, 2, 3]
+                                    .map(|row| [0, 1, 2, 3].map(|column| m[column * 4 + row]))
                             });
                         Some((*bone_of.get(&node)?, times(world.get(node)?, &bind)))
                     })
@@ -386,7 +409,11 @@ fn parse(gltf: &Gltf) -> Result<Parsed, String> {
                 .filter(|(parts, values)| *parts == 4 && values.len() == count * 4);
             let first = out.points.len() as u32;
             for at in 0..count {
-                let p = [positions[at * 3], positions[at * 3 + 1], positions[at * 3 + 2]];
+                let p = [
+                    positions[at * 3],
+                    positions[at * 3 + 1],
+                    positions[at * 3 + 2],
+                ];
                 let mut mine = [(0_u16, 0.0_f32); 4];
                 let mut placed = [0.0_f32; 3];
                 let mut total = 0.0;
@@ -467,7 +494,11 @@ fn rigged(parsed: &Parsed) -> Option<Shaped> {
     if parsed.bones.is_empty() || parsed.bones.len() > 255 {
         return None;
     }
-    let lower: Vec<String> = parsed.bones.iter().map(|bone| bone.0.to_lowercase()).collect();
+    let lower: Vec<String> = parsed
+        .bones
+        .iter()
+        .map(|bone| bone.0.to_lowercase())
+        .collect();
     // Where each bone ends: at the middle of the bones hanging from it,
     // or a little further along from its parent.
     let mut joints: Vec<Joint> = Vec::with_capacity(parsed.bones.len());
@@ -503,11 +534,15 @@ fn rigged(parsed: &Parsed) -> Option<Shaped> {
             bone,
             start: [0.01; 2],
             end: [0.01; 2],
-            mirror: lower.iter().position(|name| !other.is_empty() && *name == other),
+            mirror: lower
+                .iter()
+                .position(|name| !other.is_empty() && *name == other),
         });
     }
     // A hand or foot with two bones above it is a limb that follows it.
-    let finger = ["index", "thumb", "middle", "ring", "pinky", "little", "finger", "toe"];
+    let finger = [
+        "index", "thumb", "middle", "ring", "pinky", "little", "finger", "toe",
+    ];
     let mut limbs = Vec::new();
     for (index, name) in lower.iter().enumerate() {
         if !(name.contains("hand") || name.contains("foot") || name.contains("ankle"))

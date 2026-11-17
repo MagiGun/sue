@@ -1226,6 +1226,8 @@ pub fn figure_view(kind: crate::figure::Kind) -> View3D {
         yaw: if hand { 200.0 } else { 18.0 },
         pitch: if hand { 12.0 } else { 6.0 },
         distance: if hand { 3.4 } else { 4.4 },
+        // Shaded, as a clay figure; the outline is there to turn on.
+        style: 0,
         follow_light: true,
         ..View3D::default()
     }

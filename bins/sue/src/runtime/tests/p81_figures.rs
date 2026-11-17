@@ -105,7 +105,11 @@ fn undo_pair(
     assert!(
         check(paint),
         "{what}: so after ({:?}, {} layers)",
-        paint.runtime.shell.message().map(|(text, _)| text.to_string()),
+        paint
+            .runtime
+            .shell
+            .message()
+            .map(|(text, _)| text.to_string()),
         layers(paint).len()
     );
     assert_eq!(
@@ -236,17 +240,16 @@ fn p81_a_dragged_hand_takes_its_arm_along_and_a_ring_turns_one_joint() {
             let (pose, body, _) = sight(paint, layer);
             assert_ne!(pose.0[5], base.0[5], "the upper arm turned");
             assert!(pose.0[6][0] < base.0[6][0] - 10.0, "the elbow folded");
-            assert!(pose.0[6][0] >= -155.0 && pose.0[6][2].abs() < 1e-3, "within limits");
+            assert!(
+                pose.0[6][0] >= -155.0 && pose.0[6][2].abs() < 1e-3,
+                "within limits"
+            );
             // Nothing but the arm moved.
             for joint in (0..17).filter(|joint| *joint != 5 && *joint != 6) {
                 assert_eq!(pose.0[joint], base.0[joint], "{joint}");
             }
             // The wrist is where it was let go.
-            let now = on_screen(
-                paint,
-                layer,
-                sue_paint::figure::solve(&pose, &body)[7].0,
-            );
+            let now = on_screen(paint, layer, sue_paint::figure::solve(&pose, &body)[7].0);
             assert!((now - to).length() < 14.0, "{now:?} for {to:?}");
         },
     );
@@ -284,7 +287,10 @@ fn p81_a_dragged_hand_takes_its_arm_along_and_a_ring_turns_one_joint() {
             }
             let kept = arena_bytes(&paint);
             undo(&mut paint);
-            assert!(arena_bytes(&paint) == before, "the ring turn undone exactly");
+            assert!(
+                arena_bytes(&paint) == before,
+                "the ring turn undone exactly"
+            );
             redo(&mut paint);
             assert!(arena_bytes(&paint) == kept, "and redone exactly");
             turned = true;
@@ -388,7 +394,11 @@ fn scrolled_to(paint: &mut PaintDriver, name: &str, first: egui::Rect) -> egui::
         if found.top() < first.top() + first.height() * 1.6 && found.top() >= first.top() - 1.0 {
             return found;
         }
-        let by = if found.top() > first.top() { -30.0 } else { 30.0 };
+        let by = if found.top() > first.top() {
+            -30.0
+        } else {
+            30.0
+        };
         paint.step(vec![
             egui::Event::PointerMoved(over),
             egui::Event::MouseWheel {
@@ -414,7 +424,15 @@ fn p81_a_hand_pose_material_closes_the_hands_of_a_body() {
     let poses = material_folder(&mut paint, "Poses");
     let names: Vec<&str> = poses.iter().map(|(name, _)| name.as_str()).collect();
     // Sue's own library: the body poses and the hand poses.
-    for name in ["Contrapposto", "Crouch", "Punch", "Look back", "Fist", "OK sign", "Claw"] {
+    for name in [
+        "Contrapposto",
+        "Crouch",
+        "Punch",
+        "Look back",
+        "Fist",
+        "OK sign",
+        "Claw",
+    ] {
         assert!(names.contains(&name), "{name} among {names:?}");
     }
     assert!(names.len() >= 12 + 12, "{}", names.len());
@@ -511,7 +529,10 @@ fn p81_gltf_and_obj_files_import_as_3d_layers_and_a_skinned_one_poses() {
         bytes.windows(4).any(|window| window == b"glTF"),
         "the file is in the document"
     );
-    assert!(pixels(&paint, layer).iter().any(|byte| *byte != 0), "it shows");
+    assert!(
+        pixels(&paint, layer).iter().any(|byte| *byte != 0),
+        "it shows"
+    );
     // Its upper bone dragged to the side on the canvas: the bone turns.
     let (rest, body, _) = sight(&paint, layer);
     let placed = sue_paint::figure::bones(&rest, &body);
@@ -547,10 +568,16 @@ fn p81_gltf_and_obj_files_import_as_3d_layers_and_a_skinned_one_poses() {
     let entity = model(&paint, layer);
     assert!(!sue_paint::figure::is_figure(entity));
     assert_eq!(sue_paint::model3d::file_of(entity).unwrap().1, "obj");
-    assert!(pixels(&paint, layer).iter().any(|byte| *byte != 0), "it shows");
+    assert!(
+        pixels(&paint, layer).iter().any(|byte| *byte != 0),
+        "it shows"
+    );
     // Both are kept among the 3D object materials, to use again.
     let objects = material_folder(&mut paint, "3D objects");
     let names: Vec<&str> = objects.iter().map(|(name, _)| name.as_str()).collect();
-    assert!(names.contains(&"Post") && names.contains(&"Pyramid"), "{names:?}");
+    assert!(
+        names.contains(&"Post") && names.contains(&"Pyramid"),
+        "{names:?}"
+    );
     let _ = std::fs::remove_dir_all(&folder);
 }

@@ -607,7 +607,10 @@ impl SuePaint {
                 if pins.contains(&joint) {
                     // A pinned hand or foot: a square round its joint.
                     painter.rect_stroke(
-                        egui::Rect::from_center_size(a, egui::Vec2::splat(marks::ring_small(theme) * 2.6)),
+                        egui::Rect::from_center_size(
+                            a,
+                            egui::Vec2::splat(marks::ring_small(theme) * 2.6),
+                        ),
                         0.0,
                         Stroke::new(marks::heavy(theme), Color32::from_rgb(255, 170, 40)),
                         egui::StrokeKind::Middle,
@@ -645,8 +648,7 @@ impl SuePaint {
             }
             // The rotation manipulator: a ring for each of the picked
             // joint's own axes, to turn it about that axis alone.
-            if let Some(rings) =
-                chosen.and_then(|joint| crate::figure::rings(&pose, &body, joint))
+            if let Some(rings) = chosen.and_then(|joint| crate::figure::rings(&pose, &body, joint))
             {
                 for (ring, color) in rings.iter().zip([
                     Color32::from_rgb(235, 80, 80),

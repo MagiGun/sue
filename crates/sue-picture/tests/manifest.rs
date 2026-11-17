@@ -45,7 +45,10 @@ fn the_engine_depends_on_no_studio_and_no_interface_crate() {
             "sue-lang",
             "sue-model",
             "sue-platform",
-            "sue-type"
+            "sue-type",
+            // The figure asset is packed, and glTF models are JSON.
+            "miniz_oxide",
+            "serde_json"
         ],
         "sue-picture works on pictures; the studios and the shell stand on it"
     );

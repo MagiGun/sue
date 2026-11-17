@@ -493,6 +493,14 @@ mod tests {
             .filter(|command| command.is_family())
             .map(|command| command.name)
             .collect();
-        assert_eq!(family, ["figure.preset.", "figure.object.angle."]);
+        assert_eq!(
+            family,
+            [
+                "figure.model.",
+                "figure.preset.",
+                "figure.object.angle.",
+                "figure.slider."
+            ]
+        );
     }
 }

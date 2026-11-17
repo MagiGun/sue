@@ -58,7 +58,9 @@ impl SuePaint {
                         ring.iter().filter_map(|p| sight.lens.project(*p)).collect();
                     let near = flat
                         .windows(2)
-                        .map(|pair| crate::canvas::overlays::segment_distance(local, pair[0], pair[1]))
+                        .map(|pair| {
+                            crate::canvas::overlays::segment_distance(local, pair[0], pair[1])
+                        })
                         .fold(f32::INFINITY, f32::min);
                     // Which way round the ring runs on the layer.
                     let round: f32 = flat
@@ -105,7 +107,9 @@ impl SuePaint {
                     Some(limb) => placed[limb[2]].0,
                     None => placed[joint].1,
                 };
-                let root = joints.get(joint).is_some_and(|joint| joint.parent.is_none());
+                let root = joints
+                    .get(joint)
+                    .is_some_and(|joint| joint.parent.is_none());
                 self.figure_joint = Some(joint);
                 self.gesture = Some(Gesture::Pose {
                     layer,
@@ -190,7 +194,9 @@ impl SuePaint {
         };
         let body = sight.body;
         let keep = self.figure_limits;
-        let here = self.doc().map(|doc| doc.view.to_picture(viewport, size, pos));
+        let here = self
+            .doc()
+            .map(|doc| doc.view.to_picture(viewport, size, pos));
         let local = here.map(|p| [p.x - sight.offset[0], p.y - sight.offset[1]]);
         match (how, local) {
             (1, _) => {

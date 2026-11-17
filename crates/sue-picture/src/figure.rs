@@ -321,7 +321,14 @@ pub const SLIDERS: [Slider; 20] = [
     slider("head_length", "Head length", "Head", WHOLE, 0.0, false),
     slider("neck_length", "Neck length", "Neck", WHOLE, 0.0, false),
     slider("neck_width", "Neck width", "Neck", WHOLE, 0.0, false),
-    slider("shoulders", "Shoulder width", "Shoulders", WHOLE, 0.0, false),
+    slider(
+        "shoulders",
+        "Shoulder width",
+        "Shoulders",
+        WHOLE,
+        0.0,
+        false,
+    ),
     slider("chest", "Chest", "Chest", WHOLE, 0.0, false),
     slider("bust", "Bust", "Chest", WHOLE, 0.0, false),
     slider("torso_length", "Torso length", "Chest", WHOLE, 0.0, false),
@@ -331,7 +338,14 @@ pub const SLIDERS: [Slider; 20] = [
     slider("arm_width", "Arm width", "Arms", WHOLE, 0.0, true),
     slider("hand_size", "Hand size", "Hands", WHOLE, 0.0, true),
     slider("finger_length", "Finger length", "Hands", WHOLE, 0.0, true),
-    slider("finger_width", "Finger thickness", "Hands", WHOLE, 0.0, true),
+    slider(
+        "finger_width",
+        "Finger thickness",
+        "Hands",
+        WHOLE,
+        0.0,
+        true,
+    ),
     slider("veins", "Veins", "Hands", PART, 0.3, true),
     slider(
         "prominence",
@@ -2365,7 +2379,12 @@ mod tests {
         thin.shape.0[0] = [-1.0, 0.0];
         // The belly, at a little over half the height.
         let belly = |body: &Body| body.joints()[1].start[0];
-        assert!(belly(&fat) > belly(&plain) * 1.1, "fat is wider: {} {}", belly(&fat), belly(&plain));
+        assert!(
+            belly(&fat) > belly(&plain) * 1.1,
+            "fat is wider: {} {}",
+            belly(&fat),
+            belly(&plain)
+        );
         assert!(belly(&thin) < belly(&plain), "thin is narrower");
         // A part's own place on the chart shapes that part: stronger
         // arms are thicker arms, and the legs stay as they were.
@@ -2420,7 +2439,10 @@ mod tests {
                 slider.key
             );
             // Past its range it stays at its most.
-            assert_eq!(base.with_slider(slider.key, 99.0).slider(slider.key), slider.range[1]);
+            assert_eq!(
+                base.with_slider(slider.key, 99.0).slider(slider.key),
+                slider.range[1]
+            );
         }
         // Longer legs raise the hips of a body of the same height's
         // share; longer fingers reach further from the wrist.
@@ -2428,7 +2450,10 @@ mod tests {
         let reach = |body: &Body| {
             let placed = bones(&rest, body);
             let (wrist, tip) = (placed[7].0, placed[26].1);
-            (0..3).map(|k| (tip[k] - wrist[k]).powi(2)).sum::<f32>().sqrt()
+            (0..3)
+                .map(|k| (tip[k] - wrist[k]).powi(2))
+                .sum::<f32>()
+                .sqrt()
         };
         assert!(reach(&long) > reach(&plain) * 1.03, "longer fingers");
         // As text on the model, and back; what is at rest is not written.
@@ -2440,7 +2465,9 @@ mod tests {
         assert_eq!(Body::of(&model).slider("hips"), 0.25);
         assert!(plain.parts_text().is_empty());
         // A body shape material carries them.
-        let read = Body::default().with_shape_text(&shaped.shape_text()).unwrap();
+        let read = Body::default()
+            .with_shape_text(&shaped.shape_text())
+            .unwrap();
         assert_eq!(read.parts, shaped.parts);
     }
 
@@ -2529,8 +2556,12 @@ mod tests {
             kind: Kind::Hand,
             ..body
         };
-        let smooth = hand.with_slider("veins", 0.0).with_slider("prominence", 0.0);
-        let veined = hand.with_slider("veins", 1.0).with_slider("prominence", 1.0);
+        let smooth = hand
+            .with_slider("veins", 0.0)
+            .with_slider("prominence", 0.0);
+        let veined = hand
+            .with_slider("veins", 1.0)
+            .with_slider("prominence", 1.0);
         let open = hand.preset(0);
         let (a, b) = (surface(&open, &smooth), surface(&open, &veined));
         assert_eq!(a.positions.len(), b.positions.len());
@@ -2657,7 +2688,10 @@ mod preview {
                 }
                 pixel[3] = 255;
             }
-            let png = sue_io::encode_png(&RasterTile2D::from_bytes(size[0], size[1], PixelFormat::Rgba8, pixels).unwrap()).unwrap();
+            let png = sue_io::encode_png(
+                &RasterTile2D::from_bytes(size[0], size[1], PixelFormat::Rgba8, pixels).unwrap(),
+            )
+            .unwrap();
             std::fs::write(format!("{folder}/{name}.png"), png).unwrap();
             println!("{name}: {took:?}");
         };
@@ -2676,13 +2710,22 @@ mod preview {
         };
         save("male", &male, &male.standing(), &front, [700, 1000]);
         save("female", &female, &female.standing(), &front, [700, 1000]);
-        save("male-rest", &male, &Pose::rest(), &View3D { yaw: 0.0, ..front }, [700, 1000]);
+        save(
+            "male-rest",
+            &male,
+            &Pose::rest(),
+            &View3D { yaw: 0.0, ..front },
+            [700, 1000],
+        );
         for (index, name) in PRESETS.iter().enumerate().skip(1) {
             save(
                 &format!("pose-{index:02}-{name}"),
                 &male,
                 &male.preset(index),
-                &View3D { floor: false, ..front },
+                &View3D {
+                    floor: false,
+                    ..front
+                },
                 [300, 420],
             );
         }

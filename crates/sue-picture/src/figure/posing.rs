@@ -6,8 +6,8 @@
 
 use super::human::{self, at};
 use super::{
-    Body, HAND, IDENTITY, Kind, Mat3, Pose, Side, apply, between, degrees, euler, mul,
-    transpose, unit,
+    Body, HAND, IDENTITY, Kind, Mat3, Pose, Side, apply, between, degrees, euler, mul, transpose,
+    unit,
 };
 
 /// How far each of a joint's three turns may go, in degrees: least and
@@ -238,6 +238,7 @@ fn about(axis: [f32; 3], angle: f32) -> Mat3 {
 /// Hand pose `base` with its unlocked fingers set as `setup` says.
 /// `body` is the hand figure (or the body whose hand it is), which
 /// knows how the thumb really bends.
+#[allow(clippy::needless_range_loop)]
 #[must_use]
 pub fn hand_setup(body: &Body, base: &Pose, setup: &HandSetup) -> Pose {
     let mut pose = Pose(
@@ -273,7 +274,10 @@ pub fn hand_setup(body: &Body, base: &Pose, setup: &HandSetup) -> Pose {
         let axis = |part: usize| axes.get(part).copied().unwrap_or([1.0, 0.0, 0.0]);
         // The thumb swings out with the spread, and folds across the
         // fingers (a fist) or along the palm's edge (a flat fold).
-        let out = about([0.0, 0.0, 1.0], spread.max(0.0) * 22.0 - spread.min(0.0) * -8.0);
+        let out = about(
+            [0.0, 0.0, 1.0],
+            spread.max(0.0) * 22.0 - spread.min(0.0) * -8.0,
+        );
         let base_turn = mul(&out, &about(axis(0), fist * 30.0 + fold * 18.0));
         pose.0[13] = degrees(&base_turn);
         pose.0[14] = degrees(&about(axis(1), fist * 38.0 + fold * 12.0));
@@ -470,7 +474,12 @@ const THUMB_IN: [f32; 4] = [34.0, 40.0, 50.0, -6.0];
 const HAND_SHAPES: [HandShape; 16] = [
     // Open hand.
     (
-        [[0.0, 0.0, 0.0, 4.0], STRAIGHT, [0.0, 0.0, 0.0, -4.0], [0.0, 0.0, 0.0, -8.0]],
+        [
+            [0.0, 0.0, 0.0, 4.0],
+            STRAIGHT,
+            [0.0, 0.0, 0.0, -4.0],
+            [0.0, 0.0, 0.0, -8.0],
+        ],
         [0.0; 4],
     ),
     // Relaxed.
@@ -515,10 +524,7 @@ const HAND_SHAPES: [HandShape; 16] = [
         [-4.0, 0.0, 0.0, 30.0],
     ),
     // Flat fold.
-    (
-        [[80.0, 6.0, 2.0, 0.0]; 4],
-        [16.0, 10.0, 10.0, 0.0],
-    ),
+    ([[80.0, 6.0, 2.0, 0.0]; 4], [16.0, 10.0, 10.0, 0.0]),
     // OK sign.
     (
         [
@@ -551,7 +557,12 @@ const HAND_SHAPES: [HandShape; 16] = [
     ),
     // Rock.
     (
-        [[0.0, 0.0, 0.0, 10.0], CURLED, CURLED, [0.0, 0.0, 0.0, -14.0]],
+        [
+            [0.0, 0.0, 0.0, 10.0],
+            CURLED,
+            CURLED,
+            [0.0, 0.0, 0.0, -14.0],
+        ],
         THUMB_IN,
     ),
     // Three.
@@ -570,7 +581,10 @@ const HAND_SHAPES: [HandShape; 16] = [
         [-6.0, 0.0, 0.0, 30.0],
     ),
     // Finger gun.
-    ([[0.0, 0.0, 0.0, 2.0], CURLED, CURLED, CURLED], [-8.0, 0.0, 0.0, 24.0]),
+    (
+        [[0.0, 0.0, 0.0, 2.0], CURLED, CURLED, CURLED],
+        [-8.0, 0.0, 0.0, 24.0],
+    ),
 ];
 
 /// Hand pose `index` of Sue's own ([`super::HAND_PRESETS`]) for the
@@ -687,7 +701,13 @@ mod tests {
         let step = [ankle[0], ankle[1] + 0.3, ankle[2] + 0.2];
         let stepped = reached(&base, &body, [11, 12, 13], step, true);
         assert!(stepped.0[12][0] > 20.0, "the knee folds back");
-        let placed = solve(&stepped, &Body { ground: false, ..body });
+        let placed = solve(
+            &stepped,
+            &Body {
+                ground: false,
+                ..body
+            },
+        );
         assert!(far(placed[13].0, step) < 0.03);
     }
 
@@ -806,7 +826,13 @@ mod tests {
         assert!(far(loose[7].0, before[7].0) > 0.05, "unpinned, it moves");
         let pinned = held(&leaned, &base, &body, &[7], true);
         let after = solve(&pinned, &body);
-        assert!(far(after[7].0, before[7].0) < 0.03, "pinned, it stays: {} {:?} {:?}", far(after[7].0, before[7].0), pinned.0[5], pinned.0[6]);
+        assert!(
+            far(after[7].0, before[7].0) < 0.03,
+            "pinned, it stays: {} {:?} {:?}",
+            far(after[7].0, before[7].0),
+            pinned.0[5],
+            pinned.0[6]
+        );
         assert_eq!(pinned.0[2], leaned.0[2]);
         // A body pose on a model with a few joints of the same names.
         let joints = body.joints();
