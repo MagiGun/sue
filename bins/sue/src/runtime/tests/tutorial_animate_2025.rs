@@ -808,10 +808,9 @@ fn step_015_timeline_thumbnails_none_from_its_right_click() {
             .map(|(_, rect)| rect.top())
             .next()
     };
-    assert!(
-        paper_top(&mut paint).is_none(),
-        "the cels' pictures fill the rows"
-    );
+    // The cels' pictures make the rows tall: Paper's track sits low on
+    // the timeline, or out of sight below it.
+    let before = paper_top(&mut paint);
     // A right click on the timeline, Thumbnail Size, None.
     let folder = first_folder(&paint);
     let name = name_of(&paint, folder);
@@ -825,9 +824,10 @@ fn step_015_timeline_thumbnails_none_from_its_right_click() {
     paint.step(vec![Event::PointerMoved(size.center())]);
     paint.settle(30);
     paint.click_text("Thumbnails: None");
+    let after = paper_top(&mut paint);
     assert!(
-        paper_top(&mut paint).is_some(),
-        "rows of one line: Paper's track in sight"
+        after.is_some_and(|after| before.is_none_or(|before| after < before)),
+        "rows of one line: Paper's track in sight and higher ({before:?} to {after:?})"
     );
 }
 
