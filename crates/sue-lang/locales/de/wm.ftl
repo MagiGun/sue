@@ -21,7 +21,6 @@ settings = Einstellungen
 quit-sue = Sue beenden
 language-system = System ({ $language })
 language-follow-sue = Sue folgen ({ $language })
-language-changed = Sue spricht { $language }
 could-not-change-language = Sprache konnte nicht geändert werden: { $error }
 layout-automatic = Automatisch ({ $layout })
 layout-desktop = Desktop
@@ -33,8 +32,6 @@ layout-phone-shaped = Telefonformat
 sue-hub-every-studio-tool-files = Sue: Hub, alle Studios und Werkzeuge, Dateien, Projekte und Einstellungen
 pinned-sue-opens-here-launch-click = Angeheftet: Sue öffnet sich hier beim Start. Klicken, um die Anheftung zu lösen
 pin-sue-opens-here-launch = Anheften: Sue öffnet sich hier beim Start
-sue-opens-hub-launch = Sue öffnet beim Start den Hub
-sue-opens-in-at-launch = Sue öffnet beim Start { $name }
 could-not-pin-it = Konnte nicht angeheftet werden: { $error }
 
 ## Befehlspalette

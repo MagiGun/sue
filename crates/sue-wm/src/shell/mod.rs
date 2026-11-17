@@ -750,21 +750,11 @@ impl Shell {
         if io.world.rice.get_str(PIN_KEY).map(str::trim) == Some(value.as_str()) {
             return;
         }
-        let name = id
-            .as_ref()
-            .and_then(|id| io.applets.manifest(id))
-            .map(|manifest| manifest.title());
         let txn = SetRiceValue::new(PIN_KEY, RiceValue::Text(value));
         io.typing.flush(io.history);
-        match io.apply_sue(RiceEdit(txn)) {
-            Ok(_) => self.notify(
-                name.map_or_else(
-                    || tr!("sue-opens-hub-launch"),
-                    |name| tr!("sue-opens-in-at-launch", name = name),
-                ),
-                false,
-            ),
-            Err(error) => self.notify(tr!("could-not-pin-it", error = error), true),
+        // The pin itself shows where Sue opens: no notice says it again.
+        if let Err(error) = io.apply_sue(RiceEdit(txn)) {
+            self.notify(tr!("could-not-pin-it", error = error), true);
         }
     }
 

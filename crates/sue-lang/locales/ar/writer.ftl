@@ -172,14 +172,11 @@ restore-snapshot = استعادة اللقطة الفورية
 before-restoring = قبل الاستعادة
 ## studio.rs
 
-made = تم إنشاء { $title }
 open-a-project-first = افتح مشروعا أولا
 put-picture-text = وضع الصورة في النص
-added-to-research = تمت الإضافة إلى الأبحاث
 imported = تم الاستيراد
 could-not-read = تعذرت قراءة { $path }: { $error }
 import = استيراد
-imported-2 = تم استيراد { $name }
 kib = { $name }، { $value } ك.بايت
 could-not-write = تعذرت كتابة { $path }: { $error }
 export-as-2 = تصدير كـ { $name }

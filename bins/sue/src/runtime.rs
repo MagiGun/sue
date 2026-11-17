@@ -1590,14 +1590,14 @@ impl Runtime {
         self.kept_at = None;
         self.kept = None;
         self.autosave_seen = self.engine.world.arena.revision();
-        self.shell.notify(
-            tr!(
-                "opened-2",
-                value = file_name(path),
-                value2 = if replaced { REPLACED } else { "" }
-            ),
-            false,
-        );
+        // Opening shows the file itself; only what happened behind it
+        // (the work before it was kept) is worth a notice.
+        if replaced {
+            self.shell.notify(
+                tr!("opened-2", value = file_name(path), value2 = REPLACED),
+                false,
+            );
+        }
         Ok(())
     }
 

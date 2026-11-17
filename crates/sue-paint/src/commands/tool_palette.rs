@@ -107,9 +107,7 @@ impl SuePaint {
             return;
         }
         problems.extend(self.toolbox.arrange(&layout));
-        if problems.is_empty() {
-            cx.notify(tr!("tool-layout-loaded"));
-        } else {
+        if !problems.is_empty() {
             cx.notify(tr!(
                 "tool-layout-loaded-with-problems",
                 count = problems.len(),

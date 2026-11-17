@@ -159,21 +159,6 @@ impl SuePaint {
             .unwrap_or(1.0)
     }
 
-    /// The first time a pen's pressure shows up while its curve is still
-    /// the one Sue Paint starts with, says where to fit it to the hand.
-    fn pen_seen(&mut self, cx: &mut AppletContext<'_>) {
-        if self.pen_hinted {
-            return;
-        }
-        self.pen_hinted = true;
-        let default = crate::dialogs::DEFAULT_PEN_PRESSURE
-            .parse::<sue_model::Response>()
-            .unwrap_or_default();
-        if self.pen_curve == default {
-            cx.notify(tr!("pen-pressure-found-hint"));
-        }
-    }
-
     pub(super) fn canvas_input(
         &mut self,
         ui: &Ui,
@@ -198,9 +183,7 @@ impl SuePaint {
             )
         });
         // Every packet of the pen, for a stroke of the brush engine.
-        if self.engine_take_samples() {
-            self.pen_seen(cx);
-        }
+        self.engine_take_samples();
         // The pen turned over to its eraser end picks the Eraser, and back
         // the tool before; only between strokes, so a stroke under way
         // finishes with the tool it began with.
@@ -263,9 +246,6 @@ impl SuePaint {
                         // pressure, not a full one: the pressure goes once
                         // this frame's events are handled.
                         TouchPhase::End | TouchPhase::Cancel => lifted = true,
-                    }
-                    if force.is_some() {
-                        self.pen_seen(cx);
                     }
                 }
                 Event::PointerButton {

@@ -25,11 +25,9 @@ command-palette-item = Command Palette
 # Sue's language, chosen in Settings.
 language-system = System ({ $language })
 language-follow-sue = Follow Sue ({ $language })
-language-changed = Sue speaks { $language }
 could-not-change-language = Could not change the language: { $error }
 # The Sue menu's Interface submenu: which layout the whole app uses.
 interface-menu = Interface
-interface-changed = Sue uses the { $interface } interface
 could-not-change-interface = Could not change the interface: { $error }
 layout-automatic = Automatic ({ $layout })
 layout-desktop = Desktop
@@ -42,8 +40,6 @@ layout-phone-shaped = Phone Shaped
 sue-hub-every-studio-tool-files = Sue: the Hub, every studio and tool, files, projects and Settings
 pinned-sue-opens-here-launch-click = Pinned: Sue opens here at launch. Click to take the pin away
 pin-sue-opens-here-launch = Pin: Sue opens here at launch
-sue-opens-hub-launch = Sue opens on the Hub at launch
-sue-opens-in-at-launch = Sue opens in { $name } at launch
 could-not-pin-it = Could not pin it: { $error }
 
 ## The command palette

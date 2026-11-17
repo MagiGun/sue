@@ -259,7 +259,6 @@ impl SuePaint {
             0,
             tip,
         ));
-        cx.notify(tr!("new-brush-sub-tool", name = name));
     }
 
     /// Add from downloads: the brushes in a file people downloaded (Clip

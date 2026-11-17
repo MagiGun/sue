@@ -21,7 +21,6 @@ settings = Paramètres
 quit-sue = Quitter Sue
 language-system = Système ({ $language })
 language-follow-sue = Suivre Sue ({ $language })
-language-changed = Sue parle { $language }
 could-not-change-language = Impossible de changer de langue : { $error }
 layout-automatic = Automatique ({ $layout })
 layout-desktop = Bureau
@@ -33,8 +32,6 @@ layout-phone-shaped = Format téléphone
 sue-hub-every-studio-tool-files = Sue : le Hub, les ateliers, les outils, les fichiers, les projets et les paramètres
 pinned-sue-opens-here-launch-click = Épinglé : Sue s'ouvre ici au démarrage. Cliquez pour retirer l'épingle
 pin-sue-opens-here-launch = Épingler : Sue s'ouvrira ici au démarrage
-sue-opens-hub-launch = Sue s'ouvre sur le Hub au démarrage
-sue-opens-in-at-launch = Sue s'ouvre dans { $name } au démarrage
 could-not-pin-it = Impossible d'épingler : { $error }
 
 ## Palette de commandes

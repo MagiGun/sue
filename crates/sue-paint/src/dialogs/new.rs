@@ -703,8 +703,7 @@ impl SuePaint {
                 .find(|name| !taken(name))
                 .unwrap_or_default();
             self.canvas_presets.push(new.to_preset(name.clone()));
-            new.preset = Some(name.clone());
-            cx.notify(tr!("canvas-preset-registered", name = name));
+            new.preset = Some(name);
         } else if let Some(name) = new.preset.take() {
             self.canvas_presets.retain(|preset| preset.name != name);
         }

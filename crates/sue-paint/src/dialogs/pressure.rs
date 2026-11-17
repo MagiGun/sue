@@ -220,9 +220,8 @@ impl SuePaint {
     /// Keeps the fitted curve for every tool.
     pub(super) fn pressure_ok(cx: &mut AppletContext<'_>, pressure: &PressureDialog) {
         let text = pressure.curve.to_string();
-        match cx.edit_rice(SetRiceValue::new(PEN_PRESSURE, RiceValue::Text(text))) {
-            Ok(_) => cx.notify(tr!("pen-pressure-adjusted-every-tool")),
-            Err(error) => cx.fail(tr!("cannot-keep-the-pen-pressure", error = error)),
+        if let Err(error) = cx.edit_rice(SetRiceValue::new(PEN_PRESSURE, RiceValue::Text(text))) {
+            cx.fail(tr!("cannot-keep-the-pen-pressure", error = error));
         }
     }
 }

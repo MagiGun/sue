@@ -21,7 +21,6 @@ settings = Ajustes
 quit-sue = Salir de Sue
 language-system = Sistema ({ $language })
 language-follow-sue = Seguir a Sue ({ $language })
-language-changed = Sue habla { $language }
 could-not-change-language = No se pudo cambiar el idioma: { $error }
 layout-automatic = Automática ({ $layout })
 layout-desktop = Escritorio
@@ -34,8 +33,6 @@ layout-phone-shaped = Con forma de teléfono
 sue-hub-every-studio-tool-files = Sue: el Hub, cada estudio y herramienta, archivos, proyectos y Ajustes
 pinned-sue-opens-here-launch-click = Fijado: Sue se abre aquí al iniciar. Haz clic para quitar la chincheta
 pin-sue-opens-here-launch = Fijar: Sue se abre aquí al iniciar
-sue-opens-hub-launch = Sue se abre en el Hub al iniciar
-sue-opens-in-at-launch = Sue se abre en { $name } al iniciar
 could-not-pin-it = No se pudo fijar: { $error }
 
 ## La paleta de comandos

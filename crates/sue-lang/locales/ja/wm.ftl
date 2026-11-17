@@ -21,7 +21,6 @@ settings = 設定
 quit-sue = Sue を終了
 language-system = システム ({ $language })
 language-follow-sue = Sue に合わせる ({ $language })
-language-changed = Sue の言語: { $language }
 could-not-change-language = 言語を変更できませんでした: { $error }
 layout-automatic = 自動 ({ $layout })
 layout-desktop = デスクトップ
@@ -34,8 +33,6 @@ layout-phone-shaped = スマートフォンの形
 sue-hub-every-studio-tool-files = Sue: ハブ、すべてのスタジオとツール、ファイル、プロジェクト、設定
 pinned-sue-opens-here-launch-click = ピン留め中: 起動時にここが開きます。クリックでピンを外します
 pin-sue-opens-here-launch = ピン留め: 起動時にここを開く
-sue-opens-hub-launch = 起動時にハブを開きます
-sue-opens-in-at-launch = 起動時に{ $name }を開きます
 could-not-pin-it = ピン留めできませんでした: { $error }
 
 ## コマンドパレット
