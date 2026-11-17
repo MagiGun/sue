@@ -1108,9 +1108,9 @@ pub(crate) enum Holder {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BarPayload(pub Slot);
 
-/// A color dragged out of a color palette (a color set's swatch, Color
-/// History, the main and sub color circles). A bar it is dropped on
-/// gets a button that makes it the drawing color.
+/// A color dragged out of a color palette (a color set's swatch or a
+/// Color History one). A bar it is dropped on gets a button that makes
+/// it the drawing color.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ColorDrag(pub [u8; 3]);
 

@@ -150,10 +150,11 @@ pub fn sample_picture(cx: &mut AppletContext<'_>, width: u32, height: u32) -> Op
     }
     let (w, h) = (width as f32, height as f32);
     // The circles the ink draws (center, and radius as a share of the
-    // width), each filled with flat color that stays inside its ring: a
-    // round brush half the circle across, led once around a path a
-    // quarter of the circle out, covers it from the middle to just under
-    // the ink, with no halo outside the line.
+    // width), each filled with flat color up to the middle of its ring:
+    // a hard round brush a little over half the circle across, led once
+    // around a path a little under half the circle out, covers it from
+    // the middle to the ink's center line, so the color meets the line
+    // with no pale gap inside it and no halo outside it.
     let circles = [
         ([0.34, 0.45], 0.1, [0.95, 0.55, 0.35]),
         ([0.62, 0.38], 0.08, [0.35, 0.6, 0.95]),
@@ -162,8 +163,8 @@ pub fn sample_picture(cx: &mut AppletContext<'_>, width: u32, height: u32) -> Op
     for (center, radius, rgb) in circles {
         let radius = w * radius;
         let fill = Tip {
-            size: radius * 1.04,
-            hardness: 0.9,
+            size: radius * 1.08,
+            hardness: 1.0,
             size_by: crate::brush::Dynamics::NONE,
             opacity_by: crate::brush::Dynamics::NONE,
             ..Tip::default()

@@ -219,6 +219,28 @@ fn t50_02_a_sub_tool_dragged_onto_the_command_bar() {
         "{:?}",
         ui.bar_buttons()
     );
+    // Another sub tool, then the new button: it picks the Mapping pen.
+    let other = ui
+        .node("Turnip pen", |rect| {
+            rect.left() > 40.0 && rect.right() < 400.0
+        })
+        .expect("Turnip pen in the Sub Tool palette");
+    ui.click(other.center());
+    let picked = |ui: &Polish, name: &str| {
+        ui.on.iter().any(|(label, rect)| {
+            label.starts_with(name) && rect.left() > 40.0 && rect.right() < 400.0
+        })
+    };
+    assert!(picked(&ui, "Turnip pen"), "{:?}", ui.on);
+    let button = ui
+        .bar_buttons()
+        .into_iter()
+        .filter(|(label, _)| label.starts_with("Mapping pen"))
+        .map(|(_, rect)| rect)
+        .max_by(|a, b| a.left().total_cmp(&b.left()))
+        .unwrap();
+    ui.click(button.center());
+    assert!(picked(&ui, "Mapping pen"), "{:?}", ui.on);
 }
 
 /// Tip 2: a color dragged from a color set onto the Command Bar becomes
@@ -405,4 +427,53 @@ fn p6_the_default_sub_tool_lists_five_sub_tools() {
         opacity.bottom() < brush_size.top(),
         "Opacity whole above Brush Size"
     );
+}
+
+/// The integration report: the sample picture's colored dabs had a
+/// wide pale halo. Each circle's color is now flat up to its ink: just
+/// inside the line it is solid, and just outside it nothing is painted.
+#[test]
+fn p6_the_sample_picture_colors_meet_their_ink() {
+    let (mut runtime, _root) = runtime("p6-ui-sample");
+    let start = Instant::now();
+    runtime.request(
+        ShellRequest::Open(AppletId::new(sue_paint::ID).unwrap()),
+        &mut NoTextures,
+        start,
+    );
+    let (w, h) = (1600_u32, 1200_u32);
+    let picture = runtime
+        .with_context(&mut NoTextures, start, |cx| {
+            sue_paint::sample_picture(cx, w, h)
+        })
+        .expect("the sample picture");
+    let arena = &runtime.engine.world.arena;
+    let color = sue_paint::doc::layers(arena, picture)
+        .into_iter()
+        .find(|layer| layer.name == "Color")
+        .expect("the Color layer")
+        .id;
+    let raster = sue_paint::doc::raster(arena, color).expect("pixels");
+    assert_eq!((raster.width(), raster.height()), (w, h));
+    let bytes = raster.bytes().unwrap();
+    let alpha =
+        |x: f32, y: f32| bytes[((y.round() as u32 * w + x.round() as u32) * 4 + 3) as usize];
+    let (wf, hf) = (w as f32, h as f32);
+    // Half the ink's width, as the sample's pen draws it.
+    let ink = wf / 160.0 / 2.0;
+    for (center, radius) in [
+        ([0.34, 0.45], 0.1),
+        ([0.62, 0.38], 0.08),
+        ([0.5, 0.66], 0.09),
+    ] {
+        let (cx, cy, r) = (wf * center[0], hf * center[1], wf * radius);
+        for step in 0..32 {
+            let t = step as f32 / 32.0 * std::f32::consts::TAU;
+            let at = |reach: f32| (cx + t.cos() * reach, cy + t.sin() * reach);
+            let (x, y) = at(r - ink - 1.0);
+            assert_eq!(alpha(x, y), 255, "solid just inside the ink at {x}, {y}");
+            let (x, y) = at(r + ink + 2.0);
+            assert_eq!(alpha(x, y), 0, "clear just outside the ink at {x}, {y}");
+        }
+    }
 }
