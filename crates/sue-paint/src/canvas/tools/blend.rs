@@ -23,7 +23,9 @@ impl SuePaint {
     /// source set first).
     pub(super) fn blend_press(&mut self, press: &Press, sub: &SubTool, cx: &mut AppletContext<'_>) {
         let p = press.p;
-        if self.refuse_keyframed(cx) {
+        // The blend reads and writes the layer where it is kept, not
+        // where keyframes show it.
+        if self.refuse_keyframed(cx, false) {
             return;
         }
         let info = match self.mask_paintable(&cx.world.arena) {
