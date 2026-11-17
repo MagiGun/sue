@@ -74,7 +74,7 @@ pub mod view;
 // `crate::brush::Tip` and `sue_paint::composite::flatten` path working.
 pub use sue_picture::{
     anim, blend, brush, camera, color, colorize, composite, correct, decoration, doc, effects,
-    figure, fill, filters, gradient, gradient_map, manga, model3d, print, proof, psd_io, quick,
+    figure, fill, filters, gradient, gradient_map, hand_scan, manga, model3d, print, proof, psd_io, quick,
     rulers, select, story, templates, three, timelapse, tools, transform, vector, warp,
 };
 // Private in Sue Paint before the move, so private here still.
@@ -82,6 +82,7 @@ use sue_picture::{comps, smart};
 
 pub use bar_items::bar_button_rect;
 pub use commands::registry;
+pub use dialogs::hand_scanner;
 pub use launchers::shown_buttons;
 pub use menus::menus;
 pub use studio::{

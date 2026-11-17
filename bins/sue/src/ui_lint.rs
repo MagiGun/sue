@@ -249,6 +249,18 @@ const PICTURE: &[(&str, &str, Exempt)] = &[
         Exempt::All,
     ),
     ("crates/sue-paint/src/dialogs", "pad_picture", Exempt::All),
+    // The Hand Scanner: the camera's picture with the marks on the hand
+    // found in it (they must read on whatever the camera sees), the
+    // small picture of the posed figure on a canvas's paper, and the
+    // made-up camera picture tests and snapshots run on.
+    (
+        "crates/sue-paint/src/dialogs",
+        "camera_picture",
+        Exempt::All,
+    ),
+    ("crates/sue-paint/src/dialogs", "model_picture", Exempt::All),
+    ("crates/sue-paint/src/dialogs", "model_image", Exempt::All),
+    ("crates/sue-paint/src/dialogs", "paint_fake", Exempt::All),
     // The miniature page of a template on Sue Writer's start page.
     ("crates/sue-writer/src/ui", "template_thumb", Exempt::All),
 ];

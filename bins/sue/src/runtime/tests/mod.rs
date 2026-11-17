@@ -18,6 +18,7 @@ mod p6_p6_ui;
 mod p6_tools_a;
 mod p6_tools_b;
 mod p81_figures;
+mod p81_scanner;
 mod paint_3d;
 mod paint_anim;
 mod paint_basics;

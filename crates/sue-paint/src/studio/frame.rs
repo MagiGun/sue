@@ -208,6 +208,7 @@ impl SuePaint {
             self.paste_from_hub(cx);
         }
         self.poll_scans(cx);
+        self.poll_hand_scanner(cx);
         self.poll_exports(cx);
         self.animate(cx, &ui.ctx().clone());
         self.record_timelapse(cx, &ui.ctx().clone());

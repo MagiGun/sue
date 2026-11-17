@@ -20,6 +20,7 @@ mod comps;
 mod fill;
 mod filter;
 mod frame;
+pub mod hand_scanner;
 mod lines_tones;
 mod modifiers;
 mod new;
@@ -175,6 +176,9 @@ pub(crate) enum Dialog {
     Anim(Box<AnimDialog>),
     /// Edit, Colorize: the line art, the hint layer and the blur.
     Colorize(ColorizeDialog),
+    /// The Hand Scanner: the camera poses the 3D hand (its camera,
+    /// tracker and the pose to go back to live on the studio).
+    HandScanner,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -460,6 +464,7 @@ impl Dialog {
             .fixed(sue_wm::fonts::MANAGE_SIZE.y)
             .enter_is_the_bodys(),
             Dialog::Colorize(_) => Look::new(tr!("colorize"), Form, Footer::none()),
+            Dialog::HandScanner => Look::new(tr!("hand-scanner-title"), Wide, ok()),
             // Its body draws its own OK and Cancel, by its preview.
             Dialog::Correction(_, filter, ..) => Look::new(
                 filter.label(),
@@ -621,6 +626,7 @@ impl SuePaint {
             Dialog::Perspective(perspective) => perspective_ui(ui, perspective, theme),
             Dialog::Correction(_, filter, ..) => self.correction_dialog_ui(ui, filter, cx, theme),
             Dialog::Colorize(colorize) => colorize_ui(ui, colorize, theme),
+            Dialog::HandScanner => self.hand_scanner_ui(ui, cx, theme),
             Dialog::Canvas(canvas) => canvas_ui(ui, canvas, theme),
             Dialog::Resolution(resolution) => resolution_ui(ui, resolution, theme),
             Dialog::Shortcuts => shortcuts_ui(ui, cx, room, change_keys, theme),
@@ -710,6 +716,7 @@ impl SuePaint {
             Dialog::Anim(dialog) => self.anim_dialog_ok(cx, *dialog),
             Dialog::Color(color) => self.color_dialog_ok(cx, color),
             Dialog::Colorize(colorize) => self.colorize_ok(cx, &colorize),
+            Dialog::HandScanner => self.hand_scanner_end(cx, true),
             Dialog::Message(..)
             | Dialog::Shortcuts
             | Dialog::Pages(_)
@@ -773,6 +780,7 @@ impl SuePaint {
             | Dialog::Anim(_)
             | Dialog::Colorize(_) => {}
             Dialog::Color(color) => self.color_dialog_cancel(cx, color),
+            Dialog::HandScanner => self.hand_scanner_end(cx, false),
         }
     }
 }

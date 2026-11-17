@@ -22,10 +22,11 @@ use crate::studio::SuePaint;
 /// its photo. A test holds it to the flags of the table, which Auto
 /// Actions read.
 #[cfg_attr(not(test), allow(dead_code))]
-pub(super) const RECORDABLE: [&str; 17] = [
+pub(super) const RECORDABLE: [&str; 18] = [
     "figure.register_pose",
     "figure.pose_scanner",
     "figure.hand_scanner",
+    "figure.hand_scanner_camera",
     "figure.flip",
     "figure.reset",
     "figure.reset_part",
@@ -62,6 +63,12 @@ fn pose_scanner(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 /// Hand Scanner: a photo poses the current hand.
 fn hand_scanner(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.pick_scan(cx, true);
+}
+
+/// Hand Scanner (camera): a hand held up to the camera poses the current
+/// 3D hand, or a hand of the current drawing figure, live.
+fn hand_scanner_camera(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.open_hand_scanner(cx);
 }
 
 /// Flip pose: the figure mirrored left to right.
@@ -269,6 +276,14 @@ fn on_hand(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
     )
 }
 
+/// Works while the current layer holds something with hands: a 3D hand
+/// or a whole drawing figure.
+fn on_hands(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    super::when(
+        current_body(paint, facts.arena).is_some_and(|body| body.kind != crate::figure::Kind::Head),
+    )
+}
+
 /// `figure.preset.<n>` works while the current layer's figure, hand or
 /// head has a preset `n`.
 fn on_preset(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
@@ -346,6 +361,15 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         Icon::Picture,
         hand_scanner,
         on_hand,
+    ),
+    // Recorded as the photo scanners are: an Auto Action opens the
+    // dialog, and what the camera sees then poses the hand.
+    c(
+        "figure.hand_scanner_camera",
+        "hand-scanner-camera",
+        Icon::ToolHand,
+        hand_scanner_camera,
+        on_hands,
     ),
     c(
         "figure.flip",

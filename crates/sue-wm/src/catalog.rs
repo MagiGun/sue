@@ -248,6 +248,10 @@ pub enum SettingsItem {
     /// The icon packs: the one in use with a preview, install, remove, the
     /// icons replaced one by one, and Sue's own set as a template.
     Icons,
+    /// The optional packages (`sue_platform::packages`): each with what
+    /// it is for, its size, licence and source, Install with progress
+    /// and Cancel, Uninstall, and Install from a File.
+    Packages,
 }
 
 /// A titled group of rows.

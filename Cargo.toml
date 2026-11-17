@@ -164,6 +164,11 @@ opt-level = 3
 [profile.dev.package."*"]
 opt-level = 3
 
+# Hand tracking cuts and scales every camera picture before its models
+# run; unoptimized, that alone would halve the Hand Scanner's speed.
+[profile.dev.package.sue-ai]
+opt-level = 3
+
 # The picture engine's pixel loops and the blend math they call run for
 # every pixel on every change; unoptimized, painting and layer edits would
 # stutter.

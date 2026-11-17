@@ -295,11 +295,22 @@ history, History forgets the steps of the canvas in front.
 
 ### Settings
 
+**Settings, Packages** lists the optional downloads: files Sue can use
+but does not ship, such as the Hand Scanner's hand tracking models. Each
+is a card with what it is for, its size, its licence and where it comes
+from. **Install** downloads it, showing how far it is and how fast, and
+**Cancel** stops it at once and leaves nothing behind. If the connection
+is lost, Sue says so and **Try Again** carries on from where it stopped.
+**Uninstall** removes it again. **Install from a File** adds a package
+someone shared with you (a `.suepkg` file with its files next to it);
+while "Only signed packages" is on, such a package is refused, and the
+page says so. Nothing is ever downloaded until you press Install.
+
 The Sue menu's **Settings** (or `Ctrl+,`) opens Settings as a dialog over
 the page (on a phone it fills the screen); `Escape`, its close button or a
 click beside it closes it. A list of categories runs down the left
 (General, Language, Appearance, Display and Performance, Sound, Files, a
-page for each studio, Keyboard Shortcuts, Extensions and Advanced), and
+page for each studio, Keyboard Shortcuts, Packages and Advanced), and
 the right side shows only that category. Rows most people never need wait
 under closed titles (the colors, sizes and spacing, animation details); a
 click opens one. Type in "Filter settings..." to search all of them; Clip
@@ -1024,6 +1035,26 @@ Once a canvas is open:
   4 MB) into its models folder; after that it works offline, on the
   computer itself. A whole person, clearly lit, scans best; arms and
   legs pointing at the camera are guessed from how short they look.
+- **Hand scanner (camera)** (Tool Property, with a 3D hand or a 3D
+  drawing figure picked): hold a hand up to your camera and the hand on
+  the canvas follows it, live. The dialog shows the camera's picture
+  with your hand boxed and its bones drawn, and beside it the 3D hand as
+  it is posed. Hold your palm toward the camera, about an arm's length
+  away, in good light. **Pause Capture** holds the picture and the pose
+  still so you can put your hand down and look; the camera chooser
+  switches cameras; for a hand figure, **Turn the whole hand too**
+  decides whether the hand turns as yours does or only its fingers
+  follow; for a drawing figure you choose its left or its right hand.
+  Sue tells a left hand from a right one by itself; if it guesses wrong,
+  say which under **Your hand**. **OK** keeps the pose as one step you
+  can undo; **Cancel** puts the hand back as it was. The camera is on
+  only while this dialog is open; its pictures are looked at in the
+  computer's memory and are never saved and never sent anywhere. The
+  first time, the dialog asks to install the **Hand tracking** package
+  (7.6 MiB, see Settings, Packages); after that it works offline. If the
+  camera cannot be used, the dialog says why (none found, in use by
+  another program, not allowed by Windows' privacy settings, unplugged)
+  and offers Try Again. Windows only for now.
 - **3D layers:** Layer, New Layer, 3D Layer puts a cube, sphere, cylinder,
   cone, plane, prism or pyramid on the canvas, and File, Import, 3D Data brings in an OBJ
   model. With the Object tool (O), drag to turn the camera, Shift and drag

@@ -166,6 +166,8 @@ pub enum AiTask {
     CodeAssist,
     /// Image understanding and captioning.
     Vision,
+    /// Where a hand is in a picture and the points of its skeleton.
+    HandTracking,
 }
 
 impl AiTask {
@@ -174,7 +176,7 @@ impl AiTask {
     pub const fn input_kind(self) -> ComponentKind {
         match self {
             Self::Transcription | Self::StemSeparation => ComponentKind::PCMFloat1D,
-            Self::Upscaling | Self::Ocr | Self::Inpainting | Self::Vision => {
+            Self::Upscaling | Self::Ocr | Self::Inpainting | Self::Vision | Self::HandTracking => {
                 ComponentKind::RasterTile2D
             }
             Self::ShaderGeneration => ComponentKind::StringBuffer,
@@ -192,6 +194,7 @@ impl AiTask {
                 ComponentKind::StringBuffer
             }
             Self::CodeAssist => ComponentKind::ASTNode,
+            Self::HandTracking => ComponentKind::MeshBuffer3D,
         }
     }
 }

@@ -194,3 +194,13 @@ filter-settings-hint = Type a word to find the settings it names, on every page.
 settings-reset-page-hint = Puts every setting on this page back to how Sue comes.
 settings-reset-all-hint = Puts every setting in Sue back to how Sue comes. Asks once more first.
 keys-take-from-hint = The other command lets go of the key, and this one keeps it.
+# Settings, Packages: the optional downloads.
+optional-downloads = Optional Downloads
+parts-of-sue = Parts of Sue
+packages-note = Some features need files that Sue does not ship, such as the hand tracking models of Sue Paint's Hand Scanner. They are downloaded only when you install them here or where a feature asks, each file is checked, and you can cancel or uninstall at any time.
+packages-install-file = Install from a File
+packages-install-file-hint = Installs a package someone shared: choose its .suepkg file. Files it names by a path are taken from the same folder.
+packages-added = { $name } is being installed.
+packages-file-refused = That file could not be used as a package: { $why }
+packages-file-unsigned = A package from a file carries no signature, and Trust (below) accepts only signed packages. Turn "Only signed packages" off to install it.
+packages-folder = Packages are kept in { $path }

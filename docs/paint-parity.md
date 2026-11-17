@@ -515,6 +515,7 @@ decorations. Light and heavy pressure and a flick need a tablet.
 | Body shape by part (sub tool detail palette) | Tool Property | partial | Sliders for head, neck, shoulders, chest and bust, torso, waist, hips, arms, hands and fingers, legs and feet, in Tool Property rather than a palette of its own |
 | 3D head models (5.1) | 3D | partial | A realistic head (neck, skull, jaw and eyes pose) with seven presets; no face shapes to edit |
 | 3D hand models and Hand Scanner posing (5.0) | 3D, Materials | done | A detailed hand of sixteen joints, left or right, with knuckles, tendons, veins and nails (Veins and Tendon and knuckle prominence sliders), sixteen poses, and the Hand Scanner |
+| Hand Scanner from the live camera (5.0) | 3D | partial | Hand scanner (camera) in Tool Property: the camera's picture with the hand boxed, a camera chooser, Pause Capture, OK and Cancel; the hand follows live, also one hand of a drawing figure; Windows only so far; its models are the optional package Hand tracking |
 | Painting directly on 3D (5.0, 5.1) | 3D | missing | |
 | VRM import and photorealistic rendering | File > Import | missing | |
 | Height-based fog, Follow camera light (5.0, 5.1) | 3D settings | done | In the 3D layer's Tool Property |

@@ -15,6 +15,7 @@ macro_rules! tr {
 
 mod icons;
 mod keys;
+pub(crate) mod packages;
 
 pub(crate) use keys::{SUE_KEYMAP, sue_keymap};
 
@@ -313,6 +314,8 @@ pub struct Settings {
     notice: Option<String>,
     /// The icon packs.
     icons: icons::IconsUi,
+    /// The Packages rows between frames.
+    packages: packages::PackagesUi,
 }
 
 /// The value `path` starts with: the one in the settings Sue ships.
@@ -886,6 +889,7 @@ impl Settings {
             }
             SettingsItem::Keys(id) => self.keys_ui(ui, id, needle, cx),
             SettingsItem::Icons if needle.is_empty() => self.icons_ui(ui, cx),
+            SettingsItem::Packages if needle.is_empty() => self.packages_ui(ui, cx),
             SettingsItem::Presets if needle.is_empty() => {
                 ui.horizontal_wrapped(|ui| {
                     for preset in cx.catalog.presets.clone() {
@@ -961,6 +965,7 @@ impl SueApplet for Settings {
         cx: &mut AppletContext<'_>,
     ) {
         self.icons.picked(pick, path, cx);
+        self.packages.picked(pick, path, cx);
     }
 
     fn navigate(&mut self, target: &str) -> bool {

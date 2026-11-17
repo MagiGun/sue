@@ -446,3 +446,25 @@ keep-exporting = Keep Exporting
 stop-and-quit = Stop and Quit
 quit-stops-export = { $name } is still being exported. If Sue quits now, the export stops and nothing of it is written.
 quit-stops-exports = { $count } exports are still running. If Sue quits now, they stop and nothing of them is written.
+# Optional packages: files Sue can use but does not ship (Settings,
+# Packages, and the dialogs that need one).
+package-installed = Installed
+package-not-installed = Not installed
+package-installing = Installing
+package-installing-name = Installing { $name }
+package-size = { $size }
+package-version = version { $version }
+package-licence = licence { $licence }
+package-from = From: { $author }
+package-install = Install ({ $size })
+package-install-hint = Downloads the package's files, checks each one and puts them in Sue's packages folder. You can cancel at any time.
+package-try-again = Try Again
+package-cancel = Cancel
+package-uninstall = Uninstall
+package-uninstall-hint = Removes the package's files from this computer. It can be installed again later.
+package-progress = { $done } of { $total }
+package-progress-speed = { $amount }, { $speed } a second
+package-offline = Sue could not reach the server. Check the internet connection, then try again: the download carries on from where it stopped.
+package-damaged = The download did not match what the package names, so it was thrown away. Try again.
+package-disk = A file could not be written: { $why }
+package-failed = The package could not be installed: { $why }

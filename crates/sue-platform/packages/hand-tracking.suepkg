@@ -1,0 +1,17 @@
+# The Hand Scanner's models (Sue Paint): where a hand is in the camera's
+# picture, and the 21 points of its skeleton. MediaPipe Hands by Google,
+# converted to ONNX by the OpenCV Zoo; both under the Apache License 2.0.
+# The links are pinned to one commit of the OpenCV Zoo's own model
+# repositories, and each file is checked against its SHA-256.
+# Format: docs/packages.md.
+format = 1
+id = hand-tracking
+name = Hand tracking
+version = 1.0.0
+kind = ai-model
+summary = Finds your hand in the camera's picture, for Sue Paint's Hand Scanner. Runs on this computer only.
+licence = Apache-2.0
+author = MediaPipe Hands by Google, converted to ONNX by the OpenCV Zoo
+homepage = https://github.com/opencv/opencv_zoo
+file = palm_detection.onnx | 3905734 | 78ff51c38496b7fc8b8ebdb6cc8c1abb02fa6c38427c6848254cdaba57fcce7c | https://huggingface.co/opencv/palm_detection_mediapipe/resolve/233e619dcea1759bf6de707b9b904fe30881ea55/palm_detection_mediapipe_2023feb.onnx
+file = hand_landmark.onnx | 4099621 | db0898ae717b76b075d9bf563af315b29562e11f8df5027a1ef07b02bef6d81c | https://huggingface.co/opencv/handpose_estimation_mediapipe/resolve/4b2a0b446e5cf2f11fb6b2c7251091c035d2c1f7/handpose_estimation_mediapipe_2023feb.onnx
