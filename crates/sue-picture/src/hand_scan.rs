@@ -509,11 +509,11 @@ mod tests {
     /// always the ones a pose was made with, and inside its limits: its
     /// points land within half a centimeter.
     fn assert_same(pose: &Pose, want: &Pose) {
-        for at in 1..=12 {
+        for (at, joint) in HAND.iter().enumerate().take(13).skip(1) {
             assert!(
                 close(pose.0[at], want.0[at], 1.0),
                 "{}: {:?} is not {:?}",
-                HAND[at].name,
+                joint.name,
                 pose.0[at],
                 want.0[at]
             );

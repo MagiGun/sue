@@ -25,6 +25,7 @@
 #[cfg(target_os = "android")]
 pub mod android;
 mod audio;
+pub mod camera;
 mod desktop;
 mod device;
 pub mod fs;

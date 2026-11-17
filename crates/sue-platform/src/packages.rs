@@ -507,12 +507,16 @@ mod tests {
             .collect()
     }
 
+    /// What the server was asked: each path, and the byte it was asked
+    /// to start from.
+    type Asked = Arc<Mutex<Vec<(String, Option<u64>)>>>;
+
     /// A little web server on this machine: serves `files` by path,
     /// honors `Range`, counts what it was asked, and can send slowly (a
     /// piece, then a wait) so a test can cancel in the middle.
     struct Server {
         base: String,
-        asked: Arc<Mutex<Vec<(String, Option<u64>)>>>,
+        asked: Asked,
         stop: Arc<AtomicBool>,
         sent: Arc<AtomicUsize>,
     }

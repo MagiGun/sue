@@ -129,7 +129,7 @@ fn pretending() -> bool {
 
 /// COM and Media Foundation, started for as long as this lives, on this
 /// thread.
-struct Session {
+pub(crate) struct Session {
     /// Whether this session's `CoInitializeEx` succeeded and so owes a
     /// `CoUninitialize`. On a thread already in a single threaded
     /// apartment (the window's thread) COM is up and stays as it is.
@@ -143,7 +143,7 @@ impl Session {
         unsafe_code,
         reason = "starting COM and Media Foundation has no safe call (standing approval, rule 13)"
     )]
-    fn start() -> Result<Self, MediaError> {
+    pub(crate) fn start() -> Result<Self, MediaError> {
         // SAFETY: CoInitializeEx takes no pointer (the reserved one is
         // None) and may be called on any thread; a success (S_OK or
         // S_FALSE) is paired with CoUninitialize in Drop on this same
