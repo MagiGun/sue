@@ -131,6 +131,11 @@ pub(crate) struct EngineStroke {
     correction: u32,
     /// How post correction works (by speed, by scale, Bezier).
     correct: Correct,
+    /// The brush sprays on while the pen holds still.
+    continuous: bool,
+    /// Where and since when (the frame clock, and the pen's own time) the
+    /// pen has held still, for continuous spraying.
+    held: Option<(f64, f64, [f32; 2])>,
     /// Smart Shape is on for this sub tool.
     smart: bool,
     /// Smart Shape: where and since when the pen has rested.
@@ -506,8 +511,8 @@ fn screen_speed(samples: &[Sample], zoom: f32) -> f32 {
 
 /// [`corrected`] as `how` says: by speed it smooths a quick stroke up to
 /// twice as much and a slow one down to half (a stroke of 800 screen
-/// points a second is as the level says); by scale the brush's width that
-/// sets how far it smooths is measured on the screen; Bezier lays the
+/// points a second is as the level says); by scale it smooths as far on
+/// the screen whatever the zoom and the brush's size; Bezier lays the
 /// result again as curves through the fewest points that keep it.
 pub(crate) fn corrected_as(samples: &[Sample], level: u32, size: f32, how: Correct) -> Vec<Sample> {
     if level == 0 {
@@ -516,8 +521,9 @@ pub(crate) fn corrected_as(samples: &[Sample], level: u32, size: f32, how: Corre
     let zoom = how.zoom.max(0.01);
     let mut size = size;
     if how.by_scale {
-        // The smoothing reaches as far on the screen at any zoom.
-        size = (size * zoom).max(1.0) / zoom;
+        // The smoothing reaches as far on the screen at any zoom and for
+        // any brush: as for a brush 10 points wide on the screen.
+        size = 10.0 / zoom;
     }
     if how.by_speed {
         let speed = screen_speed(samples, zoom);
@@ -525,7 +531,7 @@ pub(crate) fn corrected_as(samples: &[Sample], level: u32, size: f32, how: Corre
     }
     let out = corrected(samples, level, size);
     if how.bezier {
-        let tolerance = (level.min(10) as f32 * 0.15 * (size * 0.12).max(1.0)).max(0.5);
+        let tolerance = (level.min(10) as f32 * 0.5 + 1.0) * (size * 0.12).max(1.0);
         bezier_fit(&out, tolerance)
     } else {
         out
@@ -1051,6 +1057,10 @@ impl SuePaint {
             zoom,
             line: shift_line,
             correction: sub.correction,
+            continuous: sue_brush::paint::Behaviours::from_preset(&line_brush.preset)
+                .continuous
+                .is_some(),
+            held: None,
             correct: Correct {
                 by_speed: sub.brush_rows.correction_by_speed,
                 by_scale: sub.brush_rows.correction_by_scale,
@@ -1133,9 +1143,33 @@ impl SuePaint {
     ) {
         self.engine_feed(viewport, size);
         let (visible, step) = self.on_screen;
+        let now = self.clock.0;
         let Some(Gesture::Engine(stroke)) = &mut self.gesture else {
             return;
         };
+        // Continuous spraying (full guide 00:31:12): while the pen holds
+        // still the brush keeps laying, so each frame says where it still
+        // is and when.
+        // Its time goes on from the pen's own clock by the frames' time
+        // since the pen last said anything.
+        if stroke.continuous && !stroke.lifted && !stroke.line {
+            let last = stroke.last;
+            match stroke.held {
+                Some((clock, time, pos)) if time == last.time && pos == last.pos => {
+                    if now > clock {
+                        let mut still = last;
+                        still.kind = Kind::Move;
+                        still.time = time + (now - clock);
+                        stroke.feed(still);
+                        stroke.held = Some((clock, time, pos));
+                        // `feed` moved `last` on: the hold goes on from
+                        // the pen's own sample.
+                        stroke.last = last;
+                    }
+                }
+                _ => stroke.held = Some((now, last.time, last.pos)),
+            }
+        }
         let mut dirty: Vec<_> = stroke
             .copies
             .iter_mut()
@@ -1644,6 +1678,98 @@ mod tests {
         let last = *samples.last().unwrap();
         samples.push(Sample::new(Kind::Up, last.pos, last.time + 0.005));
         samples
+    }
+
+    /// A line that wobbles 2 pixels either side every 15 pixels, as a
+    /// shaky hand draws it, sampled every 7.5 pixels.
+    fn shaky() -> Vec<Sample> {
+        let mut samples: Vec<Sample> = (0..=48)
+            .map(|i| {
+                let kind = if i == 0 { Kind::Down } else { Kind::Move };
+                let y = match i % 4 {
+                    1 => 2.0,
+                    3 => -2.0,
+                    _ => 0.0,
+                };
+                Sample::new(kind, [i as f32 * 7.5, y], f64::from(i) / 100.0).pressing(0.5)
+            })
+            .collect();
+        let last = *samples.last().unwrap();
+        samples.push(Sample::new(Kind::Up, last.pos, last.time + 0.005));
+        samples
+    }
+
+    /// The most a corrected line strays from the straight middle.
+    fn strays(samples: &[Sample]) -> f32 {
+        samples[4..samples.len() - 4]
+            .iter()
+            .map(|s| s.pos[1].abs())
+            .fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn bezier_post_correction_lays_a_shaky_line_straighter() {
+        let raw = shaky();
+        let how = Correct::default();
+        let plain = corrected_as(&raw, 4, 10.0, how);
+        let bezier = corrected_as(
+            &raw,
+            4,
+            10.0,
+            Correct {
+                bezier: true,
+                ..how
+            },
+        );
+        assert_eq!(plain.len(), raw.len());
+        assert_eq!(bezier.len(), raw.len(), "pressure and time stay");
+        assert!(
+            strays(&bezier) < strays(&plain) * 0.5,
+            "{} against {}",
+            strays(&bezier),
+            strays(&plain)
+        );
+        // The ends stay where they were.
+        assert_eq!(bezier[0].pos, raw[0].pos);
+        assert_eq!(bezier[raw.len() - 2].pos, raw[raw.len() - 2].pos);
+    }
+
+    #[test]
+    fn post_correction_by_speed_and_by_scale_change_how_far_it_smooths() {
+        let raw = shaky();
+        let how = Correct::default();
+        let base = strays(&corrected_as(&raw, 3, 10.0, how));
+        // 360 pixels in half a second: 720 a second at 100 %, so by speed
+        // it smooths about as much; drawn four times as fast it smooths
+        // more.
+        let quick: Vec<Sample> = raw
+            .iter()
+            .map(|s| Sample {
+                time: s.time / 4.0,
+                ..*s
+            })
+            .collect();
+        let by_speed = Correct {
+            by_speed: true,
+            ..how
+        };
+        assert!(strays(&corrected_as(&quick, 3, 10.0, by_speed)) < base);
+        // By scale: at 400 % the same smoothing on the screen is a quarter
+        // of the pixels, at 25 % four times as many.
+        let at = |zoom: f32| {
+            let by_scale = Correct {
+                by_scale: true,
+                zoom,
+                ..how
+            };
+            strays(&corrected_as(&raw, 3, 10.0, by_scale))
+        };
+        assert!(
+            at(4.0) > base && at(0.25) < base,
+            "{} {base} {}",
+            at(4.0),
+            at(0.25)
+        );
     }
 
     #[test]

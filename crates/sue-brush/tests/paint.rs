@@ -171,7 +171,7 @@ fn run(
         let mut t = end;
         while t < end + hold {
             t += 1.0 / 60.0;
-            stroke.hold(t, Some(&backdrop));
+            stroke.hold(t, None, Some(&backdrop));
         }
     }
     pipeline.push_all(lift);

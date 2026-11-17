@@ -380,7 +380,8 @@ fn draw_frames(
                 done = committed.len();
             }
             if kept.kind != Kind::Up {
-                stroke.hold(kept.time, Some(&backdrop));
+                let tail = pipeline.tail();
+                stroke.hold(kept.time, tail.last(), Some(&backdrop));
             }
         }
         // For show only; after the lift there is none to show.

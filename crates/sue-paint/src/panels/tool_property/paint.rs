@@ -100,6 +100,17 @@ pub(super) fn paint_properties(
         0.0,
         100.0,
     );
+    if !sub.tip.eraser {
+        rows.percent(
+            ui,
+            "color-mixing",
+            Category::Ink,
+            &tr!("color-mixing"),
+            &mut sub.tip.mix,
+            0.0,
+            100.0,
+        );
+    }
     shape::ink_rows(ui, rows, sub);
     let tip = &mut sub.tip;
     let levels: Vec<String> = AntiAlias::ALL.iter().map(|level| level.label()).collect();
@@ -272,17 +283,6 @@ fn tip_properties(ui: &mut Ui, rows: &mut Rows<'_>, tip: &mut Tip) {
             &tr!("flow"),
             &mut tip.flow,
             1.0,
-            100.0,
-        );
-    }
-    if !tip.eraser {
-        rows.percent(
-            ui,
-            "color-mixing",
-            Category::Ink,
-            &tr!("color-mixing"),
-            &mut tip.mix,
-            0.0,
             100.0,
         );
     }

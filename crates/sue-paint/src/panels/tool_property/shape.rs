@@ -421,15 +421,20 @@ pub(super) fn spray_rows(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
     };
     let before = spray;
     if spray.linked {
-        rows.percent(
+        // A share of the brush's size, in tenths of a percent.
+        let mut share = spray.size * 100.0;
+        if rows.slider(
             ui,
             "particle-size",
             Category::SprayingEffect,
             &tr!("particle-size"),
-            &mut spray.size,
-            1.0,
-            100.0,
-        );
+            &mut share,
+            0.5..=100.0,
+            " %",
+            true,
+        ) {
+            spray.size = share / 100.0;
+        }
     } else {
         rows.slider(
             ui,
@@ -465,7 +470,7 @@ pub(super) fn spray_rows(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
         &mut spray.density,
         1.0..=256.0,
         "",
-        true,
+        false,
     );
     rows.percent(
         ui,

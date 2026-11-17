@@ -171,7 +171,8 @@ impl Painter {
                 copy.done = committed.len();
             }
             if sample.kind != Kind::Up {
-                copy.paint.hold(sample.time, backdrop);
+                let tail = copy.pipeline.tail();
+                copy.paint.hold(sample.time, tail.last(), backdrop);
             }
         }
         if self.copies.iter().all(|copy| copy.pipeline.is_done()) {

@@ -349,6 +349,21 @@ impl SuePaint {
 }
 
 impl SuePaint {
+    /// Shows category `index` of Sub Tool Detail's list
+    /// ([`Category::ALL`]), as scripts and snapshots name it:
+    /// `detail/<index>`.
+    pub(crate) fn detail_navigate(&mut self, target: &str) -> bool {
+        let Some(category) = target
+            .strip_prefix("detail/")
+            .and_then(|index| index.parse::<usize>().ok())
+            .and_then(|index| Category::ALL.get(index).copied())
+        else {
+            return false;
+        };
+        self.tool_palettes.detail = Some(category);
+        true
+    }
+
     /// What the tool palettes do every frame, wherever they are shown:
     /// the naming dialog, and keeping the tool palette's arrangement.
     pub(crate) fn tool_palettes_frame(

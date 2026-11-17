@@ -93,7 +93,6 @@ pub(crate) enum Category {
 
 impl Category {
     /// Every category, in the list's order.
-    #[cfg(test)]
     pub(crate) const ALL: [Self; 20] = [
         Self::BrushSize,
         Self::Ink,
@@ -326,6 +325,19 @@ impl<'h> Rows<'h> {
         }
     }
 
+    /// `true` when this view draws rows of `category`: Tool Property
+    /// draws every category, Sub Tool Detail the one picked, the census
+    /// none. For a row drawn outside these rows.
+    pub(crate) fn shows(&self, category: Category) -> bool {
+        match &self.view {
+            View::Property { .. } => true,
+            View::Detail {
+                category: chosen, ..
+            } => *chosen == category,
+            View::Census(_) => false,
+        }
+    }
+
     /// The width of a row's name, so the controls of a column line up.
     fn label_width(&self) -> f32 {
         name_width(self.theme)
@@ -425,6 +437,7 @@ impl<'h> Rows<'h> {
             )
             .label(label)
             .label_width(width)
+            .width(field_room(ui, theme))
             .suffix(suffix)
             .decimals(decimals)
             .enabled(enabled);
@@ -549,7 +562,7 @@ impl<'h> Rows<'h> {
                     sue_wm::ui::input::dropdown(("sue-paint-tool-list", id), chosen, options)
                         .label(label)
                         .enabled(enabled)
-                        .width(room)
+                        .width(field_room(ui, theme))
                         .show(ui, theme)
                         .on_hover_text(label)
                         .changed()
@@ -607,6 +620,14 @@ impl<'h> Rows<'h> {
     }
 }
 
+/// How wide a row's control may be, so it ends where the number fields
+/// of the rows with a dynamics button end: the room left less that
+/// button and the gap before it.
+pub(crate) fn field_room(ui: &Ui, theme: &Theme) -> f32 {
+    let side = Density::of(ui).icon_button();
+    (ui.available_width() - side - theme.space(Space::S2)).max(side)
+}
+
 /// How wide the names of a palette's rows are, so their controls line up.
 pub(crate) fn name_width(theme: &Theme) -> f32 {
     theme.space(Space::S9) * 2.0
@@ -648,7 +669,11 @@ impl SuePaint {
         let sub = self.toolbox.current_mut();
         match tool {
             tool if tool.paints() => {
-                if matches!(tool, Tool::Pen | Tool::Pencil | Tool::Brush | Tool::Figure) {
+                // Vector magnet is a correction of the line: in Sub Tool
+                // Detail it shows with Correction alone.
+                if matches!(tool, Tool::Pen | Tool::Pencil | Tool::Brush | Tool::Figure)
+                    && rows.shows(Category::Correction)
+                {
                     self.magnet_row(ui, theme);
                 }
                 let sub = self.toolbox.current_mut();

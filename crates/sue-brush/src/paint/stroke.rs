@@ -562,8 +562,24 @@ impl PaintStroke {
         }
     }
 
-    /// Continuous spraying: the pen held still up to device time `now`.
-    pub fn hold(&mut self, now: f64, backdrop: Option<&dyn Backdrop>) {
+    /// Continuous spraying: the pen held still up to device time `now`,
+    /// `pending` the newest point the input pipeline has not committed
+    /// yet. A pen that has held still since it landed has no committed
+    /// point to spray at (the pipeline commits as the pen moves on): its
+    /// pending point is laid down first, so the spray starts where it
+    /// stands.
+    pub fn hold(
+        &mut self,
+        now: f64,
+        pending: Option<&StrokePoint>,
+        backdrop: Option<&dyn Backdrop>,
+    ) {
+        if self.behaviours.continuous.is_some()
+            && !self.planner.started()
+            && let Some(point) = pending
+        {
+            self.lay_down(std::slice::from_ref(point), backdrop);
+        }
         let mut out = Vec::new();
         self.planner.hold(now, &mut out);
         if !out.is_empty() {

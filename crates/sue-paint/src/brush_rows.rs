@@ -604,6 +604,16 @@ mod tests {
                 .preset
         };
         assert_eq!(painted(&back).to_bytes(), painted(&sub).to_bytes());
+        assert_eq!(painted(&sub).blend, sue_model::BlendMode::Multiply);
+        // A pen in its own mode is laid through the paint behaviours.
+        let mut pen = Tool::Pen.sub_tools().remove(0);
+        pen.brush_rows.preset = Some(PresetRows {
+            blend: sue_model::BlendMode::Lighten,
+            ..preset_rows_of(&pen)
+        });
+        let brush = crate::canvas::engine::brush_of(&pen, false, false).unwrap();
+        assert_eq!(brush.preset.blend, sue_model::BlendMode::Lighten);
+        assert!(!sue_brush::worker::Brush::new(brush.preset, [0.0; 3]).is_plain());
     }
 
     #[test]
