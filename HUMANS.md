@@ -643,6 +643,14 @@ Once a canvas is open:
   `Tab` (Window, Hide All Palettes) hides every palette but the command
   bar, and shows them all again exactly as they were (the item then reads
   Show All Palettes); `Shift+Tab` hides the menus.
+- **Buttons from the palettes:** drag a tool from the Tool palette, a sub
+  tool from the Sub Tool palette, or a color from a color set or Color
+  History straight onto the command bar or Quick Access, and it becomes
+  a button there that picks it (Command Bar Settings adds the rest).
+- **Notices** (Copied, a file saved, an export running) stand in the
+  canvas's view, never over a palette or the Timeline, and never take a
+  click from what lies under them: only their own buttons can be
+  pressed, and a notice fades while the pointer is over it.
 - **Shortcuts:** Sue Paint uses Clip Studio Paint's default keys: the tool
   letters (`P`, `B`, `E`, `G`, `M`, `W`, `I`, `K`, `H`, `R`, `/` and the
   rest), `,` and `.` for the previous and next sub tool, `[` and `]` for the

@@ -598,6 +598,9 @@ follow [Semantic Versioning](https://semver.org/).
   animation folder's cels.
 - Sue Paint, Timeline: a right click on the frames offers Thumbnail
   Size, as Clip Studio Paint's does.
+- Sue Paint: tools, sub tools and colors drag straight onto the Command
+  Bar or Quick Access, from the Tool palette, the Sub Tool palette, a
+  color set and Color History; each becomes a button that picks it.
 
 ### Changed
 
@@ -908,6 +911,22 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint, Merge Selected Layers: with one layer picked inside a
   folder cel, the whole cel is merged into one layer, so an auto action
   that merges a cel and steps to the next works on every cel.
+- Sue Paint's default layout: the Sub Tool palette lists five sub tools
+  on a 900 point high window and six on a 1080 one (it showed three),
+  each on one line with its sample stroke and its name; the Color Wheel
+  fills its palette with the main and sub color at its lower left and
+  the drawing color's red, green and blue in a column at its right.
+- Sue Paint: the Layer palette spreads its buttons evenly over their
+  lines; an empty Item Bank says so once, in its middle, with what to
+  do; Layer Property says No Canvas in its middle when none is open.
+- Paper: every piece of text draws at its full weight, so secondary
+  text (a layer's 100 % Normal, captions, a field's unit) reads clearly.
+- Notices take no clicks from what lies under them, only on their own
+  buttons, and fade while the pointer is over them; in Sue Paint they
+  always stand in the canvas's view, never over a docked Timeline or a
+  palette, even when the view is small or no canvas is open.
+- Settings: an empty folder or device setting says in its field what
+  empty means (Sue Paint's own folder, next to the source file).
 
 ### Fixed
 
@@ -1214,6 +1233,9 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint, Timeline: the playback range's start and end handles on the
   ruler can be dragged again (a press there moved the playhead), and a
   drag of one is a single undo step, however many frames it passes.
+- Sue Paint's sample picture fills its circles with flat color inside
+  the ink, with no pale halo around them; the Sub Tool palette's sample
+  strokes are sharp at 2.0 scale.
 
 ### Removed
 
