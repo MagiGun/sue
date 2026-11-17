@@ -500,9 +500,7 @@ impl Pipeline {
         if let Some(speed) = flick {
             let size = self.dynamics.base_size();
             let narrowing = if self.shaper.ends_tapered() {
-                flick::Narrowing::Taper {
-                    most: self.shaper.longest_ending(),
-                }
+                flick::Narrowing::Taper
             } else {
                 flick::Narrowing::Own
             };

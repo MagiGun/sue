@@ -53,11 +53,10 @@ pub(crate) enum Narrowing {
     /// It narrows by itself (the brush has no ending taper).
     Own,
     /// The brush's ending taper narrows the line and the run out
-    /// together, in one taper, so the line does not thin twice (a
-    /// bulging end with a needle on it): the run out keeps the line's
-    /// width and reaches no farther than `most` pixels, the longest
-    /// ending the brush can have.
-    Taper { most: f32 },
+    /// together, in one taper that reaches at least over the run out, so
+    /// the line does not thin twice (a bulging end with a needle on it):
+    /// the run out keeps the line's width.
+    Taper,
 }
 
 /// Carries `points` (the stroke's last points; `before` the point taken
@@ -79,14 +78,8 @@ pub(crate) fn run_out(
     if !(speed.is_finite() && speed > 0.0 && step > 0.0) {
         return 0.0;
     }
-    let mut reach = (speed * CARRY).min(size * 4.0 + 16.0).min(FARTHEST);
-    let own = match narrowing {
-        Narrowing::Own => true,
-        Narrowing::Taper { most } => {
-            reach = reach.min(most);
-            false
-        }
-    };
+    let reach = (speed * CARRY).min(size * 4.0 + 16.0).min(FARTHEST);
+    let own = narrowing == Narrowing::Own;
     if reach < step {
         return 0.0;
     }
@@ -186,17 +179,10 @@ mod tests {
         let reach = fast.last().unwrap().arc;
         assert!((reach - 56.0).abs() < 1e-3, "{reach}");
         // Under the brush's ending taper it keeps the line's width (the
-        // taper narrows it) and reaches no farther than the taper can.
+        // taper narrows it) and reaches as far.
         let mut tapered = vec![point([0.0, 0.0], 0.0, 0.0)];
-        let reach = run_out(
-            &mut tapered,
-            None,
-            100_000.0,
-            10.0,
-            2.0,
-            Narrowing::Taper { most: 20.0 },
-        );
-        assert!((reach - 20.0).abs() < 1e-3, "{reach}");
+        let reach = run_out(&mut tapered, None, 100_000.0, 10.0, 2.0, Narrowing::Taper);
+        assert!((reach - 56.0).abs() < 1e-3, "{reach}");
         assert!(tapered.iter().all(|p| (p.size - 10.0).abs() < 1e-6));
     }
 }

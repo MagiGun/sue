@@ -350,7 +350,7 @@ impl Shaper {
     /// What the ending of `points` (before the tapers), the last
     /// `run_out` pixels of which are a flick's run out, reaches over at
     /// least: the run out, and if pointed, [`ENDING_PER_WIDTH`] times the
-    /// widest the line is near its end; never more than
+    /// widest the line is near its end, that never more than
     /// [`Self::longest_ending`].
     fn ending_floor(&self, points: &[StrokePoint], length: f32, run_out: f32) -> Floor {
         if !self.ends_tapered() {
@@ -366,7 +366,9 @@ impl Shaper {
         let most = self.longest_ending();
         Floor {
             pointed: (ENDING_PER_WIDTH * widest).min(most),
-            run_out: run_out.min(most),
+            // The run out lies past every point committed while the pen
+            // was down, so an ending over it alone changes none of them.
+            run_out,
         }
     }
 
