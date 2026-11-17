@@ -20,6 +20,19 @@ use crate::panels::tool::ToolDrag;
 use crate::studio::SuePaint;
 use crate::tools::SubTool;
 
+/// How tall the Sub Tool palette's list shows in `room`: all of it when
+/// its `count` rows of `tall` points (and the Add Sub Tool row of `add`
+/// points) fit, else as many whole rows as fit, so no row is cut through
+/// and the scroll bar says there are more.
+fn list_height(count: usize, tall: f32, add: f32, spacing: f32, room: f32) -> f32 {
+    let pitch = tall + spacing;
+    let whole = count as f32 * pitch + add;
+    if whole <= room {
+        return room;
+    }
+    ((room + spacing) / pitch).floor().max(1.0) * pitch - spacing
+}
+
 /// Where a sub tool dragged in the list would land: before sub tool
 /// `index` of the entry shown (or after the last when it is the list's
 /// length).
@@ -175,15 +188,23 @@ impl SuePaint {
         // so it can still be scrolled away by hand.
         let followed = Id::unique(("sue-paint-subs-followed", slot, shown_group));
         let follow = inner.ctx().data(|data| data.get_temp::<usize>(followed)) != Some(picked);
+        let tall = if paints { line * 1.4 } else { line };
+        let height = list_height(
+            names.len(),
+            tall,
+            line,
+            inner.spacing().item_spacing.y,
+            inner.available_height(),
+        );
         egui::ScrollArea::vertical()
             .id_salt(("sue-paint-subs", slot, shown_group))
             .auto_shrink([false, false])
+            .max_height(height)
             .show(&mut inner, |ui| {
                 for (offset, name) in names.iter().enumerate() {
                     let index = range.start + offset;
                     let sub = &entry.subs()[index];
                     let chosen = index == picked;
-                    let tall = if paints { line * 1.4 } else { line };
                     let (row, response) = ui.allocate_exact_size(
                         vec2(ui.available_width(), tall),
                         Sense::click_and_drag(),

@@ -148,7 +148,7 @@ The order of work is the plan at the end.
 | Export vectors | File > Special Export | done | Visible vector layers as SVG, each line an outline as wide as drawn |
 | Export layer comp (EX) | File > Special Export | done | Layer, Layer Comps keeps named sets of visibility, opacity and blend; each exports as its own picture |
 | Record timelapse | File > Timelapse > Record timelapse | done | A picture of the canvas after every change |
-| Export timelapse (video or GIF) | File > Timelapse > Export timelapse | done | MP4, AVI or GIF, fitted to a length you choose; Clip Studio's presets run to 300 seconds. Aspect ratio, a preview that plays, and progress with Cancel while it runs in the background (CTV-7) |
+| Export timelapse (video or GIF) | File > Timelapse > Export timelapse | done | MP4, AVI or GIF, fitted to a length you choose (the video lasts that length, however few frames); Clip Studio's presets run to 300 seconds. Aspect ratio, a preview that plays, and progress with Cancel while it runs in the background (CTV-7) |
 
 ## File: import, batch and scanning
 
@@ -362,6 +362,7 @@ The order of work is the plan at the end.
 | New Animation Cel, Assign Animation Cel | Animation | done | |
 | Add and Delete Keyframe, Insert and Delete Frame | Animation > Edit Track | done | |
 | Onion Skin and its settings | Animation > Show Animation Cels | done | Before in blue, after in green; how many, their colors, how faint |
+| Show edited cel only, Check cel motion by key input, Check surrounding cels by key input | Animation > Show Animation Cels | done | The locked cel shows in place of the frame's; the frames from two cels back play into the current one; each press shows the cel before, the cel after, then the current one. The playhead stays (ABV-9) |
 | Light Table and Register Selected Layer | Animation > Light Table | done | Trace from other layers |
 | Animation Cels palette's light table: general light table, register file, Light table tool, reset position, opacity | Animation Cels palette | done | Moving a traced layer never moves the layer itself |
 | Play, Stop, Loop, Move Frame | Animation > Playback | done | |

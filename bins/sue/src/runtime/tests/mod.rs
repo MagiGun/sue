@@ -45,6 +45,7 @@ mod paint_jobs;
 mod paint_layers;
 mod paint_menus;
 mod paint_palettes;
+mod paint_polish;
 mod paint_rulers;
 mod paint_saving;
 mod paint_select;
@@ -159,9 +160,18 @@ pub(crate) fn frames(
 }
 
 /// Where Sue Paint's canvas has its middle in a 1440 by 900 window: the
-/// page's middle, moved by Sue Paint's palettes.
+/// middle of the canvas's view as the last frame laid it (a fitted
+/// picture's middle), else the page's middle moved by Sue Paint's
+/// palettes as 0.0.75 laid them.
 pub(crate) fn paint_middle(runtime: &Runtime) -> Pos2 {
-    runtime.shell.page_rect().center() + vec2(8.0, -63.0)
+    runtime
+        .applets
+        .get(&AppletId::new(sue_paint::ID).unwrap())
+        .and_then(|applet| applet.notice_room())
+        .map_or_else(
+            || runtime.shell.page_rect().center() + vec2(8.0, -63.0),
+            |view| view.center(),
+        )
 }
 
 pub(crate) fn frame_with(

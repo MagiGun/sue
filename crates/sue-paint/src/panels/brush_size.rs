@@ -64,7 +64,11 @@ impl SuePaint {
                 vec2(cell, cell + label),
             )
             .shrink(theme.space(Space::S1) / 2.0);
-            if rect.top() > body.bottom() {
+            // Whole rows only: a row the palette would cut through is
+            // left out rather than shown as half dots (the first row
+            // always shows).
+            let row_bottom = body.top() + (row + 1) as f32 * (cell + label);
+            if row > 0 && row_bottom > body.bottom() + 0.5 {
                 break;
             }
             let response = ui.interact(

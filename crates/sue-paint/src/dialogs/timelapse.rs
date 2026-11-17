@@ -176,26 +176,15 @@ impl TimelapseDialog {
         self.reading = None;
     }
 
-    /// The video's frames a second, how many kept frames it shows, every
-    /// how many it shows one, and how long it plays in seconds.
-    fn timing(&self) -> (u32, usize, usize, f64) {
-        let count = self.paths.len();
-        let (fps, step) = timelapse::pace(count, self.export);
-        let shown = timelapse::shown(count, step);
-        let length = if shown == 0 { 0 } else { shown + fps as usize };
-        (fps, shown, step, length as f64 / f64::from(fps.max(1)))
+    /// When the video shows each kept frame and how long it plays: the
+    /// timing the export uses.
+    fn timing(&self) -> timelapse::Timing {
+        timelapse::Timing::new(self.paths.len(), self.export)
     }
 
     /// The kept frame the video shows `at` seconds in.
     fn kept_at(&self, at: f64) -> usize {
-        let (fps, shown, step, _) = self.timing();
-        let frame = (at * f64::from(fps)).floor().max(0.0) as usize;
-        let chosen = frame.min(shown.saturating_sub(1));
-        if chosen + 1 >= shown {
-            self.paths.len().saturating_sub(1)
-        } else {
-            chosen * step
-        }
+        self.timing().kept_at(at)
     }
 
     /// The preview frame nearest before the kept frame `kept`.
@@ -211,7 +200,8 @@ impl TimelapseDialog {
     /// The dialog's body.
     pub(super) fn ui(&mut self, ui: &mut Ui, theme: &Theme) -> Outcome {
         self.take_frames(ui.ctx());
-        let (fps, shown, _, seconds) = self.timing();
+        let timing = self.timing();
+        let (fps, frames, seconds) = (timing.fps, timing.len(), timing.seconds());
         // The clock: it moves on while the preview plays, round and round.
         let now = ui.input(|input| input.time);
         if self.playing && seconds > 0.0 {
@@ -227,14 +217,14 @@ impl TimelapseDialog {
         ui.add_space(theme.space(Space::S3));
         self.controls(ui, seconds, theme);
         let size = self.export.size(self.shape.unwrap_or([16, 9]));
-        if shown > 0 {
+        if frames > 0 {
             help(
                 ui,
                 &tr!(
                     "timelapse-video-size",
                     width = size[0],
                     height = size[1],
-                    count = shown + fps as usize,
+                    count = frames,
                     fps = fps
                 ),
                 theme,
@@ -398,8 +388,7 @@ impl TimelapseDialog {
             }
         });
         // The length changed: the preview starts again if it went past.
-        let (_, _, _, seconds) = self.timing();
-        if self.at > seconds {
+        if self.at > self.timing().seconds() {
             self.at = 0.0;
         }
     }
@@ -462,18 +451,27 @@ mod tests {
         dialog.paths = Arc::new(paths.clone());
         // Every frame at 30 a second, the last held a second.
         dialog.export.seconds = None;
-        let (fps, shown, step, seconds) = dialog.timing();
-        assert_eq!((fps, shown, step), (30, 10, 1));
-        assert!((seconds - 40.0 / 30.0).abs() < 1e-9);
+        let timing = dialog.timing();
+        assert_eq!((timing.fps, timing.picks.len(), timing.step), (30, 10, 1));
+        assert!((timing.seconds() - 40.0 / 30.0).abs() < 1e-9);
         let plan = timelapse::Plan::sized(&paths, dialog.export, [100, 100]);
         assert_eq!(plan.len(), 40, "as long as the video");
         assert_eq!(dialog.kept_at(0.0), 0);
         assert_eq!(dialog.kept_at(3.5 / 30.0), 3);
         assert_eq!(dialog.kept_at(1.2), 9, "the last held");
-        // Fit to two seconds: five a second, every frame.
+        // Fit to two seconds: ten a second, every frame, the last
+        // second the finished picture.
         dialog.export.seconds = Some(2.0);
-        let (fps, shown, _, _) = dialog.timing();
-        assert_eq!((fps, shown), (5, 10));
-        assert_eq!(dialog.kept_at(0.5), 2);
+        let timing = dialog.timing();
+        assert_eq!((timing.fps, timing.picks.len()), (10, 10));
+        assert!((timing.seconds() - 2.0).abs() < 1e-9);
+        assert_eq!(dialog.kept_at(0.5), 5);
+        assert_eq!(dialog.kept_at(1.5), 9);
+        // Fit to thirty seconds with three frames: thirty seconds, the
+        // frames held, not a short video.
+        dialog.paths = Arc::new(paths[..3].to_vec());
+        dialog.export.seconds = Some(30.0);
+        assert!((dialog.timing().seconds() - 30.0).abs() < 1e-9);
+        assert_eq!(dialog.kept_at(12.0), 1);
     }
 }

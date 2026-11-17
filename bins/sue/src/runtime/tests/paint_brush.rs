@@ -689,7 +689,7 @@ impl Paint {
     /// Where the canvas has its middle: the page's middle, moved by Sue
     /// Paint's palettes.
     fn middle(&self) -> Pos2 {
-        self.runtime.shell.page_rect().center() + vec2(8.0, -63.0)
+        paint_middle(&self.runtime)
     }
 
     /// Presses the main button at `from` with `modifiers` held, moves to

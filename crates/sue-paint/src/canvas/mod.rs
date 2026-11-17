@@ -356,7 +356,7 @@ fn status_rect(column: Rect, chrome: f32, slide: f32) -> Rect {
 
 #[cfg(test)]
 mod tests {
-    use super::input::lean_in_picture;
+    use super::input::{lean_in_picture, twist_in_picture};
     use egui::Pos2;
 
     #[test]
@@ -386,5 +386,22 @@ mod tests {
         // Upright or unknown: no way at all; how far is tilt's.
         assert_eq!(lean_in_picture(None, at, zoomed), [0.0, 0.0]);
         assert_eq!(lean_in_picture(Some([0.0, 0.0]), at, zoomed), [0.0, 0.0]);
+    }
+
+    #[test]
+    fn the_pens_twist_turns_and_mirrors_with_the_view() {
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+        let at = egui::pos2(40.0, 30.0);
+        let zoomed = |p: Pos2| egui::pos2(p.x * 3.0, p.y * 3.0);
+        assert!(near(twist_in_picture(30.0, at, zoomed), 30.0));
+        // A view turned a quarter clockwise on screen: the picture under
+        // the pen is turned back a quarter.
+        let turned = |p: Pos2| egui::pos2(p.y, -p.x);
+        assert!(near(twist_in_picture(30.0, at, turned), 300.0));
+        assert!(near(twist_in_picture(100.0, at, turned), 10.0));
+        // Mirrored left to right: clockwise reads as counterclockwise.
+        let flipped = |p: Pos2| egui::pos2(500.0 - p.x, p.y);
+        assert!(near(twist_in_picture(30.0, at, flipped), 150.0));
+        assert!(near(twist_in_picture(0.0, at, flipped), 180.0));
     }
 }

@@ -477,12 +477,19 @@ impl SuePaint {
             }),
             None => tilt,
         });
+        // And so does its twist.
+        let twist = sample.twist.map(|twist| match self.docs.get(self.active) {
+            Some(doc) => super::input::twist_in_picture(twist, screen, |at| {
+                doc.view.to_picture(viewport, size, at)
+            }),
+            None => twist,
+        });
         Sample {
             pos,
             time: sample.time,
             pressure: sample.pressure,
             tilt,
-            twist: sample.twist,
+            twist,
             kind,
         }
     }
@@ -502,7 +509,10 @@ impl SuePaint {
         let Some(doc) = self.docs.get(self.active) else {
             return false;
         };
-        let info = match self.drawable(&cx.world.arena) {
+        let info = match self
+            .mask_layer(&cx.world.arena)
+            .unwrap_or_else(|| self.drawable(&cx.world.arena))
+        {
             Ok(info) => info,
             Err(error) => {
                 cx.fail(error);

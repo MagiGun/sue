@@ -893,6 +893,11 @@ pub struct SuePaint {
     pub(crate) select_turn: Option<SelectTurn>,
     /// The exports running in the background.
     pub(crate) exports: exports::Exports,
+    /// Show Edited Cel Only: the cel being drawn shows in its animation
+    /// folder in place of the one the frame shows.
+    pub(crate) edited_cel_only: bool,
+    /// Check Cel Motion or Check Surrounding Cels by Key Input under way.
+    pub(crate) cel_peek: Option<crate::panels::timeline::CelPeek>,
 }
 
 /// How the brush engine took a stroke (for the runtime tests).
@@ -1115,6 +1120,8 @@ impl Default for SuePaint {
             gradient_work: GradientWork::default(),
             select_turn: None,
             exports: exports::Exports::default(),
+            edited_cel_only: false,
+            cel_peek: None,
         }
     }
 }
@@ -1137,6 +1144,35 @@ pub(crate) fn saw_stroke(seen: StrokeSeen) {
 #[must_use]
 pub fn last_stroke() -> Option<StrokeSeen> {
     LAST_STROKE.with(|last| last.borrow().clone())
+}
+
+/// What the canvas showed of an animation in its last frame: the frame
+/// it showed (the playhead's, or another while Check Cel Motion or Check
+/// Surrounding Cels shows one) and the cels it hid.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ViewSeen {
+    /// The frame shown.
+    pub frame: u32,
+    /// The cels not shown.
+    pub hidden: std::collections::HashSet<EntityId>,
+}
+
+thread_local! {
+    /// What the canvas last showed of an animation on this thread.
+    static LAST_VIEW: std::cell::RefCell<Option<ViewSeen>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Notes `seen` as what the canvas shows of an animation now.
+pub(crate) fn saw_view(seen: ViewSeen) {
+    LAST_VIEW.with(|last| *last.borrow_mut() = Some(seen));
+}
+
+/// What the canvas showed of an animation in the last frame on this
+/// thread (for the runtime tests).
+#[must_use]
+pub fn last_view() -> Option<ViewSeen> {
+    LAST_VIEW.with(|last| last.borrow().clone())
 }
 
 impl std::fmt::Debug for SuePaint {
@@ -1239,6 +1275,25 @@ impl SuePaint {
             return Err(tr!("vector-layer-draw-pens-brushes-pick", name = info.name));
         }
         Ok(info)
+    }
+
+    /// The current layer while its mask is edited (Edit Mask on, and the
+    /// layer has one), whatever kind of layer it is: a gradient, fill or
+    /// tone layer's mask is gray pixels and takes brushes, fills and the
+    /// Blend tool as a raster layer's does. `None` when no mask is
+    /// edited; else the layer, or why not (locked or hidden, as for any
+    /// layer).
+    pub(crate) fn mask_layer(&self, arena: &Arena) -> Option<Result<doc::LayerInfo, String>> {
+        self.doc().filter(|doc| doc.mask_edit)?;
+        let info = self.layer_info(arena)?;
+        doc::mask_of(arena, info.id)?;
+        Some(if info.locked {
+            Err(tr!("is-locked", name = info.name))
+        } else if !info.style.visible {
+            Err(tr!("is-hidden", name = info.name))
+        } else {
+            Ok(info)
+        })
     }
 
     /// The current layer if pens and brushes can draw on it.

@@ -679,7 +679,9 @@ fn sue_paint_timeline_zooms_and_pans_with_the_wheel_and_the_middle_button() {
     assert_eq!(folder_shown(&paint), [true]);
     let name = texts
         .iter()
-        .find(|(text, rect)| text.starts_with("Folder") && rect.top() > 800.0)
+        .find(|(text, rect)| {
+            text.starts_with("Folder") && rect.top() > ten_dragged.bottom() && rect.left() < 560.0
+        })
         .map(|(_, rect)| *rect)
         .unwrap_or_else(|| panic!("the animation folder's name beside its track: {texts:?}"));
     let eye = Pos2::new(name.left() - 34.0, name.center().y);
@@ -1258,11 +1260,17 @@ fn sue_paint_timeline_holds_runs_double_clicks_and_thumbnails_by_hand() {
     paint.command("anim.cel.new");
     let texts = paint.settle(10);
     let header = timeline_header(&texts);
+    // Inside the Timeline (the Layer palette beside it numbers its cels
+    // too).
+    let timeline = sue_wm::dock::bottom_row(&paint.ctx).expect("the Timeline is docked");
     let number = |texts: &[(String, egui::Rect)], name: &str| {
         texts
             .iter()
             .filter(|(text, rect)| {
-                text == name && rect.top() > header.bottom() && rect.left() > 560.0
+                text == name
+                    && rect.top() > header.bottom()
+                    && rect.left() > 560.0
+                    && timeline.contains(rect.center())
             })
             .map(|(_, rect)| *rect)
             .min_by(|a, b| a.top().total_cmp(&b.top()))

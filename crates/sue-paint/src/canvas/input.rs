@@ -36,6 +36,19 @@ pub(super) fn lean_in_picture(
     [way.x / reach * length, way.y / reach * length]
 }
 
+/// A pen's twist on screen at `at` (degrees clockwise) as a twist in the
+/// picture: the way it points on screen, followed into the picture
+/// (`to_picture`), so a turned view turns it and a mirrored view mirrors
+/// it, as [`lean_in_picture`] does the lean. 0 to 360.
+pub(super) fn twist_in_picture(twist: f32, at: Pos2, to_picture: impl Fn(Pos2) -> Pos2) -> f32 {
+    let (sin, cos) = twist.to_radians().sin_cos();
+    let way = to_picture(at + egui::vec2(cos, sin) * 100.0) - to_picture(at);
+    if !way.x.is_finite() || !way.y.is_finite() || way.length() <= 1e-6 {
+        return twist.rem_euclid(360.0);
+    }
+    way.y.atan2(way.x).to_degrees().rem_euclid(360.0)
+}
+
 /// The angle of a screen vector, in degrees.
 pub(super) fn angle(v: egui::Vec2) -> f32 {
     v.y.atan2(v.x).to_degrees()
