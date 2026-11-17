@@ -1,7 +1,7 @@
 //! The canvas's and layers' dialogs: Change Canvas Size, Change Image
 //! Resolution, Canvas Properties, Color Profile Preview Settings, Print,
-//! Convert Layer, New 3D Layer, Register Material and Create Perspective
-//! Ruler.
+//! Convert Layer, New 3D Layer and Create Perspective Ruler. Register
+//! Material is in `register.rs`.
 
 use std::sync::{Arc, Mutex};
 
@@ -541,21 +541,6 @@ pub(super) fn shape_3d_ui(ui: &mut Ui, kind: &mut usize, theme: &Theme) -> Outco
         });
     });
     note(ui, &tr!("file-import-3d-data-brings-models"), theme);
-    Outcome::Open
-}
-
-/// Register Material, Image: its name.
-pub(super) fn material_ui(ui: &mut Ui, name: &mut String, theme: &Theme) -> Outcome {
-    form_grid(ui, "sue-paint-material", theme, |form| {
-        let label = bare(tr!("material-name"));
-        form.row(&label, |ui| {
-            let response = text_field("sue-paint-material-name", name)
-                .label(&label)
-                .show(ui, theme);
-            tip(response, &label, "", theme);
-        });
-    });
-    note(ui, &tr!("current-layer-goes-into-material-palette"), theme);
     Outcome::Open
 }
 

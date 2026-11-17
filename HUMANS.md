@@ -806,6 +806,30 @@ Once a canvas is open:
   they pick up: white dragged out of black goes gray and takes the black
   along. A quick mouse draws smooth curves, and every stroke ends in a
   clean point or a clean round end.
+- **Every brush setting, in its place:** Sub Tool Detail sorts a brush's
+  settings into Brush Size, Ink, Anti-aliasing, Brush Shape, Brush Tip,
+  Spraying Effect, Stroke, Texture, Watercolor edge, Dual brush,
+  Starting and Ending, Erase, Color Jitter, Correction and Anti-overflow,
+  with every slider, field and list lined up in one column. A brush has
+  its own blending mode; a mixing brush its amount and density of paint,
+  color stretch and blur. Its tip is round or a strip of pictures you
+  pick from your brush tips, searching by name or tag, made thinner in
+  one direction, flipped, and with a density of its own. The Spray
+  sprays particles of a size, number, spread and direction you set, and
+  keeps spraying while the pen holds still if you ask it to. Gap
+  presets space the dabs; Sharp angles, post correction by speed, by
+  scale or as Bezier curves, and Enable snapping shape the line; an
+  eraser can erase every layer; anti-overflow keeps the paint inside a
+  reference layer's lines. Save all settings as default keeps a sub tool
+  as it is (Reset brings it back), and brush shapes you register, in a
+  brush file you can share.
+- **Selection pen and tones:** the Selection pen has hardness, density
+  and stabilization; tones in Layer Property also come in ellipse, heart
+  and flower dots, and Noise has a grain size and a factor.
+- **Register Material** asks where to keep the picture, its search tags,
+  whether it is also a brush tip and a paper texture, and how it pastes:
+  scaled, tiled over the canvas, its layer at the top or above the
+  current one.
 - **Puppet warp** (Edit, Transform): click to put pins on a layer, drag one
   and the drawing bends around the others while keeping its shape; a part
   of the drawing that does not touch another bends only by its own pins.

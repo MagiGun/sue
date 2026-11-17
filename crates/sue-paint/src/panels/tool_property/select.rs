@@ -30,6 +30,34 @@ pub(super) fn select_properties(
                 &tr!("px"),
                 true,
             );
+            // Full guide 00:24:07: how soft its edge is, how much it
+            // selects and how steady it lays.
+            rows.percent(
+                ui,
+                "selection-pen-hardness",
+                Category::Ink,
+                &tr!("hardness"),
+                &mut sub.tip.hardness,
+                0.0,
+                100.0,
+            );
+            rows.percent(
+                ui,
+                "selection-pen-density",
+                Category::Ink,
+                &tr!("brush-density"),
+                &mut sub.tip.opacity,
+                1.0,
+                100.0,
+            );
+            rows.slider_u32(
+                ui,
+                "selection-pen-stabilization",
+                Category::Correction,
+                &tr!("stabilization"),
+                &mut sub.stabilization,
+                0..=100,
+            );
             rows.hint(
                 ui,
                 &if sub.mode == 4 {

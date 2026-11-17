@@ -731,6 +731,7 @@ impl SueApplet for SuePaint {
                 true
             }
             place if place.starts_with("materials/") => self.hub.navigate(place),
+            detail if detail.starts_with("detail/") => self.detail_navigate(detail),
             bar if bar.starts_with("bar/") => self.bar_navigate(bar),
             extras if extras.starts_with("extras/") => self.extras_navigate(extras),
             page if page.starts_with("new-canvas") => self.new_canvas.navigate(page),

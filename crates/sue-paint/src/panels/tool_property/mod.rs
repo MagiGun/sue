@@ -16,6 +16,7 @@ mod lines;
 mod paint;
 mod ruler;
 mod select;
+mod shape;
 mod text;
 mod three;
 
@@ -54,8 +55,12 @@ pub(crate) enum Category {
     Ink,
     /// Anti-aliasing.
     AntiAliasing,
+    /// Ready-made brush shapes to apply, and registering one.
+    BrushShape,
     /// The tip's shape and how it turns.
     BrushTip,
+    /// Each dab sprayed as small particles.
+    SprayingEffect,
     /// Spacing, build up, flow: how dabs follow the stroke.
     Stroke,
     /// Paper grain.
@@ -66,10 +71,14 @@ pub(crate) enum Category {
     DualBrush,
     /// Starting and ending.
     StartEnd,
+    /// What an eraser erases.
+    Erase,
     /// Color jitter.
     ColorJitter,
     /// Stabilization, post correction, flick, Smart Shape.
     Correction,
+    /// Keeping the paint inside the reference layer's lines.
+    AntiOverflow,
     /// What the tool does when it is used.
     Operation,
     /// Which layers Fill and Auto Select look at, and what they leave out.
@@ -84,19 +93,22 @@ pub(crate) enum Category {
 
 impl Category {
     /// Every category, in the list's order.
-    #[cfg(test)]
-    pub(crate) const ALL: [Self; 16] = [
+    pub(crate) const ALL: [Self; 20] = [
         Self::BrushSize,
         Self::Ink,
         Self::AntiAliasing,
+        Self::BrushShape,
         Self::BrushTip,
+        Self::SprayingEffect,
         Self::Stroke,
         Self::Texture,
         Self::WatercolorEdge,
         Self::DualBrush,
         Self::StartEnd,
+        Self::Erase,
         Self::ColorJitter,
         Self::Correction,
+        Self::AntiOverflow,
         Self::Operation,
         Self::Reference,
         Self::Area,
@@ -110,14 +122,18 @@ impl Category {
             Self::BrushSize => tr!("detail-brush-size"),
             Self::Ink => tr!("detail-ink"),
             Self::AntiAliasing => tr!("detail-anti-aliasing"),
+            Self::BrushShape => tr!("detail-brush-shape"),
             Self::BrushTip => tr!("detail-brush-tip"),
+            Self::SprayingEffect => tr!("detail-spraying-effect"),
             Self::Stroke => tr!("detail-stroke"),
             Self::Texture => tr!("detail-texture"),
             Self::WatercolorEdge => tr!("detail-watercolor-edge"),
             Self::DualBrush => tr!("detail-dual-brush"),
             Self::StartEnd => tr!("detail-starting-and-ending"),
+            Self::Erase => tr!("detail-erase"),
             Self::ColorJitter => tr!("detail-color-jitter"),
             Self::Correction => tr!("detail-correction"),
+            Self::AntiOverflow => tr!("detail-anti-overflow"),
             Self::Operation => tr!("detail-operation"),
             Self::Reference => tr!("detail-reference"),
             Self::Area => tr!("detail-area"),
@@ -132,14 +148,18 @@ impl Category {
             Self::BrushSize => tr!("detail-help-brush-size"),
             Self::Ink => tr!("detail-help-ink"),
             Self::AntiAliasing => tr!("detail-help-anti-aliasing"),
+            Self::BrushShape => tr!("detail-help-brush-shape"),
             Self::BrushTip => tr!("detail-help-brush-tip"),
+            Self::SprayingEffect => tr!("detail-help-spraying-effect"),
             Self::Stroke => tr!("detail-help-stroke"),
             Self::Texture => tr!("detail-help-texture"),
             Self::WatercolorEdge => tr!("detail-help-watercolor-edge"),
             Self::DualBrush => tr!("detail-help-dual-brush"),
             Self::StartEnd => tr!("detail-help-starting-and-ending"),
+            Self::Erase => tr!("detail-help-erase"),
             Self::ColorJitter => tr!("detail-help-color-jitter"),
             Self::Correction => tr!("detail-help-correction"),
+            Self::AntiOverflow => tr!("detail-help-anti-overflow"),
             Self::Operation => tr!("detail-help-operation"),
             Self::Reference => tr!("detail-help-reference"),
             Self::Area => tr!("detail-help-area"),
@@ -177,6 +197,38 @@ const DETAIL_ONLY: &[&str] = &[
     "dual-spacing",
     "dual-scatter",
     "dual-hardness",
+    // The brush rows of FG-4 that Clip Studio Paint keeps in Sub Tool
+    // Detail.
+    "brush-blend",
+    "blur-intensity",
+    // Spraying effect's switch; a spraying brush shows its rows.
+    "spray",
+    "brush-shape",
+    "brush-shape-apply",
+    "brush-shape-register",
+    "tip-kind",
+    "tip-list",
+    "tip-thickness",
+    "tip-thickness-direction",
+    "brush-density",
+    "tip-flip-x",
+    "tip-flip-y",
+    "density-by-gap",
+    "gap-preset",
+    "gap-fixed",
+    "continuous-spraying",
+    "continuous-rate",
+    "repeat-method",
+    "tip-blend-darken",
+    "erase-all-layers",
+    "correction-by-speed",
+    "correction-by-scale",
+    "correction-bezier",
+    "sharp-angles",
+    "snapping",
+    "anti-overflow",
+    "anti-overflow-tolerance",
+    "anti-overflow-scaling",
 ];
 
 /// `true` when Tool Property leaves row `id` out, as `hidden` says.
@@ -272,6 +324,19 @@ impl<'h> Rows<'h> {
             enabled: false,
             last: None,
             theme,
+        }
+    }
+
+    /// `false` when this view would leave the row `id` of `category` out,
+    /// so a row whose choices cost something to gather can skip them;
+    /// the census counts every row.
+    pub(crate) fn draws(&self, id: &str, category: Category) -> bool {
+        match &self.view {
+            View::Property { hidden, .. } => !left_out(hidden, id),
+            View::Detail {
+                category: chosen, ..
+            } => *chosen == category,
+            View::Census(_) => true,
         }
     }
 
@@ -374,6 +439,7 @@ impl<'h> Rows<'h> {
             )
             .label(label)
             .label_width(width)
+            .width(field_room(ui, theme))
             .suffix(suffix)
             .decimals(decimals)
             .enabled(enabled);
@@ -498,7 +564,7 @@ impl<'h> Rows<'h> {
                     sue_wm::ui::input::dropdown(("sue-paint-tool-list", id), chosen, options)
                         .label(label)
                         .enabled(enabled)
-                        .width(room)
+                        .width(field_room(ui, theme))
                         .show(ui, theme)
                         .on_hover_text(label)
                         .changed()
@@ -556,6 +622,14 @@ impl<'h> Rows<'h> {
     }
 }
 
+/// How wide a row's control may be, so it ends where the number fields
+/// of the rows with a dynamics button end: the room left less that
+/// button and the gap before it.
+pub(crate) fn field_room(ui: &Ui, theme: &Theme) -> f32 {
+    let side = Density::of(ui).icon_button();
+    (ui.available_width() - side - theme.space(Space::S2)).max(side)
+}
+
 /// How wide the names of a palette's rows are, so their controls line up.
 pub(crate) fn name_width(theme: &Theme) -> f32 {
     theme.space(Space::S9) * 2.0
@@ -597,11 +671,15 @@ impl SuePaint {
         let sub = self.toolbox.current_mut();
         match tool {
             tool if tool.paints() => {
+                // Vector magnet is a correction of the line: in Sub Tool
+                // Detail it shows with Correction, with its eye.
                 if matches!(tool, Tool::Pen | Tool::Pencil | Tool::Brush | Tool::Figure) {
-                    self.magnet_row(ui, theme);
+                    rows.row(ui, "vector-magnet", Category::Correction, |ui, _, _| {
+                        self.magnet_row(ui, theme);
+                    });
                 }
                 let sub = self.toolbox.current_mut();
-                paint::paint_properties(ui, rows, tool, sub);
+                command = paint::paint_properties(ui, rows, tool, sub, &mut self.brush_work);
             }
             Tool::Fill | Tool::AutoSelect => {
                 fill::fill_properties(ui, rows, tool, sub, &mut self.select_op);

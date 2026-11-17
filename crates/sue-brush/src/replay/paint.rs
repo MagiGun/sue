@@ -104,7 +104,8 @@ pub fn painted(
             done = committed.len();
         }
         if sample.kind != Kind::Up {
-            paint.hold(sample.time, backdrop);
+            let tail = pipeline.tail();
+            paint.hold(sample.time, tail.last(), backdrop);
         }
     }
     paint.finish(backdrop);

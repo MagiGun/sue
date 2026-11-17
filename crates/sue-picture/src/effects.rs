@@ -54,17 +54,32 @@ pub const TONE_DOT_Y: &str = "effect.tone.dot_y";
 pub const TONE_SOURCES: [&str; 2] = ["Brightness", "Opacity"];
 
 /// The shapes a tone's dots take, in order: Noise ([`TONE_NOISE`])
-/// scatters single pixels instead of drawing dots. Star came later, so
-/// it is last and files that keep an index read as they did.
-pub const TONE_SHAPES: [&str; 7] = [
-    "Circle", "Square", "Diamond", "Line", "Cross", "Noise", "Star",
+/// scatters grains instead of drawing dots. Star, then Ellipse, Heart
+/// and Flower came later, so they are last and files that keep an index
+/// read as they did.
+pub const TONE_SHAPES: [&str; 10] = [
+    "Circle", "Square", "Diamond", "Line", "Cross", "Noise", "Star", "Ellipse", "Heart", "Flower",
 ];
+
+/// The size of a noise tone's grains, in pixels (`Float`, 1 when
+/// missing: single pixels).
+pub const TONE_NOISE_SIZE: &str = "effect.tone.noise_size";
+/// How strongly a noise tone's grains stand out, 0 to 1 (`Float`, 1 when
+/// missing): at 0 the tone is an even veil of its density, at 1 every
+/// grain is either inked or not.
+pub const TONE_NOISE_FACTOR: &str = "effect.tone.noise_factor";
 
 /// The index of Noise in [`TONE_SHAPES`].
 pub const TONE_NOISE: u8 = 5;
 
 /// The index of Star in [`TONE_SHAPES`].
 const TONE_STAR: u8 = 6;
+/// The index of Ellipse in [`TONE_SHAPES`].
+const TONE_ELLIPSE: u8 = 7;
+/// The index of Heart in [`TONE_SHAPES`].
+const TONE_HEART: u8 = 8;
+/// The index of Flower in [`TONE_SHAPES`].
+const TONE_FLOWER: u8 = 9;
 /// The layer shown in one color (`Bool`).
 pub const COLOR: &str = "effect.color";
 /// That color (`Color`).
@@ -120,6 +135,9 @@ pub struct Effects {
     pub tone_dot: [f32; 2],
     /// Monochrome draws black, and white.
     pub mono: [bool; 2],
+    /// A noise tone's grain size in pixels, and how strongly the grains
+    /// stand out (0 to 1).
+    pub noise: [f32; 2],
 }
 
 impl Default for Effects {
@@ -140,6 +158,7 @@ impl Default for Effects {
             tone_opacity: None,
             tone_dot: [0.0; 2],
             mono: [true; 2],
+            noise: [1.0, 1.0],
         }
     }
 }
@@ -184,6 +203,19 @@ fn dot(shape: u8, density: f32, du: f32, dv: f32, cell: f32) -> f32 {
     if density <= 0.0 {
         return 0.0;
     }
+    if let Some((area, outside)) = polar_shape(shape) {
+        // As large as the density says; the shapes of the cells around
+        // are drawn too, so a large one is never cut at its cell's edge.
+        let scale = (density / area).sqrt();
+        let mut cover: f32 = 0.0;
+        for nu in [-1.0, 0.0, 1.0] {
+            for nv in [-1.0, 0.0, 1.0] {
+                let away = outside(du + nu, dv + nv, scale) * cell;
+                cover = cover.max((0.5 - away).clamp(0.0, 1.0));
+            }
+        }
+        return cover;
+    }
     if shape == TONE_STAR {
         // A star's points reach past its own cell once it is large, so
         // the stars of the cells around are drawn too: a point is never
@@ -218,6 +250,74 @@ fn dot(shape: u8, density: f32, du: f32, dv: f32, cell: f32) -> f32 {
         ),
     };
     (reach - away + 0.5).clamp(0.0, 1.0)
+}
+
+/// How far `(du, dv)` (in cells, `dv` growing downward) lies outside a
+/// shape of size `scale`; below zero inside.
+type Outside = fn(f32, f32, f32) -> f32;
+
+/// The tone shapes drawn from a curve around their middle: each one's
+/// area at size 1 (in cells) and how far a point lies outside it.
+fn polar_shape(shape: u8) -> Option<(f32, Outside)> {
+    use std::f32::consts::PI;
+    match shape {
+        // An ellipse lying across, its height 0.6 of its width.
+        TONE_ELLIPSE => Some((PI * ELLIPSE_RATIO, |du, dv, scale| {
+            let (a, b) = (scale, scale * ELLIPSE_RATIO);
+            let reach = (du / a).hypot(dv / b);
+            (reach - 1.0) * b.min(a)
+        })),
+        // A heart, its notch up and its point down, about its middle:
+        // r = (2 - 2 sin t + sin t sqrt|cos t| / (sin t + 1.4)) / 2.
+        TONE_HEART => Some((HEART_AREA, |du, dv, scale| {
+            let up = -dv + HEART_MIDDLE * scale;
+            let reach = du.hypot(up);
+            let turn = up.atan2(du);
+            let (sin, cos) = turn.sin_cos();
+            let edge = 0.5 * (2.0 - 2.0 * sin + sin * cos.abs().sqrt() / (sin + 1.4));
+            (reach - scale * edge) * 0.5
+        })),
+        // A flower of five round petals.
+        TONE_FLOWER => Some((PI * FLOWER_AREA, |du, dv, scale| {
+            let reach = du.hypot(dv);
+            let turn = (-dv).atan2(du) - PI / 2.0;
+            (reach - scale * (0.72 + 0.28 * (5.0 * turn).cos())) * 0.7
+        })),
+        _ => None,
+    }
+}
+
+/// A heart's area at size 1, in cells (measured once, numerically).
+const HEART_AREA: f32 = 3.130_76;
+
+/// How far below the heart's curve's own middle its middle of area lies,
+/// at size 1.
+const HEART_MIDDLE: f32 = -0.535_18;
+
+/// An ellipse dot's height over its width.
+const ELLIPSE_RATIO: f32 = 0.6;
+
+/// A flower's area over pi at size 1: the mean of its radius squared.
+const FLOWER_AREA: f32 = 0.72 * 0.72 + 0.28 * 0.28 / 2.0;
+
+/// A number from 0 to 1 for picture point `(x, y)` that looks random and
+/// is the same every time, in grains `size` pixels across, smoothly
+/// between them (the noise tone).
+fn grain(x: u32, y: u32, size: f32) -> f32 {
+    if size <= 1.0 {
+        return scatter(x, y);
+    }
+    let (fx, fy) = ((x as f32 + 0.5) / size, (y as f32 + 0.5) / size);
+    let (gx, gy) = (fx.floor(), fy.floor());
+    let (tx, ty) = (fx - gx, fy - gy);
+    let (tx, ty) = (tx * tx * (3.0 - 2.0 * tx), ty * ty * (3.0 - 2.0 * ty));
+    let at = |i: f32, j: f32| scatter((gx + i) as i64 as u32, (gy + j) as i64 as u32);
+    let top = at(0.0, 0.0) + (at(1.0, 0.0) - at(0.0, 0.0)) * tx;
+    let bottom = at(0.0, 1.0) + (at(1.0, 1.0) - at(0.0, 1.0)) * tx;
+    // Smoothed values gather round the middle: spread them back out so
+    // a density still covers its share.
+    let n = top + (bottom - top) * ty;
+    (0.5 + (n - 0.5) * 1.7).clamp(0.0, 1.0)
 }
 
 /// How far an inner corner of the star lies from its middle, as a share
@@ -342,6 +442,10 @@ impl Effects {
                 switch(entity, MONO_BLACK, true),
                 switch(entity, MONO_WHITE, true),
             ],
+            noise: [
+                number(entity, TONE_NOISE_SIZE, 1.0).clamp(1.0, 64.0) as f32,
+                number(entity, TONE_NOISE_FACTOR, 1.0).clamp(0.0, 1.0) as f32,
+            ],
         }
     }
 
@@ -421,7 +525,15 @@ impl Effects {
                 density = (density * steps).round() / steps;
             }
             let cover = if self.tone_shape == TONE_NOISE {
-                if scatter(x, y) < density { 1.0 } else { 0.0 }
+                // Grains of the noise size, standing out as much as the
+                // noise factor says.
+                let inked = if grain(x, y, self.noise[0]) < density {
+                    1.0
+                } else {
+                    0.0
+                };
+                let factor = self.noise[1].clamp(0.0, 1.0);
+                density * (1.0 - factor) + inked * factor
             } else {
                 let (sin, cos) = angle.sin_cos();
                 let (px, py) = (
@@ -434,7 +546,7 @@ impl Effects {
                     _ if density >= 1.0 => 1.0,
                     // Dark dots past half turn into light holes between
                     // them, so the coverage keeps up to solid.
-                    0..=2 | TONE_STAR if density > 0.5 => {
+                    0..=2 | TONE_STAR..=TONE_FLOWER if density > 0.5 => {
                         1.0 - dot(
                             self.tone_shape,
                             1.0 - density,
@@ -805,6 +917,100 @@ mod tests {
         }
         let share = sum / 4096.0;
         assert!((share - 0.5).abs() < 0.06, "{share}");
+    }
+
+    #[test]
+    fn ellipse_heart_and_flower_tones_cover_their_density_in_their_own_shapes() {
+        // Full guide 00:10:49: the other dot shapes. Each covers about as
+        // much as its gray asks, and each looks unlike every other.
+        let look = |shape: u8, gray: f32| -> Vec<f32> {
+            let effects = Effects {
+                tone: Some((16.0, 0.0)),
+                tone_shape: shape,
+                ..Effects::default()
+            };
+            (0..64)
+                .flat_map(|y| (0..64).map(move |x| (x, y)))
+                .map(|(x, y)| effects.apply([gray, gray, gray, 1.0], x, y)[3])
+                .collect()
+        };
+        for shape in [TONE_ELLIPSE, TONE_HEART, TONE_FLOWER] {
+            for gray in [0.8_f32, 0.6, 0.3] {
+                let share = look(shape, gray).iter().sum::<f32>() / 4096.0;
+                assert!(
+                    (share - (1.0 - gray)).abs() < 0.08,
+                    "{shape} at {gray}: {share}"
+                );
+            }
+            for other in 0..TONE_SHAPES.len() as u8 {
+                if other != shape && other != TONE_NOISE {
+                    assert_ne!(look(shape, 0.7), look(other, 0.7), "{shape} and {other}");
+                }
+            }
+        }
+        // A heart's notch is up: its top row is thinner than its bottom.
+        let heart = Effects {
+            tone: Some((40.0, 0.0)),
+            tone_shape: TONE_HEART,
+            ..Effects::default()
+        };
+        let row = |heart: &Effects, y: u32| -> f32 {
+            (0..40)
+                .map(|x| heart.apply([0.75, 0.75, 0.75, 1.0], x, y)[3])
+                .sum()
+        };
+        // Its point reaches farther down than its lobes reach up.
+        let heart = Effects {
+            tone_dot: [20.0, 20.0],
+            ..heart
+        };
+        let inked: Vec<u32> = (0..40).filter(|y| row(&heart, *y) > 0.5).collect();
+        let (top, bottom) = (inked[0], inked[inked.len() - 1]);
+        assert!(bottom - 20 > 20 - top + 2, "{top} {bottom}");
+        // And its notch: the middle of its top row is clear.
+        assert!(heart.apply([0.75, 0.75, 0.75, 1.0], 20, top + 1)[3] < 0.5);
+    }
+
+    #[test]
+    fn noise_size_makes_grains_and_the_factor_softens_them() {
+        // Full guide 00:13:54: Noise with its size and factor.
+        let look = |size: f32, factor: f32| -> Vec<f32> {
+            let effects = Effects {
+                tone: Some((8.0, 0.0)),
+                tone_shape: TONE_NOISE,
+                noise: [size, factor],
+                ..Effects::default()
+            };
+            (0..64)
+                .flat_map(|y| (0..64).map(move |x| (x, y)))
+                .map(|(x, y)| effects.apply([0.5, 0.5, 0.5, 1.0], x, y)[3])
+                .collect()
+        };
+        // Neighbours agree more often in big grains than in single pixels.
+        let same = |cover: &[f32]| {
+            (0..64 * 64 - 1)
+                .filter(|i| i % 64 != 63 && cover[*i] == cover[i + 1])
+                .count()
+        };
+        let fine = look(1.0, 1.0);
+        let coarse = look(6.0, 1.0);
+        assert!(
+            same(&coarse) > same(&fine) + 800,
+            "{} {}",
+            same(&coarse),
+            same(&fine)
+        );
+        for cover in [&fine, &coarse] {
+            let share = cover.iter().sum::<f32>() / 4096.0;
+            assert!((share - 0.5).abs() < 0.1, "{share}");
+        }
+        // No factor: an even veil of the density.
+        assert!(look(6.0, 0.0).iter().all(|c| (c - 0.5).abs() < 1e-4));
+        let half = look(6.0, 0.5);
+        assert!(
+            half.iter()
+                .all(|c| (c - 0.25).abs() < 1e-4 || (c - 0.75).abs() < 1e-4)
+        );
     }
 
     #[test]

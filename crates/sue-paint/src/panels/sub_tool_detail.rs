@@ -220,21 +220,25 @@ impl SuePaint {
         );
         // The list of categories.
         let mut list_ui = child(&mut inner, list, "sub-tool-detail-list");
+        // The list in the compact rows of a side list, so a brush's
+        // fifteen categories show whole in the palette's own height.
         egui::ScrollArea::vertical()
             .id_salt("sue-paint-detail-categories")
             .show(&mut list_ui, |ui| {
-                for category in &found {
-                    let label = category.label();
-                    let row = sue_wm::ui::list_row(
-                        ("sue-paint-detail-category", *category as u8),
-                        &label,
-                    )
-                    .selected(*category == chosen)
-                    .show(ui, theme);
-                    if row.response.on_hover_text(&label).clicked() {
-                        self.tool_palettes.detail = Some(*category);
+                Density::Compact.scope(ui, |ui| {
+                    for category in &found {
+                        let label = category.label();
+                        let row = sue_wm::ui::list_row(
+                            ("sue-paint-detail-category", *category as u8),
+                            &label,
+                        )
+                        .selected(*category == chosen)
+                        .show(ui, theme);
+                        if row.response.on_hover_text(&label).clicked() {
+                            self.tool_palettes.detail = Some(*category);
+                        }
                     }
-                }
+                });
             });
         // The rows of the chosen category, each with its eye.
         let mut rows_ui = child(&mut inner, settings, "sub-tool-detail-rows");
@@ -271,6 +275,7 @@ impl SuePaint {
         let footer_rect =
             Rect::from_min_max(pos2(room.left(), room.bottom() - footer + pad), room.max);
         let mut bar = child(&mut inner, footer_rect, "sub-tool-detail-footer");
+        let mut saved = false;
         bar.horizontal(|ui| {
             let label = tr!("show-category-in-tool-property");
             if sue_wm::ui::checkbox(
@@ -286,8 +291,23 @@ impl SuePaint {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.sub_tool_header_buttons(ui, theme);
+                // Save all settings as default (FGV-12): what the sub tool
+                // starts as, and what Reset brings back.
+                if self.toolbox.tool().paints() {
+                    let save = tr!("save-all-settings-as-default");
+                    if sue_wm::ui::button("sue-paint-detail-save-default", &save)
+                        .show(ui, theme)
+                        .on_hover_text(tr!("save-all-settings-as-default-hint"))
+                        .clicked()
+                    {
+                        saved = true;
+                    }
+                }
             });
         });
+        if saved {
+            self.save_sub_tool_default(cx);
+        }
     }
 
     /// The buttons that every view of a sub tool's settings ends its
@@ -320,9 +340,7 @@ impl SuePaint {
             .show(ui, theme)
             .clicked()
         {
-            let entry = self.toolbox.current_entry();
-            let (kind, index) = (entry.kind, entry.picked());
-            self.toolbox.reset_sub(kind, index);
+            self.reset_current_sub();
         }
     }
 
@@ -330,11 +348,26 @@ impl SuePaint {
     /// has something to go back to.
     pub(crate) fn can_reset_current(&self) -> bool {
         let sub = self.toolbox.current();
-        crate::tools::SubTool::builtin(sub.tool, &sub.name).is_some()
+        crate::tools::SubTool::builtin(sub.tool, &sub.name).is_some() || self.has_saved_default()
     }
 }
 
 impl SuePaint {
+    /// Shows category `index` of Sub Tool Detail's list
+    /// ([`Category::ALL`]), as scripts and snapshots name it:
+    /// `detail/<index>`.
+    pub(crate) fn detail_navigate(&mut self, target: &str) -> bool {
+        let Some(category) = target
+            .strip_prefix("detail/")
+            .and_then(|index| index.parse::<usize>().ok())
+            .and_then(|index| Category::ALL.get(index).copied())
+        else {
+            return false;
+        };
+        self.tool_palettes.detail = Some(category);
+        true
+    }
+
     /// What the tool palettes do every frame, wherever they are shown:
     /// the naming dialog, and keeping the tool palette's arrangement.
     pub(crate) fn tool_palettes_frame(
@@ -345,5 +378,6 @@ impl SuePaint {
     ) {
         self.naming_dialog(ctx, theme);
         self.keep_tools(cx);
+        self.brush_rows_frame(cx);
     }
 }

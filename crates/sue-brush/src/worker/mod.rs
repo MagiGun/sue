@@ -111,11 +111,14 @@ impl Brush {
     /// pencils), which the worker lays as coverage of one ink; `false`
     /// for a brush with paint behaviours (dabs that build up, mixing,
     /// pictures, paper, spray, color jitter, blend modes, the blend
-    /// tools), which it lays through [`crate::paint::PaintStroke`].
+    /// tools), which it lays through [`crate::paint::PaintStroke`]. A
+    /// brush kept inside a region (anti-overflow) is laid through it too,
+    /// since the region is the painter's.
     #[must_use]
     pub fn is_plain(&self) -> bool {
         let preset = &self.preset;
-        preset.engine == EngineKind::Stroke
+        self.resources.overflow.is_none()
+            && preset.engine == EngineKind::Stroke
             && matches!(preset.tip, TipSource::Round)
             // A swept round tip is round: a flat one (thinner than it
             // is wide) is laid by dabs, which turn it.

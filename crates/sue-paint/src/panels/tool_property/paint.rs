@@ -5,24 +5,34 @@
 use egui::Ui;
 
 use super::brush::{color_jitter, dynamic_row, starting_and_ending};
+use super::shape;
 use super::{Category, Rows};
 use crate::brush::{AntiAlias, Tip};
+use crate::brush_rows::BrushWork;
 use crate::tools::{SubTool, Tool};
 
 /// A painting tool's settings: its size, opacity, hardness and
 /// anti-aliasing, its smoothing, then its tip.
-pub(super) fn paint_properties(ui: &mut Ui, rows: &mut Rows<'_>, tool: Tool, sub: &mut SubTool) {
+/// Returns a command a row asks for (Register of the brush shapes).
+pub(super) fn paint_properties(
+    ui: &mut Ui,
+    rows: &mut Rows<'_>,
+    tool: Tool,
+    sub: &mut SubTool,
+    work: &mut BrushWork,
+) -> Option<&'static str> {
     if tool == Tool::Eraser {
         // How it erases lines on vector layers.
         let names = super::names(&crate::vector::Erase::NAMES);
         rows.choice_u8(
             ui,
             "vector-erase",
-            Category::Operation,
+            Category::Erase,
             &tr!("vector"),
             &mut sub.kind,
             &names,
         );
+        shape::erase_rows(ui, rows, sub);
     }
     let tip = &mut sub.tip;
     let (mut screen_size, mut at_least_one) = (tip.screen_size, tip.at_least_one);
@@ -90,6 +100,8 @@ pub(super) fn paint_properties(ui: &mut Ui, rows: &mut Rows<'_>, tool: Tool, sub
         0.0,
         100.0,
     );
+
+    let tip = &mut sub.tip;
     let levels: Vec<String> = AntiAlias::ALL.iter().map(|level| level.label()).collect();
     let mut level = AntiAlias::ALL
         .iter()
@@ -146,38 +158,30 @@ pub(super) fn paint_properties(ui: &mut Ui, rows: &mut Rows<'_>, tool: Tool, sub
         Some(&tr!("smart-shape-hint")),
         &mut sub.smart_shape,
     );
-    tip_properties(ui, rows, &mut sub.tip);
+    shape::correction_rows(ui, rows, sub);
+    let mut command = None;
     if tool != Tool::Figure {
+        command = shape::shape_rows(ui, rows, sub, work);
+        shape::tip_rows(ui, rows, sub, work);
+    }
+    tip_properties(ui, rows, &mut sub.tip);
+    // After Color mixing, which opens the mixing rows.
+    shape::ink_rows(ui, rows, sub);
+    if tool != Tool::Figure {
+        shape::spray_rows(ui, rows, sub);
+        shape::stroke_rows(ui, rows, sub);
         behaviour_properties(ui, rows, sub);
+        shape::overflow_rows(ui, rows, tool, sub);
     }
     if tool == Tool::Figure {
         rows.hint(ui, &tr!("drag-canvas-draw-shape"));
     }
+    command
 }
 
 /// The brush tip: its shape and how it turns and scatters, spacing, build
 /// up, color mixing, paper grain, starting and ending, and color jitter.
 fn tip_properties(ui: &mut Ui, rows: &mut Rows<'_>, tip: &mut Tip) {
-    let shapes = crate::brush::shapes();
-    if !shapes.is_empty() || tip.shape != 0 {
-        let mut ids = vec![0];
-        let mut names = vec![tr!("round")];
-        for (id, name) in &shapes {
-            ids.push(*id);
-            names.push(name.clone());
-        }
-        let mut chosen = ids.iter().position(|id| *id == tip.shape).unwrap_or(0);
-        if rows.choice(
-            ui,
-            "tip-shape",
-            Category::BrushTip,
-            &tr!("brush-tip"),
-            &mut chosen,
-            &names,
-        ) {
-            tip.shape = ids[chosen];
-        }
-    }
     if tip.shape != 0 {
         // Clip Studio Paint's Direction and Spray: how each shape turns
         // and how far it falls from the line.
@@ -307,16 +311,18 @@ fn behaviour_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
     use sue_brush::texture::{TextureMode, TextureSettings};
     let before = crate::canvas::engine::behaviours_of(sub);
     let mut b = before.clone();
-    // The paper: none, or one of Sue's own (or a person's picture,
-    // kept as it is).
+    // The paper: none, one of Sue's own, a material registered for it
+    // (full guide FGV-48), or a person's picture kept as it is.
     let papers = sue_brush::texture::BUILTIN;
+    let own = crate::material_props::papers();
     let mut names = vec![tr!("texture-none")];
     names.extend(papers.iter().map(|name| paper_label(name)));
-    let picture = matches!(
-        b.texture.as_ref().map(|t| &t.paper),
-        Some(PaperChoice::Picture(_))
-    );
-    if picture {
+    names.extend(own.iter().map(|(name, _)| name.clone()));
+    let picture = match b.texture.as_ref().map(|t| &t.paper) {
+        Some(PaperChoice::Picture(hash)) if !own.iter().any(|(_, h)| h == hash) => Some(*hash),
+        _ => None,
+    };
+    if picture.is_some() {
         names.push(tr!("texture-own-picture"));
     }
     let mut chosen = match b.texture.as_ref().map(|t| &t.paper) {
@@ -325,7 +331,10 @@ fn behaviour_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
             .iter()
             .position(|found| found == name)
             .map_or(0, |at| at + 1),
-        Some(PaperChoice::Picture(_)) => papers.len() + 1,
+        Some(PaperChoice::Picture(hash)) => own
+            .iter()
+            .position(|(_, h)| h == hash)
+            .map_or(papers.len() + own.len() + 1, |at| papers.len() + 1 + at),
     };
     if rows.choice(
         ui,
@@ -335,14 +344,19 @@ fn behaviour_properties(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
         &mut chosen,
         &names,
     ) {
+        let settings = b
+            .texture
+            .as_ref()
+            .map_or_else(TextureSettings::default, |t| t.settings);
         b.texture = match chosen {
             0 => None,
             at if at <= papers.len() => Some(TextureChoice {
                 paper: PaperChoice::Builtin(papers[at - 1].to_owned()),
-                settings: b
-                    .texture
-                    .as_ref()
-                    .map_or_else(TextureSettings::default, |t| t.settings),
+                settings,
+            }),
+            at if at <= papers.len() + own.len() => Some(TextureChoice {
+                paper: PaperChoice::Picture(own[at - papers.len() - 1].1),
+                settings,
             }),
             _ => b.texture.clone(),
         };

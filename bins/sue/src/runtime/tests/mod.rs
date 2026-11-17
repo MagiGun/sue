@@ -10,6 +10,7 @@ use sue_wm::AppletId;
 mod hub;
 mod menus;
 mod p6_brush_engine;
+mod p6_p6_brush_rows;
 mod paint_3d;
 mod paint_anim;
 mod paint_basics;

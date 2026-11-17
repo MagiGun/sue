@@ -89,7 +89,7 @@ impl SuePaint {
                     .selection
                     .clone()
                     .unwrap_or_else(|| Selection::new(size[0], size[1]));
-                selection.disc([p.x, p.y], radius, add);
+                selection.dab([p.x, p.y], radius, sub.tip.hardness, sub.tip.opacity, add);
                 doc.selection = Some(selection);
                 doc.edges = None;
             }
@@ -144,8 +144,16 @@ impl SuePaint {
             return;
         };
         let p = doc.view.to_picture(viewport, size, pos);
-        let radius = (self.toolbox.current().tip.size / 2.0).max(0.5);
-        let to = [p.x, p.y];
+        let sub = self.toolbox.current();
+        let radius = (sub.tip.size / 2.0).max(0.5);
+        let (hardness, density) = (sub.tip.hardness, sub.tip.opacity);
+        // Stabilization: the pen's place followed with a lag that grows
+        // with it, so a shaky hand lays a smooth edge.
+        let follow = 1.0 / (1.0 + sub.stabilization.min(100) as f32 / 8.0);
+        let to = [
+            last[0] + (p.x - last[0]) * follow,
+            last[1] + (p.y - last[1]) * follow,
+        ];
         let length = (to[0] - last[0]).hypot(to[1] - last[1]);
         let count = (length / (radius * 0.5).max(0.5)).ceil().max(1.0) as usize;
         let mut selection = doc
@@ -154,12 +162,14 @@ impl SuePaint {
             .unwrap_or_else(|| Selection::new(size[0], size[1]));
         for n in 1..=count {
             let t = n as f32 / count as f32;
-            selection.disc(
+            selection.dab(
                 [
                     last[0] + (to[0] - last[0]) * t,
                     last[1] + (to[1] - last[1]) * t,
                 ],
                 radius,
+                hardness,
+                density,
                 *add,
             );
         }

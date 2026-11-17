@@ -542,6 +542,30 @@ impl SuePaint {
                 (&tr!("tone-dot-shape"), &shape_names()),
                 theme,
             );
+            // Full guide 00:13:54: Noise's grain size and how strongly
+            // the grains stand out.
+            if now.tone_shape == effects::TONE_NOISE {
+                self.effect_slider(
+                    ui,
+                    cx,
+                    id,
+                    (effects::TONE_NOISE_SIZE, 1.0),
+                    &tr!("tone-noise-size"),
+                    1.0..=64.0,
+                    (1.0, &tr!("px")),
+                    theme,
+                );
+                self.effect_slider(
+                    ui,
+                    cx,
+                    id,
+                    (effects::TONE_NOISE_FACTOR, 1.0),
+                    &tr!("tone-noise-factor"),
+                    0.0..=100.0,
+                    (100.0, " %"),
+                    theme,
+                );
+            }
             let mut levels = f64::from(now.tone_levels);
             ui.horizontal(|ui| {
                 caption(ui, &tr!("tone-posterization"), theme);

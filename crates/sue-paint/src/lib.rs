@@ -37,6 +37,7 @@ pub(crate) fn localize(text: &str) -> String {
 }
 
 mod bar_items;
+mod brush_rows;
 mod canvas;
 pub mod clip_io;
 mod colorsets;
@@ -52,6 +53,7 @@ mod icons;
 mod launchers;
 mod layout_style;
 mod lettering;
+mod material_props;
 pub mod materials;
 mod menus;
 mod mobile;

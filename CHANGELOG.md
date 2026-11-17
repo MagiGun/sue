@@ -13,6 +13,32 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, Sub Tool Detail and Tool Property: the brush settings of
+  a working artist. Ink has the brush's own blending mode (Behind
+  too), and a mixing brush its amount of paint, density of paint,
+  color stretch and blur intensity. Brush Shape applies a ready-made
+  tip or registers your own. Brush Tip is round or made of several
+  pictures picked from the brush tips (found by name or by tag), with
+  thickness and its direction, horizontal and vertical flips (on, off
+  or random), brush density apart from opacity, and density adjusted
+  by the gap. Spraying Effect gives the Spray its particle size (linked
+  to the brush or in pixels), density, deviation and direction back.
+  Stroke has the gap presets (fixed, narrow, normal, wide), continuous
+  spraying and the repeat method. Erase has Erase all layers;
+  Correction has Sharp angles, post correction by speed, by scale and
+  as Bezier curves, and Enable snapping for each sub tool;
+  Anti-overflow keeps the paint inside the reference layer's lines.
+  Rows sit in categories with their sliders and number fields lined up.
+- Sue Paint: Save all settings as default keeps a sub tool as it is in
+  a brush file you can share; it starts that way and Reset brings it
+  back. Brush shapes you register go in the same file.
+- Sue Paint, Selection pen: hardness, brush density and stabilization.
+- Sue Paint, Layer Property: Ellipse, Heart and Flower tone dots, and
+  Noise with its size and factor.
+- Sue Paint, Register Material: where to keep the picture, search tags,
+  use as a brush tip shape and as a paper texture, and how it pastes
+  (scaling ratio, tiling, its layer at the top or above the current).
+
 - Sue Paint, Blend tool: Blend, Painterly blender, Wet bleed blender,
   Textured blender and Soothing watercolor beside Blur, Finger Tip and
   Copy stamp, each working the paint under it its own way (smoothing,

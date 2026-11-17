@@ -267,6 +267,12 @@ impl Planner {
         &self.settings
     }
 
+    /// `true` once a point was planned.
+    #[must_use]
+    pub const fn started(&self) -> bool {
+        self.last.is_some()
+    }
+
     /// Dabs placed so far.
     #[must_use]
     pub const fn dabs(&self) -> u64 {
@@ -373,7 +379,14 @@ impl Planner {
             self.place(&p, out);
         }
         self.last = Some(b);
-        if self.held_from < b.time {
+        // The hold is counted from where the pen last went somewhere: a
+        // pen held still still sends points (the resampler's steady ticks,
+        // a tablet's packets), and those do not start it again.
+        // A stabilized pen creeps the last bit of the way to where it
+        // stands: within the automatic gap it still holds.
+        let still = (AUTO_GAP * b.size).max(0.5);
+        let moved = length > still || self.held_from == f64::NEG_INFINITY;
+        if moved && self.held_from < b.time {
             self.held_from = b.time;
             self.held = 0;
         }
@@ -799,6 +812,20 @@ mod tests {
         // Holding again to the same time adds nothing.
         p.hold(0.5, &mut out);
         assert_eq!(out.len() - before, 25);
+        // Points that stay where the pen is (the steady ticks of a pen
+        // held still) do not start the hold again.
+        let mut ticks = planner(settings);
+        let mut laid = Vec::new();
+        ticks.push(&point(0.0, 10.0), &mut laid);
+        let first = laid.len();
+        for step in 1..=10 {
+            let t = f64::from(step) * 0.05;
+            let mut tick = point(0.0, 10.0);
+            tick.time = t;
+            ticks.push(&tick, &mut laid);
+            ticks.hold(t, &mut laid);
+        }
+        assert_eq!(laid.len() - first, 25, "half a second held at 50 a second");
         let mut still = planner(PlanSettings::default());
         let mut none = Vec::new();
         still.push(&point(0.0, 10.0), &mut none);

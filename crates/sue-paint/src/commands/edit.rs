@@ -531,7 +531,7 @@ fn material_image(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>)
         .layer_info(&cx.world.arena)
         .map_or_else(|| tr!("material"), |info| info.name);
     if paint.paintable(&cx.world.arena).is_ok() {
-        paint.dialog = Some(Dialog::Material(name));
+        paint.dialog = Some(Dialog::Material(crate::dialogs::RegisterForm::new(name)));
     } else {
         cx.fail(tr!("pick-raster-layer-register-as-material"));
     }

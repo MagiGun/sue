@@ -31,14 +31,34 @@ impl SuePaint {
         else {
             return;
         };
-        let Some(raster) = crate::materials::layer(material, size, self.drawing_color()) else {
+        // A picture registered with its own paste settings (FGV-48):
+        // scaled, tiled or not, its layer at the top or above the current.
+        let props = match &material.source {
+            crate::materials::Source::File(path) => {
+                crate::material_props::MaterialProps::read(path)
+            }
+            crate::materials::Source::Builtin(_) => None,
+        }
+        .filter(|_| material.placement == crate::materials::Placement::Fit);
+        let raster = match &props {
+            Some(props) => crate::materials::picture(material, size, self.drawing_color())
+                .and_then(|tile| props.paste(&tile, size)),
+            None => crate::materials::layer(material, size, self.drawing_color()),
+        };
+        let Some(raster) = raster else {
             cx.fail(tr!("cannot-read-the-material", name = material.name));
             return;
+        };
+        let above = match props.map(|props| props.order) {
+            Some(crate::material_props::Order::Top) => doc::layers(&cx.world.arena, picture)
+                .last()
+                .map(|info| info.id),
+            _ => self.layer(),
         };
         match doc::add_layer_pixels(
             &cx.world.arena,
             picture,
-            self.layer(),
+            above,
             material.name.clone(),
             raster,
         ) {
