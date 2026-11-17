@@ -203,10 +203,10 @@ pub const BLENDERS: &[(&str, Wet)] = &[
         Wet {
             pickup: 0.5,
             amount: 0.0,
-            stretch: 0.75,
+            stretch: 0.8,
             blur: 0.0,
-            density: 1.0,
-            smear: 0.0,
+            density: 0.8,
+            smear: 0.35,
         },
     ),
     // Like blend, broken up by the paper (give it a texture laid by dab).
@@ -217,7 +217,7 @@ pub const BLENDERS: &[(&str, Wet)] = &[
             amount: 0.0,
             stretch: 0.5,
             blur: 0.25,
-            density: 0.9,
+            density: 0.7,
             smear: 0.0,
         },
     ),
@@ -589,7 +589,7 @@ impl WetCanvas {
         let share = if self.wet.amount > 0.0 {
             1.0
         } else {
-            last_at.map_or(0.5, |from| {
+            last_at.map_or(0.15, |from| {
                 let (dx, dy) = (at[0] - from[0], at[1] - from[1]);
                 ((dx * dx + dy * dy).sqrt() / radius.max(0.5)).clamp(0.02, 1.0)
             })

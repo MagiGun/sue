@@ -499,7 +499,7 @@ fn extra(preset: &mut BrushPreset, key: &str, bytes: &[u8]) {
 #[allow(clippy::too_many_lines)]
 pub fn builtin() -> Vec<BrushPreset> {
     use AntiAlias::{None as Hard, Strong, Weak};
-    use TextureMode::{Height, Subtract};
+    use TextureMode::{Height, Multiply, Subtract};
     let pen = |id: &str, name: &str, size: f32| Make::csp(id, name, "Pen", size);
     let marker = |id: &str, name: &str, size: f32| Make::csp(id, name, "Marker", size);
     let pencil = |id: &str, name: &str, size: f32| Make::csp(id, name, "Pencil", size);
@@ -906,11 +906,12 @@ pub fn builtin() -> Vec<BrushPreset> {
         blend("sue.blend.blend", "Blend", "blend"),
         blend("sue.blend.painterly", "Painterly blender", "painterly").hardness(0.8),
         blend("sue.blend.wet_bleed", "Wet bleed blender", "wet-bleed").hardness(0.3),
-        // Broken up by the canvas's tooth, dab by dab.
+        // Works the paint as far as the paper's tooth lets it, dab by
+        // dab: the grain shows in the blend, never a pixel left untouched.
         blend("sue.blend.textured", "Textured blender", "textured")
             .hardness(0.7)
             .grain(1.0)
-            .paper("rough", Height, 1.0)
+            .paper("rough", Multiply, 1.0)
             .set(paint_key::TEXTURE_CONTRAST, 0.5)
             .flag(paint_field::TEXTURE_PER_DAB),
         blend(
