@@ -362,6 +362,8 @@ struct Vectors {
     chunks: Vec<(String, Vec<u8>)>,
     /// Kept rows still pointed at, by `MainId`, with the layer that does.
     kept: HashMap<i64, i64>,
+    /// Strokes were drawn anew with Sue's pen (not only copied).
+    drawn: bool,
 }
 
 /// What a layer's row gets in Clip Studio's own columns beyond Sue's.
@@ -454,6 +456,33 @@ impl Writer<'_> {
         mipmap
     }
 
+    /// Keeps the stroke row `index` for layer `id`. When another layer
+    /// already keeps it (a layer duplicated in Sue keeps its original's
+    /// columns), this one gets a copy of the row and its strokes, so no
+    /// two layers share one row; `out` then points at the copy.
+    fn keep_stroke(&mut self, index: i64, id: i64, out: &mut NativeRow) {
+        if !self.vectors.kept.contains_key(&index) {
+            self.vectors.kept.insert(index, id);
+            return;
+        }
+        let Some(payload) = kept_table_named(self.doc, "VectorObjectList")
+            .and_then(|table| native::stroke_row(table, index))
+            .and_then(|(_, chunk)| kept_chunk(self.doc, &chunk))
+        else {
+            return;
+        };
+        let main = self.vectors.next;
+        self.vectors.next += 1;
+        let external = self.ids.external();
+        self.externals.insert(external.clone());
+        self.vectors
+            .chunks
+            .push((external.clone(), payload.to_vec()));
+        self.vectors.rows.push((main, id, external));
+        out.typed
+            .push(("VectorNormalStrokeIndex", Value::Integer(main)));
+    }
+
     /// What `layer` (with row `id`) gets in Clip Studio's own storage:
     /// its fill, gradient, text or vector lines where the survey shows
     /// how, its palette color and its layer color's sub color. A layer
@@ -489,7 +518,7 @@ impl Writer<'_> {
             .filter(|content| native::clip_studio_fit(content).is_some())
         else {
             if let Some(index) = stroke {
-                self.vectors.kept.insert(index, id);
+                self.keep_stroke(index, id, &mut out);
             }
             return out;
         };
@@ -505,7 +534,7 @@ impl Writer<'_> {
         if let Some(index) = stroke
             && !(replaced && matches!(content, ClipContent::Vector(_)))
         {
-            self.vectors.kept.insert(index, id);
+            self.keep_stroke(index, id, &mut out);
         }
         if !replaced {
             return out;
@@ -567,6 +596,7 @@ impl Writer<'_> {
                     native::vector_bytes(vector, self.vectors.brush),
                 ));
                 self.vectors.rows.push((main, id, external));
+                self.vectors.drawn = true;
                 out.typed.extend([
                     ("LayerType", int(native::DRAWN)),
                     ("DrawToRenderOffscreenType", int(10)),
@@ -1185,7 +1215,7 @@ pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
         changed.push(list);
     }
     let mut brush_manager = None;
-    if !vectors.rows.is_empty() {
+    if vectors.drawn {
         let (tables, manager) = brush.tables(doc, canvas);
         changed.extend(tables);
         brush_manager = Some(manager);

@@ -770,3 +770,56 @@ fn a_kept_stroke_row_stays_while_its_layer_points_at_it() {
         Some(ClipContent::Text(_))
     ));
 }
+
+#[test]
+fn a_duplicated_vector_layer_gets_a_stroke_row_of_its_own() {
+    // A layer duplicated in Sue keeps its original's columns, and so the
+    // same stroke row; each must end up with a row and strokes of its own.
+    let doc = picture();
+    let saved = without_sue_tables(&write(&doc).unwrap());
+    for keep_content in [true, false] {
+        let mut opened = read(&saved).unwrap();
+        let mut copy = opened.root.children[3].clone();
+        copy.name = "Lines copy".to_owned();
+        if !keep_content {
+            // Strokes Sue did not decode are copied as they are too.
+            copy.content = None;
+            opened.root.children[3].content = None;
+        }
+        opened.root.children.push(copy);
+        let bytes = write(&opened).unwrap();
+        let (list_columns, list) = table(&bytes, "VectorObjectList").unwrap();
+        assert_eq!(list.len(), 2, "one row each");
+        let back = read(&bytes).unwrap();
+        let (a, b) = (&back.root.children[3], &back.root.children[4]);
+        let index = |layer: &ClipLayer| {
+            super::model::column(&layer.columns, "VectorNormalStrokeIndex")
+                .and_then(Value::int)
+                .unwrap()
+        };
+        assert_ne!(index(a), index(b));
+        for layer in [a, b] {
+            let row = list
+                .iter()
+                .find(|row| {
+                    value(&list_columns, row, "MainId").and_then(Value::int) == Some(index(layer))
+                })
+                .unwrap();
+            assert_eq!(
+                value(&list_columns, row, "LayerId").and_then(Value::int),
+                Some(layer.id),
+                "{} owns its row",
+                layer.name
+            );
+        }
+        assert!(matches!(a.content, Some(ClipContent::Vector(_))));
+        assert_eq!(a.content, b.content, "the copy has the same lines");
+        // Only Sue's pen from the first write: copying adds no pen.
+        let (_, styles) = table(&bytes, "BrushStyle").unwrap();
+        assert_eq!(styles.len(), 1);
+        // Writing it again keeps each its own row, the same bytes after.
+        let again = write(&back).unwrap();
+        assert_eq!(table(&again, "VectorObjectList").unwrap().1.len(), 2);
+        assert_eq!(write(&read(&again).unwrap()).unwrap(), again);
+    }
+}
