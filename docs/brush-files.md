@@ -60,6 +60,40 @@ Sue's built-in brushes are written by hand in
 | --- | --- | --- | --- |
 | `erase.vector` | choice | `touched`, `intersection`, `whole` | How an eraser takes vector lines away: only where it touches, up to the lines it crosses, or every line it touches. Absent: `touched` |
 
+## A sub tool as a brush (Sue Paint)
+
+Sue Paint writes a sub tool as a brush preset with every setting Tool
+Property and Sub Tool Detail show, so a sub tool saved with "Save all
+settings as default" or registered as a brush shape comes back the
+same. Its tip pictures are named (`Named`) by the brush tip they are in
+Sue Paint, and the preset carries these fields of its own beside the
+paint behaviours (`docs/brush-behaviours.md`); a build that does not know
+them keeps them as they are.
+
+| Field | Kind | Meaning |
+| --- | --- | --- |
+| `sue_paint.tip` | text | The sub tool's tip as its 0.0.75 text (`size=8;opacity=1;...`) |
+| `sue_paint.tips` | text | The names of the tip's pictures, one a line, when it lays several |
+| `sue_paint.mode` | byte | The sub tool's mode within its tool |
+| `sue_paint.gap` | choice | The gap preset: `fixed`, `narrow`, `normal` or `wide` |
+| `sue_paint.thickness_vertical` | flag | The tip's thickness runs up and down |
+| `sue_paint.snapping` | flag | Its strokes snap to rulers and the grid (Enable snapping; on when absent) |
+| `sue_paint.correction_by_speed` | flag | Post correction grows with the pen's speed |
+| `sue_paint.correction_by_scale` | flag | Post correction is measured on the screen |
+| `sue_paint.correction_bezier` | flag | Post correction lays Bezier curves |
+| `sue_paint.anti_overflow` | text | Anti-overflow as `tolerance scaling` (`0.5 0`), empty when off |
+
+The brush's own blending mode, its amount of paint, color stretch and
+blur intensity, thickness and brush density are the preset's own
+(`blend`, `mix.load`, `mix.pull`, `mix.blur`, the `aspect` and `density`
+parameters).
+
+Sue Paint keeps these brushes in `sub-tool-brushes.sue` in its data
+folder: a library with a set `Defaults` (one brush for each sub tool
+saved as its default, named `<tool id>/<sub tool name>`) and a set
+`Brush shapes` (the shapes a person registered). It is an ordinary brush
+file: it can be shared, and installed in any library.
+
 ## Custom sub tools of Sue 0.0.75
 
 Sue 0.0.75 kept a person's own sub tools in `item_bank.txt`, one a line:

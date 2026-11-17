@@ -287,7 +287,7 @@ impl Kept {
 
     /// Reads the file in `folder` (nothing kept when it is missing).
     pub(crate) fn load(folder: &Path) -> Result<Self, String> {
-        match sue_platform::fs::read(&folder.join(FILE)) {
+        match sue_platform::fs::read(folder.join(FILE)) {
             Ok(bytes) => Self::from_file(&bytes),
             Err(_) => Ok(Self {
                 loaded: true,
@@ -299,7 +299,7 @@ impl Kept {
     /// Writes the file into `folder`.
     pub(crate) fn save(&self, folder: &Path) -> Result<(), String> {
         sue_platform::fs::create_dir_all(folder)
-            .and_then(|()| sue_platform::fs::write(&folder.join(FILE), self.to_file()))
+            .and_then(|()| sue_platform::fs::write(folder.join(FILE), self.to_file()))
             .map_err(|error| error.to_string())
     }
 }

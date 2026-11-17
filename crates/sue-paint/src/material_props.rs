@@ -158,7 +158,7 @@ impl MaterialProps {
 
     /// The settings kept beside `png`, if any.
     pub(crate) fn read(png: &Path) -> Option<Self> {
-        sue_platform::fs::read(&Self::path_for(png))
+        sue_platform::fs::read(Self::path_for(png))
             .ok()
             .map(|bytes| Self::from_text(&String::from_utf8_lossy(&bytes)))
     }
@@ -214,8 +214,8 @@ pub(crate) fn scaled(tile: &RasterTile2D, ratio: f32) -> Option<RasterTile2D> {
                 (x1, y1, fx * fy),
             ] {
                 let a = get(px, py, 3) * weight;
-                for c in 0..3 {
-                    sum[c] += get(px, py, c) * a;
+                for (c, part) in sum.iter_mut().take(3).enumerate() {
+                    *part += get(px, py, c) * a;
                 }
                 sum[3] += a;
             }

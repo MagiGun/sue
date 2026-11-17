@@ -325,26 +325,6 @@ fn downloaded_tip(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_downloaded_brush_without_a_picture_paints_with_its_settings() {
-        let pen = sue_brush::presets::find("sue.pen.g_pen").expect("a built-in pen");
-        let brush = sue_io::brushes::ImportedBrush {
-            name: "Round".to_owned(),
-            preset: Some(pen),
-            ..sue_io::brushes::ImportedBrush::default()
-        };
-        let tip = downloaded_tip(&brush, None).expect("no picture is no reason to refuse");
-        assert_eq!((tip.size, tip.taper_start, tip.shape), (10.0, 20.0, 0));
-        // A file that says nothing of its brushes still has nothing to add.
-        let bare = sue_io::brushes::ImportedBrush::default();
-        assert!(downloaded_tip(&bare, None).is_none());
-    }
-}
-
 /// `name` as a file name: the characters no file system takes become
 /// underscores, and an empty name is `material`.
 fn file_safe(name: &str) -> String {
@@ -363,5 +343,25 @@ fn file_safe(name: &str) -> String {
         "material".to_owned()
     } else {
         safe
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_downloaded_brush_without_a_picture_paints_with_its_settings() {
+        let pen = sue_brush::presets::find("sue.pen.g_pen").expect("a built-in pen");
+        let brush = sue_io::brushes::ImportedBrush {
+            name: "Round".to_owned(),
+            preset: Some(pen),
+            ..sue_io::brushes::ImportedBrush::default()
+        };
+        let tip = downloaded_tip(&brush, None).expect("no picture is no reason to refuse");
+        assert_eq!((tip.size, tip.taper_start, tip.shape), (10.0, 20.0, 0));
+        // A file that says nothing of its brushes still has nothing to add.
+        let bare = sue_io::brushes::ImportedBrush::default();
+        assert!(downloaded_tip(&bare, None).is_none());
     }
 }

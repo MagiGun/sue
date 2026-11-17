@@ -392,10 +392,10 @@ impl Selection {
     }
 
     /// Paints a dab of the Selection pen into the selection, or out of it
-    /// (Erase selection): full in the middle as far as `hardness` (0 to
-    /// 1) of `radius` says, then falling off softly to the rim, and at
-    /// most `density` (0 to 1) selected. A hard dab at full density is
-    /// [`Self::disc`].
+    /// (Erase selection): full in the middle as far out as the share
+    /// `hardness` of `radius` says, then falling off softly to the rim,
+    /// and at most the share `density` selected (both 0 to 1). A hard dab
+    /// at full density is [`Self::disc`].
     pub fn dab(&mut self, center: [f32; 2], radius: f32, hardness: f32, density: f32, add: bool) {
         let hardness = hardness.clamp(0.0, 1.0);
         let density = density.clamp(0.0, 1.0);

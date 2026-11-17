@@ -325,19 +325,6 @@ impl<'h> Rows<'h> {
         }
     }
 
-    /// `true` when this view draws rows of `category`: Tool Property
-    /// draws every category, Sub Tool Detail the one picked, the census
-    /// none. For a row drawn outside these rows.
-    pub(crate) fn shows(&self, category: Category) -> bool {
-        match &self.view {
-            View::Property { .. } => true,
-            View::Detail {
-                category: chosen, ..
-            } => *chosen == category,
-            View::Census(_) => false,
-        }
-    }
-
     /// The width of a row's name, so the controls of a column line up.
     fn label_width(&self) -> f32 {
         name_width(self.theme)
@@ -670,11 +657,11 @@ impl SuePaint {
         match tool {
             tool if tool.paints() => {
                 // Vector magnet is a correction of the line: in Sub Tool
-                // Detail it shows with Correction alone.
-                if matches!(tool, Tool::Pen | Tool::Pencil | Tool::Brush | Tool::Figure)
-                    && rows.shows(Category::Correction)
-                {
-                    self.magnet_row(ui, theme);
+                // Detail it shows with Correction, with its eye.
+                if matches!(tool, Tool::Pen | Tool::Pencil | Tool::Brush | Tool::Figure) {
+                    rows.row(ui, "vector-magnet", Category::Correction, |ui, _, _| {
+                        self.magnet_row(ui, theme);
+                    });
                 }
                 let sub = self.toolbox.current_mut();
                 command = paint::paint_properties(ui, rows, tool, sub, &mut self.brush_work);
