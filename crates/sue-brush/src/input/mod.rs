@@ -358,10 +358,29 @@ impl Pipeline {
         }
     }
 
-    /// The points that never change again, from the stroke's start.
+    /// The points that never change again, from the stroke's start (or
+    /// since [`Self::take_committed`] last took them).
     #[must_use]
     pub fn committed(&self) -> &[StrokePoint] {
         self.shaper.committed()
+    }
+
+    /// Takes the committed points away: the ones committed since the
+    /// last call, in order. Whoever lays a stroke as it is drawn takes
+    /// them as they come, so the pipeline of a stroke that never lifts
+    /// holds only what can still change, however long the stroke is.
+    /// After it [`Self::committed`] and [`Self::points`] start from the
+    /// points that came since.
+    pub fn take_committed(&mut self) -> Vec<StrokePoint> {
+        self.shaper.take_committed()
+    }
+
+    /// How many points the pipeline holds: the committed ones not taken
+    /// yet and the ones that may still change. Bounded for a stroke
+    /// whose committed points are taken as they come.
+    #[must_use]
+    pub fn held(&self) -> usize {
+        self.shaper.held()
     }
 
     /// The rest of the stroke as it stands now, after the committed

@@ -739,27 +739,44 @@ impl PaintStroke {
     /// and around them as far as the shaping of the whole stroke reads
     /// (a watercolor edge).
     pub fn take_dirty(&mut self) -> Vec<TileKey> {
-        let mut keys: Vec<TileKey> = match &mut self.target {
-            Target::Coverage(buffer) => buffer.take_dirty(),
-            Target::Color(buffer) => buffer.take_dirty(),
-            Target::Wet(canvas) => canvas.take_dirty(),
+        let apron = self.finishing(false).apron();
+        // A whole tile, for what says only which tile changed.
+        let whole = |key: TileKey| {
+            let [x, y] = key.origin();
+            let rect = PixelRect {
+                x0: x,
+                y0: y,
+                x1: x + TILE,
+                y1: y + TILE,
+            };
+            (key, rect)
+        };
+        let mut changed: Vec<(TileKey, PixelRect)> = match &mut self.target {
+            // Coverage knows which pixels of a tile changed: the shaping
+            // reads an apron around each, no further.
+            Target::Coverage(buffer) if apron > 0 => buffer.take_dirty_rects(),
+            Target::Coverage(buffer) => buffer.take_dirty().into_iter().map(whole).collect(),
+            Target::Color(buffer) => buffer.take_dirty().into_iter().map(whole).collect(),
+            Target::Wet(canvas) => canvas.take_dirty().into_iter().map(whole).collect(),
         };
         if let Some(dual) = &mut self.dual {
-            keys.extend(dual.buffer.take_dirty());
+            changed.extend(dual.buffer.take_dirty().into_iter().map(whole));
         }
-        let apron = self.finishing(false).apron();
-        if apron > 0 && !keys.is_empty() {
-            let reach = (apron + TILE - 1) / TILE;
-            let mut grown = Vec::with_capacity(keys.len() * 9);
-            for key in &keys {
-                let [x, y] = key.origin();
-                for dy in -reach..=reach {
-                    for dx in -reach..=reach {
-                        grown.push(TileKey::of_pixel(x + dx * TILE, y + dy * TILE));
-                    }
+        let mut keys: Vec<TileKey> = Vec::with_capacity(changed.len());
+        for (key, rect) in changed {
+            if apron == 0 {
+                keys.push(key);
+                continue;
+            }
+            let (k0, k1) = (
+                TileKey::of_pixel(rect.x0 - apron, rect.y0 - apron),
+                TileKey::of_pixel(rect.x1 - 1 + apron, rect.y1 - 1 + apron),
+            );
+            for y in k0.y..=k1.y {
+                for x in k0.x..=k1.x {
+                    keys.push(TileKey { x, y });
                 }
             }
-            keys = grown;
         }
         keys.sort_unstable();
         keys.dedup();

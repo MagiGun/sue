@@ -314,6 +314,20 @@ impl Round {
         self.whole(&mut out[from..]);
     }
 
+    /// [`Self::committed`] for points handed over once: `fresh` holds
+    /// only the points committed since the last call
+    /// ([`crate::input::Pipeline::take_committed`]), so a long stroke
+    /// keeps none of them.
+    pub fn fresh(&mut self, fresh: &[StrokePoint], out: &mut Vec<Swept>) {
+        let from = out.len();
+        for point in fresh {
+            let spot = self.spot(point);
+            self.runs.push(spot, self.edge, out);
+        }
+        self.taken += fresh.len();
+        self.whole(&mut out[from..]);
+    }
+
     /// The capsules of the open run and of `tail`, which goes on from the
     /// committed points.
     #[must_use]

@@ -70,8 +70,6 @@ struct Copy {
     transform: Option<[f32; 6]>,
     pipeline: Pipeline,
     paint: PaintStroke,
-    /// How many of the pipeline's committed points the paint has.
-    done: usize,
 }
 
 /// A stroke with paint behaviours, painted on the worker.
@@ -147,7 +145,6 @@ impl Painter {
                     transform,
                     pipeline,
                     paint,
-                    done: 0,
                 }
             })
             .collect();
@@ -207,9 +204,10 @@ impl Painter {
                 .as_ref()
                 .map_or(sample, |m| through(&sample, m));
             copy.pipeline.push(sample);
-            let committed = copy.pipeline.committed();
-            if committed.len() > copy.done {
-                let fresh = &committed[copy.done..];
+            // The points are the paint's from here: the pipeline keeps
+            // none of them, however long the stroke gets.
+            let fresh = copy.pipeline.take_committed();
+            if !fresh.is_empty() {
                 work += fresh
                     .iter()
                     .map(|p| {
@@ -217,8 +215,7 @@ impl Painter {
                         (d * d) as u64
                     })
                     .sum::<u64>();
-                copy.paint.commit(fresh, backdrop);
-                copy.done = committed.len();
+                copy.paint.commit(&fresh, backdrop);
             }
             if sample.kind != Kind::Up {
                 let tail = copy.pipeline.tail();
@@ -232,6 +229,12 @@ impl Painter {
             core.closed = true;
         }
         work
+    }
+
+    /// How many stroke points the stroke holds on to (its pipelines'):
+    /// bounded, however long the stroke is.
+    pub(crate) fn held(&self) -> usize {
+        self.copies.iter().map(|copy| copy.pipeline.held()).sum()
     }
 
     /// Draws the provisional tail of every copy.

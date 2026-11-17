@@ -595,6 +595,219 @@ fn full_size_brushes_lay_the_same_bytes_the_slow_way() {
     }
 }
 
-// Kept for the tests below.
-#[allow(dead_code)]
-fn unused(_: Duration) {}
+// ---------------------------------------------------------------------
+// The promises that keep a long stroke cheap
+// ---------------------------------------------------------------------
+
+/// A plain round pen of `size`, laid as coverage of one ink.
+fn round_pen(size: f32) -> Brush {
+    let mut preset = sue_brush::presets::find("sue.pen.g_pen").expect("the G-pen");
+    preset.set(param::SIZE, size);
+    let brush = Brush::new(preset, [0.1, 0.1, 0.1]);
+    assert!(brush.is_plain());
+    brush
+}
+
+/// The middle value of `values`.
+fn median(values: &[f64]) -> f64 {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    sorted[sorted.len() / 2]
+}
+
+/// A minute of dense input that never lifts, scribbled over the same
+/// place: each frame's update timed, and the most points the stroke
+/// held on to. On this thread alone, so nothing else is measured.
+fn a_minute(brush: &Brush, raster: &RasterTile2D) -> (Vec<f64>, usize) {
+    let half = raster.width() as f32 / 2.0;
+    let samples = scribble(60.0, [half, half], half * 0.6);
+    assert!(samples.len() > 14_000, "tens of thousands of samples");
+    let mut stroke = Stroke::on(brush, settings(), 1, canvas_of(raster));
+    let mut queue = VecDeque::new();
+    let mut frames = Vec::with_capacity(samples.len() / FRAME + 1);
+    let mut held = 0;
+    for chunk in samples.chunks(FRAME) {
+        queue.extend(chunk.iter().copied());
+        let start = Instant::now();
+        stroke.update(&mut queue, None, None).expect("laid");
+        let _ = stroke.take_dirty();
+        frames.push(start.elapsed().as_secs_f64());
+        held = held.max(stroke.held_points());
+    }
+    (frames, held)
+}
+
+#[test]
+fn a_minute_of_dense_input_costs_no_more_at_its_end_than_at_its_start() {
+    let base = layer(400, 400);
+    let brushes: Vec<(&str, Brush)> = heavies(0.08)
+        .into_iter()
+        .filter(|heavy| {
+            // (A watercolor edge costs more as the place fills up, not
+            // as the stroke gets longer; the benchmark times it.)
+            ["oil mixing 300", "soft airbrush 800", "finger tip 300"].contains(&heavy.name)
+        })
+        .map(|heavy| (heavy.name, heavy.brush()))
+        .chain([("round pen", round_pen(12.0))])
+        .collect();
+    assert_eq!(brushes.len(), 4);
+    for (name, brush) in brushes {
+        // Timing on a busy machine is noisy: the stroke is flat if it
+        // is flat once in three goes.
+        let mut worst = f64::INFINITY;
+        for _ in 0..3 {
+            let (frames, held) = a_minute(&brush, &base);
+            // What the stroke holds on to does not grow with it: a
+            // minute of points went through, a window of them is kept.
+            assert!(held < 2_000, "{name}: holds {held} points");
+            let tenth = frames.len() / 10;
+            let first = median(&frames[..tenth]);
+            let last = median(&frames[frames.len() - tenth..]);
+            worst = worst.min(last / first.max(1.0e-7));
+            if worst <= 1.5 {
+                break;
+            }
+        }
+        assert!(
+            worst <= 1.5,
+            "{name}: the last tenth costs {worst:.2} times the first"
+        );
+    }
+}
+
+/// Writes what `edit` changed into `raster`.
+fn write_patches(edit: &sue_core::txn::RasterEdit, raster: &mut RasterTile2D) {
+    let stride = raster.width() as usize * 4;
+    let bytes = raster.bytes_mut().expect("bytes");
+    for patch in edit.patches() {
+        let row = patch.width as usize * 4;
+        for line in 0..patch.height as usize {
+            let at = (patch.y as usize + line) * stride + patch.x as usize * 4;
+            bytes[at..at + row].copy_from_slice(&patch.after[line * row..(line + 1) * row]);
+        }
+    }
+}
+
+#[test]
+fn the_interface_never_waits_for_a_worker_that_is_behind() {
+    use sue_brush::worker::Landing;
+    let (base, brushes, samples) = small(0.5, 2.0);
+    let heavy = brushes
+        .into_iter()
+        .find(|heavy| heavy.name == "textured 500")
+        .expect("the brush");
+    let brush = heavy.brush();
+    let mut reference = base.clone();
+    slow(&brush, &samples, &mut reference);
+
+    // The pen's samples come as fast as they can be pushed: far faster
+    // than a 250 px mixing brush is laid, so the worker is behind from
+    // the first frame on.
+    let pool = Arc::new(JobPool::new(3));
+    let mut worker = StrokeWorker::start_on(pool, &brush, settings(), canvas_of(&base));
+    let mut longest = Duration::ZERO;
+    let mut frame = |worker: &mut StrokeWorker, chunk: &[Sample]| {
+        let start = Instant::now();
+        worker.push_all(chunk);
+        let dirty = worker.poll();
+        longest = longest.max(start.elapsed());
+        dirty
+    };
+    for chunk in samples.chunks(FRAME) {
+        let _ = frame(&mut worker, chunk);
+    }
+    let _ = frame(&mut worker, &[lift(&samples)]);
+    assert!(
+        !worker.is_settled() && worker.work_left(1) > 0,
+        "the worker was behind when the pen lifted"
+    );
+    // The lift does not wait either: the stroke settles on the pool,
+    // edit and all, while the frames go on.
+    worker.settle(Landing {
+        raster: base.clone(),
+        layer: EntityId::from_u128(7),
+        label: "Stroke".to_owned(),
+    });
+    let began = Instant::now();
+    let mut shown = 0;
+    while !worker.is_settled() {
+        shown += frame(&mut worker, &[]).len();
+        std::thread::sleep(Duration::from_millis(2));
+        assert!(began.elapsed() < Duration::from_secs(300), "never settled");
+    }
+    assert!(shown > 0, "what the worker laid meanwhile was shown");
+    assert!(
+        longest < Duration::from_millis(50),
+        "a frame waited {longest:?} for the worker"
+    );
+    // Through: the stroke and its edit are there at once, and the edit
+    // lays exactly what the slow way lays.
+    let start = Instant::now();
+    let mut stroke = worker.finish().expect("a stroke");
+    assert!(start.elapsed() < Duration::from_millis(50));
+    let edit = stroke.take_edit().expect("an edit").expect("merged");
+    let mut raster = base.clone();
+    write_patches(&edit, &mut raster);
+    assert!(
+        raster.bytes() == reference.bytes(),
+        "the same pixels, later"
+    );
+}
+
+#[test]
+fn an_edit_worked_out_apart_is_the_edit_of_the_merge() {
+    let (base, brushes, samples) = small(0.12, 1.0);
+    let brushes = brushes
+        .into_iter()
+        .map(|heavy| (heavy.name, heavy.brush()))
+        .chain([("round pen", round_pen(14.0))]);
+    for (name, brush) in brushes {
+        let draw = || {
+            let mut stroke = Stroke::on(&brush, settings(), 1, canvas_of(&base));
+            let mut queue: VecDeque<Sample> = samples.iter().copied().collect();
+            queue.push_back(lift(&samples));
+            stroke.update(&mut queue, None, None).expect("laid");
+            stroke
+        };
+        let mut merged = base.clone();
+        let mut stroke = draw();
+        stroke.let_go_of_layer();
+        let direct = stroke
+            .commit(&mut merged, [0, 0], EntityId::from_u128(7), "Stroke")
+            .expect("merged");
+        assert!(!direct.is_empty(), "{name}");
+        let mut stroke = draw();
+        stroke.prepare(&base, EntityId::from_u128(7), "Stroke");
+        let apart = stroke.take_edit().expect("an edit").expect("merged");
+        assert!(
+            apart.patches() == direct.patches(),
+            "{name}: the edit worked out apart differs from the merge's"
+        );
+        let mut raster = base.clone();
+        write_patches(&apart, &mut raster);
+        assert!(raster.bytes() == merged.bytes(), "{name}");
+    }
+}
+
+#[test]
+fn a_stroke_given_up_stops_its_worker_at_once() {
+    let (base, brushes, samples) = small(0.5, 2.0);
+    let heavy = brushes
+        .into_iter()
+        .find(|heavy| heavy.name == "textured 500")
+        .expect("the brush");
+    let pool = Arc::new(JobPool::new(3));
+    let mut worker = StrokeWorker::start_on(pool, &heavy.brush(), settings(), canvas_of(&base));
+    worker.push_all(&samples);
+    let _ = worker.poll();
+    assert!(worker.is_busy());
+    // Seconds of work are queued; giving the stroke up waits for no
+    // more than the sample being laid.
+    let start = Instant::now();
+    worker.abandon();
+    assert!(
+        start.elapsed() < Duration::from_millis(500),
+        "giving up took {:?}",
+        start.elapsed()
+    );
+}

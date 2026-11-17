@@ -24,7 +24,7 @@
 
 mod tile;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use sue_core::{PixelFormat, RasterTile2D};
 
@@ -78,8 +78,12 @@ impl std::error::Error for MergeError {}
 pub struct StrokeBuffer {
     combine: Combine,
     tiles: BTreeMap<TileKey, Tile>,
-    tail: BTreeSet<TileKey>,
-    dirty: BTreeSet<TileKey>,
+    /// The tiles the tail lies on, each with the pixels of it the tail
+    /// may cover.
+    tail: BTreeMap<TileKey, PixelRect>,
+    /// The tiles changed since [`Self::take_dirty`] was asked, each with
+    /// the pixels of it that may have changed.
+    dirty: BTreeMap<TileKey, PixelRect>,
     counters: Counters,
 }
 
@@ -119,7 +123,7 @@ impl StrokeBuffer {
     /// Clears the tail: the tiles it touched lose their tail coverage and
     /// are marked for showing again.
     pub fn clear_tail(&mut self) {
-        for key in std::mem::take(&mut self.tail) {
+        for (key, rect) in std::mem::take(&mut self.tail) {
             if let Some(tile) = self.tiles.get_mut(&key) {
                 tile.tail = None;
                 self.counters.tail_tiles_cleared += 1;
@@ -127,7 +131,7 @@ impl StrokeBuffer {
                     self.tiles.remove(&key);
                 }
             }
-            self.dirty.insert(key);
+            mark(&mut self.dirty, key, rect);
         }
     }
 
@@ -135,7 +139,7 @@ impl StrokeBuffer {
     /// final), leaving no tail.
     pub fn settle(&mut self) {
         let combine = self.combine;
-        for key in std::mem::take(&mut self.tail) {
+        for (key, _) in std::mem::take(&mut self.tail) {
             let Some(tile) = self.tiles.get_mut(&key) else {
                 continue;
             };
@@ -167,12 +171,20 @@ impl StrokeBuffer {
 
     /// The tiles that hold tail coverage, in order.
     pub fn tail_keys(&self) -> impl Iterator<Item = TileKey> + '_ {
-        self.tail.iter().copied()
+        self.tail.keys().copied()
     }
 
     /// The tiles that changed since the last call, in order: what the
     /// compositor shows again.
     pub fn take_dirty(&mut self) -> Vec<TileKey> {
+        std::mem::take(&mut self.dirty).into_keys().collect()
+    }
+
+    /// [`Self::take_dirty`] with, for each tile, the pixels of it that
+    /// may have changed (a rectangle around them): what a view that
+    /// reads around each pixel (a watercolor edge) needs to know how far
+    /// the change reaches, so it shows no more tiles again than it must.
+    pub fn take_dirty_rects(&mut self) -> Vec<(TileKey, PixelRect)> {
         std::mem::take(&mut self.dirty).into_iter().collect()
     }
 
@@ -414,10 +426,16 @@ impl Painter<'_> {
                         let i = row + (x - ox) as usize;
                         part[i] = combine.apply(part[i], q);
                     }
+                    let run = PixelRect {
+                        x0,
+                        y0: y,
+                        x1,
+                        y1: y + 1,
+                    };
                     if self.part == Part::Tail {
-                        self.buffer.tail.insert(key);
+                        mark(&mut self.buffer.tail, key, run);
                     }
-                    self.buffer.dirty.insert(key);
+                    mark(&mut self.buffer.dirty, key, run);
                 }
                 x0 = x1;
             }
@@ -430,6 +448,19 @@ impl Painter<'_> {
 }
 
 /// Coverage 0 to 1 as 16 bits, rounded to nearest; not a number is none.
+/// Notes that the pixels of `rect` in tile `key` changed.
+fn mark(tiles: &mut BTreeMap<TileKey, PixelRect>, key: TileKey, rect: PixelRect) {
+    tiles
+        .entry(key)
+        .and_modify(|all| {
+            all.x0 = all.x0.min(rect.x0);
+            all.y0 = all.y0.min(rect.y0);
+            all.x1 = all.x1.max(rect.x1);
+            all.y1 = all.y1.max(rect.y1);
+        })
+        .or_insert(rect);
+}
+
 fn quantize(c: f32) -> u16 {
     if c.is_nan() {
         return 0;

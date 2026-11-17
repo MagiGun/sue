@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{PoisonError, RwLock};
 
 use crate::buffer::{AREA, TILE, TileKey};
@@ -48,6 +49,8 @@ struct Shown {
     pixels: PixelTiles,
     bounds: Option<PixelRect>,
     ended: bool,
+    /// The tiles shown anew since [`LiveView::take_fresh`] was asked.
+    fresh: std::collections::BTreeSet<TileKey>,
 }
 
 /// A stroke's coverage as the compositor reads it while the pen is down:
@@ -59,6 +62,10 @@ struct Shown {
 pub struct LiveView {
     ink: Ink,
     shown: RwLock<Shown>,
+    /// Samples the stroke has laid, and about how many pixels of work
+    /// they were.
+    laid: AtomicU64,
+    work: AtomicU64,
 }
 
 impl LiveView {
@@ -68,7 +75,26 @@ impl LiveView {
         Self {
             ink,
             shown: RwLock::new(Shown::default()),
+            laid: AtomicU64::new(0),
+            work: AtomicU64::new(0),
         }
+    }
+
+    /// The stroke laid `samples` more, about `work` pixels of work.
+    pub(crate) fn went_on(&self, samples: u64, work: u64) {
+        self.laid.fetch_add(samples, Ordering::Relaxed);
+        self.work.fetch_add(work, Ordering::Relaxed);
+    }
+
+    /// How many samples the stroke has laid so far, and about how many
+    /// pixels of work they were: how far the worker is, for an interface
+    /// that shows it is still busy.
+    #[must_use]
+    pub fn progress(&self) -> (u64, u64) {
+        (
+            self.laid.load(Ordering::Relaxed),
+            self.work.load(Ordering::Relaxed),
+        )
     }
 
     /// The ink the stroke lays.
@@ -90,6 +116,7 @@ impl LiveView {
         if shown.ended {
             return;
         }
+        shown.fresh.extend(keys.iter().copied());
         for (key, coverage) in fresh {
             match coverage {
                 Some(coverage) => {
@@ -115,6 +142,7 @@ impl LiveView {
         if shown.ended {
             return;
         }
+        shown.fresh.extend(tiles.iter().map(|(key, _)| *key));
         for (key, pixels) in tiles {
             match pixels {
                 Some(pixels) => {
@@ -134,7 +162,17 @@ impl LiveView {
         shown.ended = true;
         shown.tiles.clear();
         shown.pixels.clear();
+        shown.fresh.clear();
         shown.bounds = None;
+    }
+
+    /// The tiles the worker has shown anew since the last call, in
+    /// order: what the compositor shows again. The worker says so after
+    /// every slice it lays, before its job is through.
+    #[must_use]
+    pub fn take_fresh(&self) -> Vec<TileKey> {
+        let mut shown = self.shown.write().unwrap_or_else(PoisonError::into_inner);
+        std::mem::take(&mut shown.fresh).into_iter().collect()
     }
 
     /// `true` when the view shows laid pixels (a stroke with paint
