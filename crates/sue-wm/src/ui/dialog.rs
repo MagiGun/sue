@@ -533,6 +533,16 @@ impl<'a> Dialog<'a> {
             out = Some((parts, rect));
         });
         let (parts, rect) = out.expect("the window's contents are drawn in the call");
+        // The first frame did not know how tall the body is: the window
+        // is put again around the parent's middle at the size it turned
+        // out to have, so a tall dialog does not hang below it. From
+        // then on it stays where it is, or where it was moved to.
+        let at = if known.is_none() && self.height.is_none() {
+            let size = vec2(self.width, chrome + parts.body_height.min(tallest));
+            parent.center() - size / 2.0
+        } else {
+            at
+        };
         let placed = Placed {
             at,
             body_height: parts.body_height,

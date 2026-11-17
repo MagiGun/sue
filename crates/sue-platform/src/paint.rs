@@ -276,6 +276,9 @@ struct NativeImage {
     texture: wgpu::Texture,
     id: egui::TextureId,
     used: bool,
+    /// When a painted frame first found it unused; `None` while frames
+    /// draw it.
+    idle_since: Option<std::time::Instant>,
 }
 
 /// RGBA pixels for an upload of at most `limit` pixels a side: the borrowed
@@ -316,6 +319,9 @@ fn upload_pixels(
     }
     Some(([out_w, out_h], Cow::Owned(out)))
 }
+
+/// How long an image stays after the last frame that drew it.
+const IMAGE_KEEP: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Paints egui frames with `egui-wgpu`, and keeps the textures of the images
 /// the interface shows.
@@ -367,7 +373,7 @@ impl EguiPainter {
     }
 
     /// Draws one egui frame into `target` (`size` physical pixels), cleared
-    /// to `clear` first, then frees the images the frame did not use.
+    /// to `clear` first, then frees the images no frame has used for a while.
     #[allow(
         clippy::too_many_arguments,
         reason = "one frame's parts, as egui hands them over"
@@ -436,10 +442,25 @@ impl EguiPainter {
             self.renderer.free_texture(id);
         }
         textures.clear();
+        self.sweep(std::time::Instant::now());
+    }
+
+    /// Frees the images no painted frame has drawn for [`IMAGE_KEEP`].
+    /// Several windows paint with this one painter, each its own frame
+    /// (a dialog in a window of its own, then the window under it): an
+    /// image freed as soon as one frame did not draw it was freed by the
+    /// dialog's frame and uploaded whole again for the window's next
+    /// one, every frame the dialog was open; with a comic page that is
+    /// over a hundred megabytes a frame.
+    fn sweep(&mut self, now: std::time::Instant) {
         let renderer = &mut self.renderer;
         self.images.retain(|_, image| {
-            let keep = image.used;
-            image.used = false;
+            if std::mem::take(&mut image.used) {
+                image.idle_since = None;
+                return true;
+            }
+            let since = *image.idle_since.get_or_insert(now);
+            let keep = now.duration_since(since) < IMAGE_KEEP;
             if !keep {
                 renderer.free_texture(&image.id);
             }
@@ -692,6 +713,7 @@ impl TextureUpload for EguiPainter {
                     texture,
                     id,
                     used: true,
+                    idle_since: None,
                 },
             );
         }
@@ -775,6 +797,48 @@ mod tests {
         for (got, want) in middle.iter().zip([128_u8, 64, 200]) {
             assert!(got.abs_diff(want) <= 2, "{middle:?}");
         }
+    }
+
+    /// A frame that does not draw a picture (a dialog's, in its own
+    /// window) leaves the picture's texture for the next frame of the
+    /// window that does; it goes once no frame has drawn it for a while.
+    #[test]
+    fn another_windows_frame_does_not_free_a_picture() {
+        let Ok(gpu) = crate::gpu::GpuContext::headless() else {
+            return;
+        };
+        let mut painter = EguiPainter::new(&gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+        let pixels: Vec<u8> = [128_u8, 64, 200, 255].repeat(16 * 16);
+        let id = TextureUpload::texture(&mut painter, 1, 1, [16, 16], 4, &pixels, true)
+            .expect("an uploaded picture");
+        let ctx = egui::Context::default();
+        // The window's frame, then two of a dialog that draws nothing.
+        for _ in 0..3 {
+            let output = ctx.run_ui(egui::RawInput::default(), |_| {});
+            painter
+                .paint_offscreen(
+                    &ctx,
+                    [16, 16],
+                    egui::Color32::BLACK,
+                    output.shapes,
+                    output.textures_delta,
+                    1.0,
+                )
+                .unwrap();
+        }
+        assert!(painter.images.contains_key(&1), "the texture is kept");
+        assert_eq!(
+            TextureUpload::texture(&mut painter, 1, 1, [16, 16], 4, &pixels, true),
+            Some(id),
+            "the same texture, not uploaded again"
+        );
+        // Unused for longer than it is kept: freed.
+        let now = std::time::Instant::now();
+        painter.sweep(now);
+        painter.sweep(now);
+        assert!(painter.images.contains_key(&1));
+        painter.sweep(now + IMAGE_KEEP);
+        assert!(!painter.images.contains_key(&1), "freed once unused");
     }
 
     #[test]

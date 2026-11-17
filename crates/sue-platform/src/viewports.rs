@@ -34,6 +34,10 @@ struct Child {
     state: egui_winit::State,
     /// Its close button was pressed: egui hears of it next frame.
     close: bool,
+    /// What the window was last made or changed to: a frame that asks
+    /// for something else (a dialog as tall as what it now holds, a new
+    /// title) changes the window to it.
+    builder: ViewportBuilder,
 }
 
 /// What one viewport drew this frame.
@@ -72,6 +76,22 @@ pub(crate) fn install(ctx: &egui::Context, shared: &Shared) {
             let owner = viewports.owner(id);
             match viewports.children.get_mut(&id) {
                 Some(child) => {
+                    // egui hands an immediate viewport's builder over as
+                    // it is; telling what changed since the window was
+                    // made is the backend's part. Without it a dialog
+                    // stayed the size of its first frame, before it knew
+                    // how tall its body is, and scrolled what it holds.
+                    let (commands, _) = child.builder.patch(viewport.builder.clone());
+                    if !commands.is_empty() {
+                        let mut info = egui::ViewportInfo::default();
+                        egui_winit::process_viewport_commands(
+                            ctx,
+                            &mut info,
+                            commands,
+                            &child.window,
+                            &mut Vec::new(),
+                        );
+                    }
                     let mut raw = child.state.take_egui_input(&child.window);
                     // A Wayland pen over this window (tablet-v2 takes it
                     // away from the mouse).
@@ -208,6 +228,7 @@ impl Viewports {
                     surface,
                     state,
                     close: false,
+                    builder,
                 },
             );
             opened = true;
