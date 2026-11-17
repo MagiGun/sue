@@ -205,11 +205,15 @@ impl Grid {
                 .min_by(|a, b| a.top().total_cmp(&b.top()))
                 .unwrap_or_else(|| panic!("frame {name} on the ruler: {texts:?}"))
         };
-        let (one, seven) = (number("1"), number("7"));
+        // Read from 7 and 13: a "1" also names the first cel, here and in
+        // the Layer palette, and the playback start handle sits over the
+        // ruler's own 1.
+        let (seven, thirteen) = (number("7"), number("13"));
+        let step = (thirteen.left() - seven.left()) / 6.0;
         let row = track_row(&texts, track).unwrap_or_else(|| panic!("{track}'s track: {texts:?}"));
         Self {
-            one: one.left(),
-            step: (seven.left() - one.left()) / 6.0,
+            one: seven.left() - 6.0 * step,
+            step,
             row: row.center().y + 4.0,
         }
     }

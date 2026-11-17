@@ -2245,9 +2245,11 @@ fn b31_the_spacer_docks_under_the_canvas() {
         .node_in("Information", below)
         .expect("its icon under the canvas");
     walk.press(icon.center(), PointerButton::Primary);
+    // The row opens under the canvas, 250 points tall in the 900 point
+    // window (p5-polish), so its tabs sit in the lowest third.
     let tab = walk.tab("info").expect("Information");
     assert!(
-        tab.top() > 700.0 && tab.left() < 1100.0,
+        tab.top() > 600.0 && tab.left() < 1100.0,
         "under the canvas: {tab:?}"
     );
 }
