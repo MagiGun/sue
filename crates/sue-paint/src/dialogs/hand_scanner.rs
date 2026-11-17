@@ -499,6 +499,9 @@ fn apart(a: &Pose, b: &Pose) -> f32 {
 const DRAW_EVERY: Duration = Duration::from_millis(50);
 /// ...and only when a joint moved at least this many degrees.
 const DRAW_FROM: f32 = 0.6;
+/// How tall the dialog's two pictures are for their width: three to
+/// four, as a camera's picture.
+const PICTURE_SHAPE: f32 = 0.75;
 /// The longer side of the small picture of the figure, in pixels.
 const MODEL_SIDE: usize = 420;
 /// The gray under the figure in that picture: a canvas's paper.
@@ -583,6 +586,107 @@ impl HandScan {
     fn stop(&mut self) {
         self.stream = None;
         self.tracking = None;
+    }
+}
+
+/// The figure's layer (`bytes`: `width` by `height` RGBA pixels) made
+/// small for the dialog: every few pixels one, each the mean of four
+/// around it, over the light ground a canvas has.
+fn model_image(bytes: &[u8], width: usize, height: usize) -> egui::ColorImage {
+    let step = width.max(height).div_ceil(MODEL_SIDE).max(1);
+    let size = [(width / step).max(1), (height / step).max(1)];
+    let half = step / 2;
+    let mut pixels = Vec::with_capacity(size[0] * size[1]);
+    for y in 0..size[1] {
+        for x in 0..size[0] {
+            let mut sum = [0_u32; 4];
+            for (dx, dy) in [(0, 0), (half, 0), (0, half), (half, half)] {
+                let at =
+                    ((y * step + dy).min(height - 1) * width + (x * step + dx).min(width - 1)) * 4;
+                for (channel, total) in sum.iter_mut().enumerate() {
+                    *total += u32::from(bytes[at + channel]);
+                }
+            }
+            let alpha = sum[3] / 4;
+            let over =
+                |channel: usize| ((sum[channel] / 4) * alpha + MODEL_GROUND * (255 - alpha)) / 255;
+            pixels.push(Color32::from_rgb(
+                over(0) as u8,
+                over(1) as u8,
+                over(2) as u8,
+            ));
+        }
+    }
+    egui::ColorImage::new(size, pixels)
+}
+
+/// Draws the small picture of the posed figure in `area`, on a canvas's
+/// paper: picture content, not interface.
+fn model_picture(
+    painter: &egui::Painter,
+    area: Rect,
+    model: Option<&(egui::TextureHandle, [f32; 2])>,
+    theme: &Theme,
+) {
+    let corner = theme.corner(ui::Radius::Md);
+    painter.rect_filled(area, corner, Color32::from_gray(MODEL_GROUND as u8));
+    if let Some((texture, shape)) = model {
+        let scale = (area.width() / shape[0]).min(area.height() / shape[1]);
+        painter.image(
+            texture.id(),
+            Rect::from_center_size(area.center(), vec2(shape[0], shape[1]) * scale),
+            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
+    }
+    painter.rect_stroke(area, corner, theme.hairline(), egui::StrokeKind::Inside);
+}
+
+/// Draws the camera's picture in `area`, as a mirror shows it, with the
+/// hand found in it boxed and its bones drawn: picture content, whose
+/// marks must read on whatever the camera sees.
+fn camera_picture(
+    painter: &egui::Painter,
+    area: Rect,
+    (texture, shape): &(egui::TextureHandle, [f32; 2]),
+    hand: Option<&HandObservation>,
+    theme: &Theme,
+) {
+    let scale = (area.width() / shape[0]).min(area.height() / shape[1]);
+    let shown = Rect::from_center_size(area.center(), vec2(shape[0], shape[1]) * scale);
+    painter.image(
+        texture.id(),
+        shown,
+        Rect::from_min_max(pos2(1.0, 0.0), pos2(0.0, 1.0)),
+        Color32::WHITE,
+    );
+    let Some(hand) = hand else {
+        return;
+    };
+    // A picture point, mirrored like the picture.
+    let at = |x: f32, y: f32| pos2(shown.right() - x * scale, shown.top() + y * scale);
+    let mark = Color32::from_rgb(64, 224, 132);
+    let pad = 14.0;
+    let bounds = Rect::from_two_pos(
+        at(hand.bounds[0] - pad, hand.bounds[1] - pad),
+        at(hand.bounds[2] + pad, hand.bounds[3] + pad),
+    )
+    .intersect(shown);
+    painter.rect_stroke(
+        bounds,
+        theme.corner(ui::Radius::Sm),
+        Stroke::new(2.0, mark),
+        egui::StrokeKind::Inside,
+    );
+    for (from, to) in BONES {
+        let (a, b) = (hand.points[from], hand.points[to]);
+        painter.line_segment(
+            [at(a[0], a[1]), at(b[0], b[1])],
+            Stroke::new(1.5, Color32::from_white_alpha(210)),
+        );
+    }
+    for point in hand.points {
+        painter.circle_filled(at(point[0], point[1]), 2.5, mark);
     }
 }
 
@@ -701,35 +805,8 @@ impl SuePaint {
         else {
             return;
         };
-        // Every `step`th pixel, each the mean of four around it, over
-        // the light ground a canvas has.
-        let step = width.max(height).div_ceil(MODEL_SIDE).max(1);
-        let size = [(width / step).max(1), (height / step).max(1)];
-        let half = step / 2;
-        let mut pixels = Vec::with_capacity(size[0] * size[1]);
-        for y in 0..size[1] {
-            for x in 0..size[0] {
-                let mut sum = [0_u32; 4];
-                for (dx, dy) in [(0, 0), (half, 0), (0, half), (half, half)] {
-                    let at = ((y * step + dy).min(height - 1) * width
-                        + (x * step + dx).min(width - 1))
-                        * 4;
-                    for (channel, total) in sum.iter_mut().enumerate() {
-                        *total += u32::from(bytes[at + channel]);
-                    }
-                }
-                let alpha = sum[3] / 4;
-                let over = |channel: usize| {
-                    ((sum[channel] / 4) * alpha + MODEL_GROUND * (255 - alpha)) / 255
-                };
-                pixels.push(Color32::from_rgb(
-                    over(0) as u8,
-                    over(1) as u8,
-                    over(2) as u8,
-                ));
-            }
-        }
-        let image = egui::ColorImage::new(size, pixels);
+        let image = model_image(bytes, width, height);
+        let size = image.size;
         let shape = [size[0] as f32, size[1] as f32];
         match &mut scan.model {
             Some((texture, kept)) => {
@@ -917,67 +994,21 @@ impl SuePaint {
         // posed (the dialog stands over the canvas).
         let gap = theme.space(Space::S3);
         let side = ((ui.available_width() - gap) / 2.0).floor();
-        let room = vec2(side * 2.0 + gap, (side * 0.75).round());
+        // Each as wide as half the dialog, and as tall as a camera's
+        // picture is to its width.
+        let height = (side * PICTURE_SHAPE).round();
+        let room = vec2(side + gap + side, height);
         let (both, _) = ui.allocate_exact_size(room, egui::Sense::hover());
-        let area = Rect::from_min_size(both.min, vec2(side, room.y));
+        let area = Rect::from_min_size(both.min, vec2(side, height));
         let model_area = Rect::from_min_size(pos2(area.right() + gap, both.top()), area.size());
         let painter = ui.painter_at(both);
         let corner = theme.corner(ui::Radius::Md);
         painter.rect_filled(area, corner, theme.surface(0));
-        painter.rect_filled(model_area, corner, Color32::from_gray(MODEL_GROUND as u8));
-        if let Some((texture, shape)) = &scan.model {
-            let scale = (model_area.width() / shape[0]).min(model_area.height() / shape[1]);
-            painter.image(
-                texture.id(),
-                Rect::from_center_size(model_area.center(), vec2(shape[0], shape[1]) * scale),
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                Color32::WHITE,
-            );
-        }
-        painter.rect_stroke(
-            model_area,
-            corner,
-            theme.hairline(),
-            egui::StrokeKind::Inside,
-        );
+        model_picture(&painter, model_area, scan.model.as_ref(), theme);
         let camera_error = scan.stream.as_ref().and_then(CameraStream::error);
         let tracker_error = scan.tracking.as_ref().and_then(Tracking::failed);
-        if let Some((texture, shape)) = &scan.picture {
-            let scale = (area.width() / shape[0]).min(area.height() / shape[1]);
-            let shown = Rect::from_center_size(area.center(), vec2(shape[0], shape[1]) * scale);
-            painter.image(
-                texture.id(),
-                shown,
-                Rect::from_min_max(pos2(1.0, 0.0), pos2(0.0, 1.0)),
-                Color32::WHITE,
-            );
-            // A picture point, mirrored like the picture.
-            let at = |x: f32, y: f32| pos2(shown.right() - x * scale, shown.top() + y * scale);
-            if let Some(hand) = &scan.hand {
-                let mark = Color32::from_rgb(64, 224, 132);
-                let pad = 14.0;
-                let bounds = Rect::from_two_pos(
-                    at(hand.bounds[0] - pad, hand.bounds[1] - pad),
-                    at(hand.bounds[2] + pad, hand.bounds[3] + pad),
-                )
-                .intersect(shown);
-                painter.rect_stroke(
-                    bounds,
-                    theme.corner(ui::Radius::Sm),
-                    Stroke::new(2.0, mark),
-                    egui::StrokeKind::Inside,
-                );
-                for (from, to) in BONES {
-                    let (a, b) = (hand.points[from], hand.points[to]);
-                    painter.line_segment(
-                        [at(a[0], a[1]), at(b[0], b[1])],
-                        Stroke::new(1.5, Color32::from_white_alpha(210)),
-                    );
-                }
-                for point in hand.points {
-                    painter.circle_filled(at(point[0], point[1]), 2.5, mark);
-                }
-            }
+        if let Some(picture) = &scan.picture {
+            camera_picture(&painter, area, picture, scan.hand.as_ref(), theme);
         }
         if let Some(why) = camera_error
             .as_ref()
@@ -985,7 +1016,7 @@ impl SuePaint {
             .or(tracker_error.map(|why| tr!("hand-scanner-tracker-failed", why = why)))
         {
             // Over the (last) picture, on a scrim so it reads.
-            painter.rect_filled(area, corner, theme.surface(0).gamma_multiply(0.86));
+            painter.rect_filled(area, corner, theme.scrim());
             let inner = area.shrink(theme.space(Space::S5));
             let galley = painter.layout(
                 why,
