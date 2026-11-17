@@ -13,6 +13,7 @@
 
 mod backend;
 mod error;
+pub mod hand;
 mod model;
 mod onnx;
 mod registry;
