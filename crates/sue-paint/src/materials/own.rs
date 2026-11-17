@@ -625,6 +625,32 @@ fn gloom(x: f32, y: f32, aspect: f32, px: f32) -> f32 {
 
 // 3D models of boxes.
 
+/// How a person looks into a 3D background: standing at its open end
+/// (where `z` is greatest), eyes 1.6 m above the ground, looking straight
+/// along it through a lens `fov` degrees high, so the canvas shows the
+/// place from inside, in one point perspective, as a background is drawn.
+pub(crate) fn eye_view(geometry: &Geometry, fov: f32) -> crate::three::View3D {
+    let mesh = geometry.to_mesh();
+    let (middle, extent) = crate::three::frame_of(&mesh);
+    let scale = 2.0 / extent.max(1e-6);
+    let front = mesh
+        .positions()
+        .iter()
+        .map(|p| p[2])
+        .fold(f32::NEG_INFINITY, f32::max);
+    // Just in front of the nearest wall's edge, so nothing of the place
+    // is behind the eye.
+    let distance = (front - middle[2]) * scale + 0.08;
+    crate::three::View3D {
+        yaw: 0.0,
+        pitch: 0.0,
+        distance,
+        fov,
+        pan: [0.0, (1.6 - middle[1]) * scale],
+        ..crate::three::View3D::default()
+    }
+}
+
 /// Adds a box from `min` to `max`, its faces wound outwards.
 fn cuboid(geometry: &mut Geometry, min: [f64; 3], max: [f64; 3]) {
     let [x0, y0, z0] = min;
@@ -672,7 +698,7 @@ fn post(geometry: &mut Geometry, x: f64, z: f64, radius: f64, y0: f64, y1: f64) 
 }
 
 /// A room seen from where its fourth wall would be: floor, three walls,
-/// a window and a door.
+/// a ceiling, a window and a door.
 fn room() -> Geometry {
     let mut g = Geometry::new();
     cuboid(&mut g, [-4.0, -0.1, -4.0], [4.0, 0.0, 4.0]);
@@ -687,6 +713,8 @@ fn room() -> Geometry {
     cuboid(&mut g, [-0.04, 1.0, -3.98], [0.04, 2.48, -3.9]);
     // A door in the left wall.
     cuboid(&mut g, [-3.98, 0.0, 1.0], [-3.9, 2.2, 2.0]);
+    // The ceiling.
+    cuboid(&mut g, [-4.1, 3.0, -4.1], [4.1, 3.1, 4.0]);
     g
 }
 
@@ -726,6 +754,8 @@ fn corridor() -> Geometry {
     cuboid(&mut g, [-1.6, 0.0, -16.0], [-1.5, 2.8, 2.0]);
     cuboid(&mut g, [1.5, 0.0, -16.0], [1.6, 2.8, 2.0]);
     cuboid(&mut g, [-1.5, 0.0, -16.1], [1.5, 2.8, -16.0]);
+    // The ceiling.
+    cuboid(&mut g, [-1.6, 2.8, -16.1], [1.6, 2.9, 2.0]);
     let mut z = 0.0;
     while z > -15.0 {
         cuboid(&mut g, [-1.5, 0.0, z - 1.0], [-1.44, 2.1, z]);

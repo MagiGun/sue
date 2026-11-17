@@ -150,11 +150,40 @@ impl SuePaint {
     }
 
     /// Puts a 3D background or object material on the canvas as a 3D
-    /// layer of its own.
+    /// layer of its own: a background seen from inside, where a person
+    /// would stand, an object from a corner above.
     pub(crate) fn place_model_material(&mut self, cx: &mut AppletContext<'_>, material: &Material) {
-        match crate::materials::model_of(material) {
-            Some(model) => self.add_3d_layer(cx, &crate::localize(&material.name), model),
-            None => cx.fail(tr!("cannot-read-the-material", name = material.name)),
+        let Some(model) = crate::materials::model_of(material) else {
+            cx.fail(tr!("cannot-read-the-material", name = material.name));
+            return;
+        };
+        let Some(view) = crate::materials::view_of(material) else {
+            self.add_3d_layer(cx, &crate::localize(&material.name), model);
+            return;
+        };
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        let name = crate::localize(&material.name);
+        match crate::three::new_layer_viewed(
+            &cx.world.arena,
+            picture,
+            self.layer(),
+            &name,
+            model,
+            Some(view),
+        ) {
+            Ok((edit, id)) => {
+                if Self::apply(cx, edit)
+                    && let Some(doc) = self.doc_mut()
+                {
+                    doc.layer = Some(id);
+                    doc.picked.clear();
+                }
+                self.toolbox.pick(crate::tools::Tool::Operation);
+                self.toolbox.pick_sub(crate::tools::Tool::Operation, 0);
+            }
+            Err(error) => cx.fail(error),
         }
     }
 

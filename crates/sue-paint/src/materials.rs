@@ -539,6 +539,20 @@ pub fn model_of(material: &Material) -> Option<Entity> {
     Some(Entity::empty(crate::localize(&material.name), sue_model::class::MODEL).with_ext(build()))
 }
 
+/// How the 3D layer of a 3D background material is looked into: from
+/// inside, where a person would stand. `None` for any other material (a
+/// small object is looked at from a corner above, as a new 3D layer is).
+#[must_use]
+pub fn view_of(material: &Material) -> Option<crate::three::View3D> {
+    let Source::Builtin(index) = material.source else {
+        return None;
+    };
+    match OWN.get(index)? {
+        (_, kind, Art::Model(build)) if *kind == BACKGROUND => Some(own::eye_view(&build(), 60.0)),
+        _ => None,
+    }
+}
+
 /// The frame layout of one of Sue Paint's frame templates.
 #[must_use]
 pub fn frames_of(material: &Material) -> Option<usize> {
@@ -565,18 +579,13 @@ pub fn picture(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<Ra
             Art::Framed { aspect, ink } => Some(draw_framed(box_in(size, aspect), color, ink)),
             Art::Pose(..) => posed(material, size),
             Art::Model(build) => {
-                // A background is looked into from its open side; an
+                // A background is looked into as it lands, from inside; an
                 // object from a corner above.
-                let (yaw, pitch) = if material.kind == BACKGROUND {
-                    (0.0, 14.0)
-                } else {
-                    (32.0, 22.0)
-                };
-                let view = crate::three::View3D {
-                    yaw,
-                    pitch,
+                let view = view_of(material).unwrap_or(crate::three::View3D {
+                    yaw: 32.0,
+                    pitch: 22.0,
                     ..crate::three::View3D::default()
-                };
+                });
                 let buffers = crate::three::render_buffers(&build().to_mesh(), &view, size);
                 crate::three::draw(&buffers, &view)
             }
