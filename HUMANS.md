@@ -968,14 +968,22 @@ Once a canvas is open:
   hand as a real one would; with the pen upright, or a mouse, the shape
   turns along the line if that is on, and otherwise stays as set.
 - **3D drawing figures:** Layer, New Layer, 3D Drawing Figure puts a
-  posable figure on a 3D layer. With the Object tool, drag a body part to
-  bend it at its joint (Shift twists it) and drag anywhere else to turn
-  the camera; the joints show as dots, the one you are posing lit. Tool
-  Settings has pose presets, Flip pose, Reset pose and the picked joint's
-  Bend, Twist and Swing, and the body shape: Height and Head to body
-  ratio. Convert to Lines and Tones makes line art from
-  the pose to draw over; Convert to Vector Lines and Tones makes those
-  lines strokes you can reshape with the vector tools.
+  posable figure on a 3D layer: a smooth body with the guide lines of an
+  artist's mannequin. With the Object tool, drag a hand or a foot and
+  its arm or leg follows; drag any other part and it follows the pointer
+  (Shift twists it); drag anywhere else to turn the camera. The joints
+  show as dots, the one you are posing lit, with three rings round it
+  that turn it about one axis each. Tool Property has **Model** (male or
+  female body, left or right hand, head, or **Import 3D file**), the
+  poses, Flip pose, Reset pose and Reset part, **Joint angle limits**,
+  **Pin joint** (a pinned hand or foot stays put while you pose the
+  rest), the picked joint's Bend, Twist and Swing, and the **Hand
+  setup**: a pad that opens the hand, makes a fist or folds the fingers
+  flat, with a spread slider and a lock for each finger. A figure keeps
+  to the ground when it sits or crouches (**Keep on the ground**).
+  Convert to Lines and Tones makes line art from the pose to draw over;
+  Convert to Vector Lines and Tones makes those lines strokes you can
+  reshape with the vector tools.
 - **3D Tool Property:** with the Object tool on a 3D layer, Tool
   Property is in sections. **3D object**: drag its buttons to move the
   object, turn it, or slide it along the ground (or focus one and use
@@ -988,12 +996,21 @@ Once a canvas is open:
   Head to body ratio (with **Adjust head to body ratio with height**),
   a body part and the **body shape chart** (thin to fat across, less to
   more muscle up), **Initialize**, and **Register body shape**, which
-  keeps it in the Material palette's Body shapes. Every drag is one
-  step to undo.
+  keeps it in the Material palette's Body shapes. **Body shape by
+  part** has a slider for each part: head width and length, neck,
+  shoulders, chest and bust, torso, waist, hips, arm and leg length and
+  width, hand size, finger length and thickness, foot size, and for the
+  hands **Veins** and **Tendon and knuckle prominence**. **Light
+  source** has the light's height and **Shadow on the floor**. Every
+  drag is one step to undo.
 - **3D hands and heads:** Layer, New Layer, **3D Hand** and **3D Head**
   pose the same way: drag a finger joint to curl it, or the neck or jaw
-  to turn, tilt or open the mouth. Their presets include a fist,
-  pointing, a peace sign, thumbs up and holding for the hand, and front,
+  to turn, tilt or open the mouth. The hand is a detailed model with
+  knuckles, tendons, veins and nails, left or right. Sue has sixteen
+  hand poses (a fist, pointing, a peace sign, thumbs up, holding, OK,
+  pinch, claw and more) and twenty body poses; a hand pose dropped on a
+  body closes its hands (the one whose arm is picked, or both). The
+  head's poses are front,
   three-quarter, looking up or down, turned, tilted and an open mouth for
   the head. **Register pose as material** in Tool Property keeps any
   pose in the Material palette's Poses, with a picture of it; double-click
@@ -1006,8 +1023,7 @@ Once a canvas is open:
   model that finds the body (MoveNet, 9 MB) or the hand (MediaPipe,
   4 MB) into its models folder; after that it works offline, on the
   computer itself. A whole person, clearly lit, scans best; arms and
-  legs pointing at the camera are guessed from how short they look. Sue's
-  3D hand is a right hand, so a left hand poses it as its mirror.
+  legs pointing at the camera are guessed from how short they look.
 - **3D layers:** Layer, New Layer, 3D Layer puts a cube, sphere, cylinder,
   cone, plane, prism or pyramid on the canvas, and File, Import, 3D Data brings in an OBJ
   model. With the Object tool (O), drag to turn the camera, Shift and drag

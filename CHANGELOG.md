@@ -11,6 +11,38 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Sue Paint, 3D drawing figures: the figures are new. A male and a
+  female body, a left and a right hand and a head are real, smooth
+  models with the thin guide lines of an artist's mannequin (the middle
+  line, rings at the joints), drawn with soft light, soft edges and, if
+  you like, a shadow on the floor and a light you can raise or lower.
+  The hand has knuckles, tendons, veins and nails; **Veins** and
+  **Tendon and knuckle prominence** are sliders. Poses and pictures
+  from before open as they were.
+- Sue Paint, Tool Property: **Model** picks which model a figure is,
+  and **Import 3D file** brings in a glTF, GLB or OBJ model (drop the
+  file on the canvas for the same). The file is kept inside your
+  picture and among the 3D object materials. A glTF model with a
+  skeleton is posed by its own bones.
+- Sue Paint, **Body shape by part**: beside height, head to body ratio
+  and the body shape chart, sliders for the head, neck, shoulders,
+  chest and bust, waist, hips, arms, hands and fingers, legs and feet.
+  Body shape materials keep them.
+- Sue Paint, posing: drag a hand or a foot and its arm or leg follows;
+  drag any other part and it follows the pointer. The picked joint
+  shows three rings that turn it about one axis. **Joint angle limits**
+  keeps every joint within what a body can do, **Pin joint** holds a
+  hand or foot in place while you pose the rest, **Reset part** puts a
+  part back, and a figure keeps to the ground when it sits or crouches.
+- Sue Paint, **Hand setup**: a pad that opens the hand, makes a fist or
+  folds the fingers flat, a spread slider and a lock for each finger,
+  for a hand figure and for either hand of a body.
+- Sue Paint, Material palette: twenty body poses and sixteen hand poses
+  of Sue's own. A hand pose dropped on a body closes its hands; a body
+  pose goes onto any model whose joints have the same names.
+
 ## [0.0.8] - 2026-11-17
 
 ### Added

@@ -50,6 +50,7 @@ pub(crate) use quick_access::MENU_COMMANDS as QUICK_ACCESS_COMMANDS;
 pub(crate) use sub_tool_detail::ToolPalettes;
 pub(crate) use sub_view::MENU_COMMANDS as SUB_VIEW_COMMANDS;
 pub(crate) use tool::{PROPERTY_MENU, SUB_TOOL_MENU, TOOL_MENU, slot_is_liquify};
+pub(crate) use tool_property::MODELS;
 
 /// The rice key: the Tool palette shows the main and sub colors under its
 /// tools (its menu's Show Color Icon).

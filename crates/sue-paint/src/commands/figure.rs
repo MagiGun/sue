@@ -22,12 +22,15 @@ use crate::studio::SuePaint;
 /// its photo. A test holds it to the flags of the table, which Auto
 /// Actions read.
 #[cfg_attr(not(test), allow(dead_code))]
-pub(super) const RECORDABLE: [&str; 13] = [
+pub(super) const RECORDABLE: [&str; 17] = [
     "figure.register_pose",
     "figure.pose_scanner",
     "figure.hand_scanner",
     "figure.flip",
     "figure.reset",
+    "figure.reset_part",
+    "figure.pin",
+    "figure.model.",
     "figure.preset.",
     "figure.object.ground",
     "figure.object.reset_position",
@@ -36,6 +39,7 @@ pub(super) const RECORDABLE: [&str; 13] = [
     "figure.object.angle.",
     "figure.body.initialize",
     "figure.body.register",
+    "figure.slider.",
 ];
 
 /// The group's commands that leave the canvas (quit, print or open a
@@ -68,6 +72,87 @@ fn flip(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
 /// Reset pose: the figure back to its kind's first preset.
 fn reset(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.pose_figure(cx, |_, body| Some(body.standing()));
+}
+
+/// Reset part: the picked joint and everything hanging from it back as
+/// the figure's first pose holds them.
+fn reset_part(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    let Some(joint) = paint.figure_joint else {
+        cx.notify(tr!("pick-a-joint-first"));
+        return;
+    };
+    paint.pose_figure(cx, |now, body| {
+        let standing = body.standing();
+        let mut next = now.clone();
+        for part in crate::figure::hanging(&body.joints(), joint) {
+            if let (Some(turn), Some(rest)) = (next.0.get_mut(part), standing.0.get(part)) {
+                *turn = *rest;
+            }
+        }
+        Some(next)
+    });
+}
+
+/// Pin joint: the picked hand or foot kept where it is while the rest
+/// of the body is posed, or freed again.
+fn pin(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.toggle_pin(cx);
+}
+
+/// `figure.model.<n>`: the figure made model `n` of Sue's own.
+fn model(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    if let Some((_, _, kind, build, side)) = call
+        .arg
+        .parse::<usize>()
+        .ok()
+        .and_then(|index| crate::panels::MODELS.get(index))
+    {
+        paint.set_figure_model(cx, *kind, *build, *side);
+    }
+}
+
+/// `figure.model.<n>` works while the current layer holds one of Sue's
+/// own figures and there is a model `n`.
+fn on_model(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    super::when(
+        current_body(paint, facts.arena)
+            .is_some_and(|body| body.kind != crate::figure::Kind::Imported)
+            && call
+                .arg
+                .parse::<usize>()
+                .is_ok_and(|index| index < crate::panels::MODELS.len()),
+    )
+}
+
+/// `figure.slider.<key>=<value>`: one slider of the body shape set (a
+/// key of [`crate::figure::SLIDERS`], its value as the slider keeps it),
+/// so an Auto Action or a script shapes a figure too.
+fn slider(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let Some((key, value)) = call
+        .arg
+        .split_once('=')
+        .and_then(|(key, value)| Some((key, value.trim().parse::<f32>().ok()?)))
+    else {
+        return;
+    };
+    paint.shape_figure(cx, &tr!("body-shape"), |now| {
+        Some(now.with_slider(key.trim(), value))
+    });
+}
+
+/// `figure.slider.<key>=<value>` works while the current layer holds
+/// one of Sue's own figures and `key` names a slider.
+fn on_slider(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    super::when(
+        current_body(paint, facts.arena)
+            .is_some_and(|body| body.kind != crate::figure::Kind::Imported)
+            && call.arg.split_once('=').is_some_and(|(key, value)| {
+                value.trim().parse::<f32>().is_ok()
+                    && crate::figure::SLIDERS
+                        .iter()
+                        .any(|slider| slider.key == key.trim())
+            }),
+    )
 }
 
 /// `figure.preset.<n>`: the figure in its kind's preset pose `n`.
@@ -272,6 +357,23 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     .with(Flags::HIDDEN),
     c("figure.reset", "reset-pose", Icon::Reset, reset, on_figure).with(Flags::HIDDEN),
     c(
+        "figure.reset_part",
+        "reset-part",
+        Icon::Reset,
+        reset_part,
+        on_figure,
+    )
+    .with(Flags::HIDDEN),
+    c("figure.pin", "pin-joint", Icon::Reset, pin, on_body).with(Flags::HIDDEN),
+    c(
+        "figure.model.",
+        "model-3d",
+        Icon::MaterialPose,
+        model,
+        on_model,
+    )
+    .with(Flags::FAMILY.with(Flags::HIDDEN)),
+    c(
         "figure.preset.",
         "poses",
         Icon::MaterialPose,
@@ -329,6 +431,14 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         register_body,
         on_body,
     ),
+    c(
+        "figure.slider.",
+        "body-shape",
+        Icon::MaterialPose,
+        slider,
+        on_slider,
+    )
+    .with(Flags::FAMILY.with(Flags::HIDDEN)),
 ];
 
 #[cfg(test)]
@@ -383,6 +493,14 @@ mod tests {
             .filter(|command| command.is_family())
             .map(|command| command.name)
             .collect();
-        assert_eq!(family, ["figure.preset.", "figure.object.angle."]);
+        assert_eq!(
+            family,
+            [
+                "figure.model.",
+                "figure.preset.",
+                "figure.object.angle.",
+                "figure.slider."
+            ]
+        );
     }
 }

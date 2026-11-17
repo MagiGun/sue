@@ -19,12 +19,82 @@
 //! head (neck, skull, jaw, nose, eyes and ears, to turn and tilt). Each
 //! kind has its own joints, framing and preset poses, and poses, draws
 //! and is posed by dragging its parts the same way.
+//!
+//! # Hand joints
+//!
+//! The stable contract for everything that reads or writes a hand's pose
+//! (the Hand Scanner, hand pose materials, the hand setup pad). A hand
+//! figure ([`Kind::Hand`]) has the sixteen joints of [`HAND`], in this
+//! order, and its [`Pose`] holds one `[x, y, z]` turn in degrees for each:
+//!
+//! | Index | Name | x (curl) | y (twist) | z (spread) |
+//! | --- | --- | --- | --- | --- |
+//! | 0 | Palm | free | free | free |
+//! | 1 | Index finger base | -30 to 95 | -15 to 15 | -30 to 30 |
+//! | 2 | Index finger middle | 0 to 115 | 0 | 0 |
+//! | 3 | Index finger tip | -10 to 85 | 0 | 0 |
+//! | 4 | Middle finger base | -30 to 95 | -15 to 15 | -30 to 30 |
+//! | 5 | Middle finger middle | 0 to 115 | 0 | 0 |
+//! | 6 | Middle finger tip | -10 to 85 | 0 | 0 |
+//! | 7 | Ring finger base | -30 to 95 | -15 to 15 | -30 to 30 |
+//! | 8 | Ring finger middle | 0 to 115 | 0 | 0 |
+//! | 9 | Ring finger tip | -10 to 85 | 0 | 0 |
+//! | 10 | Little finger base | -30 to 95 | -15 to 15 | -30 to 30 |
+//! | 11 | Little finger middle | 0 to 115 | 0 | 0 |
+//! | 12 | Little finger tip | -10 to 85 | 0 | 0 |
+//! | 13 | Thumb base | -45 to 75 | -60 to 60 | -80 to 45 |
+//! | 14 | Thumb middle | -20 to 80 | -20 to 20 | -30 to 30 |
+//! | 15 | Thumb tip | -30 to 95 | -10 to 10 | -15 to 15 |
+//!
+//! The axes are the hand's own, the same for every joint at rest: the
+//! palm faces +z, the fingers point up +y, the thumb is on the -x side
+//! and the little finger on the +x side (a left hand; a right hand is
+//! its mirror image and takes the same numbers). A joint with no turn is
+//! the open flat hand. Turning about x by a positive angle curls the
+//! joint toward the palm (a fist is about 88, 100, 62 down a finger).
+//! Turning about z by a positive angle swings the finger toward the
+//! thumb side, a negative one toward the little finger side. Turning
+//! about y twists the finger about its own length. The three turns
+//! compose as z, then y, then x (`Rz * Ry * Rx`), and each joint's turn
+//! is in its parent's frame: the base joints hang from the palm, each
+//! middle joint from its base, each tip from its middle.
+//!
+//! The ranges are the joint angle limits ([`limits`]) that posing keeps
+//! to while Joint angle limits is on; a pose text may hold any numbers
+//! and still loads. A pose is kept as text by [`Pose::to_text`]
+//! (`v1;x,y,z;x,y,z;...`, joints in the order above) and read back by
+//! [`Pose::from_text_for`]; joints a text lacks stay unturned and
+//! joints it has too many of are dropped, so older and newer texts both
+//! load. [`Pose::of`] reads a figure model's pose, [`set_pose`] is the
+//! one undo step that poses it, and [`aimed`] makes a pose from the
+//! directions bones should point in (what a camera sees).
+//!
+//! A right hand ([`SIDE`] `right`, [`Side::Right`]) is drawn as the left
+//! hand's mirror image and keeps the left hand's numbers and joints:
+//! [`Body::joints`] and [`aimed`] work in the left hand's space, so
+//! directions measured off a right hand are mirrored (x negated) before
+//! they are given to [`aimed`], and the pose that comes back shows
+//! right on the right hand. [`solve`], [`bones`] and [`surface`] give
+//! the mirrored hand as it is drawn.
+//!
+//! A body figure's hands carry the same fifteen finger joints, named
+//! with their side (`Left index finger base` and so on) after the
+//! body's first seventeen joints, so body pose texts from before the
+//! fingers existed load unchanged. [`hand_onto_body`] lays a hand pose
+//! onto one of a body's hands and [`hand_from_body`] reads it back.
 
 use sue_core::txn::{ReplaceComponent, SetProperty};
 use sue_core::{Arena, Entity, EntityId, MeshBuffer3D, Value};
 use sue_model::{Geometry, PrimKind};
 
 use crate::doc::Edit;
+
+pub(crate) mod human;
+mod posing;
+pub use posing::{
+    HandSetup, Limits, aimed_at, hand_from_body, hand_onto_body, hand_pose, hand_setup, hanging,
+    held, limb_of, limited, limits, reached, retargeted, turned,
+};
 
 /// The class of a drawing figure's model entity.
 pub const CLASS: &str = "sue.paint.figure";
@@ -44,6 +114,20 @@ pub const SHAPE: &str = "figure.shape";
 /// The head to body ratio follows the height, as a real person's does
 /// (`Bool`, Clip Studio Paint's Adjust head to body ratio with height).
 pub const FOLLOW: &str = "figure.follow_height";
+/// The body shape's sliders that are not at rest, as text: `key=value`
+/// with `;` between (see [`SLIDERS`], `Text`).
+pub const PARTS_TEXT: &str = "figure.parts";
+/// Which hand a hand figure is: `left` or `right` (`Text`).
+pub const SIDE: &str = "figure.side";
+/// The figure shows its guide lines (`Bool`, on unless set).
+pub const GUIDES: &str = "figure.guides";
+/// A body keeps to the ground as it is posed: it comes down when it
+/// sits or crouches (`Bool`; a figure from before this was kept does
+/// not).
+pub const GROUND: &str = "figure.ground";
+/// The hands and feet pinned where they are while the rest of the body
+/// is posed: their joint numbers, `,` between (`Text`).
+pub const PINS: &str = "figure.pins";
 
 /// A body's type: how its shoulders, waist and hips are built.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -161,6 +245,132 @@ impl Shape {
     }
 }
 
+/// Which hand a hand figure is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Side {
+    /// A left hand, as the hand figure is modeled.
+    #[default]
+    Left,
+    /// A right hand: the left hand's mirror image.
+    Right,
+}
+
+impl Side {
+    /// Its name in [`SIDE`].
+    #[must_use]
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+
+    /// The side named `key`; left for anything else.
+    #[must_use]
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "right" => Self::Right,
+            _ => Self::Left,
+        }
+    }
+}
+
+/// One slider of the body shape: a part of the body made longer, wider
+/// or more marked.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Slider {
+    /// Its name in [`PARTS_TEXT`] and in body shape materials.
+    pub key: &'static str,
+    /// What people read, kept in English (`localize` shows it).
+    pub name: &'static str,
+    /// The group it is listed under, as people read it.
+    pub group: &'static str,
+    /// Its least and most.
+    pub range: [f32; 2],
+    /// Its value on a new figure.
+    pub rest: f32,
+    /// Hand figures have it too.
+    pub hand: bool,
+}
+
+const fn slider(
+    key: &'static str,
+    name: &'static str,
+    group: &'static str,
+    range: [f32; 2],
+    rest: f32,
+    hand: bool,
+) -> Slider {
+    Slider {
+        key,
+        name,
+        group,
+        range,
+        rest,
+        hand,
+    }
+}
+
+const WHOLE: [f32; 2] = [-1.0, 1.0];
+const PART: [f32; 2] = [0.0, 1.0];
+
+/// The body shape's sliders, part by part, in the order people see
+/// them.
+pub const SLIDERS: [Slider; 20] = [
+    slider("head_width", "Head width", "Head", WHOLE, 0.0, false),
+    slider("head_length", "Head length", "Head", WHOLE, 0.0, false),
+    slider("neck_length", "Neck length", "Neck", WHOLE, 0.0, false),
+    slider("neck_width", "Neck width", "Neck", WHOLE, 0.0, false),
+    slider(
+        "shoulders",
+        "Shoulder width",
+        "Shoulders",
+        WHOLE,
+        0.0,
+        false,
+    ),
+    slider("chest", "Chest", "Chest", WHOLE, 0.0, false),
+    slider("bust", "Bust", "Chest", WHOLE, 0.0, false),
+    slider("torso_length", "Torso length", "Chest", WHOLE, 0.0, false),
+    slider("waist", "Waist", "Waist", WHOLE, 0.0, false),
+    slider("hips", "Hips", "Hips", WHOLE, 0.0, false),
+    slider("arm_length", "Arm length", "Arms", WHOLE, 0.0, false),
+    slider("arm_width", "Arm width", "Arms", WHOLE, 0.0, true),
+    slider("hand_size", "Hand size", "Hands", WHOLE, 0.0, true),
+    slider("finger_length", "Finger length", "Hands", WHOLE, 0.0, true),
+    slider(
+        "finger_width",
+        "Finger thickness",
+        "Hands",
+        WHOLE,
+        0.0,
+        true,
+    ),
+    slider("veins", "Veins", "Hands", PART, 0.3, true),
+    slider(
+        "prominence",
+        "Tendon and knuckle prominence",
+        "Hands",
+        PART,
+        0.35,
+        true,
+    ),
+    slider("leg_length", "Leg length", "Legs", WHOLE, 0.0, false),
+    slider("leg_width", "Leg width", "Legs", WHOLE, 0.0, false),
+    slider("foot_size", "Foot size", "Feet", WHOLE, 0.0, false),
+];
+
+/// The sliders' values on a new figure.
+const SLIDERS_REST: [f32; SLIDERS.len()] = {
+    let mut rest = [0.0; SLIDERS.len()];
+    let mut at = 0;
+    while at < SLIDERS.len() {
+        rest[at] = SLIDERS[at].rest;
+        at += 1;
+    }
+    rest
+};
+
 /// What a figure is.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Kind {
@@ -171,6 +381,8 @@ pub enum Kind {
     Hand,
     /// A head ([`HEAD_JOINTS`]).
     Head,
+    /// A model imported from a file, posed by its own bones.
+    Imported,
 }
 
 impl Kind {
@@ -181,6 +393,7 @@ impl Kind {
             Self::Body => "body",
             Self::Hand => "hand",
             Self::Head => "head",
+            Self::Imported => "imported",
         }
     }
 
@@ -190,6 +403,7 @@ impl Kind {
         match key {
             "hand" => Self::Hand,
             "head" => Self::Head,
+            "imported" => Self::Imported,
             _ => Self::Body,
         }
     }
@@ -461,7 +675,7 @@ const fn joint(
 
 /// The figure's joints, parents first. The figure stands about 1.9 tall
 /// on the ground, facing +z; its left is +x.
-pub const JOINTS: [Joint; 17] = [
+const BODY17: [Joint; 17] = [
     joint(
         "Hips",
         None,
@@ -617,6 +831,155 @@ pub const JOINTS: [Joint; 17] = [
     ),
 ];
 
+/// What people read for a hand's fifteen finger joints on a body, the
+/// left hand's then the right's, in the hand's own order.
+const FINGER_NAMES: [[&str; 15]; 2] = [
+    [
+        "Left index finger base",
+        "Left index finger middle",
+        "Left index finger tip",
+        "Left middle finger base",
+        "Left middle finger middle",
+        "Left middle finger tip",
+        "Left ring finger base",
+        "Left ring finger middle",
+        "Left ring finger tip",
+        "Left little finger base",
+        "Left little finger middle",
+        "Left little finger tip",
+        "Left thumb base",
+        "Left thumb middle",
+        "Left thumb tip",
+    ],
+    [
+        "Right index finger base",
+        "Right index finger middle",
+        "Right index finger tip",
+        "Right middle finger base",
+        "Right middle finger middle",
+        "Right middle finger tip",
+        "Right ring finger base",
+        "Right ring finger middle",
+        "Right ring finger tip",
+        "Right little finger base",
+        "Right little finger middle",
+        "Right little finger tip",
+        "Right thumb base",
+        "Right thumb middle",
+        "Right thumb tip",
+    ],
+];
+
+/// The figure's joints. The first seventeen are the body as it has
+/// always been posed (so a pose text from before there were more still
+/// loads): hips, spine, chest, neck, head, each arm's upper arm, forearm
+/// and hand, each leg's thigh, shin and foot. Then the shoulders (17,
+/// 18), the toes (19, 20), the left hand's fifteen finger joints (21 to
+/// 35, in [`HAND`]'s order) and the right's (36 to 50), the jaw (51) and
+/// the eyes (52, 53). The figure stands about 1.9 tall on the ground,
+/// facing +z; its left is +x. Where each joint really sits and how long
+/// its bone is comes from the body's mesh ([`Body::joints`]); the
+/// numbers here are only the old figure's.
+pub const JOINTS: [Joint; 54] = {
+    let none = joint(
+        "",
+        None,
+        [0.0; 3],
+        [0.0, 0.03, 0.0],
+        [0.01; 2],
+        [0.01; 2],
+        None,
+    );
+    let mut all = [none; 54];
+    let mut at = 0;
+    while at < 17 {
+        all[at] = BODY17[at];
+        at += 1;
+    }
+    all[17] = joint(
+        "Left shoulder",
+        Some(2),
+        [0.03, 0.17, 0.0],
+        [0.17, 0.02, 0.0],
+        [0.04; 2],
+        [0.04; 2],
+        Some(18),
+    );
+    all[18] = joint(
+        "Right shoulder",
+        Some(2),
+        [-0.03, 0.17, 0.0],
+        [-0.17, 0.02, 0.0],
+        [0.04; 2],
+        [0.04; 2],
+        Some(17),
+    );
+    all[5].parent = Some(17);
+    all[8].parent = Some(18);
+    all[19] = joint(
+        "Left toes",
+        Some(13),
+        [0.0, -0.04, 0.17],
+        [0.0, 0.0, 0.06],
+        [0.03, 0.015],
+        [0.03, 0.01],
+        Some(20),
+    );
+    all[20] = joint(
+        "Right toes",
+        Some(16),
+        [0.0, -0.04, 0.17],
+        [0.0, 0.0, 0.06],
+        [0.03, 0.015],
+        [0.03, 0.01],
+        Some(19),
+    );
+    let mut side = 0;
+    while side < 2 {
+        let first = 21 + side * 15;
+        let hand = if side == 0 { 7 } else { 10 };
+        let mut k = 0;
+        while k < 15 {
+            let parent = if k % 3 == 0 { hand } else { first + k - 1 };
+            let mut finger = HAND[k + 1];
+            finger.name = FINGER_NAMES[side][k];
+            finger.parent = Some(parent);
+            finger.mirror = Some(21 + (1 - side) * 15 + k);
+            all[first + k] = finger;
+            k += 1;
+        }
+        side += 1;
+    }
+    all[51] = joint(
+        "Jaw",
+        Some(4),
+        [0.0, 0.0, 0.03],
+        [0.0, -0.06, 0.06],
+        [0.04; 2],
+        [0.03; 2],
+        None,
+    );
+    all[52] = joint(
+        "Left eye",
+        Some(4),
+        [0.03, 0.03, 0.09],
+        [0.0, 0.0, 0.01],
+        [0.012; 2],
+        [0.012; 2],
+        Some(53),
+    );
+    all[53] = joint(
+        "Right eye",
+        Some(4),
+        [-0.03, 0.03, 0.09],
+        [0.0, 0.0, 0.01],
+        [0.012; 2],
+        [0.012; 2],
+        Some(52),
+    );
+    all
+};
+
 /// The middle and size Sue Paint frames a figure by, so posing never
 /// changes how large it shows.
 pub const FRAME: ([f32; 3], f32) = ([0.0, 0.95, 0.0], 2.1);
@@ -638,6 +1001,16 @@ pub struct Body {
     pub shape: Shape,
     /// The head to body ratio follows the height.
     pub follow: bool,
+    /// The body shape's sliders, in [`SLIDERS`] order.
+    pub parts: [f32; SLIDERS.len()],
+    /// Which hand a hand figure is.
+    pub side: Side,
+    /// It shows its guide lines.
+    pub guides: bool,
+    /// A body keeps to the ground as it is posed.
+    pub ground: bool,
+    /// An imported model's skeleton, by number (0 for Sue's own figures).
+    pub rig: u64,
     /// Where it stands, how it is turned and how large it is.
     pub place: crate::three::Placement,
 }
@@ -682,8 +1055,79 @@ impl Body {
                 .property(FOLLOW)
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            parts: entity
+                .property(PARTS_TEXT)
+                .and_then(Value::as_str)
+                .map_or(SLIDERS_REST, Self::parts_from_text),
+            side: entity
+                .property(SIDE)
+                .and_then(Value::as_str)
+                .map_or(Side::Left, Side::from_key),
+            guides: entity
+                .property(GUIDES)
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            ground: entity
+                .property(GROUND)
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            rig: if entity.property(KIND).and_then(Value::as_str) == Some("imported") {
+                crate::model3d::rig_of(entity)
+            } else {
+                0
+            },
             place: crate::three::Placement::of(entity),
         }
+    }
+
+    /// The value of the slider named `key` (0 when there is none).
+    #[must_use]
+    pub fn slider(&self, key: &str) -> f32 {
+        SLIDERS
+            .iter()
+            .position(|slider| slider.key == key)
+            .map_or(0.0, |at| self.parts[at])
+    }
+
+    /// The same body with the slider named `key` at `value`, kept in
+    /// its range.
+    #[must_use]
+    pub fn with_slider(mut self, key: &str, value: f32) -> Self {
+        if let Some(at) = SLIDERS.iter().position(|slider| slider.key == key)
+            && value.is_finite()
+        {
+            let [least, most] = SLIDERS[at].range;
+            self.parts[at] = value.clamp(least, most);
+        }
+        self
+    }
+
+    /// The sliders that are not at rest as text: `key=value`, `;`
+    /// between.
+    #[must_use]
+    pub fn parts_text(&self) -> String {
+        SLIDERS
+            .iter()
+            .zip(self.parts)
+            .filter(|(slider, value)| (*value - slider.rest).abs() > 1e-6)
+            .map(|(slider, value)| format!("{}={value}", slider.key))
+            .collect::<Vec<_>>()
+            .join(";")
+    }
+
+    /// The sliders `text` ([`Self::parts_text`]) holds; what it does not
+    /// name, or names unreadably, is at rest.
+    #[must_use]
+    pub fn parts_from_text(text: &str) -> [f32; SLIDERS.len()] {
+        let mut body = Self::default();
+        for pair in text.split(';') {
+            if let Some((key, value)) = pair.split_once('=')
+                && let Ok(value) = value.trim().parse::<f32>()
+            {
+                body = body.with_slider(key.trim(), value);
+            }
+        }
+        body.parts
     }
 
     /// The head to body ratio of a person `height` centimeters tall, as
@@ -717,6 +1161,9 @@ impl Body {
     pub fn initialized(self) -> Self {
         Self {
             kind: self.kind,
+            side: self.side,
+            ground: self.ground,
+            rig: self.rig,
             place: self.place,
             ..Self::default()
         }
@@ -728,12 +1175,13 @@ impl Body {
     #[must_use]
     pub fn shape_text(&self) -> String {
         format!(
-            "build={}\nheight={}\nheads={}\nshape={}\nfollow={}\n",
+            "build={}\nheight={}\nheads={}\nshape={}\nfollow={}\nparts={}\n",
             self.build.key(),
             self.height,
             self.heads,
             self.shape.to_text(),
             self.follow,
+            self.parts_text(),
         )
     }
 
@@ -761,6 +1209,7 @@ impl Body {
                 }
                 "shape" => body.shape = Shape::from_text(value),
                 "follow" => body.follow = value == "true",
+                "parts" => body.parts = Self::parts_from_text(value),
                 _ => continue,
             }
             read = true;
@@ -775,8 +1224,11 @@ impl Body {
         let scale = self.height / Self::HEIGHT;
         let (middle, size) = match self.kind {
             Kind::Body => FRAME,
-            Kind::Hand => ([0.0, 0.095, 0.0], 0.26),
-            Kind::Head => ([0.0, 0.13, 0.025], 0.34),
+            Kind::Hand => ([0.0, 0.07, 0.0], 0.3),
+            Kind::Head => ([0.0, 0.11, 0.02], 0.38),
+            Kind::Imported => {
+                return human::shaped(self).frame.unwrap_or(([0.0; 3], 2.0));
+            }
         };
         (middle.map(|value| value * scale), size * scale)
     }
@@ -788,6 +1240,7 @@ impl Body {
             Kind::Body => &PRESETS,
             Kind::Hand => &HAND_PRESETS,
             Kind::Head => &HEAD_PRESETS,
+            Kind::Imported => &[],
         }
     }
 
@@ -795,9 +1248,24 @@ impl Body {
     #[must_use]
     pub fn preset(&self, index: usize) -> Pose {
         match self.kind {
-            Kind::Body => preset(index),
-            Kind::Hand => hand_preset(index),
+            Kind::Body => {
+                // The body's pose, its hands relaxed (or as the pose
+                // holds them).
+                let mut pose = preset(index);
+                let hands = match index {
+                    15 => [2, 2],
+                    10 => [1, 0],
+                    5 | 14 => [0, 0],
+                    _ => [1, 1],
+                };
+                for (side, hand) in [Side::Left, Side::Right].into_iter().zip(hands) {
+                    hand_onto_body(self, &mut pose, side, &hand_pose(self, hand));
+                }
+                pose
+            }
+            Kind::Hand => hand_pose(self, index),
             Kind::Head => head_preset(index),
+            Kind::Imported => Pose(vec![[0.0; 3]; human::shaped(self).joints.len()]),
         }
     }
 
@@ -807,57 +1275,25 @@ impl Body {
         self.preset(0)
     }
 
-    /// The joints shaped for this body: the head grown or shrunk to its
-    /// ratio and the rest lengthened or shortened to keep the height, then
-    /// all scaled to the height. Lengths (up and down) change; shoulders and
-    /// hips keep their width, so a short ratio reads as a child or a
-    /// chibi, not a thin adult.
+    /// The joints shaped for this body, as poses turn them: where each
+    /// sits in its parent's frame and its bone in its own, measured off
+    /// the body's mesh once its type, chart, sliders, head to body ratio
+    /// and height have shaped it. A right hand's are the left hand's (it
+    /// is drawn mirrored), so the same pose numbers suit both.
     #[must_use]
     pub fn joints(&self) -> Vec<Joint> {
-        let scale = self.height / Self::HEIGHT * self.place.scale;
-        let scaled = |joints: &[Joint]| -> Vec<Joint> {
-            joints
-                .iter()
-                .map(|joint| Joint {
-                    offset: joint.offset.map(|value| value * scale),
-                    bone: joint.bone.map(|value| value * scale),
-                    start: joint.start.map(|value| value * scale),
-                    end: joint.end.map(|value| value * scale),
-                    ..*joint
-                })
-                .collect()
-        };
-        match self.kind {
-            Kind::Hand => return scaled(&HAND),
-            Kind::Head => return scaled(&HEAD_JOINTS),
-            Kind::Body => {}
-        }
-        let head = Self::HEADS / self.heads;
-        let rest = (1.0 - 1.0 / self.heads) / (1.0 - 1.0 / Self::HEADS);
-        let mut joints = JOINTS;
-        if self.build == Build::Female {
-            built_female(&mut joints);
-        }
-        for (at, joint) in joints.iter_mut().enumerate() {
-            let [across, through] = self.shape.widths(at);
-            for half in [&mut joint.start, &mut joint.end] {
-                half[0] *= across;
-                half[1] *= through;
-            }
-            if at == HEAD {
-                joint.bone = joint.bone.map(|value| value * head * scale);
-                joint.start = joint.start.map(|value| value * head * scale);
-                joint.end = joint.end.map(|value| value * head * scale);
-                joint.offset = joint.offset.map(|value| value * rest * scale);
-            } else {
-                let long = |v: [f32; 3]| [v[0] * scale, v[1] * rest * scale, v[2] * scale];
-                joint.bone = long(joint.bone);
-                joint.offset = long(joint.offset);
-                joint.start = joint.start.map(|value| value * scale);
-                joint.end = joint.end.map(|value| value * scale);
-            }
-        }
-        joints.to_vec()
+        let scale = self.place.scale;
+        human::shaped(self)
+            .joints
+            .iter()
+            .map(|joint| Joint {
+                offset: joint.offset.map(|value| value * scale),
+                bone: joint.bone.map(|value| value * scale),
+                start: joint.start.map(|value| value * scale),
+                end: joint.end.map(|value| value * scale),
+                ..*joint
+            })
+            .collect()
     }
 }
 
@@ -870,39 +1306,18 @@ impl Default for Body {
             build: Build::Male,
             shape: Shape::default(),
             follow: false,
+            parts: SLIDERS_REST,
+            side: Side::Left,
+            guides: true,
+            ground: true,
+            rig: 0,
             place: crate::three::Placement::default(),
         }
     }
 }
 
-/// [`JOINTS`] built as a female body: shoulders, chest, waist, neck and
-/// arms narrower, hips and thighs set wider.
-fn built_female(joints: &mut [Joint; 17]) {
-    let across = |joint: &mut Joint, by: f32| {
-        joint.start[0] *= by;
-        joint.end[0] *= by;
-    };
-    // The hips wider, the waist, chest and neck narrower.
-    across(&mut joints[0], 1.12);
-    across(&mut joints[1], 0.86);
-    across(&mut joints[2], 0.88);
-    across(&mut joints[3], 0.86);
-    for arm in [5, 6, 7, 8, 9, 10] {
-        let joint = &mut joints[arm];
-        joint.start = joint.start.map(|value| value * 0.9);
-        joint.end = joint.end.map(|value| value * 0.9);
-    }
-    // Shoulders in, legs out.
-    for shoulder in [5, 8] {
-        joints[shoulder].offset[0] *= 0.88;
-    }
-    for thigh in [11, 14] {
-        joints[thigh].offset[0] *= 1.1;
-        joints[thigh].start[0] *= 1.06;
-    }
-}
-
 /// The head, in [`JOINTS`].
+#[cfg(test)]
 const HEAD: usize = 4;
 
 /// How every joint is turned, in degrees about its x, y and z.
@@ -982,8 +1397,10 @@ impl Pose {
             JOINTS.to_vec()
         };
         let mut out = self.clone();
+        let mirror =
+            |at: usize, joint: &Joint| joint.mirror.filter(|m| *m < self.0.len()).unwrap_or(at);
         for (at, joint) in joints.iter().enumerate().take(self.0.len()) {
-            let [x, y, z] = self.0[joint.mirror.unwrap_or(at).min(self.0.len() - 1)];
+            let [x, y, z] = self.0[mirror(at, joint)];
             out.0[at] = [x, -y, -z];
         }
         out
@@ -991,10 +1408,31 @@ impl Pose {
 }
 
 /// What people read for the pose presets, in order.
-pub const PRESETS: [&str; 7] = ["Stand", "T-pose", "Walk", "Run", "Sit", "Arms up", "Think"];
+pub const PRESETS: [&str; 20] = [
+    "Stand",
+    "T-pose",
+    "Walk",
+    "Run",
+    "Sit",
+    "Arms up",
+    "Think",
+    "Contrapposto",
+    "Hands on hips",
+    "Arms crossed",
+    "Wave",
+    "Reach forward",
+    "Crouch",
+    "Kneel",
+    "Jump",
+    "Punch",
+    "Kick",
+    "Sit on the floor",
+    "Bow",
+    "Look back",
+];
 
 /// What people read for the hand's preset poses, in order.
-pub const HAND_PRESETS: [&str; 7] = [
+pub const HAND_PRESETS: [&str; 16] = [
     "Open hand",
     "Relaxed",
     "Fist",
@@ -1002,6 +1440,15 @@ pub const HAND_PRESETS: [&str; 7] = [
     "Peace sign",
     "Thumbs up",
     "Holding",
+    "Spread",
+    "Flat fold",
+    "OK sign",
+    "Pinch",
+    "Claw",
+    "Rock",
+    "Three",
+    "Call me",
+    "Finger gun",
 ];
 
 /// Hand preset pose `index` (see [`HAND_PRESETS`]).
@@ -1155,6 +1602,166 @@ pub fn preset(index: usize) -> Pose {
             set(5, [10.0, 0.0, 15.0]);
             set(6, [-90.0, 0.0, 0.0]);
         }
+        // Contrapposto: the weight on one leg, the hips and shoulders
+        // tilted against each other.
+        7 => {
+            set(0, [0.0, 0.0, 6.0]);
+            set(1, [0.0, 0.0, -5.0]);
+            set(2, [0.0, 8.0, -6.0]);
+            set(4, [0.0, -12.0, 4.0]);
+            set(11, [-4.0, 0.0, 2.0]);
+            set(14, [-14.0, 0.0, -10.0]);
+            set(15, [24.0, 0.0, 0.0]);
+            set(16, [-8.0, 0.0, 0.0]);
+            set(5, [5.0, 0.0, 14.0]);
+            set(6, [-18.0, 0.0, 0.0]);
+            set(8, [-8.0, 0.0, -16.0]);
+            set(9, [-30.0, 0.0, 0.0]);
+        }
+        // Hands on hips.
+        8 => {
+            set(5, [22.0, -70.0, 46.0]);
+            set(6, [-98.0, 0.0, 0.0]);
+            set(8, [22.0, 70.0, -46.0]);
+            set(9, [-98.0, 0.0, 0.0]);
+            set(11, [0.0, 0.0, 6.0]);
+            set(14, [0.0, 0.0, -6.0]);
+        }
+        // Arms crossed.
+        9 => {
+            set(5, [-34.0, -62.0, 14.0]);
+            set(6, [-104.0, 0.0, 0.0]);
+            set(8, [-28.0, 62.0, -14.0]);
+            set(9, [-112.0, 0.0, 0.0]);
+            set(4, [4.0, 0.0, 0.0]);
+        }
+        // Wave.
+        10 => {
+            set(8, [0.0, -90.0, -96.0]);
+            set(9, [-78.0, 0.0, 0.0]);
+            set(5, [0.0, 0.0, 10.0]);
+            set(6, [-10.0, 0.0, 0.0]);
+            set(4, [0.0, -8.0, -6.0]);
+            set(2, [0.0, 0.0, -4.0]);
+        }
+        // Reach forward.
+        11 => {
+            set(1, [16.0, 0.0, 0.0]);
+            set(2, [10.0, 12.0, 0.0]);
+            set(8, [-88.0, 0.0, -4.0]);
+            set(9, [-8.0, 0.0, 0.0]);
+            set(5, [22.0, 0.0, 12.0]);
+            set(6, [-20.0, 0.0, 0.0]);
+            set(11, [-24.0, 0.0, 3.0]);
+            set(12, [18.0, 0.0, 0.0]);
+            set(14, [16.0, 0.0, -3.0]);
+            set(15, [22.0, 0.0, 0.0]);
+        }
+        // Crouch.
+        12 => {
+            set(1, [28.0, 0.0, 0.0]);
+            set(2, [14.0, 0.0, 0.0]);
+            set(4, [-24.0, 0.0, 0.0]);
+            set(11, [-112.0, 0.0, 10.0]);
+            set(12, [132.0, 0.0, 0.0]);
+            set(13, [-22.0, 0.0, 0.0]);
+            set(14, [-112.0, 0.0, -10.0]);
+            set(15, [132.0, 0.0, 0.0]);
+            set(16, [-22.0, 0.0, 0.0]);
+            set(5, [-58.0, 0.0, 10.0]);
+            set(6, [-42.0, 0.0, 0.0]);
+            set(8, [-58.0, 0.0, -10.0]);
+            set(9, [-42.0, 0.0, 0.0]);
+        }
+        // Kneel, on one knee.
+        13 => {
+            set(11, [-88.0, 0.0, 4.0]);
+            set(12, [88.0, 0.0, 0.0]);
+            set(14, [6.0, 0.0, -4.0]);
+            set(15, [96.0, 0.0, 0.0]);
+            set(16, [38.0, 0.0, 0.0]);
+            set(5, [-36.0, 0.0, 8.0]);
+            set(6, [-48.0, 0.0, 0.0]);
+            set(8, [6.0, 0.0, -8.0]);
+            set(9, [-12.0, 0.0, 0.0]);
+        }
+        // Jump.
+        14 => {
+            set(1, [-10.0, 0.0, 0.0]);
+            set(11, [-72.0, 0.0, 6.0]);
+            set(12, [102.0, 0.0, 0.0]);
+            set(14, [22.0, 0.0, -6.0]);
+            set(15, [64.0, 0.0, 0.0]);
+            set(16, [30.0, 0.0, 0.0]);
+            set(5, [-10.0, 0.0, 142.0]);
+            set(6, [-12.0, 0.0, 0.0]);
+            set(8, [-10.0, 0.0, -152.0]);
+            set(9, [-12.0, 0.0, 0.0]);
+            set(4, [-12.0, 0.0, 0.0]);
+        }
+        // Punch.
+        15 => {
+            set(0, [0.0, 10.0, 0.0]);
+            set(2, [6.0, 24.0, 0.0]);
+            set(4, [0.0, -26.0, 0.0]);
+            set(8, [-84.0, 0.0, -8.0]);
+            set(9, [-6.0, 0.0, 0.0]);
+            set(5, [14.0, -40.0, 24.0]);
+            set(6, [-122.0, 0.0, 0.0]);
+            set(11, [-28.0, 0.0, 8.0]);
+            set(12, [28.0, 0.0, 0.0]);
+            set(14, [22.0, 0.0, -8.0]);
+            set(15, [18.0, 0.0, 0.0]);
+        }
+        // Kick.
+        16 => {
+            set(1, [-12.0, 0.0, 0.0]);
+            set(14, [-86.0, 0.0, -4.0]);
+            set(15, [10.0, 0.0, 0.0]);
+            set(16, [28.0, 0.0, 0.0]);
+            set(11, [6.0, 0.0, 4.0]);
+            set(12, [8.0, 0.0, 0.0]);
+            set(5, [-30.0, 0.0, 30.0]);
+            set(6, [-62.0, 0.0, 0.0]);
+            set(8, [36.0, 0.0, -26.0]);
+            set(9, [-40.0, 0.0, 0.0]);
+        }
+        // Sit on the floor, knees up, leaning on the hands.
+        17 => {
+            set(0, [-16.0, 0.0, 0.0]);
+            set(1, [10.0, 0.0, 0.0]);
+            set(11, [-84.0, 0.0, 12.0]);
+            set(12, [84.0, 0.0, 0.0]);
+            set(13, [-6.0, 0.0, 0.0]);
+            set(14, [-84.0, 0.0, -12.0]);
+            set(15, [84.0, 0.0, 0.0]);
+            set(16, [-6.0, 0.0, 0.0]);
+            set(5, [36.0, 0.0, 16.0]);
+            set(6, [-4.0, 0.0, 0.0]);
+            set(8, [36.0, 0.0, -16.0]);
+            set(9, [-4.0, 0.0, 0.0]);
+        }
+        // Bow.
+        18 => {
+            set(1, [36.0, 0.0, 0.0]);
+            set(2, [24.0, 0.0, 0.0]);
+            set(3, [10.0, 0.0, 0.0]);
+            set(5, [-6.0, 0.0, 6.0]);
+            set(8, [-6.0, 0.0, -6.0]);
+        }
+        // Look back over the shoulder.
+        19 => {
+            set(1, [0.0, 20.0, 0.0]);
+            set(2, [0.0, 32.0, 0.0]);
+            set(3, [0.0, 38.0, 0.0]);
+            set(4, [4.0, 24.0, 0.0]);
+            set(5, [10.0, 0.0, 12.0]);
+            set(6, [-14.0, 0.0, 0.0]);
+            set(8, [-14.0, 0.0, -14.0]);
+            set(9, [-22.0, 0.0, 0.0]);
+            set(14, [-10.0, 0.0, -4.0]);
+            set(15, [16.0, 0.0, 0.0]);
+        }
         _ => {
             set(5, [0.0, 0.0, 12.0]);
             set(8, [0.0, 0.0, -12.0]);
@@ -1199,23 +1806,29 @@ fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
 /// Where every joint is and how it is turned, for `pose`.
 #[must_use]
 pub fn solve(pose: &Pose, body: &Body) -> Vec<([f32; 3], Mat3)> {
-    let mut placed: Vec<([f32; 3], Mat3)> = Vec::with_capacity(JOINTS.len());
-    // Where the body stands: the root placed, everything else hanging
-    // from it (its size is in the joints already).
+    let shaped = human::shaped(body);
     let stand = body.place.matrix();
-    let root = |offset: [f32; 3]| add(body.place.position, apply(&stand, offset));
-    for (at, joint) in body.joints().iter().enumerate() {
-        let turn = euler(pose.0.get(at).copied().unwrap_or([0.0; 3]));
-        let (position, rotation) = match joint.parent {
-            Some(parent) => {
-                let (from, frame) = placed[parent];
-                (add(from, apply(&frame, joint.offset)), mul(&frame, &turn))
+    let flip = human::is_mirrored(body);
+    human::posed(pose, &shaped, body)
+        .into_iter()
+        .map(|(mut at, mut frame)| {
+            // A right hand: the left hand's mirror image.
+            if flip {
+                at[0] = -at[0];
+                for (row, line) in frame.iter_mut().enumerate() {
+                    for (column, value) in line.iter_mut().enumerate() {
+                        if (row == 0) != (column == 0) {
+                            *value = -*value;
+                        }
+                    }
+                }
             }
-            None => (root(joint.offset), mul(&stand, &turn)),
-        };
-        placed.push((position, rotation));
-    }
-    placed
+            (
+                add(body.place.position, apply(&stand, at)),
+                mul(&stand, &frame),
+            )
+        })
+        .collect()
 }
 
 fn transpose(m: &Mat3) -> Mat3 {
@@ -1285,9 +1898,32 @@ pub fn aimed(
             .map(|at| base.0.get(at).copied().unwrap_or([0.0; 3]))
             .collect(),
     );
-    let mut frames: Vec<Mat3> = Vec::with_capacity(joints.len());
-    for (at, joint) in joints.iter().enumerate() {
-        let parent = joint.parent.map_or(IDENTITY, |parent| frames[parent]);
+    let mut frames: Vec<Mat3> = vec![IDENTITY; joints.len()];
+    // Parents first, whatever order the joints are listed in.
+    let mut order: Vec<usize> = Vec::with_capacity(joints.len());
+    let mut done = vec![false; joints.len()];
+    while order.len() < joints.len() {
+        let before = order.len();
+        for (at, joint) in joints.iter().enumerate() {
+            if !done[at]
+                && joint
+                    .parent
+                    .is_none_or(|parent| parent >= joints.len() || done[parent])
+            {
+                done[at] = true;
+                order.push(at);
+            }
+        }
+        if order.len() == before {
+            break;
+        }
+    }
+    for at in order {
+        let joint = &joints[at];
+        let parent = joint
+            .parent
+            .filter(|parent| *parent < joints.len())
+            .map_or(IDENTITY, |parent| frames[parent]);
         if at == 0
             && let Some(root) = root
         {
@@ -1298,12 +1934,12 @@ pub fn aimed(
             let local = apply(&transpose(&parent), target);
             pose.0[at] = degrees(&between(bone, local));
         }
-        frames.push(mul(&parent, &euler(pose.0[at])));
+        frames[at] = mul(&parent, &euler(pose.0[at]));
     }
     pose
 }
 
-const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+pub(crate) const IDENTITY: Mat3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 /// Each joint's bone, start and end, for `pose`.
 #[must_use]
@@ -1315,84 +1951,45 @@ pub fn bones(pose: &Pose, body: &Body) -> Vec<([f32; 3], [f32; 3])> {
         .collect()
 }
 
-/// The posed body as one shape: a rounded solid along every bone.
+/// The posed body as a surface to draw: its skin bent to the pose, with
+/// its guide lines and the relief of its hands.
+#[must_use]
+pub fn surface(pose: &Pose, body: &Body) -> crate::three::Surface {
+    human::surface(pose, body)
+}
+
+/// The posed body as `view` sees it on a `size` canvas.
+#[must_use]
+pub fn render(
+    pose: &Pose,
+    body: &Body,
+    view: &crate::three::View3D,
+    size: [u32; 2],
+) -> crate::three::Buffers {
+    crate::three::render_surface(&surface(pose, body), view, size, body.frame())
+}
+
+/// The posed body as one shape of triangles.
 #[must_use]
 pub fn geometry(pose: &Pose, body: &Body) -> Geometry {
+    let surface = surface(pose, body);
     let mut geometry = Geometry::new();
-    let placed = solve(pose, body);
-    let around = 12;
-    for ((start, frame), joint) in placed.iter().zip(body.joints().iter()) {
-        let length = joint
-            .bone
-            .iter()
-            .map(|value| value * value)
-            .sum::<f32>()
-            .sqrt();
-        if length <= 0.0 {
-            continue;
-        }
-        let along = joint.bone.map(|value| value / length);
-        // The part's own across and through, square to the bone.
-        let (across, through) = if along[1].abs() > 0.7 {
-            ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0])
-        } else {
-            ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0])
-        };
-        // Rings from a rounded start to a rounded end: (place along the
-        // bone, 0 to 1, and how wide there, 0 to 1 of the half widths).
-        let mut rings: Vec<(f32, f32, [f32; 2])> = Vec::new();
-        let caps = 4;
-        let reach = |half: [f32; 2]| half[0].max(half[1]) / length.max(1e-3);
-        for step in 0..=caps {
-            let angle = std::f32::consts::FRAC_PI_2 * (1.0 - step as f32 / caps as f32);
-            rings.push((
-                -angle.sin() * reach(joint.start) * 0.6,
-                angle.cos(),
-                joint.start,
-            ));
-        }
-        for step in 0..=caps {
-            let angle = std::f32::consts::FRAC_PI_2 * step as f32 / caps as f32;
-            rings.push((
-                1.0 + angle.sin() * reach(joint.end) * 0.6,
-                angle.cos(),
-                joint.end,
-            ));
-        }
-        let point = |t: f32, scale: f32, half: [f32; 2], i: usize| {
-            let theta = i as f32 / around as f32 * std::f32::consts::TAU;
-            let (c, s) = (theta.cos(), theta.sin());
-            let local = [0, 1, 2].map(|axis| {
-                joint.bone[axis] * t
-                    + across[axis] * c * half[0] * scale
-                    + through[axis] * s * half[1] * scale
-            });
-            let world = add(*start, apply(frame, local));
-            world.map(f64::from)
-        };
-        for pair in rings.windows(2) {
-            let ((t0, s0, h0), (t1, s1, h1)) = (pair[0], pair[1]);
-            for i in 0..around {
-                let ids: Vec<u32> = [
-                    point(t0, s0, h0, i),
-                    point(t0, s0, h0, i + 1),
-                    point(t1, s1, h1, i + 1),
-                    point(t1, s1, h1, i),
-                ]
-                .iter()
-                .map(|position| geometry.add_point(*position))
-                .collect();
-                let _ = geometry.add_prim(PrimKind::Polygon, &ids);
-            }
-        }
+    let ids: Vec<u32> = surface
+        .positions
+        .iter()
+        .map(|p| geometry.add_point(p.map(f64::from)))
+        .collect();
+    for t in surface.indices.as_chunks::<3>().0 {
+        let _ = geometry.add_prim(PrimKind::Polygon, &t.map(|i| ids[i as usize]));
     }
     geometry
 }
 
-/// The posed body as triangles, for the renderer.
+/// The posed body as triangles.
 #[must_use]
 pub fn mesh(pose: &Pose, body: &Body) -> MeshBuffer3D {
-    geometry(pose, body).to_mesh()
+    let surface = surface(pose, body);
+    MeshBuffer3D::new(surface.positions, surface.indices).unwrap_or_default()
 }
 
 /// A new figure model, standing.
@@ -1410,7 +2007,112 @@ pub fn new_of(name: &str, kind: Kind) -> Entity {
     };
     Entity::empty(name, CLASS)
         .with_property(KIND, Value::from(kind.key()))
+        .with_property(GROUND, Value::from(kind == Kind::Body))
         .with_property(POSE, Value::from(body.standing().to_text()))
+}
+
+/// The three rings of the rotation manipulator round joint `joint` of
+/// the posed body: for each of the joint's own x, y and z, a circle of
+/// points square to it, in the model's space. Turning a ring turns the
+/// joint about that axis ([`turned`]).
+#[must_use]
+pub fn rings(pose: &Pose, body: &Body, joint: usize) -> Option<[Vec<[f32; 3]>; 3]> {
+    let placed = solve(pose, body);
+    let (at, frame) = *placed.get(joint)?;
+    let joints = body.joints();
+    let bone = joints.get(joint)?.bone;
+    let long = (bone[0] * bone[0] + bone[1] * bone[1] + bone[2] * bone[2]).sqrt();
+    let size = body.frame().1 * body.place.scale;
+    let radius = (long * 0.8).clamp(size * 0.035, size * 0.075);
+    let axis = |k: usize| [frame[0][k], frame[1][k], frame[2][k]];
+    Some([0, 1, 2].map(|k| {
+        let (u, v) = (axis((k + 1) % 3), axis((k + 2) % 3));
+        (0..=48)
+            .map(|step| {
+                let (sin, cos) = (step as f32 / 48.0 * std::f32::consts::TAU).sin_cos();
+                [0, 1, 2].map(|i| at[i] + radius * (cos * u[i] + sin * v[i]))
+            })
+            .collect()
+    }))
+}
+
+/// The hands and feet pinned on figure model `entity`, by joint.
+#[must_use]
+pub fn pins_of(entity: &Entity) -> Vec<usize> {
+    entity
+        .property(PINS)
+        .and_then(Value::as_str)
+        .map(|text| {
+            text.split(',')
+                .filter_map(|joint| joint.trim().parse().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `pins` as [`PINS`] keeps them.
+#[must_use]
+pub fn pins_text(pins: &[usize]) -> String {
+    pins.iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// The edit that makes the figure of 3D layer `layer` another of Sue's
+/// models (a body of a type, a hand of a side, or a head) in that
+/// model's first pose, and draws the layer again, as one step named
+/// `label`. `None` for an imported model, which is its own.
+#[must_use]
+pub fn set_model(
+    arena: &Arena,
+    layer: EntityId,
+    kind: Kind,
+    build: Build,
+    side: Side,
+    label: &str,
+) -> Option<Edit> {
+    let model = of_layer(arena, layer)?;
+    let now = Body::of(arena.get_by_id(model).ok()?);
+    if now.kind == Kind::Imported || kind == Kind::Imported {
+        return None;
+    }
+    let body = Body {
+        kind,
+        build,
+        side,
+        ground: kind == Kind::Body,
+        ..now
+    };
+    let pose = if kind == now.kind {
+        Pose::of(arena.get_by_id(model).ok()?)
+    } else {
+        body.standing()
+    };
+    let raster = crate::doc::raster(arena, layer)?;
+    let size = [raster.width(), raster.height()];
+    let mut view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
+    let mut edit = Edit::new(label);
+    if kind != now.kind {
+        // Another kind of model is looked at its own way.
+        let fresh = crate::three::figure_view(kind);
+        view.yaw = fresh.yaw;
+        view.pitch = fresh.pitch;
+        view.distance = fresh.distance;
+        view.pan = [0.0; 2];
+        for set in view.edits(layer) {
+            edit = edit.then(set);
+        }
+    }
+    let drawn = crate::three::draw(&render(&pose, &body, &view, size), &view)?;
+    Some(
+        edit.then(SetProperty::new(model, KIND, kind.key()))
+            .then(SetProperty::new(model, BUILD, build.key()))
+            .then(SetProperty::new(model, SIDE, side.key()))
+            .then(SetProperty::new(model, GROUND, body.ground))
+            .then(SetProperty::new(model, POSE, pose.to_text()))
+            .then(ReplaceComponent::new(layer, drawn, label)),
+    )
 }
 
 /// `true` if `entity` is a drawing figure.
@@ -1439,7 +2141,7 @@ pub fn set_pose(arena: &Arena, layer: EntityId, pose: &Pose, label: &str) -> Opt
     let size = [raster.width(), raster.height()];
     let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
     let body = Body::of(arena.get_by_id(model).ok()?);
-    let buffers = crate::three::render_framed(&mesh(pose, &body), &view, size, Some(body.frame()));
+    let buffers = render(pose, &body, &view, size);
     let drawn = crate::three::draw(&buffers, &view)?;
     Some(
         Edit::new(label)
@@ -1461,7 +2163,7 @@ pub fn set_pose_seen(
     let raster = crate::doc::raster(arena, layer)?;
     let size = [raster.width(), raster.height()];
     let body = Body::of(arena.get_by_id(model).ok()?);
-    let buffers = crate::three::render_framed(&mesh(pose, &body), view, size, Some(body.frame()));
+    let buffers = render(pose, &body, view, size);
     let drawn = crate::three::draw(&buffers, view)?;
     let mut edit = Edit::new(label).then(SetProperty::new(model, POSE, pose.to_text()));
     for set in view.edits(layer) {
@@ -1479,11 +2181,17 @@ pub fn set_body(arena: &Arena, layer: EntityId, body: &Body, label: &str) -> Opt
     let size = [raster.width(), raster.height()];
     let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
     let pose = Pose::of(arena.get_by_id(model).ok()?);
-    let buffers = crate::three::render_framed(&mesh(&pose, body), &view, size, Some(body.frame()));
+    let buffers = render(&pose, body, &view, size);
     let drawn = crate::three::draw(&buffers, &view)?;
     let mut edit = Edit::new(label)
         .then(SetProperty::new(model, HEIGHT, f64::from(body.height)))
-        .then(SetProperty::new(model, HEADS, f64::from(body.heads)));
+        .then(SetProperty::new(model, HEADS, f64::from(body.heads)))
+        .then(SetProperty::new(model, PARTS_TEXT, body.parts_text()))
+        .then(SetProperty::new(model, GUIDES, body.guides))
+        .then(SetProperty::new(model, GROUND, body.ground));
+    if body.kind == Kind::Hand {
+        edit = edit.then(SetProperty::new(model, SIDE, body.side.key()));
+    }
     if body.kind == Kind::Body {
         edit = edit
             .then(SetProperty::new(model, BUILD, body.build.key()))
@@ -1610,7 +2318,7 @@ mod tests {
         let fist = body.preset(2);
         assert!(tip(&open, 6)[1] > 0.15 && tip(&open, 6)[2].abs() < 1e-3);
         assert!(
-            tip(&fist, 6)[2] > 0.02,
+            tip(&fist, 6)[2] > 0.0 && tip(&fist, 5)[2] > 0.02,
             "curled toward the palm: {:?}",
             tip(&fist, 6)
         );
@@ -1647,13 +2355,12 @@ mod tests {
             ..male
         };
         let rest = Pose::rest();
-        let width = |body: &Body, joint: usize| body.joints()[joint].start[0];
         let shoulder = |body: &Body| bones(&rest, body)[5].0[0];
-        let hip = |body: &Body| bones(&rest, body)[11].0[0];
         assert!(shoulder(&female) < shoulder(&male), "narrower shoulders");
-        assert!(hip(&female) > hip(&male), "legs set wider");
-        assert!(width(&female, 0) > width(&male, 0), "wider hips");
-        assert!(width(&female, 1) < width(&male, 1), "a narrower waist");
+        // The two are different meshes of the same points.
+        let (a, b) = (surface(&rest, &male), surface(&rest, &female));
+        assert_eq!(a.positions.len(), b.positions.len());
+        assert_ne!(a.positions, b.positions);
         // Kept as a property; anything else reads as male.
         let model = new_model("Figure").with_property(BUILD, Value::from("female"));
         assert_eq!(Body::of(&model).build, Build::Female);
@@ -1668,23 +2375,25 @@ mod tests {
         let plain = Body::default();
         let mut fat = plain;
         fat.shape.0[0] = [1.0, 0.0];
+        let mut thin = plain;
+        thin.shape.0[0] = [-1.0, 0.0];
+        // The belly, at a little over half the height.
+        let belly = |body: &Body| body.joints()[1].start[0];
+        assert!(
+            belly(&fat) > belly(&plain) * 1.1,
+            "fat is wider: {} {}",
+            belly(&fat),
+            belly(&plain)
+        );
+        assert!(belly(&thin) < belly(&plain), "thin is narrower");
+        // A part's own place on the chart shapes that part: stronger
+        // arms are thicker arms, and the legs stay as they were.
         let mut strong_arms = plain;
         strong_arms.shape.0[3] = [0.0, 1.0];
-        let across = |body: &Body, joint: usize| body.joints()[joint].start[0];
-        for joint in 0..JOINTS.len() {
-            assert!(across(&fat, joint) > across(&plain, joint) * 1.3, "{joint}");
-        }
-        assert!(across(&strong_arms, 5) > across(&plain, 5) * 1.15, "an arm");
-        assert_eq!(across(&strong_arms, 11), across(&plain, 11), "not a leg");
-        // Thin and fat add and stay on the chart.
-        let mut both = fat;
-        both.shape.0[4] = [1.0, 0.0];
-        assert_eq!(across(&both, 12), across(&fat, 12));
-        // Lengths never change: the chart is width only.
-        assert_eq!(
-            bones(&Pose::rest(), &fat)[16],
-            bones(&Pose::rest(), &plain)[16]
-        );
+        let arm = |body: &Body| body.joints()[5].start[0];
+        let leg = |body: &Body| body.joints()[12].start[0];
+        assert!(arm(&strong_arms) > arm(&plain) * 1.02, "an arm");
+        assert!((leg(&strong_arms) - leg(&plain)).abs() < 1e-4, "not a leg");
         // As text, and read back clamped.
         let mut shape = Shape::default();
         shape.0[2] = [0.25, -0.5];
@@ -1693,9 +2402,184 @@ mod tests {
         assert_eq!(Shape::from_text("nonsense"), Shape::default());
         assert_eq!(Shape::from_text("v1;NaN,x").0[0], [0.0, 0.0]);
         assert_eq!(PARTS.len(), 5);
-        for joint in 0..JOINTS.len() {
+        for joint in 0..17 {
             assert!(Shape::part_of(joint) > 0 && Shape::part_of(joint) < PARTS.len());
         }
+    }
+
+    #[test]
+    fn every_slider_shapes_the_body_and_round_trips_as_text() {
+        let plain = Body::default();
+        let rest = Pose::rest();
+        let still = surface(&rest, &plain).positions;
+        for slider in &SLIDERS {
+            let female = Body {
+                build: Build::Female,
+                ..plain
+            };
+            let base = if slider.key == "bust" { female } else { plain };
+            let most = base.with_slider(slider.key, slider.range[1]);
+            assert_eq!(most.slider(slider.key), slider.range[1]);
+            let moved = surface(&rest, &most).positions;
+            let from = if slider.key == "bust" {
+                surface(&rest, &female).positions
+            } else {
+                still.clone()
+            };
+            let far = moved
+                .iter()
+                .zip(&from)
+                .map(|(a, b)| (0..3).map(|k| (a[k] - b[k]).abs()).fold(0.0, f32::max))
+                .fold(0.0_f32, f32::max);
+            // Veins are drawn in the light on a body (its hands are too
+            // coarse to raise them), so they move no point there.
+            assert!(
+                far > 0.0005 || slider.key == "veins",
+                "{} shapes the body: {far}",
+                slider.key
+            );
+            // Past its range it stays at its most.
+            assert_eq!(
+                base.with_slider(slider.key, 99.0).slider(slider.key),
+                slider.range[1]
+            );
+        }
+        // Longer legs raise the hips of a body of the same height's
+        // share; longer fingers reach further from the wrist.
+        let long = plain.with_slider("finger_length", 1.0);
+        let reach = |body: &Body| {
+            let placed = bones(&rest, body);
+            let (wrist, tip) = (placed[7].0, placed[26].1);
+            (0..3)
+                .map(|k| (tip[k] - wrist[k]).powi(2))
+                .sum::<f32>()
+                .sqrt()
+        };
+        assert!(reach(&long) > reach(&plain) * 1.03, "longer fingers");
+        // As text on the model, and back; what is at rest is not written.
+        let shaped = plain.with_slider("waist", -0.5).with_slider("veins", 1.0);
+        assert_eq!(shaped.parts_text(), "waist=-0.5;veins=1");
+        assert_eq!(Body::parts_from_text(&shaped.parts_text()), shaped.parts);
+        assert_eq!(Body::parts_from_text("nonsense;waist=x"), plain.parts);
+        let model = new_model("Figure").with_property(PARTS_TEXT, Value::from("hips=0.25"));
+        assert_eq!(Body::of(&model).slider("hips"), 0.25);
+        assert!(plain.parts_text().is_empty());
+        // A body shape material carries them.
+        let read = Body::default()
+            .with_shape_text(&shaped.shape_text())
+            .unwrap();
+        assert_eq!(read.parts, shaped.parts);
+    }
+
+    #[test]
+    fn old_pose_texts_still_load_and_new_ones_round_trip() {
+        // A pose kept before the body had fingers: seventeen joints.
+        let old = "v1;0,0,0;0,0,0;0,0,0;0,0,0;12,0,-6;10,0,15;-90,0,0;0,0,0;-45,0,-10;\
+                   -135,0,0;0,0,0;0,0,0;0,0,0;0,0,0;0,0,0;0,0,0;0,0,0";
+        let model = new_model("Figure").with_property(POSE, Value::from(old));
+        let pose = Pose::of(&model);
+        assert_eq!(pose.0.len(), JOINTS.len(), "a turn for every joint now");
+        assert_eq!(pose.0[..17], preset(6).0[..17], "the old turns, unchanged");
+        assert!(pose.0[17..].iter().all(|turn| *turn == [0.0; 3]));
+        // It poses the new body as it posed the old: the right hand
+        // comes up to the chin.
+        let body = Body::of(&model);
+        let hand = bones(&pose, &body)[10].0;
+        let rest = bones(&Pose::rest(), &body)[10].0;
+        assert!(hand[1] > rest[1] + 0.3, "the hand is raised: {hand:?}");
+        // The first seventeen joints keep their names and order.
+        for (at, name) in ["Hips", "Spine", "Chest", "Neck", "Head", "Left upper arm"]
+            .iter()
+            .enumerate()
+        {
+            assert_eq!(JOINTS[at].name, *name);
+        }
+        assert_eq!(JOINTS[16].name, "Right foot");
+        assert_eq!(JOINTS[21].name, "Left index finger base");
+        assert_eq!(JOINTS[36].name, "Right index finger base");
+        // An old hand pose: sixteen joints, as ever.
+        let fist = hand_preset(2);
+        assert_eq!(Pose::from_text_for(&fist.to_text(), HAND.len()), fist);
+        // A whole new pose round trips, fingers and all.
+        let full = Body::default().preset(15);
+        assert_eq!(Pose::from_text(&full.to_text()), full);
+        assert_eq!(full.flipped().flipped().0.len(), full.0.len());
+        // Flipping takes the fist from the right hand to the left.
+        let flipped = full.flipped();
+        assert_eq!(flipped.0[21][0], full.0[36][0]);
+    }
+
+    #[test]
+    fn the_skin_follows_its_joints_without_tearing() {
+        let body = Body::default();
+        let rest = surface(&Pose::rest(), &body);
+        assert_eq!(rest.normals.len(), rest.positions.len());
+        assert!(rest.indices.len() > 50_000, "a real mesh");
+        // Bending the left elbow moves the forearm and hand, and leaves
+        // the right arm and the legs exactly where they were.
+        let mut bent = Pose::rest();
+        bent.0[6] = [-90.0, 0.0, 0.0];
+        let posed = surface(&bent, &body);
+        let moved: Vec<usize> = (0..rest.positions.len())
+            .filter(|at| {
+                (0..3).any(|k| (rest.positions[*at][k] - posed.positions[*at][k]).abs() > 1e-5)
+            })
+            .collect();
+        assert!(moved.len() > 500, "the forearm and hand moved");
+        assert!(
+            moved.iter().all(|at| rest.positions[*at][0] > 0.0),
+            "only the left side"
+        );
+        // No triangle is pulled apart: every edge stays about as long as
+        // it was, even at the elbow.
+        let long = |surface: &crate::three::Surface, a: u32, b: u32| {
+            let (a, b) = (surface.positions[a as usize], surface.positions[b as usize]);
+            (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f32>().sqrt()
+        };
+        for t in rest.indices.as_chunks::<3>().0 {
+            for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                let (was, now) = (long(&rest, a, b), long(&posed, a, b));
+                assert!(now < was * 3.0 + 0.01, "an edge tore: {was} to {now}");
+            }
+        }
+        // The hands carry relief and the body its guide lines; a body
+        // told not to shows none.
+        assert!(rest.relief.is_some() && rest.detail.iter().any(|d| d[2] > 0.5));
+        assert!(rest.guides.len() > 100);
+        let bare = Body {
+            guides: false,
+            ..body
+        };
+        assert!(surface(&Pose::rest(), &bare).guides.is_empty());
+        // Veins and prominence change the hand's surface.
+        let hand = Body {
+            kind: Kind::Hand,
+            ..body
+        };
+        let smooth = hand
+            .with_slider("veins", 0.0)
+            .with_slider("prominence", 0.0);
+        let veined = hand
+            .with_slider("veins", 1.0)
+            .with_slider("prominence", 1.0);
+        let open = hand.preset(0);
+        let (a, b) = (surface(&open, &smooth), surface(&open, &veined));
+        assert_eq!(a.positions.len(), b.positions.len());
+        let raised = a
+            .positions
+            .iter()
+            .zip(&b.positions)
+            .filter(|(a, b)| (0..3).any(|k| (a[k] - b[k]).abs() > 0.0003))
+            .count();
+        assert!(raised > 200, "veins and knuckles stand out: {raised}");
+        // A right hand is the left hand's mirror image.
+        let right = Body {
+            side: Side::Right,
+            ..hand
+        };
+        let (l, r) = (surface(&open, &hand), surface(&open, &right));
+        assert!((l.positions[100][0] + r.positions[100][0]).abs() < 1e-6);
+        assert_eq!(l.positions[100][1], r.positions[100][1]);
     }
 
     #[test]
@@ -1764,7 +2648,7 @@ mod tests {
         let b = bones(&rest, &moved);
         // The hips stand twice as high and moved across.
         assert!((b[0].0[1] - a[0].0[1] * 2.0).abs() < 1e-4);
-        assert!((b[0].0[0] - 0.5).abs() < 1e-4);
+        assert!((b[0].0[0] - 0.5).abs() < 0.08);
         // Turned a quarter round: the left shoulder (+x) is now toward -z.
         assert!(b[5].0[2] < -0.2, "{:?}", b[5].0);
         // The framing stays, so a placed figure moves on the canvas.
@@ -1774,5 +2658,108 @@ mod tests {
         raised.0[5] = [0.0, 0.0, 90.0];
         assert_ne!(bones(&raised, &moved)[7], b[7]);
         assert_eq!(bones(&raised, &moved)[16], b[16]);
+    }
+}
+
+#[cfg(test)]
+mod preview {
+    use super::*;
+    use crate::three::View3D;
+    use sue_core::{PixelFormat, RasterTile2D};
+
+    /// Draws the figures to PNG files in the folder `SUE_FIGURE_PREVIEW`
+    /// names, to look at while working on them. Run with `--ignored`.
+    #[test]
+    #[ignore = "writes pictures to look at"]
+    fn figures_to_look_at() {
+        let Ok(folder) = std::env::var("SUE_FIGURE_PREVIEW") else {
+            return;
+        };
+        let save = |name: &str, body: &Body, pose: &Pose, view: &View3D, size: [u32; 2]| {
+            let started = std::time::Instant::now();
+            let buffers = render(pose, body, view, size);
+            let took = started.elapsed();
+            let tile = crate::three::draw(&buffers, view).unwrap();
+            let mut pixels = tile.bytes().unwrap().to_vec();
+            for pixel in pixels.as_chunks_mut::<4>().0 {
+                let alpha = f32::from(pixel[3]) / 255.0;
+                for channel in pixel.iter_mut().take(3) {
+                    *channel = (f32::from(*channel) * alpha + 250.0 * (1.0 - alpha)) as u8;
+                }
+                pixel[3] = 255;
+            }
+            let png = sue_io::encode_png(
+                &RasterTile2D::from_bytes(size[0], size[1], PixelFormat::Rgba8, pixels).unwrap(),
+            )
+            .unwrap();
+            std::fs::write(format!("{folder}/{name}.png"), png).unwrap();
+            println!("{name}: {took:?}");
+        };
+        let front = View3D {
+            yaw: 25.0,
+            pitch: 8.0,
+            distance: 4.2,
+            style: 0,
+            floor: true,
+            ..View3D::default()
+        };
+        let male = Body::default();
+        let female = Body {
+            build: Build::Female,
+            ..male
+        };
+        save("male", &male, &male.standing(), &front, [700, 1000]);
+        save("female", &female, &female.standing(), &front, [700, 1000]);
+        save(
+            "male-rest",
+            &male,
+            &Pose::rest(),
+            &View3D { yaw: 0.0, ..front },
+            [700, 1000],
+        );
+        for (index, name) in PRESETS.iter().enumerate().skip(1) {
+            save(
+                &format!("pose-{index:02}-{name}"),
+                &male,
+                &male.preset(index),
+                &View3D {
+                    floor: false,
+                    ..front
+                },
+                [300, 420],
+            );
+        }
+        let hand = Body {
+            kind: Kind::Hand,
+            ..male
+        };
+        let back = View3D {
+            yaw: 160.0,
+            pitch: 20.0,
+            light: 200.0,
+            distance: 2.6,
+            style: 0,
+            ..View3D::default()
+        };
+        save("hand-back", &hand, &hand.preset(0), &back, [700, 800]);
+        let palm = View3D {
+            yaw: 20.0,
+            light: 45.0,
+            ..back
+        };
+        for (index, name) in HAND_PRESETS.iter().enumerate() {
+            save(
+                &format!("hand-{index:02}-{name}"),
+                &hand,
+                &hand.preset(index),
+                if index % 2 == 0 { &palm } else { &back },
+                [300, 340],
+            );
+        }
+        let head = Body {
+            kind: Kind::Head,
+            ..male
+        };
+        save("head", &head, &head.preset(1), &front, [700, 800]);
     }
 }

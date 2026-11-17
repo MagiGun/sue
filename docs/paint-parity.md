@@ -160,7 +160,7 @@ The order of work is the plan at the end.
 | Import vector | File > Import > Vector | partial | Command exists; verify what it reads |
 | Import audio | File > Import > Audio | done | A sound on the timeline from the frame you are on |
 | Import movie | File > Import > Movie | partial | Command exists; an animation from a movie is a phone template |
-| Import 3D data (OBJ) | File > Import > 3D Data | done | |
+| Import 3D data (glTF, GLB, OBJ) | File > Import > 3D Data, or drop the file on the canvas | done | The file is kept inside the picture and among the 3D object materials; a skinned glTF is posed by its bones |
 | FBX import (5.1) | File > Import | missing | |
 | 3D pose from Posemaniacs | File > Import > 3D pose | missing | |
 | Pose Scanner (image to pose) | File > Import > Pose Scanner | done | Tool Property of a 3D drawing figure; MoveNet finds the body, limbs toward the camera guessed from how short they look |
@@ -509,9 +509,12 @@ decorations. Light and heavy pressure and a flick need a tablet.
 | Camera: drag to turn, Shift to move, Ctrl to come nearer | Object tool | done | |
 | Light and shading settings | Tool Property | done | Shaded, line art or both |
 | Convert 3D to Lines and Tones (EX) | Layer > Convert to Lines and Tones | done | Clean line art and tone to draw over |
-| Drawing figures with poses and pose materials | Materials, 3D | done | Preset poses for the figure, hand and head; any pose kept as a pose material and used again |
-| 3D head models (5.1) | 3D | partial | A posable head (neck, skull, jaw, nose, brow, eyes, ears) with seven presets; simpler than Clip Studio's, no face shapes to edit |
-| 3D hand models and Hand Scanner posing (5.0) | 3D, Materials | partial | A posable hand of sixteen joints with seven presets, and the Hand Scanner (MediaPipe's twenty one points, in depth too); one right hand, so a left hand poses as its mirror |
+| Drawing figures with poses and pose materials | Materials, 3D | done | Smooth male and female bodies with guide lines (meshes from MakeHuman's CC0 assets); twenty body poses and sixteen hand poses of Sue's own; any pose kept as a pose material and used again, a hand pose on a body's hands, a pose on any model with the same joint names |
+| Posing by dragging: limbs follow the hand or foot, rotation manipulator, joint angle limits, fixed joints | Object tool | partial | Two bone inverse kinematics for arms and legs, three rings on the picked joint, limits on by default, pinned hands and feet, Reset part, ground contact; no whole body drag from the hips and no manipulator for moving a joint along an axis |
+| Hand setup (open, close and spread the fingers, a lock per finger) | Tool Property | done | A triangle pad (open, fist, flat fold), spread, five locks; for a hand figure and either hand of a body |
+| Body shape by part (sub tool detail palette) | Tool Property | partial | Sliders for head, neck, shoulders, chest and bust, torso, waist, hips, arms, hands and fingers, legs and feet, in Tool Property rather than a palette of its own |
+| 3D head models (5.1) | 3D | partial | A realistic head (neck, skull, jaw and eyes pose) with seven presets; no face shapes to edit |
+| 3D hand models and Hand Scanner posing (5.0) | 3D, Materials | done | A detailed hand of sixteen joints, left or right, with knuckles, tendons, veins and nails (Veins and Tendon and knuckle prominence sliders), sixteen poses, and the Hand Scanner |
 | Painting directly on 3D (5.0, 5.1) | 3D | missing | |
 | VRM import and photorealistic rendering | File > Import | missing | |
 | Height-based fog, Follow camera light (5.0, 5.1) | 3D settings | done | In the 3D layer's Tool Property |

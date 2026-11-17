@@ -48,6 +48,7 @@ pub mod filters;
 pub mod gradient;
 pub mod gradient_map;
 pub mod manga;
+pub mod model3d;
 pub mod print;
 pub mod proof;
 pub mod psd_io;

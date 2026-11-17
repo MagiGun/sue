@@ -238,13 +238,30 @@ impl SuePaint {
         if material.kind == crate::materials::POSE
             && let (Some(at), Some((kind, pose))) = (at, crate::materials::pose_of(material))
         {
-            match self.figure_layer_at(&cx.world.arena, at, kind) {
+            // A figure of its kind shown there, or, for a hand pose, a
+            // body (whose hands take it).
+            let shown = self.figure_layer_at(&cx.world.arena, at, kind).or_else(|| {
+                (kind == crate::figure::Kind::Hand)
+                    .then(|| self.figure_layer_at(&cx.world.arena, at, crate::figure::Kind::Body))
+                    .flatten()
+            });
+            match shown {
                 Some(layer) => {
                     if let Some(doc) = self.doc_mut() {
                         doc.layer = Some(layer);
                         doc.picked.clear();
                     }
                 }
+                // A hand pose let go beside a body that is the current
+                // layer still closes that body's hands.
+                None if kind == crate::figure::Kind::Hand
+                    && self.layer().is_some_and(|layer| {
+                        crate::figure::of_layer(&cx.world.arena, layer)
+                            .and_then(|model| cx.world.arena.get_by_id(model).ok())
+                            .is_some_and(|model| {
+                                crate::figure::Body::of(model).kind == crate::figure::Kind::Body
+                            })
+                    }) => {}
                 None => {
                     // Where no figure of its kind shows: a new one.
                     let name = crate::localize(&material.name);

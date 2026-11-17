@@ -580,10 +580,42 @@ impl SuePaint {
                     .map(|[x, y]| screen([x + offset[0] as f32, y + offset[1] as f32]))
             };
             let chosen = self.figure_joint;
+            let joints = body.joints();
+            let pins = crate::figure::pins_of(model);
+            // A body's fingers show their bones only while one of that
+            // hand's is picked, so the hand is not a knot of dots.
+            let hand_of = |joint: usize| -> Option<usize> {
+                (body.kind == crate::figure::Kind::Body && (21..51).contains(&joint))
+                    .then(|| (joint - 21) / 15)
+            };
+            let open_hand = chosen.and_then(|joint| {
+                hand_of(joint).or(match joint {
+                    7 => Some(0),
+                    10 => Some(1),
+                    _ => None,
+                })
+            });
             for (joint, (start, end)) in crate::figure::bones(&pose, &body).iter().enumerate() {
+                if joints.get(joint).is_some_and(|joint| joint.name.is_empty())
+                    || hand_of(joint).is_some_and(|hand| open_hand != Some(hand))
+                {
+                    continue;
+                }
                 let (Some(a), Some(b)) = (place(*start), place(*end)) else {
                     continue;
                 };
+                if pins.contains(&joint) {
+                    // A pinned hand or foot: a square round its joint.
+                    painter.rect_stroke(
+                        egui::Rect::from_center_size(
+                            a,
+                            egui::Vec2::splat(marks::ring_small(theme) * 2.6),
+                        ),
+                        0.0,
+                        Stroke::new(marks::heavy(theme), Color32::from_rgb(255, 170, 40)),
+                        egui::StrokeKind::Middle,
+                    );
+                }
                 let lit = chosen == Some(joint);
                 painter.line_segment(
                     [a, b],
@@ -613,6 +645,23 @@ impl SuePaint {
                         Color32::from_rgb(80, 160, 255)
                     },
                 );
+            }
+            // The rotation manipulator: a ring for each of the picked
+            // joint's own axes, to turn it about that axis alone.
+            if let Some(rings) = chosen.and_then(|joint| crate::figure::rings(&pose, &body, joint))
+            {
+                for (ring, color) in rings.iter().zip([
+                    Color32::from_rgb(235, 80, 80),
+                    Color32::from_rgb(80, 190, 90),
+                    Color32::from_rgb(80, 130, 245),
+                ]) {
+                    let points: Vec<egui::Pos2> =
+                        ring.iter().filter_map(|point| place(*point)).collect();
+                    painter.add(egui::Shape::line(
+                        points,
+                        Stroke::new(marks::heavy(theme), color),
+                    ));
+                }
             }
         }
         if tool == Tool::Operation {

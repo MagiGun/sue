@@ -3820,6 +3820,8 @@ dependencies = [
 name = "sue-picture"
 version = "0.0.8"
 dependencies = [
+ "miniz_oxide 0.8.9",
+ "serde_json",
  "sha2",
  "sue-brush",
  "sue-core",

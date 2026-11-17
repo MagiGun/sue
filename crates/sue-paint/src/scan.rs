@@ -864,12 +864,7 @@ mod tests {
                     pitch: 0.0,
                     ..crate::three::View3D::default()
                 };
-                let buffers = crate::three::render_framed(
-                    &crate::figure::mesh(pose, body),
-                    &view,
-                    [400, 400],
-                    Some(body.frame()),
-                );
+                let buffers = crate::figure::render(pose, body, &view, [400, 400]);
                 let tile = crate::three::draw(&buffers, &view).unwrap();
                 std::fs::write(
                     photos.join(format!("{name}-{side}.png")),

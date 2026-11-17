@@ -253,7 +253,16 @@ pub(crate) enum Gesture {
         start: Pos2,
         base: crate::figure::Pose,
         before: Vec<u8>,
-        twist: bool,
+        /// How the drag poses: 0 bends and swings the joint, 1 twists
+        /// it, 2 takes the part where the pointer goes (a hand or foot
+        /// with its limb following), 3 to 5 turn the joint about its own
+        /// x, y or z (a ring of the rotation manipulator).
+        how: u8,
+        /// Where on the layer the drag began.
+        grip: [f32; 2],
+        /// The point of the model the drag carries, and for a ring the
+        /// joint on the layer and which way round the ring runs.
+        like: [f32; 3],
     },
     /// Dragging a ruler's handle: the ruler's text from before.
     RulerHandle {
@@ -673,6 +682,12 @@ pub struct SuePaint {
     pub(crate) view3d_release: bool,
     /// The drawing figure's joint picked to pose.
     pub(crate) figure_joint: Option<usize>,
+    /// Posing keeps every joint within what a body can do.
+    pub(crate) figure_limits: bool,
+    /// The hand setup as Tool Property last left it, and the hand of a
+    /// body it sets (0 left, 1 right, 2 both).
+    pub(crate) hand_setup: crate::figure::HandSetup,
+    pub(crate) hand_side: usize,
     /// A figure's pose being changed in Tool Property, its pose and pixels
     /// from before; the pose asked for this frame; and whether it is let go.
     pub(crate) pose_before: Option<(EntityId, crate::figure::Pose, Vec<u8>)>,
@@ -1039,6 +1054,9 @@ impl Default for SuePaint {
             view3d_before: None,
             pending_view3d: None,
             figure_joint: None,
+            figure_limits: true,
+            hand_setup: crate::figure::HandSetup::default(),
+            hand_side: 2,
             pose_before: None,
             pending_pose: None,
             pose_release: false,

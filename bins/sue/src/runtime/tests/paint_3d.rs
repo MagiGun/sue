@@ -9,14 +9,14 @@ use egui::pos2;
 
 /// The whole arena as bytes: entities, ids, components, properties and
 /// relations, so two states compare exactly.
-fn arena_bytes(paint: &PaintDriver) -> Vec<u8> {
+pub(super) fn arena_bytes(paint: &PaintDriver) -> Vec<u8> {
     let mut out = sue_core::codec::Writer::new();
     paint.runtime.engine.world.arena.encode(&mut out);
     out.into_bytes()
 }
 
 /// The picture of the canvas Sue Paint has open.
-fn picture(paint: &PaintDriver) -> sue_core::EntityId {
+pub(super) fn picture(paint: &PaintDriver) -> sue_core::EntityId {
     paint
         .runtime
         .applets
@@ -28,7 +28,10 @@ fn picture(paint: &PaintDriver) -> sue_core::EntityId {
 /// One frame with `events`, as [`PaintDriver::step`], that also returns
 /// every control the frame named for assistive technology, with where it
 /// is: the drag buttons and the chart have no text of their own.
-fn step_named(paint: &mut PaintDriver, events: Vec<egui::Event>) -> Vec<(String, egui::Rect)> {
+pub(super) fn step_named(
+    paint: &mut PaintDriver,
+    events: Vec<egui::Event>,
+) -> Vec<(String, egui::Rect)> {
     step_told(paint, events)
         .into_iter()
         .map(|(label, _, rect)| (label, rect))
@@ -36,7 +39,7 @@ fn step_named(paint: &mut PaintDriver, events: Vec<egui::Event>) -> Vec<(String,
 }
 
 /// [`step_named`] with each control's role.
-fn step_told(
+pub(super) fn step_told(
     paint: &mut PaintDriver,
     events: Vec<egui::Event>,
 ) -> Vec<(String, egui::accesskit::Role, egui::Rect)> {
@@ -103,7 +106,7 @@ const COLUMN: f32 = 200.0;
 
 /// Where the control named `name` is, scrolled into Tool Property's view
 /// with the wheel when it is above or below it.
-fn control(paint: &mut PaintDriver, name: &str) -> egui::Rect {
+pub(super) fn control(paint: &mut PaintDriver, name: &str) -> egui::Rect {
     for _ in 0..80 {
         let told = step_told(paint, Vec::new());
         // A slider and its number field share a name: the track is the
@@ -194,7 +197,7 @@ fn every_row(paint: &mut PaintDriver) -> Vec<String> {
 }
 
 /// Where `text` is, scrolled into Tool Property's view.
-fn text_shown(paint: &mut PaintDriver, text: &str) -> egui::Rect {
+pub(super) fn text_shown(paint: &mut PaintDriver, text: &str) -> egui::Rect {
     for _ in 0..80 {
         let (x, top, bottom) = band(paint);
         if let Some((_, rect)) = paint.texts.iter().find(|(found, rect)| {
@@ -218,20 +221,20 @@ fn text_shown(paint: &mut PaintDriver, text: &str) -> egui::Rect {
 }
 
 /// Shows the Tool Property palette (it shares its place with Sub Tool).
-fn show_tool_property(paint: &mut PaintDriver) {
+pub(super) fn show_tool_property(paint: &mut PaintDriver) {
     paint.settle(2);
     paint.click_text("Tool Property");
 }
 
 /// Drags from the middle of the control named `name` by `by`, in small
 /// moves, and lets go; then lets the frames after draw.
-fn drag_control(paint: &mut PaintDriver, name: &str, by: egui::Vec2) {
+pub(super) fn drag_control(paint: &mut PaintDriver, name: &str, by: egui::Vec2) {
     let from = control(paint, name).center();
     paint.drag(from, from + by, egui::PointerButton::Primary);
 }
 
 /// Clicks the middle of the control named `name`.
-fn click_control(paint: &mut PaintDriver, name: &str) {
+pub(super) fn click_control(paint: &mut PaintDriver, name: &str) {
     let at = control(paint, name).center();
     let press = |pressed| egui::Event::PointerButton {
         pos: at,
@@ -247,7 +250,7 @@ fn click_control(paint: &mut PaintDriver, name: &str) {
 
 /// Adds a 3D layer with `new` (a Layer, New Layer command) and returns
 /// it: the current layer, with the Object tool picked.
-fn new_3d(paint: &mut PaintDriver, new: &str) -> sue_core::EntityId {
+pub(super) fn new_3d(paint: &mut PaintDriver, new: &str) -> sue_core::EntityId {
     paint.command(new);
     paint.settle(2);
     // Layer, New Layer, 3D Layer asks for its shape first.
@@ -267,7 +270,7 @@ fn new_3d(paint: &mut PaintDriver, new: &str) -> sue_core::EntityId {
 }
 
 /// The 3D layer's model.
-fn model(paint: &PaintDriver, layer: sue_core::EntityId) -> &sue_core::Entity {
+pub(super) fn model(paint: &PaintDriver, layer: sue_core::EntityId) -> &sue_core::Entity {
     let arena = &paint.runtime.engine.world.arena;
     arena
         .get_by_id(sue_paint::three::model_of(arena, layer).unwrap())
@@ -275,7 +278,7 @@ fn model(paint: &PaintDriver, layer: sue_core::EntityId) -> &sue_core::Entity {
 }
 
 /// The layer's pixels.
-fn pixels(paint: &PaintDriver, layer: sue_core::EntityId) -> Vec<u8> {
+pub(super) fn pixels(paint: &PaintDriver, layer: sue_core::EntityId) -> Vec<u8> {
     sue_paint::doc::raster(&paint.runtime.engine.world.arena, layer)
         .unwrap()
         .bytes()
@@ -286,7 +289,7 @@ fn pixels(paint: &PaintDriver, layer: sue_core::EntityId) -> Vec<u8> {
 /// Does `change` (a drag or click in Tool Property), which must change
 /// the layer and be one undo step; `check` holds after it. Undo finds the
 /// arena exactly as before, redo exactly as after.
-fn one_step(
+pub(super) fn one_step(
     paint: &mut PaintDriver,
     layer: sue_core::EntityId,
     what: &str,
@@ -356,7 +359,8 @@ fn sue_paint_3d_tool_property_has_the_object_camera_light_outline_and_body_rows(
         "Reset position",
         "Reset scale",
         "Object scale",
-        "Outline width",
+        // A figure is drawn shaded when new, so the outline's width
+        // shows once Draw as asks for lines (its own test below).
         "Body part",
         "Head to body ratio",
     ] {

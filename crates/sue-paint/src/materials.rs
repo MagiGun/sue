@@ -109,9 +109,13 @@ impl MaterialKinds {
                 Placement::Model,
                 |_| scan_own(BACKGROUND, Placement::Model),
             ),
-            (OBJECT, "3D objects", Glyph::Cube, Placement::Model, |_| {
-                scan_own(OBJECT, Placement::Model)
-            }),
+            (
+                OBJECT,
+                "3D objects",
+                Glyph::Cube,
+                Placement::Model,
+                scan_objects,
+            ),
         ];
         for (id, name, glyph, placement, scan) in own {
             kinds
@@ -290,6 +294,69 @@ fn scan_poses(folder: Option<&Path>) -> Vec<Material> {
 
 fn scan_bodies(folder: Option<&Path>) -> Vec<Material> {
     scan_files(folder, "bodies", "body", BODY)
+}
+
+/// Sue Paint's own 3D objects, then the models people imported (kept in
+/// the `models` folder to use again).
+fn scan_objects(folder: Option<&Path>) -> Vec<Material> {
+    let mut found = scan_own(OBJECT, Placement::Model);
+    for extension in crate::model3d::EXTENSIONS {
+        found.extend(
+            scan_files(folder, "models", extension, OBJECT)
+                .into_iter()
+                .map(|material| Material {
+                    placement: Placement::Model,
+                    ..material
+                }),
+        );
+    }
+    found
+}
+
+/// Keeps the 3D model file at `path` in Sue Paint's `folder` as a 3D
+/// object material, to use again; returns its file there. A file that
+/// is there already (the same name) is left as it is.
+///
+/// # Errors
+/// If it will not copy.
+pub fn register_model(folder: &Path, path: &Path) -> Result<PathBuf, String> {
+    let dir = folder.join("models");
+    let name = path.file_name().ok_or_else(|| tr!("file-has-no-model"))?;
+    let kept = dir.join(name);
+    if kept.exists() || path.parent() == Some(dir.as_path()) {
+        return Ok(kept);
+    }
+    sue_platform::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let bytes = sue_platform::fs::read(path).map_err(|error| error.to_string())?;
+    sue_platform::write_atomic(&kept, &bytes).map_err(|error| error.to_string())?;
+    Ok(kept)
+}
+
+/// The model in the 3D file at `path` (glTF, GLB or OBJ), named after
+/// the file.
+///
+/// # Errors
+/// If the file cannot be read as a model.
+pub fn model_file(path: &Path) -> Result<Entity, String> {
+    let name = path
+        .file_stem()
+        .map_or_else(|| tr!("model"), |stem| stem.to_string_lossy().into_owned());
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let bytes = sue_platform::fs::read(path).map_err(|error| error.to_string())?;
+    // A .gltf may keep its buffers in files beside it.
+    let beside = |file: &str| {
+        let file = Path::new(file);
+        // Only a plain file name beside the model, never a path out of
+        // its folder.
+        if file.components().count() != 1 {
+            return None;
+        }
+        sue_platform::fs::read(path.parent()?.join(file)).ok()
+    };
+    crate::model3d::import(bytes, &name, &extension, &beside)
 }
 
 /// The files ending in `.<extension>` in `dir` of `folder` as materials of
@@ -530,8 +597,10 @@ fn draw_frames(size: [u32; 2], layout: usize) -> Option<RasterTile2D> {
 /// named after it.
 #[must_use]
 pub fn model_of(material: &Material) -> Option<Entity> {
-    let Source::Builtin(index) = material.source else {
-        return None;
+    let index = match &material.source {
+        Source::Builtin(index) => *index,
+        // A model people imported.
+        Source::File(path) => return model_file(path).ok(),
     };
     let (_, _, Art::Model(build)) = OWN.get(index)? else {
         return None;
@@ -594,6 +663,24 @@ pub fn picture(material: &Material, size: [u32; 2], color: [u8; 3]) -> Option<Ra
             }
         },
         Source::File(_) if material.placement == Placement::Pose => posed(material, size),
+        Source::File(path) if material.placement == Placement::Model => {
+            // A model people imported, from a corner above.
+            let model = model_file(path).ok()?;
+            let view = crate::three::View3D {
+                yaw: 28.0,
+                pitch: 12.0,
+                distance: 4.6,
+                style: 0,
+                ..crate::three::View3D::default()
+            };
+            let buffers = crate::three::render_model(
+                &model,
+                &view,
+                size,
+                &crate::three::Placement::default(),
+            )?;
+            crate::three::draw(&buffers, &view)
+        }
         Source::File(path) if material.placement == Placement::Layers => {
             // A template: its layers flattened.
             let bytes = sue_platform::fs::read(path).ok()?;
@@ -631,12 +718,7 @@ fn posed(material: &Material, size: [u32; 2]) -> Option<RasterTile2D> {
         distance: 4.4,
         ..crate::three::View3D::default()
     };
-    let buffers = crate::three::render_framed(
-        &crate::figure::mesh(&pose, &body),
-        &view,
-        size,
-        Some(body.frame()),
-    );
+    let buffers = crate::figure::render(&pose, &body, &view, size);
     crate::three::draw(&buffers, &view)
 }
 

@@ -621,6 +621,18 @@ impl SuePaint {
         if let Some(dir) = path.parent() {
             self.last_dir = Some(dir.to_path_buf());
         }
+        // A 3D model (dropped on the canvas, or opened) becomes a 3D
+        // layer of the canvas that is open.
+        if self.picture().is_some()
+            && path.extension().is_some_and(|extension| {
+                crate::model3d::EXTENSIONS
+                    .iter()
+                    .any(|known| extension.eq_ignore_ascii_case(known))
+            })
+        {
+            self.import_3d(cx, path);
+            return;
+        }
         match sue_platform::fs::read(path) {
             Ok(bytes) => match self.open_bytes(cx, path, &bytes, as_layer) {
                 Ok(()) => {
