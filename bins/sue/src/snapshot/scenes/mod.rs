@@ -120,7 +120,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_command_bar::scenes(tour)?;
     paint_extras::scenes(tour)?;
     paint_tools::palettes(tour)?;
-    // 36p1 to 36p10. Tool Property of the comic, figure, text, ruler and
+    // 36p1 to 36p11. Tool Property of the comic, figure, text, ruler and
     // Correct Line sub tools (Phase 6).
     p6_tools_b::tool_rows(tour)?;
 

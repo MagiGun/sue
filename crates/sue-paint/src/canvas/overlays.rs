@@ -695,12 +695,12 @@ fn ruler_overlay(
             stroke,
         );
     };
-    // Guides right across, and the linear ruler's unit marks.
+    // Guides right across the picture, and the linear ruler's unit marks.
     for guide in &rulers.guides {
         let (from, to) = if guide.upright {
-            ([guide.at, -reach], [guide.at, h + reach])
+            ([guide.at, 0.0], [guide.at, h])
         } else {
-            ([-reach, guide.at], [w + reach, guide.at])
+            ([0.0, guide.at], [w, guide.at])
         };
         painter.line_segment(
             [screen(from), screen(to)],

@@ -35,6 +35,26 @@ fn click_text(tour: &mut Tour<'_>, text: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A drag with the main button from `from` to `to`.
+fn drag(tour: &mut Tour<'_>, from: egui::Pos2, to: egui::Pos2) {
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    tour.camera
+        .input
+        .push(vec![egui::Event::PointerMoved(from)]);
+    tour.camera.input.push(vec![button(from, true)]);
+    for step in 1..=12 {
+        let at = from + (to - from) * (step as f32 / 12.0);
+        tour.camera.input.push(vec![egui::Event::PointerMoved(at)]);
+    }
+    tour.camera.input.push(vec![button(to, false)]);
+    tour.settle();
+}
+
 /// The sub tools whose Tool Property each picture shows: the tool's
 /// command, the sub tool's command and the picture's name.
 const ROWS: [(&str, &str, &str); 10] = [
@@ -90,7 +110,8 @@ const ROWS: [(&str, &str, &str); 10] = [
     ),
 ];
 
-/// 36p1 to 36p10. Tool Property of each sub tool of [`ROWS`]; the tools
+/// 36p1 to 36p11. Tool Property of each sub tool of [`ROWS`], then a
+/// guide and a scaled linear ruler on the canvas, undone after; the tools
 /// are put back as they were found (the first sub tool of each, the
 /// Operation tool picked, the Sub Tool palette in front).
 pub(super) fn tool_rows(tour: &mut Tour<'_>) -> Result<(), String> {
@@ -101,6 +122,28 @@ pub(super) fn tool_rows(tour: &mut Tour<'_>) -> Result<(), String> {
         tour.paint_command(sub);
         tour.shoot(name)?;
     }
+    // 36p11. A guide and a linear ruler with scale marks on the canvas.
+    let middle = tour.runtime.shell.page_rect().center() + egui::vec2(8.0, -63.0);
+    tour.paint_command("tool.pick.ruler");
+    tour.paint_command("subtool.ruler.Guide");
+    drag(
+        tour,
+        middle + egui::vec2(-200.0, 60.0),
+        middle + egui::vec2(200.0, 64.0),
+    );
+    tour.paint_command("subtool.ruler.Linear_Ruler");
+    tour.settle();
+    click_text(tour, "Scale")?;
+    drag(
+        tour,
+        middle + egui::vec2(-180.0, -80.0),
+        middle + egui::vec2(160.0, -40.0),
+    );
+    tour.shoot("36p11-sue-paint-guide-and-ruler-scale")?;
+    click_text(tour, "Scale")?;
+    tour.paint_command("edit.undo");
+    tour.paint_command("edit.undo");
+    tour.settle();
     for (tool, first) in [
         ("tool.pick.figure", "subtool.figure.Straight_Line"),
         ("tool.pick.frame", "subtool.frame_border.Rectangle_Frame"),
