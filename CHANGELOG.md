@@ -11,6 +11,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-11-17
+
 ### Added
 
 - Sue Paint, Sub Tool Detail and Tool Property: the brush settings of
@@ -2188,7 +2190,9 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.74...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.8...HEAD
+[0.0.8]: https://github.com/MagiGun/sue/compare/v0.0.75...v0.0.8
+[0.0.75]: https://github.com/MagiGun/sue/compare/v0.0.74...v0.0.75
 [0.0.74]: https://github.com/MagiGun/sue/compare/v0.0.73...v0.0.74
 [0.0.73]: https://github.com/MagiGun/sue/compare/v0.0.72...v0.0.73
 [0.0.72]: https://github.com/MagiGun/sue/compare/v0.0.71...v0.0.72
