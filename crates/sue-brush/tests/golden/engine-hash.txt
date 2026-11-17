@@ -3,5 +3,6 @@
 # Recorded again in Phase 6 (brush engine package), after a look at the
 # stroke sheets: sparse samples are joined by arcs (the resampler's
 # curve), the stabilizer's drain only goes forward along the pen's way,
-# and an ending comes to a clean point or is a round end.
-engine 1 63468e6130624fba
+# and an ending comes to a clean point or is a round end. Then again
+# for Sue's papers made of noise with no grid in it.
+engine 1 22e834fe2f85b9aa
