@@ -17,6 +17,7 @@ mod p6_brush_rows;
 mod p6_tools_a;
 mod p6_tools_b;
 mod paint_3d;
+mod paint_assets;
 mod paint_canvas;
 mod paint_canvas_chrome;
 mod paint_color;
@@ -121,6 +122,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_at_rest(tour);
     paint_command_bar::scenes(tour)?;
     paint_extras::scenes(tour)?;
+    paint_assets::scenes(tour)?;
     paint_tools::palettes(tour)?;
     p6_brush_rows::rows(tour)?;
     paint_at_rest(tour);

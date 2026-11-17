@@ -275,6 +275,33 @@ fn window_palettes() -> impl Iterator<Item = (&'static str, Palette)> {
         .flat_map(|group| group.iter().copied())
 }
 
+/// Window, Material Folders: one item per kind of material, each showing
+/// the Material palette open at that folder.
+fn material_folder_items() -> Vec<MenuItem> {
+    crate::materials::MaterialKinds::builtin()
+        .iter()
+        .map(|kind| {
+            named(
+                &title_case(&crate::localize(&kind.name)),
+                &format!("{}{}", crate::commands::FOLDER_PREFIX, kind.id),
+            )
+        })
+        .collect()
+}
+
+/// `text` with each word's first letter capital, as menu items read.
+fn title_case(text: &str) -> String {
+    text.split(' ')
+        .map(|word| {
+            let mut letters = word.chars();
+            letters.next().map_or_else(String::new, |first| {
+                first.to_uppercase().chain(letters).collect()
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The Window menu's palette items, a line between each two groups.
 fn palette_items() -> Vec<MenuItem> {
     let mut items = Vec::new();
@@ -348,6 +375,8 @@ pub fn menus() -> Vec<Menu> {
         sub(&tr!("workspace"), workspace_items(&[], None)),
     ];
     window.extend(palette_items());
+    // One Material palette entry per folder: the palette open at it.
+    window.push(sub(&tr!("material-folders"), material_folder_items()));
     // The interface (desktop, tablet, phone) is Sue's, in the Sue menu
     // and Settings: one "Layout" menu here would sit beside another.
     window.extend([SEP, item("window.hide_all"), item("window.hide_menus")]);
@@ -566,7 +595,11 @@ pub fn menus() -> Vec<Menu> {
                 item("edit.brush_tip"),
                 sub(
                     &tr!("register-material"),
-                    vec![item("edit.material.image"), item("edit.material.tip")],
+                    vec![
+                        item("edit.material.image"),
+                        item("edit.material.tip"),
+                        item("edit.material.template"),
+                    ],
                 ),
                 SEP,
                 item("edit.screen_color").note(screen_note()),
@@ -749,6 +782,8 @@ pub fn menus() -> Vec<Menu> {
                         item("layer.new.hand"),
                         item("layer.new.head"),
                         item("layer.new.frame"),
+                        SEP,
+                        item("layer.new.file_object"),
                     ],
                 ),
                 sub(
@@ -806,6 +841,10 @@ pub fn menus() -> Vec<Menu> {
                         item("layer.frame.combine"),
                     ],
                 ),
+                sub(
+                    &tr!("file-object"),
+                    vec![item("layer.file_object.update"), item("layer.rasterize")],
+                ),
                 SEP,
                 sub(
                     &tr!("layer-settings"),
@@ -819,6 +858,9 @@ pub fn menus() -> Vec<Menu> {
                         item("layer.toggle.lock_alpha"),
                         SEP,
                         item("layer.toggle.layer_color"),
+                        SEP,
+                        item("layer.palette_in_folder"),
+                        item("layer.palette_on_canvas"),
                     ],
                 ),
                 sub(
@@ -925,6 +967,7 @@ pub fn menus() -> Vec<Menu> {
                 item("view.actual"),
                 item("view.double"),
                 item("view.fit"),
+                item("view.fit_width"),
                 item("view.reset_display"),
                 item("view.fit_navigator"),
                 item("view.print_size"),
@@ -944,6 +987,7 @@ pub fn menus() -> Vec<Menu> {
                 item("view.bleed"),
                 item("view.page_image"),
                 item("view.safety_margin"),
+                item("view.webtoon_display"),
                 item("view.paper"),
                 item("view.tone_area"),
                 sub(

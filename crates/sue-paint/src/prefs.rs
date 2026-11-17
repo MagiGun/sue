@@ -55,6 +55,11 @@ const CLIP_NAMES: &[(&str, &str, &str)] = &[
     ("pref-interface", "pref-interface-color", "sue_paint.theme"),
     (
         "pref-interface",
+        "pref-adjust-density",
+        crate::studio::THEME_DENSITY,
+    ),
+    (
+        "pref-interface",
         "pref-switch-to-tablet-interface",
         "display.interface",
     ),
@@ -157,6 +162,15 @@ pub(crate) fn page(title: &str) -> SettingsPage {
                 params(&[
                     "sue_paint.selection_layer_opacity",
                     crate::studio::ASK_DELETE_FOLDERS,
+                    crate::commands::PALETTE_IN_FOLDER,
+                    crate::commands::PALETTE_ON_CANVAS,
+                ]),
+            ),
+            group(
+                tr!("webtoon-display-settings"),
+                params(&[
+                    crate::dialogs::assets::WEBTOON_GUIDES,
+                    crate::dialogs::assets::WEBTOON_SCREEN,
                 ]),
             ),
             group(
@@ -164,6 +178,7 @@ pub(crate) fn page(title: &str) -> SettingsPage {
                 vec![
                     SettingsItem::Note(tr!("settings-theme-note")),
                     param("sue_paint.theme"),
+                    param(crate::studio::THEME_DENSITY),
                 ],
             ),
             group(

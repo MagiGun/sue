@@ -1122,6 +1122,34 @@ slide back out and the Hub comes back. How fast this happens follows the
 Motion settings (Settings, Display & Graphics): a faster animation speed
 shortens it, and "Instant transitions" makes it immediate.
 
+**Materials, templates and file objects.** The Material palette has a
+row of buttons, one per folder (Tones, Patterns, Effect lines, Balloons,
+Templates, Poses, 3D backgrounds, 3D objects and your own pictures and
+brush tips); Window, **Material Folders** opens the palette at each.
+Everything in it Sue Paint brings is of its own making: drag a tone, a
+pattern or focus lines over the canvas, a balloon (white inside) where it
+goes, a room or a chair as a 3D layer (a room, street or corridor shows
+from inside, at eye height, ready to draw over), a pose onto the figure
+you want posed. Edit, Register Material, **Template** keeps the canvas's layers as
+a template (a `.clip` file you can share), and File, New's **Template**
+row starts a new canvas with one. Layer, New Layer, **File Object** shows
+a picture file on a layer; **Update File Object** shows it as the file is
+now, and Rasterize makes it a layer to draw on.
+
+**Seeing your work as readers will.** Layer, Layer Settings, **Display
+Palette Colors on Canvas** shows each layer's drawing in its palette color
+(only on screen), and **in Parent Folder** shows a folder's colors on its
+row. View, **Webtoon Display Settings** marks where each screen of a
+phone, tablet or desktop ends down a webtoon, and View, **Fit Width**
+fits the canvas's width to the window. Preferences' **Adjust density**
+makes the interface color darker or lighter; text always stays readable.
+
+**Auto Actions that remember your hands.** While an action records, a
+layer you drag in the Layer palette and the strokes you draw are kept as
+steps too, and a step keeps the settings its dialog had when you
+recorded it. The second box of a step shows its dialog while the action
+plays: the action waits for you to press OK, and Cancel stops it.
+
 ---
 
 ## Sue Writer: writing and publishing

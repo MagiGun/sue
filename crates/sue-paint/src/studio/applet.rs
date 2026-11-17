@@ -236,6 +236,7 @@ impl SueApplet for SuePaint {
             },
         ));
         declarations.extend(crate::studio_mode::declarations());
+        declarations.extend(Self::asset_declarations());
         declarations.extend(Self::custom_colors());
         declarations.extend(sue_wm::shortcuts::declarations(
             KEYS_SECTION,
@@ -542,6 +543,7 @@ impl SueApplet for SuePaint {
             "import" => self.take_file(cx, path),
             "layer" => self.open_picked(cx, path, true),
             "import-layers" => self.open_picked(cx, path, true),
+            "file-object" => self.make_file_object(cx, path),
             "batch-import" => self.batch_import(cx, path),
             "story-text" => self.import_text(cx, path),
             "brush-import" => self.import_brushes(cx, path),

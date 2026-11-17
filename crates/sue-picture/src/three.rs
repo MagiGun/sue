@@ -1142,13 +1142,33 @@ pub fn new_layer(
     name: &str,
     model: Entity,
 ) -> Result<(Edit, EntityId), String> {
+    new_layer_viewed(arena, picture, below, name, model, None)
+}
+
+/// [`new_layer`], its camera set to `view` when given (a 3D background
+/// looked into from where a person would stand) instead of the camera a
+/// new figure or model gets.
+///
+/// # Errors
+/// If the picture has no size.
+pub fn new_layer_viewed(
+    arena: &Arena,
+    picture: EntityId,
+    below: Option<EntityId>,
+    name: &str,
+    model: Entity,
+    view: Option<View3D>,
+) -> Result<(Edit, EntityId), String> {
+    let given = view.is_some();
     let size = arena
         .get_by_id(picture)
         .ok()
         .and_then(sue_model::picture::size)
         .ok_or(tr!("the-picture-has-no-size"))?;
     let figure = crate::figure::is_figure(&model);
-    let view = if figure {
+    let view = if let Some(view) = view {
+        view
+    } else if figure {
         View3D {
             yaw: 18.0,
             pitch: 6.0,
@@ -1185,6 +1205,12 @@ pub fn new_layer(
         (STYLE, Value::Int(i64::from(view.style))),
     ] {
         layer = layer.with_property(key, value);
+    }
+    // A camera given keeps its lens and its place too.
+    if given {
+        for (key, value) in [(FOV, view.fov), (PAN_X, view.pan[0]), (PAN_Y, view.pan[1])] {
+            layer = layer.with_property(key, Value::Float(f64::from(value)));
+        }
     }
     let edit = Edit::new(tr!("new-3d-layer-2", name = name))
         .then(SpawnEntity::new(model))

@@ -87,6 +87,44 @@ follow [Semantic Versioning](https://semver.org/).
   a control point and connect lines; Redraw vector line can leave its
   end free, connect lines and simplify; Fill leftover and Select
   garbage join Remove dust.
+- Sue Paint, Material palette: a library of Sue Paint's own making, many
+  times larger: screentones (dots from 5% to 70%, fine and coarse, line
+  and noise tones, dot and line gradations), patterns (crosshatch,
+  waves, scales, herringbone, wood grain, tiles, basket weave and more),
+  effect lines (focus, speed, falling speed, flash, gloom), balloons
+  (round, thought, shout, whisper, wavy, caption box) with white inside,
+  frame templates, every preset pose, and 3D backgrounds (room, street,
+  corridor, stairs, rooftop) and objects (chair, desk, table, bed,
+  bookshelf, door, street lamp, crate) that land as 3D layers; a
+  background lands seen from inside, at eye height in one point
+  perspective, ready to draw over. A row of
+  buttons opens the palette at each folder, and Window, Material Folders
+  lists them too.
+- Sue Paint: templates. Edit, Register Material, Template keeps a
+  canvas's layers as a template (a `.clip` file you can share), and
+  File, New has a Template row that starts the new canvas with one.
+- Sue Paint: New Layer, File Object shows a picture file on a layer of
+  its own; Update File Object shows the file as it is now, and Rasterize
+  makes it a layer to draw on.
+- Sue Paint, Layer Settings: Display Palette Colors in Parent Folder (a
+  folder's row shows the palette colors of what it holds) and Display
+  Palette Colors on Canvas (each layer's drawing shows in its palette
+  color; the picture itself is unchanged).
+- Sue Paint, View: Webtoon Display Settings shows where each screen of a
+  phone, tablet or desktop ends down a webtoon, and Fit Width fits the
+  canvas's width to the window.
+- Sue Paint, Auto Action: each step has a second box that shows its
+  dialog while the action plays (the action waits for OK; Cancel stops
+  it), a step keeps the settings its dialog had when it was recorded (a
+  blur recorded at 12 pixels plays at 12 pixels), and recording keeps
+  layers dragged in the Layer palette and the strokes you draw on the
+  canvas. A dialog cancelled while recording leaves no step behind.
+- Sue Paint, Preferences: Adjust density makes the interface color
+  darker or lighter; text always stays readable.
+- Sue Paint: a pose dragged from the Material palette onto a drawing
+  figure poses that figure, whichever layer is current; let go where no
+  figure is, it makes one in that pose.
+
 - Sue Paint, Animation, Show Animation Cels: Show Edited Cel Only (the
   cel locked as the one you draw shows in its folder in place of the
   frame's), Check Cel Motion by Key Input (the frames from two cels back

@@ -164,7 +164,7 @@ The order of work is the plan at the end.
 | FBX import (5.1) | File > Import | missing | |
 | 3D pose from Posemaniacs | File > Import > 3D pose | missing | |
 | Pose Scanner (image to pose) | File > Import > Pose Scanner | done | Tool Property of a 3D drawing figure; MoveNet finds the body, limbs toward the camera guessed from how short they look |
-| Create file object | File > Import > Create file object | missing | Another file embedded as an object layer |
+| Create file object | Layer > New Layer > File Object | done | A layer shows a picture file kept outside the canvas (its pixels kept too); Update File Object reads the file again; Rasterize makes it a layer to draw on. Pictures only: a `.clip` as a file object is not built |
 | Batch import (EX) | File > Import > Batch import | done | Every picture in a folder, by name, one a page |
 | Scan, Continuous Scan, Select Scan Device | File > Import > Scan | missing | A scanner talks through `sue-platform` |
 | Exposure sheet import | File > Import > Exposure sheet | done | CSV, cels found by layer name |
@@ -522,8 +522,8 @@ decorations. Light and heavy pressure and a flick need a tablet.
 | Register body shape as material, Initialize | Tool Property | done | Body shape materials (`.body`, docs/body-shape-files.md) beside pose materials |
 | Object list of several objects on one 3D layer | Tool Property | missing | One object per 3D layer |
 | Display settings for editing | Tool Property | missing | Clip Studio's draw quality while a 3D object is edited; Sue Paint draws the model at full quality on every frame of a drag, so there is nothing to lower yet |
-| Hand pose on the figure itself, poses dragged onto the model, the 3D object launcher | 3D | missing | Hands are their own 3D layer; poses go on by Paste from the Material palette |
-| Characters with physics, 3D backgrounds, motion materials | Materials | missing | Later (risk R6: Sue's own materials only) |
+| Hand pose on the figure itself, poses dragged onto the model, the 3D object launcher | 3D | partial | A pose dragged from the Material palette poses the figure of its kind under the pointer, whichever layer is current, and makes a new figure where none is; hands are their own 3D layer, so a hand pose does not pose a body figure's hands, and there is no object launcher |
+| Characters with physics, 3D backgrounds, motion materials | Materials | partial | 3D backgrounds (room, street, corridor, stairs, rooftop) and small 3D objects of Sue Paint's own, each a 3D layer; characters with physics and motion materials are downloaded materials in Clip Studio Paint and are left out (risk R6: Sue's own materials only) |
 | Batch texture export (EX) | File > Export | missing | |
 | FBX import (5.1) | File > Import | missing | |
 
@@ -588,7 +588,7 @@ decorations. Light and heavy pressure and a flick need a tablet.
 | Palettes: Color Wheel, Color Slider, Color Set, Color History, Intermediate Color, Approximate Color | Window | done | |
 | Palettes: Navigator, Sub View, Layer, Layer Property, History | Window | done | |
 | Palettes: Timeline, Animation Cels, Material | Window | done | |
-| Auto Action palette (recorded sequences) | Window > Auto Action Palette | partial | Records and plays menu commands; it does not record tool strokes as Clip Studio's can |
+| Auto Action palette (recorded sequences) | Window > Auto Action Palette | done | Records and plays menu commands, layers dragged in the Layer palette and strokes drawn on the canvas; each step has its on box and a box that shows its dialog while playing (the action waits for it), and keeps the settings its dialog had when it was recorded |
 | Item Bank palette | Window > Item Bank | done | Keeps sub tools to add again |
 | Information palette | Window > Information | done | The canvas, the memory its pixels take, the pointer's place and color, a drag's length, in the unit chosen; its menu shows or hides each, so it can be emptied into a spacer |
 | Cascade, Tile, New Window | Window > Canvas | done | New Window adds a tab and leaves tiling alone; a canvas can also go into a window of its own (tear its tab off, or Canvas in Its Own Window), on any screen |
@@ -609,7 +609,7 @@ decorations. Light and heavy pressure and a flick need a tablet.
 | Materials kept in a folder of your choice | Settings | done | |
 | Recently used folder and frequency sorting (5.0) | Palette | partial | To verify |
 | User tags and batch tag management (5.1) | Palette | missing | |
-| Pose, 3D and texture material kinds | Palette | partial | Poses done, each with a picture of it; 3D models and textures as materials to come |
+| Pose, 3D and texture material kinds | Palette | partial | Poses (every preset among them), 3D backgrounds and small 3D objects of Sue Paint's own, effect lines, balloons and templates; downloaded 3D characters and textures are not built (material downloads are left out on purpose) |
 
 ## Print
 

@@ -131,6 +131,37 @@ impl SuePaint {
             let under = screen([x, y + h]) + Vec2::new(0.0, theme.space(sue_wm::ui::Space::S1));
             marks::tag(&painter, under, &tr!("output-frame-label"), theme);
         }
+        // Webtoon Display Settings: where each screen of the reader's
+        // device ends, numbered.
+        if cx
+            .rice()
+            .get_bool(crate::dialogs::assets::WEBTOON_GUIDES)
+            .unwrap_or(false)
+        {
+            let tall = crate::dialogs::assets::screen_height(
+                cx.rice().get_str(crate::dialogs::assets::WEBTOON_SCREEN),
+                size[0],
+            );
+            let mut y = tall;
+            let mut screen_number = 1;
+            while y < size[1] as f32 && screen_number < 400 {
+                marks::guide(
+                    &painter,
+                    vec![screen([0.0, y]), screen([size[0] as f32, y])],
+                    false,
+                    theme,
+                );
+                let at = screen([0.0, y]) + Vec2::new(0.0, theme.space(sue_wm::ui::Space::S1));
+                marks::tag(
+                    &painter,
+                    at,
+                    &tr!("webtoon-screen-end", value = screen_number),
+                    theme,
+                );
+                y += tall;
+                screen_number += 1;
+            }
+        }
         // The selection.
         if self.show_selection
             && let Some(selection) = &doc.selection

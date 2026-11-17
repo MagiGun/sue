@@ -12,7 +12,13 @@
 //!
 //! Recording keeps every command flagged `RECORDABLE` that runs while it
 //! lasts, wherever it was run from: the menus, a key, the command bar,
-//! Quick Access or a palette's button (gap CT-33).
+//! Quick Access or a palette's button (gap CT-33), and the strokes drawn
+//! on the canvas and the layers dragged in the Layer palette (FGV-16).
+//!
+//! Each step has a second box: whether the step's dialog shows while the
+//! action plays. With it ticked the action waits for the dialog, and
+//! Cancel there stops the rest of the action; without it the dialog's
+//! settings are taken as they come, as OK would.
 //!
 //! The sets live in `auto_actions.txt` in Sue Paint's data folder, in the
 //! format `docs/paint-auto-action-files.md` describes; an exported set is
@@ -60,6 +66,24 @@ pub(crate) struct AutoAction {
     /// Its steps that are turned off (skipped when played), by place;
     /// shorter than `steps` when the last ones are on.
     pub steps_off: Vec<bool>,
+    /// Its steps whose dialog shows while it plays, by place; shorter
+    /// than `steps` when the last ones show none.
+    pub steps_dialog: Vec<bool>,
+    /// The settings each step's dialog had when it was recorded, by
+    /// place (empty: none kept); shorter than `steps` when the last ones
+    /// keep none. Played, the step's dialog takes them.
+    pub steps_settings: Vec<String>,
+}
+
+/// One step of an action as it plays.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Step {
+    /// The command it runs.
+    pub command: String,
+    /// Whether its dialog shows (the action waits for it).
+    pub dialog: bool,
+    /// The settings its dialog takes (see `auto_settings`).
+    pub settings: Option<String>,
 }
 
 impl AutoAction {
@@ -90,6 +114,23 @@ impl AutoAction {
         self.tidy();
     }
 
+    /// Whether step `index` shows its dialog while the action plays.
+    pub(crate) fn shows_dialog(&self, index: usize) -> bool {
+        self.steps_dialog.get(index).copied().unwrap_or(false)
+    }
+
+    /// Has step `index` show its dialog while the action plays, or not.
+    pub(crate) fn set_dialog(&mut self, index: usize, on: bool) {
+        if index >= self.steps.len() {
+            return;
+        }
+        if self.steps_dialog.len() <= index {
+            self.steps_dialog.resize(index + 1, false);
+        }
+        self.steps_dialog[index] = on;
+        self.tidy();
+    }
+
     /// Takes step `index` out.
     pub(crate) fn remove_step(&mut self, index: usize) {
         if index < self.steps.len() {
@@ -97,26 +138,72 @@ impl AutoAction {
             if index < self.steps_off.len() {
                 self.steps_off.remove(index);
             }
+            if index < self.steps_dialog.len() {
+                self.steps_dialog.remove(index);
+            }
+            if index < self.steps_settings.len() {
+                self.steps_settings.remove(index);
+            }
             self.tidy();
         }
     }
 
     /// The steps that play, in order.
+    #[cfg(test)]
     pub(crate) fn playing(&self) -> Vec<String> {
+        self.playing_steps()
+            .into_iter()
+            .map(|step| step.command)
+            .collect()
+    }
+
+    /// The steps that play, in order, each with whether its dialog shows
+    /// and the settings it keeps for it.
+    pub(crate) fn playing_steps(&self) -> Vec<Step> {
         self.steps
             .iter()
             .enumerate()
             .filter(|(index, _)| self.step_on(*index))
-            .map(|(_, step)| step.clone())
+            .map(|(index, step)| Step {
+                command: step.clone(),
+                dialog: self.shows_dialog(index),
+                settings: self.settings(index).map(str::to_owned),
+            })
             .collect()
     }
 
-    /// Drops the "off" marks past the last one that is set, so two
-    /// actions that play alike compare alike.
+    /// The settings step `index` keeps for its dialog, if any.
+    pub(crate) fn settings(&self, index: usize) -> Option<&str> {
+        self.steps_settings
+            .get(index)
+            .map(String::as_str)
+            .filter(|settings| !settings.is_empty())
+    }
+
+    /// Has step `index` keep `settings` for its dialog (empty: none).
+    pub(crate) fn set_settings(&mut self, index: usize, settings: &str) {
+        if index >= self.steps.len() {
+            return;
+        }
+        if self.steps_settings.len() <= index {
+            self.steps_settings.resize(index + 1, String::new());
+        }
+        settings.clone_into(&mut self.steps_settings[index]);
+        self.tidy();
+    }
+
+    /// Drops the marks past the last one that is set, so two actions
+    /// that play alike compare alike.
     fn tidy(&mut self) {
-        self.steps_off.truncate(self.steps.len());
-        while self.steps_off.last() == Some(&false) {
-            self.steps_off.pop();
+        for marks in [&mut self.steps_off, &mut self.steps_dialog] {
+            marks.truncate(self.steps.len());
+            while marks.last() == Some(&false) {
+                marks.pop();
+            }
+        }
+        self.steps_settings.truncate(self.steps.len());
+        while self.steps_settings.last().is_some_and(String::is_empty) {
+            self.steps_settings.pop();
         }
     }
 }
@@ -152,6 +239,13 @@ pub(crate) struct AutoActions {
     pub renaming: Option<(usize, String)>,
     /// The set being renamed, as typed.
     pub renaming_set: Option<String>,
+    /// The steps of the action playing that are still to run, each with
+    /// whether its dialog shows: the action waits here while one does.
+    pub queue: std::collections::VecDeque<Step>,
+    /// While recording, the step whose command opened the dialog now
+    /// open: OK keeps the dialog's settings with it, Cancel takes the
+    /// step out again (it did nothing).
+    pub dialog_step: Option<usize>,
 }
 
 /// An id made of `name`: lower case letters and digits, dashes between
@@ -176,7 +270,10 @@ pub(crate) fn slug(name: &str) -> String {
     }
 }
 
-/// Reads the lines of one action (`id`, `off`, `step`) into `action`.
+/// Reads the lines of one action (`id`, `off`, `step`, `dialog`,
+/// `settings`) into `action`. A file of a Sue that knew no `dialog` or
+/// `settings` line still reads; one such Sue reads a newer file and skips
+/// the lines it does not know.
 fn read_line(action: &mut AutoAction, line: &str) {
     if let Some(id) = line.strip_prefix("id ") {
         let id = id.trim();
@@ -193,6 +290,14 @@ fn read_line(action: &mut AutoAction, line: &str) {
         action.steps.push(command.trim().to_owned());
         let index = action.steps.len() - 1;
         action.set_step(index, on);
+    } else if line == "dialog"
+        && let Some(index) = action.steps.len().checked_sub(1)
+    {
+        action.set_dialog(index, true);
+    } else if let Some(settings) = line.strip_prefix("settings ")
+        && let Some(index) = action.steps.len().checked_sub(1)
+    {
+        action.set_settings(index, settings.trim());
     }
 }
 
@@ -314,6 +419,12 @@ impl AutoActions {
                 for (step, command) in action.steps.iter().enumerate() {
                     let off = if action.step_on(step) { "" } else { "off " };
                     out.push_str(&format!("step {off}{command}\n"));
+                    if action.shows_dialog(step) {
+                        out.push_str("dialog\n");
+                    }
+                    if let Some(settings) = action.settings(step) {
+                        out.push_str(&format!("settings {settings}\n"));
+                    }
                 }
             }
         }
@@ -450,12 +561,12 @@ impl AutoActions {
     /// The steps that play of the action `id`, in whichever set it is,
     /// and its name; none for an action that is off.
     #[must_use]
-    pub fn steps_of(&self, id: &str) -> Option<(String, Vec<String>)> {
+    pub(crate) fn steps_of(&self, id: &str) -> Option<(String, Vec<Step>)> {
         self.all_sets()
             .into_iter()
             .flat_map(|set| set.actions)
             .find(|action| action.id == id && !action.off)
-            .map(|action| (action.name.clone(), action.playing()))
+            .map(|action| (action.name.clone(), action.playing_steps()))
     }
 }
 
@@ -484,26 +595,73 @@ impl SuePaint {
             .sets
             .get(index)
             .filter(|action| !action.off)
-            .map(AutoAction::playing)
+            .map(AutoAction::playing_steps)
         else {
             return;
         };
-        self.play_steps(&steps, cx);
+        self.play_steps(steps, cx);
     }
 
-    /// Runs `steps` in turn, recording none of them.
-    pub(crate) fn play_steps(&mut self, steps: &[String], cx: &mut AppletContext<'_>) {
+    /// Runs `steps` in turn, recording none of them. A step whose dialog
+    /// shows waits for it: the rest runs once it is closed with OK
+    /// ([`Self::auto_continue`]). An action played while another waits
+    /// takes its place.
+    pub(crate) fn play_steps(&mut self, steps: Vec<Step>, cx: &mut AppletContext<'_>) {
+        self.auto.queue = steps.into();
+        self.auto_continue(cx);
+    }
+
+    /// Runs the steps still to run of the action playing, until one shows
+    /// its dialog. A step's dialog takes the settings the step kept when
+    /// it was recorded; a step whose dialog does not show goes on with
+    /// them at once, as OK would.
+    pub(crate) fn auto_continue(&mut self, cx: &mut AppletContext<'_>) {
         let recording = self.auto.recording.take();
-        for step in steps {
-            self.run(step, cx);
+        while self.dialog.is_none() {
+            let Some(step) = self.auto.queue.pop_front() else {
+                break;
+            };
+            self.run(&step.command, cx);
+            if let (Some(settings), Some(dialog)) = (&step.settings, self.dialog.as_mut()) {
+                super::auto_settings::apply(dialog, settings);
+            }
+            if !step.dialog
+                && let Some(dialog) = self.dialog.take()
+            {
+                self.dialog_ok(cx, dialog);
+            }
         }
         self.auto.recording = recording;
+    }
+
+    /// While recording: the dialog that just closed with OK (`kept`) or
+    /// Cancel (`None`). OK keeps the dialog's settings with the step that
+    /// opened it; Cancel takes that step out, as it did nothing.
+    pub(crate) fn record_dialog_closed(&mut self, kept: Option<&crate::dialogs::Dialog>) {
+        let Some(step) = self.auto.dialog_step.take() else {
+            return;
+        };
+        let Some(action) = self
+            .auto
+            .recording
+            .and_then(|index| self.auto.sets.get_mut(index))
+        else {
+            return;
+        };
+        match kept {
+            Some(dialog) => {
+                if let Some(settings) = super::auto_settings::of_dialog(dialog) {
+                    action.set_settings(step, &settings);
+                }
+            }
+            None => action.remove_step(step),
+        }
     }
 
     /// Plays the action whose id is `id` (its key, `auto.run.<id>`).
     pub(crate) fn play_auto_id(&mut self, id: &str, cx: &mut AppletContext<'_>) {
         if let Some((_, steps)) = self.auto.steps_of(id) {
-            self.play_steps(&steps, cx);
+            self.play_steps(steps, cx);
         }
     }
 
@@ -956,6 +1114,43 @@ impl SuePaint {
                                     auto.sets[index].set_step(step, !on);
                                     changed = true;
                                 }
+                                // Whether its dialog shows while playing:
+                                // only a step with a dialog (its command
+                                // ends in "...", as menus show it) takes
+                                // the box; the others show it dimmed.
+                                let shows = auto.sets[index].shows_dialog(step);
+                                let has_dialog = label.ends_with("...")
+                                    || shows
+                                    || auto.sets[index].settings(step).is_some();
+                                let dialog_name = tr!("auto-show-dialog-of", name = label.clone());
+                                let dialog = ui
+                                    .add_enabled_ui(has_dialog, |ui| {
+                                        sue_wm::ui::checkbox(
+                                            ("sue-paint-auto-step-dialog", &id, step),
+                                            "",
+                                            shows,
+                                        )
+                                        .bare()
+                                        .show(ui, theme)
+                                    })
+                                    .inner;
+                                dialog.widget_info(|| {
+                                    egui::WidgetInfo::selected(
+                                        egui::Role::CheckBox,
+                                        has_dialog,
+                                        shows,
+                                        &dialog_name,
+                                    )
+                                });
+                                let dialog = sue_wm::ui::tooltip(
+                                    dialog,
+                                    &Tip::new(&dialog_name).help(&tr!("auto-show-dialog-help")),
+                                    theme,
+                                );
+                                if has_dialog && dialog.clicked() {
+                                    auto.sets[index].set_dialog(step, !shows);
+                                    changed = true;
+                                }
                                 let chosen = auto.selected == index && auto.step == Some(step);
                                 let row = TreeRow::new(("sue-paint-auto-step", &id, step), &label)
                                     .depth(1)
@@ -1037,6 +1232,30 @@ mod tests {
         let text = AutoActions::write_sets(&sets, 1);
         assert!(text.starts_with(HEADER));
         assert!(text.contains("step off view.fit"));
+        // A step whose dialog shows keeps the mark on a line of its own.
+        let mut shown = sets.clone();
+        shown[1].actions[0].set_dialog(2, true);
+        // And the settings its dialog had when it was recorded, too.
+        shown[1].actions[0].set_settings(0, "filter:gaussian=12.5");
+        let with_dialog = AutoActions::write_sets(&shown, 1);
+        assert!(with_dialog.contains("step select.none\ndialog\n"));
+        assert!(with_dialog.contains("step layer.new\nsettings filter:gaussian=12.5\n"));
+        assert_eq!(AutoActions::read_sets(&with_dialog), (shown.clone(), 1));
+        let step = |command: &str, dialog: bool, settings: Option<&str>| Step {
+            command: command.to_owned(),
+            dialog,
+            settings: settings.map(str::to_owned),
+        };
+        assert_eq!(
+            shown[1].actions[0].playing_steps(),
+            [
+                step("layer.new", false, Some("filter:gaussian=12.5")),
+                step("select.none", true, None)
+            ]
+        );
+        // Taking a step out takes its settings with it.
+        shown[1].actions[0].remove_step(0);
+        assert!(shown[1].actions[0].steps_settings.is_empty());
         let (back, in_use) = AutoActions::read_sets(&text);
         assert_eq!(back, sets);
         assert_eq!(in_use, 1);

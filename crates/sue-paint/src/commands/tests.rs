@@ -236,6 +236,8 @@ fn every_command_can_be_reached() {
             "figure.object.angle.",
             "auto.run.",
             "subtool.",
+            "auto.stroke.",
+            "layer.move_by.",
         ]
     );
 }

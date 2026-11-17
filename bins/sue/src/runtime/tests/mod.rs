@@ -14,6 +14,7 @@ mod p6_p6_brush_rows;
 mod p6_p6_clip;
 mod p6_tools_a;
 mod p6_tools_b;
+mod p6_p6_assets;
 mod paint_3d;
 mod paint_anim;
 mod paint_basics;

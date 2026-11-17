@@ -40,7 +40,7 @@ fn sue_paint_runs_every_view_command() {
         .filter(|command| command.group == "view")
         .map(|command| command.name)
         .collect();
-    assert_eq!(names.len(), 43, "{names:?}");
+    assert_eq!(names.len(), 45, "{names:?}");
     let paper = |runtime: &Runtime| {
         sue_paint::doc::layers(&runtime.engine.world.arena, picture)
             .into_iter()

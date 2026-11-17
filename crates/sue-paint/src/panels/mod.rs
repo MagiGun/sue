@@ -8,6 +8,7 @@
 //! and a single palette with its torn-off header.
 
 pub(crate) mod auto_action;
+mod auto_settings;
 mod brush_size;
 pub(crate) mod cels;
 mod color;

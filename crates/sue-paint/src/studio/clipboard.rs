@@ -15,9 +15,20 @@ impl SuePaint {
         cx: &mut AppletContext<'_>,
         material: &crate::materials::Material,
     ) {
-        if material.placement == crate::materials::Placement::Pose {
-            self.apply_pose_material(cx, material);
-            return;
+        match material.placement {
+            crate::materials::Placement::Pose => {
+                self.apply_pose_material(cx, material);
+                return;
+            }
+            crate::materials::Placement::Layers => {
+                self.apply_template(cx, material);
+                return;
+            }
+            crate::materials::Placement::Model => {
+                self.place_model_material(cx, material);
+                return;
+            }
+            crate::materials::Placement::Cover | crate::materials::Placement::Fit => {}
         }
         let Some(picture) = self.picture() else {
             return;

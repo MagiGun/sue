@@ -162,7 +162,9 @@ fn reference_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemStat
 /// or frame layer, a raster layer with effects on).
 fn rasterize_state(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
     when(paint.layer().is_some_and(|layer| {
-        doc::rasterizes(facts.arena, layer) || crate::vector::is_vector(facts.arena, layer)
+        doc::rasterizes(facts.arena, layer)
+            || crate::vector::is_vector(facts.arena, layer)
+            || SuePaint::is_file_object(facts.arena, layer)
     }))
 }
 
@@ -645,6 +647,16 @@ fn rasterize(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     let (Some(picture), Some(layer)) = (paint.picture(), paint.layer()) else {
         return;
     };
+    // A File Object layer keeps the file's pixels as they are and is a
+    // raster layer from then on.
+    if SuePaint::is_file_object(&cx.world.arena, layer) {
+        SuePaint::apply(
+            cx,
+            doc::Edit::new(tr!("rasterize"))
+                .then(SetProperty::remove(layer, crate::studio::FILE_OBJECT)),
+        );
+        return;
+    }
     match doc::rasterize(&cx.world.arena, picture, layer) {
         Ok((edit, id)) => apply_and_pick(paint, cx, edit, id),
         Err(error) => cx.fail(error),

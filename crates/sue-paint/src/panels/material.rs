@@ -81,6 +81,11 @@ pub(crate) fn kind_icon(kind: &str) -> Icon {
         crate::materials::IMAGE => Icon::MaterialImage,
         crate::materials::TIP => Icon::MaterialBrushTip,
         crate::materials::POSE => Icon::MaterialPose,
+        crate::materials::EFFECT => Icon::ExtractLine,
+        crate::materials::BALLOON => Icon::ToolBalloon,
+        crate::materials::TEMPLATE => Icon::Template,
+        crate::materials::BACKGROUND => Icon::Cube,
+        crate::materials::OBJECT => Icon::ToolFigure,
         _ => Icon::Materials,
     }
 }
@@ -110,7 +115,10 @@ pub(crate) fn matches(entry: &Entry, folder: &Node, search: &str) -> bool {
 pub(crate) fn material_thumb(material: &crate::materials::Material, side: u32) -> Vec<u8> {
     let tile = match material.placement {
         crate::materials::Placement::Fit => crate::materials::layer(material, [side, side], [0; 3]),
-        crate::materials::Placement::Cover | crate::materials::Placement::Pose => {
+        crate::materials::Placement::Cover
+        | crate::materials::Placement::Pose
+        | crate::materials::Placement::Layers
+        | crate::materials::Placement::Model => {
             crate::materials::picture(material, [side, side], [0; 3])
         }
     };
@@ -200,6 +208,8 @@ impl SuePaint {
             if !self.paste_picture_at(cx, &name, &tile, at) {
                 return;
             }
+        } else if material.placement == Placement::Pose {
+            self.drop_pose(cx, material, at);
         } else {
             self.paste_material(cx, material);
         }
@@ -257,6 +267,44 @@ impl SuePaint {
         self.extras.material.picked.clear();
         self.extras.material.tags = None;
         self.hub.materials_changed();
+    }
+
+    /// A row of buttons, one per folder of the library (each kind of
+    /// material), the open one shown pressed: a click opens the palette
+    /// at that folder.
+    fn material_folder_buttons(&mut self, ui: &mut Ui, row: Rect, theme: &Theme) {
+        let kinds: Vec<(String, String)> = self
+            .material_kinds
+            .iter()
+            .map(|kind| (kind.id.clone(), crate::localize(&kind.name)))
+            .collect();
+        if kinds.is_empty() {
+            return;
+        }
+        let gap = theme.space(Space::S1);
+        let count = kinds.len() as f32;
+        let side = ((row.width() - gap * (count - 1.0)) / count)
+            .min(row.height())
+            .floor()
+            .max(12.0);
+        let buttons = crate::panels::child(ui, row, "material-folders");
+        let mut x = row.left();
+        let mut open = None;
+        for (id, name) in kinds {
+            let rect = Rect::from_min_size(pos2(x, row.center().y - side / 2.0), vec2(side, side));
+            let chosen = matches!(&self.extras.material.folder, Node::Kind(kind) if *kind == id);
+            let response =
+                sue_wm::ui::icon_button(("sue-paint-material-folder", &id), kind_icon(&id), &name)
+                    .selected(chosen)
+                    .show_at(&buttons, rect, theme);
+            if sue_wm::ui::tooltip(response, &Tip::new(&name), theme).clicked() {
+                open = Some(id);
+            }
+            x += side + gap;
+        }
+        if let Some(id) = open {
+            self.show_material_folder(&id);
+        }
     }
 
     /// The Material palette.
@@ -325,13 +373,20 @@ impl SuePaint {
             self.command_button(&buttons, rect, command, icon, cx, theme);
             x += button + gap;
         }
+        // One button per folder, each opening the palette at it, as Clip
+        // Studio Paint keeps a Material palette per folder.
+        let folders = Rect::from_min_size(
+            pos2(body.left(), top.bottom() + gap),
+            vec2(body.width(), button),
+        );
+        self.material_folder_buttons(ui, folders, theme);
         // The bottom: the picked material's tags and its buttons.
         let bottom = Rect::from_min_max(
             pos2(body.left(), body.bottom() - control - gap - button),
             body.max,
         );
         let middle = Rect::from_min_max(
-            pos2(body.left(), top.bottom() + gap),
+            pos2(body.left(), folders.bottom() + gap),
             pos2(body.right(), bottom.top() - gap),
         );
         // The tree of folders, at the left when there is room.
