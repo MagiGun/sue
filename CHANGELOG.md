@@ -56,6 +56,14 @@ follow [Semantic Versioning](https://semver.org/).
   blurring width, process after brush stroke) and Dual brush (mode,
   size or linked to the main size, spacing, scatter, hardness) are new
   categories. Tool Property shows these rows once their eye is opened.
+- Sue Paint: a .clip exported from Sue now holds fill layers, linear
+  gradients, text, vector lines, palette colors and the layer color's
+  second color the way Clip Studio Paint itself stores them, so they
+  can stay editable there instead of arriving as flat pixels. A .clip
+  saved by Clip Studio opens in Sue with those layers live too: the
+  words of a text layer, the lines of a vector layer, the color of a
+  fill and the stops of a gradient, and gray layers as their grays.
+
 - Sue Paint, Animation, Show Animation Cels: Show Edited Cel Only (the
   cel locked as the one you draw shows in its folder in place of the
   frame's), Check Cel Motion by Key Input (the frames from two cels back

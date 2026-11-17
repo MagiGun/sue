@@ -3682,3 +3682,4 @@ material-tiling-hint = The picture is repeated over the whole canvas when pasted
 material-layer-order = Layer order
 material-order-above-current = Above the current layer
 material-order-top = At the top of the Layer palette
+clip-report-native = in Clip Studio's own storage, live in Clip Studio and in Sue: { $names }

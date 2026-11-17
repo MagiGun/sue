@@ -6,7 +6,9 @@
 
 use sue_core::txn::{Relate, SpawnEntity};
 use sue_core::{CHILD, Color, Entity, EntityId, OrderKey, PixelFormat, RasterTile2D, Relation};
-use sue_io::clip::{ClipContent, ClipDocument, ClipLayer, ClipLayerPath, Columns, RASTER, column};
+use sue_io::clip::{
+    ClipBitmap, ClipContent, ClipDocument, ClipLayer, ClipLayerPath, Columns, RASTER, column,
+};
 use sue_io::sqlite::Value;
 use sue_model::picture;
 use sue_model::{BlendMode, Foreign, class};
@@ -159,12 +161,29 @@ impl Making<'_> {
                 layer.content,
                 Some(ClipContent::Text(_) | ClipContent::Vector(_))
             );
+            // A text or vector layer is Clip Studio's `LayerType` 0, which
+            // Sue reads whole.
             if generated
-                || (layer.layer_type != RASTER && !layer.is_paper())
+                || (layer.layer_type != RASTER && !layer.is_paper() && !sue_reads)
                 || (layer.content.is_some() && !sue_reads)
             {
                 outcome = Outcome::Kept;
             }
+            // A gray layer comes in as color: Sue paints in color.
+            if layer.pixels.as_ref().is_some_and(ClipBitmap::is_gray)
+                || column(&layer.columns, "LayerColorTypeIndex")
+                    .and_then(Value::int)
+                    .is_some_and(|expression| expression != 0)
+            {
+                outcome = outcome.max(Outcome::Approximated);
+            }
+            // Clip Studio stores no pixels for a text or vector layer: Sue
+            // draws them.
+            let redraw = sue_reads
+                && layer
+                    .pixels
+                    .as_ref()
+                    .is_none_or(|bitmap| bitmap.blocks.is_none());
             let [left, top] = layer.pixels_at();
             // At least the canvas, and every pixel the file has beyond it.
             let (x0, y0) = (left.min(0), top.min(0));
@@ -220,7 +239,7 @@ impl Making<'_> {
             }
             if let Some(content) = &layer.content {
                 let (made, content_lost) =
-                    layers::on_pixels_in(entity, content, [x0, y0], self.doc.dpi);
+                    layers::on_pixels_in(entity, content, [x0, y0], self.doc.dpi, redraw);
                 lost |= content_lost;
                 entity = made;
             }

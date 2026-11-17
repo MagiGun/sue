@@ -43,6 +43,16 @@ fn rgba(raster: &RasterTile2D) -> Option<Vec<u8>> {
     }
 }
 
+/// How a layer of `content` comes out: in Clip Studio's own storage when
+/// it has a place for it (and whether something of it is lost there,
+/// kept in Sue's own tables), else live for Sue only.
+fn native_outcome(content: &ClipContent) -> (Outcome, bool) {
+    match sue_io::clip::native::clip_studio_fit(content) {
+        Some(lost) => (Outcome::Native, lost),
+        None => (Outcome::Live, false),
+    }
+}
+
 /// How a layer changed in Sue comes out, by what its kept data was: one
 /// Clip Studio drew from more than pixels (text, vector lines, a
 /// correction, a fill) is written as its pixels only, and its own data
@@ -122,7 +132,16 @@ impl Writing<'_> {
             } else {
                 self.layer(entity, info)
             }
-            .map(|(layer, outcome, lost)| (layer, outcome.max(self::lost(entity)), lost));
+            .map(|(layer, outcome, lost)| {
+                // Written again in Clip Studio's own storage, it is live
+                // there, whatever it was read as.
+                let outcome = if outcome == Outcome::Native {
+                    outcome
+                } else {
+                    outcome.max(self::lost(entity))
+                };
+                (layer, outcome, lost)
+            });
             let Some((mut layer, mut outcome, mut approximated)) = made else {
                 self.report
                     .lines
@@ -201,10 +220,12 @@ impl Writing<'_> {
                 );
                 let format_lost = raster.format() != PixelFormat::Rgba8;
                 if let Some((content, lost)) = layers::content_out(entity, [x, y], self.dpi) {
-                    // Text and vector lines: Clip Studio gets what they
-                    // drew, Sue the words and the lines.
+                    // Text and vector lines: Clip Studio gets them in its
+                    // own storage where it has a place for them (and the
+                    // pixels Sue drew), Sue gets the words and the lines.
+                    let (outcome, studio_lost) = native_outcome(&content);
                     layer.content = Some(content);
-                    (layer, Outcome::Live, lost || format_lost)
+                    (layer, outcome, lost || format_lost || studio_lost)
                 } else {
                     // Frames, balloons, figures and the like ride on a
                     // raster: Clip Studio gets what they drew.
@@ -237,7 +258,10 @@ impl Writing<'_> {
                     layers::content_out(entity, info.style.offset, self.dpi)
                 {
                     let correction = matches!(content, ClipContent::Correction(_));
-                    let outcome = if correction || shown.is_none() {
+                    let (native, studio_lost) = native_outcome(&content);
+                    let outcome = if native == Outcome::Native {
+                        native
+                    } else if correction || shown.is_none() {
                         Outcome::SueOnly
                     } else {
                         Outcome::Live
@@ -245,7 +269,7 @@ impl Writing<'_> {
                     (
                         ClipLayer::generated(&info.name, content, x, y, pixels),
                         outcome,
-                        lost,
+                        lost || studio_lost,
                     )
                 } else {
                     // A layer kind Clip Studio has no place for (an image

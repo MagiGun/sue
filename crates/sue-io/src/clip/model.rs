@@ -653,6 +653,15 @@ impl ClipBitmap {
         Some(if color { 4 } else { 1 })
     }
 
+    /// Whether this is a gray layer's bitmap: an alpha plane and a gray
+    /// plane, channel order 17 (survey 9.5). It decodes as color.
+    #[must_use]
+    pub fn is_gray(&self) -> bool {
+        self.part("Parameter")
+            .and_then(|part| part.values.get(4))
+            .is_some_and(|order| *order == 17)
+    }
+
     /// Whether a pixel no block covers is white (or, for color, opaque
     /// white); otherwise it is clear (or black for one channel).
     #[must_use]

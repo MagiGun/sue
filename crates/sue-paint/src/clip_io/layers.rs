@@ -2,18 +2,19 @@
 //! model and a [`ClipDocument`] layer: fill, gradient and correction
 //! layers, text, vector lines, layer effects and palette color.
 //!
-//! Clip Studio's own storage of these has not been observed yet, so the
-//! `.clip` carries them in Sue's own tables (`docs/clip-sue-tables.md`):
-//! Clip Studio shows a layer's pixels (what Sue draws for it, a fill and
-//! a gradient as they look, a correction as nothing), and Sue reads the
-//! layer back live. The one exception is the layer color effect, which
-//! is Clip Studio's own `DrawColor` columns.
+//! `sue_io::clip` writes fill, gradient, text and vector layers, palette
+//! color and the layer color effect in Clip Studio's own storage too,
+//! where the survey of 2026-11-16 shows how (`sue_io::clip::native`), so
+//! Clip Studio opens them live. Everything is also carried in Sue's own
+//! tables (`docs/clip-sue-tables.md`), so Sue gets back what Clip
+//! Studio has no place for (corrections, effects, a text's runs); Clip
+//! Studio shows the pixels Sue drew for those.
 //!
 //! Each mapping says whether it lost something on the way ("approximated"
 //! in the conversion report); what Sue's or Clip Studio's model holds and
 //! the other has no place for is named beside each.
 
-use sue_core::{Color, ColorSpace, Entity, Value};
+use sue_core::{Color, ColorSpace, ComponentData, ComponentKind, Entity, Value};
 use sue_io::clip::{
     ClipAlign, ClipContent, ClipCorrection, ClipDrawColor, ClipEffects, ClipFill, ClipGradient,
     ClipGradientRepeat, ClipGradientShape, ClipLayer, ClipLine, ClipPoint, ClipStop, ClipText,
@@ -331,7 +332,15 @@ fn vector_out(lines: &[Line], at: [f32; 2]) -> (ClipContent, bool) {
                 || line.samples.iter().any(|sample| {
                     sample.speed != 0.0 || sample.tilt != 0.0 || sample.lean != [0.0, 0.0]
                 })
-                || line.colors[1] != line.colors[0];
+                || line.colors[1] != line.colors[0]
+                // Clip Studio draws each point at its stored width alone:
+                // what the pen's pressure and the tip's tapers add to it
+                // is Sue's, so Clip Studio shows such a line evener.
+                || line.tip.taper_start > 0.0
+                || line.tip.taper_end > 0.0
+                || line.samples.iter().any(|sample| {
+                    (line.tip.size_by.factor(sample.pressure, 0.0, 0.0, 1.0) - 1.0).abs() > 1e-3
+                });
             let [r, g, b] = crate::color::bytes(line.colors[0]);
             ClipLine {
                 points: line
@@ -631,16 +640,34 @@ pub(super) fn on_pixels_in(
     content: &ClipContent,
     offset: [i64; 2],
     dpi: f64,
+    redraw: bool,
 ) -> (Entity, bool) {
     let at = offset.map(|value| value as f32);
     match content {
-        ClipContent::Text(text) => text_in(entity, text, at, dpi),
-        ClipContent::Vector(lines) => vector_in(entity, lines, at),
+        ClipContent::Text(text) => text_in(entity, text, at, dpi, redraw),
+        ClipContent::Vector(lines) => vector_in(entity, lines, at, redraw),
         _ => (entity, false),
     }
 }
 
-fn text_in(entity: Entity, text: &ClipText, at: [f32; 2], dpi: f64) -> (Entity, bool) {
+/// `entity` holding `raster` in place of the pixels it was made with.
+fn with_pixels(mut entity: Entity, raster: sue_core::RasterTile2D) -> Entity {
+    if let Some(slot) = entity.component_mut(ComponentKind::RasterTile2D) {
+        *slot = ComponentData::RasterTile2D(raster);
+    }
+    entity
+}
+
+/// `redraw`: the file stores no pixels for the layer (Clip Studio draws a
+/// text or vector layer from its description when it opens a file, and
+/// stores none), so Sue draws them from what it read.
+fn text_in(
+    entity: Entity,
+    text: &ClipText,
+    at: [f32; 2],
+    dpi: f64,
+    redraw: bool,
+) -> (Entity, bool) {
     let first = text.runs.first();
     let [r, g, b, _] = first.map_or([0, 0, 0, 255], |run| run.color);
     let mut lettering = Lettering::new([text.at[0] - at[0], text.at[1] - at[1]], [r, g, b]);
@@ -682,11 +709,18 @@ fn text_in(entity: Entity, text: &ClipText, at: [f32; 2], dpi: f64) -> (Entity, 
         for (key, value) in made.properties().iter() {
             entity.properties_mut().set(key, value.clone());
         }
+        if redraw
+            && let Some(raster) = made
+                .component(ComponentKind::RasterTile2D)
+                .and_then(ComponentData::as_raster)
+        {
+            entity = with_pixels(entity, raster.clone());
+        }
     }
     (entity, lost)
 }
 
-fn vector_in(entity: Entity, vector: &ClipVector, at: [f32; 2]) -> (Entity, bool) {
+fn vector_in(entity: Entity, vector: &ClipVector, at: [f32; 2], redraw: bool) -> (Entity, bool) {
     let mut lost = false;
     let lines: Vec<Line> = vector
         .lines
@@ -735,9 +769,20 @@ fn vector_in(entity: Entity, vector: &ClipVector, at: [f32; 2]) -> (Entity, bool
             }
         })
         .collect();
-    let entity = entity
+    let mut entity = entity
         .with_class(vector::CLASS)
         .with_ext(vector::to_geometry(&lines));
+    if redraw {
+        let size = entity
+            .component(ComponentKind::RasterTile2D)
+            .and_then(ComponentData::as_raster)
+            .map(|raster| (raster.width(), raster.height()));
+        if let Some((width, height)) = size
+            && let Some(raster) = vector::render(&lines, width, height)
+        {
+            entity = with_pixels(entity, raster);
+        }
+    }
     (entity, lost)
 }
 

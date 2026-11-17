@@ -5,13 +5,14 @@
 //! effects, palette color, layer thumbnails, layer comps, the timeline
 //! with its tracks, keyframes and audio, and the canvas preview.
 //!
-//! How Clip Studio itself stores most of these is not yet observed (the
-//! survey of `clip-survey-todo.md` has not been made), so Sue keeps them
-//! in tables of its own inside the file, laid out as
+//! Sue keeps them in tables of its own inside the file, laid out as
 //! `docs/clip-sue-tables.md` describes, and keeps whatever Clip Studio
 //! wrote for them untouched beside them ([`ClipNative`] names the two
-//! blobs Sue can already point at). Clip Studio sees the pixels of each
-//! layer, as it always has; Sue sees the layer as it was made.
+//! blobs Sue can point at). Where the survey of 2026-11-16 showed how
+//! Clip Studio stores one (fill, linear gradient, text, vector lines),
+//! the writer puts it in Clip Studio's own storage too and the reader
+//! reads it from there (`super::native`); for the rest Clip Studio sees
+//! the pixels of each layer, and Sue sees the layer as it was made.
 //!
 //! A layer elsewhere in the document is named by its [`ClipLayerPath`]:
 //! the places of the folders down to it, never a row id, since the writer

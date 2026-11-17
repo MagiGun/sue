@@ -169,6 +169,22 @@ pub(super) fn rowid_column(sql: &str) -> Option<usize> {
     None
 }
 
+/// The column names of a `CREATE TABLE` statement, in order.
+pub(super) fn sql_columns(sql: &str) -> Vec<String> {
+    definitions(sql)
+        .into_iter()
+        .filter(|part| {
+            let upper = part.to_ascii_uppercase();
+            !part.is_empty()
+                && !["PRIMARY ", "UNIQUE", "CHECK", "FOREIGN ", "CONSTRAINT "]
+                    .iter()
+                    .any(|word| upper.starts_with(word))
+        })
+        .filter_map(|part| part.split_whitespace().next())
+        .map(|name| name.trim_matches('"').to_owned())
+        .collect()
+}
+
 /// The definition of `column` in Sue's column list `columns` (such as
 /// `LayerName TEXT DEFAULT NULL`), if it is there.
 pub(super) fn definition<'a>(columns: &'a str, column: &str) -> Option<&'a str> {

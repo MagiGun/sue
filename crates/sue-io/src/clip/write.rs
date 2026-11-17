@@ -5,11 +5,14 @@
 //! [`encode_clip`] writes the [`Psd`] records Sue Paint saves today
 //! through the same model.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+use super::kinds::ClipContent;
 use super::model::{
-    ClipBitmap, ClipDocument, ClipHead, ClipLayer, ClipShape, ClipTable, Columns, FOLDER, column,
+    ClipBitmap, ClipDocument, ClipHead, ClipLayer, ClipMask, ClipShape, ClipTable, Columns, FOLDER,
+    column,
 };
+use super::native::{self, NATIVE_LAYER_COLUMNS};
 use super::offscreen::{attribute_of, payload_bytes};
 use super::parts::{self, VERSION};
 use super::read::MODELED;
@@ -19,7 +22,7 @@ use super::schema::{
     MIPMAP_COLUMNS, MIPMAP_INFO_COLUMNS, OFFSCREEN_COLUMNS, PROJECT_COLUMNS,
     SUE_DOCUMENT_PART_COLUMNS, SUE_DOCUMENT_PART_SQL, SUE_LAYER_PART_COLUMNS, SUE_LAYER_PART_SQL,
     SUE_LAYER_SQL, SUE_PROJECT_SQL, composite_of, definition, names, quoted, rowid_column,
-    table_sql,
+    sql_columns, table_sql,
 };
 use crate::psd::{Psd, PsdKind, PsdLayer};
 use crate::sqlite::{self, NewTable, Value};
@@ -247,8 +250,12 @@ impl Out {
                 let blank = matches!(value, Value::Null | Value::Integer(0))
                     || matches!(value, Value::Text(text) if text.is_empty())
                     || matches!(value, Value::Real(real) if *real == 0.0);
-                if !blank && !self.has(name) {
+                // Clip Studio's own columns of a kind of layer are
+                // written even when they hold 0, as Clip Studio writes them.
+                let native = definition(NATIVE_LAYER_COLUMNS, name).is_some();
+                if (!blank || native) && !self.has(name) {
                     let definition = definition(self.defaults, name)
+                        .or_else(|| definition(NATIVE_LAYER_COLUMNS, name))
                         .map_or_else(|| format!("{name} INTEGER DEFAULT NULL"), str::to_owned);
                     self.add(name, &definition)?;
                 }
@@ -336,7 +343,42 @@ struct Writer<'a> {
     exta: Vec<(String, Vec<u8>)>,
     /// The last layer row that is not a folder.
     top: i64,
+    /// The vector layers written in Clip Studio's own storage.
+    vectors: Vectors,
 }
+
+/// The vector layers of a document as Clip Studio stores them: a
+/// `VectorObjectList` row each, whose strokes sit in an `Exta` chunk.
+#[derive(Default)]
+struct Vectors {
+    /// The `MainId` of the brush the strokes are drawn with.
+    brush: u32,
+    /// The next free `VectorObjectList` `MainId`.
+    next: i64,
+    /// New rows: `MainId`, layer, chunk id.
+    rows: Vec<(i64, i64, String)>,
+    /// Their chunks, written after every bitmap's: where a file read
+    /// back keeps them, so writing it again gives the same bytes.
+    chunks: Vec<(String, Vec<u8>)>,
+    /// Kept rows still pointed at, by `MainId`, with the layer that does.
+    kept: HashMap<i64, i64>,
+    /// Strokes were drawn anew with Sue's pen (not only copied).
+    drawn: bool,
+}
+
+/// What a layer's row gets in Clip Studio's own columns beyond Sue's.
+#[derive(Default)]
+struct NativeRow {
+    /// Columns that take the place of what the row would hold.
+    typed: Vec<(&'static str, Value)>,
+    /// A mask the layer needs and has not (a fill or gradient layer).
+    mask: Option<ClipMask>,
+}
+
+/// The palette color's three `Layer` columns.
+const PALETTE: [&str; 3] = ["LayerPaletteRed", "LayerPaletteGreen", "LayerPaletteBlue"];
+/// The layer color effect's sub color.
+const SUB_COLOR: [&str; 3] = ["DrawColorSubRed", "DrawColorSubGreen", "DrawColorSubBlue"];
 
 impl Writer<'_> {
     /// `id` when it is set and free in table `table` (0 `Layer`, 1
@@ -414,6 +456,162 @@ impl Writer<'_> {
         mipmap
     }
 
+    /// Keeps the stroke row `index` for layer `id`. When another layer
+    /// already keeps it (a layer duplicated in Sue keeps its original's
+    /// columns), this one gets a copy of the row and its strokes, so no
+    /// two layers share one row; `out` then points at the copy.
+    fn keep_stroke(&mut self, index: i64, id: i64, out: &mut NativeRow) {
+        if let std::collections::hash_map::Entry::Vacant(slot) = self.vectors.kept.entry(index) {
+            slot.insert(id);
+            return;
+        }
+        let Some(payload) = kept_table_named(self.doc, "VectorObjectList")
+            .and_then(|table| native::stroke_row(table, index))
+            .and_then(|(_, chunk)| kept_chunk(self.doc, &chunk))
+        else {
+            return;
+        };
+        let main = self.vectors.next;
+        self.vectors.next += 1;
+        let external = self.ids.external();
+        self.externals.insert(external.clone());
+        self.vectors
+            .chunks
+            .push((external.clone(), payload.to_vec()));
+        self.vectors.rows.push((main, id, external));
+        out.typed
+            .push(("VectorNormalStrokeIndex", Value::Integer(main)));
+    }
+
+    /// What `layer` (with row `id`) gets in Clip Studio's own storage:
+    /// its fill, gradient, text or vector lines where the survey shows
+    /// how, its palette color and its layer color's sub color. A layer
+    /// whose kept columns already say the same keeps them as they are.
+    #[allow(clippy::too_many_lines)]
+    fn native(&mut self, layer: &ClipLayer, id: i64) -> NativeRow {
+        let mut out = NativeRow::default();
+        let int = Value::Integer;
+        let kept_int = |name: &str| column(&layer.columns, name).and_then(Value::int);
+        if let Some(color) = layer.palette_color {
+            let kept = (kept_int("LayerUsePaletteColor").unwrap_or(0) != 0)
+                .then(|| native::color_columns(&layer.columns, PALETTE))
+                .flatten();
+            if kept != Some(color) {
+                out.typed.push(("LayerUsePaletteColor", int(1)));
+                for (name, channel) in PALETTE.into_iter().zip(color) {
+                    out.typed.push((name, int(native::quad_column(channel))));
+                }
+            }
+        }
+        if layer.draw_color.enabled()
+            && let Some(sub) = layer.effects.as_ref().and_then(|effects| effects.sub_color)
+            && native::color_columns(&layer.columns, SUB_COLOR) != Some(sub)
+        {
+            for (name, channel) in SUB_COLOR.into_iter().zip(sub) {
+                out.typed.push((name, int(native::quad_column(channel))));
+            }
+        }
+        let stroke = kept_int("VectorNormalStrokeIndex").filter(|index| *index != 0);
+        let Some(content) = layer
+            .content
+            .as_ref()
+            .filter(|content| native::clip_studio_fit(content).is_some())
+        else {
+            if let Some(index) = stroke {
+                self.keep_stroke(index, id, &mut out);
+            }
+            return out;
+        };
+        let dpi = self.doc.dpi;
+        let reads = native::as_clip_studio_reads(content, dpi);
+        let kept = native::content_of_columns(&layer.columns).or_else(|| {
+            stroke
+                .and_then(|index| kept_strokes(self.doc, index))
+                .map(ClipContent::Vector)
+        });
+        // A kept stroke row stays unless new strokes take its place.
+        let replaced = !(reads.is_some() && kept == reads);
+        if let Some(index) = stroke
+            && !(replaced && matches!(content, ClipContent::Vector(_)))
+        {
+            self.keep_stroke(index, id, &mut out);
+        }
+        if !replaced {
+            return out;
+        }
+        match content {
+            ClipContent::Fill(_) | ClipContent::Gradient(_) => {
+                let Some(info) = native::gradation_info(content) else {
+                    return out;
+                };
+                out.typed.extend([
+                    ("LayerType", int(native::GENERATED)),
+                    ("LayerMasking", int(1)),
+                    ("GradationFillInfo", Value::Blob(info)),
+                    ("DrawToRenderOffscreenType", int(60)),
+                    ("DrawToRenderMipmapType", int(32)),
+                    ("MoveOffsetAndExpandType", int(30)),
+                    ("FixOffsetAndExpandType", int(30)),
+                    ("RenderBoundForLayerMoveType", int(30)),
+                    ("SetRenderThumbnailInfoType", int(30)),
+                    ("DrawRenderThumbnailType", int(30)),
+                ]);
+                if matches!(content, ClipContent::Gradient(_)) {
+                    out.typed.push(("GradationFillColorMixingInfo", int(1)));
+                }
+                // Clip Studio gives a fill or gradient layer a mask, white
+                // and with nothing stored in it.
+                if layer.mask.is_none() {
+                    out.mask = Some(ClipMask {
+                        offset: [-layer.offset[0], -layer.offset[1]],
+                        offscreen_offset: [0, 0],
+                        bitmap: ClipBitmap::gray(self.doc.width, self.doc.height, &[], true),
+                    });
+                }
+            }
+            ClipContent::Text(text) => {
+                let blobs = native::text_blobs(text, dpi);
+                out.typed.extend([
+                    ("LayerType", int(native::DRAWN)),
+                    ("DrawToRenderOffscreenType", int(40)),
+                    ("DrawToRenderMipmapType", int(40)),
+                    ("MoveOffsetAndExpandType", int(50)),
+                    ("MaterialContentType", int(110)),
+                    ("TextLayerType", int(0)),
+                    ("TextLayerString", Value::Blob(blobs.string)),
+                    ("TextLayerAttributes", Value::Blob(blobs.attributes)),
+                    ("TextLayerAddAttributesV01", Value::Blob(blobs.add)),
+                    ("TextLayerAttributesVersion", int(1)),
+                    // The layer keeps its own name.
+                    ("TextLayerNameAutoChangeEnabled", int(0)),
+                ]);
+            }
+            ClipContent::Vector(vector) => {
+                let main = self.vectors.next;
+                self.vectors.next += 1;
+                let external = self.ids.external();
+                self.externals.insert(external.clone());
+                self.vectors.chunks.push((
+                    external.clone(),
+                    native::vector_bytes(vector, self.vectors.brush),
+                ));
+                self.vectors.rows.push((main, id, external));
+                self.vectors.drawn = true;
+                out.typed.extend([
+                    ("LayerType", int(native::DRAWN)),
+                    ("DrawToRenderOffscreenType", int(10)),
+                    ("VectorNormalStrokeIndex", int(main)),
+                    ("VectorNormalFillIndex", int(0)),
+                    ("VectorNormalBalloonIndex", int(0)),
+                    ("VectorNormalType", int(0)),
+                    ("MixSubColorForEveryPlot", int(1)),
+                ]);
+            }
+            _ => {}
+        }
+        out
+    }
+
     /// The rows of one layer, given its id and the next one's.
     fn layer(&mut self, layer: &ClipLayer, id: i64, next: i64, root: bool) {
         let first = if layer.is_folder() || root {
@@ -431,9 +629,15 @@ impl Writer<'_> {
             .as_ref()
             .or(empty.as_ref())
             .map(|bitmap| self.bitmap(id, bitmap));
+        let native = if root || layer.is_folder() {
+            NativeRow::default()
+        } else {
+            self.native(layer, id)
+        };
         let mask = layer
             .mask
             .as_ref()
+            .or(native.mask.as_ref())
             .map(|mask| (mask, self.bitmap(id, &mask.bitmap)));
         let uuid = if layer.uuid.is_empty() || self.uuids.contains(&layer.uuid) {
             self.ids.uuid()
@@ -473,6 +677,20 @@ impl Writer<'_> {
         ];
         if layer.is_folder() || root {
             typed.push(("LayerFirstChildIndex", int(first)));
+        }
+        if native.mask.is_some() {
+            // The mask made for a fill or gradient layer is on.
+            for (name, value) in &mut typed {
+                if *name == "LayerVisibility" {
+                    *value = int(layer.visibility | 2);
+                }
+            }
+        }
+        for (name, value) in native.typed {
+            match typed.iter_mut().find(|(known, _)| *known == name) {
+                Some(slot) => slot.1 = value,
+                None => typed.push((name, value)),
+            }
         }
         if let Some(render) = render {
             typed.push(("LayerRenderMipmap", int(render)));
@@ -527,6 +745,297 @@ impl Writer<'_> {
             self.layer(layer, ids[i], next, false);
         }
         ids.first().copied().unwrap_or(0)
+    }
+}
+
+// ----- Clip Studio's own tables of vector layers ------------------------------------
+
+/// The kept table `name`, when the document has one.
+fn kept_table_named<'a>(doc: &'a ClipDocument, name: &str) -> Option<&'a ClipTable> {
+    doc.foreign.tables.iter().find(|table| table.name == name)
+}
+
+/// The value of `name` in a kept row.
+fn cell<'a>(table: &'a ClipTable, values: &'a [Value], name: &str) -> Option<&'a Value> {
+    let at = table.columns.iter().position(|column| column == name)?;
+    values.get(at)
+}
+
+/// The highest `MainId` of a kept table.
+fn highest_main(table: &ClipTable) -> i64 {
+    table
+        .rows
+        .iter()
+        .filter_map(|(_, values)| cell(table, values, "MainId").and_then(Value::int))
+        .max()
+        .unwrap_or(0)
+}
+
+/// Whether two values say the same: a whole number and a real are the
+/// same number either way (SQLite stores a real with no fraction as a
+/// whole number, and reads it back as one).
+fn same(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Integer(_) | Value::Real(_), Value::Integer(_) | Value::Real(_)) => {
+            a.real() == b.real()
+        }
+        _ => a == b,
+    }
+}
+
+/// The stroke data of a kept chunk, by its id.
+fn kept_chunk<'a>(doc: &'a ClipDocument, id: &str) -> Option<&'a [u8]> {
+    doc.foreign.chunks.iter().find_map(|chunk| {
+        let (found, payload) = (super::container::Chunk {
+            kind: chunk.kind,
+            offset: 0,
+            data: &chunk.data,
+        })
+        .external()
+        .ok()?;
+        (&chunk.kind == b"Exta" && found == id).then_some(payload)
+    })
+}
+
+/// The strokes the kept `VectorObjectList` row `index` points at.
+fn kept_strokes(doc: &ClipDocument, index: i64) -> Option<super::kinds::ClipVector> {
+    let table = kept_table_named(doc, "VectorObjectList")?;
+    let (_, id) = native::stroke_row(table, index)?;
+    native::vector_of(kept_chunk(doc, &id)?)
+}
+
+/// Appends a row of `values` (by column name) to a kept table; a column
+/// the table lacks is added to it.
+fn append_row(table: &mut ClipTable, values: &[(&str, Value)]) {
+    for (name, _) in values {
+        if !table.columns.iter().any(|column| column == name)
+            && let Some(close) = table.sql.rfind(')')
+        {
+            table.sql.insert_str(close, &format!(", {name}"));
+            table.columns.push((*name).to_owned());
+            for (_, row) in &mut table.rows {
+                row.push(Value::Null);
+            }
+        }
+    }
+    let key = rowid_column(&table.sql);
+    let rowid = table
+        .rows
+        .iter()
+        .map(|(rowid, _)| *rowid)
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let row = table
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            if Some(i) == key {
+                return Value::Integer(rowid);
+            }
+            values
+                .iter()
+                .find(|(column, _)| column == name)
+                .map_or(Value::Null, |(_, value)| value.clone())
+        })
+        .collect();
+    table.rows.push((rowid, row));
+}
+
+/// Sets `name` of the rows of a kept table whose `MainId` is `main`.
+fn set_cell(table: &mut ClipTable, main: i64, name: &str, value: &Value) {
+    let (Some(key), Some(at)) = (
+        table.columns.iter().position(|column| column == "MainId"),
+        table.columns.iter().position(|column| column == name),
+    ) else {
+        return;
+    };
+    for (_, row) in &mut table.rows {
+        if row.get(key).and_then(Value::int) == Some(main) {
+            row[at] = value.clone();
+        }
+    }
+}
+
+/// The last row of a list linked by `NextIndex` in a kept table, from
+/// the row `first`.
+fn last_of_list(table: &ClipTable, first: i64) -> Option<i64> {
+    let mut at = first;
+    let mut seen = HashSet::new();
+    loop {
+        if at == 0 || !seen.insert(at) {
+            return None;
+        }
+        let next = table.rows.iter().find_map(|(_, values)| {
+            (cell(table, values, "MainId")?.int()? == at)
+                .then(|| cell(table, values, "NextIndex").and_then(Value::int))?
+        })?;
+        if next == 0 {
+            return Some(at);
+        }
+        at = next;
+    }
+}
+
+/// Where the plain pen of Sue's vector lines is in the document's brush
+/// tables: found among the kept ones, or added after them.
+struct Brush {
+    /// Its `BrushStyle` `MainId`.
+    style: i64,
+    /// Its two `BrushEffectorGraphData` `MainId`s.
+    graphs: [i64; 2],
+    /// The style and the graphs must be added.
+    add_style: bool,
+    add_graphs: bool,
+}
+
+impl Brush {
+    fn of(doc: &ClipDocument) -> Self {
+        let graphs_table = kept_table_named(doc, "BrushEffectorGraphData");
+        let pen = native::pen_graphs();
+        let found_graphs: Option<Vec<i64>> = graphs_table.and_then(|table| {
+            pen.iter()
+                .map(|(number, size, points)| {
+                    table.rows.iter().find_map(|(_, values)| {
+                        let same = cell(table, values, "ControlNumber").and_then(Value::int)
+                            == Some(*number)
+                            && cell(table, values, "ControlDataSize").and_then(Value::int)
+                                == Some(*size)
+                            && cell(table, values, "ControlPoints").and_then(Value::bytes)
+                                == Some(points.as_slice());
+                        if same {
+                            cell(table, values, "MainId").and_then(Value::int)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        });
+        let (graphs, add_graphs) = match found_graphs.as_deref() {
+            Some(&[a, b]) => ([a, b], false),
+            _ => {
+                let top = graphs_table.map_or(0, highest_main);
+                ([top + 1, top + 2], true)
+            }
+        };
+        let styles = kept_table_named(doc, "BrushStyle");
+        let template = native::pen_style(graphs.map(|id| u32::try_from(id).unwrap_or(0)));
+        let found_style = styles.and_then(|table| {
+            table.rows.iter().find_map(|(_, values)| {
+                template
+                    .iter()
+                    .all(|(name, value)| {
+                        cell(table, values, name).is_some_and(|kept| same(kept, value))
+                    })
+                    .then(|| cell(table, values, "MainId").and_then(Value::int))?
+            })
+        });
+        match found_style {
+            Some(style) if !add_graphs => Self {
+                style,
+                graphs,
+                add_style: false,
+                add_graphs,
+            },
+            _ => Self {
+                style: styles.map_or(0, highest_main) + 1,
+                graphs,
+                add_style: true,
+                add_graphs,
+            },
+        }
+    }
+
+    /// The brush tables with the pen in them; `canvas` is the canvas row's
+    /// id. Answers the tables changed or made, and the manager's id.
+    fn tables(&self, doc: &ClipDocument, canvas: i64) -> (Vec<ClipTable>, i64) {
+        let table = |name: &str, sql: &str| {
+            kept_table_named(doc, name)
+                .cloned()
+                .unwrap_or_else(|| ClipTable {
+                    name: name.to_owned(),
+                    sql: sql.to_owned(),
+                    columns: sql_columns(sql),
+                    rows: Vec::new(),
+                })
+        };
+        let int = Value::Integer;
+        let mut manager = table("BrushStyleManager", native::BRUSH_MANAGER_SQL);
+        if manager.rows.is_empty() {
+            append_row(
+                &mut manager,
+                &[
+                    ("MainId", int(1)),
+                    ("CanvasId", int(canvas)),
+                    ("FirstGraphData", int(0)),
+                    ("FirstPatternImage", int(0)),
+                    ("FirstPattern", int(0)),
+                    ("FirstFixedSpray", int(0)),
+                    ("FirstBrushStyle", int(0)),
+                    ("FirstFillStyle", int(0)),
+                ],
+            );
+        }
+        let (_, first_row) = &manager.rows[0];
+        let manager_id = cell(&manager, first_row, "MainId")
+            .and_then(Value::int)
+            .unwrap_or(1);
+        let first = |name: &str| {
+            cell(&manager, &manager.rows[0].1, name)
+                .and_then(Value::int)
+                .unwrap_or(0)
+        };
+        let (first_graph, first_style) = (first("FirstGraphData"), first("FirstBrushStyle"));
+        let mut graphs = table("BrushEffectorGraphData", native::BRUSH_GRAPH_SQL);
+        if self.add_graphs {
+            match last_of_list(&graphs, first_graph) {
+                Some(last) => set_cell(&mut graphs, last, "NextIndex", &int(self.graphs[0])),
+                None => set_cell(
+                    &mut manager,
+                    manager_id,
+                    "FirstGraphData",
+                    &int(self.graphs[0]),
+                ),
+            }
+            for (i, (number, size, points)) in native::pen_graphs().into_iter().enumerate() {
+                let next = if i == 0 { self.graphs[1] } else { 0 };
+                append_row(
+                    &mut graphs,
+                    &[
+                        ("MainId", int(self.graphs[i])),
+                        ("CanvasId", int(canvas)),
+                        ("NextIndex", int(next)),
+                        ("ControlNumber", int(number)),
+                        ("ControlDataSize", int(size)),
+                        ("ControlPoints", Value::Blob(points)),
+                    ],
+                );
+            }
+        }
+        let mut styles = table("BrushStyle", native::BRUSH_STYLE_SQL);
+        if self.add_style {
+            match last_of_list(&styles, first_style) {
+                Some(last) => set_cell(&mut styles, last, "NextIndex", &int(self.style)),
+                None => set_cell(
+                    &mut manager,
+                    manager_id,
+                    "FirstBrushStyle",
+                    &int(self.style),
+                ),
+            }
+            let mut row = vec![
+                ("MainId", int(self.style)),
+                ("CanvasId", int(canvas)),
+                ("NextIndex", int(0)),
+            ];
+            row.extend(native::pen_style(
+                self.graphs.map(|id| u32::try_from(id).unwrap_or(0)),
+            ));
+            append_row(&mut styles, &row);
+        }
+        (vec![manager, graphs, styles], manager_id)
     }
 }
 
@@ -639,7 +1148,11 @@ pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
         parts: Vec::new(),
         exta: Vec::new(),
         top: 0,
+        vectors: Vectors::default(),
     };
+    let brush = Brush::of(doc);
+    writer.vectors.brush = u32::try_from(brush.style).unwrap_or(1);
+    writer.vectors.next = kept_table_named(doc, "VectorObjectList").map_or(0, highest_main) + 1;
     // The root is 2 when it has no id of its own, as Sue has always
     // written it; layers and bitmaps count on from the highest id.
     let root = if doc.root.id == 0 && writer.next == 2 {
@@ -650,6 +1163,63 @@ pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
     };
     writer.layer(&doc.root, root, 0, true);
     let top_before_root = writer.top;
+
+    // Clip Studio's own tables of vector layers: kept rows a layer still
+    // points at stay (with that layer's id), the others go with their
+    // chunks, and the new ones are added.
+    let vectors = std::mem::take(&mut writer.vectors);
+    let mut changed: Vec<ClipTable> = Vec::new();
+    let mut dropped_chunks: HashSet<String> = HashSet::new();
+    let kept_list = kept_table_named(doc, "VectorObjectList");
+    if kept_list.is_some() || !vectors.rows.is_empty() {
+        let mut list = kept_list.cloned().unwrap_or_else(|| ClipTable {
+            name: "VectorObjectList".to_owned(),
+            sql: native::VECTOR_OBJECT_LIST_SQL.to_owned(),
+            columns: sql_columns(native::VECTOR_OBJECT_LIST_SQL),
+            rows: Vec::new(),
+        });
+        let main = list.columns.iter().position(|column| column == "MainId");
+        let layer_at = list.columns.iter().position(|column| column == "LayerId");
+        let data = list
+            .columns
+            .iter()
+            .position(|column| column == "VectorData");
+        list.rows.retain_mut(|(_, values)| {
+            let id = main.and_then(|at| values.get(at)).and_then(Value::int);
+            match id.and_then(|id| vectors.kept.get(&id)) {
+                Some(layer) => {
+                    if let Some(at) = layer_at {
+                        values[at] = Value::Integer(*layer);
+                    }
+                    true
+                }
+                None => {
+                    if let Some(chunk) = data.and_then(|at| values.get(at)).and_then(Value::bytes) {
+                        dropped_chunks.insert(String::from_utf8_lossy(chunk).into_owned());
+                    }
+                    false
+                }
+            }
+        });
+        for (main, layer, external) in &vectors.rows {
+            append_row(
+                &mut list,
+                &[
+                    ("MainId", Value::Integer(*main)),
+                    ("CanvasId", Value::Integer(canvas)),
+                    ("LayerId", Value::Integer(*layer)),
+                    ("VectorData", Value::Blob(external.clone().into_bytes())),
+                ],
+            );
+        }
+        changed.push(list);
+    }
+    let mut brush_manager = None;
+    if vectors.drawn {
+        let (tables, manager) = brush.tables(doc, canvas);
+        changed.extend(tables);
+        brush_manager = Some(manager);
+    }
 
     // Kept rows go after the rows of the layers.
     for row in &doc.foreign.rows {
@@ -686,7 +1256,8 @@ pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
     let mut offset = 24 + doc.foreign.preamble.len() + 16 + head_size;
     let mut chunks: Vec<Vec<u8>> = Vec::new();
     let mut external = Vec::new();
-    let exta = std::mem::take(&mut writer.exta);
+    let mut exta = std::mem::take(&mut writer.exta);
+    exta.extend(vectors.chunks.iter().cloned());
     for (id, payload) in &exta {
         let mut data = Vec::with_capacity(payload.len() + 64);
         data.extend_from_slice(&(id.len() as u64).to_be_bytes());
@@ -706,6 +1277,9 @@ pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
             })
             .external()
         {
+            if dropped_chunks.contains(&id) {
+                continue;
+            }
             external.push((id, offset));
         }
         offset += 16 + kept.data.len();
@@ -772,7 +1346,19 @@ pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
             ("CanvasHeight", Value::Real(f64::from(doc.height))),
             ("CanvasResolution", Value::Real(dpi)),
             ("CanvasRootFolder", int(root)),
-        ],
+        ]
+        .into_iter()
+        .chain(
+            brush_manager
+                .filter(|_| {
+                    column(&doc.canvas_columns, "BrushStyleManager")
+                        .and_then(Value::int)
+                        .unwrap_or(0)
+                        == 0
+                })
+                .map(|manager| ("BrushStyleManager", int(manager))),
+        )
+        .collect(),
         kept: doc.canvas_columns.clone(),
         made: vec![
             ("CanvasUnit", int(0)),
@@ -842,27 +1428,38 @@ pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
         });
     }
     tables.push(external_out.finish()?);
-    tables.push(
-        match doc
-            .foreign
-            .tables
-            .iter()
-            .find(|table| table.name == "ExternalTableAndColumnName")
-        {
-            Some(table) => kept_table(table),
-            None => NewTable {
-                name: "ExternalTableAndColumnName".to_owned(),
-                sql: EXTERNAL_NAMES_SQL.to_owned(),
-                rows: vec![(
-                    1,
-                    vec![
-                        Value::Text("Offscreen".to_owned()),
-                        Value::Text("BlockData".to_owned()),
-                    ],
-                )],
-            },
-        },
-    );
+    let mut names_table = doc
+        .foreign
+        .tables
+        .iter()
+        .find(|table| table.name == "ExternalTableAndColumnName")
+        .cloned()
+        .unwrap_or_else(|| ClipTable {
+            name: "ExternalTableAndColumnName".to_owned(),
+            sql: EXTERNAL_NAMES_SQL.to_owned(),
+            columns: sql_columns(EXTERNAL_NAMES_SQL),
+            rows: Vec::new(),
+        });
+    let mut needed = vec![("Offscreen", "BlockData")];
+    if !vectors.rows.is_empty() {
+        needed.push(("VectorObjectList", "VectorData"));
+    }
+    for (table, name) in needed {
+        let named = names_table.rows.iter().any(|(_, values)| {
+            cell(&names_table, values, "TableName").and_then(Value::text) == Some(table)
+                && cell(&names_table, values, "ColumnName").and_then(Value::text) == Some(name)
+        });
+        if !named {
+            append_row(
+                &mut names_table,
+                &[
+                    ("TableName", Value::Text(table.to_owned())),
+                    ("ColumnName", Value::Text(name.to_owned())),
+                ],
+            );
+        }
+    }
+    tables.push(kept_table(&names_table));
     let mut sue_project = Out::new(
         doc,
         "SueProject",
@@ -935,10 +1532,18 @@ pub fn write(doc: &ClipDocument) -> Result<Vec<u8>, String> {
             "LayerThumbnail",
             "ExternalTableAndColumnName",
         ];
-        if !skeleton.contains(&table.name.as_str()) {
-            tables.push(kept_table(table));
+        if skeleton.contains(&table.name.as_str()) {
+            continue;
+        }
+        match changed.iter().position(|made| made.name == table.name) {
+            Some(at) => tables.push(kept_table(&changed.remove(at))),
+            None => tables.push(kept_table(table)),
         }
     }
+    for table in &changed {
+        tables.push(kept_table(table));
+    }
+    raise_max_index(&mut tables);
     let database = sqlite::write(&tables);
 
     let mut out = Vec::new();
@@ -980,6 +1585,46 @@ fn chunk(kind: [u8; 4], data: &[u8]) -> Vec<u8> {
     out.extend_from_slice(&(data.len() as u64).to_be_bytes());
     out.extend_from_slice(data);
     out
+}
+
+/// In a kept `ElemScheme` (the table Clip Studio counts the ids it gave
+/// out in), raises each table's `MaxIndex` to the highest `MainId` the
+/// file now holds, so Clip Studio never gives out an id Sue used.
+fn raise_max_index(tables: &mut [NewTable]) {
+    let mut highest: HashMap<String, i64> = HashMap::new();
+    for table in tables.iter() {
+        let columns = sql_columns(&table.sql);
+        if let Some(at) = columns.iter().position(|column| column == "MainId") {
+            let top = table
+                .rows
+                .iter()
+                .filter_map(|(_, values)| values.get(at).and_then(Value::int))
+                .max();
+            if let Some(top) = top {
+                highest.insert(table.name.clone(), top);
+            }
+        }
+    }
+    let Some(scheme) = tables.iter_mut().find(|table| table.name == "ElemScheme") else {
+        return;
+    };
+    let columns = sql_columns(&scheme.sql);
+    let (Some(name_at), Some(max_at)) = (
+        columns.iter().position(|column| column == "TableName"),
+        columns.iter().position(|column| column == "MaxIndex"),
+    ) else {
+        return;
+    };
+    for (_, values) in &mut scheme.rows {
+        let Some(name) = values.get(name_at).and_then(Value::text) else {
+            continue;
+        };
+        if let Some(top) = highest.get(name)
+            && values.get(max_at).and_then(Value::int).unwrap_or(0) < *top
+        {
+            values[max_at] = Value::Integer(*top);
+        }
+    }
 }
 
 /// A row of one of Sue's part tables.

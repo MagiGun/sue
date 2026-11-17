@@ -2881,6 +2881,26 @@ entities as one undoable edit; an export that makes the same print
 writes the file's own parts back, and the preview is drawn again only
 when a layer changed.
 
+Since the survey of Clip Studio's own files (2026-11-16), the writer
+also puts fill, gradient (linear, ends held), text and vector layers,
+palette color and the layer color's sub color into Clip Studio's own
+storage (`crates/sue-io/src/clip/native.rs`): `GradationFillInfo` with
+`LayerType` 2 and a white mask, the text's records with `LayerType` 0,
+and for vector lines a `VectorObjectList` row whose strokes sit in an
+`Exta` chunk, drawn with a plain pen added to the document's brush
+tables (found again, never added twice). So Clip Studio opens them live.
+Sue's own parts are still written beside them, for what Clip Studio has
+no place for. The reader decodes the same columns: a file Clip Studio
+saved (it drops Sue's tables) opens live in Sue, and where Sue's part and
+Clip Studio's columns disagree (the layer was changed in Clip Studio),
+Clip Studio's columns win. A kept layer whose columns already say what
+its content says keeps them byte for byte. Gray layers (an alpha and a
+gray plane) decode as color; block checksums are Adler-32 as Clip Studio
+writes them; a kept `ElemScheme` has its `MaxIndex` raised past every id
+Sue wrote. Corrections, rulers, comps and the timeline stay in Sue's
+tables until their storage is observed. The report's `Native` outcome
+names the layers written this way.
+
 `.clip` and `.psd` are in the `FormatRegistry` as `LayeredFormat`
 (`crates/sue-io/src/layered.rs`): import gives a layered picture with
 folders folded into their layers and the original file kept as

@@ -14,6 +14,7 @@ use super::model::{
     ClipBitmap, ClipChunk, ClipDocument, ClipDrawColor, ClipForeign, ClipHead, ClipLayer, ClipMask,
     ClipRow, ClipShape, ClipTable, Columns, column,
 };
+use super::native;
 use super::offscreen::{parse_attribute, parse_payload};
 use super::parts::{self, CONTENT_KINDS, VERSION};
 use super::schema::rowid_column;
@@ -714,6 +715,8 @@ pub fn read(bytes: &[u8]) -> Result<ClipDocument, String> {
     let canvas_columns = canvas.rest(canvas_row, &CANVAS_TYPED);
     drop(canvas);
     foreign.shapes = shapes;
+    let strokes = Strokes::of(&foreign);
+    native_in(&mut root, &strokes, dpi);
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     Ok(ClipDocument {
         width: width as u32,
@@ -729,6 +732,98 @@ pub fn read(bytes: &[u8]) -> Result<ClipDocument, String> {
         timeline,
         preview,
     })
+}
+
+// ----- Clip Studio's own storage of layers ----------------------------------------
+
+/// The vector strokes a file holds: its `VectorObjectList` rows and the
+/// chunks they name.
+struct Strokes<'a> {
+    table: Option<&'a ClipTable>,
+    chunks: HashMap<String, &'a [u8]>,
+}
+
+impl<'a> Strokes<'a> {
+    fn of(foreign: &'a ClipForeign) -> Self {
+        let table = foreign
+            .tables
+            .iter()
+            .find(|table| table.name == "VectorObjectList");
+        let mut chunks = HashMap::new();
+        if table.is_some() {
+            for chunk in &foreign.chunks {
+                if &chunk.kind != b"Exta" {
+                    continue;
+                }
+                if let Ok((id, payload)) = (super::container::Chunk {
+                    kind: chunk.kind,
+                    offset: 0,
+                    data: &chunk.data,
+                })
+                .external()
+                {
+                    chunks.entry(id).or_insert(payload);
+                }
+            }
+        }
+        Self { table, chunks }
+    }
+
+    /// The strokes of the row `index`.
+    fn of_row(&self, index: i64) -> Option<super::kinds::ClipVector> {
+        let (_, id) = native::stroke_row(self.table?, index)?;
+        native::vector_of(self.chunks.get(&id)?)
+    }
+}
+
+/// Reads what Clip Studio's own columns say of each layer in `folder`:
+/// fill, gradient, text and vector lines, palette color and the layer
+/// color's sub color. Where Sue's own part says the same (it was written
+/// with it), Sue's part stays, as it holds more; where they differ, the
+/// layer was changed in Clip Studio after Sue wrote it, and Clip Studio's
+/// columns win.
+fn native_in(folder: &mut ClipLayer, strokes: &Strokes<'_>, dpi: f64) {
+    for layer in &mut folder.children {
+        native_in(layer, strokes, dpi);
+        if layer.is_folder() {
+            continue;
+        }
+        let found = native::content_of_columns(&layer.columns).or_else(|| {
+            column(&layer.columns, "VectorNormalStrokeIndex")
+                .and_then(Value::int)
+                .filter(|index| *index != 0)
+                .and_then(|index| strokes.of_row(index))
+                .map(super::kinds::ClipContent::Vector)
+        });
+        if let Some(found) = found {
+            let agrees = layer
+                .content
+                .as_ref()
+                .and_then(|content| native::as_clip_studio_reads(content, dpi))
+                .as_ref()
+                == Some(&found);
+            if !agrees {
+                layer.content = Some(found);
+            }
+        }
+        let int = |name: &str| column(&layer.columns, name).and_then(Value::int);
+        if int("LayerUsePaletteColor").unwrap_or(0) != 0
+            && let Some(color) = native::color_columns(
+                &layer.columns,
+                ["LayerPaletteRed", "LayerPaletteGreen", "LayerPaletteBlue"],
+            )
+        {
+            layer.palette_color = Some(color);
+        }
+        if layer.draw_color.enabled()
+            && let Some(sub) = native::color_columns(
+                &layer.columns,
+                ["DrawColorSubRed", "DrawColorSubGreen", "DrawColorSubBlue"],
+            )
+        {
+            layer.effects.get_or_insert_with(Default::default).sub_color = Some(sub);
+        }
+    }
 }
 
 // ----- As Photoshop records, for Sue Paint as it opens them today -----------------
