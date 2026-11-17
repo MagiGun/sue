@@ -432,22 +432,97 @@ fn new_revisions(width: u32, height: u32) -> Vec<u64> {
     vec![fresh_revision(); count]
 }
 
+/// From how many samples a buffer is asked for in a way that can fail
+/// first, and blank 8-bit buffers are shared ([`RasterTile2D::blank`]).
+const LARGE_BUFFER: usize = 1 << 20;
+
+/// Whether `len` samples of `T` can be had now. `vec!` ends the program
+/// when there is no memory; a canvas too large for the computer must be
+/// an error someone can read instead.
+fn fits_in_memory<T>(len: usize) -> Result<(), CoreError> {
+    if len < LARGE_BUFFER {
+        return Ok(());
+    }
+    let mut probe: Vec<T> = Vec::new();
+    probe
+        .try_reserve_exact(len)
+        .map_err(|_| CoreError::InvalidBuffer("not enough memory for a picture this large"))
+}
+
+/// The blank 8-bit buffers alive now, by length: watched, never held.
+static BLANKS: std::sync::Mutex<Vec<(usize, std::sync::Weak<Vec<u8>>)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// A zeroed 8-bit buffer of `len` samples: the one other blank rasters
+/// of that length still share, else a new one.
+fn blank_bytes(len: usize) -> Result<Shared<Vec<u8>>, CoreError> {
+    if len < LARGE_BUFFER {
+        return Ok(Shared::new(vec![0; len]));
+    }
+    let mut blanks = BLANKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    blanks.retain(|(_, watched)| watched.strong_count() > 0);
+    if let Some(shared) = blanks
+        .iter()
+        .filter(|(length, _)| *length == len)
+        .find_map(|(_, watched)| Shared::revive(watched))
+    {
+        return Ok(shared);
+    }
+    fits_in_memory::<u8>(len)?;
+    let shared = Shared::new(vec![0; len]);
+    blanks.push((len, shared.watch()));
+    Ok(shared)
+}
+
 impl RasterTile2D {
-    /// A zero-filled tile.
+    /// A zero-filled tile with a buffer of its own.
     ///
     /// # Errors
-    /// [`CoreError::InvalidBuffer`] for a zero or overflowing size.
+    /// [`CoreError::InvalidBuffer`] for a zero or overflowing size, or
+    /// one there is no memory for.
     pub fn new(width: u32, height: u32, format: PixelFormat) -> Result<Self, CoreError> {
         let len = Self::sample_count(width, height, format)?;
         let pixels = match format {
-            PixelFormat::Gray8 | PixelFormat::Rgba8 => PixelStorage::U8(Shared::new(vec![0; len])),
-            PixelFormat::RgbaF32 => PixelStorage::F32(Shared::new(vec![0.0; len])),
+            PixelFormat::Gray8 | PixelFormat::Rgba8 => {
+                fits_in_memory::<u8>(len)?;
+                PixelStorage::U8(Shared::new(vec![0; len]))
+            }
+            PixelFormat::RgbaF32 => {
+                fits_in_memory::<f32>(len)?;
+                PixelStorage::F32(Shared::new(vec![0.0; len]))
+            }
         };
         Ok(Self {
             width,
             height,
             format,
             pixels,
+            revisions: new_revisions(width, height),
+        })
+    }
+
+    /// A zero-filled tile for a layer nothing is drawn on yet. Large
+    /// blank tiles of one size share one buffer of zeros until each is
+    /// first written (copy-on-write, as any shared pixels), so the blank
+    /// pages of a comic and the new layers of a page cost no memory
+    /// until they are drawn on: eight pages at 600 dots an inch took
+    /// 835 MB before a line was drawn, and a few hundred pages more than
+    /// a computer has, which ended the program.
+    ///
+    /// # Errors
+    /// As [`Self::new`].
+    pub fn blank(width: u32, height: u32, format: PixelFormat) -> Result<Self, CoreError> {
+        if format == PixelFormat::RgbaF32 {
+            return Self::new(width, height, format);
+        }
+        let len = Self::sample_count(width, height, format)?;
+        Ok(Self {
+            width,
+            height,
+            format,
+            pixels: PixelStorage::U8(blank_bytes(len)?),
             revisions: new_revisions(width, height),
         })
     }
@@ -1210,6 +1285,57 @@ component_from!(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Large blank rasters of one size share one buffer of zeros until
+    /// one is written: that one gets pixels of its own, the rest stay
+    /// blank and shared. A comic's blank pages cost one page of memory.
+    #[test]
+    fn blank_rasters_share_their_zeros_until_written() {
+        // A size no other test uses, so the shared buffer is this test's.
+        let (width, height) = (1031, 517);
+        let mut first = RasterTile2D::blank(width, height, PixelFormat::Rgba8).unwrap();
+        let second = RasterTile2D::blank(width, height, PixelFormat::Rgba8).unwrap();
+        let third = second.clone();
+        assert!(first.shares_pixels_with(&second));
+        assert_eq!(first, second);
+        assert_ne!(first.tile_revisions(), second.tile_revisions());
+        let copies = crate::shared::copies();
+        first.bytes_mut().unwrap()[0] = 255;
+        assert_eq!(crate::shared::copies(), copies + 1, "copied on write");
+        assert!(!first.shares_pixels_with(&second));
+        assert!(second.shares_pixels_with(&third));
+        assert!(second.bytes().unwrap().iter().all(|byte| *byte == 0));
+        // The last blank one is written without a copy, and the next
+        // blank raster starts from zeros again.
+        drop(third);
+        let mut second = second;
+        let copies = crate::shared::copies();
+        second.bytes_mut().unwrap()[4] = 9;
+        assert_eq!(crate::shared::copies(), copies, "nobody else holds it");
+        let fresh = RasterTile2D::blank(width, height, PixelFormat::Rgba8).unwrap();
+        assert!(fresh.bytes().unwrap().iter().all(|byte| *byte == 0));
+        assert!(!fresh.shares_pixels_with(&second));
+        // A raster made with `new` has its own buffer; small ones too.
+        let own = RasterTile2D::new(width, height, PixelFormat::Rgba8).unwrap();
+        assert!(!own.shares_pixels_with(&fresh));
+        let small = RasterTile2D::blank(8, 8, PixelFormat::Rgba8).unwrap();
+        let other = RasterTile2D::blank(8, 8, PixelFormat::Rgba8).unwrap();
+        assert!(!small.shares_pixels_with(&other));
+    }
+
+    /// A raster there is no memory for is an error, not the end of the
+    /// program.
+    #[test]
+    fn a_raster_too_large_for_memory_is_an_error() {
+        for make in [RasterTile2D::new, RasterTile2D::blank] {
+            for format in [PixelFormat::Rgba8, PixelFormat::RgbaF32] {
+                assert!(matches!(
+                    make(u32::MAX, u32::MAX, format),
+                    Err(CoreError::InvalidBuffer(_))
+                ));
+            }
+        }
+    }
 
     #[test]
     fn string_buffer_respects_char_boundaries() {

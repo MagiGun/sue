@@ -17,6 +17,7 @@ mod p6_p6_clip;
 mod p6_p6_ui;
 mod p6_tools_a;
 mod p6_tools_b;
+mod p81_bugs;
 mod p81_figures;
 mod p81_issue12;
 mod p81_scanner;
@@ -330,7 +331,7 @@ impl PaintDriver {
         Self::with(runtime, root)
     }
 
-    fn with(mut runtime: Runtime, root: PathBuf) -> Self {
+    pub(crate) fn with(mut runtime: Runtime, root: PathBuf) -> Self {
         let ctx = egui::Context::default();
         let now = Instant::now();
         runtime.request(

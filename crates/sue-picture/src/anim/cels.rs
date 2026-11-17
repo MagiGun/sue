@@ -155,7 +155,7 @@ fn empty_structure(
         let mut copy = if crate::doc::is_folder(arena, *id) {
             Entity::empty(original.name(), original.class())
         } else {
-            let blank = RasterTile2D::new(width, height, sue_core::PixelFormat::Rgba8)
+            let blank = RasterTile2D::blank(width, height, sue_core::PixelFormat::Rgba8)
                 .map_err(|error| error.to_string())?;
             let class = if original.class() == crate::vector::CLASS {
                 crate::vector::CLASS

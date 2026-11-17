@@ -111,7 +111,7 @@ pub fn add_raster_layer_at(
             PixelFormat::Rgba8,
             rgba.repeat(width as usize * height as usize),
         ),
-        None => RasterTile2D::new(width, height, PixelFormat::Rgba8),
+        None => RasterTile2D::blank(width, height, PixelFormat::Rgba8),
     }
     .map_err(|error| error.to_string())?;
     let layer = Entity::new(name, raster).with_class(class::LAYER);
@@ -201,8 +201,8 @@ pub fn add_vector_layer(
     name: String,
 ) -> Result<(SpawnEntity, EntityId), String> {
     let [width, height] = size_of(arena, picture)?;
-    let raster =
-        RasterTile2D::new(width, height, PixelFormat::Rgba8).map_err(|error| error.to_string())?;
+    let raster = RasterTile2D::blank(width, height, PixelFormat::Rgba8)
+        .map_err(|error| error.to_string())?;
     let layer = Entity::new(name, raster)
         .with_class(crate::vector::CLASS)
         .with_ext(sue_model::Geometry::new());

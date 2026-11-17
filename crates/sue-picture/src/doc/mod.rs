@@ -131,7 +131,7 @@ pub fn create(spec: &NewPicture) -> Result<(Edit, EntityId), String> {
                 .with_relation(Relation::new(id, CHILD, paper_id).ordered(order)),
         );
     }
-    let raster = RasterTile2D::new(spec.width, spec.height, PixelFormat::Rgba8)
+    let raster = RasterTile2D::blank(spec.width, spec.height, PixelFormat::Rgba8)
         .map_err(|error| error.to_string())?;
     let layer = Entity::new(tr!("layer-number", number = 1), raster).with_class(class::LAYER);
     let layer_id = layer.id();
