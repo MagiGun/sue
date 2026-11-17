@@ -78,7 +78,7 @@ fn texts(tour: &mut Tour<'_>) -> Vec<(String, egui::Rect)> {
 }
 
 /// Clicks the last `text` drawn (the dialog's, over the studio's).
-fn click(tour: &mut Tour<'_>, text: &str) -> Result<(), String> {
+pub(super) fn click(tour: &mut Tour<'_>, text: &str) -> Result<(), String> {
     let at = texts(tour)
         .into_iter()
         .filter(|(found, _)| found == text)
@@ -125,7 +125,7 @@ pub(super) fn families(tour: &mut Tour<'_>) -> Result<(), String> {
 
 /// Clicks the control named `name`, found by what it tells assistive
 /// technology (an icon button has no text drawn).
-fn click_named(tour: &mut Tour<'_>, name: &str) -> Result<(), String> {
+pub(super) fn click_named(tour: &mut Tour<'_>, name: &str) -> Result<(), String> {
     tour.camera.ctx.enable_accesskit();
     let output = tour.camera.frame(&mut tour.runtime);
     tour.camera
