@@ -528,10 +528,19 @@ impl Settings {
                     .texts
                     .entry(path.clone())
                     .or_insert_with(|| value.clone());
-                let response = ui::text_field(("sue-text", entry.path()), text)
+                // An empty field says what empty means (the setting's
+                // `.empty` line, where it has one), so it never reads as
+                // a value someone forgot.
+                let empty_key = format!("{}.empty", rice_message(entry.path()));
+                let empty =
+                    sue_lang::has("rice", &empty_key).then(|| sue_lang::text("rice", &empty_key));
+                let mut field = ui::text_field(("sue-text", entry.path()), text)
                     .label(&name)
-                    .width(self.field.min(ui.available_width()))
-                    .show(ui, theme);
+                    .width(self.field.min(ui.available_width()));
+                if let Some(empty) = &empty {
+                    field = field.hint(empty);
+                }
+                let response = field.show(ui, theme);
                 let response = ui::tooltip(response, &tip, theme);
                 if response.lost_focus() {
                     let typed = self.texts.remove(&path).unwrap_or_default();
