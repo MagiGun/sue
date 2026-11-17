@@ -12,6 +12,7 @@
 mod error;
 mod hash;
 mod manifest;
+mod optional;
 mod resolver;
 mod trust;
 mod updater;
@@ -20,6 +21,10 @@ pub use ed25519_dalek::SigningKey;
 pub use error::PkgError;
 pub use hash::{ContentHash, ContentStore};
 pub use manifest::{Dependency, PackageKind, PackageManifest};
+pub use optional::{
+    Chunk, FORMAT, Fetch, FetchError, MANIFEST, NoNetwork, OptionalPackage, PackageFile,
+    PackageHome, Progress,
+};
 pub use resolver::{PackageIndex, Resolution, resolve};
 pub use semver::{Version, VersionReq};
 pub use trust::{SignedManifest, TrustStore};

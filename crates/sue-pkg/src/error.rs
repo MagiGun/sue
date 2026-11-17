@@ -71,6 +71,16 @@ pub enum PkgError {
         /// Rejected action.
         action: &'static str,
     },
+    /// An optional package's manifest that cannot be read: what is wrong.
+    Manifest(String),
+    /// A file's source did not give the file: why.
+    Fetch(String),
+    /// The network could not be reached: why.
+    Offline(String),
+    /// The person cancelled.
+    Cancelled,
+    /// A file or folder could not be read or written: which and why.
+    Io(String),
 }
 
 impl fmt::Display for PkgError {
@@ -107,6 +117,10 @@ impl fmt::Display for PkgError {
             Self::InvalidTransition { phase, action } => {
                 write!(f, "cannot {action} while the updater is {phase:?}")
             }
+            Self::Manifest(why) | Self::Fetch(why) | Self::Offline(why) | Self::Io(why) => {
+                f.write_str(why)
+            }
+            Self::Cancelled => f.write_str("cancelled"),
         }
     }
 }
