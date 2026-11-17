@@ -464,9 +464,12 @@ fn cc4_liquify_has_a_hardness() {
         .map(|(_, rect)| *rect)
         .expect("the Hardness row");
     assert!(
-        driver.texts.iter().any(|(text, rect)| text.starts_with("50")
-            && rect.left() > row.left()
-            && (rect.center().y - row.center().y).abs() < row.height()),
+        driver
+            .texts
+            .iter()
+            .any(|(text, rect)| text.starts_with("50")
+                && rect.left() > row.left()
+                && (rect.center().y - row.center().y).abs() < row.height()),
         "Hardness 50 %: {:?}",
         driver.texts
     );
