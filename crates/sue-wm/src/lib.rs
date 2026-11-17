@@ -46,6 +46,7 @@ mod lang;
 mod launchpad;
 mod layout;
 mod menubar;
+pub mod packages;
 mod palette;
 mod scheduler;
 mod shell;

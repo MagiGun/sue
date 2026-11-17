@@ -10,12 +10,12 @@
 //! ([`BUILT_IN`], manifests kept as files in this crate) and the ones a
 //! person added from a manifest file, which it remembers in the package
 //! home's `catalog` folder. Everyone shares the one center
-//! ([`PackageCenter::shared`]): an install started in a dialog shows its
+//! ([`PackageCenter::at`]): an install started in a dialog shows its
 //! progress in Settings too, and either place can cancel it.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use sue_core::{JobHandle, JobPool};
@@ -132,19 +132,39 @@ impl PackageCenter {
         }
     }
 
-    /// The center everyone shares: over this machine's package folder
-    /// ([`crate::PlatformPaths::packages_dir`]), fetching over HTTPS.
+    /// The center over this machine's own package folder
+    /// ([`crate::PlatformPaths::packages_dir`]).
     #[must_use]
     pub fn shared() -> Arc<Self> {
-        static SHARED: OnceLock<Arc<PackageCenter>> = OnceLock::new();
-        Arc::clone(SHARED.get_or_init(|| {
-            let root = crate::PlatformPaths::detect().map_or_else(
-                |_| std::env::temp_dir().join("sue-packages"),
-                |paths| paths.packages_dir(),
-            );
-            let agent = format!("Sue/{}", env!("CARGO_PKG_VERSION"));
-            Arc::new(Self::new(root, Arc::new(HttpsFetch::new(agent))))
-        }))
+        let root = crate::PlatformPaths::detect().map_or_else(
+            |_| std::env::temp_dir().join("sue-packages"),
+            |paths| paths.packages_dir(),
+        );
+        Self::at(&root)
+    }
+
+    /// The center over the package home at `root`, shared by everyone
+    /// who asks for that folder: made (fetching over HTTPS) the first
+    /// time, the same one after. Settings and the studios reach the
+    /// center this way, with the packages folder Sue runs with.
+    #[must_use]
+    pub fn at(root: &Path) -> Arc<Self> {
+        let mut centers = centers();
+        if let Some(found) = centers.iter().find(|center| center.home.root() == root) {
+            return Arc::clone(found);
+        }
+        let agent = format!("Sue/{}", env!("CARGO_PKG_VERSION"));
+        let center = Arc::new(Self::new(root, Arc::new(HttpsFetch::new(agent))));
+        centers.push(Arc::clone(&center));
+        center
+    }
+
+    /// Makes `center` the one [`Self::at`] gives for its folder (tests
+    /// put one there that fetches without a network).
+    pub fn put(center: Arc<Self>) {
+        let mut centers = centers();
+        centers.retain(|found| found.home.root() != center.home.root());
+        centers.push(center);
     }
 
     /// The home the packages are installed in.
@@ -380,6 +400,14 @@ impl PackageCenter {
         self.install(&id);
         Ok(id)
     }
+}
+
+/// The centers [`PackageCenter::at`] has made, one per folder.
+fn centers() -> std::sync::MutexGuard<'static, Vec<Arc<PackageCenter>>> {
+    static CENTERS: Mutex<Vec<Arc<PackageCenter>>> = Mutex::new(Vec::new());
+    CENTERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Fetches over HTTPS (and plain HTTP), carrying on from where an
@@ -756,6 +784,20 @@ mod tests {
         );
         assert!(!home.join("big").exists());
         assert!(!home.join(".staging").exists(), "a half download was left");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn everyone_who_asks_for_a_folder_gets_the_same_center() {
+        let root = scratch("same");
+        let first = PackageCenter::at(&root);
+        assert!(Arc::ptr_eq(&first, &PackageCenter::at(&root)));
+        let other = PackageCenter::at(&root.join("other"));
+        assert!(!Arc::ptr_eq(&first, &other));
+        // A center put there takes the folder's place.
+        let put = Arc::new(PackageCenter::new(&root, Arc::new(NoNetwork)));
+        PackageCenter::put(Arc::clone(&put));
+        assert!(Arc::ptr_eq(&put, &PackageCenter::at(&root)));
         let _ = std::fs::remove_dir_all(&root);
     }
 

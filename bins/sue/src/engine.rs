@@ -646,8 +646,9 @@ impl Engine {
         catalog.pages.push({
             let mut page = SettingsPage::new(
                 "packages",
-                tr!("extensions"),
+                tr!("packages"),
                 vec![
+                    group(tr!("optional-downloads"), vec![SettingsItem::Packages]),
                     group(
                         tr!("trust"),
                         vec![
@@ -656,7 +657,7 @@ impl Engine {
                         ],
                     ),
                     group(tr!("studios-and-tools"), vec![table("applets")]),
-                    group(tr!("packages"), vec![table("packages")]),
+                    group(tr!("parts-of-sue"), vec![table("packages")]),
                 ],
             );
             page.aliases.push("extensions".to_owned());
@@ -717,6 +718,7 @@ impl Engine {
             ("paint", self.paths.data_dir.join("paint")),
             ("cache", self.paths.cache_dir.clone()),
             ("models", self.paths.models_dir()),
+            ("packages", self.paths.packages_dir()),
             (
                 "icons",
                 sue_wm::icons::pack::IconHome::of(&self.paths)
@@ -1126,7 +1128,7 @@ pub(crate) mod tests {
                 "Sue Paint",
                 "Sue Writer",
                 "Keyboard Shortcuts",
-                "Extensions",
+                "Packages",
                 "Advanced"
             ]
         );
