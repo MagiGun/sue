@@ -157,6 +157,29 @@ mod system {
     }
 }
 
+/// Opens the system's camera `id` (the first one for `None`) at about
+/// `want` pixels, as a source to read on the calling thread: what
+/// [`CameraStream::open`] runs on the stream's own thread.
+///
+/// # Errors
+///
+/// [`CameraError::Unsupported`] where Sue cannot use cameras yet, and
+/// whatever keeps the camera from opening.
+pub fn open_source(
+    id: Option<&str>,
+    want: (u32, u32),
+) -> Result<Box<dyn CameraSource>, CameraError> {
+    #[cfg(target_os = "windows")]
+    {
+        system::open(id, want)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (id, want);
+        Err(CameraError::Unsupported)
+    }
+}
+
 /// What the stream's thread and its owner share.
 struct Shared {
     latest: Mutex<Option<Arc<CameraFrame>>>,
@@ -193,16 +216,8 @@ impl CameraStream {
     /// picture or an error to look at.
     #[must_use]
     pub fn open(id: Option<&str>, want: (u32, u32), wake: impl Fn() + Send + 'static) -> Self {
-        #[cfg(target_os = "windows")]
-        {
-            let id = id.map(str::to_owned);
-            Self::with(Box::new(move || system::open(id.as_deref(), want)), wake)
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = (id, want);
-            Self::with(Box::new(|| Err(CameraError::Unsupported)), wake)
-        }
+        let id = id.map(str::to_owned);
+        Self::with(Box::new(move || open_source(id.as_deref(), want)), wake)
     }
 
     /// A stream over whatever `open` makes: a real camera, or a

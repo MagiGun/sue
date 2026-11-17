@@ -82,6 +82,7 @@ use sue_picture::{comps, smart};
 
 pub use bar_items::bar_button_rect;
 pub use commands::registry;
+pub use dialogs::hand_scanner;
 pub use launchers::shown_buttons;
 pub use menus::menus;
 pub use studio::{

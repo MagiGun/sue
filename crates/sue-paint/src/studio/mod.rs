@@ -716,6 +716,9 @@ pub struct SuePaint {
     pub(crate) extras: crate::extras::Extras,
     /// Photos being read by the Pose and Hand Scanners.
     pub(crate) scans: crate::scan::Scans,
+    /// The Hand Scanner while its dialog is open: its camera, tracker
+    /// and the pose to go back to.
+    pub(crate) hand_scan: Option<Box<crate::dialogs::hand_scanner::HandScan>>,
     /// The kinds of material, registered at start.
     pub(crate) material_kinds: crate::materials::MaterialKinds,
     /// The Hub's Materials place (drawn by `hub_ui`), and the old cache
@@ -1053,6 +1056,7 @@ impl Default for SuePaint {
             material_thumbs: HashMap::new(),
             extras: crate::extras::Extras::default(),
             scans: crate::scan::Scans::default(),
+            hand_scan: None,
             material_kinds: crate::materials::MaterialKinds::builtin(),
             hub: crate::hub::MaterialsPlace::default(),
             new_canvas: crate::mobile::NewCanvas::default(),

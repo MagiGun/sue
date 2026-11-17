@@ -60,6 +60,12 @@ fn hand_scanner(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.pick_scan(cx, true);
 }
 
+/// Hand Scanner (camera): a hand held up to the camera poses the current
+/// 3D hand, or a hand of the current drawing figure, live.
+fn hand_scanner_camera(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.open_hand_scanner(cx);
+}
+
 /// Flip pose: the figure mirrored left to right.
 fn flip(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.pose_figure(cx, |now, _| Some(now.flipped()));
@@ -184,6 +190,14 @@ fn on_hand(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
     )
 }
 
+/// Works while the current layer holds something with hands: a 3D hand
+/// or a whole drawing figure.
+fn on_hands(paint: &SuePaint, facts: &Facts<'_>, _: Call<'_>) -> ItemState {
+    super::when(
+        current_body(paint, facts.arena).is_some_and(|body| body.kind != crate::figure::Kind::Head),
+    )
+}
+
 /// `figure.preset.<n>` works while the current layer's figure, hand or
 /// head has a preset `n`.
 fn on_preset(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
@@ -262,6 +276,15 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         hand_scanner,
         on_hand,
     ),
+    // Not recordable: what it does depends on what the camera sees.
+    Command::new(
+        "figure.hand_scanner_camera",
+        "hand-scanner-camera",
+        "figure",
+        hand_scanner_camera,
+    )
+    .icon(Icon::ToolHand.name())
+    .state(on_hands),
     c(
         "figure.flip",
         "flip-pose",

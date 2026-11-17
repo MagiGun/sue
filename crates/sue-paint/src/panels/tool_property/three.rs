@@ -888,6 +888,15 @@ impl SuePaint {
                     &tr!("register-pose-as-material"),
                 );
             });
+            // The Hand Scanner: the camera poses its hand, live.
+            if body.kind != crate::figure::Kind::Head {
+                self.three_command_button(
+                    ui,
+                    theme,
+                    "figure.hand_scanner_camera",
+                    &tr!("hand-scanner-camera"),
+                );
+            }
             // Pose Scanner and Hand Scanner: a photo poses it.
             match body.kind {
                 crate::figure::Kind::Body => {
