@@ -28,7 +28,6 @@ follow [Semantic Versioning](https://semver.org/).
   layer shows.
 - Sue Paint, Timeline: the ruler goes on left of frame 1 (0, -1 and on,
   shaded), so the view can show the very start with room to spare.
-
 - Sue Paint, Animation, Show Animation Cels: Show Edited Cel Only (the
   cel locked as the one you draw shows in its folder in place of the
   frame's), Check Cel Motion by Key Input (the frames from two cels back
@@ -621,7 +620,8 @@ follow [Semantic Versioning](https://semver.org/).
   top of the track, with the track labels, not under the cels; with
   Range off, a track label's frame count stays in the dialog, grayed.
 - Sue Paint: a stroke on a cel in an animation folder whose keyframes
-  move it lands where the cel shows at that frame.
+  move it, or in a 2D camera folder the canvas is shown through, lands
+  where the cel shows at that frame, and shows there as you draw.
 - Sue Paint: every built-in brush was tuned to paint the way its name
   promises. Pencils, crayons, pastels and chalk catch the paper's grain
   (crayon and chalk skip its valleys even when pressed hard); the

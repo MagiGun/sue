@@ -707,6 +707,43 @@ fn trv_8_edit_layers_with_active_keyframes_draws_where_the_layer_shows() {
         shift(left, keyed_left) < 3.0 && shift(right, keyed_right) < 3.0,
         "drawn where it shows: {left}..{right} against {keyed_left}..{keyed_right}, moved {dx}"
     );
+    // And the canvas shows it there, under the pen, while it is drawn
+    // and once it is in: the middle of the line, on its row.
+    let row = (rows.0 + rows.1) / 2;
+    let under = [(left + right) / 2, row];
+    let dark = |paint: &mut PaintDriver| {
+        paint.settle(2);
+        let seen = sue_paint::canvas_probed();
+        seen.first()
+            .copied()
+            .flatten()
+            .is_some_and(|[r, g, b, _]| u32::from(r) + u32::from(g) + u32::from(b) < 300)
+    };
+    sue_paint::probe_canvas(vec![under]);
+    assert!(dark(&mut paint), "the stroke shows under the pen");
+    paint.command("edit.undo");
+    paint.settle(4);
+    assert!(!dark(&mut paint), "undone: nothing under the pen");
+    let middle = paint_middle(&paint.runtime);
+    let (from, to) = (middle + vec2(-80.0, -100.0), middle + vec2(80.0, -100.0));
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    paint.step(vec![egui::Event::PointerMoved(from)]);
+    paint.step(vec![button(from, true)]);
+    for index in 1..=24 {
+        paint.step(vec![egui::Event::PointerMoved(
+            from + (to - from) * (index as f32 / 24.0),
+        )]);
+    }
+    assert!(dark(&mut paint), "shown under the pen while it is drawn");
+    paint.step(vec![button(to, false)]);
+    paint.settle(4);
+    assert!(dark(&mut paint), "shown under the pen once it is in");
+    sue_paint::probe_canvas(Vec::new());
     // Off again: refused again.
     paint.command("anim.key.edit_keyed");
     let before = arena_bytes(&paint);
@@ -790,4 +827,113 @@ fn trv_6_track_label_range_off_grays_the_frame_count() {
     let notes = sue_paint::anim::editing::track_notes(&sequence.tracks[folder_track(&paint)]);
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert_eq!((notes[0].name.as_str(), notes[0].range), ("Walk", 4));
+}
+
+#[test]
+fn trv_8_a_stroke_under_a_rendered_2d_camera_lands_where_the_cel_shows() {
+    let mut paint = PaintDriver::new("p6-stroke-camera");
+    // Cel 1 with a line, drawn before any camera: where it lands is where
+    // the pen went. Then its folder dragged into a new camera folder.
+    paint.new_timeline();
+    folder_with_cels(&mut paint, 1, 1);
+    paint.command("anim.layer.camera");
+    let camera = named(&paint, "Camera 1");
+    let folder = named(&paint, "Folder 1");
+    let row = |paint: &mut PaintDriver, name: &str| {
+        let texts = paint.settle(2);
+        texts
+            .iter()
+            .filter(|(text, rect)| text.starts_with(name) && rect.left() > 1150.0)
+            .map(|(_, rect)| *rect)
+            .next()
+            .unwrap_or_else(|| panic!("{name}'s row in the Layer palette: {texts:?}"))
+    };
+    let (from, onto) = (row(&mut paint, "Folder 1"), row(&mut paint, "Camera 1"));
+    paint.drag(from.center(), onto.center(), egui::PointerButton::Primary);
+    paint.settle(2);
+    assert_eq!(
+        sue_paint::doc::folder_of(arena(&paint), folder),
+        Some(camera),
+        "the folder in the camera"
+    );
+    let at = row(&mut paint, "Camera 1");
+    click_at(&mut paint, at.center());
+    paint.step(vec![key(egui::Key::O, egui::Modifiers::NONE)]);
+    paint.settle(4);
+    paint.click_text("Tool Property");
+    paint.settle(4);
+    let cel = named(&paint, "1");
+    let first = ink_rows(&paint, cel);
+    let (left, right) = ink_columns(&paint, cel, first.0..=first.1).expect("cel 1's line");
+    // The camera moved 100 pixels right at frame 1; Render 2D Camera is
+    // on (as it is by default), so the canvas shows the cels through it.
+    let size = canvas_size(&paint);
+    let field = field_under(&mut paint, "Position X");
+    type_enter(
+        &mut paint,
+        field,
+        &format!("{}", f64::from(size[0]) / 2.0 + 100.0),
+    );
+    let rate = timeline(&paint).rate;
+    let seen = sue_paint::camera::Camera::of(
+        arena(&paint),
+        camera,
+        Some(sue_paint::camera::time_of(0, rate)),
+        size,
+    );
+    assert!(
+        (seen.center[0] - (size[0] as f32 / 2.0 + 100.0)).abs() < 0.5,
+        "{seen:?}"
+    );
+    assert!(
+        sue_paint::anim::setup::Playback::of(arena(&paint), open_picture(&paint)).render_camera
+    );
+    // Back on cel 1 with the pen, the same line lower down: it lands on
+    // the cel where the camera shows it, 100 pixels right in the cel's own
+    // pixels.
+    paint.step(vec![key(egui::Key::P, egui::Modifiers::NONE)]);
+    let texts = paint.settle(4);
+    let at = texts
+        .iter()
+        .filter(|(text, rect)| text == "1" && rect.left() > 1150.0)
+        .map(|(_, rect)| *rect)
+        .next()
+        .unwrap_or_else(|| panic!("cel 1's row in the Layer palette: {texts:?}"));
+    click_at(&mut paint, at.center());
+    paint.settle(2);
+    undo_pair(&mut paint, "a stroke through the camera", |paint| {
+        line_on_canvas(paint, 60.0);
+    });
+    let last = ink_rows(&paint, cel);
+    assert!(
+        last.1 > first.1 + 4,
+        "a second line, lower: {first:?} {last:?}"
+    );
+    let (moved_left, moved_right) =
+        ink_columns(&paint, cel, first.1 + 4..=last.1).expect("the second line");
+    let shift = |a: u32, b: u32| (b as f32 - a as f32 - 100.0).abs();
+    assert!(
+        shift(left, moved_left) < 3.0 && shift(right, moved_right) < 3.0,
+        "drawn where it shows: {left}..{right} against {moved_left}..{moved_right}"
+    );
+    // The canvas shows it under the pen, as it was drawn.
+    let inked: Vec<u32> = (first.1 + 4..=last.1)
+        .filter(|y| {
+            let raster = sue_paint::doc::raster(arena(&paint), cel).unwrap();
+            let x = (moved_left + moved_right) / 2;
+            raster.bytes().unwrap()[((y * raster.width() + x) * 4 + 3) as usize] > 64
+        })
+        .collect();
+    let row = inked[inked.len() / 2];
+    sue_paint::probe_canvas(vec![[(left + right) / 2, row]]);
+    paint.settle(4);
+    let seen = sue_paint::canvas_probed();
+    sue_paint::probe_canvas(Vec::new());
+    assert!(
+        seen.first()
+            .copied()
+            .flatten()
+            .is_some_and(|[r, g, b, _]| u32::from(r) + u32::from(g) + u32::from(b) < 300),
+        "shown under the pen: {seen:?}"
+    );
 }

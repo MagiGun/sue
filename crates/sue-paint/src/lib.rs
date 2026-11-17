@@ -83,8 +83,8 @@ pub use commands::registry;
 pub use launchers::shown_buttons;
 pub use menus::menus;
 pub use studio::{
-    ID, StrokeSeen, SuePaint, ViewSeen, export_at_once, hold_export_starts, hold_exports_to,
-    last_stroke, last_view, mirror,
+    ID, StrokeSeen, SuePaint, ViewSeen, canvas_probed, export_at_once, hold_export_starts,
+    hold_exports_to, last_stroke, last_view, mirror, probe_canvas,
 };
 
 use sue_core::EntityId;

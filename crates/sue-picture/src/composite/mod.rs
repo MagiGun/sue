@@ -227,12 +227,24 @@ impl Compositor {
             .get_by_id(stroke.layer())
             .map(|entity| picture::LayerStyle::of(entity).offset)
             .unwrap_or_default();
-        let clamp = |value: i64, side: u32| value.clamp(0, i64::from(side)) as u32;
+        // In the layer's own picture pixels, unclamped: the frame may
+        // move them onto the canvas from outside it.
+        let clamp = |value: i64| value.clamp(0, i64::from(u32::MAX)) as u32;
         let rect = [
-            clamp(x0 + offset[0], self.size[0]),
-            clamp(y0 + offset[1], self.size[1]),
-            clamp(x1 + offset[0], self.size[0]),
-            clamp(y1 + offset[1], self.size[1]),
+            clamp(x0 + offset[0]),
+            clamp(y0 + offset[1]),
+            clamp(x1 + offset[0]),
+            clamp(y1 + offset[1]),
+        ];
+        // Where the canvas shows them, cut to the picture.
+        let [x0, y0, x1, y1] = *self
+            .shown_rects(arena, &[rect], Some(stroke.layer()))
+            .first()?;
+        let rect = [
+            x0.min(self.size[0]),
+            y0.min(self.size[1]),
+            x1.min(self.size[0]),
+            y1.min(self.size[1]),
         ];
         (rect[0] < rect[2] && rect[1] < rect[3]).then_some(rect)
     }

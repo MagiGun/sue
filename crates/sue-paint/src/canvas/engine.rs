@@ -469,16 +469,17 @@ impl SuePaint {
     }
 
     /// What each canvas point sees on the layer a stroke goes to, when the
-    /// frame shown moves it (its keyframes, a keyed folder round it);
-    /// `None` when nothing moves it.
+    /// frame shown moves it (its keyframes, a keyed folder round it, a 2D
+    /// camera round it while Render 2D Camera shows the canvas through
+    /// it); `None` when nothing moves it.
     fn keyed_warp(&self, arena: &sue_core::Arena) -> Option<[f32; 6]> {
         if !self.timeline_on {
             return None;
         }
         let info = self.mask_drawable(arena).ok()?;
         let doc = self.doc()?;
-        crate::anim::frame_view(arena, doc.picture, doc.frame, None, Some(false))?
-            .warp(arena, info.id)
+        // The cameras as the canvas shows them (Playback Settings).
+        crate::anim::frame_view(arena, doc.picture, doc.frame, None, None)?.warp(arena, info.id)
     }
 
     /// A stream sample as the worker takes it.

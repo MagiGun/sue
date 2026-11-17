@@ -1193,6 +1193,45 @@ pub fn last_view() -> Option<ViewSeen> {
     LAST_VIEW.with(|last| last.borrow().clone())
 }
 
+/// Picture pixels the runtime tests asked the canvas to read as it shows
+/// them, and the screen colors it read there in its last frame.
+type Probe = (Vec<[u32; 2]>, Vec<Option<[u8; 4]>>);
+
+thread_local! {
+    /// What the canvas is asked to read, and read (see [`probe_canvas`]).
+    static CANVAS_PROBE: std::cell::RefCell<Probe> =
+        const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+}
+
+/// Asks the canvas to read the screen colors of picture pixels `points`
+/// in every frame from now on (for the runtime tests; none stops it).
+pub fn probe_canvas(points: Vec<[u32; 2]>) {
+    CANVAS_PROBE.with(|probe| *probe.borrow_mut() = (points, Vec::new()));
+}
+
+/// The screen colors the canvas showed at the points [`probe_canvas`]
+/// asked for, in its last frame on this thread.
+#[must_use]
+pub fn canvas_probed() -> Vec<Option<[u8; 4]>> {
+    CANVAS_PROBE.with(|probe| probe.borrow().1.clone())
+}
+
+/// Reads the points asked for off `compositor`, when any are.
+pub(crate) fn probe_with(compositor: &crate::composite::Compositor) {
+    CANVAS_PROBE.with(|probe| {
+        let mut probe = probe.borrow_mut();
+        if probe.0.is_empty() {
+            return;
+        }
+        let seen = probe
+            .0
+            .iter()
+            .map(|[x, y]| compositor.pixel(*x, *y))
+            .collect();
+        probe.1 = seen;
+    });
+}
+
 impl std::fmt::Debug for SuePaint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(&tr!("suepaint"))
