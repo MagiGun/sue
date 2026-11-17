@@ -1114,20 +1114,30 @@ impl SuePaint {
                                     auto.sets[index].set_step(step, !on);
                                     changed = true;
                                 }
-                                // Whether its dialog shows while playing.
+                                // Whether its dialog shows while playing:
+                                // only a step with a dialog (its command
+                                // ends in "...", as menus show it) takes
+                                // the box; the others show it dimmed.
                                 let shows = auto.sets[index].shows_dialog(step);
+                                let has_dialog = label.ends_with("...")
+                                    || shows
+                                    || auto.sets[index].settings(step).is_some();
                                 let dialog_name = tr!("auto-show-dialog-of", name = label.clone());
-                                let dialog = sue_wm::ui::checkbox(
-                                    ("sue-paint-auto-step-dialog", &id, step),
-                                    "",
-                                    shows,
-                                )
-                                .bare()
-                                .show(ui, theme);
+                                let dialog = ui
+                                    .add_enabled_ui(has_dialog, |ui| {
+                                        sue_wm::ui::checkbox(
+                                            ("sue-paint-auto-step-dialog", &id, step),
+                                            "",
+                                            shows,
+                                        )
+                                        .bare()
+                                        .show(ui, theme)
+                                    })
+                                    .inner;
                                 dialog.widget_info(|| {
                                     egui::WidgetInfo::selected(
                                         egui::Role::CheckBox,
-                                        true,
+                                        has_dialog,
                                         shows,
                                         &dialog_name,
                                     )
@@ -1137,7 +1147,7 @@ impl SuePaint {
                                     &Tip::new(&dialog_name).help(&tr!("auto-show-dialog-help")),
                                     theme,
                                 );
-                                if dialog.clicked() {
+                                if has_dialog && dialog.clicked() {
                                     auto.sets[index].set_dialog(step, !shows);
                                     changed = true;
                                 }
