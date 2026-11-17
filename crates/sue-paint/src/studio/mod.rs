@@ -674,6 +674,13 @@ pub struct SuePaint {
     /// One camera value being set in Tool Property and not keyed yet:
     /// its folder, the frame, the value's channel and what it is set to.
     pub(crate) camera_value: Option<(EntityId, u32, &'static str, f64)>,
+    /// Edit Layers with Active Keyframes: a layer whose keyframes are on
+    /// takes strokes, drawn where they show.
+    pub(crate) edit_keyed: bool,
+    /// What each canvas point sees on the layer a stroke is drawn on,
+    /// when keyframes or a keyed folder move it at the frame shown: the
+    /// stroke lands where the layer shows.
+    pub(crate) stroke_warp: Option<[f32; 6]>,
     /// The Material palette: the kind it shows (0 all, then by the kinds
     /// registered) and the material picked, by name.
     pub(crate) material_kind: u8,
@@ -998,6 +1005,8 @@ impl Default for SuePaint {
             anim_ui: crate::panels::timeline::AnimUi::default(),
             camera_pending: None,
             camera_value: None,
+            edit_keyed: false,
+            stroke_warp: None,
             view3d_before: None,
             pending_view3d: None,
             figure_joint: None,

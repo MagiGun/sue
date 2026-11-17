@@ -853,6 +853,30 @@ fn track_note(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.ask_track_note(cx);
 }
 
+/// Assign Multiple Cels: asks which cels show from the frame shown on.
+fn cel_assign_many(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.ask_assign_many(cx);
+}
+
+/// Create All Supported Cels: the cels the frames name, made.
+fn cel_create_supported(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    if paint.timeline_here(&cx.world.arena).is_some() {
+        paint.create_supported_cels(cx);
+    }
+}
+
+/// Edit Layers with Active Keyframes, and back.
+fn key_edit_keyed(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    if paint.here(&cx.world.arena).is_some() {
+        paint.edit_keyed = !paint.edit_keyed;
+    }
+}
+
+/// Checked while layers with keyframes on take strokes.
+fn edit_keyed_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    flag(paint.edit_keyed)
+}
+
 /// A track label at the frame shown (the argument names its kind).
 fn track_label(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
     paint.timeline_track_label(cx, call.name.trim_start_matches("anim.track_label."));
@@ -1563,6 +1587,31 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         camera_value_set,
     )
     .with(Flags::HIDDEN),
+    // Animation, Edit Track: the rest of Clip Studio Paint's entries.
+    c(
+        "anim.cel.assign_many",
+        "assign-multiple-cels-ellipsis",
+        "cel-specify",
+        cel_assign_many,
+    )
+    .state(on_timeline)
+    .with(Flags::PALETTE),
+    c(
+        "anim.cel.create_supported",
+        "create-all-supported-cels",
+        "cel-new",
+        cel_create_supported,
+    )
+    .state(on_timeline)
+    .with(Flags::PALETTE),
+    c(
+        "anim.key.edit_keyed",
+        "edit-layers-with-active-keyframes",
+        "keyframes",
+        key_edit_keyed,
+    )
+    .state(edit_keyed_on)
+    .with(Flags::PALETTE),
 ];
 
 /// The cels of the folder of the current track: its track, when it is an

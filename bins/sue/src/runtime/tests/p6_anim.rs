@@ -321,3 +321,473 @@ fn trv_11_camera_tool_property_keys_each_value_with_its_own_button() {
     assert!(mark(&paint, "mark.camera.corner.3").is_some());
     assert!(shown_at(&paint, 0).is_some(), "the cel still shows");
 }
+
+// TRV-6 (and ABV-3): the ruler goes on left of frame 1.
+
+/// The numbers the Timeline's ruler drew, with where.
+fn ruler_numbers(paint: &mut PaintDriver) -> Vec<(i64, egui::Rect)> {
+    let texts = paint.settle(4);
+    let header = texts
+        .iter()
+        .find(|(text, rect)| text == "Timeline" && rect.top() > 600.0)
+        .map(|(_, rect)| *rect)
+        .unwrap_or_else(|| panic!("the Timeline palette: {texts:?}"));
+    // The ruler's frame numbers sit in its lower half, the first line of
+    // text under the palette's tab that holds numbers only.
+    let mut numbers: Vec<(i64, egui::Rect)> = texts
+        .iter()
+        .filter(|(_, rect)| rect.left() > 560.0 && rect.top() > header.bottom())
+        .filter_map(|(text, rect)| Some((text.parse::<i64>().ok()?, *rect)))
+        .collect();
+    let row = numbers
+        .iter()
+        .filter(|(number, _)| *number == 1)
+        .map(|(_, rect)| rect.center().y)
+        .fold(f32::INFINITY, f32::min);
+    numbers.retain(|(_, rect)| (rect.center().y - row).abs() < 3.0);
+    numbers.sort_by(|a, b| a.1.left().total_cmp(&b.1.left()));
+    // The cel picture's own "1" can stand on the same line: each number
+    // once, where the ruler drew it first.
+    let mut seen = std::collections::HashSet::new();
+    numbers.retain(|(number, _)| seen.insert(*number));
+    numbers
+}
+
+#[test]
+fn trv_6_the_ruler_goes_on_left_of_frame_1_numbered_and_shaded() {
+    let mut paint = PaintDriver::new("p6-ruler-before");
+    paint.new_timeline();
+    folder_with_cels(&mut paint, 1, 1);
+    // Zoomed in, every frame is numbered.
+    for _ in 0..3 {
+        paint.command("anim.zoom_in");
+    }
+    paint.command("anim.first");
+    let numbers = ruler_numbers(&mut paint);
+    let shown: Vec<i64> = numbers.iter().map(|(number, _)| *number).collect();
+    assert!(
+        shown.starts_with(&[1, 2, 3, 4]),
+        "every frame numbered: {shown:?}"
+    );
+    assert!(shown.iter().all(|number| *number > 0), "{shown:?}");
+    let one = numbers[0].1;
+    // Shift and the wheel over the frames pan left of frame 1: 0, -1 and
+    // on come in, in order, left of 1.
+    let over = Pos2::new(one.left() + 200.0, one.bottom() + 40.0);
+    for _ in 0..6 {
+        paint.step(vec![
+            egui::Event::PointerMoved(over),
+            egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+            egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: vec2(0.0, 200.0),
+                modifiers: egui::Modifiers::SHIFT,
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Wheel,
+            },
+        ]);
+    }
+    paint.step(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+    paint.settle(30);
+    let numbers = ruler_numbers(&mut paint);
+    let shown: Vec<i64> = numbers.iter().map(|(number, _)| *number).collect();
+    let at = |wanted: i64| {
+        numbers
+            .iter()
+            .find(|(number, _)| *number == wanted)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{wanted} on the ruler: {shown:?}"))
+    };
+    let (minus_one, zero, one) = (at(-1), at(0), at(1));
+    assert!(
+        minus_one.left() < zero.left() && zero.left() < one.left(),
+        "{shown:?}"
+    );
+    // Never more than a third of what shows lies before frame 1.
+    let before = shown.iter().filter(|number| **number <= 0).count();
+    assert!(
+        before * 3 <= shown.len() + 3,
+        "frame 1 keeps most of the width: {shown:?}"
+    );
+    // A click on the ruler there goes to the first frame.
+    paint.command("anim.next");
+    paint.command("anim.next");
+    paint.settle(2);
+    click_at(&mut paint, zero.center());
+    let frame = sue_paint_frame(&paint);
+    assert_eq!(frame, 0, "the first frame");
+    // And the playback range still starts at the first frame.
+    let picture = open_picture(&paint);
+    let (start, _) =
+        sue_paint::anim::setup::Settings::of(arena(&paint), picture).range(timeline_length(&paint));
+    assert_eq!(start, 0);
+}
+
+/// The frame Sue Paint shows (0 based), as the Timeline bar reads it.
+fn sue_paint_frame(paint: &PaintDriver) -> u32 {
+    paint
+        .texts
+        .iter()
+        .find(|(text, _)| text.contains(" to ") && text.contains("   "))
+        .and_then(|(text, _)| text.split_whitespace().next()?.parse::<u32>().ok())
+        .map(|number| number - 1)
+        .unwrap_or_else(|| panic!("the bar's readout: {:?}", paint.texts))
+}
+
+/// How many frames the timeline has.
+fn timeline_length(paint: &PaintDriver) -> u32 {
+    sue_paint::anim::length(arena(paint), open_picture(paint))
+}
+
+// TRV-8 (and A25V-18): the rest of Animation, Edit Track.
+
+/// The labels of the Animation menu's submenu `title`, in order.
+fn animation_submenu(title: &str) -> Vec<String> {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let menus = sue_paint::menus();
+    let animation = menus
+        .iter()
+        .find(|menu| menu.title == "Animation")
+        .expect("an Animation menu");
+    let mut out = Vec::new();
+    for item in &animation.items {
+        if let sue_wm::MenuItem::Sub { label, items } = item
+            && label == title
+        {
+            out.extend(items.iter().map(|item| item.label().to_owned()));
+        }
+    }
+    out
+}
+
+/// The name of the cel the first animation folder shows at `frame`.
+fn shown_name(paint: &PaintDriver, frame: u32) -> Option<String> {
+    shown_at(paint, frame).map(|cel| arena(paint).get_by_id(cel).unwrap().name().to_owned())
+}
+
+#[test]
+fn trv_8_edit_track_has_the_entries_of_clip_studio_paint_in_its_order() {
+    let edit_track = animation_submenu("Edit Track");
+    let at = |name: &str| {
+        edit_track
+            .iter()
+            .position(|label| label == name)
+            .unwrap_or_else(|| panic!("{name} in Edit Track: {edit_track:?}"))
+    };
+    // The keyframe entries: the three eases, Edit Layers with Active
+    // Keyframes, Delete All Keyframes; then the cel entries.
+    assert!(at("Edit Layers with Active Keyframes") < at("Delete All Keyframes"));
+    assert!(at("Edit Layers with Active Keyframes") > at("Enable Keyframes on This Layer"));
+    assert_eq!(
+        at("Assign Multiple Cels..."),
+        at("Assign Animation Cel") + 1
+    );
+    assert_eq!(
+        at("Create All Supported Cels"),
+        at("Assign Multiple Cels...") + 1
+    );
+    assert!(at("Create All Supported Cels") < at("Rename in Timeline Order"));
+}
+
+#[test]
+fn trv_8_assign_multiple_cels_then_create_all_supported_cels() {
+    let mut paint = PaintDriver::new("p6-assign-many");
+    paint.new_timeline();
+    folder_with_cels(&mut paint, 2, 4);
+    paint.command("anim.first");
+    paint.settle(2);
+    // Assign Multiple Cels from frame 1: 1, 2, then 3 and 4 (not drawn
+    // yet), on twos.
+    paint.command("anim.cel.assign_many");
+    let texts = paint.settle(4);
+    assert!(
+        texts.iter().any(|(text, _)| text == "Assign Multiple Cels"),
+        "the dialog: {texts:?}"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|(text, _)| text.contains("Cels of Folder 1: 1, 2")),
+        "it lists the folder's cels: {texts:?}"
+    );
+    super::paint_anim::fill(&mut paint, "Cels", "1, 2, 3-4");
+    super::paint_anim::fill(&mut paint, "Frames each", "2");
+    undo_pair(&mut paint, "Assign Multiple Cels", |paint| {
+        paint.click_text("OK");
+    });
+    let shown: Vec<Option<String>> = (0..8).map(|frame| shown_name(&paint, frame)).collect();
+    assert_eq!(
+        shown,
+        [
+            Some("1"),
+            Some("1"),
+            Some("2"),
+            Some("2"),
+            None,
+            None,
+            None,
+            None
+        ]
+        .map(|name| name.map(str::to_owned))
+        .to_vec(),
+        "on twos; 3 and 4 show nothing yet"
+    );
+    let sequence = timeline(&paint);
+    assert_eq!(
+        sue_paint::anim::editing::wanted_cels(
+            &sequence.tracks[folder_track(&paint)],
+            sequence.rate
+        ),
+        vec![(4, "3".to_owned()), (6, "4".to_owned())]
+    );
+    // The timeline names them on their frames, before they exist.
+    let texts = paint.settle(2);
+    let header = texts
+        .iter()
+        .find(|(text, rect)| text == "Timeline" && rect.top() > 600.0)
+        .map(|(_, rect)| *rect)
+        .unwrap();
+    for name in ["3", "4"] {
+        assert!(
+            texts.iter().any(|(text, rect)| text == name
+                && rect.left() > 560.0
+                && rect.top() > header.bottom() + 40.0),
+            "{name} on the folder's track: {texts:?}"
+        );
+    }
+    // Create All Supported Cels makes 3 and 4, shown where they were
+    // named.
+    undo_pair(&mut paint, "Create All Supported Cels", |paint| {
+        paint.command("anim.cel.create_supported");
+    });
+    let shown: Vec<Option<String>> = (0..8).map(|frame| shown_name(&paint, frame)).collect();
+    assert_eq!(
+        shown,
+        ["1", "1", "2", "2", "3", "3", "4", "4"]
+            .map(|name| Some(name.to_owned()))
+            .to_vec()
+    );
+    let folder =
+        sue_paint::anim::track_folder(&timeline(&paint).tracks[folder_track(&paint)]).unwrap();
+    assert_eq!(
+        sue_paint::anim::cels(arena(&paint), open_picture(&paint), folder).len(),
+        4,
+        "two cels made, in the folder"
+    );
+    // Nothing left to make: no step.
+    let steps = paint.runtime.engine.history.depth();
+    paint.command("anim.cel.create_supported");
+    paint.settle(2);
+    assert_eq!(paint.runtime.engine.history.depth(), steps);
+}
+
+/// The columns of `layer` that hold ink in the rows `rows`: the first
+/// and the last, if any.
+fn ink_columns(
+    paint: &PaintDriver,
+    layer: sue_core::EntityId,
+    rows: std::ops::RangeInclusive<u32>,
+) -> Option<(u32, u32)> {
+    let raster = sue_paint::doc::raster(arena(paint), layer).unwrap();
+    let bytes = raster.bytes().unwrap();
+    let width = raster.width();
+    let inked: Vec<u32> = (0..width)
+        .filter(|x| {
+            rows.clone()
+                .filter(|y| *y < raster.height())
+                .any(|y| bytes[((y * width + x) * 4 + 3) as usize] > 64)
+        })
+        .collect();
+    Some((*inked.first()?, *inked.last()?))
+}
+
+/// The rows of `layer` that hold ink: the first and the last.
+fn ink_rows(paint: &PaintDriver, layer: sue_core::EntityId) -> (u32, u32) {
+    let raster = sue_paint::doc::raster(arena(paint), layer).unwrap();
+    let bytes = raster.bytes().unwrap();
+    let width = raster.width();
+    let inked: Vec<u32> = (0..raster.height())
+        .filter(|y| (0..width).any(|x| bytes[((y * width + x) * 4 + 3) as usize] > 64))
+        .collect();
+    (inked[0], *inked.last().unwrap())
+}
+
+#[test]
+fn trv_8_edit_layers_with_active_keyframes_draws_where_the_layer_shows() {
+    let mut paint = PaintDriver::new("p6-edit-keyed");
+    paint.new_timeline();
+    let middle = paint_middle(&paint.runtime);
+    // A filled box on Layer 1, keyed, then moved right with the Object
+    // tool at frame 1.
+    paint.step(vec![key(egui::Key::M, egui::Modifiers::NONE)]);
+    paint.drag(
+        middle - vec2(40.0, 20.0),
+        middle + vec2(40.0, 20.0),
+        egui::PointerButton::Primary,
+    );
+    paint.command("edit.fill");
+    paint.command("select.none");
+    paint.settle(4);
+    let layer = named(&paint, "Layer 1");
+    paint.command("anim.keyframes");
+    paint.command("anim.key.layer");
+    paint.command("tool.operation");
+    paint.settle(4);
+    let inside =
+        mark(&paint, "mark.keyed.middle").expect("the keyed layer's box") + vec2(10.0, 5.0);
+    let event = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::SHIFT,
+    };
+    paint.step(vec![
+        egui::Event::ModifiersChanged(egui::Modifiers::SHIFT),
+        egui::Event::PointerMoved(inside),
+    ]);
+    paint.step(vec![event(inside, true)]);
+    for index in 1..=16 {
+        paint.step(vec![egui::Event::PointerMoved(
+            inside + vec2(120.0 * index as f32 / 16.0, 0.0),
+        )]);
+    }
+    paint.step(vec![event(inside + vec2(120.0, 0.0), false)]);
+    paint.step(vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE)]);
+    paint.settle(6);
+    let size = canvas_size(&paint);
+    let rate = timeline(&paint).rate;
+    let pose = sue_paint::anim::motion::pose(
+        arena(&paint),
+        layer,
+        sue_paint::camera::time_of(0, rate),
+        size,
+    )
+    .unwrap();
+    let dx = pose.position[0];
+    assert!(dx > 40.0, "the layer moved right: {pose:?}");
+    // A reference line on a layer of its own, above the box.
+    paint.command("layer.new");
+    paint.settle(2);
+    let reference = sue_paint::doc::layers(arena(&paint), open_picture(&paint))
+        .last()
+        .unwrap()
+        .id;
+    assert!(reference != layer);
+    paint.step(vec![key(egui::Key::P, egui::Modifiers::NONE)]);
+    paint.settle(2);
+    line_on_canvas(&mut paint, -100.0);
+    let rows = ink_rows(&paint, reference);
+    let (left, right) = ink_columns(&paint, reference, rows.0..=rows.1).unwrap();
+    paint.command("edit.undo");
+    paint.command("edit.undo");
+    paint.settle(2);
+    // Back on Layer 1: with keyframes on it takes no stroke.
+    assert_eq!(
+        sue_paint::doc::layers(arena(&paint), open_picture(&paint))
+            .last()
+            .unwrap()
+            .id,
+        layer
+    );
+    let before = arena_bytes(&paint);
+    line_on_canvas(&mut paint, -100.0);
+    assert!(arena_bytes(&paint) == before, "refused");
+    // Edit Layers with Active Keyframes: the same line lands on the layer
+    // where it shows, so in the layer's own pixels it is left of where it
+    // shows by as much as the layer moved.
+    paint.command("anim.key.edit_keyed");
+    paint.settle(2);
+    undo_pair(&mut paint, "a stroke on a keyed layer", |paint| {
+        line_on_canvas(paint, -100.0);
+    });
+    let (keyed_left, keyed_right) =
+        ink_columns(&paint, layer, rows.0..=rows.1).expect("ink on the keyed layer");
+    let shift = |a: u32, b: u32| (a as f32 - b as f32 - dx).abs();
+    assert!(
+        shift(left, keyed_left) < 3.0 && shift(right, keyed_right) < 3.0,
+        "drawn where it shows: {left}..{right} against {keyed_left}..{keyed_right}, moved {dx}"
+    );
+    // Off again: refused again.
+    paint.command("anim.key.edit_keyed");
+    let before = arena_bytes(&paint);
+    line_on_canvas(&mut paint, -100.0);
+    assert!(arena_bytes(&paint) == before, "refused again");
+}
+
+// Seen and left in Phase 5: in-between marks in the label strip; Range
+// off grays the frame count.
+
+#[test]
+fn trv_6_label_strip_holds_the_in_between_marks_over_the_cels() {
+    let mut paint = PaintDriver::new("p6-inbetween-strip");
+    paint.new_timeline();
+    folder_with_cels(&mut paint, 2, 4);
+    paint.command("anim.next");
+    paint.command("anim.next");
+    paint.command("anim.track_label.inbetween");
+    paint.command("anim.next");
+    paint.command("anim.track_label.inbetween-done");
+    let texts = paint.settle(4);
+    let track = folder_track(&paint);
+    let marks: Vec<Pos2> = [2, 3]
+        .iter()
+        .map(|frame| {
+            mark(&paint, &format!("mark.track-label.{track}.{frame}"))
+                .unwrap_or_else(|| panic!("the mark at frame {}", frame + 1))
+        })
+        .collect();
+    // In one strip at the top of the folder's row: above the cels' names
+    // (cel 1 named on its clip), at the same height.
+    let cel_name = texts
+        .iter()
+        .filter(|(text, rect)| text == "1" && rect.left() > 560.0 && rect.top() > 780.0)
+        .map(|(_, rect)| *rect)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap_or_else(|| panic!("cel 1 on its track: {texts:?}"));
+    for at in &marks {
+        assert!(
+            at.y < cel_name.top(),
+            "the mark over the cels: {at:?} {cel_name:?}"
+        );
+    }
+    assert!((marks[0].y - marks[1].y).abs() < 0.5, "one strip");
+}
+
+#[test]
+fn trv_6_track_label_range_off_grays_the_frame_count() {
+    let mut paint = PaintDriver::new("p6-range-gray");
+    paint.new_timeline();
+    folder_with_cels(&mut paint, 1, 1);
+    paint.command("anim.track_note");
+    paint.settle(4);
+    assert!(
+        paint.rect_of("Number of frames").is_some(),
+        "the frame count stays with Range off: {:?}",
+        paint.texts
+    );
+    // Off, it is grayed: a drag along it (which changes a number field)
+    // leaves it at 1.
+    let field = super::paint_anim::right_of(&paint, "Number of frames");
+    let at = field.center();
+    paint.drag(at, at + vec2(80.0, 0.0), egui::PointerButton::Primary);
+    paint.settle(2);
+    // (A press there may move the dialog: it is read where it is now.)
+    let field = super::paint_anim::right_of(&paint, "Number of frames");
+    let shown = paint
+        .texts
+        .iter()
+        .find(|(_, rect)| *rect == field)
+        .map(|(text, _)| text.clone());
+    assert_eq!(shown.as_deref(), Some("1"), "grayed, it keeps 1");
+    // Range ticked: the same field takes the count.
+    paint.click_text("Range");
+    paint.settle(2);
+    super::paint_anim::fill(&mut paint, "Number of frames", "4");
+    super::paint_anim::fill(&mut paint, "Label name", "Walk");
+    paint.click_text("OK");
+    paint.settle(2);
+    let sequence = timeline(&paint);
+    let notes = sue_paint::anim::editing::track_notes(&sequence.tracks[folder_track(&paint)]);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert_eq!((notes[0].name.as_str(), notes[0].range), ("Walk", 4));
+}

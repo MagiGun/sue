@@ -228,6 +228,8 @@ fn every_command_can_be_reached() {
         [
             "edit.transform.cancel",
             "edit.material.paste",
+            "anim.camera.value_key.",
+            "anim.camera.value_set",
             "figure.flip",
             "figure.reset",
             "figure.preset.",
@@ -469,6 +471,9 @@ fn the_palette_offers_what_it_offered() {
             "anim.palette_color.clips",
             "anim.key.layer_delete",
             "anim.playback.camera",
+            "anim.cel.assign_many",
+            "anim.cel.create_supported",
+            "anim.key.edit_keyed",
             "window.interface.auto",
             "window.interface.desktop",
             "window.interface.tablet",

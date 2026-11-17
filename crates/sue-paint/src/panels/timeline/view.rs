@@ -31,6 +31,11 @@ impl TimelineView {
     pub const MIN_STEP: f32 = 4.0;
     /// The widest a frame gets.
     pub const MAX_STEP: f32 = 60.0;
+    /// How many frames before the first the view may show at most (and
+    /// never more than a third of what shows), as Clip Studio Paint's
+    /// ruler goes on left of frame 1 (numbered 0, -1 and on, shaded):
+    /// room to drag the playback range's first handle to the very start.
+    pub const BEFORE: f32 = 10.0;
 
     /// Points per frame: the zoom people chose, or `length` frames fitting
     /// `width`.
@@ -77,7 +82,8 @@ impl TimelineView {
         }
     }
 
-    /// Keeps the view on the timeline and its tracks, and brings `frame`
+    /// Keeps the view on the timeline (and the few frames before it) and
+    /// its tracks, and brings `frame`
     /// into view when it changed (playing, stepping). `width` and
     /// `visible` are the frames' width and the tracks' height, `content`
     /// the height of every track. Returns how many frames show.
@@ -100,7 +106,9 @@ impl TimelineView {
                 self.first = frame.saturating_sub(shown.saturating_sub(4)) as f32;
             }
         }
-        self.first = self.first.clamp(0.0, most);
+        // Never so far left that the frames leave most of the width.
+        let before = Self::BEFORE.min((shown as f32 / 3.0).floor().max(1.0));
+        self.first = self.first.clamp(-before, most);
         self.down = self.down.clamp(0.0, (content - visible).max(0.0));
         shown
     }
@@ -143,11 +151,16 @@ pub(super) fn timeline_scrollbars(
         let size = (track.width() * shown as f32 / length as f32).clamp(24.0, track.width());
         let room = (track.width() - size).max(1.0);
         let thumb = Rect::from_min_size(
-            pos2(track.left() + room * view.first / most, track.top()),
+            pos2(
+                track.left() + room * view.first.max(0.0) / most,
+                track.top(),
+            ),
             vec2(size, THICK),
         );
         let moved = bar(track, thumb, "timeline-hbar");
-        view.first = (view.first + moved.x * most / room).clamp(0.0, most);
+        if moved.x != 0.0 {
+            view.first = (view.first.max(0.0) + moved.x * most / room).clamp(0.0, most);
+        }
     }
     if tall {
         let most = (content - visible).max(1.0);
@@ -226,6 +239,12 @@ mod tests {
         let shown = view.settle(0, 120, 300.0, 10.0, 400.0, 200.0);
         assert_eq!(shown, 30);
         assert_eq!(view.first, 0.0);
+        // Panned far to the left: no further than ten frames before the
+        // first (a third of the 30 that show), as the ruler goes on left
+        // of frame 1.
+        view.pan(5000.0, 10.0);
+        view.settle(0, 120, 300.0, 10.0, 400.0, 200.0);
+        assert_eq!(view.first, -TimelineView::BEFORE);
         view.pan(-5000.0, 10.0);
         view.scroll(-5000.0);
         view.settle(0, 120, 300.0, 10.0, 400.0, 200.0);
@@ -241,8 +260,9 @@ mod tests {
         // Everything fits: nothing to scroll.
         let mut view = TimelineView::default();
         view.scroll(-50.0);
+        view.pan(30.0, 24.0);
         view.settle(0, 12, 300.0, 24.0, 100.0, 200.0);
-        assert_eq!((view.first, view.down), (0.0, 0.0));
+        assert_eq!((view.first, view.down), (-1.25, 0.0), "only the pan");
         assert_eq!(view.step(300.0, 12), 24.333_334);
     }
 }

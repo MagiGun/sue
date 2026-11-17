@@ -10,7 +10,7 @@ use sue_model::Sequence;
 use sue_wm::AppletContext;
 
 use super::Edit;
-use super::forms::{InsertForm, LabelForm, TimelineForm, TrackNoteForm};
+use super::forms::{AssignManyForm, InsertForm, LabelForm, TimelineForm, TrackNoteForm};
 use crate::anim;
 use crate::anim::editing::{self, Selection, TrackLabel};
 use crate::anim::motion::Ease;
@@ -423,6 +423,104 @@ impl SuePaint {
             editing::with_track_note(&sequence, form.track, form.frame, Some((&form.name, range)));
         if changed != sequence {
             Self::apply(cx, anim::set(picture, changed, &tr!("track-label")));
+        }
+    }
+
+    /// Asks which cels the picked animation folder's track shows from the
+    /// frame shown on, and how (Assign Multiple Cels).
+    pub(crate) fn ask_assign_many(&mut self, cx: &mut AppletContext<'_>) {
+        let Some((picture, sequence, _)) = self.timeline_here(&cx.world.arena) else {
+            cx.fail(tr!("make-timeline-first-animation-timeline-new"));
+            return;
+        };
+        let (frame, track) = self.doc().map_or((0, 0), |doc| (doc.frame, doc.track));
+        let arena = &cx.world.arena;
+        let Some(folder) = sequence.tracks.get(track).and_then(anim::track_folder) else {
+            cx.fail(tr!("pick-animation-folder-track"));
+            return;
+        };
+        let name_of = |id: sue_core::EntityId| {
+            arena
+                .get_by_id(id)
+                .map(|entity| entity.name().to_owned())
+                .unwrap_or_default()
+        };
+        let known: Vec<String> = anim::cels(arena, picture, folder)
+            .into_iter()
+            .map(name_of)
+            .collect();
+        self.dialog = Some(Dialog::Anim(Box::new(AnimDialog::AssignMany(
+            AssignManyForm {
+                track,
+                folder: name_of(folder),
+                cels: known.join(", "),
+                known,
+                start: frame,
+                each: 1,
+                times: 1,
+            },
+        ))));
+    }
+
+    /// Shows the cels Assign Multiple Cels named, one after another, as
+    /// one step; names with no cel yet are kept for Create All Supported
+    /// Cels.
+    pub(crate) fn assign_many_ok(&mut self, cx: &mut AppletContext<'_>, form: &AssignManyForm) {
+        let Some((picture, sequence, length)) = self.timeline_here(&cx.world.arena) else {
+            return;
+        };
+        let arena = &cx.world.arena;
+        let Some(folder) = sequence.tracks.get(form.track).and_then(anim::track_folder) else {
+            return;
+        };
+        let cels: Vec<(String, sue_core::EntityId)> = anim::cels(arena, picture, folder)
+            .into_iter()
+            .filter_map(|cel| Some((arena.get_by_id(cel).ok()?.name().to_owned(), cel)))
+            .collect();
+        let picks: Vec<editing::CelPick> = editing::cel_list(&form.cels)
+            .into_iter()
+            .map(|name| match cels.iter().find(|(known, _)| *known == name) {
+                Some((_, cel)) => editing::CelPick::Cel(*cel),
+                None => editing::CelPick::Wanted(name),
+            })
+            .collect();
+        let changed = editing::assign_many(
+            &sequence,
+            form.track,
+            (form.start, form.each, form.times),
+            &picks,
+            picture,
+            length,
+        );
+        if changed == sequence {
+            return;
+        }
+        let wanted = editing::wanted_cels(&changed.tracks[form.track], changed.rate)
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        Self::apply(
+            cx,
+            anim::set(picture, changed, &tr!("assign-multiple-cels")),
+        );
+        if wanted > 0 {
+            cx.notify(tr!("cels-wanted-count", count = wanted));
+        }
+    }
+
+    /// Makes every cel a frame names that has no layer yet (Create All
+    /// Supported Cels), as one step.
+    pub(crate) fn create_supported_cels(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(picture) = self.picture() else {
+            return;
+        };
+        match anim::cels::create_supported_cels(&cx.world.arena, picture) {
+            Ok(Some(edit)) => {
+                Self::apply(cx, edit);
+            }
+            Ok(None) => cx.notify(tr!("no-cels-to-make")),
+            Err(error) => cx.fail(error),
         }
     }
 

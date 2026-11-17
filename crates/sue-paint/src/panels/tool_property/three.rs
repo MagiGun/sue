@@ -1011,34 +1011,64 @@ impl SuePaint {
             values[index] = value;
         }
         ui.label(caption(&tr!("camera-at-frame", value = frame + 1)));
+        // The whole camera keyed at once, over the values each keyed alone.
+        let mut command = None;
+        let keys = crate::camera::keys(arena, folder);
+        let keyed = keys.contains(&time);
+        ui.horizontal(|ui| {
+            let (name, run) = if keyed {
+                (tr!("update-keyframe"), "anim.camera.key")
+            } else {
+                (tr!("add-keyframe"), "anim.camera.key")
+            };
+            let key = self
+                .bound
+                .first_chord(crate::commands::shortcut_table(), run);
+            let response = ui::button("sue-paint-camera-key", &name).show(ui, theme);
+            if ui::tooltip(response, &Tip::new(&name).shortcut(&key), theme).clicked() {
+                command = Some(run);
+            }
+            if keyed {
+                let name = tr!("delete-keyframe");
+                let key = self
+                    .bound
+                    .first_chord(crate::commands::shortcut_table(), "anim.camera.unkey");
+                let response = ui::button("sue-paint-camera-unkey", &name).show(ui, theme);
+                if ui::tooltip(response, &Tip::new(&name).shortcut(&key), theme).clicked() {
+                    command = Some("anim.camera.unkey");
+                }
+            }
+        });
         // Each value as Clip Studio Paint's Tool Property lists them, how
         // it reads (times shown), its unit, its range, and the key button
         // beside it that keys it alone.
-        let rows: [(
-            &'static str,
-            String,
-            f64,
-            String,
-            std::ops::RangeInclusive<f64>,
-            &'static str,
-        ); 7] = [
-            (
+        let row = |channel, name, times, suffix, range, key| CameraRow {
+            channel,
+            name,
+            times,
+            suffix,
+            range,
+            key,
+        };
+        let any = f64::NEG_INFINITY..=f64::INFINITY;
+        let rows = [
+            row(
                 crate::camera::X,
                 tr!("position-x"),
                 1.0,
                 tr!("px"),
-                f64::NEG_INFINITY..=f64::INFINITY,
+                any.clone(),
                 "anim.camera.value_key.camera.x",
             ),
-            (
+            row(
                 crate::camera::Y,
                 tr!("position-y"),
                 1.0,
                 tr!("px"),
-                f64::NEG_INFINITY..=f64::INFINITY,
+                any.clone(),
                 "anim.camera.value_key.camera.y",
             ),
-            (
+            row(
                 crate::camera::SCALE,
                 tr!("scale"),
                 100.0,
@@ -1046,31 +1076,31 @@ impl SuePaint {
                 1.0..=2000.0,
                 "anim.camera.value_key.camera.scale",
             ),
-            (
+            row(
                 crate::camera::ANGLE,
                 tr!("rotation"),
                 180.0 / std::f64::consts::PI,
                 tr!("deg"),
-                f64::NEG_INFINITY..=f64::INFINITY,
+                any.clone(),
                 "anim.camera.value_key.camera.angle",
             ),
-            (
+            row(
                 crate::camera::PIVOT_X,
                 tr!("center-of-rotation-x"),
                 1.0,
                 tr!("px"),
-                f64::NEG_INFINITY..=f64::INFINITY,
+                any.clone(),
                 "anim.camera.value_key.camera.pivot.x",
             ),
-            (
+            row(
                 crate::camera::PIVOT_Y,
                 tr!("center-of-rotation-y"),
                 1.0,
                 tr!("px"),
-                f64::NEG_INFINITY..=f64::INFINITY,
+                any,
                 "anim.camera.value_key.camera.pivot.y",
             ),
-            (
+            row(
                 crate::camera::OPACITY,
                 tr!("layer-opacity"),
                 100.0,
@@ -1080,11 +1110,16 @@ impl SuePaint {
             ),
         ];
         let mut set: Option<(&'static str, f64, bool)> = None;
-        let mut command = None;
         ui::form_grid(ui, "sue-paint-camera", theme, |grid| {
-            for (index, (channel, name, times, suffix, range, key_command)) in
-                rows.iter().enumerate()
-            {
+            for (index, row) in rows.iter().enumerate() {
+                let CameraRow {
+                    channel,
+                    name,
+                    times,
+                    suffix,
+                    range,
+                    key: key_command,
+                } = row;
                 grid.row(name, |ui| {
                     let mut shown = values[index] * times;
                     let response = ui::number_field(("sue-paint-camera", *channel), &mut shown)
@@ -1149,32 +1184,6 @@ impl SuePaint {
                 }
             }
         }
-        let keys = crate::camera::keys(arena, folder);
-        let keyed = keys.contains(&time);
-        ui.horizontal(|ui| {
-            let (name, run) = if keyed {
-                (tr!("update-keyframe"), "anim.camera.key")
-            } else {
-                (tr!("add-keyframe"), "anim.camera.key")
-            };
-            let key = self
-                .bound
-                .first_chord(crate::commands::shortcut_table(), run);
-            let response = ui::button("sue-paint-camera-key", &name).show(ui, theme);
-            if ui::tooltip(response, &Tip::new(&name).shortcut(&key), theme).clicked() {
-                command = Some(run);
-            }
-            if keyed {
-                let name = tr!("delete-keyframe");
-                let key = self
-                    .bound
-                    .first_chord(crate::commands::shortcut_table(), "anim.camera.unkey");
-                let response = ui::button("sue-paint-camera-unkey", &name).show(ui, theme);
-                if ui::tooltip(response, &Tip::new(&name).shortcut(&key), theme).clicked() {
-                    command = Some("anim.camera.unkey");
-                }
-            }
-        });
         let rate = self
             .picture()
             .and_then(|picture| crate::anim::timeline(arena, picture))
@@ -1191,6 +1200,18 @@ impl SuePaint {
         ui.label(caption(&tr!("drag-inside-frame-move-camera-corner")));
         command
     }
+}
+
+/// A value of the 2D camera as Tool Property lists it: its channel, its
+/// name, how many times the stored value it reads (degrees, percent), its
+/// unit, its range, and the command of the key button beside it.
+struct CameraRow {
+    channel: &'static str,
+    name: String,
+    times: f64,
+    suffix: String,
+    range: std::ops::RangeInclusive<f64>,
+    key: &'static str,
 }
 
 /// The light source: where the light comes from, how strong it is and how

@@ -451,13 +451,34 @@ impl SuePaint {
     }
 
     /// Where screen point `pos` is in pixels that sit at `offset` in the
-    /// picture.
+    /// picture, on the layer as the frame shown moves it (`stroke_warp`).
     fn layer_point(&self, pos: Pos2, viewport: Rect, size: [u32; 2], offset: [i64; 2]) -> [f32; 2] {
         let Some(doc) = self.docs.get(self.active) else {
             return [pos.x, pos.y];
         };
         let p = doc.view.to_picture(viewport, size, pos);
-        [p.x - offset[0] as f32, p.y - offset[1] as f32]
+        // A layer that keyframes move: the point of it that shows there.
+        let p = match self.stroke_warp {
+            Some(m) => [
+                m[0] * p.x + m[1] * p.y + m[4],
+                m[2] * p.x + m[3] * p.y + m[5],
+            ],
+            None => [p.x, p.y],
+        };
+        [p[0] - offset[0] as f32, p[1] - offset[1] as f32]
+    }
+
+    /// What each canvas point sees on the layer a stroke goes to, when the
+    /// frame shown moves it (its keyframes, a keyed folder round it);
+    /// `None` when nothing moves it.
+    fn keyed_warp(&self, arena: &sue_core::Arena) -> Option<[f32; 6]> {
+        if !self.timeline_on {
+            return None;
+        }
+        let info = self.mask_drawable(arena).ok()?;
+        let doc = self.doc()?;
+        crate::anim::frame_view(arena, doc.picture, doc.frame, None, Some(false))?
+            .warp(arena, info.id)
     }
 
     /// A stream sample as the worker takes it.
@@ -511,6 +532,10 @@ impl SuePaint {
         size: [u32; 2],
         cx: &mut AppletContext<'_>,
     ) -> bool {
+        // A layer that keyframes or a keyed folder move takes the stroke
+        // where it shows (Edit Layers with Active Keyframes on, or a cel in
+        // a keyed folder).
+        self.stroke_warp = self.keyed_warp(&cx.world.arena);
         let Some(doc) = self.docs.get(self.active) else {
             return false;
         };

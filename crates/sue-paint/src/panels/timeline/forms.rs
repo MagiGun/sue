@@ -434,6 +434,27 @@ pub(crate) struct TrackNoteForm {
     pub frames: u32,
 }
 
+/// Assign Multiple Cels: the cels a folder's track shows one after
+/// another from a frame, each for some frames, some times over.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct AssignManyForm {
+    /// The animation folder's track.
+    pub track: usize,
+    /// The folder's name, for the help line.
+    pub folder: String,
+    /// The folder's cels' names, in the Layer palette's order from the
+    /// bottom.
+    pub known: Vec<String>,
+    /// The cels as typed: names split by commas or spaces, `1-6` a run.
+    pub cels: String,
+    /// The first frame, from 0.
+    pub start: u32,
+    /// How many frames each cel shows.
+    pub each: u32,
+    /// How many times the run goes.
+    pub times: u32,
+}
+
 /// A timeline label: the frame (from 0) and its name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LabelForm {

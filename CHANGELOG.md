@@ -13,6 +13,22 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, the 2D camera's Tool Property: Center of Rotation X and Y
+  and Layer Opacity join Position, Scale and Rotation, and every value
+  has a key button beside it that keys that value alone at the frame
+  shown (solid while it is keyed there; a second press takes the key
+  away). A value typed or dragged is keyed when you let go, as one undo
+  step.
+- Sue Paint, Animation, Edit Track: Assign Multiple Cels... shows a run
+  of cels from a frame (names, or 1-6 for six cels), each for as many
+  frames as you say, as many times over; a name with no cel yet shows
+  its name grayed on the timeline, and Create All Supported Cels makes
+  those cels in the folder. Edit Layers with Active Keyframes lets you
+  draw on a layer whose keyframes are on, and the stroke lands where the
+  layer shows.
+- Sue Paint, Timeline: the ruler goes on left of frame 1 (0, -1 and on,
+  shaded), so the view can show the very start with room to spare.
+
 - Sue Paint, Animation, Show Animation Cels: Show Edited Cel Only (the
   cel locked as the one you draw shows in its folder in place of the
   frame's), Check Cel Motion by Key Input (the frames from two cels back
@@ -601,6 +617,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Sue Paint, Timeline: in-between marks sit in the label strip at the
+  top of the track, with the track labels, not under the cels; with
+  Range off, a track label's frame count stays in the dialog, grayed.
+- Sue Paint: a stroke on a cel in an animation folder whose keyframes
+  move it lands where the cel shows at that frame.
 - Sue Paint: every built-in brush was tuned to paint the way its name
   promises. Pencils, crayons, pastels and chalk catch the paper's grain
   (crayon and chalk skip its valleys even when pressed hard); the
