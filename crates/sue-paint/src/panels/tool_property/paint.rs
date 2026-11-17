@@ -100,18 +100,7 @@ pub(super) fn paint_properties(
         0.0,
         100.0,
     );
-    if !sub.tip.eraser {
-        rows.percent(
-            ui,
-            "color-mixing",
-            Category::Ink,
-            &tr!("color-mixing"),
-            &mut sub.tip.mix,
-            0.0,
-            100.0,
-        );
-    }
-    shape::ink_rows(ui, rows, sub);
+
     let tip = &mut sub.tip;
     let levels: Vec<String> = AntiAlias::ALL.iter().map(|level| level.label()).collect();
     let mut level = AntiAlias::ALL
@@ -176,6 +165,8 @@ pub(super) fn paint_properties(
         shape::tip_rows(ui, rows, sub, work);
     }
     tip_properties(ui, rows, &mut sub.tip);
+    // After Color mixing, which opens the mixing rows.
+    shape::ink_rows(ui, rows, sub);
     if tool != Tool::Figure {
         shape::spray_rows(ui, rows, sub);
         shape::stroke_rows(ui, rows, sub);
@@ -283,6 +274,17 @@ fn tip_properties(ui: &mut Ui, rows: &mut Rows<'_>, tip: &mut Tip) {
             &tr!("flow"),
             &mut tip.flow,
             1.0,
+            100.0,
+        );
+    }
+    if !tip.eraser {
+        rows.percent(
+            ui,
+            "color-mixing",
+            Category::Ink,
+            &tr!("color-mixing"),
+            &mut tip.mix,
+            0.0,
             100.0,
         );
     }

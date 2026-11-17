@@ -146,6 +146,10 @@ pub(super) fn shape_rows(
     sub: &mut SubTool,
     work: &mut BrushWork,
 ) -> Option<&'static str> {
+    let ids = ["brush-shape", "brush-shape-apply", "brush-shape-register"];
+    if !ids.iter().any(|id| rows.draws(id, Category::BrushShape)) {
+        return None;
+    }
     let presets = crate::brush_rows::shape_presets(&work.kept);
     let names: Vec<String> = presets
         .iter()

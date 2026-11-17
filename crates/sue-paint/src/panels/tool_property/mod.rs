@@ -201,6 +201,8 @@ const DETAIL_ONLY: &[&str] = &[
     // Detail.
     "brush-blend",
     "blur-intensity",
+    // Spraying effect's switch; a spraying brush shows its rows.
+    "spray",
     "brush-shape",
     "brush-shape-apply",
     "brush-shape-register",
@@ -322,6 +324,19 @@ impl<'h> Rows<'h> {
             enabled: false,
             last: None,
             theme,
+        }
+    }
+
+    /// `false` when this view would leave the row `id` of `category` out,
+    /// so a row whose choices cost something to gather can skip them;
+    /// the census counts every row.
+    pub(crate) fn draws(&self, id: &str, category: Category) -> bool {
+        match &self.view {
+            View::Property { hidden, .. } => !left_out(hidden, id),
+            View::Detail {
+                category: chosen, ..
+            } => *chosen == category,
+            View::Census(_) => true,
         }
     }
 

@@ -220,21 +220,25 @@ impl SuePaint {
         );
         // The list of categories.
         let mut list_ui = child(&mut inner, list, "sub-tool-detail-list");
+        // The list in the compact rows of a side list, so a brush's
+        // fifteen categories show whole in the palette's own height.
         egui::ScrollArea::vertical()
             .id_salt("sue-paint-detail-categories")
             .show(&mut list_ui, |ui| {
-                for category in &found {
-                    let label = category.label();
-                    let row = sue_wm::ui::list_row(
-                        ("sue-paint-detail-category", *category as u8),
-                        &label,
-                    )
-                    .selected(*category == chosen)
-                    .show(ui, theme);
-                    if row.response.on_hover_text(&label).clicked() {
-                        self.tool_palettes.detail = Some(*category);
+                Density::Compact.scope(ui, |ui| {
+                    for category in &found {
+                        let label = category.label();
+                        let row = sue_wm::ui::list_row(
+                            ("sue-paint-detail-category", *category as u8),
+                            &label,
+                        )
+                        .selected(*category == chosen)
+                        .show(ui, theme);
+                        if row.response.on_hover_text(&label).clicked() {
+                            self.tool_palettes.detail = Some(*category);
+                        }
                     }
-                }
+                });
             });
         // The rows of the chosen category, each with its eye.
         let mut rows_ui = child(&mut inner, settings, "sub-tool-detail-rows");
