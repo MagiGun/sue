@@ -652,4 +652,103 @@ fn the_survey_files_read_as_what_they_hold() {
     assert_eq!(contents(&back), contents(&doc));
     assert_eq!(table(&again, "BrushStyle").unwrap().1.len(), 1);
     assert_eq!(table(&again, "VectorObjectList").unwrap().1.len(), 1);
+    // Its vector layer redrawn in Sue: the new strokes are drawn with the
+    // file's own pen, found again, not a second one.
+    let mut redrawn = doc.clone();
+    let paths: Vec<_> = redrawn.paths().into_iter().map(|(path, _)| path).collect();
+    for path in paths {
+        let layer = redrawn.layer_at_mut(&path).unwrap();
+        if layer.name == "Layer 3" {
+            layer.columns.clear();
+            layer.id = 0;
+            layer.content = Some(ClipContent::Vector(ClipVector {
+                lines: vec![line([200.0, 900.0], [1400.0, 900.0], [0, 0, 255, 255])],
+            }));
+        }
+    }
+    let bytes = write(&redrawn).unwrap();
+    assert_eq!(table(&bytes, "BrushStyle").unwrap().1.len(), 1);
+    assert_eq!(table(&bytes, "BrushEffectorGraphData").unwrap().1.len(), 2);
+    assert_eq!(table(&bytes, "VectorObjectList").unwrap().1.len(), 1);
+}
+
+#[test]
+fn a_kept_pen_stored_with_whole_numbers_is_found_again() {
+    // SQLite keeps a real with no fraction as a whole number: a pen Clip
+    // Studio wrote reads back with 90 where Sue writes 90.0.
+    let mut doc = picture();
+    let int = Value::Integer;
+    let mut style = vec![
+        ("MainId", int(1)),
+        ("CanvasId", int(1)),
+        ("NextIndex", int(0)),
+    ];
+    style.extend(native::pen_style([1, 2]).into_iter().map(|(name, value)| {
+        let value = match value {
+            Value::Real(real) if real.fract() == 0.0 => int(real as i64),
+            other => other,
+        };
+        (name, value)
+    }));
+    let style_columns: Vec<String> = std::iter::once("_PW_ID".to_owned())
+        .chain(style.iter().map(|(name, _)| (*name).to_owned()))
+        .collect();
+    let graphs = native::pen_graphs();
+    doc.foreign.tables = vec![
+        ClipTable {
+            name: "BrushStyleManager".to_owned(),
+            sql: native::BRUSH_MANAGER_SQL.to_owned(),
+            columns: super::schema::sql_columns(native::BRUSH_MANAGER_SQL),
+            rows: vec![(
+                1,
+                vec![
+                    int(1),
+                    int(1),
+                    int(1),
+                    int(1),
+                    int(0),
+                    int(0),
+                    int(0),
+                    int(1),
+                    int(0),
+                ],
+            )],
+        },
+        ClipTable {
+            name: "BrushEffectorGraphData".to_owned(),
+            sql: native::BRUSH_GRAPH_SQL.to_owned(),
+            columns: super::schema::sql_columns(native::BRUSH_GRAPH_SQL),
+            rows: (0..2)
+                .map(|i| {
+                    let (number, size, points) = graphs[i].clone();
+                    (
+                        i as i64 + 1,
+                        vec![
+                            int(i as i64 + 1),
+                            int(i as i64 + 1),
+                            int(1),
+                            int(if i == 0 { 2 } else { 0 }),
+                            int(number),
+                            int(size),
+                            Value::Blob(points),
+                        ],
+                    )
+                })
+                .collect(),
+        },
+        ClipTable {
+            name: "BrushStyle".to_owned(),
+            sql: native::BRUSH_STYLE_SQL.to_owned(),
+            columns: style_columns,
+            rows: vec![(
+                1,
+                std::iter::once(int(1))
+                    .chain(style.into_iter().map(|(_, value)| value))
+                    .collect(),
+            )],
+        },
+    ];
+    let bytes = write(&doc).unwrap();
+    assert_eq!(table(&bytes, "BrushStyle").unwrap().1.len(), 1);
+    assert_eq!(table(&bytes, "BrushEffectorGraphData").unwrap().1.len(), 2);
 }

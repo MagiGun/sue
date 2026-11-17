@@ -844,7 +844,9 @@ pub(super) fn pen_graphs() -> [(i64, i64, Vec<u8>); 2] {
     ]
 }
 
-/// The plain pen a Sue vector line is drawn with in Clip Studio: a
+/// The plain pen a Sue vector line is drawn with in Clip Studio (its
+/// reals written bit for bit as Clip Studio wrote them, so a file's own
+/// pen is found again): a
 /// `BrushStyle` row after its id columns (`MainId`, `CanvasId`,
 /// `NextIndex`), with the ids of its two pressure curves (`graphs`)
 /// written into the effectors that point at them.
@@ -865,19 +867,16 @@ pub(super) fn pen_style(graphs: [u32; 2]) -> Vec<(&'static str, Value)> {
             "SizeEffector",
             blob(words(&[
                 0xd1,
-                0.7_f32.to_bits(),
+                0x3f33_3333,
                 graphs[0],
-                0.7_f32.to_bits(),
-                0.9_f32.to_bits(),
+                0x3f33_3333,
+                0x3f66_6666,
                 graphs[1],
             ])),
         ),
         ("OpacityEffector", blob(words(&[1]))),
         ("FlowBase", real(1.0)),
-        (
-            "FlowEffector",
-            blob(words(&[0x41, 0.18_f32.to_bits(), graphs[1]])),
-        ),
+        ("FlowEffector", blob(words(&[0x41, 0x3e38_51eb, graphs[1]]))),
         ("AntiAlias", int(1)),
         ("MipmapIndexToPlot", int(0)),
         ("Hardness", real(1.0)),

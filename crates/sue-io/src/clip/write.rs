@@ -737,6 +737,18 @@ fn highest_main(table: &ClipTable) -> i64 {
         .unwrap_or(0)
 }
 
+/// Whether two values say the same: a whole number and a real are the
+/// same number either way (SQLite stores a real with no fraction as a
+/// whole number, and reads it back as one).
+fn same(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Integer(_) | Value::Real(_), Value::Integer(_) | Value::Real(_)) => {
+            a.real() == b.real()
+        }
+        _ => a == b,
+    }
+}
+
 /// The stroke data of a kept chunk, by its id.
 fn kept_chunk<'a>(doc: &'a ClipDocument, id: &str) -> Option<&'a [u8]> {
     doc.foreign.chunks.iter().find_map(|chunk| {
@@ -880,7 +892,9 @@ impl Brush {
             table.rows.iter().find_map(|(_, values)| {
                 template
                     .iter()
-                    .all(|(name, value)| cell(table, values, name) == Some(value))
+                    .all(|(name, value)| {
+                        cell(table, values, name).is_some_and(|kept| same(kept, value))
+                    })
                     .then(|| cell(table, values, "MainId").and_then(Value::int))?
             })
         });
