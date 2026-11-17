@@ -3395,7 +3395,7 @@ Paint's page) and `search` words (Clip Studio's option names).
 | Sue Paint (`sue-paint`) | Layout, New Canvas, Saving, Pen and Tools (modifier keys, Pen Pressure and Command Bar buttons), Phones and Tablets (Studio Mode keys as command drop-downs), Layers, Colors, Custom Colors (only while the theme is Custom), closed: the pressure curve as text |
 | Sue Writer (`sue-writer`) | Writing, Page, Colors |
 | Keyboard Shortcuts (`keymaps`) | Sue's own keys, then a group per studio: one closed group per menu (and Tools), every command that can take a key, search by name or key, a mark on both rows of a key held twice with an offer to take it from the other |
-| Extensions (`packages`) | The signature policy, the studios and tools installed, packages |
+| Packages (`packages`) | The optional downloads (`SettingsItem::Packages`: a card per package, Install with progress, speed and Cancel, Uninstall, Install from a File), the signature policy, the studios and tools installed, the parts of Sue |
 | Advanced | The settings file with Reload, Export and Open Folder; any setting no page claims, one closed group per section (tested: every setting has exactly one row) |
 
 | Parameter | Control |
@@ -3530,7 +3530,37 @@ the live generation:
 `CoreUpdate` packages MAY name a `delta_base`. The payload is then a binary delta
 against that generation's binary, signed like any other payload.
 
-### 5.5 Updating Sue itself from its releases
+### 5.6 Optional packages
+
+Files Sue can use but does not ship (the first: the Hand Scanner's hand
+tracking models) are optional packages. `OptionalPackage`
+(`sue-pkg/src/optional.rs`) is a text manifest people can write and share
+(`docs/packages.md`): id, name, version, kind, licence, author, and each
+file with its size, SHA-256 and source, a link or a path next to the
+manifest. `PackageHome::install` is all or nothing: every file goes to
+`.staging/<id>/<name>.part`, is checked against its size and SHA-256, and
+only then is the staging folder moved to `<id>/`. A `Progress` shared
+with the interface carries the bytes had and the cancel flag; a cancelled
+install removes its staging folder, a failed one keeps its parts and the
+next try carries on (`Fetch::fetch(url, from, sink)`, with
+`Chunk::Restart` when the source cannot). `sue-pkg` does no networking:
+`sue_platform::packages::HttpsFetch` is the `Fetch` over `ureq` (a
+`Range` request to carry on), and `PackageCenter` runs installs on a
+`sue-core` `JobPool`, reports `PackageState` (`Available`, `Installing`
+with bytes and speed, `Installed`, `Failed`), cancels and uninstalls.
+There is one center per packages folder (`PackageCenter::at`), so
+Settings, Packages and a studio's dialog show and cancel the same
+install; both draw Sue's one card, `sue_wm::packages::package_card`. The
+manifests of the packages Sue names itself are files in
+`crates/sue-platform/packages/`. A package from a file is unsigned and is
+refused while `packages.require_signatures` is on.
+
+Every download in Sue can be cancelled: packages (above), an update of
+Sue (`update::Download::cancel`, Cancel Download in the update window)
+and the photo scanners' models (`update::download_link` takes a
+`cancelled` test; their transfer has Cancel).
+
+## 6. Zero-copy offline AI engine (`sue-ai`)
 
 Until Sue updates itself through `CoreUpdate` packages, it updates from the
 GitHub releases of MagiGun/sue. The OS side lives in
@@ -3618,6 +3648,30 @@ Apache 2.0). Those two files are fetched the first time they are needed
 (`sue_platform::update::download_link` into `Paths::models_dir()`, the
 applet's `models` folder) and kept only when their SHA-256 matches the one
 Sue Paint carries; after that the scanners work offline.
+Hand tracking for the live Hand Scanner is `sue_ai::hand`:
+`OnnxHandTracker` runs MediaPipe's palm detector (192 pixels square, 2016
+anchors) and hand landmark model (224 pixels square) and gives a
+`HandObservation`: the 21 points in the picture and in meters, left or
+right, and the box around them. A hand found is followed from picture to
+picture (the next cut comes from the points just read), so the detector
+runs only when it is lost: about 60 ms to find a hand and 19 ms to follow
+it on a desktop processor. The models are the optional package Hand
+tracking (§5.6), not part of Sue. `HandTracker` is the trait the scanner
+works with, so tests give it a tracker that needs no model.
+`sue_picture::hand_scan` turns the points into joint turns (the contract
+"Hand joints" in `figure.rs`): `to_model` (camera space to the hand
+figure's, a right hand mirrored), `Smoother` (a one euro filter per
+coordinate), `solve` (the palm's turn, each finger's curl and spread, the
+thumb's turns, inside the joint limits), `pose_hand` and `pose_body`
+(a body's finger joints are found by name). The camera is
+`sue_platform::camera`: `cameras()`, `CameraStream` (a thread of its own
+that keeps the newest picture, shared), with Windows implemented through
+the Media Foundation Source Reader in the audited crate
+`crates/sue-platform/windows` (`camera`), and `CameraError::Unsupported`
+elsewhere. Sue Paint's dialog (`dialogs/hand_scanner.rs`) runs tracking
+on another thread, shows the pose live without touching the history and
+applies it once on OK with `figure::set_pose`.
+
 `figure::aimed(joints, base, root, targets)` turns a figure's joints so
 each bone lies along a target direction (the least turn from its rest
 direction in its parent's frame), which is how found points become a

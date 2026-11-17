@@ -59,7 +59,11 @@ pub(crate) fn fetch(
         concat!("Sue/", env!("CARGO_PKG_VERSION")),
         progress,
         cancelled,
-    )?;
+    )
+    // Cancelled or failed: nothing of the download stays behind.
+    .inspect_err(|_| {
+        let _ = sue_platform::fs::remove_dir_all(&part);
+    })?;
     let sum = sue_platform::update::sha256_of(&got).map_err(|error| error.to_string())?;
     if sum != file.sha256 {
         let _ = sue_platform::fs::remove_dir_all(&part);

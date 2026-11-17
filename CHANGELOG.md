@@ -11,6 +11,40 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Sue Paint, **Hand scanner (camera)**: hold a hand up to your camera
+  and the 3D hand on the canvas takes its pose, live. Pick a 3D hand's
+  layer (or a drawing figure's, to pose one of its hands) and choose
+  Hand scanner (camera) in Tool Property. The dialog shows the camera's
+  picture with your hand boxed, the posed hand beside it, a camera
+  chooser and Pause Capture; hold your palm toward the camera. OK keeps
+  the pose as one step you can undo, Cancel puts the hand back. The
+  camera is on only while the dialog is open, and its pictures stay in
+  the computer's memory: they are never saved and never sent anywhere.
+  Windows only for now; on other systems the dialog says that cameras
+  are not available there yet.
+- **Settings, Packages**: optional downloads. Files Sue can use but does
+  not ship are packages you install and uninstall yourself, each shown
+  with what it is for, its size, its licence and where it comes from.
+  A download shows its progress and speed and can be cancelled at any
+  moment, leaving nothing half installed; after a lost connection, Try
+  Again carries on from where it stopped. Every file is checked against
+  its SHA-256 before it is used. The first package is Hand tracking
+  (7.6 MiB, MediaPipe Hands by Google, Apache-2.0), which the Hand
+  Scanner asks for the first time you open it. Install from a File adds
+  a package someone shared (`docs/packages.md` describes the file).
+- An update of Sue that is downloading can be cancelled (Cancel
+  Download in the update window).
+
+### Changed
+
+- Settings: the page Extensions is now called Packages and starts with
+  the optional downloads.
+- Sue Paint, Pose scanner and Hand scanner (image to pose): a model
+  download that is cancelled or fails leaves no folder behind.
+
+
 ## [0.0.8] - 2026-11-17
 
 ### Added

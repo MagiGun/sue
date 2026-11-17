@@ -639,6 +639,64 @@ mod tests {
         assert_same(&pose, &posed);
     }
 
+    /// The points MediaPipe's model gave for a photo of a right hand
+    /// held open to the camera, fingers spread and a little bent (the
+    /// OpenCV Zoo's demo picture): meters, x right, y down, z away.
+    const REAL_OPEN_RIGHT: Points = [
+        [-0.031_380, 0.057_301, 0.028_195],
+        [-0.001_359, 0.049_600, 0.017_886],
+        [0.025_149, 0.039_174, 0.012_015],
+        [0.053_742, 0.021_938, -0.001_985],
+        [0.072_619, 0.013_273, -0.003_210],
+        [0.014_306, 0.004_315, -0.004_516],
+        [0.038_067, -0.015_608, -0.005_543],
+        [0.052_163, -0.030_166, -0.002_452],
+        [0.067_230, -0.048_202, -0.002_566],
+        [0.004_257, -0.001_526, -0.000_942],
+        [0.021_585, -0.021_180, 0.001_246],
+        [0.034_185, -0.044_937, -0.000_171],
+        [0.046_241, -0.058_997, -0.009_080],
+        [-0.009_233, -0.003_767, 0.004_417],
+        [-0.003_521, -0.028_533, 0.000_870],
+        [0.004_384, -0.047_110, 0.001_339],
+        [0.012_555, -0.066_745, 0.003_170],
+        [-0.027_749, -0.002_816, 0.006_978],
+        [-0.028_430, -0.024_867, 0.004_141],
+        [-0.026_145, -0.040_928, 0.001_574],
+        [-0.022_686, -0.051_237, -0.002_164],
+    ];
+
+    #[test]
+    fn a_real_open_hand_reads_as_open_and_facing_the_camera() {
+        let angles = solve(&to_model(&REAL_OPEN_RIGHT, true)).expect("a hand");
+        println!("{angles:?}");
+        // Every finger is nearly straight: no joint curled past a third
+        // of a fist.
+        for (at, turn) in angles.fingers[..12].iter().enumerate() {
+            assert!(
+                turn[0].abs() < 35.0,
+                "{}: curled {}",
+                HAND[at + 1].name,
+                turn[0]
+            );
+        }
+        // The fingers fan out: the index toward the thumb, the little
+        // finger away from it.
+        assert!(angles.fingers[0][2] > angles.fingers[9][2] + 10.0);
+        // The palm faces the camera, give or take: turned less than a
+        // quarter turn about every axis.
+        let palm = euler(angles.palm);
+        assert!(palm[2][2] > 0.5, "the palm faces away: {:?}", angles.palm);
+        // The thumb stands out to its side, not across the palm.
+        let mut pose = rest();
+        pose_hand(&mut pose, &angles, false);
+        let points = points_of(&pose);
+        assert!(
+            points[4][0] < points[2][0],
+            "the thumb points across the palm"
+        );
+    }
+
     #[test]
     fn turns_stay_inside_the_joints_limits() {
         // A finger bent backward far past what a hand can do, and a

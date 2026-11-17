@@ -511,7 +511,7 @@ decorations. Light and heavy pressure and a flick need a tablet.
 | Convert 3D to Lines and Tones (EX) | Layer > Convert to Lines and Tones | done | Clean line art and tone to draw over |
 | Drawing figures with poses and pose materials | Materials, 3D | done | Preset poses for the figure, hand and head; any pose kept as a pose material and used again |
 | 3D head models (5.1) | 3D | partial | A posable head (neck, skull, jaw, nose, brow, eyes, ears) with seven presets; simpler than Clip Studio's, no face shapes to edit |
-| 3D hand models and Hand Scanner posing (5.0) | 3D, Materials | partial | A posable hand of sixteen joints with seven presets, and the Hand Scanner (MediaPipe's twenty one points, in depth too); one right hand, so a left hand poses as its mirror |
+| 3D hand models and Hand Scanner posing (5.0) | 3D, Materials | partial | A posable hand of sixteen joints with seven presets; the Hand Scanner from the live camera (Hand scanner (camera) in Tool Property: the camera's picture with the hand boxed, a camera chooser, Pause Capture, OK and Cancel; the hand follows live, also one hand of a drawing figure; Windows only so far; its models are the optional package Hand tracking) and from a photo (MediaPipe's twenty one points, in depth too); one right hand, so a left hand poses as its mirror |
 | Painting directly on 3D (5.0, 5.1) | 3D | missing | |
 | VRM import and photorealistic rendering | File > Import | missing | |
 | Height-based fog, Follow camera light (5.0, 5.1) | 3D settings | done | In the 3D layer's Tool Property |
