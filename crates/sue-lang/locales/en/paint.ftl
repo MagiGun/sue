@@ -3525,3 +3525,4 @@ snap-angle-hint = Turns the view in steps of this angle; Shift snaps by the same
 track-label-ellipsis = Track Label...
 label-name = Label name
 track-label-at-frame = On the picked track, from frame { $value }. An empty name takes the label away.
+clip-report-native = in Clip Studio's own storage, live in Clip Studio and in Sue: { $names }

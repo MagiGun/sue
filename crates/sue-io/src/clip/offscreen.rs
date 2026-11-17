@@ -23,6 +23,12 @@ const ONE: [u32; 16] = [
     33, 1, 0, 1, 65_536, 0, 0, 1, 256, 65_536, 256, 256, 8, 8, 0, 0,
 ];
 
+/// The same for a gray layer, as Clip Studio writes it (survey 9.5): an
+/// alpha plane, then one gray plane (channel order 17).
+const GRAY: [u32; 16] = [
+    17, 1, 1, 2, 65_536, 1, 256, 1, 256, 65_536, 256, 256, 8, 8, 0, 0,
+];
+
 /// The `BlockSize` of a block with nothing in it, as Sue writes it.
 const EMPTY_SIZE: u32 = 0x68;
 
@@ -239,6 +245,24 @@ fn part(name: &str, values: Vec<u32>) -> AttributePart {
     }
 }
 
+/// A block's `BlockCheckSum`, as Clip Studio writes it: the Adler-32 sum
+/// of the compressed length (four bytes, little-endian) followed by the
+/// compressed data (survey 9.4). A block with no data has 0.
+pub(super) fn checksum(data: &[u8]) -> u32 {
+    let len = u32::try_from(data.len()).unwrap_or(u32::MAX).to_le_bytes();
+    let (mut a, mut b) = (1_u32, 0_u32);
+    for (i, byte) in len.iter().chain(data).enumerate() {
+        a += u32::from(*byte);
+        b += a;
+        // Well before either can overflow.
+        if i % 1024 == 1023 {
+            a %= 65_521;
+            b %= 65_521;
+        }
+    }
+    ((b % 65_521) << 16) | (a % 65_521)
+}
+
 /// A bitmap of `width` by `height` whose tile at grid index `i` is
 /// `tile(i)` (its bytes, or `None` when empty), `raw` bytes a tile.
 fn pack(
@@ -266,13 +290,22 @@ fn pack(
         });
     }
     let count = u32::try_from(count).unwrap_or(u32::MAX);
-    let lists = [("BlockStatus", 1), ("BlockCheckSum", 0)]
-        .map(|(name, value)| BlockList {
-            name: name.to_owned(),
+    let sums = blocks
+        .iter()
+        .map(|block| block.data.as_deref().map_or(0, checksum))
+        .collect();
+    let lists = vec![
+        BlockList {
+            name: "BlockStatus".to_owned(),
             head: [12, count, 4],
-            values: vec![value; count as usize],
-        })
-        .to_vec();
+            values: vec![1; count as usize],
+        },
+        BlockList {
+            name: "BlockCheckSum".to_owned(),
+            head: [12, count, 4],
+            values: sums,
+        },
+    ];
     let mut bitmap = empty_with(width, height, channels, white, sizes);
     bitmap.blocks = Some(ClipBlocks {
         blocks,
@@ -456,6 +489,43 @@ impl ClipBitmap {
         )
     }
 
+    /// A gray layer's bitmap as Clip Studio stores one: `gray` (0 black
+    /// to 255 white) and `alpha`, `width * height` bytes each (a short
+    /// buffer reads as clear). A tile with no alpha is left empty.
+    #[must_use]
+    pub fn gray_layer(width: u32, height: u32, gray: &[u8], alpha: &[u8]) -> Self {
+        let (w, h) = (width as usize, height as usize);
+        let full = gray.len() >= w * h && alpha.len() >= w * h;
+        let columns = w.div_ceil(TILE);
+        let area = TILE * TILE;
+        pack(
+            width,
+            height,
+            &GRAY,
+            false,
+            u32::try_from(area * 2).unwrap_or(0),
+            |index| {
+                if !full || columns == 0 {
+                    return None;
+                }
+                let (tx, ty) = (index % columns * TILE, index / columns * TILE);
+                let mut raw = vec![0_u8; area * 2];
+                let mut has = false;
+                for y in 0..TILE.min(h.saturating_sub(ty)) {
+                    for x in 0..TILE.min(w.saturating_sub(tx)) {
+                        let (from, t) = ((ty + y) * w + tx + x, y * TILE + x);
+                        if alpha[from] != 0 {
+                            has = true;
+                            raw[t] = alpha[from];
+                            raw[area + t] = gray[from];
+                        }
+                    }
+                }
+                has.then_some(raw)
+            },
+        )
+    }
+
     /// The pixels: straight RGBA8 for color, one byte a pixel for one
     /// channel. Pixels no block covers take the fill.
     ///
@@ -470,7 +540,15 @@ impl ClipBitmap {
             .ok_or("a layer's bitmap description is broken")?;
         let (width, height) = (parameter[0] as usize, parameter[1] as usize);
         let (columns, rows) = (parameter[2] as usize, parameter[3] as usize);
-        let channels = self.channels().unwrap_or(1);
+        // A gray layer (survey 9.5) is an alpha plane and a gray plane;
+        // it comes out as color.
+        let gray = self.is_gray();
+        let gray_at = parameter.get(8).map_or(TILE * TILE, |at| *at as usize);
+        let channels = if gray {
+            4
+        } else {
+            self.channels().unwrap_or(1)
+        };
         // At most a gigabyte of pixels, whatever the file claims.
         if width
             .saturating_mul(height)
@@ -482,7 +560,13 @@ impl ClipBitmap {
         let fill = if self.white() { 255 } else { 0 };
         let mut out = vec![fill; width * height * usize::from(channels)];
         let area = TILE * TILE;
-        let need = if channels == 4 { area * 5 } else { area };
+        let need = if gray {
+            gray_at.max(area) + area
+        } else if channels == 4 {
+            area * 5
+        } else {
+            area
+        };
         // The blocks laid out exactly as Sue writes them, then any more in
         // the tail that are laid out a little differently (not yet seen in
         // a file Clip Studio wrote): those are read as Sue always read
@@ -515,7 +599,14 @@ impl ClipBitmap {
             }
             for y in 0..TILE.min(height.saturating_sub(ty)) {
                 let len = TILE.min(width.saturating_sub(tx));
-                if channels == 4 {
+                if gray {
+                    for x in 0..len {
+                        let t = y * TILE + x;
+                        let o = ((ty + y) * width + tx + x) * 4;
+                        let value = raw[gray_at + t];
+                        out[o..o + 4].copy_from_slice(&[value, value, value, raw[t]]);
+                    }
+                } else if channels == 4 {
                     for x in 0..len {
                         let t = y * TILE + x;
                         let o = ((ty + y) * width + tx + x) * 4;
@@ -777,6 +868,32 @@ mod tests {
         );
     }
 
+    /// Adler-32 the slow way, as its definition says.
+    fn adler(bytes: &[u8]) -> u32 {
+        let (mut a, mut b) = (1_u64, 0_u64);
+        for byte in bytes {
+            a = (a + u64::from(*byte)) % 65_521;
+            b = (b + a) % 65_521;
+        }
+        u32::try_from((b << 16) | a).unwrap()
+    }
+
+    #[test]
+    fn a_block_checksum_is_adler_32_of_its_length_and_data() {
+        // The sum is of the four length bytes (little-endian) and the data.
+        assert_eq!(adler(b"Wikipedia"), 0x11e6_0398);
+        for len in [0_usize, 1, 9, 1023, 1024, 5552, 70_000] {
+            let data: Vec<u8> = (0..len).map(|i| (i * 7 + 255) as u8).collect();
+            let mut whole = u32::try_from(len).unwrap().to_le_bytes().to_vec();
+            whole.extend_from_slice(&data);
+            assert_eq!(checksum(&data), adler(&whole), "{len} bytes");
+        }
+        let all_high = vec![0xff_u8; 300_000];
+        let mut whole = 300_000_u32.to_le_bytes().to_vec();
+        whole.extend_from_slice(&all_high);
+        assert_eq!(checksum(&all_high), adler(&whole));
+    }
+
     #[test]
     fn a_bitmap_is_surveyed_block_by_block() {
         let bitmap = dots();
@@ -800,11 +917,22 @@ mod tests {
             .iter()
             .map(|list| (list.name.as_str(), list.head, list.values.as_slice()))
             .collect();
+        // A block with data has its checksum, as Clip Studio writes it; an
+        // empty one 0.
+        let sums: Vec<u32> = bitmap
+            .blocks
+            .as_ref()
+            .unwrap()
+            .blocks
+            .iter()
+            .map(|block| block.data.as_deref().map_or(0, checksum))
+            .collect();
+        assert!(sums[0] != 0 && sums[5] != 0 && sums[1..5] == [0; 4]);
         assert_eq!(
             lists,
             [
                 ("BlockStatus", [12, 6, 4], [1; 6].as_slice()),
-                ("BlockCheckSum", [12, 6, 4], [0; 6].as_slice()),
+                ("BlockCheckSum", [12, 6, 4], sums.as_slice()),
             ]
         );
         assert_eq!(survey_bitmap(&payload, false).blocks[0].inflated, None);

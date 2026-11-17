@@ -22,6 +22,47 @@ use super::model::{
 use super::schema::{BLENDS, LAYER_COLUMNS, OFFSCREEN_COLUMNS, names, table_sql};
 use crate::sqlite::Value;
 
+/// `doc` as the writer lays it out in Clip Studio's own terms: a layer
+/// whose content Clip Studio's storage holds gets Clip Studio's
+/// `LayerType` for it, and a fill or gradient layer with no mask gets the
+/// white mask, switched on, that Clip Studio gives one. What a test that
+/// writes `doc` and reads it back compares with.
+#[must_use]
+pub fn as_clip_studio_stores(doc: &ClipDocument) -> ClipDocument {
+    fn walk(layers: &mut [ClipLayer], width: u32, height: u32) {
+        for layer in layers {
+            walk(&mut layer.children, width, height);
+            if layer.is_folder() {
+                continue;
+            }
+            let Some(content) = layer
+                .content
+                .as_ref()
+                .filter(|content| super::native::clip_studio_fit(content).is_some())
+            else {
+                continue;
+            };
+            match content {
+                ClipContent::Fill(_) | ClipContent::Gradient(_) => {
+                    layer.layer_type = super::native::GENERATED;
+                    if layer.mask.is_none() {
+                        layer.mask = Some(ClipMask {
+                            offset: [-layer.offset[0], -layer.offset[1]],
+                            offscreen_offset: [0, 0],
+                            bitmap: ClipBitmap::gray(width, height, &[], true),
+                        });
+                        layer.set_mask_enabled(true);
+                    }
+                }
+                _ => layer.layer_type = super::native::DRAWN,
+            }
+        }
+    }
+    let mut doc = doc.clone();
+    walk(&mut doc.root.children, doc.width, doc.height);
+    doc
+}
+
 /// A small seeded random number source (splitmix64).
 #[derive(Clone, Debug)]
 pub struct Seeded(u64);
@@ -198,18 +239,17 @@ pub fn raster_subset(width: u32, height: u32, seed: u64) -> ClipDocument {
     off.set_opacity_u8(200);
     off.set_blend(*b"mul ");
 
-    // A one channel layer (gray).
+    // A gray layer, laid out as Clip Studio stores one: an alpha plane and
+    // a gray plane.
+    let (gw, gh) = (width.div_ceil(2), height.div_ceil(2));
     let mut gray = ClipLayer::raster(
         "Gray",
         5,
         7,
-        ClipBitmap::gray(
-            width.div_ceil(2),
-            height.div_ceil(2),
-            &ramp(width.div_ceil(2), height.div_ceil(2), seed),
-            false,
-        ),
+        ClipBitmap::gray_layer(gw, gh, &ramp(gw, gh, seed), &ramp(gw, gh, seed ^ 3)),
     );
+    gray.columns
+        .push(("LayerColorTypeIndex".to_owned(), Value::Integer(1)));
     gray.reference = true;
 
     // Masks on and off, offset from their layers.
@@ -990,6 +1030,7 @@ mod tests {
     fn the_raster_subset_comes_back_as_it_was_built() {
         for (name, doc) in documents() {
             let back = read(&write(&doc).unwrap()).unwrap();
+            let doc = as_clip_studio_stores(&doc);
             assert_eq!(
                 (back.width, back.height, back.dpi, &back.sue),
                 (doc.width, doc.height, doc.dpi, &doc.sue),
@@ -1073,11 +1114,21 @@ mod tests {
         let paper = find("Paper");
         assert!(paper.is_paper() && paper.layer_type == PAPER);
         assert_eq!(paper.draw_color.color(), [250, 240, 200]);
-        // A one channel layer is read, not dropped.
+        // A gray layer is read as color: its gray spread to red, green
+        // and blue, its own alpha kept.
         let gray = find("Gray");
+        assert!(gray.pixels.as_ref().unwrap().is_gray());
         let pixels = gray.pixels.as_ref().unwrap().decode().unwrap();
-        assert_eq!((pixels.channels, pixels.width, pixels.height), (1, 32, 24));
-        assert_eq!(pixels.data, ramp(32, 24, 9));
+        assert_eq!((pixels.channels, pixels.width, pixels.height), (4, 32, 24));
+        let (values, alphas) = (ramp(32, 24, 9), ramp(32, 24, 9 ^ 3));
+        for ((pixel, value), alpha) in pixels.data.chunks(4).zip(values).zip(alphas) {
+            let want = if alpha == 0 {
+                [0; 4]
+            } else {
+                [value, value, value, alpha]
+            };
+            assert_eq!(pixel, want);
+        }
         // Masks are masks, on or off, where they were.
         let masked = find("Masked");
         assert!(masked.mask_enabled());
@@ -1468,6 +1519,7 @@ mod tests {
             .collect();
         assert_eq!(kinds.len(), super::super::parts::CONTENT_KINDS.len());
         let back = read(&write(&doc).unwrap()).unwrap();
+        let doc = as_clip_studio_stores(&doc);
         for (want, got) in doc.all_layers().iter().zip(back.all_layers()) {
             assert_eq!(
                 want.pixels.as_ref().map(decoded),

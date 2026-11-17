@@ -256,14 +256,21 @@ fn every_kind_goes_out_live_and_comes_back_live() {
     let mut arena = Arena::new();
     let picture = a_rich_picture(&mut arena);
     let (bytes, wrote) = encode_with_report(&arena, picture).unwrap();
-    for name in ["Sky", "Glow", "Ink", "Dots"] {
+    // The fill, the text and the vector lines in Clip Studio's own
+    // storage; the circle gradient and the effects as their pixels.
+    for (name, outcome) in [
+        ("Sky", Outcome::Native),
+        ("Hello", Outcome::Native),
+        ("Ink", Outcome::Native),
+        ("Glow", Outcome::Live),
+        ("Dots", Outcome::Live),
+    ] {
         assert!(
-            wrote.names(Outcome::Live).contains(&name),
+            wrote.names(outcome).contains(&name),
             "{name}: {}",
             wrote.summary()
         );
     }
-    assert!(wrote.names(Outcome::Live).contains(&"Hello"));
     assert_eq!(wrote.names(Outcome::SueOnly), ["Warm"]);
     assert!(wrote.names(Outcome::LeftOut).is_empty());
     // What Clip Studio is given: the fill and the gradient as they look,
@@ -980,4 +987,476 @@ fn write_kinds_for_the_hands_on_check() {
     let mut arena = Arena::new();
     let picture = a_bouncing_ball(&mut arena);
     write("10-bouncing-ball.clip", &arena, picture);
+}
+
+// ----- Clip Studio's own storage (P6) ------------------------------------------------
+
+/// `bytes` as Clip Studio would save the file again: Sue's own tables
+/// gone, every layer holding only what Clip Studio's own columns say.
+fn as_clip_studio_saves(bytes: &[u8]) -> Vec<u8> {
+    let mut plain = read(bytes).unwrap();
+    plain.comps.clear();
+    plain.timeline = None;
+    plain.preview = None;
+    let paths: Vec<_> = plain.paths().into_iter().map(|(path, _)| path).collect();
+    for path in paths {
+        let layer = plain.layer_at_mut(&path).unwrap();
+        layer.content = None;
+        layer.effects = None;
+        layer.palette_color = None;
+        layer.rulers.clear();
+        layer.thumbnail = None;
+        layer.draft = false;
+        layer.reference = false;
+    }
+    sue_io::clip::write(&plain).unwrap()
+}
+
+/// A picture of the kinds Clip Studio's own storage holds: a fill, a
+/// linear gradient, a text and vector lines, with a palette color.
+fn a_native_picture(arena: &mut Arena, width: u32, height: u32) -> EntityId {
+    let picture = base(arena, width, height);
+    let (edit, fill) =
+        doc::new_fill_layer(arena, picture, None, "Sky", Color::srgb8(255, 0x32, 0x64));
+    apply(arena, edit);
+    apply(arena, doc::set(fill, picture::OPACITY, 0.25));
+    let w = width as f32;
+    let h = height as f32;
+    let gradient = doc::Gradient {
+        line: [[w / 2.0, 0.0], [w / 2.0, h]],
+        look: Look {
+            map: GradientMap::of(&[
+                Stop::new(0.0, [250, 200, 10]),
+                Stop {
+                    alpha: 0,
+                    ..Stop::new(1.0, [10, 10, 80])
+                },
+            ])
+            .unwrap(),
+            shape: Shape::Linear,
+            edge: Edge::Extend,
+            aspect: 1.0,
+        },
+    };
+    let (edit, glow) = doc::new_gradient_layer(arena, picture, None, "Glow", gradient);
+    apply(arena, edit);
+    apply(arena, doc::set(glow, picture::OPACITY, 0.6));
+    let mut lettering = Lettering::new([w * 0.1, h * 0.12], [20, 20, 120]);
+    lettering.content = "Sue Paint".to_owned();
+    lettering.size = h * 0.12;
+    let text = crate::lettering::text_layer(&lettering, width, height).unwrap();
+    let spawn = doc::landed(arena, picture, None, text);
+    apply(arena, spawn);
+    let lines: Vec<vector::Line> = [
+        (
+            vec![
+                [w * 0.1, h * 0.75],
+                [w * 0.33, h * 0.3],
+                [w * 0.57, h * 0.8],
+            ],
+            [0.0, 0.0, 0.0],
+            6.0,
+        ),
+        (
+            vec![[w * 0.5, h * 0.2], [w * 0.9, h * 0.35]],
+            [0.8, 0.1, 0.1],
+            12.0,
+        ),
+    ]
+    .into_iter()
+    .map(|(points, rgb, size)| {
+        vector::figure_line(
+            &points,
+            Tip {
+                size,
+                ..Tip::default()
+            },
+            [rgb; 2],
+            false,
+        )
+    })
+    .collect();
+    let pixels = vector::render(&lines, width, height).unwrap();
+    let ink = Entity::new("Ink", pixels)
+        .with_class(vector::CLASS)
+        .with_ext(vector::to_geometry(&lines));
+    let spawn = doc::landed(arena, picture, None, ink);
+    apply(arena, spawn);
+    apply(
+        arena,
+        doc::set(
+            named(arena, picture, "Ink"),
+            doc::PALETTE_COLOR,
+            Color::srgb8(92, 178, 96),
+        ),
+    );
+    picture
+}
+
+/// Whether a raster layer of `arena` shows anything.
+fn shows(arena: &Arena, layer: EntityId) -> bool {
+    doc::raster(arena, layer)
+        .and_then(|raster| raster.bytes().map(<[u8]>::to_vec))
+        .is_some_and(|bytes| bytes.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0))
+}
+
+#[test]
+fn fills_gradients_text_and_lines_go_out_in_clip_studios_own_storage() {
+    let mut arena = Arena::new();
+    let picture = a_native_picture(&mut arena, 160, 120);
+    let (bytes, wrote) = encode_with_report(&arena, picture).unwrap();
+    for name in ["Sky", "Glow", "Sue Paint", "Ink"] {
+        assert!(
+            wrote.names(Outcome::Native).contains(&name),
+            "{name}: {}",
+            wrote.summary()
+        );
+    }
+    assert!(wrote.summary().contains("in Clip Studio's own storage"));
+    let doc = read(&bytes).unwrap();
+    let layer = |name: &str| {
+        doc.all_layers()
+            .into_iter()
+            .find(|layer| layer.name == name)
+            .unwrap()
+    };
+    let has = |name: &str, column: &str| {
+        sue_io::clip::column(&layer(name).columns, column)
+            .and_then(sue_io::sqlite::Value::bytes)
+            .is_some()
+    };
+    assert!(has("Sky", "GradationFillInfo"));
+    assert!(has("Glow", "GradationFillInfo"));
+    assert!(has("Sue Paint", "TextLayerAttributes"));
+    assert_eq!(
+        sue_io::clip::column(&layer("Ink").columns, "LayerUsePaletteColor"),
+        Some(&sue_io::sqlite::Value::Integer(1))
+    );
+    // Back in Sue, every layer is what it was, from Sue's own parts.
+    let (back, again, report) = opened(&bytes);
+    assert!(report.exact(), "{}", report.summary());
+    let classes = |arena: &Arena, picture: EntityId| -> Vec<(String, String)> {
+        doc::layers(arena, picture)
+            .into_iter()
+            .map(|info| {
+                let entity = arena.get_by_id(info.id).unwrap();
+                (info.name, entity.class().to_owned())
+            })
+            .collect()
+    };
+    assert_eq!(classes(&back, again), classes(&arena, picture));
+}
+
+#[test]
+fn a_file_clip_studio_saved_opens_live_from_its_own_storage() {
+    let mut arena = Arena::new();
+    let picture = a_native_picture(&mut arena, 160, 120);
+    let saved = as_clip_studio_saves(&encode(&arena, picture).unwrap());
+    let plain = read(&saved).unwrap();
+    assert!(
+        plain
+            .all_layers()
+            .iter()
+            .all(|layer| layer.content.is_none()
+                || sue_io::clip::column(&layer.columns, "GradationFillInfo").is_some()
+                || sue_io::clip::column(&layer.columns, "TextLayerString").is_some()
+                || sue_io::clip::column(&layer.columns, "VectorNormalStrokeIndex").is_some()),
+        "only Clip Studio's own columns are left"
+    );
+    let (back, again, report) = opened(&saved);
+    let kind = |name: &str| {
+        back.get_by_id(named(&back, again, name))
+            .unwrap()
+            .class()
+            .to_owned()
+    };
+    assert_eq!(kind("Sky"), doc::FILL_LAYER);
+    assert_eq!(kind("Glow"), doc::GRADIENT_LAYER);
+    assert_eq!(kind("Sue Paint"), doc::TEXT);
+    assert_eq!(kind("Ink"), vector::CLASS);
+    assert_eq!(
+        text(&back, named(&back, again, "Sue Paint"), "text.content").as_deref(),
+        Some("Sue Paint")
+    );
+    // Clip Studio stores no pixels for text and lines: Sue draws them.
+    for name in ["Sue Paint", "Ink"] {
+        assert!(shows(&back, named(&back, again, name)), "{name} shows");
+    }
+    let lines = vector::lines(&vector::geometry(&back, named(&back, again, "Ink")));
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[1].tip.size, 12.0);
+    // The fill's color and the palette color came across.
+    let sky = back.get_by_id(named(&back, again, "Sky")).unwrap();
+    assert_eq!(
+        sky.property(doc::FILL_COLOR).cloned(),
+        Some(Value::Color(Color::srgb8(255, 0x32, 0x64)))
+    );
+    let ink = back.get_by_id(named(&back, again, "Ink")).unwrap();
+    assert_eq!(
+        ink.property(doc::PALETTE_COLOR).cloned(),
+        Some(Value::Color(Color::srgb8(92, 178, 96)))
+    );
+    assert!(
+        report.names(Outcome::Kept).is_empty(),
+        "{}",
+        report.summary()
+    );
+}
+
+#[test]
+fn a_gray_layer_opens_as_its_grays_and_says_so() {
+    let mut doc = sue_io::clip::ClipDocument::new(40, 30, 72.0);
+    let gray: Vec<u8> = (0..40 * 30).map(|i| (i % 256) as u8).collect();
+    let alpha: Vec<u8> = (0..40 * 30)
+        .map(|i| if i % 3 == 0 { 0 } else { 200 })
+        .collect();
+    let mut layer = sue_io::clip::ClipLayer::raster(
+        "Pencil",
+        0,
+        0,
+        sue_io::clip::ClipBitmap::gray_layer(40, 30, &gray, &alpha),
+    );
+    layer.columns.push((
+        "LayerColorTypeIndex".to_owned(),
+        sue_io::sqlite::Value::Integer(1),
+    ));
+    doc.root.children.push(layer);
+    let (back, picture, report) = opened(&sue_io::clip::write(&doc).unwrap());
+    assert_eq!(report.names(Outcome::Approximated), ["Pencil"]);
+    let id = named(&back, picture, "Pencil");
+    let raster = doc::raster(&back, id).unwrap();
+    let bytes = raster.bytes().unwrap();
+    for i in [1_usize, 2, 4, 700] {
+        let value = (i % 256) as u8;
+        assert_eq!(&bytes[i * 4..i * 4 + 4], &[value, value, value, 200]);
+    }
+    assert_eq!(bytes[3], 0, "where the gray layer is clear, so is Sue's");
+}
+
+#[test]
+fn a_layer_changed_in_sue_goes_back_in_clip_studios_storage_again() {
+    let mut arena = Arena::new();
+    let picture = a_native_picture(&mut arena, 160, 120);
+    let saved = as_clip_studio_saves(&encode(&arena, picture).unwrap());
+    let (mut back, again, _) = opened(&saved);
+    // Retype the words in Sue.
+    let words = named(&back, again, "Sue Paint");
+    let retext = crate::lettering::retext(&back, words, "Changed", 160, 120).unwrap();
+    apply(&mut back, retext);
+    let (bytes, wrote) = encode_with_report(&back, again).unwrap();
+    assert!(wrote.names(Outcome::Native).contains(&"Sue Paint"));
+    let doc = read(&bytes).unwrap();
+    let words = doc
+        .all_layers()
+        .into_iter()
+        .find(|layer| layer.name == "Sue Paint")
+        .unwrap();
+    assert_eq!(
+        sue_io::clip::column(&words.columns, "TextLayerString")
+            .and_then(sue_io::sqlite::Value::bytes),
+        Some(b"Changed".as_slice())
+    );
+    // The untouched vector layer keeps its row and its one pen.
+    let saved_again = as_clip_studio_saves(&bytes);
+    let (reopened, picture_again, _) = opened(&saved_again);
+    let lines = vector::lines(&vector::geometry(
+        &reopened,
+        named(&reopened, picture_again, "Ink"),
+    ));
+    assert_eq!(lines.len(), 2);
+}
+
+/// Writes the files of the hands-on check of Clip Studio's own storage
+/// into the folder `SUE_CLIP_INBOX` names, with `index.txt` saying what
+/// each should show in Clip Studio, and, with `SUE_CLIP_INBOX_LOOK`, how
+/// Sue shows each once Clip Studio has saved it (Sue's own tables gone).
+#[test]
+#[ignore = "writes files for a person to open in Clip Studio"]
+#[allow(clippy::too_many_lines)]
+fn write_native_kinds_for_the_hands_on_check() {
+    let Some(dir) = std::env::var_os("SUE_CLIP_INBOX") else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let look = std::env::var_os("SUE_CLIP_INBOX_LOOK").map(std::path::PathBuf::from);
+    let write_bytes = |name: &str, bytes: &[u8]| {
+        std::fs::write(dir.join(name), bytes).unwrap();
+        if let Some(look) = &look {
+            std::fs::create_dir_all(look).unwrap();
+            let (shown, picture, report) = opened(&as_clip_studio_saves(bytes));
+            let options = RenderOptions {
+                paper: true,
+                drafts: false,
+            };
+            let png = sue_io::encode_png(&flatten(&shown, picture, options).unwrap()).unwrap();
+            let stem = name.trim_end_matches(".clip");
+            std::fs::write(look.join(format!("{stem}-after-clip-studio.png")), png).unwrap();
+            let (own, own_picture, _) = opened(bytes);
+            let png = sue_io::encode_png(&flatten(&own, own_picture, options).unwrap()).unwrap();
+            std::fs::write(look.join(format!("{stem}-in-sue.png")), png).unwrap();
+            eprintln!(
+                "{name}: reopened without Sue's tables: {}",
+                report.summary()
+            );
+        }
+    };
+    let write = |name: &str, arena: &Arena, picture: EntityId| {
+        let (bytes, report) = encode_with_report(arena, picture).unwrap();
+        eprintln!("{name}: {}", report.summary());
+        write_bytes(name, &bytes);
+    };
+    let (w, h) = (600, 400);
+    let single = |make: &dyn Fn(&mut Arena, EntityId)| {
+        let mut arena = Arena::new();
+        let picture = base(&mut arena, w, h);
+        make(&mut arena, picture);
+        (arena, picture)
+    };
+    // 01: a fill layer.
+    let (arena, picture) = single(&|arena, picture| {
+        let (edit, _) =
+            doc::new_fill_layer(arena, picture, None, "Fill", Color::srgb8(255, 0x32, 0x64));
+        apply(arena, edit);
+    });
+    write("01-fill.clip", &arena, picture);
+    // 02: a linear gradient, three stops, top to bottom.
+    let three = GradientMap::of(&[
+        Stop::new(0.0, [250, 200, 10]),
+        Stop::new(0.5, [20, 120, 60]),
+        Stop::new(1.0, [10, 10, 80]),
+    ])
+    .unwrap();
+    let (arena, picture) = single(&|arena, picture| {
+        let gradient = doc::Gradient {
+            line: [[300.0, 0.0], [300.0, 400.0]],
+            look: Look {
+                map: three,
+                shape: Shape::Linear,
+                edge: Edge::Extend,
+                aspect: 1.0,
+            },
+        };
+        let (edit, _) = doc::new_gradient_layer(arena, picture, None, "Gradient", gradient);
+        apply(arena, edit);
+    });
+    let (gradient_bytes, report) = encode_with_report(&arena, picture).unwrap();
+    eprintln!("02-gradient.clip: {}", report.summary());
+    write_bytes("02-gradient.clip", &gradient_bytes);
+    // 02b, 02c: the same, every stop's color source set to 0 and to 3
+    // (the number for "a color of its own" is not yet observed).
+    for (name, source) in [
+        ("02b-gradient-source-0.clip", 0_u32),
+        ("02c-gradient-source-3.clip", 3),
+    ] {
+        let mut doc = read(&gradient_bytes).unwrap();
+        for layer in &mut doc.root.children {
+            if let Some((_, value)) = layer
+                .columns
+                .iter_mut()
+                .find(|(column, _)| column == "GradationFillInfo")
+                && let sue_io::sqlite::Value::Blob(blob) = value
+            {
+                // GradationData's stops start after its name and head.
+                let start = 4 + 4 + 4 + 2 * 13 + 4 + 24;
+                for stop in 0..3 {
+                    let at = start + stop * 28 + 16;
+                    blob[at..at + 4].copy_from_slice(&source.to_be_bytes());
+                }
+            }
+        }
+        write_bytes(name, &sue_io::clip::write(&doc).unwrap());
+    }
+    // 03: a text layer, one line.
+    let (arena, picture) = single(&|arena, picture| {
+        let mut lettering = Lettering::new([60.0, 60.0], [20, 20, 120]);
+        lettering.content = "Sue Paint".to_owned();
+        lettering.font = "Tahoma".to_owned();
+        lettering.size = 40.0;
+        let text = crate::lettering::text_layer(&lettering, w, h).unwrap();
+        let spawn = doc::landed(arena, picture, None, text);
+        apply(arena, spawn);
+    });
+    write("03-text.clip", &arena, picture);
+    // 03b: two lines.
+    let (arena, picture) = single(&|arena, picture| {
+        let mut lettering = Lettering::new([60.0, 200.0], [160, 20, 20]);
+        lettering.content = "First line\nsecond line".to_owned();
+        lettering.font = "Tahoma".to_owned();
+        lettering.size = 32.0;
+        let text = crate::lettering::text_layer(&lettering, w, h).unwrap();
+        let spawn = doc::landed(arena, picture, None, text);
+        apply(arena, spawn);
+    });
+    write("03b-text-two-lines.clip", &arena, picture);
+    // 04: vector lines.
+    let mut arena = Arena::new();
+    let picture = a_native_picture(&mut arena, w, h);
+    for name in ["Sky", "Glow", "Sue Paint"] {
+        let id = named(&arena, picture, name);
+        apply(&mut arena, doc::set(id, picture::VISIBLE, false));
+    }
+    write("04-vector.clip", &arena, picture);
+    // 05: palette color and the layer color with its sub color.
+    let (arena, picture) = single(&|arena, picture| {
+        let sketch = named(arena, picture, "Sketch");
+        for (key, value) in [
+            (doc::PALETTE_COLOR, Value::Color(Color::srgb8(92, 178, 96))),
+            (effects::COLOR, Value::from(true)),
+            (effects::COLOR_VALUE, Value::Color(Color::srgb8(0, 80, 160))),
+        ] {
+            apply(arena, doc::set(sketch, key, value));
+        }
+    });
+    write("05-palette-and-layer-color.clip", &arena, picture);
+    // 06: everything of 01 to 05 together, and a correction (Sue's only).
+    let mut arena = Arena::new();
+    let picture = a_native_picture(&mut arena, w, h);
+    let (edit, _) = doc::new_correction(&arena, picture, None, "Warm", "hue:12,0.1,-0.05");
+    apply(&mut arena, edit);
+    write("06-everything.clip", &arena, picture);
+    // 07, 08: the survey's own file from Clip Studio, written back by Sue
+    // unchanged, and with its vector layer redrawn in Sue.
+    if let Some(survey) = std::env::var_os("SUE_CLIP_SURVEY") {
+        let path = std::path::PathBuf::from(survey).join("05-gradient.clip");
+        if let Ok(original) = std::fs::read(path) {
+            let (opened_arena, opened_picture, _) = opened(&original);
+            write("07-survey-written-back.clip", &opened_arena, opened_picture);
+            // How Sue draws the survey's own text, vector and gray layers,
+            // with the fill and the gradient over them hidden.
+            if let Some(look) = &look {
+                let mut bare = opened(&original);
+                for name in ["Fill 1", "Gradient 1"] {
+                    let id = named(&bare.0, bare.1, name);
+                    apply(&mut bare.0, doc::set(id, picture::VISIBLE, false));
+                }
+                let options = RenderOptions {
+                    paper: true,
+                    drafts: false,
+                };
+                let png = sue_io::encode_png(&flatten(&bare.0, bare.1, options).unwrap()).unwrap();
+                std::fs::write(look.join("07-survey-under-the-fill.png"), png).unwrap();
+            }
+            let mut changed = opened_arena;
+            let ink = named(&changed, opened_picture, "Layer 3");
+            let lines = vec![vector::figure_line(
+                &[[200.0, 900.0], [800.0, 300.0], [1400.0, 900.0]],
+                Tip {
+                    size: 8.0,
+                    ..Tip::default()
+                },
+                [[0.1, 0.1, 0.6]; 2],
+                false,
+            )];
+            let pixels = vector::render(&lines, 1600, 1200).unwrap();
+            let mut edit = doc::Edit::new("Redraw");
+            edit = edit.then(sue_core::txn::ReplaceComponent::new(ink, pixels, "Redraw"));
+            edit = edit.then(sue_core::txn::SetExtension::set(
+                ink,
+                vector::to_geometry(&lines),
+            ));
+            apply(&mut changed, edit);
+            write("08-survey-vector-redrawn.clip", &changed, opened_picture);
+        }
+    }
 }

@@ -7,6 +7,10 @@
 pub enum Outcome {
     /// Converted with nothing lost.
     Exact,
+    /// Written in Clip Studio's own storage, so Clip Studio opens it
+    /// live (a fill, a gradient, text, vector lines), and kept in Sue's
+    /// own tables too for what Clip Studio has no place for.
+    Native,
     /// Converted as closely as Sue can (a gray layer painted in color, a
     /// blend mode Sue does not know).
     Approximated,
@@ -139,6 +143,10 @@ impl Report {
                 .map(|line| line.name.as_str())
                 .collect()
         };
+        let native = layers_as(Outcome::Native);
+        if !native.is_empty() {
+            parts.push(tr!("clip-report-native", names = listed(&native)));
+        }
         let live = layers_as(Outcome::Live);
         if !live.is_empty() {
             parts.push(tr!("clip-report-live", names = listed(&live)));

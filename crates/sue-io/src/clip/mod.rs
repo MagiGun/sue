@@ -12,17 +12,19 @@
 //! offscreen) and sit in an `Exta` chunk as 256 by 256 tiles, each zlib
 //! compressed as an alpha plane followed by BGRx.
 //!
-//! Correction layers and gradient or fill layers, which Clip Studio draws
-//! from their settings, come in as empty layers in their places; text and
-//! vector layers come in as the pixels Clip Studio last drew for them.
-//!
-//! A file Sue writes also carries the Sue project of the picture in a
-//! `SueProject` table, so Sue opens its own `.clip` files with nothing lost
-//! (vector lines, tones, effects), while Clip Studio sees the layers.
+//! Fill, gradient, text and vector layers are written and read in Clip
+//! Studio's own storage where the survey of 2026-11-16 shows it
+//! ([`native`]), so Clip Studio opens them live; what it has no place for
+//! yet (corrections, rulers, comps, the timeline) is kept in Sue's own
+//! tables of the file (`docs/clip-sue-tables.md`), Clip Studio seeing its
+//! pixels. Gray layers decode as color.
 
 mod container;
 mod kinds;
 mod model;
+pub mod native;
+#[cfg(test)]
+mod native_tests;
 mod offscreen;
 pub mod parts;
 mod read;
