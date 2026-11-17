@@ -16,6 +16,10 @@ in-use
 id clean-up-the-sketch
 step layer.duplicate
 step off filter.grayscale
+step filter.gaussian
+dialog
+step layer.move_by.-1
+step auto.stroke.subtool.pen.G-pen 120.0,300.5,0.40 160.0,302.0,0.75 200.5,305.0,0.60
 step layer.toggle.draft
 [Flat Copy]
 id flat-copy
@@ -40,6 +44,11 @@ step layer.merge_visible
   names Shortcut Settings and the command bar use (`layer.new`,
   `filter.grayscale`, `view.fit`). `step off <command>` is a step turned
   off: it stays in the action but is skipped when the action plays.
+- `dialog` on the line after a step has that step's dialog show while
+  the action plays: the action waits until the dialog is closed with OK,
+  and Cancel stops the rest of the action. A step without it takes its
+  dialog's settings as they are, as OK would. A Sue Paint that does not
+  know the line reads the file and leaves it out.
 - Lines Sue Paint does not know are left out when it reads the file.
 
 ## Older files
@@ -55,3 +64,15 @@ While Record is on, every command flagged as recordable that runs is
 kept as a step, wherever it was run from: a menu, a key, the command bar,
 Quick Access or a palette's button. Commands that only change how Sue
 Paint looks (Window, palettes) are not recorded.
+
+Two things done by hand are recorded too, as steps of their own:
+
+- A layer dragged to another place in the Layer palette is
+  `layer.move_by.<places>`: played, the current layer moves up (more than
+  0) or down by as many places in the stack.
+- A stroke drawn on the canvas is `auto.stroke.<sub tool> <points>`: the
+  sub tool command it was drawn with (as Shortcut Settings names it),
+  then each point as `x,y,pressure`, the place in picture pixels and the
+  pen's pressure from 0 to 1, at most a few hundred points. Played, the
+  stroke is drawn again with that sub tool on the current layer, as one
+  undo step, and the sub tool picked before stays picked.
