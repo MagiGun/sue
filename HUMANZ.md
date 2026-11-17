@@ -2124,6 +2124,24 @@ again starts from untouched pixels. On release the tiles become one
 correction, tapers, flick and mixing, all editable in Tool Property; an ignored
 test (`stroke_sheet`) paints a sheet of simulated strokes for tuning by eye.
 
+**The 0.0.8 engine (`sue-brush`), Phase 6.** Its resampler lays the
+fixed-rate ticks along a centripetal Catmull-Rom curve through the
+device's records (one record of lookahead; the tail and the lift lay the
+newest piece with the way it was going), so sparse input is joined by
+arcs. The stabilizer's drain follows the pen's smoothed path forward from
+the place on it nearest the brush. An ending comes to a clean point
+(at least two widths long, extended by at most 6,000 square pixels of
+line) or stays a round end; a flick's run out lies inside the ending
+taper. A mixing brush (`paint::wet`) lays what it carries: it takes up the
+paint its leading edge meets, refills with its own paint per brush width
+travelled, mixes with the wet paint right under it and lays fresh paint
+as the eighth power of its amount; blend tools work by the way they
+moved. The built-in papers are white noise blurred by box passes, with no
+grid. The Blend tool's blenders are presets of tool `blend`
+(`EngineKind::Blend`); a sub tool's paint behaviours that its tip text
+cannot say live in `SubTool::behaviours` and are written over its preset
+when it paints.
+
 **Transform.** Scale/Rotate (Ctrl+T) and Free Transform (Ctrl+Shift+T)
 lift the selected part of the current layer, or all of it
 (`sue_paint::transform::lift`), and draw it onto a quad with one projective
