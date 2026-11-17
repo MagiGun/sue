@@ -199,7 +199,7 @@ impl Shell {
             match event {
                 Event::Open(item) => match item.key {
                     ProjectKey::Kept(id) => {
-                        acts.push(HubAct::Request(ShellRequest::Recover(id)));
+                        acts.push(HubAct::request(ShellRequest::Recover(id)));
                     }
                     ProjectKey::File(path) => acts.push(HubAct::OpenFile(path)),
                 },
@@ -223,7 +223,7 @@ impl Shell {
                     theme,
                 );
                 if open {
-                    acts.push(HubAct::Request(match item.key {
+                    acts.push(HubAct::request(match item.key {
                         ProjectKey::Kept(id) => ShellRequest::Recover(id),
                         ProjectKey::File(path) => ShellRequest::OpenFile(path),
                     }));

@@ -196,7 +196,7 @@ fn circle_fit(points: &[[f32; 2]]) -> Option<([f32; 2], f32)> {
     let radius = (uc * uc + vc * vc + (suu + svv) / count).sqrt();
     radius
         .is_finite()
-        .then(|| ([(uc + mx) as f32, (vc + my) as f32], radius as f32))
+        .then_some(([(uc + mx) as f32, (vc + my) as f32], radius as f32))
 }
 
 fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
