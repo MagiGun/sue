@@ -618,6 +618,11 @@ fn new_mask(paint: &mut SuePaint, cx: &mut AppletContext<'_>, inside: bool) {
     match doc::new_mask(&cx.world.arena, layer, show) {
         Ok((edit, _)) => {
             SuePaint::apply(cx, edit);
+            // As in Clip Studio Paint, the new mask is what the tools
+            // draw on next: transparent hides, a color shows.
+            if let Some(doc) = paint.doc_mut() {
+                doc.mask_edit = true;
+            }
         }
         Err(error) => cx.fail(error),
     }

@@ -367,7 +367,6 @@ fn sue_paint_masks_hide_without_erasing_the_layer() {
         );
     };
     command(&mut runtime, "layer.mask.outside");
-    command(&mut runtime, "layer.mask.edit");
     let mask = sue_paint::doc::mask_of(&runtime.engine.world.arena, layer).expect("a mask");
     // The eraser (E) on the mask along the stroke's left half.
     drag(

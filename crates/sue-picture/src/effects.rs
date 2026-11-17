@@ -53,9 +53,18 @@ pub const TONE_DOT_Y: &str = "effect.tone.dot_y";
 /// What can set the size of a tone's dots, in order.
 pub const TONE_SOURCES: [&str; 2] = ["Brightness", "Opacity"];
 
-/// The shapes a tone's dots take, in order: the last scatters single
-/// pixels (noise) instead of drawing dots.
-pub const TONE_SHAPES: [&str; 6] = ["Circle", "Square", "Diamond", "Line", "Cross", "Noise"];
+/// The shapes a tone's dots take, in order: Noise ([`TONE_NOISE`])
+/// scatters single pixels instead of drawing dots. Star came later, so
+/// it is last and files that keep an index read as they did.
+pub const TONE_SHAPES: [&str; 7] = [
+    "Circle", "Square", "Diamond", "Line", "Cross", "Noise", "Star",
+];
+
+/// The index of Noise in [`TONE_SHAPES`].
+pub const TONE_NOISE: u8 = 5;
+
+/// The index of Star in [`TONE_SHAPES`].
+const TONE_STAR: u8 = 6;
 /// The layer shown in one color (`Bool`).
 pub const COLOR: &str = "effect.color";
 /// That color (`Color`).
@@ -175,6 +184,20 @@ fn dot(shape: u8, density: f32, du: f32, dv: f32, cell: f32) -> f32 {
     if density <= 0.0 {
         return 0.0;
     }
+    if shape == TONE_STAR {
+        // A star's points reach past its own cell once it is large, so
+        // the stars of the cells around are drawn too: a point is never
+        // cut off at the cell's edge.
+        let outer = (density / STAR_AREA).sqrt();
+        let mut cover: f32 = 0.0;
+        for nu in [-1.0, 0.0, 1.0] {
+            for nv in [-1.0, 0.0, 1.0] {
+                let outside = star_outside(du + nu, dv + nv, outer) * cell;
+                cover = cover.max((0.5 - outside).clamp(0.0, 1.0));
+            }
+        }
+        return cover;
+    }
     let (du, dv) = (du.abs(), dv.abs());
     let (reach, away) = match shape {
         // Square: as large as the density, its side square-rooted.
@@ -195,6 +218,36 @@ fn dot(shape: u8, density: f32, du: f32, dv: f32, cell: f32) -> f32 {
         ),
     };
     (reach - away + 0.5).clamp(0.0, 1.0)
+}
+
+/// How far an inner corner of the star lies from its middle, as a share
+/// of how far its points reach.
+const STAR_INNER: f32 = 0.42;
+
+/// The area of a star whose points reach 1: ten triangles between the
+/// middle, a point and an inner corner, 36 degrees apart.
+const STAR_AREA: f32 = 5.0 * STAR_INNER * 0.587_785_25;
+
+/// How far `(du, dv)` lies outside a five pointed star whose points
+/// reach `outer`, with one point up (`dv` grows downward); below zero
+/// inside. All in cells.
+fn star_outside(du: f32, dv: f32, outer: f32) -> f32 {
+    use std::f32::consts::PI;
+    // The angle from the upper point, folded into the half of a point
+    // between a point (0) and the next inner corner (36 degrees).
+    let half = PI / 5.0;
+    let mut turn = du.atan2(-dv).rem_euclid(2.0 * half);
+    if turn > half {
+        turn = 2.0 * half - turn;
+    }
+    let reach = du.hypot(dv);
+    let (x, y) = (reach * turn.sin(), reach * turn.cos());
+    // The edge from the point (0, outer) to the inner corner; its normal
+    // faces away from the middle.
+    let inner = outer * STAR_INNER;
+    let (ex, ey) = (inner * half.sin(), inner * half.cos() - outer);
+    let length = ex.hypot(ey).max(f32::EPSILON);
+    (x * -ey + (y - outer) * ex) / length
 }
 
 /// A number from 0 to 1 for pixel `(x, y)` that looks random and is the
@@ -367,7 +420,7 @@ impl Effects {
                 let steps = f32::from(self.tone_levels - 1);
                 density = (density * steps).round() / steps;
             }
-            let cover = if usize::from(self.tone_shape) == TONE_SHAPES.len() - 1 {
+            let cover = if self.tone_shape == TONE_NOISE {
                 if scatter(x, y) < density { 1.0 } else { 0.0 }
             } else {
                 let (sin, cos) = angle.sin_cos();
@@ -381,7 +434,7 @@ impl Effects {
                     _ if density >= 1.0 => 1.0,
                     // Dark dots past half turn into light holes between
                     // them, so the coverage keeps up to solid.
-                    0..=2 if density > 0.5 => {
+                    0..=2 | TONE_STAR if density > 0.5 => {
                         1.0 - dot(
                             self.tone_shape,
                             1.0 - density,
@@ -752,6 +805,51 @@ mod tests {
         }
         let share = sum / 4096.0;
         assert!((share - 0.5).abs() < 0.06, "{share}");
+    }
+
+    #[test]
+    fn a_star_tone_draws_dots_of_its_own_shape() {
+        // Full guide 00:13:41: a star among the dot shapes. Its dots are
+        // none of the other shapes, a star with a point up is not the
+        // same turned upside down, and its points are never cut off at
+        // the cell's edge.
+        let look = |shape: u8, gray: f32| -> Vec<f32> {
+            let effects = Effects {
+                tone: Some((16.0, 0.0)),
+                tone_shape: shape,
+                ..Effects::default()
+            };
+            (0..64)
+                .flat_map(|y| (0..64).map(move |x| (x, y)))
+                .map(|(x, y)| effects.apply([gray, gray, gray, 1.0], x, y)[3])
+                .collect()
+        };
+        let star = look(TONE_STAR, 0.7);
+        assert!(star.iter().any(|cover| *cover > 0.5), "the star draws");
+        for other in 0..TONE_STAR {
+            assert_ne!(
+                look(other, 0.7),
+                star,
+                "{}",
+                TONE_SHAPES[usize::from(other)]
+            );
+        }
+        let at = |x: usize, y: usize| star[y * 64 + x];
+        let flipped = (0..64).all(|y| (0..64).all(|x| (at(x, y) - at(x, 63 - y)).abs() < 1e-3));
+        assert!(!flipped, "a point up is not a point down");
+        let mirrored = (0..64).all(|y| (0..64).all(|x| (at(x, y) - at(63 - x, y)).abs() < 1e-3));
+        assert!(mirrored, "the star stands upright");
+        // Its area follows the density, light and dark alike.
+        for gray in [0.85, 0.7, 0.3, 0.15] {
+            let covered = look(TONE_STAR, gray).iter().sum::<f32>() / (64.0 * 64.0);
+            assert!((covered - (1.0 - gray)).abs() < 0.04, "{gray}: {covered}");
+        }
+        // Near half the points reach past the cell, and the cell's edge
+        // does not cut them: on the line between two cells the stars
+        // still ink where their points cross it.
+        let half = look(TONE_STAR, 0.55);
+        let edge: f32 = (0..64).map(|y| half[y * 64 + 8]).sum();
+        assert!(edge > 1.0, "{edge}");
     }
 
     #[test]

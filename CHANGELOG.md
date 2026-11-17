@@ -37,6 +37,9 @@ follow [Semantic Versioning](https://semver.org/).
   one undo step.
 
 - Sue Paint, New: points (pt) are a unit beside px, cm, mm and in.
+- Sue Paint: tones take a Star dot shape, in Layer Property, Simple
+  Tone Settings (Layer, New Layer, Tone) and wherever the dot shape is
+  picked.
 - Sue Paint, Gradient tool: twelve sub tools, among them Ellipse, Soft
   Glow, Repeating Bands, Dusk, Sea, Forest, Spectrum and Contour line
   fill (click an area and the gradient runs from its outline inward).
@@ -946,6 +949,9 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint, Rotate: Tool Property shows the Snap angle check box and
   its step, so the view can turn in steps without holding Shift (the
   setting was kept but had no row).
+- Sue Paint: a new layer mask is what the tools draw on next, as in
+  Clip Studio Paint, so painting with transparent hides at once instead
+  of erasing the layer's own pixels.
 - Sue Paint: a fast mouse stroke no longer ends in a small kink at its
   tip, and a flick no longer bends off the way the stroke was going.
 - Sue Paint: masks of older files become gray masks as the file opens,
