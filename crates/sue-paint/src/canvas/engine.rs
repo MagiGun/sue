@@ -190,20 +190,29 @@ pub(crate) fn brush_of(sub: &SubTool, eraser: bool, round: bool) -> Option<LineB
 /// eraser erases too, each with where its pixels sit from the stroke's
 /// (`offset` is where the stroke's pixel `(0, 0)` is in the picture):
 /// every raster layer that is shown, not locked, of 8-bit color and not a
-/// vector layer.
+/// vector layer. A layer in a hidden or locked folder is neither shown
+/// nor open to edits, so it is left alone too.
 fn erasable_layers(
     arena: &sue_core::Arena,
     picture: EntityId,
     current: EntityId,
     offset: [i64; 2],
 ) -> Vec<(EntityId, [i64; 2])> {
-    doc::layers(arena, picture)
-        .into_iter()
+    let all = doc::layers(arena, picture);
+    let closed: Vec<EntityId> = all
+        .iter()
+        .filter(|info| doc::is_folder(arena, info.id) && (!info.style.visible || info.locked))
+        .map(|info| info.id)
+        .collect();
+    all.into_iter()
         .filter(|info| {
             info.id != current
                 && info.kind == sue_model::picture::LayerKind::Raster
                 && info.style.visible
                 && !info.locked
+                && !doc::folders_around(arena, info.id)
+                    .iter()
+                    .any(|folder| closed.contains(folder))
                 && !crate::vector::is_vector(arena, info.id)
                 && doc::raster(arena, info.id)
                     .is_some_and(|raster| raster.format() == sue_core::PixelFormat::Rgba8)

@@ -456,8 +456,17 @@ fn cc4_liquify_has_a_hardness() {
     pick(&mut driver, "blend", "Liquify");
     driver.settle(4);
     assert!(shows(&driver, "Hardness"), "{:?}", driver.texts);
+    // The value on the Hardness row itself, not any 50 on the screen.
+    let row = driver
+        .texts
+        .iter()
+        .find(|(text, _)| text == "Hardness")
+        .map(|(_, rect)| *rect)
+        .expect("the Hardness row");
     assert!(
-        driver.texts.iter().any(|(text, _)| text.starts_with("50")),
+        driver.texts.iter().any(|(text, rect)| text.starts_with("50")
+            && rect.left() > row.left()
+            && (rect.center().y - row.center().y).abs() < row.height()),
         "Hardness 50 %: {:?}",
         driver.texts
     );
@@ -535,6 +544,52 @@ fn t50_23_ct22_the_multiple_layers_eraser_erases_every_layer() {
     let off = under(&driver, m + vec2(0.0, 120.0));
     assert_eq!(pixel(&driver, lower, off)[3], 255, "only along the stroke");
     undo_pair(&mut driver, &before);
+}
+
+/// Tip 23 (CT-22): a layer in a hidden folder is not shown, so the
+/// Multiple layers eraser leaves it alone, as it does a hidden layer.
+#[test]
+fn t50_23_ct22_the_multiple_layers_eraser_skips_a_hidden_folder() {
+    let _english = sue_lang::scope(sue_lang::ENGLISH);
+    let mut driver = open("multiple-layers-folder");
+    run(&mut driver, "view.actual");
+    let drawn = new_layer(&mut driver);
+    fill_with(&mut driver, drawn, |_, _| [0, 0, 200, 255]);
+    let tucked = new_layer(&mut driver);
+    fill_with(&mut driver, tucked, |_, _| [0, 200, 0, 255]);
+    run(&mut driver, "layer.folder_insert");
+    let folder = layers(&driver)
+        .into_iter()
+        .find(|info| sue_paint::doc::is_folder(arena(&driver), info.id))
+        .expect("a folder")
+        .id;
+    assert_eq!(
+        sue_paint::doc::folder_of(arena(&driver), tucked),
+        Some(folder)
+    );
+    assert_eq!(sue_paint::doc::folder_of(arena(&driver), drawn), None);
+    run(&mut driver, "layer.toggle.visible");
+    let shown = |driver: &PaintDriver, id: EntityId| {
+        layers(driver)
+            .into_iter()
+            .find(|info| info.id == id)
+            .is_some_and(|info| info.style.visible)
+    };
+    assert!(!shown(&driver, folder), "the folder is hidden");
+    assert!(shown(&driver, tucked), "its layer keeps its own eye open");
+    // From the folder down past its layer to the one outside it.
+    run(&mut driver, "layer.select_below");
+    run(&mut driver, "layer.select_below");
+    pick(&mut driver, "eraser", "Multiple layers");
+    let m = middle(&driver);
+    stroke(&mut driver, m + vec2(-80.0, 0.0), m + vec2(80.0, 0.0));
+    let at = under(&driver, m);
+    assert_eq!(pixel(&driver, drawn, at)[3], 0, "the layer drawn on");
+    assert_eq!(
+        pixel(&driver, tucked, at)[3],
+        255,
+        "not a layer in a hidden folder"
+    );
 }
 
 /// V-9 (CTV-9): the Snap eraser on a vector layer takes a line away up
