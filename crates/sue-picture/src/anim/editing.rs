@@ -895,6 +895,137 @@ pub fn with_track_note(
     out
 }
 
+/// The property of a blank key that names the cel it wants and that has
+/// no layer yet: what Assign Multiple Cels asked for before the cel was
+/// drawn. It goes with its key when frames are inserted, deleted, cut
+/// or pasted, and a cel put on that key replaces it.
+pub const WANTED_CEL: &str = "anim.cel.wanted";
+
+/// The cels `track` names that have no layer yet: the frame (from 0) of
+/// each blank key that wants one, and the name, first first.
+#[must_use]
+pub fn wanted_cels(track: &Track, rate: Rate) -> Vec<(u32, String)> {
+    let mut out: Vec<(u32, String)> = track
+        .clips()
+        .iter()
+        .filter(|clip| clip.properties.get(BLANK).and_then(Value::as_bool) == Some(true))
+        .filter_map(|clip| {
+            let name = clip.properties.get(WANTED_CEL).and_then(Value::as_str)?;
+            Some((clip.start.frame(rate).max(0) as u32, name.to_owned()))
+        })
+        .collect();
+    out.sort_by_key(|(frame, _)| *frame);
+    out
+}
+
+/// `track`'s blank key at `frame` (at `rate`) wanting the cel `name`.
+fn set_wanted(track: &mut Track, rate: Rate, frame: u32, name: &str) {
+    let start = Time::from_frames(i64::from(frame), rate);
+    let Some(index) = track.clips().iter().position(|clip| clip.start == start) else {
+        return;
+    };
+    let Some(mut clip) = track.remove(index) else {
+        return;
+    };
+    let name: String = name
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    clip.properties.set(WANTED_CEL, name.trim());
+    track.insert(clip);
+}
+
+/// A cel picked by Assign Multiple Cels: one of the folder's, or a name
+/// with no layer yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CelPick {
+    /// A cel of the folder.
+    Cel(EntityId),
+    /// A cel named but not made: the frame shows nothing until Create All
+    /// Supported Cels makes it.
+    Wanted(String),
+}
+
+/// The names a list typed into Assign Multiple Cels stands for, in order:
+/// names split by commas or spaces, and `a-b` between two whole numbers
+/// every number from `a` to `b` (down too). A run longer than 1,000 is
+/// cut there.
+#[must_use]
+pub fn cel_list(text: &str) -> Vec<String> {
+    const MOST: usize = 1_000;
+    let mut out = Vec::new();
+    for word in text.split(|c: char| c == ',' || c.is_whitespace()) {
+        let word = word.trim();
+        if word.is_empty() {
+            continue;
+        }
+        let run = word.split_once('-').and_then(|(from, to)| {
+            Some((
+                from.trim().parse::<u32>().ok()?,
+                to.trim().parse::<u32>().ok()?,
+            ))
+        });
+        match run {
+            Some((from, to)) if from <= to => {
+                out.extend((from..=to).take(MOST).map(|number| number.to_string()));
+            }
+            Some((from, to)) => {
+                out.extend(
+                    (to..=from)
+                        .rev()
+                        .take(MOST)
+                        .map(|number| number.to_string()),
+                );
+            }
+            None => out.push(word.to_owned()),
+        }
+        if out.len() >= MOST {
+            out.truncate(MOST);
+            break;
+        }
+    }
+    out
+}
+
+/// `sequence` with `picks` shown one after another on track `track` from
+/// `start`, each for `each` frames, `times` over (Assign Multiple Cels),
+/// as far as the timeline's `length` goes. A wanted cel's frame shows
+/// nothing and keeps its name for Create All Supported Cels.
+#[must_use]
+pub fn assign_many(
+    sequence: &Sequence,
+    track: usize,
+    (start, each, times): (u32, u32, u32),
+    picks: &[CelPick],
+    blank_source: EntityId,
+    length: u32,
+) -> Sequence {
+    let mut out = sequence.clone();
+    if out.tracks.get(track).is_none() || picks.is_empty() {
+        return out;
+    }
+    let each = each.max(1);
+    let mut frame = start;
+    'all: for _ in 0..times.max(1) {
+        for pick in picks {
+            if frame >= length {
+                break 'all;
+            }
+            let cel = match pick {
+                CelPick::Cel(cel) => Some(*cel),
+                CelPick::Wanted(_) => None,
+            };
+            out = super::assign(&out, track, frame, cel, blank_source, length);
+            if let CelPick::Wanted(name) = pick {
+                let rate = out.rate;
+                set_wanted(&mut out.tracks[track], rate, frame, name);
+            }
+            frame = frame.saturating_add(each);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::{MIX_RATE, assign, cel_at, with_folder};

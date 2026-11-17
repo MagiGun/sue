@@ -282,6 +282,68 @@ pub fn new_cel(
     Ok((edit, cel))
 }
 
+/// The edit that makes every cel the timeline names and that has no layer
+/// yet (Create All Supported Cels): for each animation folder, one empty
+/// cel a name, on top of the folder's cels in the order the frames name
+/// them, shown on every frame that wanted it. A name the folder already
+/// has a cel of is shown with that cel. `None` when no frame wants a cel.
+///
+/// # Errors
+/// If the picture has no size.
+pub fn create_supported_cels(arena: &Arena, picture: EntityId) -> Result<Option<Edit>, String> {
+    let Some(sequence) = timeline(arena, picture) else {
+        return Ok(None);
+    };
+    let mut out: Sequence = sequence.clone();
+    let rate = out.rate;
+    let length = length(arena, picture);
+    let stack = crate::doc::layers(arena, picture);
+    let mut edit = Edit::new(tr!("create-all-supported-cels"));
+    let mut any = false;
+    for track in 0..out.tracks.len() {
+        let wanted = super::editing::wanted_cels(&out.tracks[track], rate);
+        let Some(folder) = super::track_folder(&out.tracks[track]) else {
+            continue;
+        };
+        if wanted.is_empty() {
+            continue;
+        }
+        any = true;
+        let mut named: Vec<(String, EntityId)> = cels(arena, picture, folder)
+            .into_iter()
+            .filter_map(|cel| Some((arena.get_by_id(cel).ok()?.name().to_owned(), cel)))
+            .collect();
+        let mut fresh: Vec<String> = Vec::new();
+        for (_, name) in &wanted {
+            if !named.iter().any(|(known, _)| known == name) && !fresh.contains(name) {
+                fresh.push(name.clone());
+            }
+        }
+        // On top of the folder's cels: right below the folder's own row.
+        let at = stack
+            .iter()
+            .position(|info| info.id == folder)
+            .unwrap_or(stack.len());
+        let low = at.checked_sub(1).map(|below| &stack[below].order);
+        let high = stack.get(at).map(|info| &info.order);
+        let orders = keys_between(low, high, fresh.len());
+        for (name, order) in fresh.into_iter().zip(orders) {
+            let (spawn, cel) =
+                crate::doc::add_raster_layer_at(arena, picture, order, name.clone(), None)?;
+            edit = edit
+                .then(spawn)
+                .then(Relate::new(Relation::new(folder, MEMBER, cel)));
+            named.push((name, cel));
+        }
+        for (frame, name) in wanted {
+            if let Some((_, cel)) = named.iter().find(|(known, _)| *known == name) {
+                out = assign(&out, track, frame, Some(*cel), picture, length);
+            }
+        }
+    }
+    Ok(any.then(|| edit.then(SetExtension::set(picture, out))))
+}
+
 /// The edit that shows `to` on every frame of the timeline that showed
 /// one of `from`: what a cel's frames go to when it is merged into a new
 /// layer (Merge Selected Layers on a folder cel) or put in a folder.

@@ -1156,3 +1156,81 @@ fn a_cel_wrapped_in_a_folder_hands_the_folder_its_keys_and_keeps_the_track() {
     // A layer of no animation folder is no cel.
     assert!(cels::wrap_cel(&arena, picture, folder, wrapper).is_none());
 }
+
+#[test]
+fn assign_multiple_cels_names_cels_to_come_and_create_all_supported_cels_makes_them() {
+    let (mut arena, mut history, picture, folder) = animated(8, 12);
+    let (edit, one) = new_cel(&arena, picture, folder, 0).unwrap();
+    history.apply(&mut arena, edit).unwrap();
+    // "1-3" on twos from frame 0: cel 1 is the folder's, 2 and 3 are not
+    // drawn yet.
+    let names = editing::cel_list("1-3");
+    assert_eq!(names, ["1", "2", "3"]);
+    assert_eq!(
+        editing::cel_list("b, a 4-2,x"),
+        ["b", "a", "4", "3", "2", "x"]
+    );
+    let picks: Vec<editing::CelPick> = names
+        .iter()
+        .map(|name| {
+            if name == "1" {
+                editing::CelPick::Cel(one)
+            } else {
+                editing::CelPick::Wanted(name.clone())
+            }
+        })
+        .collect();
+    let sequence = super::timeline(&arena, picture).unwrap().clone();
+    let assigned = editing::assign_many(&sequence, 0, (0, 2, 2), &picks, picture, 12);
+    let rate = assigned.rate;
+    assert_eq!(
+        editing::wanted_cels(&assigned.tracks[0], rate),
+        vec![
+            (2, "2".to_owned()),
+            (4, "3".to_owned()),
+            (8, "2".to_owned()),
+            (10, "3".to_owned())
+        ]
+    );
+    assert_eq!(
+        cel_at(&assigned.tracks[0], rate, 7),
+        Some(one),
+        "twice over"
+    );
+    assert_eq!(cel_at(&assigned.tracks[0], rate, 3), None, "not drawn yet");
+    undo_pair(
+        &mut arena,
+        &mut history,
+        Edit::new("Assign").then(sue_core::txn::SetExtension::set(picture, assigned)),
+    );
+    // Create All Supported Cels: cels 2 and 3, once each, on top of the
+    // folder's cels, shown on every frame that named them.
+    let edit = cels::create_supported_cels(&arena, picture)
+        .unwrap()
+        .unwrap();
+    undo_pair(&mut arena, &mut history, edit);
+    let made = cels(&arena, picture, folder);
+    let names: Vec<String> = made
+        .iter()
+        .map(|cel| arena.get_by_id(*cel).unwrap().name().to_owned())
+        .collect();
+    assert_eq!(made.len(), 3, "{names:?}");
+    let sequence = super::timeline(&arena, picture).unwrap();
+    let track = &sequence.tracks[0];
+    let shown = |frame| {
+        cel_at(track, rate, frame).map(|cel| arena.get_by_id(cel).unwrap().name().to_owned())
+    };
+    assert_eq!(
+        (0..12).map(shown).collect::<Vec<_>>(),
+        ["1", "1", "2", "2", "3", "3", "1", "1", "2", "2", "3", "3"]
+            .map(|name| Some(name.to_owned()))
+            .to_vec()
+    );
+    assert!(editing::wanted_cels(track, rate).is_empty());
+    assert!(
+        cels::create_supported_cels(&arena, picture)
+            .unwrap()
+            .is_none(),
+        "nothing left to make"
+    );
+}
