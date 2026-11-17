@@ -1215,6 +1215,22 @@ pub fn set_view_placed(
     Some(edit.then(ReplaceComponent::new(layer, drawn, label)))
 }
 
+/// How a new 3D layer looks at a figure of `kind`: a little from the
+/// side and above, the light carried on the camera so the figure is lit
+/// from wherever it is seen, and a hand from its back, where its
+/// knuckles, tendons and veins are.
+#[must_use]
+pub fn figure_view(kind: crate::figure::Kind) -> View3D {
+    let hand = kind == crate::figure::Kind::Hand;
+    View3D {
+        yaw: if hand { 200.0 } else { 18.0 },
+        pitch: if hand { 12.0 } else { 6.0 },
+        distance: if hand { 3.4 } else { 4.4 },
+        follow_light: true,
+        ..View3D::default()
+    }
+}
+
 /// The edit that makes a 3D layer named `name` showing `model` (an
 /// existing model entity, or a new one to spawn) where a new layer goes
 /// with `below` picked: right above it in its folder, or in it when it is
@@ -1256,12 +1272,7 @@ pub fn new_layer_viewed(
     let view = if let Some(view) = view {
         view
     } else if figure {
-        View3D {
-            yaw: 18.0,
-            pitch: 6.0,
-            distance: 4.4,
-            ..View3D::default()
-        }
+        figure_view(crate::figure::Body::of(&model).kind)
     } else {
         View3D::default()
     };
@@ -1278,6 +1289,9 @@ pub fn new_layer_viewed(
         (STYLE, Value::Int(i64::from(view.style))),
     ] {
         layer = layer.with_property(key, value);
+    }
+    if view.follow_light {
+        layer = layer.with_property(FOLLOW_LIGHT, Value::from(true));
     }
     // A camera given keeps its lens and its place too.
     if given {

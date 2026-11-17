@@ -720,14 +720,14 @@ pub fn file_of(entity: &Entity) -> Option<(&[u8], &str)> {
     Some((&file.bytes, file.format.as_str()))
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-
+/// A model made in code, for trying the importer where no file is at
+/// hand (Sue's own tests and its tour of pictures).
+pub mod sample {
     /// A small skinned model as `.gltf` text with its buffer inside: a
     /// square post of two boxes, the upper one carried by a second bone
     /// (`Arm`) hanging from the first (`Root`).
-    pub(crate) fn post_gltf() -> Vec<u8> {
+    #[must_use]
+    pub fn post_gltf() -> Vec<u8> {
         let mut points: Vec<[f32; 3]> = Vec::new();
         let mut joints: Vec<[u8; 4]> = Vec::new();
         let mut weights: Vec<[f32; 4]> = Vec::new();
@@ -769,6 +769,20 @@ pub(crate) mod tests {
         for index in &indices {
             bin.extend(index.to_le_bytes());
         }
+        // How each bone was placed when the mesh was bound: the root
+        // where it is, the arm half a meter up.
+        let binds_at = bin.len();
+        for lift in [0.0_f32, -0.5] {
+            for (at, value) in [
+                1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, lift, 0.0, 1.0,
+            ]
+            .iter()
+            .enumerate()
+            {
+                let _ = at;
+                bin.extend(f32::to_le_bytes(*value));
+            }
+        }
         const TABLE: &[u8; 64] =
             b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let mut text = String::new();
@@ -793,7 +807,7 @@ pub(crate) mod tests {
                 { "name": "Root", "children": [2] },
                 { "name": "Arm", "translation": [0.0, 0.5, 0.0] }
             ],
-            "skins": [{ "joints": [1, 2] }],
+            "skins": [{ "joints": [1, 2], "inverseBindMatrices": 4 }],
             "meshes": [{ "primitives": [{
                 "attributes": { "POSITION": 0, "JOINTS_0": 1, "WEIGHTS_0": 2 },
                 "indices": 3
@@ -806,17 +820,26 @@ pub(crate) mod tests {
                 { "buffer": 0, "byteOffset": 0, "byteLength": joints_at },
                 { "buffer": 0, "byteOffset": joints_at, "byteLength": weights_at - joints_at },
                 { "buffer": 0, "byteOffset": weights_at, "byteLength": indices_at - weights_at },
-                { "buffer": 0, "byteOffset": indices_at, "byteLength": bin.len() - indices_at }
+                { "buffer": 0, "byteOffset": indices_at, "byteLength": binds_at - indices_at },
+                { "buffer": 0, "byteOffset": binds_at, "byteLength": bin.len() - binds_at }
             ],
             "accessors": [
                 { "bufferView": 0, "componentType": 5126, "count": 12, "type": "VEC3" },
                 { "bufferView": 1, "componentType": 5121, "count": 12, "type": "VEC4" },
                 { "bufferView": 2, "componentType": 5126, "count": 12, "type": "VEC4" },
-                { "bufferView": 3, "componentType": 5123, "count": indices.len(), "type": "SCALAR" }
+                { "bufferView": 3, "componentType": 5123, "count": indices.len(), "type": "SCALAR" },
+                { "bufferView": 4, "componentType": 5126, "count": 2, "type": "MAT4" }
             ]
         }))
         .unwrap()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use super::sample::post_gltf;
 
     #[test]
     fn a_skinned_gltf_becomes_a_figure_posed_by_its_bones() {

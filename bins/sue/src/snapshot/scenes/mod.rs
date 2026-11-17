@@ -16,6 +16,7 @@ mod menus;
 mod p6_brush_rows;
 mod p6_tools_a;
 mod p6_tools_b;
+mod p81_figures;
 mod paint_3d;
 mod paint_assets;
 mod paint_canvas;
@@ -99,6 +100,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_gradient::scenes(tour)?;
     paint_layers::rows(tour)?;
     paint_3d::tool_property(tour)?;
+    p81_figures::figures(tour)?;
     shell::sue_menu_in_paint(tour)?;
     paint_dialogs::menu_and_dialogs(tour)?;
     paint_dialogs::families(tour)?;

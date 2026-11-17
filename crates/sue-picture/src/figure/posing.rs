@@ -136,11 +136,12 @@ pub fn limited(pose: &Pose, body: &Body) -> Pose {
             let mut hand = hand_from_body(body, &out, side);
             for (joint, turn) in hand.0.iter_mut().enumerate().skip(1) {
                 let kept = clamped(*turn, &HAND_LIMITS[joint]);
-                if kept != *turn {
-                    *turn = kept;
-                } else {
+                // Within its limits already (to the hair's breadth the
+                // carrying turn loses): left exactly as it is.
+                if (0..3).all(|axis| (kept[axis] - turn[axis]).abs() < 1e-3) {
                     continue;
                 }
+                *turn = kept;
                 let one = one_onto_body(body, side, *turn);
                 out.0[at::FINGERS[side as usize] + joint - 1] = one;
             }
@@ -640,4 +641,184 @@ pub fn hanging(joints: &[super::Joint], joint: usize) -> Vec<usize> {
         at += 1;
     }
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{Build, bones, solve};
+    use super::*;
+
+    fn far(a: [f32; 3], b: [f32; 3]) -> f32 {
+        long(minus(a, b))
+    }
+
+    #[test]
+    fn a_dragged_hand_or_foot_takes_its_limb_along() {
+        let body = Body::default();
+        let base = body.standing();
+        let before = solve(&base, &body);
+        // The left wrist taken forward and up, within reach.
+        let wrist = before[7].0;
+        let target = [wrist[0] - 0.05, wrist[1] + 0.25, wrist[2] + 0.3];
+        let limb = limb_of(&body, 7).unwrap();
+        assert_eq!(limb, [5, 6, 7]);
+        assert_eq!(limb_of(&body, 6), Some(limb), "the forearm drags it too");
+        assert_eq!(limb_of(&body, 2), None);
+        let posed = reached(&base, &body, limb, target, true);
+        let after = solve(&posed, &body);
+        assert!(far(after[7].0, target) < 0.02, "the wrist got there");
+        // Only the arm's two joints turned, and the elbow bent as an
+        // elbow does (about its own x, forward).
+        for joint in 0..base.0.len() {
+            if joint != 5 && joint != 6 {
+                assert_eq!(posed.0[joint], base.0[joint], "{joint}");
+            }
+        }
+        assert!(posed.0[6][0] < -20.0, "the elbow folds: {:?}", posed.0[6]);
+        assert!(posed.0[6][2].abs() < 1e-3, "as a hinge");
+        // The rest of the body stayed where it was.
+        assert!(far(after[10].0, before[10].0) < 1e-5);
+        // Out of reach, the arm straightens toward it.
+        let away = [wrist[0] + 3.0, wrist[1] + 1.0, wrist[2]];
+        let stretched = reached(&base, &body, limb, away, true);
+        assert!(stretched.0[6][0] > -8.0, "{:?}", stretched.0[6]);
+        // A foot: the knee bends the other way.
+        let ankle = before[13].0;
+        let step = [ankle[0], ankle[1] + 0.3, ankle[2] + 0.2];
+        let stepped = reached(&base, &body, [11, 12, 13], step, true);
+        assert!(stepped.0[12][0] > 20.0, "the knee folds back");
+        let placed = solve(&stepped, &Body { ground: false, ..body });
+        assert!(far(placed[13].0, step) < 0.03);
+    }
+
+    #[test]
+    fn limits_keep_joints_within_what_a_body_can_do() {
+        let body = Body::default();
+        let mut pose = body.standing();
+        pose.0[6] = [40.0, 0.0, 30.0];
+        pose.0[12] = [-60.0, 0.0, 0.0];
+        pose.0[4] = [0.0, 120.0, 0.0];
+        let kept = limited(&pose, &body);
+        assert_eq!(kept.0[6], [0.0, 0.0, 0.0], "an elbow does not bend back");
+        assert_eq!(kept.0[12][0], 0.0, "nor a knee forward");
+        assert_eq!(kept.0[4][1], 50.0, "the head turns so far");
+        assert_eq!(kept.0[5], pose.0[5], "what is within stays");
+        // Left and right are limited as mirror images.
+        let (left, right) = (limits(&body, 5), limits(&body, 8));
+        assert_eq!(left[2], [-35.0, 185.0]);
+        assert_eq!(right[2], [-185.0, 35.0]);
+        // A hand's fingers: no bending backward past a little, and the
+        // table in the module's contract holds.
+        let hand = Body {
+            kind: Kind::Hand,
+            ..body
+        };
+        assert_eq!(limits(&hand, 2), [[0.0, 115.0], [0.0, 0.0], [0.0, 0.0]]);
+        assert_eq!(limits(&hand, 13)[2], [-80.0, 45.0]);
+        let mut bent = hand.preset(0);
+        bent.0[5] = [-50.0, 20.0, 9.0];
+        assert_eq!(limited(&bent, &hand).0[5], [0.0, 0.0, 0.0]);
+        // Aiming a part at a point respects them when asked.
+        let rest = body.standing();
+        let elbow = solve(&rest, &body)[6].0;
+        let behind = [elbow[0], elbow[1] + 0.2, elbow[2] - 0.5];
+        let free = aimed_at(&rest, &body, 6, behind, false);
+        let held_back = aimed_at(&rest, &body, 6, behind, true);
+        assert!(free.0[6][0] > 10.0, "free, it bends back: {:?}", free.0[6]);
+        assert!(held_back.0[6][0] <= 0.0);
+        // A ring turn adds to the joint about its own axis.
+        let turn = turned([0.0, 0.0, 0.0], 0, 30.0);
+        assert!((turn[0] - 30.0).abs() < 1e-3 && turn[1].abs() < 1e-3);
+    }
+
+    #[test]
+    fn hand_poses_lie_on_a_bodys_hands_and_come_back() {
+        for build in [Build::Male, Build::Female] {
+            let body = Body {
+                build,
+                ..Body::default()
+            };
+            let fist = hand_pose(&body, 2);
+            let mut pose = Pose::rest();
+            hand_onto_body(&body, &mut pose, Side::Left, &fist);
+            hand_onto_body(&body, &mut pose, Side::Right, &fist);
+            for side in [Side::Left, Side::Right] {
+                let back = hand_from_body(&body, &pose, side);
+                for joint in 1..HAND.len() {
+                    for axis in 0..3 {
+                        assert!(
+                            (back.0[joint][axis] - fist.0[joint][axis]).abs() < 0.05,
+                            "{side:?} {joint}: {:?} for {:?}",
+                            back.0[joint],
+                            fist.0[joint]
+                        );
+                    }
+                }
+            }
+            // The fist closes both hands: each middle fingertip comes
+            // back toward its wrist, the same on both sides.
+            let open = bones(&Pose::rest(), &body);
+            let closed = bones(&pose, &body);
+            let reach = |placed: &[([f32; 3], [f32; 3])], wrist: usize, tip: usize| {
+                far(placed[wrist].0, placed[tip].1)
+            };
+            let (left, right) = (reach(&closed, 7, 26), reach(&closed, 10, 41));
+            assert!(left < reach(&open, 7, 26) * 0.6, "the left hand closed");
+            assert!((left - right).abs() < 0.002, "both alike: {left} {right}");
+        }
+        // The hand setup: the pad's fist corner closes the unlocked
+        // fingers and leaves a locked one as it was.
+        let hand = Body {
+            kind: Kind::Hand,
+            ..Body::default()
+        };
+        let open = hand.preset(0);
+        let setup = HandSetup {
+            fist: 1.0,
+            locks: [false, true, false, false, false],
+            ..HandSetup::default()
+        };
+        let set = hand_setup(&hand, &open, &setup);
+        assert_eq!(set.0[1], open.0[1], "the locked index stays");
+        assert!(set.0[4][0] > 80.0 && set.0[5][0] > 95.0, "the middle curls");
+        assert_ne!(set.0[13], open.0[13], "the thumb folds in");
+        let spread = hand_setup(
+            &hand,
+            &open,
+            &HandSetup {
+                spread: 1.0,
+                ..HandSetup::default()
+            },
+        );
+        assert!(spread.0[1][2] > 10.0 && spread.0[10][2] < -15.0);
+    }
+
+    #[test]
+    fn pins_hold_and_poses_move_between_models_by_joint_name() {
+        let body = Body::default();
+        let mut base = body.standing();
+        base.0[6] = [-60.0, 0.0, 0.0];
+        let before = solve(&base, &body);
+        // Turning the chest with the left hand pinned: the hand stays.
+        let mut leaned = base.clone();
+        leaned.0[2] = [0.0, 20.0, 0.0];
+        let loose = solve(&leaned, &body);
+        assert!(far(loose[7].0, before[7].0) > 0.05, "unpinned, it moves");
+        let pinned = held(&leaned, &base, &body, &[7], true);
+        let after = solve(&pinned, &body);
+        assert!(far(after[7].0, before[7].0) < 0.03, "pinned, it stays: {} {:?} {:?}", far(after[7].0, before[7].0), pinned.0[5], pinned.0[6]);
+        assert_eq!(pinned.0[2], leaned.0[2]);
+        // A body pose on a model with a few joints of the same names.
+        let joints = body.joints();
+        let few = [joints[5], joints[6]];
+        let onto = retargeted(&base, &joints, &few, &Pose(vec![[1.0; 3]; 2])).unwrap();
+        assert_eq!(onto.0, vec![base.0[5], base.0[6]]);
+        let mut other = joints[5];
+        other.name = "Wing";
+        assert!(retargeted(&base, &joints, &[other], &Pose::rest()).is_none());
+        // Everything hanging from the left upper arm.
+        let hanging = hanging(&joints, 5);
+        assert!(hanging.contains(&6) && hanging.contains(&7) && hanging.contains(&21));
+        assert!(!hanging.contains(&8));
+    }
 }

@@ -6,7 +6,7 @@ use egui::{Pos2, pos2, vec2};
 use super::super::Tour;
 
 /// Where the last frame drew `text`, if it did.
-fn drawn_at(output: &egui::FullOutput, text: &str) -> Option<egui::Rect> {
+pub(super) fn drawn_at(output: &egui::FullOutput, text: &str) -> Option<egui::Rect> {
     let mut found = None;
     for clipped in &output.shapes {
         let mut look = |shape: &egui::Shape| {
@@ -25,7 +25,7 @@ fn drawn_at(output: &egui::FullOutput, text: &str) -> Option<egui::Rect> {
 }
 
 /// Turns the wheel `times` times by `by` points over `at`.
-fn wheel(tour: &mut Tour<'_>, at: Pos2, by: f32, times: usize) {
+pub(super) fn wheel(tour: &mut Tour<'_>, at: Pos2, by: f32, times: usize) {
     for _ in 0..times {
         tour.camera.input.push(vec![
             egui::Event::PointerMoved(at),

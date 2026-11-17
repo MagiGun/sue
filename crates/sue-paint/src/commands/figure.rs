@@ -22,15 +22,15 @@ use crate::studio::SuePaint;
 /// its photo. A test holds it to the flags of the table, which Auto
 /// Actions read.
 #[cfg_attr(not(test), allow(dead_code))]
-pub(super) const RECORDABLE: [&str; 16] = [
-    "figure.reset_part",
-    "figure.pin",
-    "figure.model.",
+pub(super) const RECORDABLE: [&str; 17] = [
     "figure.register_pose",
     "figure.pose_scanner",
     "figure.hand_scanner",
     "figure.flip",
     "figure.reset",
+    "figure.reset_part",
+    "figure.pin",
+    "figure.model.",
     "figure.preset.",
     "figure.object.ground",
     "figure.object.reset_position",
@@ -39,6 +39,7 @@ pub(super) const RECORDABLE: [&str; 16] = [
     "figure.object.angle.",
     "figure.body.initialize",
     "figure.body.register",
+    "figure.slider.",
 ];
 
 /// The group's commands that leave the canvas (quit, print or open a
@@ -120,6 +121,37 @@ fn on_model(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
                 .arg
                 .parse::<usize>()
                 .is_ok_and(|index| index < crate::panels::MODELS.len()),
+    )
+}
+
+/// `figure.slider.<key>=<value>`: one slider of the body shape set (a
+/// key of [`crate::figure::SLIDERS`], its value as the slider keeps it),
+/// so an Auto Action or a script shapes a figure too.
+fn slider(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
+    let Some((key, value)) = call
+        .arg
+        .split_once('=')
+        .and_then(|(key, value)| Some((key, value.trim().parse::<f32>().ok()?)))
+    else {
+        return;
+    };
+    paint.shape_figure(cx, &tr!("body-shape"), |now| {
+        Some(now.with_slider(key.trim(), value))
+    });
+}
+
+/// `figure.slider.<key>=<value>` works while the current layer holds
+/// one of Sue's own figures and `key` names a slider.
+fn on_slider(paint: &SuePaint, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
+    super::when(
+        current_body(paint, facts.arena)
+            .is_some_and(|body| body.kind != crate::figure::Kind::Imported)
+            && call.arg.split_once('=').is_some_and(|(key, value)| {
+                value.trim().parse::<f32>().is_ok()
+                    && crate::figure::SLIDERS
+                        .iter()
+                        .any(|slider| slider.key == key.trim())
+            }),
     )
 }
 
@@ -399,6 +431,14 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         register_body,
         on_body,
     ),
+    c(
+        "figure.slider.",
+        "body-shape",
+        Icon::MaterialPose,
+        slider,
+        on_slider,
+    )
+    .with(Flags::FAMILY.with(Flags::HIDDEN)),
 ];
 
 #[cfg(test)]

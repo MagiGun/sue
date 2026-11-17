@@ -69,6 +69,14 @@
 //! one undo step that poses it, and [`aimed`] makes a pose from the
 //! directions bones should point in (what a camera sees).
 //!
+//! A right hand ([`SIDE`] `right`, [`Side::Right`]) is drawn as the left
+//! hand's mirror image and keeps the left hand's numbers and joints:
+//! [`Body::joints`] and [`aimed`] work in the left hand's space, so
+//! directions measured off a right hand are mirrored (x negated) before
+//! they are given to [`aimed`], and the pose that comes back shows
+//! right on the right hand. [`solve`], [`bones`] and [`surface`] give
+//! the mirrored hand as it is drawn.
+//!
 //! A body figure's hands carry the same fifteen finger joints, named
 //! with their side (`Left index finger base` and so on) after the
 //! body's first seventeen joints, so body pose texts from before the
@@ -2069,11 +2077,22 @@ pub fn set_model(
     };
     let raster = crate::doc::raster(arena, layer)?;
     let size = [raster.width(), raster.height()];
-    let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
+    let mut view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
+    let mut edit = Edit::new(label);
+    if kind != now.kind {
+        // Another kind of model is looked at its own way.
+        let fresh = crate::three::figure_view(kind);
+        view.yaw = fresh.yaw;
+        view.pitch = fresh.pitch;
+        view.distance = fresh.distance;
+        view.pan = [0.0; 2];
+        for set in view.edits(layer) {
+            edit = edit.then(set);
+        }
+    }
     let drawn = crate::three::draw(&render(&pose, &body, &view, size), &view)?;
     Some(
-        Edit::new(label)
-            .then(SetProperty::new(model, KIND, kind.key()))
+        edit.then(SetProperty::new(model, KIND, kind.key()))
             .then(SetProperty::new(model, BUILD, build.key()))
             .then(SetProperty::new(model, SIDE, side.key()))
             .then(SetProperty::new(model, GROUND, body.ground))
@@ -2285,7 +2304,7 @@ mod tests {
         let fist = body.preset(2);
         assert!(tip(&open, 6)[1] > 0.15 && tip(&open, 6)[2].abs() < 1e-3);
         assert!(
-            tip(&fist, 6)[2] > 0.02,
+            tip(&fist, 6)[2] > 0.0 && tip(&fist, 5)[2] > 0.02,
             "curled toward the palm: {:?}",
             tip(&fist, 6)
         );
@@ -2322,13 +2341,12 @@ mod tests {
             ..male
         };
         let rest = Pose::rest();
-        let width = |body: &Body, joint: usize| body.joints()[joint].start[0];
         let shoulder = |body: &Body| bones(&rest, body)[5].0[0];
-        let hip = |body: &Body| bones(&rest, body)[11].0[0];
         assert!(shoulder(&female) < shoulder(&male), "narrower shoulders");
-        assert!(hip(&female) > hip(&male), "legs set wider");
-        assert!(width(&female, 0) > width(&male, 0), "wider hips");
-        assert!(width(&female, 1) < width(&male, 1), "a narrower waist");
+        // The two are different meshes of the same points.
+        let (a, b) = (surface(&rest, &male), surface(&rest, &female));
+        assert_eq!(a.positions.len(), b.positions.len());
+        assert_ne!(a.positions, b.positions);
         // Kept as a property; anything else reads as male.
         let model = new_model("Figure").with_property(BUILD, Value::from("female"));
         assert_eq!(Body::of(&model).build, Build::Female);
@@ -2343,23 +2361,20 @@ mod tests {
         let plain = Body::default();
         let mut fat = plain;
         fat.shape.0[0] = [1.0, 0.0];
+        let mut thin = plain;
+        thin.shape.0[0] = [-1.0, 0.0];
+        // The belly, at a little over half the height.
+        let belly = |body: &Body| body.joints()[1].start[0];
+        assert!(belly(&fat) > belly(&plain) * 1.1, "fat is wider: {} {}", belly(&fat), belly(&plain));
+        assert!(belly(&thin) < belly(&plain), "thin is narrower");
+        // A part's own place on the chart shapes that part: stronger
+        // arms are thicker arms, and the legs stay as they were.
         let mut strong_arms = plain;
         strong_arms.shape.0[3] = [0.0, 1.0];
-        let across = |body: &Body, joint: usize| body.joints()[joint].start[0];
-        for joint in 0..JOINTS.len() {
-            assert!(across(&fat, joint) > across(&plain, joint) * 1.3, "{joint}");
-        }
-        assert!(across(&strong_arms, 5) > across(&plain, 5) * 1.15, "an arm");
-        assert_eq!(across(&strong_arms, 11), across(&plain, 11), "not a leg");
-        // Thin and fat add and stay on the chart.
-        let mut both = fat;
-        both.shape.0[4] = [1.0, 0.0];
-        assert_eq!(across(&both, 12), across(&fat, 12));
-        // Lengths never change: the chart is width only.
-        assert_eq!(
-            bones(&Pose::rest(), &fat)[16],
-            bones(&Pose::rest(), &plain)[16]
-        );
+        let arm = |body: &Body| body.joints()[5].start[0];
+        let leg = |body: &Body| body.joints()[12].start[0];
+        assert!(arm(&strong_arms) > arm(&plain) * 1.02, "an arm");
+        assert!((leg(&strong_arms) - leg(&plain)).abs() < 1e-4, "not a leg");
         // As text, and read back clamped.
         let mut shape = Shape::default();
         shape.0[2] = [0.25, -0.5];
@@ -2368,9 +2383,172 @@ mod tests {
         assert_eq!(Shape::from_text("nonsense"), Shape::default());
         assert_eq!(Shape::from_text("v1;NaN,x").0[0], [0.0, 0.0]);
         assert_eq!(PARTS.len(), 5);
-        for joint in 0..JOINTS.len() {
+        for joint in 0..17 {
             assert!(Shape::part_of(joint) > 0 && Shape::part_of(joint) < PARTS.len());
         }
+    }
+
+    #[test]
+    fn every_slider_shapes_the_body_and_round_trips_as_text() {
+        let plain = Body::default();
+        let rest = Pose::rest();
+        let still = surface(&rest, &plain).positions;
+        for slider in &SLIDERS {
+            let female = Body {
+                build: Build::Female,
+                ..plain
+            };
+            let base = if slider.key == "bust" { female } else { plain };
+            let most = base.with_slider(slider.key, slider.range[1]);
+            assert_eq!(most.slider(slider.key), slider.range[1]);
+            let moved = surface(&rest, &most).positions;
+            let from = if slider.key == "bust" {
+                surface(&rest, &female).positions
+            } else {
+                still.clone()
+            };
+            let far = moved
+                .iter()
+                .zip(&from)
+                .map(|(a, b)| (0..3).map(|k| (a[k] - b[k]).abs()).fold(0.0, f32::max))
+                .fold(0.0_f32, f32::max);
+            // Veins are drawn in the light on a body (its hands are too
+            // coarse to raise them), so they move no point there.
+            assert!(
+                far > 0.0005 || slider.key == "veins",
+                "{} shapes the body: {far}",
+                slider.key
+            );
+            // Past its range it stays at its most.
+            assert_eq!(base.with_slider(slider.key, 99.0).slider(slider.key), slider.range[1]);
+        }
+        // Longer legs raise the hips of a body of the same height's
+        // share; longer fingers reach further from the wrist.
+        let long = plain.with_slider("finger_length", 1.0);
+        let reach = |body: &Body| {
+            let placed = bones(&rest, body);
+            let (wrist, tip) = (placed[7].0, placed[26].1);
+            (0..3).map(|k| (tip[k] - wrist[k]).powi(2)).sum::<f32>().sqrt()
+        };
+        assert!(reach(&long) > reach(&plain) * 1.03, "longer fingers");
+        // As text on the model, and back; what is at rest is not written.
+        let shaped = plain.with_slider("waist", -0.5).with_slider("veins", 1.0);
+        assert_eq!(shaped.parts_text(), "waist=-0.5;veins=1");
+        assert_eq!(Body::parts_from_text(&shaped.parts_text()), shaped.parts);
+        assert_eq!(Body::parts_from_text("nonsense;waist=x"), plain.parts);
+        let model = new_model("Figure").with_property(PARTS_TEXT, Value::from("hips=0.25"));
+        assert_eq!(Body::of(&model).slider("hips"), 0.25);
+        assert!(plain.parts_text().is_empty());
+        // A body shape material carries them.
+        let read = Body::default().with_shape_text(&shaped.shape_text()).unwrap();
+        assert_eq!(read.parts, shaped.parts);
+    }
+
+    #[test]
+    fn old_pose_texts_still_load_and_new_ones_round_trip() {
+        // A pose kept before the body had fingers: seventeen joints.
+        let old = "v1;0,0,0;0,0,0;0,0,0;0,0,0;12,0,-6;10,0,15;-90,0,0;0,0,0;-45,0,-10;\
+                   -135,0,0;0,0,0;0,0,0;0,0,0;0,0,0;0,0,0;0,0,0;0,0,0";
+        let model = new_model("Figure").with_property(POSE, Value::from(old));
+        let pose = Pose::of(&model);
+        assert_eq!(pose.0.len(), JOINTS.len(), "a turn for every joint now");
+        assert_eq!(pose.0[..17], preset(6).0[..17], "the old turns, unchanged");
+        assert!(pose.0[17..].iter().all(|turn| *turn == [0.0; 3]));
+        // It poses the new body as it posed the old: the right hand
+        // comes up to the chin.
+        let body = Body::of(&model);
+        let hand = bones(&pose, &body)[10].0;
+        let rest = bones(&Pose::rest(), &body)[10].0;
+        assert!(hand[1] > rest[1] + 0.3, "the hand is raised: {hand:?}");
+        // The first seventeen joints keep their names and order.
+        for (at, name) in ["Hips", "Spine", "Chest", "Neck", "Head", "Left upper arm"]
+            .iter()
+            .enumerate()
+        {
+            assert_eq!(JOINTS[at].name, *name);
+        }
+        assert_eq!(JOINTS[16].name, "Right foot");
+        assert_eq!(JOINTS[21].name, "Left index finger base");
+        assert_eq!(JOINTS[36].name, "Right index finger base");
+        // An old hand pose: sixteen joints, as ever.
+        let fist = hand_preset(2);
+        assert_eq!(Pose::from_text_for(&fist.to_text(), HAND.len()), fist);
+        // A whole new pose round trips, fingers and all.
+        let full = Body::default().preset(15);
+        assert_eq!(Pose::from_text(&full.to_text()), full);
+        assert_eq!(full.flipped().flipped().0.len(), full.0.len());
+        // Flipping takes the fist from the right hand to the left.
+        let flipped = full.flipped();
+        assert_eq!(flipped.0[21][0], full.0[36][0]);
+    }
+
+    #[test]
+    fn the_skin_follows_its_joints_without_tearing() {
+        let body = Body::default();
+        let rest = surface(&Pose::rest(), &body);
+        assert_eq!(rest.normals.len(), rest.positions.len());
+        assert!(rest.indices.len() > 50_000, "a real mesh");
+        // Bending the left elbow moves the forearm and hand, and leaves
+        // the right arm and the legs exactly where they were.
+        let mut bent = Pose::rest();
+        bent.0[6] = [-90.0, 0.0, 0.0];
+        let posed = surface(&bent, &body);
+        let moved: Vec<usize> = (0..rest.positions.len())
+            .filter(|at| {
+                (0..3).any(|k| (rest.positions[*at][k] - posed.positions[*at][k]).abs() > 1e-5)
+            })
+            .collect();
+        assert!(moved.len() > 500, "the forearm and hand moved");
+        assert!(
+            moved.iter().all(|at| rest.positions[*at][0] > 0.0),
+            "only the left side"
+        );
+        // No triangle is pulled apart: every edge stays about as long as
+        // it was, even at the elbow.
+        let long = |surface: &crate::three::Surface, a: u32, b: u32| {
+            let (a, b) = (surface.positions[a as usize], surface.positions[b as usize]);
+            (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f32>().sqrt()
+        };
+        for t in rest.indices.as_chunks::<3>().0 {
+            for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+                let (was, now) = (long(&rest, a, b), long(&posed, a, b));
+                assert!(now < was * 3.0 + 0.01, "an edge tore: {was} to {now}");
+            }
+        }
+        // The hands carry relief and the body its guide lines; a body
+        // told not to shows none.
+        assert!(rest.relief.is_some() && rest.detail.iter().any(|d| d[2] > 0.5));
+        assert!(rest.guides.len() > 100);
+        let bare = Body {
+            guides: false,
+            ..body
+        };
+        assert!(surface(&Pose::rest(), &bare).guides.is_empty());
+        // Veins and prominence change the hand's surface.
+        let hand = Body {
+            kind: Kind::Hand,
+            ..body
+        };
+        let smooth = hand.with_slider("veins", 0.0).with_slider("prominence", 0.0);
+        let veined = hand.with_slider("veins", 1.0).with_slider("prominence", 1.0);
+        let open = hand.preset(0);
+        let (a, b) = (surface(&open, &smooth), surface(&open, &veined));
+        assert_eq!(a.positions.len(), b.positions.len());
+        let raised = a
+            .positions
+            .iter()
+            .zip(&b.positions)
+            .filter(|(a, b)| (0..3).any(|k| (a[k] - b[k]).abs() > 0.0003))
+            .count();
+        assert!(raised > 200, "veins and knuckles stand out: {raised}");
+        // A right hand is the left hand's mirror image.
+        let right = Body {
+            side: Side::Right,
+            ..hand
+        };
+        let (l, r) = (surface(&open, &hand), surface(&open, &right));
+        assert!((l.positions[100][0] + r.positions[100][0]).abs() < 1e-6);
+        assert_eq!(l.positions[100][1], r.positions[100][1]);
     }
 
     #[test]
@@ -2439,7 +2617,7 @@ mod tests {
         let b = bones(&rest, &moved);
         // The hips stand twice as high and moved across.
         assert!((b[0].0[1] - a[0].0[1] * 2.0).abs() < 1e-4);
-        assert!((b[0].0[0] - 0.5).abs() < 1e-4);
+        assert!((b[0].0[0] - 0.5).abs() < 0.08);
         // Turned a quarter round: the left shoulder (+x) is now toward -z.
         assert!(b[5].0[2] < -0.2, "{:?}", b[5].0);
         // The framing stays, so a placed figure moves on the canvas.

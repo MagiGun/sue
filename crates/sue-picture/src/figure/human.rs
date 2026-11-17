@@ -283,7 +283,11 @@ fn morphed(body: &Body) -> (Vec<[f32; 3]>, Vec<[[f32; 3]; 2]>) {
         }
     };
     let [whole, head, upper, arms, legs] = body.shape.0;
-    slide(&format!("{sex}:fat"), whole[0]);
+    // A heavy build goes past the heaviest the targets were made for.
+    slide(
+        &format!("{sex}:fat"),
+        if whole[0] > 0.0 { whole[0] * 1.6 } else { whole[0] },
+    );
     slide(&format!("{sex}:muscle"), whole[1]);
     slide("head_fat", head[0]);
     slide("torso_fat", upper[0]);

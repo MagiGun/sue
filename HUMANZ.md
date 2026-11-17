@@ -2576,6 +2576,29 @@ location's `poses/` (the kind, then `Pose::to_text`), a registered
 material kind (`materials::POSE`) whose thumbnail renders the pose and
 whose placement poses a figure of its kind.
 
+**Figure meshes, posing and imported models.** A figure's body is a
+skinned mesh with morph targets, `crates/sue-picture/assets/figures/
+human.sfig`, converted from MakeHuman's CC0 base mesh, rig and targets by
+`convert_makehuman.py` beside it (`figure::human`). `Body` shapes it
+(type, chart, `figure.parts` sliders, head to body ratio, height); the
+hand and head figures are cut from it and subdivided; the hands' veins,
+tendons and knuckles are a relief (`three::Relief`) raised in the mesh
+and lit per pixel. Poses stay what they were: one turn per joint in
+degrees, measured from a stance with the arms straight down, though
+the mesh is bound with its arms out (each joint keeps the turn between
+the two). The first seventeen body joints are the old ones, so old pose
+texts load; shoulders, toes, fingers, jaw and eyes follow. `figure::
+posing` has the joint limits, the limb that follows a dragged hand or
+foot (`reached`), `aimed_at`, pins (`held`), the hand setup and hand
+poses carried onto a body's hands. `three::Surface` and
+`render_surface` draw smooth meshes: normals per point, a soft wrapped
+key light, a finer picture brought down for soft edges, occlusion from
+the depth buffer, guide lines, and a floor shadow (`view3d.floor_shadow`,
+`view3d.light_height`). `model3d` imports glTF, GLB and OBJ: the file
+is kept as the model's `Encoded` bytes, a skinned glTF becomes a figure
+of `Kind::Imported` whose bones are its joints, and imported files are
+copied to the materials location's `models/`.
+
 **Exposure sheet, curved text, fog.** `anim::sheet` reads a folder's
 keys as cels, blanks and holds a frame each; `sheet_csv` and
 `from_sheet_csv` write and read it, cels named by their layers.
