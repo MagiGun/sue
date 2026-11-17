@@ -1431,4 +1431,108 @@ mod tests {
             assert!(!range.label().is_empty());
         }
     }
+
+    #[test]
+    fn guides_read_back_and_linked_rulers_move_with_their_layer() {
+        use sue_core::{ReversibleTransaction, UndoStack};
+        // Guides and the scale round-trip through their text.
+        let rulers = Rulers {
+            guides: vec![
+                GuideLine {
+                    upright: false,
+                    at: 12.5,
+                },
+                GuideLine {
+                    upright: true,
+                    at: 40.0,
+                },
+            ],
+            linear: Some([[0.0, 0.0], [10.0, 0.0]]),
+            linear_scale: Some(8.0),
+            ..Rulers::default()
+        };
+        let text = |key: &str| rulers.text(key);
+        let (guides, scale) = (text(GUIDES).unwrap(), text(LINEAR_SCALE).unwrap());
+        let back = Rulers::read(|key| match key {
+            GUIDES => Some(guides.as_str()),
+            LINEAR_SCALE => Some(scale.as_str()),
+            LINEAR => Some("0,0,10,0"),
+            _ => None,
+        });
+        assert_eq!(back, rulers);
+        assert_eq!(
+            GuideLine::dragged([5.0, 9.0], [50.0, 12.0]),
+            GuideLine {
+                upright: false,
+                at: 9.0
+            }
+        );
+        // A stroke started on a guide follows it.
+        let mut snap = Snap::begin(&rulers, [30.0, 13.5], true, false, 4.0).unwrap();
+        assert!(near(snap.follow([60.0, 30.0], 0.0).unwrap(), [60.0, 12.5]));
+        // Linked to its layer, the ruler shows moved with it.
+        let mut arena = Arena::new();
+        let (mut make, picture) = crate::doc::create(&crate::doc::NewPicture {
+            name: "Rulers".to_owned(),
+            width: 64,
+            height: 64,
+            dpi: 72.0,
+            paper: None,
+            timelapse: false,
+        })
+        .unwrap();
+        make.apply(&mut arena).unwrap();
+        let layer = crate::doc::layers(&arena, picture).last().unwrap().id;
+        let mut stack = UndoStack::new();
+        stack
+            .apply(&mut arena, edit(picture, LINEAR, text(LINEAR), "Ruler"))
+            .unwrap();
+        let link = link_layer_edit(&arena, picture, true, Some(layer), "Link").unwrap();
+        stack.apply(&mut arena, link).unwrap();
+        assert!(layer_linked(&arena, picture));
+        stack
+            .apply(
+                &mut arena,
+                Edit::new("Move")
+                    .then(SetProperty::new(layer, sue_model::picture::X, 5_i64))
+                    .then(SetProperty::new(layer, sue_model::picture::Y, 3_i64)),
+            )
+            .unwrap();
+        assert_eq!(link_shift(&arena, picture), [5.0, 3.0]);
+        assert_eq!(
+            Rulers::of(&arena, picture).linear,
+            Some([[5.0, 3.0], [15.0, 3.0]])
+        );
+        assert_eq!(
+            Rulers::stored(&arena, picture).linear,
+            Some([[0.0, 0.0], [10.0, 0.0]])
+        );
+        // A ruler laid where it shows is kept where that is before the move.
+        let kept = kept_text(&arena, picture, LINEAR, Some("5,3,25,3".to_owned()));
+        assert_eq!(kept.as_deref(), Some("0,0,20,0"));
+        // Unlinked, the rulers stay where they show; undo puts all back.
+        let before = arena.get_by_id(picture).unwrap().clone();
+        let unlink = link_layer_edit(&arena, picture, false, None, "Unlink").unwrap();
+        stack.apply(&mut arena, unlink).unwrap();
+        assert!(!layer_linked(&arena, picture));
+        assert_eq!(
+            Rulers::of(&arena, picture).linear,
+            Some([[5.0, 3.0], [15.0, 3.0]])
+        );
+        stack.undo(&mut arena).unwrap();
+        assert_eq!(*arena.get_by_id(picture).unwrap(), before);
+        // Guides linked to the ruler hide with it.
+        stack
+            .apply(&mut arena, edit(picture, GUIDES, text(GUIDES), "Guide"))
+            .unwrap();
+        let elsewhere = ShowRange::EditingLayer.edit(picture, Some(layer), "Only");
+        stack.apply(&mut arena, elsewhere).unwrap();
+        assert_eq!(Rulers::seen(&arena, picture, None).guides.len(), 2);
+        assert!(Rulers::seen(&arena, picture, None).linear.is_none());
+        stack
+            .apply(&mut arena, link_guide_edit(picture, true, "Link guide"))
+            .unwrap();
+        assert!(Rulers::seen(&arena, picture, None).guides.is_empty());
+        assert_eq!(Rulers::seen(&arena, picture, Some(layer)).guides.len(), 2);
+    }
 }

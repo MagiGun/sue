@@ -13,6 +13,7 @@ mod gallery;
 mod hub;
 mod icons;
 mod menus;
+mod p6_tools_b;
 mod paint_3d;
 mod paint_canvas;
 mod paint_canvas_chrome;
@@ -119,6 +120,9 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_command_bar::scenes(tour)?;
     paint_extras::scenes(tour)?;
     paint_tools::palettes(tour)?;
+    // 36p1 to 36p10. Tool Property of the comic, figure, text, ruler and
+    // Correct Line sub tools (Phase 6).
+    p6_tools_b::tool_rows(tour)?;
 
     // 12 and 13. Back to the Hub, then into Sue Paint again.
     shell::entering(tour)?;

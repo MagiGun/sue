@@ -101,7 +101,7 @@ fn effect_rows(ui: &mut Ui, rows: &mut Rows<'_>, sub: &mut SubTool) {
         Some(&tr!("make-curve-hint")),
         &mut curved,
     ) {
-        effect.curve = if curved { 0.08 } else { 0.0 };
+        effect.curve = if curved { 0.03 } else { 0.0 };
     }
     if curved {
         let mut bend = effect.curve * 100.0;

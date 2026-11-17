@@ -13,6 +13,29 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Sue Paint, Figure: rectangles, ellipses and polygons have Line/Fill
+  (line, fill, or both in one step), Roundness of corner and Aspect in
+  Tool Property; the saturated and speed line groups hold seven more
+  sub tools (scattered, dense, dark, burst, rain) whose count, length,
+  curve, grouping and spread are settings, kept with the lines.
+- Sue Paint, Frame Border: each frame drawn lands in a frame folder of
+  its own, masked to the panel, with a paper background, a layer to
+  draw on and its border; a Frame pen draws one round freehand; Tool
+  Property has How to add, Draw border and the division's gutters.
+- Sue Paint, Balloon: Line color and Fill color (the drawing color,
+  the other one or one of the sub tool's own), Edge line off for a
+  balloon with no edge, and How to add.
+- Sue Paint, Text: a Style row with bold, italic, underline and strike
+  through.
+- Sue Paint, Ruler: a Guide sub tool, Create at editing layer, Step of
+  angle, scale marks on the linear ruler and Bezier curve rulers; Link
+  Ruler to Layer and Link Guide to Ruler in the ruler drop-down and in
+  Layer, Ruler/Frame. Set Showing Area of Ruler now decides where the
+  rulers show and guide strokes.
+- Sue Paint, Correct Line: Pinch vector line can hold the far end, add
+  a control point and connect lines; Redraw vector line can leave its
+  end free, connect lines and simplify; Fill leftover and Select
+  garbage join Remove dust.
 - Sue Paint, Animation, Show Animation Cels: Show Edited Cel Only (the
   cel locked as the one you draw shows in its folder in place of the
   frame's), Check Cel Motion by Key Input (the frames from two cels back

@@ -3527,7 +3527,7 @@ label-name = Label name
 track-label-at-frame = On the picked track, from frame { $value }. An empty name takes the label away.
 
 # P6 tools B: figure, effect lines, balloon, text style, rulers, frames, correct line
-roundness-of-corner = Roundness of corner
+roundness-of-corner = Roundness
 number-of-corners = Number of corners
 line-fill = Line/Fill
 create-line = Create line
@@ -3556,15 +3556,15 @@ fill-color = Fill color
 how-to-add = How to add
 add-to-selected-layer = Add to selected layer
 create-new-layer-2 = Create new layer
-balloon-edge = Line
+balloon-edge = Edge line
 balloon-edge-hint = Draw the balloon's outline; off, the balloon has no edge
 draw-round-balloon = Draw round the balloon's outline; it closes when you let go.
 add-to-frame-folder = Add to frame border layer
 create-new-frame-folder = Create new folder
 draw-border = Draw border
 draw-border-hint = Ink the frame's border; off, the panel has no line round it
-vertical-gutter = Vertical gutter
-horizontal-gutter = Horizontal gutter
+vertical-gutter = Gap across
+horizontal-gutter = Gap down
 click-corners-frame = Click each corner; click the first again to close the frame.
 draw-round-frame = Draw round the frame freehand; it closes when you let go.
 frame-pen = Frame pen

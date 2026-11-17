@@ -833,6 +833,28 @@ Once a canvas is open:
   editable: the Object tool drags its ends, and Tool Property sets how many
   lines, how wide, a new scatter and the drawing color. Filter, Render has focus lines, speed lines and screentone, and
   Layer, New Layer, Tone makes a layer of tone.
+- **Frames, balloons, text and rulers in Tool Property:** a frame drawn
+  with the Frame Border tool lands in a frame folder of its own, masked to
+  the panel, holding a paper background, a layer to draw on and the
+  border (How to add can put it on the frame border layer instead); the
+  Frame pen draws a frame round freehand, and Frame Border Division keeps
+  the gaps across and down you set. Balloons take their Line
+  color and Fill color from the drawing color, the other color or one of
+  their own, and Edge line off draws them with no edge; a balloon of other
+  colors gets a layer of its own. The Text tool's Style row makes words
+  bold, italic, underlined or struck through (a font with bold and italic
+  faces uses them). The Figure tool's rectangle, ellipse and polygon have
+  Line/Fill, Roundness of corner and Aspect, and its saturated and speed
+  line groups hold scattered, dense, dark, burst and rain lines whose
+  count, length, curve, grouping and spread you set. The Ruler tool's
+  Guide lays a level or upright guide strokes follow; Create at editing
+  layer off lays a ruler on a layer of its own; the linear ruler can
+  carry scale marks and the curve ruler can be a Bezier curve. In the
+  Layer palette's ruler drop-down, Link Ruler to Layer moves the rulers
+  with their layer and Link Guide to Ruler shows guides only where the
+  rulers show. Correct Line's Pinch can hold the far end, add a control
+  point and connect lines, Redraw can leave its end free, connect and
+  simplify, and Fill leftover and Select garbage join Remove dust.
 - **Animation:** File, New, Animation (or New Animation Cel on any picture)
   starts a timeline. The Timeline palette, laid out as Clip Studio Paint's,
   makes folders and cels, plays and stops (with loop), steps frame by frame

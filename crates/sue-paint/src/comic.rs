@@ -1079,7 +1079,21 @@ impl SuePaint {
         let Some((picture, [width, height], paper)) = self.page(arena) else {
             return;
         };
-        let (keys, outer) = doc::landing(arena, picture, self.layer(), 4);
+        // Beside the frame folder being worked in (never inside it), else
+        // where a new layer goes.
+        let current = self.layer();
+        let in_frame = current.and_then(|layer| {
+            std::iter::once(layer)
+                .chain(doc::folders_around(arena, layer))
+                .find(|id| is_frame_folder(arena, *id))
+        });
+        let (keys, outer) = match in_frame {
+            Some(folder) => (
+                doc::keys_above(arena, picture, Some(folder), 4),
+                doc::folder_of(arena, folder),
+            ),
+            None => doc::landing(arena, picture, current, 4),
+        };
         let [back_key, draw_key, frame_key, folder_key] =
             <[_; 4]>::try_from(keys).ok().unwrap_or_default();
         let count = doc::layers(arena, picture)
