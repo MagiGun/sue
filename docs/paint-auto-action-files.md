@@ -18,6 +18,7 @@ step layer.duplicate
 step off filter.grayscale
 step filter.gaussian
 dialog
+settings filter:gaussian=12.5
 step layer.move_by.-1
 step auto.stroke.subtool.pen.G-pen 120.0,300.5,0.40 160.0,302.0,0.75 200.5,305.0,0.60
 step layer.toggle.draft
@@ -49,6 +50,17 @@ step layer.merge_visible
   and Cancel stops the rest of the action. A step without it takes its
   dialog's settings as they are, as OK would. A Sue Paint that does not
   know the line reads the file and leaves it out.
+- `settings <text>` on a line after a step keeps the settings its dialog
+  had when the step was recorded (the dialog was closed with OK).
+  Played, the dialog takes them: without its `dialog` line the step goes
+  on with them at once, with it the dialog opens at them. The text is
+  `filter:<filter>` for a filter (a tonal correction as a correction
+  layer keeps it, as `hue:20,-10,5`; any other as its name, `=` and its
+  values, as `gaussian=12.5`), `select:<kind>,<pixels>` for Expand,
+  Shrink, Blur the Border of and Outline Selected Area, and
+  `gamut:<tolerance>,<1 for every layer>` for Select Color Gamut.
+  Settings Sue Paint cannot read, or that are of another dialog, are
+  left out and the dialog's own settings are used.
 - Lines Sue Paint does not know are left out when it reads the file.
 
 ## Older files

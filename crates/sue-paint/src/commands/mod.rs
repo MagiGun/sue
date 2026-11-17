@@ -127,7 +127,18 @@ impl SuePaint {
             return;
         }
         let recorded = cx.history.len();
+        let had_dialog = self.dialog.is_some();
         crate::commands::registry().run(self, cx, command);
+        // A step being recorded that opened a dialog: what the dialog
+        // ends with goes with it.
+        if !had_dialog
+            && self.dialog.is_some()
+            && let Some(index) = self.auto.recording
+            && let Some(action) = self.auto.sets.get(index)
+            && action.steps.last().map(String::as_str) == Some(command)
+        {
+            self.auto.dialog_step = Some(action.steps.len() - 1);
+        }
         self.track_new_layers(cx, recorded);
     }
 

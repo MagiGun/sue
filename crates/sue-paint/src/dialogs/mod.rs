@@ -659,6 +659,8 @@ impl SuePaint {
 
     /// What OK (or Enter) does, for each kind of dialog.
     pub(crate) fn dialog_ok(&mut self, cx: &mut AppletContext<'_>, dialog: Dialog) {
+        // An Auto Action being recorded keeps the dialog's settings.
+        self.record_dialog_closed(Some(&dialog));
         match dialog {
             Dialog::New(new) => self.new_ok(cx, &new),
             Dialog::AdvancedFill => self.advanced_fill_now(cx),
@@ -713,8 +715,10 @@ impl SuePaint {
     /// What Cancel (or Escape, or closing its window) does, for each kind
     /// of dialog.
     fn dialog_cancel(&mut self, cx: &mut AppletContext<'_>, dialog: Dialog) {
-        // Cancel in a dialog an Auto Action showed stops the action.
+        // Cancel in a dialog an Auto Action showed stops the action; one
+        // being recorded leaves the step that opened it out.
         self.auto.queue.clear();
+        self.record_dialog_closed(None);
         match dialog {
             Dialog::Filter(filter) => self.filter_cancel(cx, &filter),
             Dialog::Correction(layer, _, before, made) => {
