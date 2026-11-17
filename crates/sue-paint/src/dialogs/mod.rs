@@ -582,7 +582,7 @@ impl SuePaint {
             Dialog::Onion(onion) => onion_ui(ui, onion, theme),
             Dialog::SelectBy(kind, amount) => select_by_ui(ui, kind, amount, theme),
             Dialog::Workspace(name) => workspace_ui(ui, name, theme),
-            Dialog::Workspaces => self.workspaces_ui(ui, theme),
+            Dialog::Workspaces => self.workspaces_ui(ui, cx, theme),
             Dialog::Print(settings, printing) => print_ui(ui, settings, *printing, theme),
             Dialog::Modifiers(chosen) => modifiers_ui(ui, chosen, theme),
             Dialog::CommandBar(bar) => self.command_bar_ui(ui, bar, cx, room, theme),

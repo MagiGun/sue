@@ -1297,10 +1297,20 @@ impl SuePaint {
             self.dock.splitters(ui, &laid, theme);
         }
         if let Some(strip) = laid.strip {
-            self.strip_ui(ui, strip, Side::Right, &laid.icons, cx, theme);
+            let groups = &laid.icon_groups;
+            self.strip_ui(ui, strip, Side::Right, &laid.icons, groups, cx, theme);
         }
         if let Some(strip) = laid.left_strip {
-            self.strip_ui(ui, strip, Side::Left, &laid.left_icons, cx, theme);
+            let groups = &laid.left_icon_groups;
+            self.strip_ui(ui, strip, Side::Left, &laid.left_icons, groups, cx, theme);
+        }
+        // A palette popped out of a strip it is no longer in closes.
+        if let Some(popped) = self.dock.popped {
+            let right = laid.strip.is_some() && laid.icons.contains(&popped);
+            let left = laid.left_strip.is_some() && laid.left_icons.contains(&popped);
+            if !right && !left {
+                self.dock.popped = None;
+            }
         }
         self.side_arrows(ui, &laid, theme);
         self.row_strips(ui, &laid, theme);
@@ -1414,12 +1424,17 @@ impl SuePaint {
     /// An icon strip (the right one, or the left one while the left side
     /// is folded), and the collapsed palette it shows. Icons drag out to
     /// dock or float their palettes.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a strip, its icons and their groups"
+    )]
     fn strip_ui(
         &mut self,
         ui: &mut Ui,
         strip: Rect,
         side: Side,
         icons_shown: &[Palette],
+        groups: &[Vec<Palette>],
         cx: &mut AppletContext<'_>,
         theme: &Theme,
     ) {
@@ -1442,6 +1457,27 @@ impl SuePaint {
                 ),
                 vec2(26.0, 26.0),
             );
+            // Palettes that were tabs of one group keep together as icons,
+            // a line between one group and the next (as Clip Studio Paint
+            // groups them). Which group an icon is in is kept for a test or
+            // a tour to read.
+            let group = groups.iter().position(|group| group.contains(palette));
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(
+                    Id::unique(("sue-paint-strip-group", palette.key())),
+                    group.unwrap_or(usize::MAX),
+                );
+            });
+            if index > 0 {
+                let before = groups
+                    .iter()
+                    .position(|group| group.contains(&icons_shown[index - 1]));
+                if before != group {
+                    let y = rect.top() - 3.0;
+                    ui.painter()
+                        .hline(rect.x_range().expand(2.0), y, theme.hairline());
+                }
+            }
             let open = self.dock.popped == Some(*palette);
             // The grip first, so the icon's own click stays on top of it:
             // egui drops a click when a drag-only widget is above the one
@@ -1483,7 +1519,7 @@ impl SuePaint {
             .popped
             .filter(|palette| icons_shown.contains(palette))
         else {
-            self.dock.popped = None;
+            // Not this strip's (the other strip may show it).
             return;
         };
         // The collapsed palette, beside the strip, until a click elsewhere.
@@ -1741,8 +1777,12 @@ impl SuePaint {
                 let margins = ui.ctx().global_style().spacing.window_margin.sum().y;
                 window.fixed_size(vec2(rect.width(), TAB_STRIP + margins))
             } else {
+                // Never narrower than its header's menu, roll up, dock
+                // again and close buttons, so a narrow palette (the tools,
+                // Tool Sliders) can still be closed by its X.
+                let buttons = Density::Compact.icon_button() * 3.0 + 44.0;
                 window.resizable(true).min_size(vec2(
-                    palette.min_width().min(180.0),
+                    palette.min_width().min(180.0).max(buttons),
                     palette.min_height().min(120.0),
                 ))
             };
@@ -1830,16 +1870,29 @@ impl SuePaint {
         } else {
             area
         };
-        let group = lone_group(palette, shown, header);
+        let mut group = lone_group(palette, shown, header);
+        // A palette without a header of its own (the tools, the command
+        // bar) gets one here, a row above it, so its first buttons are
+        // never under roll up, dock again and close; the row's free part
+        // moves the window.
+        let headless = !palette.headed() && !rolled;
+        if headless {
+            group.body.min.y = (area.top() + TAB_STRIP).min(group.body.max.y);
+        }
         // The header's room for the buttons, as the header itself.
+        let pill_left = if headless { 0.0 } else { header };
         ui.painter().rect_filled(
             Rect::from_min_max(
-                pos2(area.left() + header, area.top()),
+                pos2(area.left() + pill_left, area.top()),
                 pos2(area.right(), area.top() + TAB_STRIP),
             ),
             0.0,
             theme.pill,
         );
+        if headless && self.ready {
+            let grab = Rect::from_min_size(area.min, vec2(header, TAB_STRIP));
+            self.dock.grip(ui, grab, palette, "floating-header");
+        }
         if rolled {
             if self.ready {
                 let grab = title_bar(palette, chrome_rect(&group), None);
@@ -1883,6 +1936,24 @@ impl SuePaint {
                 }
             }
         });
+        // A double click on its title rolls it up or down, as Clip Studio
+        // Paint's floating palettes do (its menu button and its own
+        // buttons left out).
+        let title =
+            Rect::from_min_max(area.min, pos2(area.left() + header, area.top() + TAB_STRIP));
+        let menu = menu_button(palette, chrome_rect(&group));
+        let double = ui.input(|input| {
+            input
+                .pointer
+                .button_double_clicked(egui::PointerButton::Primary)
+                && input
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|at| title.contains(at) && !menu.contains(at))
+        });
+        if double && action == FloatAction::None {
+            action = FloatAction::Roll;
+        }
         action
     }
 

@@ -61,7 +61,7 @@ fn every_menu_command_is_registered() {
 /// Animation Cels and light table palettes, and the 3D drawing figure's
 /// tool property, and Quick Access's palette menu. Named one by one, so a command no one can reach cannot
 /// hide behind a prefix.
-const IN_PALETTES: [&str; 81] = [
+const IN_PALETTES: [&str; 82] = [
     "anim.camera.key",
     "anim.camera.unkey",
     "anim.light_table.reverse",
@@ -92,6 +92,7 @@ const IN_PALETTES: [&str; 81] = [
     "subview.remove",
     "subview.show_bar",
     "subview.show_turn",
+    "info.canvas",
     "info.memory",
     "info.coordinates",
     "info.length",

@@ -61,6 +61,7 @@ mod settings;
 mod settings_screens;
 mod shell;
 mod shell_polish;
+mod tutorial_workspace;
 mod windows;
 mod writer;
 mod writer_bars;

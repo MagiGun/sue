@@ -238,9 +238,9 @@ fn workspace_reset(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>)
 }
 
 /// One registered workspace of Window, Workspace: its palettes come back.
-fn workspace_use(paint: &mut SuePaint, _: &mut AppletContext<'_>, call: Call<'_>) {
+fn workspace_use(paint: &mut SuePaint, cx: &mut AppletContext<'_>, call: Call<'_>) {
     if let Ok(index) = call.arg.parse::<usize>() {
-        paint.use_workspace(index);
+        paint.pick_workspace(index, cx);
     }
 }
 
@@ -259,8 +259,8 @@ fn workspace_use_state(paint: &SuePaint, _: &Facts<'_>, call: Call<'_>) -> ItemS
 }
 
 /// Reload: the workspace in use, as it was registered.
-fn workspace_reload(paint: &mut SuePaint, _: &mut AppletContext<'_>, _: Call<'_>) {
-    paint.reload_workspace();
+fn workspace_reload(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.reload_workspace(cx);
 }
 
 /// Reload works while a registered workspace is in use (not one renamed

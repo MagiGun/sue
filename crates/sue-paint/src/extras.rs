@@ -119,6 +119,29 @@ pub(crate) const AUTO_FILE: &str = "auto_actions.txt";
 /// The file the registered workspaces are kept in, a section each.
 const WORKSPACES_FILE: &str = "workspaces.txt";
 
+/// The word of a workspace's lines that keep keyboard shortcuts.
+const KEYS_WORD: &str = "keys";
+
+/// Its line for the keys of commands that ship without one.
+const SPARSE_WORD: &str = sue_wm::shortcuts::SPARSE_KEY;
+
+/// The word of a workspace's line that keeps the unit of lengths.
+const UNIT_WORD: &str = "unit";
+
+/// Chords as one word of a workspace line: `Ctrl+E or F7`, or `none`.
+fn chords_word(chords: &sue_rice::Keybinds) -> String {
+    if chords.is_empty() {
+        "none".to_owned()
+    } else {
+        chords.to_string()
+    }
+}
+
+/// Chords as [`chords_word`] wrote them.
+fn read_chords(text: &str) -> Option<sue_rice::Keybinds> {
+    text.trim().parse().ok()
+}
+
 /// The file the default workspace is kept in (Use Current Workspace as
 /// Default), one section as `workspaces.txt` has.
 const DEFAULT_FILE: &str = "default_workspace.txt";
@@ -611,14 +634,117 @@ impl SuePaint {
         }
     }
 
+    /// Picks workspace `index`, as Window, Workspace does: its palettes
+    /// ([`Self::use_workspace`]) with the keyboard shortcuts and the unit
+    /// it keeps.
+    pub(crate) fn pick_workspace(&mut self, index: usize, cx: &mut AppletContext<'_>) {
+        self.use_workspace(index);
+        if let Some(lines) = self.workspaces.get(index).map(|space| space.lines.clone()) {
+            self.apply_workspace_settings(&lines, cx);
+        }
+    }
+
     /// Reload: the workspace in use as it was registered.
-    pub(crate) fn reload_workspace(&mut self) {
+    pub(crate) fn reload_workspace(&mut self, cx: &mut AppletContext<'_>) {
         if let Some(index) = self
             .current_workspace
             .as_ref()
             .and_then(|name| self.workspaces.iter().position(|space| space.name == *name))
         {
-            self.use_workspace(index);
+            self.pick_workspace(index, cx);
+        }
+    }
+
+    /// What a registered workspace keeps besides the palettes and the bars,
+    /// as Clip Studio Paint's Register Workspace says it does: the keyboard
+    /// shortcuts (`keys` alone, then `keys <command> <chords>` for each
+    /// shortcut set otherwise than Sue Paint's own, and `keys custom
+    /// <keys>` for the keys given to commands that ship without one) and
+    /// the unit lengths are shown in (`unit mm`).
+    pub(crate) fn workspace_settings_lines(&self, rice: &sue_rice::RiceSchema) -> Vec<String> {
+        let section = crate::studio::KEYS_SECTION;
+        let mut lines = vec![KEYS_WORD.to_owned()];
+        for shortcut in crate::studio::shortcut_table() {
+            let setting = sue_wm::shortcuts::setting(section, shortcut.command);
+            if let Some(now) = rice.get_keybind(&setting)
+                && now != shortcut.chords
+            {
+                lines.push(format!(
+                    "{KEYS_WORD} {} {}",
+                    shortcut.command,
+                    chords_word(&now)
+                ));
+            }
+        }
+        let sparse = sue_wm::shortcuts::SparseKeys::read(rice, section);
+        if !sparse.is_empty() {
+            lines.push(format!("{KEYS_WORD} {SPARSE_WORD} {sparse}"));
+        }
+        lines.push(format!("{UNIT_WORD} {}", self.extras.info.unit.word()));
+        lines
+    }
+
+    /// Sets the keyboard shortcuts and the unit a workspace's `lines` keep
+    /// ([`Self::workspace_settings_lines`]), each a setting change Sue's
+    /// history can take back. A workspace kept without them (registered
+    /// before they were) leaves both as they are.
+    pub(crate) fn apply_workspace_settings(
+        &mut self,
+        lines: &[String],
+        cx: &mut AppletContext<'_>,
+    ) {
+        if lines.iter().any(|line| line == KEYS_WORD) {
+            let section = crate::studio::KEYS_SECTION;
+            let mut kept: Vec<(&str, &str)> = Vec::new();
+            for line in lines {
+                if let Some(rest) = line.strip_prefix(&format!("{KEYS_WORD} "))
+                    && let Some((command, chords)) = rest.split_once(' ')
+                {
+                    kept.push((command, chords));
+                }
+            }
+            let mut edits = Vec::new();
+            for shortcut in crate::studio::shortcut_table() {
+                let setting = sue_wm::shortcuts::setting(section, shortcut.command);
+                let Some(now) = cx.rice().get_keybind(&setting) else {
+                    continue;
+                };
+                let wanted = kept
+                    .iter()
+                    .find(|(command, _)| *command == shortcut.command)
+                    .and_then(|(_, chords)| read_chords(chords))
+                    .unwrap_or_else(|| shortcut.chords.clone());
+                if now != wanted {
+                    edits.push((setting, sue_rice::RiceValue::Keybind(wanted)));
+                }
+            }
+            let sparse_setting = sue_wm::shortcuts::sparse_setting(section);
+            let wanted = kept
+                .iter()
+                .find(|(command, _)| *command == SPARSE_WORD)
+                .map_or("", |(_, keys)| *keys);
+            if cx
+                .rice()
+                .get_str(&sparse_setting)
+                .is_some_and(|now| now != wanted)
+            {
+                edits.push((sparse_setting, sue_rice::RiceValue::Text(wanted.to_owned())));
+            }
+            for (setting, value) in edits {
+                if let Err(error) = cx.edit_rice(sue_rice::SetRiceValue::new(setting, value)) {
+                    cx.fail(tr!("cannot-keep-the-palettes-settings", error = error));
+                    break;
+                }
+            }
+        }
+        let unit = lines
+            .iter()
+            .filter_map(|line| line.strip_prefix(&format!("{UNIT_WORD} ")))
+            .find_map(|word| crate::panels::Unit::from_word(word.trim()));
+        if let Some(unit) = unit
+            && unit != self.extras.info.unit
+        {
+            self.set_info(cx, |info| info.unit = unit);
         }
     }
 

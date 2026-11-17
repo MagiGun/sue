@@ -1111,6 +1111,21 @@ follow [Semantic Versioning](https://semver.org/).
   selection and polyline selections) is a dark line on a light rim, so
   it reads on white paper, black ink and every color between, whatever
   the theme.
+- Sue Paint, workspaces: Register Workspace keeps the keyboard
+  shortcuts and the unit of lengths too, and says what it keeps; picking
+  the workspace again sets them back. Its name field takes the keys at
+  once, and Enter registers.
+- Sue Paint: a double click on a floating palette's title rolls it up
+  and down; a narrow floating palette (the tools, Tool Sliders) keeps
+  its close button inside its window, and a floating tool palette has a
+  header of its own, so its buttons no longer cover the first tools.
+- Sue Paint: folded icons keep the groups of their tabs, with a line
+  between one group and the next, and every icon opens its palette
+  when both sides are folded.
+- Sue Paint, Command Bar and Quick Access: a button let go over the
+  middle of another goes into that button's group.
+- Sue Paint, Information palette: Show Canvas Information in its menu,
+  so the palette can be emptied.
 
 ### Removed
 

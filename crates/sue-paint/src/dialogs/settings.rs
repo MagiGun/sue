@@ -51,12 +51,27 @@ pub(crate) const GESTURES: [(&str, &str); 13] = [
 /// Register Workspace: its name.
 pub(super) fn workspace_ui(ui: &mut Ui, name: &mut String, theme: &Theme) -> Outcome {
     let mut outcome = Outcome::Open;
-    ui.horizontal(|ui| {
-        label(ui, &tr!("name"), theme);
-        ui.text_edit_singleline(name);
-    });
+    let entered = ui
+        .horizontal(|ui| {
+            label(ui, &tr!("name"), theme);
+            let field = ui.text_edit_singleline(name);
+            // The name takes the keys from the start, as a person types it.
+            if !field.has_focus() && ui.memory(|memory| memory.focused().is_none()) {
+                field.request_focus();
+            }
+            // Enter in the field is OK (the field gives up the keyboard as
+            // it takes the key, so either may be seen this frame).
+            (field.lost_focus() || field.has_focus())
+                && ui.input(|input| input.key_pressed(egui::Key::Enter))
+        })
+        .inner;
+    ui.label(
+        RichText::new(tr!("workspace-keeps"))
+            .size(theme.small_size)
+            .color(theme.muted),
+    );
     ok_cancel(ui, &mut outcome);
-    outcome
+    if entered { Outcome::Ok } else { outcome }
 }
 
 /// Keyboard Shortcuts: the keys set now and the pen and mouse gestures.
@@ -115,7 +130,12 @@ pub(super) fn shortcuts_ui(
 
 impl SuePaint {
     /// Manage Workspaces: rename, use or delete each.
-    pub(super) fn workspaces_ui(&mut self, ui: &mut Ui, theme: &Theme) -> Outcome {
+    pub(super) fn workspaces_ui(
+        &mut self,
+        ui: &mut Ui,
+        cx: &mut AppletContext<'_>,
+        theme: &Theme,
+    ) -> Outcome {
         let mut outcome = Outcome::Open;
         let mut chosen = None;
         let mut gone = None;
@@ -142,7 +162,7 @@ impl SuePaint {
                 }
             });
         if let Some(index) = chosen {
-            self.use_workspace(index);
+            self.pick_workspace(index, cx);
         }
         if let Some(index) = gone {
             self.workspaces.remove(index);
@@ -161,7 +181,8 @@ impl SuePaint {
         } else {
             name.trim().to_owned()
         };
-        let space = self.workspace_now(&name);
+        let mut space = self.workspace_now(&name);
+        space.lines.extend(self.workspace_settings_lines(cx.rice()));
         match self.workspaces.iter().position(|known| known.name == name) {
             Some(index) => self.workspaces[index] = space,
             None => self.workspaces.push(space),

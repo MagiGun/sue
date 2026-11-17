@@ -109,6 +109,14 @@ fn sub_view_show_turn_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemSt
 
 // ----- Information -------------------------------------------------------------
 
+fn info_canvas(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
+    paint.set_info(cx, |options| options.canvas = !options.canvas);
+}
+
+fn info_canvas_on(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    flag(paint.extras.info.canvas)
+}
+
 fn info_memory(paint: &mut SuePaint, cx: &mut AppletContext<'_>, _: Call<'_>) {
     paint.set_info(cx, |options| options.memory = !options.memory);
 }
@@ -365,6 +373,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
     )
     .state(sub_view_show_turn_on),
     // Information.
+    c("info.canvas", "info-show-canvas", "info", info_canvas).state(info_canvas_on),
     c("info.memory", "info-show-memory", "info", info_memory).state(info_memory_on),
     c(
         "info.coordinates",
