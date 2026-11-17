@@ -252,9 +252,7 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         "reset-to-initial-settings",
         "reset",
         |paint, _, _| {
-            let entry = paint.toolbox.current_entry();
-            let (kind, index) = (entry.kind, entry.picked());
-            paint.toolbox.reset_sub(kind, index);
+            paint.reset_current_sub();
         },
     )
     .state(resettable),
@@ -320,4 +318,28 @@ pub(super) const COMMANDS: &[Command<SuePaint>] = &[
         },
     )
     .state(|paint, _, _| flag(paint.tool_palettes.headings)),
+    // Sub Tool Detail's Save all settings as default (full guide FGV-12).
+    c(
+        "sub_tool.save_default",
+        "save-all-settings-as-default",
+        "save",
+        |paint, cx, _| {
+            paint.save_sub_tool_default(cx);
+        },
+    )
+    .state(paints),
+    // The Brush shape category's Register (full guide 00:29:47).
+    c(
+        "sub_tool.register_shape",
+        "register-brush-shape",
+        "plus",
+        |paint, cx, _| {
+            paint.register_brush_shape(cx);
+        },
+    )
+    .state(paints),
 ];
+
+fn paints(paint: &SuePaint, _: &Facts<'_>, _: Call<'_>) -> ItemState {
+    super::when(paint.toolbox.tool().paints())
+}

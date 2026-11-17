@@ -23,6 +23,7 @@ mod lines_tones;
 mod modifiers;
 mod new;
 mod pressure;
+mod register;
 mod settings;
 mod story;
 mod text;
@@ -39,8 +40,8 @@ use crate::studio::SuePaint;
 pub(crate) use anim::AnimDialog;
 use anim::{onion_ui, timeline_ui};
 use canvas::{
-    canvas_properties_ui, canvas_ui, convert_ui, grid_ui, material_ui, perspective_ui, print_ui,
-    proof_ui, resolution_ui, shape_3d_ui,
+    canvas_properties_ui, canvas_ui, convert_ui, grid_ui, perspective_ui, print_ui, proof_ui,
+    resolution_ui, shape_3d_ui,
 };
 use colorize::colorize_ui;
 use fill::{gamut_ui, select_by_ui};
@@ -48,6 +49,7 @@ use frame::frame_ui;
 use lines_tones::lines_tones_ui;
 use modifiers::modifiers_ui;
 use pressure::pressure_ui;
+pub(crate) use register::RegisterForm;
 use settings::{shortcuts_ui, workspace_ui};
 use story::{page_settings_ui, story_editor_ui, story_info_ui, webtoon_ui};
 use text::text_ui;
@@ -106,8 +108,8 @@ pub(crate) enum Dialog {
     /// Export Timelapse: the video's size, length and shape, and its
     /// preview.
     Timelapse(Box<TimelapseDialog>),
-    /// Register Material, Image: its name.
-    Material(String),
+    /// Register Material, Image: its name, tags, place and settings.
+    Material(register::RegisterForm),
     /// Expand with round corners (0), Shrink (1), Blur the border of (2),
     /// Outline (3) or Expand with square corners (4) the selection, by
     /// pixels.
@@ -600,7 +602,7 @@ impl SuePaint {
             Dialog::DivideFrame(spec) => crate::comic::divide_frame_ui(ui, spec, theme),
             Dialog::Timeline(fps, length) => timeline_ui(ui, fps, length, theme),
             Dialog::Shape3D(kind) => shape_3d_ui(ui, kind, theme),
-            Dialog::Material(name) => material_ui(ui, name, theme),
+            Dialog::Material(form) => register::register_ui(ui, form, theme),
             Dialog::Timelapse(dialog) => dialog.ui(ui, theme),
             Dialog::Perspective(perspective) => perspective_ui(ui, perspective, theme),
             Dialog::Correction(_, filter, ..) => self.correction_dialog_ui(ui, filter, cx, theme),
@@ -659,7 +661,7 @@ impl SuePaint {
             Dialog::Text(layer, lettering) => self.put_text(cx, layer, &lettering),
             Dialog::Perspective(perspective) => self.perspective_ok(cx, perspective),
             Dialog::Timelapse(dialog) => self.ask_export_timelapse(cx, dialog.export),
-            Dialog::Material(name) => self.register_material(cx, &name),
+            Dialog::Material(form) => self.register_material(cx, &form),
             Dialog::SelectBy(3, width) => self.outline_selection(cx, width),
             Dialog::SelectBy(kind, amount) => self.select_by_ok(kind, amount),
             Dialog::Gamut(tolerance, all) => self.select_gamut(cx, tolerance, all),

@@ -59,29 +59,120 @@ impl SuePaint {
         }
     }
 
-    /// Keeps the current layer as a picture material named `name`.
-    pub(crate) fn register_material(&mut self, cx: &mut AppletContext<'_>, name: &str) {
+    /// Edit, Register Material, Image (full guide 00:45:18, FG-11,
+    /// FGV-48): keeps the current layer as a picture material where the
+    /// form says, with its tags and how it is pasted; as a brush tip
+    /// shape too (so a tip picker finds it, by its tags as well) and as a
+    /// paper brushes can lay, when the form asks.
+    pub(crate) fn register_material(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        form: &crate::dialogs::RegisterForm,
+    ) {
+        use crate::material_props::Keep;
         let (Some(folder), Some(layer)) = (crate::materials::location(cx), self.layer()) else {
             return;
         };
         let Some(raster) = doc::raster(&cx.world.arena, layer) else {
             return;
         };
-        match crate::materials::register(&folder, name, raster) {
-            Ok(_) => {
-                cx.notify(tr!("is-in-the-material-palette", name = name));
-                self.panels.color_set = true;
-                self.set_tab = 2;
-                self.material_kind = self
-                    .material_kinds
-                    .iter()
-                    .position(|kind| kind.id == crate::materials::IMAGE)
-                    .map_or(0, |index| index as u8 + 1);
-                self.hub.materials_changed();
-                self.material_pick = Some(name.to_owned());
+        let name = form.name.trim();
+        let png = match crate::materials::cut_png(raster) {
+            Ok(png) => png,
+            Err(error) => {
+                cx.fail(error);
+                return;
             }
-            Err(error) => cx.fail(error),
+        };
+        let file_name = format!("{}.png", file_safe(name));
+        let write = |keep: Keep| -> Result<std::path::PathBuf, String> {
+            let dir = folder.join(keep.dir());
+            sue_platform::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+            let path = dir.join(&file_name);
+            sue_platform::write_atomic(&path, &png).map_err(|error| error.to_string())?;
+            Ok(path)
+        };
+        let path = match write(form.keep) {
+            Ok(path) => path,
+            Err(error) => {
+                cx.fail(error);
+                return;
+            }
+        };
+        if form.props != crate::material_props::MaterialProps::default()
+            && let Err(error) = form.props.write(&path)
+        {
+            cx.fail(error);
         }
+        let stem = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // As a brush tip: kept with the tips, so it comes back next time,
+        // and a shape every tip picker lists now.
+        let decoded = sue_io::decode_png(&png).ok();
+        let pixels = decoded.as_ref().and_then(|decoded| {
+            Some((
+                decoded.tile.bytes()?,
+                decoded.tile.width(),
+                decoded.tile.height(),
+            ))
+        });
+        if form.brush_tip {
+            if form.keep != Keep::BrushTips
+                && let Err(error) = write(Keep::BrushTips)
+            {
+                cx.fail(error);
+            }
+            if let Some((bytes, w, h)) = pixels
+                && let Some(shape) = crate::brush::TipShape::from_rgba(&stem, bytes, w, h)
+            {
+                crate::brush::register_shape(shape);
+            }
+        }
+        if form.props.paper
+            && let Some((bytes, w, h)) = pixels
+        {
+            crate::material_props::register_paper(&stem, bytes, w, h);
+        }
+        self.hub.materials_changed();
+        // Its tags, on every place it was kept.
+        let tags = crate::materials::tags_of(&form.tags);
+        if !tags.is_empty() {
+            let kinds = self.material_kinds.clone();
+            let library = self.hub.library(&kinds, Some(folder.clone()));
+            let found: Vec<sue_core::EntityId> = library
+                .entries()
+                .into_iter()
+                .filter(|entry| {
+                    entry.material.name == stem
+                        && matches!(
+                            entry.material.kind.as_str(),
+                            crate::materials::IMAGE | crate::materials::TIP
+                        )
+                })
+                .map(|entry| entry.id)
+                .collect();
+            for id in found {
+                if let Err(error) = library.set_tags(id, &tags) {
+                    cx.fail(error);
+                }
+            }
+        }
+        cx.notify(tr!("is-in-the-material-palette", name = name));
+        self.panels.color_set = true;
+        self.set_tab = 2;
+        let kind = if form.keep == Keep::BrushTips {
+            crate::materials::TIP
+        } else {
+            crate::materials::IMAGE
+        };
+        self.material_kind = self
+            .material_kinds
+            .iter()
+            .position(|found| found.id == kind)
+            .map_or(0, |index| index as u8 + 1);
+        self.material_pick = Some(stem);
     }
 
     /// Writes the color sets to Sue Paint's data folder.
@@ -251,5 +342,26 @@ mod tests {
         // A file that says nothing of its brushes still has nothing to add.
         let bare = sue_io::brushes::ImportedBrush::default();
         assert!(downloaded_tip(&bare, None).is_none());
+    }
+}
+
+/// `name` as a file name: the characters no file system takes become
+/// underscores, and an empty name is `material`.
+fn file_safe(name: &str) -> String {
+    let safe: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    if safe.trim_matches(['.', ' ']).is_empty() {
+        "material".to_owned()
+    } else {
+        safe
     }
 }

@@ -54,6 +54,7 @@ pub(crate) const PROPERTY_MENU: &[&str] = &[
     "sub_tool.detail",
     "sub_tool.lock",
     "sub_tool.reset",
+    "sub_tool.save_default",
     "sub_tool.categories",
 ];
 

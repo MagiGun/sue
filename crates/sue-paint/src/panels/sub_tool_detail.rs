@@ -271,6 +271,7 @@ impl SuePaint {
         let footer_rect =
             Rect::from_min_max(pos2(room.left(), room.bottom() - footer + pad), room.max);
         let mut bar = child(&mut inner, footer_rect, "sub-tool-detail-footer");
+        let mut saved = false;
         bar.horizontal(|ui| {
             let label = tr!("show-category-in-tool-property");
             if sue_wm::ui::checkbox(
@@ -286,8 +287,23 @@ impl SuePaint {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 self.sub_tool_header_buttons(ui, theme);
+                // Save all settings as default (FGV-12): what the sub tool
+                // starts as, and what Reset brings back.
+                if self.toolbox.tool().paints() {
+                    let save = tr!("save-all-settings-as-default");
+                    if sue_wm::ui::button("sue-paint-detail-save-default", &save)
+                        .show(ui, theme)
+                        .on_hover_text(tr!("save-all-settings-as-default-hint"))
+                        .clicked()
+                    {
+                        saved = true;
+                    }
+                }
             });
         });
+        if saved {
+            self.save_sub_tool_default(cx);
+        }
     }
 
     /// The buttons that every view of a sub tool's settings ends its
@@ -320,9 +336,7 @@ impl SuePaint {
             .show(ui, theme)
             .clicked()
         {
-            let entry = self.toolbox.current_entry();
-            let (kind, index) = (entry.kind, entry.picked());
-            self.toolbox.reset_sub(kind, index);
+            self.reset_current_sub();
         }
     }
 
@@ -330,7 +344,7 @@ impl SuePaint {
     /// has something to go back to.
     pub(crate) fn can_reset_current(&self) -> bool {
         let sub = self.toolbox.current();
-        crate::tools::SubTool::builtin(sub.tool, &sub.name).is_some()
+        crate::tools::SubTool::builtin(sub.tool, &sub.name).is_some() || self.has_saved_default()
     }
 }
 
@@ -345,5 +359,6 @@ impl SuePaint {
     ) {
         self.naming_dialog(ctx, theme);
         self.keep_tools(cx);
+        self.brush_rows_frame(cx);
     }
 }

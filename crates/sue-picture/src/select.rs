@@ -391,6 +391,50 @@ impl Selection {
         }
     }
 
+    /// Paints a dab of the Selection pen into the selection, or out of it
+    /// (Erase selection): full in the middle as far as `hardness` (0 to
+    /// 1) of `radius` says, then falling off softly to the rim, and at
+    /// most `density` (0 to 1) selected. A hard dab at full density is
+    /// [`Self::disc`].
+    pub fn dab(&mut self, center: [f32; 2], radius: f32, hardness: f32, density: f32, add: bool) {
+        let hardness = hardness.clamp(0.0, 1.0);
+        let density = density.clamp(0.0, 1.0);
+        if hardness >= 1.0 && density >= 1.0 {
+            self.disc(center, radius, add);
+            return;
+        }
+        let reach = radius + 1.0;
+        let clamp = |value: f32, top: u32| (value.max(0.0) as u32).min(top);
+        let (x0, x1) = (
+            clamp(center[0] - reach, self.width),
+            clamp(center[0] + reach + 1.0, self.width),
+        );
+        let (y0, y1) = (
+            clamp(center[1] - reach, self.height),
+            clamp(center[1] + reach + 1.0, self.height),
+        );
+        let inner = radius * hardness;
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let away = (x as f32 + 0.5 - center[0]).hypot(y as f32 + 0.5 - center[1]);
+                let edge = (radius - away + 0.5).clamp(0.0, 1.0);
+                let fall = if away <= inner {
+                    1.0
+                } else {
+                    let t = ((away - inner) / (radius - inner).max(0.5)).clamp(0.0, 1.0);
+                    1.0 - t * t * (3.0 - 2.0 * t)
+                };
+                let cover = (edge * fall * density * 255.0).round() as u8;
+                let at = (y * self.width + x) as usize;
+                self.mask[at] = if add {
+                    self.mask[at].max(cover)
+                } else {
+                    ((u16::from(self.mask[at]) * (255 - u16::from(cover)) + 127) / 255) as u8
+                };
+            }
+        }
+    }
+
     /// The pixels of `pixels` (RGBA8, `width` by `height`) within
     /// `tolerance` (0 to 1) of `color` (Select Color Gamut).
     #[must_use]
@@ -612,6 +656,27 @@ fn widest(values: &[u8], lanes: usize, length: usize, step: [usize; 2], reach: u
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_soft_dab_is_full_in_its_middle_and_never_past_its_density() {
+        let mut soft = Selection::new(40, 40);
+        soft.dab([20.0, 20.0], 10.0, 0.2, 0.5, true);
+        let at = |s: &Selection, x: u32| s.mask()[(20 * 40 + x) as usize];
+        assert_eq!(at(&soft, 20), 128, "half selected in the middle");
+        assert!(
+            at(&soft, 27) > 0 && at(&soft, 27) < at(&soft, 22),
+            "falls off"
+        );
+        assert_eq!(at(&soft, 31), 0, "nothing past the rim");
+        // Laid again it stays at its density.
+        soft.dab([20.0, 20.0], 10.0, 0.2, 0.5, true);
+        assert_eq!(at(&soft, 20), 128);
+        let mut hard = Selection::new(40, 40);
+        hard.dab([20.0, 20.0], 10.0, 1.0, 1.0, true);
+        let mut disc = Selection::new(40, 40);
+        disc.disc([20.0, 20.0], 10.0, true);
+        assert_eq!(hard.mask(), disc.mask());
+    }
 
     #[test]
     fn selections_grow_shrink_soften_paint_and_pick_colors() {
