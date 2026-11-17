@@ -1139,17 +1139,15 @@ impl Shell {
             room.max.y = top.max(room.top());
         }
         // A studio may keep the notices off its work (Sue Paint: on the
-        // canvas's view, never on a timeline under it), while that room
-        // is big enough to hold one.
+        // canvas's view, never on a timeline or a palette docked under
+        // it). A small room keeps them too: a notice narrows to it, and
+        // never falls back over the work around it.
         if !self.hub_open()
             && let Some((id, _)) = &page
             && let Some(clear) = io.applets.get(id).and_then(|applet| applet.notice_room())
         {
             let inside = clear.intersect(room);
-            // Half a narrow room across (a notice's width), and half
-            // that high (a couple of notices).
-            let least = crate::ui::toast::NARROW / 2.0;
-            if inside.width() >= least && inside.height() >= least / 2.0 {
+            if inside.is_positive() {
                 room = inside;
             }
         }
