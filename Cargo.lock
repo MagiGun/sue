@@ -3909,6 +3909,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sue-ve"
+version = "0.0.82"
+dependencies = [
+ "egui",
+ "sue-core",
+ "sue-io",
+ "sue-lang",
+ "sue-model",
+ "sue-picture",
+ "sue-platform",
+ "sue-rice",
+ "sue-type",
+ "sue-wm",
+]
+
+[[package]]
 name = "sue-wayland"
 version = "0.0.82"
 dependencies = [
