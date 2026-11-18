@@ -327,18 +327,7 @@ pub(crate) fn source_monitor(
             );
         }
     } else {
-        let layer = Layer {
-            track: 0,
-            clip: 0,
-            source: item,
-            kind,
-            source_time: studio.source.clock.position,
-            opacity: 1.0,
-            scale: 1.0,
-            offset: [0.0, 0.0],
-            rotation: 0.0,
-            tint: None,
-        };
+        let layer = Layer::new(item, kind, studio.source.clock.position);
         let need = if studio.source.clock.playing {
             Need::Ahead(8)
         } else {

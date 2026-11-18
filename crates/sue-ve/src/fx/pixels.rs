@@ -85,7 +85,12 @@ fn threads() -> usize {
 /// Runs `work` over horizontal strips of `rows` rows of `row_bytes`
 /// bytes each, in parallel. `work` gets the strip's first row and its
 /// bytes.
-pub fn strips(bytes: &mut [u8], row_bytes: usize, rows: usize, work: &(dyn Fn(usize, &mut [u8]) + Sync)) {
+pub fn strips(
+    bytes: &mut [u8],
+    row_bytes: usize,
+    rows: usize,
+    work: &(dyn Fn(usize, &mut [u8]) + Sync),
+) {
     if rows == 0 || row_bytes == 0 {
         return;
     }
@@ -202,7 +207,14 @@ pub fn blur_plane(values: &[f32], width: usize, height: usize, radius: f32) -> V
     a
 }
 
-fn box_lines(source: &[f32], target: &mut [f32], width: usize, height: usize, radius: usize, rows: bool) {
+fn box_lines(
+    source: &[f32],
+    target: &mut [f32],
+    width: usize,
+    height: usize,
+    radius: usize,
+    rows: bool,
+) {
     let span = (radius * 2 + 1) as f32;
     if rows {
         strips_f32(target, width, height, &|first, part| {
@@ -248,7 +260,13 @@ fn box_lines(source: &[f32], target: &mut [f32], width: usize, height: usize, ra
     }
 }
 
-fn box_line(input: &[f32], out: &mut [f32], radius: usize, span: f32, get: impl Fn(&[f32], usize) -> f32) {
+fn box_line(
+    input: &[f32],
+    out: &mut [f32],
+    radius: usize,
+    span: f32,
+    get: impl Fn(&[f32], usize) -> f32,
+) {
     let length = input.len();
     if length == 0 {
         return;
@@ -265,7 +283,12 @@ fn box_line(input: &[f32], out: &mut [f32], radius: usize, span: f32, get: impl 
     }
 }
 
-fn strips_f32(values: &mut [f32], width: usize, height: usize, work: &(dyn Fn(usize, &mut [f32]) + Sync)) {
+fn strips_f32(
+    values: &mut [f32],
+    width: usize,
+    height: usize,
+    work: &(dyn Fn(usize, &mut [f32]) + Sync),
+) {
     let parts = threads().min(height.div_ceil(16)).max(1);
     let each = height.div_ceil(parts);
     std::thread::scope(|scope| {
@@ -281,7 +304,10 @@ fn strips_f32(values: &mut [f32], width: usize, height: usize, work: &(dyn Fn(us
 #[must_use]
 pub fn distance(inside: &[bool], width: usize, height: usize) -> Vec<f32> {
     const FAR: f32 = 1e12;
-    let mut grid: Vec<f32> = inside.iter().map(|on| if *on { 0.0 } else { FAR }).collect();
+    let mut grid: Vec<f32> = inside
+        .iter()
+        .map(|on| if *on { 0.0 } else { FAR })
+        .collect();
     let mut line = Vec::new();
     let mut out = Vec::new();
     // Columns, then rows.
@@ -436,7 +462,8 @@ pub fn apply(kind: &str, params: &Params, image: &mut Image, ctx: &Ctx) {
         }
         "color.balance" => {
             let shift = |range: &str| {
-                ["red", "green", "blue"].map(|channel| params.f(&format!("{range}_{channel}")) / 100.0)
+                ["red", "green", "blue"]
+                    .map(|channel| params.f(&format!("{range}_{channel}")) / 100.0)
             };
             run_filter(
                 &Filter::ColorBalance {
@@ -461,7 +488,12 @@ pub fn apply(kind: &str, params: &Params, image: &mut Image, ctx: &Ctx) {
                 image,
             );
         }
-        "stylize.stroke" => stroke(image, px("width"), params.f("opacity") / 100.0, params.rgb("color")),
+        "stylize.stroke" => stroke(
+            image,
+            px("width"),
+            params.f("opacity") / 100.0,
+            params.rgb("color"),
+        ),
         "stylize.vignette" => vignette(image, params),
         "stylize.grain" => grain(image, params, ctx),
         "stylize.mosaic" => mosaic(image, px("size").round().max(1.0) as usize),
@@ -478,7 +510,9 @@ pub fn apply(kind: &str, params: &Params, image: &mut Image, ctx: &Ctx) {
 fn glow(image: &mut Image, params: &Params, ctx: &Ctx) {
     let threshold = (params.f("threshold") / 100.0).clamp(0.0, 0.99);
     let strength = params.f("strength") / 100.0;
-    let tint = params.rgb("color").map(|channel| f32::from(channel) / 255.0);
+    let tint = params
+        .rgb("color")
+        .map(|channel| f32::from(channel) / 255.0);
     let mut bright = Image::new(image.width, image.height, image.rgba.clone());
     for pixel in bright.rgba.as_chunks_mut::<4>().0 {
         let rgb = [pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0);
@@ -517,7 +551,13 @@ fn stroke(image: &mut Image, width: f32, opacity: f32, rgb: [u8; 3]) {
         return;
     }
     let (w, h) = (image.width as usize, image.height as usize);
-    let inside: Vec<bool> = image.rgba.as_chunks::<4>().0.iter().map(|p| p[3] >= 128).collect();
+    let inside: Vec<bool> = image
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|p| p[3] >= 128)
+        .collect();
     let far = distance(&inside, w, h);
     for (pixel, d) in image.rgba.as_chunks_mut::<4>().0.iter_mut().zip(far) {
         let cover = (width - d + 0.5).clamp(0.0, 1.0) * opacity;
@@ -561,17 +601,25 @@ fn vignette(image: &mut Image, params: &Params) {
     let width = image.width as usize;
     let target = if amount > 0.0 { 0.0 } else { 1.0 };
     let amount = amount.abs();
-    strips(&mut image.rgba, width * 4, image.height as usize, &|first, part| {
-        for (index, pixel) in part.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let (x, y) = ((index % width) as f32 + 0.5, (first + index / width) as f32 + 0.5);
-            let d = (((x - w / 2.0) / rx).powi(2) + ((y - h / 2.0) / ry).powi(2)).sqrt();
-            let edge = smoothstep(size, size + feather, d) * amount;
-            for channel in pixel.iter_mut().take(3) {
-                let value = f32::from(*channel) / 255.0;
-                *channel = ((value + (target - value) * edge) * 255.0).round() as u8;
+    strips(
+        &mut image.rgba,
+        width * 4,
+        image.height as usize,
+        &|first, part| {
+            for (index, pixel) in part.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                let (x, y) = (
+                    (index % width) as f32 + 0.5,
+                    (first + index / width) as f32 + 0.5,
+                );
+                let d = (((x - w / 2.0) / rx).powi(2) + ((y - h / 2.0) / ry).powi(2)).sqrt();
+                let edge = smoothstep(size, size + feather, d) * amount;
+                for channel in pixel.iter_mut().take(3) {
+                    let value = f32::from(*channel) / 255.0;
+                    *channel = ((value + (target - value) * edge) * 255.0).round() as u8;
+                }
             }
-        }
-    });
+        },
+    );
 }
 
 /// Film grain: noise in cells `size` source pixels across, the same
@@ -589,22 +637,32 @@ fn grain(image: &mut Image, params: &Params, ctx: &Ctx) {
         0
     };
     let width = image.width as usize;
-    strips(&mut image.rgba, width * 4, image.height as usize, &|first, part| {
-        for (index, pixel) in part.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let x = ((index % width) as f32 / cell).floor() as i64;
-            let y = ((first + index / width) as f32 / cell).floor() as i64;
-            let noise = |salt: u64| {
-                (hash(x, y, seed * 4 + salt) + hash(x + 7919, y - 104_729, seed * 4 + salt) - 1.0)
-                    * amount
-                    * 0.5
-            };
-            let gray = noise(0);
-            for (channel, value) in pixel.iter_mut().take(3).enumerate() {
-                let n = if colored { noise(channel as u64 + 1) } else { gray };
-                *value = (f32::from(*value) + n * 255.0).round().clamp(0.0, 255.0) as u8;
+    strips(
+        &mut image.rgba,
+        width * 4,
+        image.height as usize,
+        &|first, part| {
+            for (index, pixel) in part.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                let x = ((index % width) as f32 / cell).floor() as i64;
+                let y = ((first + index / width) as f32 / cell).floor() as i64;
+                let noise = |salt: u64| {
+                    (hash(x, y, seed * 4 + salt) + hash(x + 7919, y - 104_729, seed * 4 + salt)
+                        - 1.0)
+                        * amount
+                        * 0.5
+                };
+                let gray = noise(0);
+                for (channel, value) in pixel.iter_mut().take(3).enumerate() {
+                    let n = if colored {
+                        noise(channel as u64 + 1)
+                    } else {
+                        gray
+                    };
+                    *value = (f32::from(*value) + n * 255.0).round().clamp(0.0, 255.0) as u8;
+                }
             }
-        }
-    });
+        },
+    );
 }
 
 /// Square blocks of their average, aligned to the picture's corner.
@@ -667,26 +725,31 @@ fn chroma_key(image: &mut Image, params: &Params) {
         .max_by(|a, b| key[*a].total_cmp(&key[*b]))
         .unwrap_or(1);
     let width = image.width as usize;
-    strips(&mut image.rgba, width * 4, image.height as usize, &|_, part| {
-        for pixel in part.as_chunks_mut::<4>().0 {
-            let mut rgb = [pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0);
-            let c = chroma(rgb);
-            let distance = (c[0] - key_chroma[0]).hypot(c[1] - key_chroma[1]);
-            let keep = smoothstep(tolerance, tolerance + softness.max(1e-4), distance);
-            if spill > 0.0 {
-                let others = (0..3)
-                    .filter(|channel| *channel != dominant)
-                    .map(|channel| rgb[channel])
-                    .fold(0.0_f32, f32::max);
-                let excess = (rgb[dominant] - others).max(0.0);
-                rgb[dominant] -= excess * spill;
+    strips(
+        &mut image.rgba,
+        width * 4,
+        image.height as usize,
+        &|_, part| {
+            for pixel in part.as_chunks_mut::<4>().0 {
+                let mut rgb = [pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0);
+                let c = chroma(rgb);
+                let distance = (c[0] - key_chroma[0]).hypot(c[1] - key_chroma[1]);
+                let keep = smoothstep(tolerance, tolerance + softness.max(1e-4), distance);
+                if spill > 0.0 {
+                    let others = (0..3)
+                        .filter(|channel| *channel != dominant)
+                        .map(|channel| rgb[channel])
+                        .fold(0.0_f32, f32::max);
+                    let excess = (rgb[dominant] - others).max(0.0);
+                    rgb[dominant] -= excess * spill;
+                }
+                for channel in 0..3 {
+                    pixel[channel] = (rgb[channel] * 255.0).round().clamp(0.0, 255.0) as u8;
+                }
+                pixel[3] = (f32::from(pixel[3]) * keep).round() as u8;
             }
-            for channel in 0..3 {
-                pixel[channel] = (rgb[channel] * 255.0).round().clamp(0.0, 255.0) as u8;
-            }
-            pixel[3] = (f32::from(pixel[3]) * keep).round() as u8;
-        }
-    });
+        },
+    );
 }
 
 /// Keys out the dark (or bright) parts by their brightness, softly.
@@ -695,17 +758,22 @@ fn luma_key(image: &mut Image, params: &Params) {
     let softness = (params.f("softness") / 100.0).max(1e-4);
     let bright = params.pick("side") == 1;
     let width = image.width as usize;
-    strips(&mut image.rgba, width * 4, image.height as usize, &|_, part| {
-        for pixel in part.as_chunks_mut::<4>().0 {
-            let y = luma([pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0));
-            let keep = if bright {
-                1.0 - smoothstep(1.0 - threshold - softness, 1.0 - threshold, y)
-            } else {
-                smoothstep(threshold, threshold + softness, y)
-            };
-            pixel[3] = (f32::from(pixel[3]) * keep).round() as u8;
-        }
-    });
+    strips(
+        &mut image.rgba,
+        width * 4,
+        image.height as usize,
+        &|_, part| {
+            for pixel in part.as_chunks_mut::<4>().0 {
+                let y = luma([pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0));
+                let keep = if bright {
+                    1.0 - smoothstep(1.0 - threshold - softness, 1.0 - threshold, y)
+                } else {
+                    smoothstep(threshold, threshold + softness, y)
+                };
+                pixel[3] = (f32::from(pixel[3]) * keep).round() as u8;
+            }
+        },
+    );
 }
 
 /// Clears the edges, each a share of the picture, with a soft edge.
@@ -724,13 +792,21 @@ fn crop(image: &mut Image, params: &Params, ctx: &Ctx) {
             (inside / feather).clamp(0.0, 1.0)
         }
     };
-    strips(&mut image.rgba, width * 4, image.height as usize, &|first, part| {
-        for (index, pixel) in part.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let (x, y) = ((index % width) as f32 + 0.5, (first + index / width) as f32 + 0.5);
-            let inside = (x - left).min(right - x).min(y - top).min(bottom - y);
-            pixel[3] = (f32::from(pixel[3]) * ramp(inside)).round() as u8;
-        }
-    });
+    strips(
+        &mut image.rgba,
+        width * 4,
+        image.height as usize,
+        &|first, part| {
+            for (index, pixel) in part.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                let (x, y) = (
+                    (index % width) as f32 + 0.5,
+                    (first + index / width) as f32 + 0.5,
+                );
+                let inside = (x - left).min(right - x).min(y - top).min(bottom - y);
+                pixel[3] = (f32::from(pixel[3]) * ramp(inside)).round() as u8;
+            }
+        },
+    );
 }
 
 /// Mirrors one half onto the other, or flips the whole picture.
@@ -775,10 +851,15 @@ mod tests {
         let mut rgba = Vec::with_capacity((width * height * 4) as usize);
         for y in 0..height {
             for x in 0..width {
-                let bright = (width / 3..2 * width / 3).contains(&x) && (height / 3..2 * height / 3).contains(&y);
+                let bright = (width / 3..2 * width / 3).contains(&x)
+                    && (height / 3..2 * height / 3).contains(&y);
                 let r = (x * 255 / width.max(1)) as u8;
                 let g = (y * 255 / height.max(1)) as u8;
-                let b = if bright { 250 } else { ((x + y) % 64) as u8 * 3 };
+                let b = if bright {
+                    250
+                } else {
+                    ((x + y) % 64) as u8 * 3
+                };
                 rgba.extend_from_slice(&[r, g, b, if x < 3 { 128 } else { 255 }]);
             }
         }
@@ -844,7 +925,9 @@ mod tests {
     #[test]
     fn the_plane_blur_keeps_flat_areas_and_spreads_an_edge() {
         let (w, h) = (40, 30);
-        let plane: Vec<f32> = (0..w * h).map(|i| if i % w < 20 { 1.0 } else { 0.0 }).collect();
+        let plane: Vec<f32> = (0..w * h)
+            .map(|i| if i % w < 20 { 1.0 } else { 0.0 })
+            .collect();
         let soft = blur_plane(&plane, w, h, 4.0);
         assert!((soft[15 * w + 2] - 1.0).abs() < 1e-5);
         assert!(soft[15 * w + 37] < 1e-5);

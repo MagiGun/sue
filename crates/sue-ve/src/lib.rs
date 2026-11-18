@@ -10,7 +10,9 @@ macro_rules! tr {
     ($($arg:tt)*) => { sue_lang::tr!("ve", $($arg)*) };
 }
 
+pub mod audio;
 mod commands;
+pub mod compose;
 pub mod edit;
 pub mod export;
 pub mod fx;

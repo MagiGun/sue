@@ -16,11 +16,12 @@ use std::time::Instant;
 use sue_core::{Arena, EntityId, JobContext, PCMFloat1D, PixelFormat, RasterTile2D, Rate, Time};
 use sue_model::Sequence;
 
+use crate::compose::{Composer, Options};
 use crate::media::frames::{Movie, Variant, VideoFrame};
 use crate::media::sound::{MIX_RATE, Sound};
 use crate::media::{Quality, import, sound, ticks};
 use crate::model::{self, SourceKind};
-use crate::render::{self, Placed};
+use crate::render::{self, Layer};
 
 /// What an export writes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,16 +194,152 @@ impl Reader {
     }
 }
 
+/// The sources of one renderer: decoders reading movies straight
+/// through, and the pictures drawn from the arena.
+struct Sources {
+    readers: HashMap<EntityId, Option<Reader>>,
+    generated: HashMap<(EntityId, i64), Arc<VideoFrame>>,
+    hardware: bool,
+}
+
+impl Sources {
+    fn reader(
+        &mut self,
+        arena: &Arena,
+        sequence: &Sequence,
+        size: (u32, u32),
+        id: EntityId,
+    ) -> Option<&mut Reader> {
+        if !self.readers.contains_key(&id) {
+            let hardware = self.hardware;
+            let reader = (|| {
+                let entity = arena.get_by_id(id).ok()?;
+                let natural = model::size_of(arena, id)?;
+                let rate = model::rate_of(entity)?;
+                let path = import::file_of(entity)?;
+                // Decoded no larger than the output needs, unless a clip of
+                // it is scaled up.
+                let frame = model::frame_size(sequence);
+                let output = f64::from(size.0) / f64::from(frame.0.max(1));
+                let fit = (f64::from(frame.0) / f64::from(natural.0))
+                    .min(f64::from(frame.1) / f64::from(natural.1))
+                    * output;
+                let grown = sequence
+                    .tracks
+                    .iter()
+                    .flat_map(|track| track.clips())
+                    .filter(|clip| clip.source == id)
+                    .any(|clip| clip.value_at(model::key::SCALE, clip.start, 1.0) > 1.0)
+                    || clip_keys_scale(sequence, id);
+                let scale = if grown { output.max(fit) } else { fit }.min(1.0);
+                let even = |value: f64| ((value.round() as u32).max(34) + 1) & !1;
+                let decode = (
+                    even(f64::from(natural.0) * scale),
+                    even(f64::from(natural.1) * scale),
+                );
+                let decoder =
+                    sue_platform::video::VideoDecoder::open(&path, Some(decode), hardware).ok()?;
+                let movie = Movie {
+                    id,
+                    path,
+                    rate: (rate.numerator(), rate.denominator()),
+                    size: decoder.size(),
+                    variant: Variant {
+                        size: 0,
+                        proxy: false,
+                    },
+                    hardware,
+                };
+                Some(Reader {
+                    decoder,
+                    movie,
+                    last: None,
+                })
+            })();
+            self.readers.insert(id, reader);
+        }
+        self.readers.get_mut(&id).and_then(Option::as_mut)
+    }
+
+    /// The pixels of `layer`'s source.
+    fn picture(
+        &mut self,
+        arena: &Arena,
+        sequence: &Sequence,
+        size: (u32, u32),
+        layer: &Layer,
+    ) -> Option<Arc<VideoFrame>> {
+        match layer.kind {
+            SourceKind::Movie => {
+                self.reader(arena, sequence, size, layer.source)
+                    .and_then(|reader| {
+                        let index = reader.movie.index_at(ticks(layer.source_time)).max(0);
+                        reader.frame(index)
+                    })
+            }
+            _ => {
+                let index = match layer.kind {
+                    SourceKind::Picture => sue_picture::anim::timeline(arena, layer.source)
+                        .map_or(0, |timeline| layer.source_time.frame(timeline.rate)),
+                    SourceKind::ImageSequence => arena
+                        .get_by_id(layer.source)
+                        .ok()
+                        .and_then(model::rate_of)
+                        .map_or(0, |rate| layer.source_time.frame(rate)),
+                    _ => 0,
+                };
+                let key = (layer.source, index);
+                if !self.generated.contains_key(&key) {
+                    let made = if layer.kind == SourceKind::ImageSequence {
+                        arena
+                            .get_by_id(layer.source)
+                            .ok()
+                            .and_then(|entity| import::sequence_frame(entity, index))
+                            .and_then(|path| sue_platform::fs::read(path).ok())
+                            .and_then(|bytes| import::read_picture(&bytes).ok())
+                            .and_then(|tile| {
+                                render::rgba_of(&tile).map(|rgba| {
+                                    VideoFrame::new(tile.width(), tile.height(), rgba, index)
+                                })
+                            })
+                    } else {
+                        let unit = size.0 as f32 / model::frame_size(sequence).0.max(1) as f32;
+                        render::generated(
+                            arena,
+                            layer.source,
+                            &layer.kind,
+                            layer.source_time,
+                            size,
+                            unit,
+                        )
+                    };
+                    if let Some(made) = made {
+                        // Stills and titles stay; frames of animations and
+                        // image runs are kept a few at a time.
+                        if self.generated.len() > 64 {
+                            self.generated.clear();
+                        }
+                        self.generated.insert(key, Arc::new(made));
+                    }
+                }
+                self.generated.get(&key).cloned()
+            }
+        }
+    }
+}
+
 /// Draws the frames and mixes the sound of one sequence, on whatever
-/// thread it runs on.
+/// thread it runs on: the export's, and the program monitor's when the
+/// frames need the processor (the same drawing, so the preview is the
+/// export).
 pub struct Renderer {
     arena: Arena,
     sequence: Sequence,
     size: (u32, u32),
-    readers: HashMap<EntityId, Option<Reader>>,
-    generated: HashMap<(EntityId, i64), Arc<VideoFrame>>,
+    sources: Sources,
+    composer: Composer,
     sounds: HashMap<EntityId, Option<Arc<Sound>>>,
-    hardware: bool,
+    mixer: crate::mix::Mixer,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -231,137 +368,55 @@ impl Renderer {
             arena,
             sequence,
             size,
-            readers: HashMap::new(),
-            generated: HashMap::new(),
+            sources: Sources {
+                readers: HashMap::new(),
+                generated: HashMap::new(),
+                hardware,
+            },
+            composer: Composer::default(),
             sounds: HashMap::new(),
-            hardware,
+            mixer: crate::mix::Mixer::default(),
         })
     }
 
-    fn kind(&self, id: EntityId) -> SourceKind {
-        self.arena
-            .get_by_id(id)
-            .map_or(SourceKind::Unknown, SourceKind::of)
+    /// The sequence it draws.
+    #[must_use]
+    pub fn sequence(&self) -> &Sequence {
+        &self.sequence
     }
 
-    fn reader(&mut self, id: EntityId) -> Option<&mut Reader> {
-        if !self.readers.contains_key(&id) {
-            let reader = (|| {
-                let entity = self.arena.get_by_id(id).ok()?;
-                let size = model::size_of(&self.arena, id)?;
-                let rate = model::rate_of(entity)?;
-                let path = import::file_of(entity)?;
-                // Decoded no larger than the output needs, unless a clip of
-                // it is scaled up.
-                let fit = (f64::from(self.size.0) / f64::from(size.0))
-                    .min(f64::from(self.size.1) / f64::from(size.1))
-                    .min(1.0);
-                let grown = self
-                    .sequence
-                    .tracks
-                    .iter()
-                    .flat_map(|track| track.clips())
-                    .filter(|clip| clip.source == id)
-                    .any(|clip| clip.value_at(model::key::SCALE, clip.start, 1.0) > 1.0)
-                    || clip_keys_scale(&self.sequence, id);
-                let scale = if grown { 1.0 } else { fit };
-                let even = |value: f64| ((value.round() as u32).max(34) + 1) & !1;
-                let decode = (
-                    even(f64::from(size.0) * scale),
-                    even(f64::from(size.1) * scale),
-                );
-                let decoder =
-                    sue_platform::video::VideoDecoder::open(&path, Some(decode), self.hardware)
-                        .ok()?;
-                let movie = Movie {
-                    id,
-                    path,
-                    rate: (rate.numerator(), rate.denominator()),
-                    size: decoder.size(),
-                    variant: Variant {
-                        size: 0,
-                        proxy: false,
-                    },
-                    hardware: self.hardware,
-                };
-                Some(Reader {
-                    decoder,
-                    movie,
-                    last: None,
-                })
-            })();
-            self.readers.insert(id, reader);
-        }
-        self.readers.get_mut(&id).and_then(Option::as_mut)
+    /// The arena it reads.
+    #[must_use]
+    pub fn arena(&self) -> &Arena {
+        &self.arena
     }
 
     /// The picture at sequence time `time`, opaque RGBA at the size.
     pub fn frame(&mut self, time: Time) -> Vec<u8> {
-        let layers = {
-            let kind = |id: EntityId| self.kind(id);
-            render::layers_at(&self.sequence, time, &kind)
-        };
-        let mut placed = Vec::new();
-        for layer in layers {
-            let image = match layer.kind {
-                SourceKind::Movie => self.reader(layer.source).and_then(|reader| {
-                    let index = reader.movie.index_at(ticks(layer.source_time)).max(0);
-                    reader.frame(index)
-                }),
-                _ => {
-                    let index = match layer.kind {
-                        SourceKind::Picture => {
-                            sue_picture::anim::timeline(&self.arena, layer.source)
-                                .map_or(0, |sequence| layer.source_time.frame(sequence.rate))
-                        }
-                        SourceKind::ImageSequence => self
-                            .arena
-                            .get_by_id(layer.source)
-                            .ok()
-                            .and_then(model::rate_of)
-                            .map_or(0, |rate| layer.source_time.frame(rate)),
-                        _ => 0,
-                    };
-                    let key = (layer.source, index);
-                    if !self.generated.contains_key(&key) {
-                        let made = if layer.kind == SourceKind::ImageSequence {
-                            self.arena
-                                .get_by_id(layer.source)
-                                .ok()
-                                .and_then(|entity| import::sequence_frame(entity, index))
-                                .and_then(|path| sue_platform::fs::read(path).ok())
-                                .and_then(|bytes| import::read_picture(&bytes).ok())
-                                .and_then(|tile| {
-                                    render::rgba_of(&tile).map(|rgba| {
-                                        VideoFrame::new(tile.width(), tile.height(), rgba, index)
-                                    })
-                                })
-                        } else {
-                            render::generated(
-                                &self.arena,
-                                layer.source,
-                                &layer.kind,
-                                layer.source_time,
-                                self.size,
-                            )
-                        };
-                        if let Some(made) = made {
-                            // Stills and titles stay; frames of animations and
-                            // image runs are kept a few at a time.
-                            if self.generated.len() > 64 {
-                                self.generated.clear();
-                            }
-                            self.generated.insert(key, Arc::new(made));
-                        }
-                    }
-                    self.generated.get(&key).cloned()
-                }
-            };
-            if let Some(image) = image {
-                placed.push(Placed { layer, image });
-            }
-        }
-        render::composite(self.size, &placed)
+        self.frame_with(time, Options::default())
+    }
+
+    /// The picture at sequence time `time` drawn with `options`.
+    pub fn frame_with(&mut self, time: Time, options: Options) -> Vec<u8> {
+        let Self {
+            arena,
+            sequence,
+            size,
+            sources,
+            composer,
+            ..
+        } = self;
+        let size = *size;
+        let (arena, sequence) = (&*arena, &*sequence);
+        crate::compose::frame(
+            arena,
+            sequence,
+            time,
+            size,
+            options,
+            &mut |layer: &Layer| sources.picture(arena, sequence, size, layer),
+            composer,
+        )
     }
 
     fn sound(&mut self, id: EntityId) -> Option<Arc<Sound>> {
@@ -391,14 +446,16 @@ impl Renderer {
     }
 
     /// Mixes `frames` frames of sound from sequence frame `first` (at the
-    /// mixing rate).
+    /// mixing rate), with the tracks' effects carried on from the block
+    /// before when it follows on.
     #[must_use]
-    pub fn sound_block(&self, first: i64, frames: usize) -> Vec<f32> {
+    pub fn sound_block(&mut self, first: i64, frames: usize) -> Vec<f32> {
         let mut out = vec![0.0; frames * 2];
         let sounds = &self.sounds;
-        crate::mix::mix(&self.sequence, first, MIX_RATE, &mut out, &|id| {
-            sounds.get(&id).cloned().flatten()
-        });
+        self.mixer
+            .mix(&self.sequence, first, MIX_RATE, &mut out, &|id| {
+                sounds.get(&id).cloned().flatten()
+            });
         out
     }
 }

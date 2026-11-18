@@ -36,10 +36,9 @@ use windows::Win32::Media::MediaFoundation::{
     MF_SOURCE_READER_ALL_STREAMS, MF_SOURCE_READER_D3D_MANAGER,
     MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
     MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READER_MEDIASOURCE,
-    MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED, MF_SOURCE_READERF_ENDOFSTREAM, MF2DBuffer_LockFlags_Read,
-    MFAudioFormat_Float,
-    MFCreateDXGIDeviceManager, MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video,
-    MFVideoFormat_RGB32,
+    MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED, MF_SOURCE_READERF_ENDOFSTREAM,
+    MF2DBuffer_LockFlags_Read, MFAudioFormat_Float, MFCreateDXGIDeviceManager,
+    MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video, MFVideoFormat_RGB32,
 };
 use windows::Win32::System::Com::StructuredStorage::{
     PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0, PropVariantClear,
@@ -888,10 +887,16 @@ mod tests {
     fn rows_are_read_only_inside_the_locked_buffer() {
         // Top down: 4 rows of 16 bytes with a pitch of 20 in 80 bytes.
         assert!(rows_fit(1000, 20, 1000, 80, 16, 4));
-        assert!(!rows_fit(1000, 20, 1000, 75, 16, 4), "the last row runs out");
+        assert!(
+            !rows_fit(1000, 20, 1000, 75, 16, 4),
+            "the last row runs out"
+        );
         // Bottom up: the first row is the last in memory.
         assert!(rows_fit(1060, -20, 1000, 80, 16, 4));
-        assert!(!rows_fit(1060, -20, 1010, 70, 16, 4), "rows before the start");
+        assert!(
+            !rows_fit(1060, -20, 1010, 70, 16, 4),
+            "rows before the start"
+        );
         // A pitch narrower than a row is refused; no rows always fit.
         assert!(!rows_fit(1000, 8, 1000, 80, 16, 4));
         assert!(rows_fit(0, 0, 0, 0, 16, 0));

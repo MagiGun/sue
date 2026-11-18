@@ -154,7 +154,13 @@ impl ParamDef {
     }
 }
 
-const fn number(key: &'static str, min: f64, max: f64, default: f64, suffix: &'static str) -> ParamDef {
+const fn number(
+    key: &'static str,
+    min: f64,
+    max: f64,
+    default: f64,
+    suffix: &'static str,
+) -> ParamDef {
     ParamDef {
         key,
         kind: ParamKind::Number {
@@ -235,7 +241,11 @@ fn builtin() -> Vec<EffectKind> {
         params: params.to_vec(),
     };
     vec![
-        kind("blur.gaussian", Blur, &[number("radius", 0.0, 250.0, 10.0, "px")]),
+        kind(
+            "blur.gaussian",
+            Blur,
+            &[number("radius", 0.0, 250.0, 10.0, "px")],
+        ),
         kind(
             "blur.directional",
             Blur,
@@ -350,7 +360,11 @@ fn builtin() -> Vec<EffectKind> {
                 toggle("animated", true),
             ],
         ),
-        kind("stylize.mosaic", Stylize, &[number("size", 1.0, 400.0, 16.0, "px")]),
+        kind(
+            "stylize.mosaic",
+            Stylize,
+            &[number("size", 1.0, 400.0, 16.0, "px")],
+        ),
         kind(
             "key.chroma",
             Keying,
@@ -569,7 +583,10 @@ impl Params {
     /// The switch `key`.
     #[must_use]
     pub fn on(&self, key: &str) -> bool {
-        self.values.get(key).and_then(Value::as_bool).unwrap_or(false)
+        self.values
+            .get(key)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     }
 
     /// The choice `key`'s index.
@@ -616,7 +633,9 @@ pub fn color_value(rgb: [u8; 3]) -> Value {
 #[must_use]
 pub fn rgb_of(value: &Value) -> Option<[u8; 3]> {
     match value {
-        Value::Vec3(rgb) => Some(rgb.map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8)),
+        Value::Vec3(rgb) => {
+            Some(rgb.map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8))
+        }
         _ => None,
     }
 }
@@ -767,7 +786,9 @@ pub fn needs_processing(clip: &Clip) -> bool {
             .get(key::MOTION_BLUR)
             .and_then(Value::as_f64)
             .is_some_and(|angle| angle > 0.0)
-        || crate::grade::grade_of(clip).iter().any(|corrector| corrector.enabled)
+        || crate::grade::grade_of(clip)
+            .iter()
+            .any(|corrector| corrector.enabled)
         || clip.animation.channel(key::REMAP).is_some()
 }
 

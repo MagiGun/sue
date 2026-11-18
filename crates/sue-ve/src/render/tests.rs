@@ -91,18 +91,10 @@ fn flat(width: u32, height: u32, rgba: [u8; 4]) -> Arc<VideoFrame> {
 }
 
 fn layer(opacity: f32) -> Layer {
-    Layer {
-        track: 0,
-        clip: 1,
-        source: EntityId::new(),
-        kind: SourceKind::Movie,
-        source_time: Time::ZERO,
-        opacity,
-        scale: 1.0,
-        offset: [0.0, 0.0],
-        rotation: 0.0,
-        tint: None,
-    }
+    let mut layer = Layer::new(EntityId::new(), SourceKind::Movie, Time::ZERO);
+    layer.clip = 1;
+    layer.opacity = opacity;
+    layer
 }
 
 fn pixel(picture: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {

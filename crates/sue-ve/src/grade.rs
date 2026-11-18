@@ -372,7 +372,9 @@ impl Table {
             .0
             .iter()
             .map(|chunk| {
-                let f = |at: usize| f32::from_le_bytes([chunk[at], chunk[at + 1], chunk[at + 2], chunk[at + 3]]);
+                let f = |at: usize| {
+                    f32::from_le_bytes([chunk[at], chunk[at + 1], chunk[at + 2], chunk[at + 3]])
+                };
                 [f(0), f(4), f(8)]
             })
             .collect();
@@ -402,7 +404,8 @@ pub fn parse_cube(text: &str) -> Result<Table, String> {
         match first {
             // Inputs are taken as 0 to 1 (the domain lines, which almost
             // every LUT leaves at that, are read past).
-            "TITLE" | "DOMAIN_MIN" | "DOMAIN_MAX" | "LUT_3D_INPUT_RANGE" | "LUT_1D_INPUT_RANGE" => {}
+            "TITLE" | "DOMAIN_MIN" | "DOMAIN_MAX" | "LUT_3D_INPUT_RANGE" | "LUT_1D_INPUT_RANGE" => {
+            }
             "LUT_3D_SIZE" => size3 = numbers(words).first().map_or(0, |n| *n as usize),
             "LUT_1D_SIZE" => size1 = numbers(words).first().map_or(0, |n| *n as usize),
             _ => {
@@ -422,7 +425,11 @@ pub fn parse_cube(text: &str) -> Result<Table, String> {
     }
     if size3 >= 2 {
         if rows.len() != size3 * size3 * size3 {
-            return Err(tr!("lut-wrong-count", want = (size3 * size3 * size3) as i64, got = rows.len() as i64));
+            return Err(tr!(
+                "lut-wrong-count",
+                want = (size3 * size3 * size3) as i64,
+                got = rows.len() as i64
+            ));
         }
         if size3 > 129 {
             return Err(tr!("lut-too-large"));
@@ -434,7 +441,11 @@ pub fn parse_cube(text: &str) -> Result<Table, String> {
     }
     if size1 >= 2 {
         if rows.len() != size1 {
-            return Err(tr!("lut-wrong-count", want = size1 as i64, got = rows.len() as i64));
+            return Err(tr!(
+                "lut-wrong-count",
+                want = size1 as i64,
+                got = rows.len() as i64
+            ));
         }
         let curve = |channel: usize, x: f32| {
             let position = x.clamp(0.0, 1.0) * (size1 - 1) as f32;
@@ -565,7 +576,11 @@ pub fn key(qualifier: &Qualifier, rgb: [f32; 3]) -> f32 {
 /// What one corrector does to a color (0 to 1), its qualifier and LUT
 /// included. `luts` gives the tables of LUT entities.
 #[must_use]
-pub fn correct(corrector: &Corrector, rgb: [f32; 3], luts: &dyn Fn(EntityId) -> Option<Table>) -> [f32; 3] {
+pub fn correct(
+    corrector: &Corrector,
+    rgb: [f32; 3],
+    luts: &dyn Fn(EntityId) -> Option<Table>,
+) -> [f32; 3] {
     if !corrector.enabled {
         return rgb;
     }
@@ -712,8 +727,14 @@ mod tests {
             lift: [0.0, 0.0, 0.0, 0.2],
             ..Corrector::default()
         };
-        assert!(correct(&lift, [0.0; 3], &none)[0] > 0.15, "lift raises black");
-        assert!((correct(&lift, [1.0; 3], &none)[0] - 1.0).abs() < 1e-5, "and keeps white");
+        assert!(
+            correct(&lift, [0.0; 3], &none)[0] > 0.15,
+            "lift raises black"
+        );
+        assert!(
+            (correct(&lift, [1.0; 3], &none)[0] - 1.0).abs() < 1e-5,
+            "and keeps white"
+        );
         let gain = Corrector {
             gain: [0.0, 0.0, 0.0, -0.5],
             ..Corrector::default()
@@ -757,7 +778,12 @@ mod tests {
     #[test]
     fn curves_and_hue_curves() {
         let inverted = Corrector {
-            curves: [vec![[0.0, 1.0], [1.0, 0.0]], straight(), straight(), straight()],
+            curves: [
+                vec![[0.0, 1.0], [1.0, 0.0]],
+                straight(),
+                straight(),
+                straight(),
+            ],
             ..Corrector::default()
         };
         assert!(correct(&inverted, [0.0; 3], &none)[0] > 0.99);
@@ -796,9 +822,15 @@ mod tests {
             ..Corrector::default()
         };
         let red = correct(&corrector, [0.9, 0.1, 0.1], &none);
-        assert!((red[0] - red[1]).abs() < 1e-3, "red is keyed and grayed: {red:?}");
+        assert!(
+            (red[0] - red[1]).abs() < 1e-3,
+            "red is keyed and grayed: {red:?}"
+        );
         let blue = [0.1, 0.1, 0.9];
-        assert!(close(correct(&corrector, blue, &none), blue, 1e-5), "blue untouched");
+        assert!(
+            close(correct(&corrector, blue, &none), blue, 1e-5),
+            "blue untouched"
+        );
         let mut inverted = corrector;
         if let Some(q) = &mut inverted.qualifier {
             q.invert = true;
@@ -821,7 +853,12 @@ mod tests {
                     ..Corrector::default()
                 },
                 Corrector {
-                    curves: [vec![[0.0, 0.05], [0.5, 0.55], [1.0, 0.95]], straight(), straight(), straight()],
+                    curves: [
+                        vec![[0.0, 0.05], [0.5, 0.55], [1.0, 0.95]],
+                        straight(),
+                        straight(),
+                        straight(),
+                    ],
                     ..Corrector::default()
                 },
             ],
@@ -862,7 +899,11 @@ mod tests {
         assert!(close(out, [0.1, 0.3, 0.8], 1e-5), "{out:?}");
         let one = "LUT_1D_SIZE 2\n1 1 1\n0 0 0\n";
         let inverted = parse_cube(one).unwrap();
-        assert!(close(inverted.sample([0.25, 0.5, 1.0]), [0.75, 0.5, 0.0], 0.02));
+        assert!(close(
+            inverted.sample([0.25, 0.5, 1.0]),
+            [0.75, 0.5, 0.0],
+            0.02
+        ));
         assert!(parse_cube("LUT_3D_SIZE 3\n0 0 0\n").is_err());
         assert!(parse_cube("nothing here").is_err());
         // Through an entity, as the pool keeps it.
@@ -889,8 +930,15 @@ mod tests {
             lut: Some(EntityId::new()),
             ..Corrector::default()
         };
-        assert_eq!(Corrector::from_value(&corrector.to_value()), Some(corrector.clone()));
-        let mut clip = Clip::new(EntityId::new(), sue_core::Time::ZERO, sue_core::Time::SECOND);
+        assert_eq!(
+            Corrector::from_value(&corrector.to_value()),
+            Some(corrector.clone())
+        );
+        let mut clip = Clip::new(
+            EntityId::new(),
+            sue_core::Time::ZERO,
+            sue_core::Time::SECOND,
+        );
         set_grade(&mut clip, &[corrector.clone(), Corrector::default()]);
         assert_eq!(grade_of(&clip), [corrector, Corrector::default()]);
         set_grade(&mut clip, &[]);
@@ -899,7 +947,12 @@ mod tests {
 
     #[test]
     fn hsl_round_trips() {
-        for rgb in [[0.9, 0.2, 0.1], [0.1, 0.8, 0.3], [0.2, 0.3, 0.95], [0.5, 0.5, 0.5]] {
+        for rgb in [
+            [0.9, 0.2, 0.1],
+            [0.1, 0.8, 0.3],
+            [0.2, 0.3, 0.95],
+            [0.5, 0.5, 0.5],
+        ] {
             assert!(close(from_hsl(hsl(rgb)), rgb, 1e-4), "{rgb:?}");
         }
     }

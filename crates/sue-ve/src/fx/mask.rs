@@ -220,7 +220,8 @@ impl Mask {
             ),
             _ => return None,
         };
-        let number = |key: &str, default: f64| map.get(key).and_then(Value::as_f64).unwrap_or(default);
+        let number =
+            |key: &str, default: f64| map.get(key).and_then(Value::as_f64).unwrap_or(default);
         let flag = |key: &str| map.get(key).and_then(Value::as_bool).unwrap_or(false);
         Some(Self {
             shape,
@@ -271,8 +272,14 @@ impl Mask {
                         let t = f64::from(step) / f64::from(steps);
                         let u = 1.0 - t;
                         let b = [
-                            u * u * u * p0[0] + 3.0 * u * u * t * p1[0] + 3.0 * u * t * t * p2[0] + t * t * t * p3[0],
-                            u * u * u * p0[1] + 3.0 * u * u * t * p1[1] + 3.0 * u * t * t * p2[1] + t * t * t * p3[1],
+                            u * u * u * p0[0]
+                                + 3.0 * u * u * t * p1[0]
+                                + 3.0 * u * t * t * p2[0]
+                                + t * t * t * p3[0],
+                            u * u * u * p0[1]
+                                + 3.0 * u * u * t * p1[1]
+                                + 3.0 * u * t * t * p2[1]
+                                + t * t * t * p3[1],
                         ];
                         out.push(to(b));
                     }
@@ -477,7 +484,10 @@ mod tests {
         let cover = coverage(&mask, w, h, 1.0);
         let area: f32 = cover.iter().sum();
         let expected = std::f32::consts::PI * 30.0 * 30.0;
-        assert!((area - expected).abs() / expected < 0.01, "{area} for {expected}");
+        assert!(
+            (area - expected).abs() / expected < 0.01,
+            "{area} for {expected}"
+        );
         let mut inverted = mask;
         inverted.inverted = true;
         let outside: f32 = coverage(&inverted, w, h, 1.0).iter().sum();

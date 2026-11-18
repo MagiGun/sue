@@ -155,7 +155,13 @@ pub fn save(preset: &Preset) -> Result<std::path::PathBuf, String> {
     let safe: String = preset
         .name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let path = dir.join(format!("{}.{EXTENSION}", safe.trim()));
     sue_platform::fs::write(&path, to_file(preset)).map_err(|error| error.to_string())?;

@@ -7,12 +7,19 @@
 //! its fades, the crossfade of a dissolve between two clips, and the
 //! track's gain. The result is stereo; [`Meter`] follows its peaks for the
 //! audio meters.
+//!
+//! [`Mixer`] is the Audio page's desk: per clip and per track pan, the
+//! track's effects (equalizer, gate, compressor, `crate::audio`) carried
+//! from block to block, and meters per track with their loudness.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use sue_core::{EntityId, Time, Value};
 use sue_model::{Clip, Sequence, Track};
 
+use crate::audio::{FxState, Loudness, pan_gains};
+use crate::fx::key as fx_key;
 use crate::media::sound::{MIX_RATE, Sound};
 use crate::model::{self, key};
 
@@ -77,7 +84,8 @@ fn reach(track: &Track, clip: &Clip) -> (Time, Time) {
 
 /// Mixes `frames` stereo frames of `sequence` from frame `first` (at
 /// `rate` frames a second) into `out` (interleaved, cleared first).
-/// `sound` gives each source's decoded sound, when it is ready.
+/// `sound` gives each source's decoded sound, when it is ready. A mixer
+/// of its own: the tracks' effects start from silence.
 pub fn mix(
     sequence: &Sequence,
     first: i64,
@@ -85,69 +93,176 @@ pub fn mix(
     out: &mut [f32],
     sound: &dyn Fn(EntityId) -> Option<Arc<Sound>>,
 ) {
-    out.fill(0.0);
-    let frames = out.len() / 2;
-    if frames == 0 || rate == 0 {
-        return;
-    }
-    let rate_f = f64::from(rate);
-    let at = |frame: i64| Time::from_seconds(frame as f64 / rate_f);
-    let (from, to) = (at(first), at(first + frames as i64));
-    let soloed = sequence
-        .tracks
-        .iter()
-        .any(|track| !model::is_video(track) && model::flag(track, key::SOLO));
-    for track in &sequence.tracks {
-        if model::is_video(track) || track.muted || (soloed && !model::flag(track, key::SOLO)) {
-            continue;
+    Mixer::default().mix(sequence, first, rate, out, sound);
+}
+
+/// One track's meters on the mixer.
+#[derive(Clone, Debug)]
+pub struct TrackMeter {
+    /// Its peaks.
+    pub meter: Meter,
+    /// Its loudness.
+    pub loudness: Loudness,
+    /// How much its compressor takes off, dB.
+    pub reduction: f64,
+}
+
+impl TrackMeter {
+    fn new(rate: u32) -> Self {
+        Self {
+            meter: Meter::default(),
+            loudness: Loudness::new(rate),
+            reduction: 0.0,
         }
-        let track_gain = gain(
-            track
-                .properties
-                .get(key::VOLUME)
-                .and_then(Value::as_f64)
-                .unwrap_or(0.0),
-        );
-        for clip in track.clips() {
-            let (start, end) = reach(track, clip);
-            if !clip.enabled || end <= from || start >= to {
+    }
+}
+
+/// The mixing desk: each audio track's clips (with their gain, fades,
+/// crossfades and pan), the track's gain, pan and effects, its meters,
+/// and the loudness of the whole. Its effects carry on from one block to
+/// the next; a block that does not follow on starts them again.
+#[derive(Debug, Default)]
+pub struct Mixer {
+    states: HashMap<usize, FxState>,
+    next: Option<(i64, u32)>,
+    /// Each track's meters, by track index.
+    pub tracks: HashMap<usize, TrackMeter>,
+    /// The loudness of the whole mix.
+    pub master: Option<Loudness>,
+    scratch: Vec<f32>,
+}
+
+impl Mixer {
+    /// Mixes as [`mix`] does, carrying the effects and meters on.
+    pub fn mix(
+        &mut self,
+        sequence: &Sequence,
+        first: i64,
+        rate: u32,
+        out: &mut [f32],
+        sound: &dyn Fn(EntityId) -> Option<Arc<Sound>>,
+    ) {
+        out.fill(0.0);
+        let frames = out.len() / 2;
+        if frames == 0 || rate == 0 {
+            return;
+        }
+        if self.next != Some((first, rate)) {
+            for state in self.states.values_mut() {
+                state.reset();
+            }
+            self.master = None;
+            for meter in self.tracks.values_mut() {
+                meter.loudness = Loudness::new(rate);
+            }
+        }
+        self.next = Some((first + frames as i64, rate));
+        let seconds = frames as f32 / rate as f32;
+        let rate_f = f64::from(rate);
+        let at = |frame: i64| Time::from_seconds(frame as f64 / rate_f);
+        let (from, to) = (at(first), at(first + frames as i64));
+        let soloed = sequence
+            .tracks
+            .iter()
+            .any(|track| !model::is_video(track) && model::flag(track, key::SOLO));
+        let mut scratch = std::mem::take(&mut self.scratch);
+        for (track_index, track) in sequence.tracks.iter().enumerate() {
+            if model::is_video(track) {
                 continue;
             }
-            if clip
-                .properties
-                .get(key::FREEZE)
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-            {
+            let meter = self
+                .tracks
+                .entry(track_index)
+                .or_insert_with(|| TrackMeter::new(rate));
+            if track.muted || (soloed && !model::flag(track, key::SOLO)) {
+                meter.meter.decay(seconds);
                 continue;
             }
-            let Some(source) = sound(clip.source) else {
-                continue;
-            };
-            let first_frame = ((start.seconds() * rate_f).ceil() as i64).max(first);
-            let last_frame = ((end.seconds() * rate_f).ceil() as i64).min(first + frames as i64);
-            let source_rate = f64::from(MIX_RATE);
-            // Gain and envelope change slowly: worked out every 64 frames.
-            let mut level = 0.0_f32;
-            for frame in first_frame..last_frame {
-                let time = at(frame);
-                if (frame - first_frame) % 64 == 0 {
-                    let decibels = clip.value_at(key::VOLUME, time, 0.0);
-                    level = gain(decibels) * envelope(track, clip, time) * track_gain;
-                }
-                if level == 0.0 {
+            scratch.clear();
+            scratch.resize(frames * 2, 0.0);
+            let track_gain = gain(
+                track
+                    .properties
+                    .get(key::VOLUME)
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
+            );
+            let track_pan = pan_gains(
+                track
+                    .properties
+                    .get(fx_key::PAN)
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
+            );
+            for clip in track.clips() {
+                let (start, end) = reach(track, clip);
+                if !clip.enabled || end <= from || start >= to {
                     continue;
                 }
-                let position = (clip.source_in.seconds()
-                    + (time - clip.start).seconds() * clip.speed)
-                    * source_rate;
-                let [left, right] = source.at(position);
-                let index = (frame - first) as usize * 2;
-                if let Some(pair) = out.get_mut(index..index + 2) {
-                    pair[0] += left * level;
-                    pair[1] += right * level;
+                if clip
+                    .properties
+                    .get(key::FREEZE)
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                let Some(source) = sound(clip.source) else {
+                    continue;
+                };
+                let first_frame = ((start.seconds() * rate_f).ceil() as i64).max(first);
+                let last_frame =
+                    ((end.seconds() * rate_f).ceil() as i64).min(first + frames as i64);
+                let source_rate = f64::from(MIX_RATE);
+                // Gain, pan and envelope change slowly: worked out every
+                // 64 frames.
+                let mut level = 0.0_f32;
+                let mut sides = [1.0_f32; 2];
+                for frame in first_frame..last_frame {
+                    let time = at(frame);
+                    if (frame - first_frame) % 64 == 0 {
+                        let decibels = clip.value_at(key::VOLUME, time, 0.0);
+                        level = gain(decibels) * envelope(track, clip, time) * track_gain;
+                        sides = pan_gains(clip.value_at(fx_key::PAN, time, 0.0));
+                    }
+                    if level == 0.0 {
+                        continue;
+                    }
+                    let position = (clip.source_in.seconds()
+                        + (time - clip.start).seconds() * clip.speed)
+                        * source_rate;
+                    let [left, right] = source.at(position);
+                    let index = (frame - first) as usize * 2;
+                    if let Some(pair) = scratch.get_mut(index..index + 2) {
+                        pair[0] += left * level * sides[0];
+                        pair[1] += right * level * sides[1];
+                    }
                 }
             }
+            let fx = crate::audio::track_fx(track);
+            let state = self.states.entry(track_index).or_default();
+            state.process(&fx, &mut scratch, rate_f);
+            for pair in scratch.as_chunks_mut::<2>().0 {
+                pair[0] *= track_pan[0];
+                pair[1] *= track_pan[1];
+            }
+            meter.meter.feed(&scratch, seconds);
+            meter.loudness.feed(&scratch);
+            meter.reduction = state.reduction;
+            for (sum, value) in out.iter_mut().zip(&scratch) {
+                *sum += *value;
+            }
+        }
+        self.scratch = scratch;
+        self.master
+            .get_or_insert_with(|| Loudness::new(rate))
+            .feed(out);
+    }
+
+    /// Lets every track's meter fall for `seconds` (while paused).
+    pub fn decay(&mut self, seconds: f32) {
+        for meter in self.tracks.values_mut() {
+            meter.meter.decay(seconds);
         }
     }
 }

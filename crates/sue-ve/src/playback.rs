@@ -56,6 +56,8 @@ pub struct Clock {
     pub dropped: u64,
     /// The meters.
     pub meter: Meter,
+    /// The mixing desk (its track meters and effects' state).
+    pub mixer: mix::Mixer,
     /// The mix of the last block, kept to avoid allocating.
     block: Vec<f32>,
 }
@@ -75,6 +77,7 @@ impl Default for Clock {
             shown: 0,
             dropped: 0,
             meter: Meter::default(),
+            mixer: mix::Mixer::default(),
             block: Vec::new(),
         }
     }
@@ -151,6 +154,7 @@ impl Clock {
     ) -> bool {
         if !self.playing {
             self.meter.decay(1.0 / 60.0);
+            self.mixer.decay(1.0 / 60.0);
             return false;
         }
         let (start, end) = range;
@@ -173,7 +177,8 @@ impl Clock {
                 let first =
                     (self.anchor.seconds() * f64::from(rate)).round() as i64 + self.pushed as i64;
                 self.block.resize(more as usize * 2, 0.0);
-                mix::mix(sequence, first, rate, &mut self.block, sound);
+                self.mixer
+                    .mix(sequence, first, rate, &mut self.block, sound);
                 let seconds = more as f32 / rate as f32;
                 self.meter.feed(&self.block, seconds);
                 let interleaved: Vec<f32> = if channels == 2 {

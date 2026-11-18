@@ -71,7 +71,11 @@ fn every_builtin_kind_has_a_name_and_runs_on_any_picture() {
 #[test]
 fn blurs_soften_an_edge_and_keep_flat_areas() {
     let picture = edge(64, 16);
-    let blurred = run("blur.gaussian", &defaults("blur.gaussian").with("radius", 4.0), &picture);
+    let blurred = run(
+        "blur.gaussian",
+        &defaults("blur.gaussian").with("radius", 4.0),
+        &picture,
+    );
     assert_eq!(px(&blurred, 2, 8)[0], 0, "far from the edge it stays");
     let middle = px(&blurred, 32, 8)[0];
     assert!((90..170).contains(&middle), "{middle}");
@@ -86,13 +90,19 @@ fn blurs_soften_an_edge_and_keep_flat_areas() {
     };
     let smeared = run(
         "blur.directional",
-        &defaults("blur.directional").with("angle", 0.0).with("length", 10.0),
+        &defaults("blur.directional")
+            .with("angle", 0.0)
+            .with("length", 10.0),
         &lines,
     );
     assert_eq!(px(&smeared, 16, 16)[0], 255, "along the line it stays");
     assert_eq!(px(&smeared, 16, 12)[0], 0, "nothing spreads across it");
     // Sharpening pushes the two sides of the edge apart.
-    let soft = run("blur.gaussian", &defaults("blur.gaussian").with("radius", 2.0), &picture);
+    let soft = run(
+        "blur.gaussian",
+        &defaults("blur.gaussian").with("radius", 2.0),
+        &picture,
+    );
     let sharp = run("blur.sharpen", &defaults("blur.sharpen"), &soft);
     let (before, after) = (px(&soft, 30, 8)[0], px(&sharp, 30, 8)[0]);
     assert!(after < before, "{after} < {before}");
@@ -111,11 +121,18 @@ fn color_corrections_match_sues_one_implementation() {
     let got = px(&out, 40, 10);
     for channel in 0..3 {
         let want = (want[channel].clamp(0.0, 1.0) * 255.0).round();
-        assert!((f32::from(got[channel]) - want).abs() <= 1.0, "{got:?} {want}");
+        assert!(
+            (f32::from(got[channel]) - want).abs() <= 1.0,
+            "{got:?} {want}"
+        );
     }
     // Hue turned half way round: red becomes cyan.
     let red = flat(4, 4, [255, 0, 0, 255]);
-    let turned = run("color.hue_saturation", &defaults("color.hue_saturation").with("hue", 180.0), &red);
+    let turned = run(
+        "color.hue_saturation",
+        &defaults("color.hue_saturation").with("hue", 180.0),
+        &red,
+    );
     let cyan = px(&turned, 1, 1);
     assert!(cyan[0] < 5 && cyan[1] > 250 && cyan[2] > 250, "{cyan:?}");
     // Desaturated fully: gray.
@@ -139,7 +156,9 @@ fn levels_curves_and_balance_follow_their_formulas() {
     };
     let leveled = run(
         "color.levels",
-        &defaults("color.levels").with("in_black", 50.0).with("in_white", 200.0),
+        &defaults("color.levels")
+            .with("in_black", 50.0)
+            .with("in_white", 200.0),
         &ramp,
     );
     assert_eq!(px(&leveled, 40, 0)[0], 0);
@@ -156,8 +175,15 @@ fn levels_curves_and_balance_follow_their_formulas() {
     assert_eq!(run("color.curves", &defaults("color.curves"), &ramp), ramp);
     // Balance: nothing moves at zero; a red shift in the midtones reddens
     // middle gray.
-    assert_eq!(run("color.balance", &defaults("color.balance"), &ramp), ramp);
-    let warm = run("color.balance", &defaults("color.balance").with("mid_red", 60.0), &ramp);
+    assert_eq!(
+        run("color.balance", &defaults("color.balance"), &ramp),
+        ramp
+    );
+    let warm = run(
+        "color.balance",
+        &defaults("color.balance").with("mid_red", 60.0),
+        &ramp,
+    );
     let at = px(&warm, 128, 0);
     assert!(at[0] > at[2] + 10, "{at:?}");
 }
@@ -172,7 +198,11 @@ fn glow_shadow_and_stroke_reach_past_what_is_drawn() {
             lit.rgba[at..at + 3].copy_from_slice(&[255, 255, 255]);
         }
     }
-    let glowing = run("stylize.glow", &defaults("stylize.glow").with("radius", 6.0), &lit);
+    let glowing = run(
+        "stylize.glow",
+        &defaults("stylize.glow").with("radius", 6.0),
+        &lit,
+    );
     assert!(px(&glowing, 20, 32)[0] > 20, "{:?}", px(&glowing, 20, 32));
     let dark = flat(16, 16, [20, 20, 20, 255]);
     assert_eq!(run("stylize.glow", &defaults("stylize.glow"), &dark), dark);
@@ -187,7 +217,11 @@ fn glow_shadow_and_stroke_reach_past_what_is_drawn() {
             .with("opacity", 100.0),
         &shape,
     );
-    assert!(px(&shadowed, 44, 44)[3] > 200, "{:?}", px(&shadowed, 44, 44));
+    assert!(
+        px(&shadowed, 44, 44)[3] > 200,
+        "{:?}",
+        px(&shadowed, 44, 44)
+    );
     assert_eq!(px(&shadowed, 20, 20)[3], 0);
     // Stroke: a ring of its width round the square.
     let stroked = run(
@@ -197,35 +231,89 @@ fn glow_shadow_and_stroke_reach_past_what_is_drawn() {
     );
     assert_eq!(px(&stroked, 22, 32)[3], 255, "inside the ring");
     assert_eq!(px(&stroked, 16, 32)[3], 0, "past it");
-    assert_eq!(px(&stroked, 32, 32), [255, 255, 255, 255], "the square stays");
+    assert_eq!(
+        px(&stroked, 32, 32),
+        [255, 255, 255, 255],
+        "the square stays"
+    );
 }
 
 #[test]
 fn vignette_grain_and_mosaic() {
     let gray = flat(64, 48, [128, 128, 128, 255]);
-    let vignetted = run("stylize.vignette", &defaults("stylize.vignette").with("amount", 100.0), &gray);
+    let vignetted = run(
+        "stylize.vignette",
+        &defaults("stylize.vignette").with("amount", 100.0),
+        &gray,
+    );
     assert_eq!(px(&vignetted, 32, 24)[0], 128, "the middle stays");
     assert!(px(&vignetted, 0, 0)[0] < 30, "the corners darken");
-    let lighter = run("stylize.vignette", &defaults("stylize.vignette").with("amount", -100.0), &gray);
+    let lighter = run(
+        "stylize.vignette",
+        &defaults("stylize.vignette").with("amount", -100.0),
+        &gray,
+    );
     assert!(px(&lighter, 0, 0)[0] > 220);
     // Grain moves each frame when animated, keeps its mean.
     let params = defaults("stylize.grain").with("amount", 40.0);
     let mut one = gray.clone();
-    apply("stylize.grain", &params, &mut one, &Ctx { scale: 1.0, frame: 1 });
+    apply(
+        "stylize.grain",
+        &params,
+        &mut one,
+        &Ctx {
+            scale: 1.0,
+            frame: 1,
+        },
+    );
     let mut two = gray.clone();
-    apply("stylize.grain", &params, &mut two, &Ctx { scale: 1.0, frame: 2 });
+    apply(
+        "stylize.grain",
+        &params,
+        &mut two,
+        &Ctx {
+            scale: 1.0,
+            frame: 2,
+        },
+    );
     assert_ne!(one, two);
-    let mean: f64 = one.rgba.iter().step_by(4).map(|v| f64::from(*v)).sum::<f64>() / (64.0 * 48.0);
+    let mean: f64 = one
+        .rgba
+        .iter()
+        .step_by(4)
+        .map(|v| f64::from(*v))
+        .sum::<f64>()
+        / (64.0 * 48.0);
     assert!((mean - 128.0).abs() < 3.0, "{mean}");
     let mut still = params.clone();
     still.values.set("animated", false);
     let mut a = gray.clone();
-    apply("stylize.grain", &still, &mut a, &Ctx { scale: 1.0, frame: 1 });
+    apply(
+        "stylize.grain",
+        &still,
+        &mut a,
+        &Ctx {
+            scale: 1.0,
+            frame: 1,
+        },
+    );
     let mut b = gray.clone();
-    apply("stylize.grain", &still, &mut b, &Ctx { scale: 1.0, frame: 9 });
+    apply(
+        "stylize.grain",
+        &still,
+        &mut b,
+        &Ctx {
+            scale: 1.0,
+            frame: 9,
+        },
+    );
     assert_eq!(a, b);
     // Mosaic: blocks of one color.
-    let tiles = run("stylize.mosaic", &defaults("stylize.mosaic").with("size", 8.0), &super::pixels::tests_card());
+    let tiles = run(
+        "stylize.mosaic",
+        &defaults("stylize.mosaic").with("size", 8.0),
+        &super::pixels::tests_card(),
+    );
     assert_eq!(px(&tiles, 8, 8), px(&tiles, 15, 15));
 }
 
@@ -252,7 +340,11 @@ fn keys_take_out_green_and_the_dark() {
 #[test]
 fn crop_and_mirror() {
     let picture = super::pixels::tests_card();
-    let cropped = run("transform.crop", &defaults("transform.crop").with("left", 25.0), &picture);
+    let cropped = run(
+        "transform.crop",
+        &defaults("transform.crop").with("left", 25.0),
+        &picture,
+    );
     let quarter = picture.width / 4;
     assert_eq!(px(&cropped, quarter - 2, 20)[3], 0);
     assert_eq!(px(&cropped, quarter + 2, 20), px(&picture, quarter + 2, 20));
@@ -271,11 +363,30 @@ fn a_blur_scales_with_the_picture_so_a_preview_looks_as_the_export_does() {
     let small = edge(64, 8);
     let params = defaults("blur.gaussian").with("radius", 8.0);
     let mut full = big;
-    apply("blur.gaussian", &params, &mut full, &Ctx { scale: 1.0, frame: 0 });
+    apply(
+        "blur.gaussian",
+        &params,
+        &mut full,
+        &Ctx {
+            scale: 1.0,
+            frame: 0,
+        },
+    );
     let mut half = small;
-    apply("blur.gaussian", &params, &mut half, &Ctx { scale: 0.5, frame: 0 });
+    apply(
+        "blur.gaussian",
+        &params,
+        &mut half,
+        &Ctx {
+            scale: 0.5,
+            frame: 0,
+        },
+    );
     for x in (0..64).step_by(7) {
-        let (a, b) = (i32::from(px(&full, x * 2, 4)[0]), i32::from(px(&half, x, 4)[0]));
+        let (a, b) = (
+            i32::from(px(&full, x * 2, 4)[0]),
+            i32::from(px(&half, x, 4)[0]),
+        );
         assert!((a - b).abs() <= 24, "at {x}: {a} {b}");
     }
 }
@@ -292,18 +403,26 @@ fn a_stack_adds_reorders_removes_and_round_trips() {
     assert_eq!((blur, glow), (1, 2));
     let list = effects(&clip);
     assert_eq!(list[0].kind, "blur.gaussian");
-    assert_eq!(list[0].params.get("radius").and_then(Value::as_f64), Some(10.0));
+    assert_eq!(
+        list[0].params.get("radius").and_then(Value::as_f64),
+        Some(10.0)
+    );
     assert!(reorder(&mut clip, glow, -1));
     assert_eq!(effects(&clip)[0].id, glow);
     assert!(update(&mut clip, blur, |effect| effect.enabled = false));
     assert!(!effects(&clip)[1].enabled);
-    clip.animation.channel_mut(&channel(blur, "radius")).insert(Key {
-        time: Time::ZERO,
-        value: 1.0,
-        interpolation: Interpolation::Linear,
-    });
+    clip.animation
+        .channel_mut(&channel(blur, "radius"))
+        .insert(Key {
+            time: Time::ZERO,
+            value: 1.0,
+            interpolation: Interpolation::Linear,
+        });
     assert!(remove(&mut clip, blur));
-    assert!(clip.animation.channel(&channel(blur, "radius")).is_none(), "its keys go with it");
+    assert!(
+        clip.animation.channel(&channel(blur, "radius")).is_none(),
+        "its keys go with it"
+    );
     assert_eq!(effects(&clip).len(), 1);
     // A kind this build does not know stays, untouched.
     let mut list = effects(&clip);
@@ -315,7 +434,10 @@ fn a_stack_adds_reorders_removes_and_round_trips() {
     });
     set_effects(&mut clip, &list);
     assert_eq!(effects(&clip)[1].kind, "future.thing");
-    assert_eq!(Effect::from_value(&list[1].to_value()).as_ref(), Some(&list[1]));
+    assert_eq!(
+        Effect::from_value(&list[1].to_value()).as_ref(),
+        Some(&list[1])
+    );
 }
 
 #[test]
@@ -340,7 +462,10 @@ fn parameters_follow_their_keyframes_with_eases() {
         interpolation: Interpolation::Linear,
     });
     let at = |seconds: f64| effect.number(&clip, "radius", Time::from_seconds(seconds));
-    assert!((at(1.0) - 50.0).abs() < 1e-6, "eased both ways, half way is half");
+    assert!(
+        (at(1.0) - 50.0).abs() < 1e-6,
+        "eased both ways, half way is half"
+    );
     assert!(at(0.25) < 12.5, "eased in starts slow: {}", at(0.25));
     assert_eq!(at(3.0), 100.0);
     assert_eq!(effect.at(&clip, Time::from_seconds(1.0)).f("radius"), 50.0);
@@ -351,11 +476,13 @@ fn presets_carry_effects_and_keys_to_another_clip() {
     let mut from = clip();
     from.source_in = Time::from_seconds(5.0);
     let id = add(&mut from, "stylize.vignette");
-    from.animation.channel_mut(&channel(id, "amount")).insert(Key {
-        time: Time::from_seconds(6.0),
-        value: 80.0,
-        interpolation: Interpolation::Linear,
-    });
+    from.animation
+        .channel_mut(&channel(id, "amount"))
+        .insert(Key {
+            time: Time::from_seconds(6.0),
+            value: 80.0,
+            interpolation: Interpolation::Linear,
+        });
     let made = preset::capture(&from, "Dark edges");
     assert_eq!(preset::key_times(&made), [Time::SECOND]);
     let file = preset::to_file(&made);
@@ -367,7 +494,11 @@ fn presets_carry_effects_and_keys_to_another_clip() {
     assert_eq!(preset::apply(&read, &mut to), 1);
     let list = effects(&to);
     assert_eq!(list[1].kind, "stylize.vignette");
-    let key = to.animation.channel(&channel(list[1].id, "amount")).unwrap().keys()[0];
+    let key = to
+        .animation
+        .channel(&channel(list[1].id, "amount"))
+        .unwrap()
+        .keys()[0];
     assert_eq!((key.time, key.value), (Time::SECOND, 80.0));
 }
 

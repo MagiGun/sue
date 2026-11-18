@@ -278,7 +278,8 @@ impl MediaHub {
                         exact: true,
                     });
                 }
-                let picture = Arc::new(render::generated(arena, id, kind, source_time, frame)?);
+                let picture =
+                    Arc::new(render::generated(arena, id, kind, source_time, frame, 1.0)?);
                 self.generated
                     .insert(id, (revision, index, frame, Arc::clone(&picture)));
                 Some(Found {
@@ -392,8 +393,7 @@ impl MediaHub {
                         Some((seen, snapshot)) if *seen == revision => Arc::clone(snapshot),
                         _ => {
                             let snapshot = Arc::new(arena.clone());
-                            self.snapshots
-                                .insert(id, (revision, Arc::clone(&snapshot)));
+                            self.snapshots.insert(id, (revision, Arc::clone(&snapshot)));
                             snapshot
                         }
                     };
