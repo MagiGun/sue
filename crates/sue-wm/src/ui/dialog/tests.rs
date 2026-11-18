@@ -823,3 +823,152 @@ fn a_form_section_and_a_wide_row_keep_to_the_columns() {
     });
     assert_eq!(wide.left(), labelled.left());
 }
+
+/// A pointer event at `at`, pressed or let go.
+fn button(at: Pos2, pressed: bool) -> Event {
+    Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+/// Runs dialogs in windows of their own on `ctx`, as the desktop does:
+/// each frame of a dialog's window gets `events(frame)` and is 440 by
+/// 300 points at `place` on the screen.
+fn windows_of_their_own(
+    events: impl Fn(usize) -> Vec<Event> + 'static,
+    place: std::rc::Rc<std::cell::Cell<(usize, Pos2)>>,
+) {
+    Context::set_immediate_viewport_renderer(move |ctx, viewport| {
+        let id = viewport.ids.this;
+        let (frame, at) = place.get();
+        let size = vec2(440.0, 300.0);
+        let mut raw = RawInput {
+            viewport_id: id,
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+            events: events(frame),
+            time: Some(1.0 + frame as f64 * STEP),
+            ..Default::default()
+        };
+        let info = raw.viewports.entry(id).or_default();
+        info.native_pixels_per_point = Some(1.0);
+        info.focused = Some(true);
+        info.outer_rect = Some(Rect::from_min_size(at, size));
+        info.inner_rect = Some(Rect::from_min_size(at, size));
+        let mut show = viewport.viewport_ui_cb;
+        let mut out = ctx.run_ui(raw, |ui| show(ui));
+        out.textures_delta.clear();
+    });
+}
+
+#[test]
+fn a_dialogs_own_window_moves_by_its_title_bar_and_opens_where_it_was_left() {
+    let grip = pos2(100.0, crate::widgets::TITLE_BAR / 2.0);
+    let place = std::rc::Rc::new(std::cell::Cell::new((0, pos2(500.0, 300.0))));
+    windows_of_their_own(
+        move |frame| match frame {
+            3 => vec![Event::PointerMoved(grip)],
+            4 => vec![button(grip, true)],
+            5..=8 => vec![Event::PointerMoved(grip + vec2(12.0 * (frame - 4) as f32, 0.0))],
+            9 => vec![button(grip + vec2(48.0, 0.0), false)],
+            _ => Vec::new(),
+        },
+        std::rc::Rc::clone(&place),
+    );
+    let mut bench = Bench::new();
+    bench.ctx.set_embed_viewports(false);
+    let mut asked = Vec::new();
+    let mut open = true;
+    let run = |bench: &mut Bench, frame: usize, open: bool, asked: &mut Vec<_>| {
+        place.set((frame, place.get().1));
+        let theme = bench.theme.clone();
+        let input = RawInput {
+            screen_rect: Some(bench.screen),
+            time: Some(bench.time),
+            ..Default::default()
+        };
+        bench.time += STEP;
+        let mut viewport = None;
+        let mut done = bench.ctx.run_ui(input, |ui| {
+            crate::widgets::set_own_frames(ui.ctx(), true);
+            if open {
+                let dialog = plain(&theme).host(DialogHost::Window).resizable();
+                viewport = Some(dialog.viewport());
+                show(ui, dialog);
+            }
+        });
+        done.textures_delta.clear();
+        if let Some(out) = viewport.and_then(|id| done.viewport_output.get(&id)) {
+            asked.push((out.builder.position, out.commands.clone()));
+        }
+    };
+    for frame in 0..12 {
+        run(&mut bench, frame, open, &mut asked);
+    }
+    // Its title bar asks its window to be dragged, and the commands come
+    // with the frame of the window that showed it.
+    assert!(
+        asked
+            .iter()
+            .any(|(_, commands)| commands.contains(&ViewportCommand::StartDrag)),
+        "{asked:#?}"
+    );
+    // Its place is asked for while it opens only: a window told where to
+    // be every frame could not be moved.
+    assert!(asked[0].0.is_some());
+    assert!(asked[3..].iter().all(|(position, _)| position.is_none()), "{asked:#?}");
+    // The system moved it; it closes, and opens there again.
+    place.set((20, pos2(40.0, 60.0)));
+    run(&mut bench, 20, open, &mut asked);
+    open = false;
+    run(&mut bench, 21, open, &mut asked);
+    asked.clear();
+    run(&mut bench, 22, true, &mut asked);
+    assert_eq!(asked[0].0, Some(pos2(40.0, 60.0)), "{asked:#?}");
+}
+
+#[test]
+fn a_dialog_in_the_window_moves_by_its_header_resizes_and_opens_where_left() {
+    let mut bench = Bench::instant();
+    fn sizable(theme: &Theme) -> Dialog<'_> {
+        plain(theme).resizable()
+    }
+    let first = bench.frames(4, |ui, theme| show(ui, sizable(theme)));
+    // Centered at first.
+    assert!(
+        (first.rect.center() - bench.screen.center()).length() < 2.0,
+        "{:?} in {:?}",
+        first.rect,
+        bench.screen
+    );
+    // Its header moves it.
+    let header = first.rect.left_top() + vec2(40.0, 20.0);
+    bench.drag(header, vec2(-100.0, -60.0), 4, |ui, theme| show(ui, sizable(theme)));
+    let moved = bench.frames(2, |ui, theme| show(ui, sizable(theme)));
+    assert!(
+        (moved.rect.min - (first.rect.min + vec2(-100.0, -60.0))).length() < 2.0,
+        "{:?} from {:?}",
+        moved.rect,
+        first.rect
+    );
+    // Its bottom right corner sizes it.
+    let corner = moved.rect.right_bottom() - vec2(4.0, 4.0);
+    bench.drag(corner, vec2(120.0, 80.0), 4, |ui, theme| show(ui, sizable(theme)));
+    let sized = bench.frames(2, |ui, theme| show(ui, sizable(theme)));
+    // As wide as dragged; at least as tall (a body has a least height).
+    assert!(
+        (sized.rect.width() - moved.rect.width() - 120.0).abs() < 2.0
+            && sized.rect.height() >= moved.rect.height() + 78.0
+            && sized.rect.min == moved.rect.min,
+        "{:?} from {:?}",
+        sized.rect,
+        moved.rect
+    );
+    // Closed and opened again: where it was left, the size it was made.
+    bench.frames(3, |_, _| ());
+    let again = bench.frames(4, |ui, theme| show(ui, sizable(theme)));
+    assert!((again.rect.min - sized.rect.min).length() < 2.0, "{:?}", again.rect);
+    assert!((again.rect.size() - sized.rect.size()).length() < 3.0, "{:?}", again.rect);
+}

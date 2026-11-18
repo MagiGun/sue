@@ -22,7 +22,7 @@
 
 use egui::{
     Align2, Area, Color32, Context, CornerRadius, Frame, Id, InnerResponse, Key, Margin, Modifiers,
-    Rect, Response, Role, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, UiKind,
+    Pos2, Rect, Response, Role, ScrollArea, Sense, Stroke, StrokeKind, Ui, UiBuilder, UiKind,
     ViewportBuilder, ViewportCommand, ViewportId, WidgetInfo, pos2, vec2,
 };
 
@@ -142,6 +142,10 @@ struct Parts<R> {
     buttons: Vec<(Answer, Rect)>,
     /// How tall the body's content was.
     body_height: f32,
+    /// How far its header was dragged this frame (it moves the dialog).
+    dragged: egui::Vec2,
+    /// How tall the body's room was drawn.
+    body_shown: f32,
 }
 
 impl<'a> Dialog<'a> {
@@ -276,6 +280,16 @@ impl<'a> Dialog<'a> {
         self
     }
 
+    /// The height someone gave the body of this resizable dialog, drawn
+    /// in the window, while it is open; `None` until they size it. A body
+    /// that lays itself out in a height of its own reads it.
+    #[must_use]
+    pub fn sized_body_height(&self, ctx: &Context) -> Option<f32> {
+        ctx.data(|data| data.get_temp::<egui::Vec2>(self.id.with("sue-dialog-sized")))
+            .filter(|_| self.resizable)
+            .map(|size| size.y)
+    }
+
     /// The viewport of this dialog when it is a window of its own.
     #[must_use]
     pub fn viewport(&self) -> ViewportId {
@@ -343,6 +357,8 @@ impl<'a> Dialog<'a> {
     }
 
     /// The dialog inside the window: a scrim and a panel in its middle.
+    /// Its header moves it, a resizable one is sized from its bottom
+    /// right corner, and it opens where it was last put ([`places`]).
     fn show_embedded<R>(self, ctx: &Context, body: impl FnOnce(&mut Ui) -> R) -> DialogResponse<R> {
         let theme = self.theme;
         let screen = ctx.content_rect();
@@ -353,15 +369,44 @@ impl<'a> Dialog<'a> {
         // bottom, never the controls under the pointer. Only when it would
         // run past the screen's bottom does it rise.
         let kept = self.id.with("sue-dialog-kept");
+        // Where someone put it and the size they made it (its width and
+        // its body's height), while it is open; it opens where it was
+        // last left.
+        let moved_key = self.id.with("sue-dialog-moved");
+        let sized_key = self.id.with("sue-dialog-sized");
         if appeared {
-            ctx.data_mut(|data| data.remove::<Rect>(kept));
+            let remembered = places::remembered(ctx, self.id);
+            ctx.data_mut(|data| {
+                data.remove::<Rect>(kept);
+                data.remove::<Pos2>(moved_key);
+                data.remove::<egui::Vec2>(sized_key);
+                if let Some(place) = remembered {
+                    data.insert_temp(moved_key, place.at);
+                    if let Some(size) = place.size.filter(|_| self.resizable) {
+                        data.insert_temp(sized_key, size);
+                    }
+                }
+            });
         }
         let placed: Option<Rect> = ctx.data(|data| data.get_temp(kept));
+        let moved: Option<Pos2> = ctx.data(|data| data.get_temp(moved_key));
+        let margin = theme.space(Space::S6);
+        let density = touch_or(ctx, Density::Regular);
+        let chrome = self.chrome(density, true);
+        let room = (screen.height() - margin * 2.0 - chrome).max(0.0);
+        let largest = vec2((screen.width() - margin * 2.0).max(margin), room);
+        let sized: Option<egui::Vec2> = ctx
+            .data(|data| data.get_temp::<egui::Vec2>(sized_key))
+            .map(|size| size.min(largest));
         let area = Area::new(self.id)
             .kind(UiKind::Modal)
             .order(Layer::Dialog.order());
-        let area = match placed.filter(|_| shown >= 1.0) {
-            Some(last) => {
+        let area = match (moved, placed) {
+            (Some(at), _) => {
+                let size = placed.map_or(vec2(self.width, chrome), |rect| rect.size());
+                area.fixed_pos(keep_in(at, size, screen, chrome.min(size.y)))
+            }
+            (None, Some(last)) if shown >= 1.0 => {
                 let room = theme.space(Space::S6);
                 let top = last
                     .top()
@@ -369,7 +414,7 @@ impl<'a> Dialog<'a> {
                     .max(screen.top() + room);
                 area.fixed_pos(pos2(last.left(), top))
             }
-            None => area.anchor(Align2::CENTER_CENTER, vec2(0.0, rise)),
+            _ => area.anchor(Align2::CENTER_CENTER, vec2(0.0, rise)),
         };
         let area = area
             .sense(Sense::hover())
@@ -385,10 +430,10 @@ impl<'a> Dialog<'a> {
             true
         };
         let popup_open = egui::Popup::is_any_open(ctx);
-        let margin = theme.space(Space::S6);
-        let width = self.width.min(screen.width() - margin * 2.0).max(margin);
-        let density = touch_or(ctx, Density::Regular);
-        let room = screen.height() - margin * 2.0 - self.chrome(density, true);
+        let width = sized
+            .map_or(self.width, |size| size.x)
+            .min(screen.width() - margin * 2.0)
+            .max(margin);
         let frame = Frame::new()
             .fill(self.fill())
             .stroke(theme.hairline())
@@ -416,12 +461,25 @@ impl<'a> Dialog<'a> {
                         .show(ui, |ui| {
                             // The outline is part of the width asked for.
                             ui.set_width(width - frame.stroke.width * 2.0);
-                            let height = self.height.map_or(room, |height| height.min(room));
-                            self.parts(ui, true, height, self.height.is_some(), body)
+                            match sized {
+                                Some(size) => self.parts(ui, true, size.y, true, body),
+                                None => {
+                                    let height =
+                                        self.height.map_or(room, |height| height.min(room));
+                                    self.parts(ui, true, height, self.height.is_some(), body)
+                                }
+                            }
                         })
                         .inner
                 });
             let mut parts = panel.inner;
+            let rect = panel.response.rect;
+            // A resizable one is sized from its bottom right corner.
+            let resize = if self.resizable {
+                resize_corner(ui, self.id, rect, theme)
+            } else {
+                egui::Vec2::ZERO
+            };
             if scrim_clicked && self.scrim_cancels && parts.answer.is_none() {
                 parts.answer = Some(Answer::Cancel);
             }
@@ -429,11 +487,35 @@ impl<'a> Dialog<'a> {
             if appeared {
                 self.first_focus(ui);
             }
-            (parts, panel.response.rect)
+            (parts, rect, resize)
         });
-        let (parts, rect) = shown_area.inner;
-        if shown >= 1.0 {
+        let (parts, rect, resize) = shown_area.inner;
+        // Not the frame it appears in: egui learns its size then, and it
+        // may not stand in its place yet.
+        if shown >= 1.0 && !appeared {
             ctx.data_mut(|data| data.insert_temp(kept, rect));
+        }
+        if parts.dragged != egui::Vec2::ZERO || resize != egui::Vec2::ZERO {
+            let at = keep_in(rect.min + parts.dragged, rect.size(), screen, chrome);
+            let min = vec2(
+                (self.width * 0.6).min(theme.space(Space::S9) * 6.0),
+                theme.space(Space::S9) * 2.0,
+            );
+            let size = (resize != egui::Vec2::ZERO)
+                .then(|| {
+                    (vec2(rect.width(), parts.body_shown) + resize)
+                        .max(min)
+                        .min(largest)
+                })
+                .or(sized);
+            ctx.data_mut(|data| {
+                data.insert_temp(moved_key, at);
+                if let Some(size) = size {
+                    data.insert_temp(sized_key, size);
+                }
+            });
+            places::remember(ctx, self.id, places::Place { at, size });
+            ctx.request_repaint();
         }
         DialogResponse {
             inner: parts.inner,
@@ -444,7 +526,10 @@ impl<'a> Dialog<'a> {
     }
 
     /// The dialog as a window of its own, with Sue's title bar where Sue
-    /// draws the frames.
+    /// draws the frames. It opens centered on the window that showed it,
+    /// or where it was last put; its title bar moves it, and one that is
+    /// resizable can be made any size from its edges. Its place and the
+    /// size it was made are remembered ([`places`]).
     fn show_window<R>(self, ctx: &Context, body: impl FnOnce(&mut Ui) -> R) -> DialogResponse<R> {
         let theme = self.theme;
         let viewport = self.viewport();
@@ -459,40 +544,77 @@ impl<'a> Dialog<'a> {
         };
         let density = touch_or(ctx, Density::Regular);
         let chrome = bar + self.chrome(density, false);
-        // What is remembered of the window: where it was first put, and
-        // how tall its body turned out.
+        // What is known of the window while it is open: where it was put,
+        // how tall its body turned out, the size last asked of it and
+        // whether someone resized it.
         let memory = self.id.with("sue-dialog-window");
-        let known: Option<Placed> = ctx.data(|data| data.get_temp(memory));
+        // Shown in the last pass; one not shown since opens afresh.
+        let pass = ctx.cumulative_pass_nr();
+        let known: Option<Placed> = ctx
+            .data(|data| data.get_temp::<Placed>(memory))
+            .filter(|known| known.pass + 1 >= pass);
+        let kept = places::remembered(ctx, self.id);
         // Never taller than the screen it opens on: the body scrolls past
         // that.
-        let tallest = ctx
-            .input(|input| input.viewport().monitor_size)
-            .map_or(f32::INFINITY, |screen| {
-                (screen.y * 0.85 - chrome).max(theme.space(Space::S9) * 2.0)
-            });
-        let body_height = self
-            .height
-            .or(known.map(|known| known.body_height))
-            .unwrap_or(theme.space(Space::S9) * 3.0)
-            .min(tallest);
-        let size = vec2(self.width, chrome + body_height);
+        let monitor = ctx.input(|input| input.viewport().monitor_size);
+        let tallest = monitor.map_or(f32::INFINITY, |screen| {
+            (screen.y * 0.85 - chrome).max(theme.space(Space::S9) * 2.0)
+        });
         let parent = ctx
             .input(|input| input.viewport().outer_rect)
             .unwrap_or_else(|| ctx.content_rect());
-        let at = known.map_or_else(|| parent.center() - size / 2.0, |known| known.at);
+        let fitted = |body_height: f32| vec2(self.width, chrome + body_height.min(tallest));
+        let user_size = kept.and_then(|kept| kept.size).filter(|_| self.resizable);
         let mut builder = ViewportBuilder::default()
             .with_title(self.title)
-            .with_position(at)
             .with_resizable(self.resizable)
             .with_decorations(!own_frame);
-        // A window that can be resized is sized once and then left to
-        // whoever resizes it.
-        if !self.resizable || known.is_none() {
-            builder = builder.with_inner_size(size);
+        let mut placed = known.unwrap_or_else(|| {
+            // Opening: where it was last put (kept on the screens around
+            // the window that shows it), else centered on that window.
+            let size = user_size
+                .unwrap_or_else(|| fitted(self.height.unwrap_or(theme.space(Space::S9) * 3.0)));
+            let at = kept.map_or_else(
+                || parent.center() - size / 2.0,
+                |kept| on_screen(kept.at, size, parent, monitor),
+            );
+            Placed {
+                at,
+                body_height: self.height.unwrap_or(theme.space(Space::S9) * 3.0),
+                asked: size,
+                asked_at: 0,
+                user_sized: user_size.is_some(),
+                frames: 0,
+                centered: kept.is_some() || self.height.is_some(),
+                pass,
+            }
+        });
+        // Only what Sue means to change is asked of the window: a window
+        // told its place every frame could not be moved by anyone else.
+        if placed.frames == 0 {
+            builder = builder
+                .with_position(placed.at)
+                .with_inner_size(placed.asked);
+        } else if !placed.user_sized {
+            // As tall as what it holds, until someone sizes it.
+            let size = fitted(self.height.unwrap_or(placed.body_height));
+            if (size - placed.asked).length() >= 1.0 {
+                placed.asked = size;
+                placed.asked_at = placed.frames;
+            }
+            builder = builder.with_inner_size(placed.asked);
+            if !placed.centered {
+                // The first frame did not know how tall the body is: put
+                // it again around the parent's middle at the size it
+                // turned out to have, once.
+                placed.centered = true;
+                placed.at = parent.center() - placed.asked / 2.0;
+                builder = builder.with_position(placed.at);
+            }
         }
         if self.resizable {
             builder = builder.with_min_inner_size(vec2(
-                theme.space(Space::S9) * 6.0,
+                (self.width * 0.6).min(theme.space(Space::S9) * 6.0),
                 chrome + theme.space(Space::S9) * 2.0,
             ));
         }
@@ -511,16 +633,17 @@ impl<'a> Dialog<'a> {
                 closed = crate::widgets::title_bar(ui, top, self.title, false, theme);
                 ui.add_space(bar);
             }
-            let height = if self.resizable {
+            let height = if placed.user_sized {
                 (rect.height() - chrome).max(0.0)
             } else {
-                body_height
+                self.height.unwrap_or(placed.body_height).min(tallest)
             };
-            let fixed = self.resizable || self.height.is_some();
+            let fixed = placed.user_sized || self.height.is_some();
             let popup_open = egui::Popup::is_any_open(ui.ctx());
             let mut parts = self.parts(ui, false, height, fixed, body);
+            let mut resized = false;
             if own_frame && self.resizable {
-                crate::widgets::resize_edges(ui, rect);
+                resized = crate::widgets::resize_edges(ui, rect);
             }
             closed |= ui.input(|input| input.viewport().close_requested());
             if closed && parts.answer.is_none() {
@@ -530,25 +653,38 @@ impl<'a> Dialog<'a> {
             if appeared {
                 self.first_focus(ui);
             }
-            out = Some((parts, rect));
+            let actual = ui.input(|input| {
+                let info = input.viewport();
+                info.outer_rect.zip(info.inner_rect)
+            });
+            out = Some((parts, rect, resized, actual));
         });
-        let (parts, rect) = out.expect("the window's contents are drawn in the call");
-        // The first frame did not know how tall the body is: the window
-        // is put again around the parent's middle at the size it turned
-        // out to have, so a tall dialog does not hang below it. From
-        // then on it stays where it is, or where it was moved to.
-        let at = if known.is_none() && self.height.is_none() {
-            let size = vec2(self.width, chrome + parts.body_height.min(tallest));
-            parent.center() - size / 2.0
-        } else {
-            at
-        };
-        let placed = Placed {
-            at,
-            body_height: parts.body_height,
-        };
+        let (parts, rect, resized, actual) =
+            out.expect("the window's contents are drawn in the call");
+        placed.body_height = parts.body_height;
+        placed.frames += 1;
+        placed.pass = pass;
+        if let Some((outer, inner)) = actual {
+            // Resized by its edges, or (with the system's frame) found at
+            // another size than asked well after asking: someone sized it.
+            let settled = placed.frames.saturating_sub(placed.asked_at) > 3;
+            let other = (inner.size() - placed.asked).length() >= 2.0;
+            if self.resizable && (resized || (settled && other && !own_frame)) {
+                placed.user_sized = true;
+            }
+            placed.at = outer.min;
+            places::remember(
+                ctx,
+                self.id,
+                places::Place {
+                    at: outer.min,
+                    size: placed.user_sized.then_some(inner.size()),
+                },
+            );
+        }
         if parts.answer.is_some() {
-            // Answered: the next time it opens, it is placed afresh.
+            // Answered: the next time it opens, it opens where it was
+            // left.
             ctx.data_mut(|data| data.remove::<Placed>(memory));
         } else {
             if known.is_some_and(|known| known.body_height != placed.body_height) {
@@ -604,11 +740,12 @@ impl<'a> Dialog<'a> {
             let margin = theme.dialog_margin();
             let width = ui.available_width();
             let mut answer = None;
+            let mut dragged = egui::Vec2::ZERO;
             ui.spacing_mut().item_spacing = vec2(theme.space(Space::S4), 0.0);
             if header {
                 let pad = theme.space(Space::S4);
-                let (_, row) = ui.allocate_space(vec2(width, pad + density.icon_button() + pad));
-                let row = row.shrink2(vec2(0.0, pad));
+                let (_, whole) = ui.allocate_space(vec2(width, pad + density.icon_button() + pad));
+                let row = whole.shrink2(vec2(0.0, pad));
                 let close = Rect::from_min_size(
                     pos2(row.right() - pad - row.height(), row.top()),
                     vec2(row.height(), row.height()),
@@ -618,6 +755,20 @@ impl<'a> Dialog<'a> {
                 } else {
                     row.right() - margin
                 } - (row.left() + margin);
+                // The header is its title bar: dragging it moves the
+                // dialog. The close button, drawn after, keeps its clicks.
+                let grip = ui.interact(
+                    Rect::from_min_max(
+                        whole.min,
+                        pos2(row.left() + margin + room.max(0.0), whole.bottom()),
+                    ),
+                    self.id.with("sue-dialog-grip"),
+                    Sense::DRAG,
+                );
+                if grip.dragged() {
+                    dragged = grip.drag_delta();
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                }
                 let title = one_line(ui, self.title, TextRole::Title, theme.text, room, theme);
                 ui.painter().galley(
                     pos2(row.left() + margin, row.center().y - title.size().y / 2.0),
@@ -634,6 +785,7 @@ impl<'a> Dialog<'a> {
                 ui.add_space(margin);
             }
             let mut body_height = 0.0;
+            let mut body_shown = 0.0;
             let inner = Frame::new()
                 .inner_margin(Margin::symmetric(margin.round().clamp(0.0, 127.0) as i8, 0))
                 .show(ui, |ui| {
@@ -662,6 +814,7 @@ impl<'a> Dialog<'a> {
                     ui.spacing_mut().scroll = scroll_style;
                     body_height = shown.content_size.y;
                     let seen = shown.inner_rect;
+                    body_shown = seen.height();
                     let hidden_above = shown.state.clamped_offset().y;
                     let hidden_below = shown.content_size.y - seen.height() - hidden_above;
                     let fade = theme.space(Space::S7).min(seen.height() / 3.0);
@@ -690,6 +843,8 @@ impl<'a> Dialog<'a> {
                 answer,
                 buttons,
                 body_height,
+                dragged,
+                body_shown,
             }
         })
     }
@@ -860,11 +1015,82 @@ fn cut_fade(ui: &Ui, seen: Rect, fade: f32, above: bool, shade: Color32) {
     }
 }
 
-/// Where a dialog's own window was put and how tall its body was.
+/// Where a dialog of `size` put at `at` stands in `screen`: its header
+/// (`header` tall) always on it, so it can be moved back.
+fn keep_in(at: Pos2, size: egui::Vec2, screen: Rect, header: f32) -> Pos2 {
+    let grip = size.x.min(screen.width() / 4.0);
+    pos2(
+        at.x
+            .clamp(screen.left() - size.x + grip, screen.right() - grip)
+            .max(screen.left() - size.x + grip),
+        at.y
+            .clamp(screen.top(), screen.bottom() - header)
+            .max(screen.top()),
+    )
+}
+
+/// The grip at the bottom right corner of a resizable dialog drawn in the
+/// window: how far it was dragged this frame.
+fn resize_corner(ui: &mut Ui, id: Id, rect: Rect, theme: &Theme) -> egui::Vec2 {
+    let side = Density::of(ui).min_hit() / 2.0;
+    let corner = Rect::from_min_max(rect.max - egui::Vec2::splat(side), rect.max);
+    let grip = ui.interact(corner, id.with("sue-dialog-resize"), Sense::DRAG);
+    if grip.hovered() || grip.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeNwSe);
+    }
+    // Two short diagonal lines, as a window's size grip.
+    let inset = theme.space(Space::S2).max(1.0);
+    let tip = rect.max - egui::Vec2::splat(inset + theme.corner(Radius::Xl).se as f32 / 3.0);
+    let stroke = Stroke::new(theme.border_width.max(1.0), theme.text_muted());
+    for reach in [side / 2.0, side / 4.0] {
+        ui.painter().line_segment(
+            [tip - vec2(reach, 0.0), tip - vec2(0.0, reach)],
+            stroke,
+        );
+    }
+    if grip.dragged() {
+        grip.drag_delta()
+    } else {
+        egui::Vec2::ZERO
+    }
+}
+
+/// What is known of a dialog's own window while it is open.
 #[derive(Clone, Copy, PartialEq)]
 struct Placed {
-    at: egui::Pos2,
+    /// Where it is, on the screen.
+    at: Pos2,
+    /// How tall its body turned out.
     body_height: f32,
+    /// The size last asked of the window.
+    asked: egui::Vec2,
+    /// The frame that size was asked in.
+    asked_at: u32,
+    /// Someone resized it: its size is theirs from then on.
+    user_sized: bool,
+    /// How many frames it has been shown.
+    frames: u32,
+    /// It was put around the parent's middle at its real size (or never
+    /// needs to be).
+    centered: bool,
+    /// The pass of egui it was last shown in.
+    pass: u64,
+}
+
+/// Where a dialog of `size` last put at `at` opens now: kept to the
+/// screens around the window that shows it (`parent`), each `monitor`
+/// big as far as Sue can tell, with at least a grip of its title bar on
+/// one.
+fn on_screen(at: Pos2, size: egui::Vec2, parent: Rect, monitor: Option<egui::Vec2>) -> Pos2 {
+    let Some(monitor) = monitor else {
+        return at;
+    };
+    let reach = parent.expand2(monitor);
+    let grip = size.x.min(size.y).min(reach.width() / 4.0);
+    pos2(
+        at.x.clamp(reach.left() - size.x + grip, reach.right() - grip),
+        at.y.clamp(reach.top(), reach.bottom() - grip),
+    )
 }
 
 /// The touch density on a touch layout, else `other`.
@@ -1482,6 +1708,8 @@ pub fn form_grid<R>(
     })
     .inner
 }
+
+pub mod places;
 
 #[cfg(test)]
 pub(super) mod tests;

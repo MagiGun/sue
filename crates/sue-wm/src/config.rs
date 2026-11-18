@@ -100,6 +100,13 @@ pub fn rice_declarations() -> Vec<RiceDeclaration> {
         )
         .labeled("Phone Shaped"),
         declare(
+            crate::ui::dialog::places::PLACES_KEY,
+            RiceParameter::Text {
+                value: String::new(),
+            },
+            "Where each dialog was last put and the size it was made; Sue keeps this itself (empty opens every dialog in the middle again)",
+        ),
+        declare(
             "display.gpu_preference",
             choice("auto", &["auto", "integrated", "discrete"]),
             "GPU that draws the window; auto uses the display's GPU (applies after a restart)",

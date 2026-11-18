@@ -27,6 +27,7 @@ ui_scale = 1.0                 # [0.75..2.0] Interface scale on top of the syste
 interface = "auto"             # {auto|desktop|tablet|phone} Layout: auto follows the device (touch layouts on tablets and phones); pick one to switch
 phone_frame = false            # On a computer, draw the phone layout in a phone-wide column in the middle of the window
 gpu_preference = "auto"        # {auto|integrated|discrete} GPU that draws the window; auto uses the display's GPU (applies after a restart)
+dialog_places = ""             # @text Where each dialog was last put and the size it was made; Sue keeps this itself (empty opens every dialog in the middle again)
 
 [motion]
 instant_transitions = false    # Snap pages, menus and windows in 0 ms instead of animating them

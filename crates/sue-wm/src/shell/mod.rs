@@ -28,6 +28,7 @@ use sue_platform::{AudioSink, FormFactor, FramePacing, SafeAreaInsets, TextureUp
 use sue_rice::{HardwareProfile, RiceSchema, RiceValue, SetRiceValue};
 
 use crate::palette::Palette;
+use crate::ui::dialog::places as dialog_places;
 use crate::{
     AppletContext, AppletId, AppletRole, Applets, Catalog, FilePick, FrameScheduler, LayoutRequest,
     MenuBar, MenuItem, RiceEdit, ShellRequest, ShellView, SpringDamper, SpringMode, Theme,
@@ -543,6 +544,24 @@ impl Shell {
         self.touch();
     }
 
+    /// Applies the interface scale (`display.ui_scale`) when it changed:
+    /// at once, to every window, dialog and palette, since egui's zoom is
+    /// the whole context's, and its text and icons are drawn again at the
+    /// new size, never stretched. While a pointer is held it waits, so
+    /// the slider that changes it is not scaled out from under the
+    /// pointer; letting go applies it.
+    fn apply_scale(&mut self, ctx: &egui::Context) {
+        let scale = self.config.ui_scale.clamp(0.5, 3.0);
+        if (ctx.zoom_factor() - scale).abs() < f32::EPSILON {
+            return;
+        }
+        if ctx.input(|input| input.pointer.any_down()) {
+            return;
+        }
+        ctx.set_zoom_factor(scale);
+        self.touch();
+    }
+
     /// Marks a change: keep drawing through the grace period.
     pub fn touch(&mut self) {
         self.last_change = Some(Instant::now());
@@ -1004,11 +1023,24 @@ impl Shell {
         if self.applied_theme.as_ref() != Some(&self.theme) {
             self.theme
                 .apply(&ctx, self.config.caret_blink, self.applied_theme.as_ref());
-            ctx.set_zoom_factor(self.config.ui_scale.clamp(0.5, 3.0));
             ctx.options_mut(|options| {
                 options.input_options.line_scroll_speed = self.config.wheel_line_px;
+                // The interface scale is the rice's alone: egui's own
+                // Ctrl+Minus and Ctrl+0 would change it behind Settings'
+                // back (and take keys the studios use).
+                options.zoom_with_keyboard = false;
             });
             self.applied_theme = Some(self.theme.clone());
+        }
+        self.apply_scale(&ctx);
+        // Where the dialogs were put, kept in the rice between runs.
+        dialog_places::load(&ctx, io.world.rice.get_str(dialog_places::PLACES_KEY).unwrap_or(""));
+        if let Some(places) = dialog_places::take_settled(&ctx) {
+            // Kept by Sue, not an edit of anyone's: no undo step.
+            let _ = io
+                .world
+                .rice
+                .set(dialog_places::PLACES_KEY, RiceValue::Text(places));
         }
         let theme = self.theme.clone();
 

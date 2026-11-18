@@ -863,6 +863,7 @@ fn read_notes(
     let height = (screen.height() - theme.space(Space::S9) * 2.5).max(theme.space(Space::S9) * 5.0);
     let title = tr!("update-notes-title", version = release.version());
     let shown = Dialog::new("sue-release-notes", &title, theme)
+        .resizable()
         .width(width)
         .height(height)
         .accept(tr!("update-close"))

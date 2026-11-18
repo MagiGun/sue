@@ -409,3 +409,73 @@ fn an_applets_place_joins_the_hubs_rail_and_draws_its_pane() {
     rig.frames(&mut shell);
     assert!(seen.lock().unwrap().is_empty());
 }
+
+#[test]
+fn the_interface_scale_applies_at_once_after_the_pointer_lets_go_and_on_start() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut launchpad = Launchpad::new();
+    let probe = Arc::clone(&seen);
+    launchpad
+        .register(move || Box::new(Layouts(Arc::clone(&probe))))
+        .unwrap();
+    let mut rig = Rig::new(&launchpad);
+    let config = |rig: &Rig| WmConfig::from_rice(&rig.world.rice).unwrap();
+    let mut shell = Shell::new(
+        config(&rig),
+        Theme::from_rice(&rig.world.rice),
+        HardwareProfile::Balanced,
+        60,
+        FormFactor::Desktop,
+    );
+    rig.frames(&mut shell);
+    assert!((rig.ctx.zoom_factor() - 1.0).abs() < f32::EPSILON);
+    // Settings changes the scale: the theme stays the same, the scale
+    // still follows (it used to wait for a change of theme).
+    rig.world
+        .rice
+        .set("display.ui_scale", RiceValue::Float(1.5))
+        .unwrap();
+    let theme = Theme::from_rice(&rig.world.rice);
+    assert_eq!(&theme, shell.theme(), "only the scale changed");
+    shell.apply_config(config(&rig), theme, HardwareProfile::Balanced);
+    // Held while the pointer is down (the slider being dragged).
+    let ctx = rig.ctx.clone();
+    let held = |down: bool| egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+        events: vec![egui::Event::PointerButton {
+            pos: egui::pos2(10.0, 10.0),
+            button: egui::PointerButton::Primary,
+            pressed: down,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        ..egui::RawInput::default()
+    };
+    rig.with(|io| {
+        ctx.run_ui(held(true), |ui| shell.ui(ui, io, Instant::now()))
+            .drop_without_applying_deltas();
+    });
+    assert!((ctx.zoom_factor() - 1.0).abs() < f32::EPSILON, "held");
+    rig.with(|io| {
+        ctx.run_ui(held(false), |ui| shell.ui(ui, io, Instant::now()))
+            .drop_without_applying_deltas();
+    });
+    rig.frames(&mut shell);
+    assert!((ctx.zoom_factor() - 1.5).abs() < f32::EPSILON, "applied");
+    // Egui's own Ctrl+Minus no longer changes it behind the rice's back.
+    assert!(!ctx.options(|options| options.zoom_with_keyboard));
+    // A new start reads it from the rice.
+    let mut next = Rig::new(&launchpad);
+    next.world
+        .rice
+        .set("display.ui_scale", RiceValue::Float(1.25))
+        .unwrap();
+    let mut shell = Shell::new(
+        config(&next),
+        Theme::from_rice(&next.world.rice),
+        HardwareProfile::Balanced,
+        60,
+        FormFactor::Desktop,
+    );
+    next.frames(&mut shell);
+    assert!((next.ctx.zoom_factor() - 1.25).abs() < f32::EPSILON);
+}

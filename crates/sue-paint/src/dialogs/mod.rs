@@ -518,7 +518,10 @@ impl SuePaint {
             theme,
         )
         .host(DialogHost::Window)
-        .width(width);
+        .width(width)
+        // Moved by its title bar and sized from its edges; it opens where
+        // it was last left, at the size it was made.
+        .resizable();
         if let Some(label) = &look.footer.accept {
             host = host.accept(label.clone());
         }

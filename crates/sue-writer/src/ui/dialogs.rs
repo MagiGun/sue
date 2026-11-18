@@ -52,7 +52,7 @@ impl SueWriter {
         let keys =
             matches!(dialog, Dialog::Shortcuts).then(|| crate::commands::shortcut_rows(cx.rice()));
         let title = title(&dialog);
-        let mut host = footer(ui::Dialog::new(salt(&dialog), &title, theme), &dialog);
+        let mut host = footer(ui::Dialog::new(salt(&dialog), &title, theme), &dialog).resizable();
         if matches!(dialog, Dialog::Furniture(_)) {
             host = host.width(theme.space(Space::S9) * FURNITURE_STEPS);
         }

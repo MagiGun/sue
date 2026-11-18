@@ -92,12 +92,16 @@ impl Shell {
             + theme.hairline().width * 2.0;
         let body_height = (sheet.height() - chrome).max(0.0);
         let view = self.view(now, dt);
-        let shown = Dialog::new(("sue-window", id.as_str()), name, theme)
+        let mut dialog = Dialog::new(("sue-window", id.as_str()), name, theme)
             .width(sheet.width())
-            .height(body_height)
             .scrim_cancels()
-            .enter_is_the_bodys()
-            .show(ctx, |ui| {
+            .enter_is_the_bodys();
+        if form == FormFactor::Desktop {
+            // Moved by its header, sized from its corner, as any window.
+            dialog = dialog.resizable();
+        }
+        let body_height = dialog.sized_body_height(ctx).unwrap_or(body_height);
+        let shown = dialog.height(body_height).show(ctx, |ui| {
                 // The applet lays out its own body in the room it has, a
                 // hair short of it so the host's scroll area never needs
                 // its bar: only the applet's own lists scroll.
