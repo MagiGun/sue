@@ -130,6 +130,7 @@ pub mod stroke;
 mod svg;
 mod text;
 mod tools;
+mod video;
 
 use egui::{Color32, Painter, Rect, pos2, vec2};
 
@@ -1219,6 +1220,45 @@ icons! {
     /// further in hanging from it by a bent line. The outliner, the parts
     /// of a manuscript as a tree.
     Outliner = "outliner" => text::OUTLINER,
+
+    // Group L: video editing (Sue VE).
+    /// A clapperboard: a box with round lower corners, and over its top a
+    /// slanted board with two stripes across it. Sue VE, the studio.
+    AppVideo = "app-video" => video::APP_VIDEO,
+    /// A small box like a blade, a short line across it, and a line
+    /// running down from it: cut a clip in two where it is clicked.
+    ToolRazor = "tool-razor" => video::TOOL_RAZOR,
+    /// An opening bracket at the left, and beside it an arrow pointing
+    /// right: trim an edge and move what follows with it.
+    ToolRipple = "tool-ripple" => video::TOOL_RIPPLE,
+    /// A closing and an opening bracket back to back, with an arrow head
+    /// on each side pointing out: move the cut between two clips.
+    ToolRoll = "tool-roll" => video::TOOL_ROLL,
+    /// A wide box with an arrow inside pointing both ways: other frames
+    /// of the clip, in the same place.
+    ToolSlip = "tool-slip" => video::TOOL_SLIP,
+    /// A box between two open boxes, and over it an arrow pointing both
+    /// ways: move a clip between its neighbours.
+    ToolSlide = "tool-slide" => video::TOOL_SLIDE,
+    /// A horseshoe magnet, its two poles marked by a line across each:
+    /// edges snap to each other.
+    Magnet = "magnet" => video::MAGNET,
+    /// A tag hanging point down, as on a ruler: a marker.
+    Marker = "marker" => video::MARKER,
+    /// An opening bracket, a short line before it: where the part to use
+    /// begins, the in mark.
+    MarkIn = "mark-in" => video::MARK_IN,
+    /// A closing bracket, a short line after it: where the part to use
+    /// ends, the out mark.
+    MarkOut = "mark-out" => video::MARK_OUT,
+    /// An arrow pointing down into the gap between two boxes: put a clip
+    /// in, moving what follows.
+    Insert = "insert" => video::INSERT,
+    /// An arrow pointing down onto a long box: put a clip over what is
+    /// there.
+    Overwrite = "overwrite" => video::OVERWRITE,
+    /// A four pointed star: effects.
+    Effects = "effects" => video::EFFECTS,
 }
 
 /// Frames drawn without a window or a GPU, for the tests of this module.
