@@ -212,6 +212,11 @@ impl SueVe {
         {
             self.source = crate::studio::SourceView::default();
         }
+        // What finished in the background, whenever the ticks run.
+        if self.hub.poll() {
+            ui.ctx().request_repaint();
+        }
+        self.poll_jobs(cx);
         let theme = cx.theme.clone();
         let full = ui.max_rect();
         ui.painter().rect_filled(full, SQUARE, theme.void);
@@ -448,7 +453,7 @@ impl SueVe {
                 mut height,
                 mut rate,
             } => {
-                let title = tr!("cmd-new-sequence");
+                let title = tr!("new-sequence-title");
                 let shown = sue_wm::ui::Dialog::new("sve-new-sequence", &title, theme)
                     .ok_cancel()
                     .show(ctx, |ui| {

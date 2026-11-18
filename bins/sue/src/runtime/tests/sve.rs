@@ -353,7 +353,7 @@ fn the_deliver_page_exports_the_edit_in_the_background() {
     driver.click_page("Deliver");
     assert!(driver.has("Format"), "the Deliver page: {:?}", driver.texts);
     // Small and short: the in to out range at 320 wide.
-    driver.click_text("The whole sequence (else from the in to the out mark)");
+    driver.click_text("Whole sequence (else in to out)");
     let _ = sequence;
     driver.click_text("Start Export");
     let ctx = driver.ctx.clone();

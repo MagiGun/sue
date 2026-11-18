@@ -63,7 +63,70 @@ pub fn media_page(
     let mut child = ui.new_child(UiBuilder::new().max_rect(pool).id_salt("sve-media-pool"));
     child.set_clip_rect(pool);
     super::pool::pool_ui(studio, &mut child, cx, theme);
-    monitor::source_monitor(studio, ui, viewer, cx, theme);
+    // What is picked in the pool shows in the viewer, with its facts
+    // under it.
+    if let Some(picked) = studio.picked
+        && studio.source.item != Some(picked)
+        && crate::model::sequence(cx.arena(), picked).is_none()
+    {
+        studio.show_source(cx, picked);
+    }
+    let facts_height = viewer.height() * FACTS_SHARE;
+    let monitor = Rect::from_min_max(
+        viewer.min,
+        pos2(viewer.right(), viewer.bottom() - facts_height),
+    );
+    let facts = Rect::from_min_max(pos2(viewer.left(), monitor.bottom()), viewer.max);
+    monitor::source_monitor(studio, ui, monitor, cx, theme);
+    facts_ui(studio, ui, facts, cx, theme);
+}
+
+/// The share of the Media page's viewer column the clip's facts take.
+const FACTS_SHARE: f32 = 0.28;
+
+/// The facts of the clip in the source monitor: its kind, its file, its
+/// length, and what decoding found.
+fn facts_ui(studio: &SueVe, ui: &mut Ui, rect: Rect, cx: &AppletContext<'_>, theme: &Theme) {
+    ui.painter().rect_filled(rect, SQUARE, theme.panel);
+    ui.painter()
+        .hline(rect.x_range(), rect.top(), theme.hairline());
+    let Some(item) = studio.source.item else {
+        return;
+    };
+    let Ok(entity) = cx.arena().get_by_id(item) else {
+        return;
+    };
+    let mut child = ui.new_child(
+        UiBuilder::new()
+            .max_rect(rect.shrink(theme.space(Space::S6)))
+            .id_salt("sve-media-facts"),
+    );
+    sue_wm::ui::heading(&mut child, &tr!("media-facts"), theme);
+    let kind = crate::model::SourceKind::of(entity);
+    let length = crate::model::length_of(cx.arena(), item).map(|length| {
+        super::timecode(
+            length,
+            crate::model::rate_of(entity).unwrap_or(sue_core::Rate::FPS_30),
+        )
+    });
+    let rows = [
+        (tr!("field-name"), entity.name().to_owned()),
+        (tr!("media-kind"), super::pool::kind_name(&kind)),
+        (tr!("media-length"), length.unwrap_or_default()),
+        (
+            tr!("media-path"),
+            crate::model::text(entity, crate::model::key::PATH)
+                .unwrap_or_default()
+                .to_owned(),
+        ),
+        (tr!("field-size"), crate::media::import::summary(entity)),
+    ];
+    for (label, value) in rows {
+        child.horizontal(|ui| {
+            ui.label(egui::RichText::new(label).color(theme.text_muted()));
+            ui.label(value);
+        });
+    }
 }
 
 /// The Deliver page: what to write and where, the program monitor, and

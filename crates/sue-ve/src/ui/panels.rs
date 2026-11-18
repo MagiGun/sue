@@ -130,8 +130,11 @@ pub fn effects_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, t
 
 /// The audio meters: the program's left and right peaks.
 pub fn meters_ui(studio: &SueVe, ui: &mut Ui, theme: &Theme) {
-    let rect = ui.max_rect().shrink(theme.space(Space::S2));
-    let painter = ui.painter_at(rect);
+    let painter = ui.painter_at(ui.max_rect());
+    let rect = ui
+        .max_rect()
+        .shrink(theme.space(Space::S2))
+        .shrink2(vec2(0.0, theme.text_size(TextRole::Micro) / 2.0));
     let scale = theme.text_size(TextRole::Micro) * 2.0;
     let bars = Rect::from_min_max(rect.min, pos2(rect.right() - scale, rect.bottom()));
     let gap = theme.space(Space::S1);

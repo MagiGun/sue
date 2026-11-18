@@ -41,6 +41,23 @@ pub fn kind_icon(kind: &SourceKind) -> Icon {
     }
 }
 
+/// The name of a kind of source.
+#[must_use]
+pub fn kind_name(kind: &SourceKind) -> String {
+    match kind {
+        SourceKind::Movie => tr!("kind-movie"),
+        SourceKind::Sound => tr!("kind-sound"),
+        SourceKind::Still => tr!("kind-still"),
+        SourceKind::Picture => tr!("kind-picture"),
+        SourceKind::ImageSequence => tr!("kind-image-sequence"),
+        SourceKind::Title => tr!("kind-title"),
+        SourceKind::Solid => tr!("kind-solid"),
+        SourceKind::Adjustment => tr!("kind-adjustment"),
+        SourceKind::Sequence => tr!("kind-sequence"),
+        SourceKind::Unknown => tr!("kind-unknown"),
+    }
+}
+
 /// Draws the picture of pool item `id` in `rect`: a movie's first
 /// thumbnail, a still or a picture, a solid's color, else its icon.
 pub(crate) fn picture(

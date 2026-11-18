@@ -336,3 +336,29 @@ fn measure_decoding_and_export() {
         }
     }
 }
+
+#[test]
+fn a_movies_sound_and_thumbnails_come_in_the_background() {
+    let (arena, _, movie, path) = project(320, 180, 2.0);
+    let mut hub = MediaHub::new(64);
+    hub.prepare(&arena, movie);
+    let deadline = Instant::now() + std::time::Duration::from_secs(20);
+    while hub.busy() {
+        assert!(Instant::now() < deadline, "the background work ends");
+        hub.poll();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    hub.poll();
+    assert_eq!(hub.sounds.error(movie), None);
+    let sound = hub.sounds.get(movie).expect("the sound decoded");
+    assert!((sound.frames() as f64 / 48_000.0 - 2.0).abs() < 0.1);
+    assert!(
+        sound.peaks.iter().any(|peak| peak[1] > 0.3),
+        "the waveform has the tone"
+    );
+    let strip = hub.thumbs.strip(movie).unwrap();
+    let strip = strip.lock().unwrap();
+    assert_eq!(strip.frames.len(), 2, "a thumbnail a second");
+    assert_eq!(strip.frames[0].height, crate::media::thumbs::THUMB_HEIGHT);
+    let _ = std::fs::remove_file(path);
+}

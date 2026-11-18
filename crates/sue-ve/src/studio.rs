@@ -442,8 +442,19 @@ impl SueVe {
         self.selection.clear();
         self.clock = Clock::default();
         self.source = SourceView::default();
+        self.picked = None;
         for (id, _) in model::pool(cx.arena(), project) {
             self.hub.prepare(cx.arena(), id);
+            // The first movie is picked, as a pool opens with its first
+            // clip chosen.
+            if self.picked.is_none()
+                && cx
+                    .arena()
+                    .get_by_id(id)
+                    .is_ok_and(|entity| SourceKind::of(entity) == SourceKind::Movie)
+            {
+                self.picked = Some(id);
+            }
         }
         let size = self.frame_size(cx);
         self.quality = rice_text(cx.rice(), rice::QUALITY)
@@ -1222,6 +1233,11 @@ impl SueApplet for SueVe {
             || self.drag.is_some()
         {
             tick.animating = true;
+        }
+        // Ticks run when the earliest applet asks: while something moves
+        // here, that is the next frame.
+        if tick.animating {
+            tick.wake = Some(now + std::time::Duration::from_millis(8));
         }
         tick
     }

@@ -91,11 +91,23 @@ const SOUND_ROWS: [Row; 1] = [Row {
 /// The share of a row its label takes.
 const LABEL_SHARE: f32 = 0.38;
 
+/// How wide a row may be: what shows of the palette, so rows never push
+/// it wider.
+fn row_width(ui: &Ui) -> f32 {
+    ui.available_width()
+        .min(ui.clip_rect().right() - ui.cursor().left())
+}
+
+/// A row: left to right, centred up and down.
+fn row_layout() -> egui::Layout {
+    egui::Layout::left_to_right(egui::Align::Center)
+}
+
 /// A labeled row: the label at the left, then what `add` draws.
 fn labeled<R>(ui: &mut Ui, label: &str, theme: &Theme, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.horizontal(|ui| {
-        let room = ui.available_width();
-        let height = Density::Compact.icon_button();
+    let room = row_width(ui);
+    let height = Density::Compact.icon_button();
+    ui.allocate_ui_with_layout(vec2(room, height), row_layout(), |ui| {
         let (name, _) =
             ui.allocate_exact_size(vec2(room * LABEL_SHARE, height), egui::Sense::hover());
         ui.painter().text(
@@ -203,8 +215,8 @@ fn row_ui(
     let name = row.key;
     let label = sue_lang::tr!("ve", row.label);
     let button = Density::Compact.icon_button();
-    ui.horizontal(|ui| {
-        let room = ui.available_width();
+    let room = row_width(ui);
+    ui.allocate_ui_with_layout(vec2(room, button), row_layout(), |ui| {
         let (spot, _) =
             ui.allocate_exact_size(vec2(room * LABEL_SHARE, button), egui::Sense::hover());
         ui.painter().text(
@@ -214,7 +226,8 @@ fn row_ui(
             font(theme, TextRole::Caption),
             theme.text_muted(),
         );
-        let width = ui.available_width() - button - theme.space(Space::S2);
+        let gap = ui.spacing().item_spacing.x;
+        let width = (room * (1.0 - LABEL_SHARE) - button - gap * 2.0).max(button);
         let response = sue_wm::ui::number_field(("sve-inspector", row.key), &mut value)
             .label(&label)
             .range(row.range.0..=row.range.1)

@@ -184,7 +184,7 @@ pub(crate) fn waveform(
     let points_per_second = 48_000.0 / PEAK_STEP as f64;
     let span = (to - from).seconds();
     let columns = rect.width().max(1.0) as usize;
-    let color = theme.text.gamma_multiply(SOFT);
+    let color = theme.text_muted();
     for column in 0..columns {
         let a = from.seconds() + span * column as f64 / columns as f64;
         let b = from.seconds() + span * (column + 1) as f64 / columns as f64;
@@ -298,6 +298,13 @@ pub fn timeline_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, 
     // The ruler: ticks, seconds, the in to out range, markers.
     let ruler_painter = ui.painter_at(ruler);
     ruler_painter.rect_filled(ruler, SQUARE, theme.panel);
+    let (mark_in, mark_out) = model::marks(&shown);
+    if mark_in.is_some() || mark_out.is_some() {
+        let a = x_of(mark_in.unwrap_or(Time::ZERO));
+        let b = x_of(mark_out.unwrap_or(shown.duration()));
+        let span = Rect::from_min_max(pos2(a, ruler.top()), pos2(b, ruler.bottom()));
+        ruler_painter.rect_filled(span, SQUARE, theme.fill_selected());
+    }
     let step = [
         0.04_f32, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0,
     ]
@@ -324,13 +331,6 @@ pub fn timeline_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, 
             font(theme, TextRole::Micro),
             theme.text_muted(),
         );
-    }
-    let (mark_in, mark_out) = model::marks(&shown);
-    if mark_in.is_some() || mark_out.is_some() {
-        let a = x_of(mark_in.unwrap_or(Time::ZERO));
-        let b = x_of(mark_out.unwrap_or(shown.duration()));
-        let span = Rect::from_min_max(pos2(a, ruler.top()), pos2(b, ruler.bottom()));
-        ruler_painter.rect_filled(span, SQUARE, theme.fill_selected());
     }
     let mark = Density::Compact.icon();
     for marker in &shown.markers {
@@ -903,6 +903,8 @@ fn interact(
                 } else {
                     studio.selection = vec![id];
                 }
+                // The clip's source is picked in the pool too.
+                studio.picked = real.find(id).map(|(_, clip)| clip.source);
             }
             (None, _) => {
                 studio.selection.clear();
@@ -1107,7 +1109,13 @@ mod tests {
         assert_eq!(rows[1], (VIDEO_HEIGHT, VIDEO_HEIGHT));
         assert_eq!(rows[2].1, AUDIO_HEIGHT);
         // A move onto the sound track is refused, as the preview shows.
-        let wrong = Drag::Move { tracks: 1, ..drag };
+        let wrong = Drag::Move {
+            ids: vec![1],
+            from: Pos2::ZERO,
+            track: 1,
+            delta: Time::SECOND,
+            tracks: 1,
+        };
         assert_eq!(
             apply_drag(&mut sequence.clone(), &wrong, false, &ctx),
             Err(EditError::WrongKind)
