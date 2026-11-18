@@ -176,18 +176,14 @@ impl Shell {
                     );
                     bar_ui.label(RichText::new(name).size(theme.ui_size).color(theme.text));
                     bar_ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new("\u{00D7}")
-                                        .size(theme.ui_size * 1.8)
-                                        .color(theme.muted),
-                                )
-                                .frame(false)
-                                .min_size(Vec2::splat(bar_height - 8.0)),
-                            )
-                            .on_hover_text(tr!("close-esc"))
-                            .clicked()
+                        if crate::ui::icon_button(
+                            "sue-window-close",
+                            crate::icons::Icon::Close,
+                            &tr!("close-esc"),
+                        )
+                        .quiet()
+                        .show(ui, theme)
+                        .clicked()
                         {
                             close = true;
                         }

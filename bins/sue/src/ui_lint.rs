@@ -161,7 +161,7 @@ const AREAS: [Area; 11] = [
     },
     Area {
         folder: "crates/sue-wm/src/shell",
-        baseline: Counts::new([0, 2, 9, 0, 17, 0, 2]),
+        baseline: Counts::new([0, 1, 9, 0, 16, 0, 2]),
     },
     // Phase 4's touch modes (P4-10), each a file of its own, held at
     // zero from the start.
@@ -294,7 +294,11 @@ const INTERFACE: [&str; 5] = [
 /// P4-18 took the last of `bins/sue/src` (the cross of a key chip and
 /// the arrows of Settings on a phone) to icons. After Phase 4 merged,
 /// Sue Paint and Sue Writer draw none either.
-const GLYPH_BASELINE: [u32; 5] = [1, 0, 0, 0, 0];
+///
+/// 0.0.82 brought `sue-wm` to zero: its last count was the close cross of a
+/// tool's floating window, now the Close icon. Every crate draws its
+/// icons with `sue_wm::icons`, and the row stays at zero.
+const GLYPH_BASELINE: [u32; 5] = [0, 0, 0, 0, 0];
 
 /// Characters that are text where they stand, not icons: a file or a
 /// folder from the repository root, the character (`None` for every
