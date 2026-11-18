@@ -11,6 +11,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.81] - 2026-11-17
+
 ### Added
 
 - Sue Paint, 3D drawing figures: the figures are new. A male and a
@@ -94,9 +96,6 @@ follow [Semantic Versioning](https://semver.org/).
   the arc, on the circle that fits it best. Settings has Hold to create
   figures and Length of long-press (0.1 to 5 seconds). From @propaneko's
   pull request (#11).
-
-### Changed
-
 - Sue looks for a newer release every time it starts (it was once a
   day), so a start without network is not the last try for a day.
 - Fewer notices: Sue no longer says what you just did and can see
@@ -2324,7 +2323,8 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.8...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.81...HEAD
+[0.0.81]: https://github.com/MagiGun/sue/compare/v0.0.8...v0.0.81
 [0.0.8]: https://github.com/MagiGun/sue/compare/v0.0.75...v0.0.8
 [0.0.75]: https://github.com/MagiGun/sue/compare/v0.0.74...v0.0.75
 [0.0.74]: https://github.com/MagiGun/sue/compare/v0.0.73...v0.0.74
