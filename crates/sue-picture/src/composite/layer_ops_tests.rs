@@ -296,14 +296,79 @@ fn a_change_after_a_stroke_was_shown_redraws_what_the_stroke_touched() {
     );
 }
 
+/// Applies `edit`, lets `compositor` follow it, and prints how long
+/// that took and how much of the picture was redrawn.
+fn timed(name: &str, compositor: &mut Compositor, arena: &mut Arena, mut edit: doc::Edit) {
+    edit.apply(arena).unwrap();
+    let version = compositor.display().2;
+    let (_, size, _) = compositor.display();
+    let all = u64::from(size[0]) * u64::from(size[1]);
+    let start = Instant::now();
+    compositor.sync(arena);
+    let took = start.elapsed().as_secs_f64() * 1000.0;
+    let pixels = compositor.changed_since(version).map_or(all, |rects| {
+        rects
+            .iter()
+            .map(|[x0, y0, x1, y1]| u64::from(x1 - x0) * u64::from(y1 - y0))
+            .sum()
+    });
+    println!(
+        "  {name:36} {took:8.1} ms, {:5.1} % redrawn",
+        pixels as f64 * 100.0 / all as f64
+    );
+    // The frames after, with nothing changed: what the compositor knows
+    // of each layer is brought up to date.
+    compositor.sync(arena);
+    compositor.sync(arena);
+}
+
+/// A slider dragged over `steps` values of the opacity of `layer`: the
+/// time a step takes, mean and worst.
+fn dragged(
+    name: &str,
+    compositor: &mut Compositor,
+    arena: &mut Arena,
+    layer: EntityId,
+    steps: u32,
+) {
+    let (mut total, mut worst) = (0.0_f64, 0.0_f64);
+    for step in 0..steps {
+        let mut edit = doc::Edit::new("opacity").then(SetProperty::new(
+            layer,
+            picture::OPACITY,
+            1.0 - f64::from(step) / f64::from(steps + 10),
+        ));
+        edit.apply(arena).unwrap();
+        let start = Instant::now();
+        compositor.sync(arena);
+        let took = start.elapsed().as_secs_f64() * 1000.0;
+        total += took;
+        worst = worst.max(took);
+    }
+    println!(
+        "  {name:36} {:8.1} ms a step, worst {worst:.1} ms",
+        total / f64::from(steps)
+    );
+}
+
 /// How long the screen image takes to follow each layer operation on a
-/// picture of 60 layers in folders at 3000 by 4000, and on a comic page
-/// at 600 dots an inch. Run with
-/// `cargo test -p sue-picture --release layer_operations_speed -- --ignored --nocapture`.
+/// picture of 60 layers in folders at 3000 by 4000, on one of 200
+/// layers, and on a comic page at 600 dots an inch; and how long each
+/// frame of an animation of 24 cels takes to show. Run with
+/// `cargo test -p sue-picture --release layer_operations_speed -- --ignored --nocapture`
+/// (`SUE_BENCH` picks cases, see [`wanted`]).
 #[test]
 #[ignore = "a benchmark"]
 fn layer_operations_speed() {
-    for (size, count) in [([3000, 4000], 60), ([4299, 6070], 12)] {
+    for (size, count) in [
+        ([3000, 4000], 60),
+        ([3000, 4000], 200),
+        ([4299, 6070], 12),
+        ([4299, 6070], 60),
+    ] {
+        if !wanted(&format!("{}x{}x{count}", size[0], size[1])) {
+            continue;
+        }
         let (mut arena, picture, layers) = layered(size, count);
         let mut compositor = Compositor::new(picture);
         let start = Instant::now();
@@ -316,40 +381,206 @@ fn layer_operations_speed() {
         );
         compositor.sync(&arena);
         compositor.sync(&arena);
-        let all = u64::from(size[0]) * u64::from(size[1]);
         for (name, make) in operations(&arena, picture, &layers) {
-            let mut edit = make(&arena);
-            edit.apply(&mut arena).unwrap();
-            let version = compositor.display().2;
+            let edit = make(&arena);
+            timed(name, &mut compositor, &mut arena, edit);
+        }
+        // The cases of the 0.0.82 work, on the picture as the list above
+        // left it (layer 8 deleted, the layer painted all over hidden).
+        let whole = layers[0];
+        let show = |layer: EntityId, on: bool| {
+            doc::Edit::new("show").then(SetProperty::new(layer, picture::VISIBLE, on))
+        };
+        let edit = show(whole, true);
+        timed(
+            "show the layer painted all over",
+            &mut compositor,
+            &mut arena,
+            edit,
+        );
+        let folders: Vec<EntityId> = doc::layers(&arena, picture)
+            .into_iter()
+            .map(|info| info.id)
+            .filter(|id| doc::is_folder(&arena, *id))
+            .collect();
+        let folder = folders[0];
+        // Within a folder: a member three rows down.
+        let member = layers[15.min(count - 1)];
+        let at = doc::layers(&arena, picture)
+            .iter()
+            .position(|info| info.id == member)
+            .unwrap();
+        let edit = doc::reorder(&arena, picture, member, at - 3).expect("it moves");
+        timed("reorder within a folder", &mut compositor, &mut arena, edit);
+        // Across folders: a member of one folder dropped onto another.
+        if let Some(other) = folders.get(1)
+            && let Some(edit) = crate::anim::drop_layer(&arena, picture, member, *other)
+        {
+            timed(
+                "reorder into another folder",
+                &mut compositor,
+                &mut arena,
+                edit,
+            );
+        }
+        let rows = doc::layers(&arena, picture).len();
+        let edit = doc::reorder(&arena, picture, layers[9], rows - 1).expect("it moves");
+        timed(
+            "reorder from the bottom to the top",
+            &mut compositor,
+            &mut arena,
+            edit,
+        );
+        let edit = show(folder, false);
+        timed("hide a folder", &mut compositor, &mut arena, edit);
+        let edit = show(folder, true);
+        timed("show a folder", &mut compositor, &mut arena, edit);
+        dragged(
+            "folder opacity drag, 30 steps",
+            &mut compositor,
+            &mut arena,
+            folder,
+            30,
+        );
+        dragged(
+            "layer opacity drag, 30 steps",
+            &mut compositor,
+            &mut arena,
+            layers[5],
+            30,
+        );
+        dragged(
+            "opacity drag, layer painted all over",
+            &mut compositor,
+            &mut arena,
+            whole,
+            30,
+        );
+        let blend = |mode: &'static str| {
+            doc::Edit::new("blend").then(SetProperty::new(whole, picture::BLEND, mode))
+        };
+        let edit = blend("multiply");
+        timed(
+            "blend mode, layer painted all over",
+            &mut compositor,
+            &mut arena,
+            edit,
+        );
+        let edit = blend("normal");
+        timed(
+            "blend mode back, the same layer",
+            &mut compositor,
+            &mut arena,
+            edit,
+        );
+        let edit = doc::reorder(&arena, picture, whole, 5).expect("it moves");
+        timed(
+            "reorder the layer painted all over",
+            &mut compositor,
+            &mut arena,
+            edit,
+        );
+    }
+    for size in [[1920, 1080], [3000, 4000], [4299, 6070]] {
+        if wanted(&format!("play{}x{}", size[0], size[1])) {
+            playback_speed(size);
+        }
+    }
+}
+
+/// Whether the benchmark runs the case `name`: all of them, or the ones
+/// `SUE_BENCH` lists (as `3000x4000x60,play1920x1080`).
+fn wanted(name: &str) -> bool {
+    std::env::var("SUE_BENCH").map_or(true, |list| list.split(',').any(|item| item == name))
+}
+
+/// An animation of 24 cels over a background painted all over, each cel
+/// a drawing over the middle half of the picture: the time a frame takes
+/// to show, the first time round and the second.
+fn playback_speed(size: [u32; 2]) {
+    let mut arena = Arena::new();
+    let (mut edit, picture) = doc::create(&NewPicture {
+        name: "Cels".to_owned(),
+        width: size[0],
+        height: size[1],
+        dpi: 350.0,
+        paper: Some(Color::srgb8(255, 255, 255)),
+        timelapse: false,
+    })
+    .unwrap();
+    edit.apply(&mut arena).unwrap();
+    let mut cels = vec![doc::layers(&arena, picture).last().unwrap().id];
+    for index in 0..24 {
+        let (mut spawn, layer) = doc::add_raster_layer(
+            &arena,
+            picture,
+            cels.last().copied(),
+            format!("Cel {index}"),
+            None,
+        )
+        .unwrap();
+        spawn.apply(&mut arena).unwrap();
+        cels.push(layer);
+    }
+    let [width, height] = size;
+    for (index, layer) in cels.iter().enumerate() {
+        let raster = doc::raster_mut(&mut arena, *layer).unwrap();
+        let bytes = raster.bytes_mut().unwrap();
+        // The background all over; a cel's lines over the middle half,
+        // every third row, a little further right each frame.
+        let (xs, ys) = if index == 0 {
+            (0..width, 0..height)
+        } else {
+            let shift = index as u32 * 7;
+            (
+                width / 4 + shift..width * 3 / 4 + shift,
+                height / 4..height * 3 / 4,
+            )
+        };
+        for y in ys {
+            if index > 0 && y % 3 != 0 {
+                continue;
+            }
+            for x in xs.clone() {
+                let pixel = (y as usize * width as usize + x as usize) * 4;
+                bytes[pixel..pixel + 4].copy_from_slice(&[
+                    (index * 10) as u8,
+                    (x % 256) as u8,
+                    (y % 256) as u8,
+                    if index == 0 { 255 } else { 220 },
+                ]);
+            }
+        }
+    }
+    let frames = &cels[1..];
+    let view = |shown: usize| super::FrameView {
+        hidden: frames
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != shown)
+            .map(|(_, id)| *id)
+            .collect(),
+        ..super::FrameView::default()
+    };
+    let mut compositor = Compositor::new(picture);
+    compositor.set_view(Some(view(0)));
+    compositor.sync(&arena);
+    compositor.sync(&arena);
+    compositor.sync(&arena);
+    println!("{} x {}, playback of 24 cels:", size[0], size[1]);
+    for round in ["first time round", "second time round"] {
+        let (mut total, mut worst) = (0.0_f64, 0.0_f64);
+        for frame in 1..=24 {
+            compositor.set_view(Some(view(frame % 24)));
             let start = Instant::now();
             compositor.sync(&arena);
             let took = start.elapsed().as_secs_f64() * 1000.0;
-            let pixels = compositor.changed_since(version).map_or(all, |rects| {
-                rects
-                    .iter()
-                    .map(|[x0, y0, x1, y1]| u64::from(x1 - x0) * u64::from(y1 - y0))
-                    .sum()
-            });
-            println!(
-                "  {name:32} {took:8.1} ms, {:5.1} % of the picture redrawn and sent to the GPU",
-                pixels as f64 * 100.0 / all as f64
-            );
-        }
-        // An opacity slider dragged: 30 steps.
-        let small = layers[5];
-        let start = Instant::now();
-        for step in 0..30 {
-            let mut edit = doc::Edit::new("opacity").then(SetProperty::new(
-                small,
-                picture::OPACITY,
-                1.0 - f64::from(step) / 40.0,
-            ));
-            edit.apply(&mut arena).unwrap();
-            compositor.sync(&arena);
+            total += took;
+            worst = worst.max(took);
         }
         println!(
-            "  an opacity drag of 30 steps: {:.1} ms a step",
-            start.elapsed().as_secs_f64() * 1000.0 / 30.0
+            "  {round:36} {:8.1} ms a frame, worst {worst:.1} ms",
+            total / 24.0
         );
     }
 }
