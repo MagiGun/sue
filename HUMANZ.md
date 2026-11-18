@@ -2217,6 +2217,53 @@ pixel is accepted as no change (`Compositor::accept`). `brush_speed`,
 `paint_frame_speed` and `paint_tools_frame_speed` (Sue Paint's own brushes
 in the running app) are ignored tests that time it.
 
+**Layer changes by tiles (0.0.82).** When the layers change behind the
+compositor's back (a property, a reorder, undo, another animation frame)
+it no longer composites a rectangle of the picture. It keeps one number
+for each 64 pixel tile (`tiles::tile_hashes`): the layers that show
+anything in the tile, bottom first, each with a key of what it shows
+(pixels by their tile revisions, place, style, mask, effects) and, for a
+clipped layer, of what it is clipped to; a folder composited on its own
+gives a number a tile from its members. Two stacks with the same number
+for a tile composite to the same pixels there, so `Compositor::sync`
+composites exactly the tiles whose number changed: a reorder where the
+moved layer overlaps others, a hidden folder where its layers have paint,
+a frame of playback where its cels differ (`set_view` no longer redraws
+the picture). A tile is composited from only the layers that show in it
+(`rows::picks`; a layer with no pixel in the tile, a hidden one and a
+layer clipped to either are left out, which changes no pixel because a
+source with no alpha changes nothing under any blend mode), on every
+core with each thread taking the next tile not yet begun
+(`tiles::each_index`, sized by `composite::workers` as before). Composited
+tiles are kept by tile and number (`TileCache`, 96 MB unless
+`set_tile_memory` says otherwise), so undo, a layer shown again or an
+animation's next round is a copy. `Compositor::sync_within` is `sync` for
+a frame of the interface: it composites for the time it is given, what
+is on screen first, and, when the picture is seen small, first one
+sample a screen pixel all over what is on screen and the detail on the
+frames after; the studio uses it while a button is held (a slider or a
+row dragged), and `sync` when it is let go, which is always exact. A
+`refresh` of the whole picture after an edit in place goes the same way
+when what each tile showed before is known, and the tiles a stroke showed
+through its kept byte stacks (`Focus`, a step off at most) are
+composited again once the stroke is over. The test
+`random_layer_operations_keep_the_image_exact` compares the screen image
+with every layer composited at every pixel after a few hundred seeded
+operations with undo and redo; `layer_operations_speed` times it.
+
+**Dropping rows in the Layer palette (0.0.82).** A dragged row lands by
+where in the row under the pointer it is let go (`anim::DropPlace`,
+`anim::drop_layer_at`): above a layer from its upper half, below it from
+its lower half (so the bottom of a folder can be reached), above a folder
+from its top edge and into it from the rest; nothing goes under the
+paper, and a drop that would move nothing makes no step. Only rows in
+the list's own part of the screen take a drop, the list scrolls while a
+row is held at its top or bottom edge, and rows out of sight are not
+drawn at all. A press on an eye held over other eyes shows or hides each
+as the first one (`EyeSweep`): set in place, recorded as one step when
+the button is let go. `p82_layers` drives all of it on a picture of
+sixty layers.
+
 **Layer folders.** A folder is a `sue.folder` entity in the picture's stack,
 right above its layers, and each layer in it is linked by a
 `sue.paint.member` relation, so layers stay where every edit already finds

@@ -11,6 +11,52 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Sue Paint: working with layers on a big picture is much faster.
+  Reordering layers, hiding or showing a layer or a folder, changing
+  opacity or blending mode, clipping, deleting and undo now redraw only
+  the parts of the canvas that really look different, instead of a
+  large rectangle or the whole picture. On a 3000 x 4000 picture of 60
+  layers in folders, a reorder went from about 230 ms to about 10 ms,
+  hiding a folder from about 250 ms to about 30 ms, and a change to a
+  layer painted edge to edge from about 330 ms to about 70 ms. Showing
+  again what was just hidden, undo and redo are close to instant. The
+  picture itself is unchanged, pixel for pixel.
+- Sue Paint: while you drag a slider (a layer's opacity, say) on a huge
+  picture, the canvas keeps up with the pointer: the part you see is
+  drawn first, a zoomed out picture is shown at screen detail at once,
+  and the rest follows in the next moments. When you let go the canvas
+  is exact.
+- Sue Paint, animation: playback redraws only where a frame differs
+  from the one before, and a frame shown before comes back at once, so
+  the second round of a loop plays without compositing.
+- Sue Paint, Layer palette: drag a layer onto the upper half of a row
+  to put it above that layer, onto the lower half to put it below, and
+  onto a folder to put it inside. The line shows exactly where it will
+  land. Before, a layer could only be dropped above a row, so the
+  bottom of a folder could not be reached.
+- Sue Paint, Layer palette: press an eye and drag over the eyes of
+  other layers to show or hide them all in one move; one Undo takes the
+  whole move back.
+- Sue Paint, Layer palette: a layer dragged to the top or bottom edge
+  of the list scrolls the list, so it can reach a row that was out of
+  sight.
+
+### Fixed
+
+- Sue Paint, Layer palette: a long list of layers no longer slows the
+  interface; rows that are scrolled out of sight cost nothing.
+- Sue Paint, Layer palette: a layer let go outside the list no longer
+  moves onto a row hidden under the palette's buttons.
+- Sue Paint, Layer palette: dropping a layer where it already is no
+  longer adds an empty step to Undo.
+- Sue Paint, Layer palette: pressing an eye and letting go a little
+  beside it no longer drags the layer to another place in the list.
+- Sue Paint, Layer palette: the line that marks a drop above the first
+  row in sight is no longer cut off, and a pointer between two rows
+  still marks a place.
+
 ## [0.0.81] - 2026-11-17
 
 ### Added
