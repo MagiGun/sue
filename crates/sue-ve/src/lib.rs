@@ -13,6 +13,8 @@ macro_rules! tr {
 mod commands;
 pub mod edit;
 pub mod export;
+pub mod fx;
+pub mod grade;
 pub mod media;
 mod menus;
 pub mod mix;
