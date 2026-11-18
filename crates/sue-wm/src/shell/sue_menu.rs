@@ -323,15 +323,18 @@ impl Shell {
             )
             .key(key(&[&keymap.open_settings])),
         );
-        items.push(
-            sue_item(
-                run,
-                tr!("quit-sue"),
-                ShellRequest::Command("app.quit".to_owned()),
-                false,
-            )
-            .key(key(&[&keymap.quit])),
-        );
+        // Phones and tablets leave Sue the way they leave any app.
+        if self.form_factor() == FormFactor::Desktop {
+            items.push(
+                sue_item(
+                    run,
+                    tr!("quit-sue"),
+                    ShellRequest::Command(crate::menubar::QUIT.to_owned()),
+                    false,
+                )
+                .key(key(&[&keymap.quit])),
+            );
+        }
         self.sue_items = items;
         self.sue_runs = runs;
     }

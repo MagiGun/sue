@@ -283,6 +283,11 @@ fn the_sue_menus_interface_changes_what_every_studio_draws() {
         phone.sue_menu_labels(&["Interface"]),
         ["Automatic (Phone)", "Tablet", "Phone"]
     );
+    // A phone leaves Sue like any other app: no Quit there, while a
+    // computer keeps it.
+    assert!(!phone.sue_menu_labels(&[]).iter().any(|l| l == "Quit Sue"));
+    rig.with(|io| shell.open_sue_menu(io));
+    assert!(shell.sue_menu_labels(&[]).iter().any(|l| l == "Quit Sue"));
 }
 
 #[test]

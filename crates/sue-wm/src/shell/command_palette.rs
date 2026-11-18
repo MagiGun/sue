@@ -92,11 +92,14 @@ impl Shell {
                 entry(&tr!("save-project-as"), String::new()),
                 command("file.save_as"),
             ),
-            (
-                entry(&tr!("quit-sue"), keymap.quit.to_string()),
-                command("app.quit"),
-            ),
         ]);
+        // Phones and tablets leave Sue the way they leave any app.
+        if self.form_factor() == sue_platform::FormFactor::Desktop {
+            entries.push((
+                entry(&tr!("quit-sue"), keymap.quit.to_string()),
+                command(crate::menubar::QUIT),
+            ));
+        }
         for (applet, template) in templates(io.applets, &io.world.rice) {
             entries.push((
                 entry(

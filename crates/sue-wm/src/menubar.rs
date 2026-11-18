@@ -22,6 +22,7 @@
 //! the studio's own menus, Window, Help), with the standard items in one
 //! order and one wording.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use egui::{Id, Rect, Sense, Ui, pos2, vec2};
@@ -201,6 +202,53 @@ fn menu_density(ctx: &egui::Context) -> Density {
     }
 }
 
+/// The command that quits Sue. Phones and tablets leave an app the way the
+/// system does (home, back, the app switcher), so their menus leave it out.
+pub const QUIT: &str = "app.quit";
+
+/// `items` without Quit and the lines it leaves at an end or doubled, as a
+/// touch layout shows them.
+#[must_use]
+pub fn without_quit(items: &[MenuItem]) -> Vec<MenuItem> {
+    let mut kept: Vec<MenuItem> = items
+        .iter()
+        .filter(|item| !matches!(item, MenuItem::Action { command, .. } if command == QUIT))
+        .map(|item| match item {
+            MenuItem::Sub { label, items } => MenuItem::Sub {
+                label: label.clone(),
+                items: without_quit(items),
+            },
+            other => other.clone(),
+        })
+        .collect();
+    tidy(&mut kept);
+    kept
+}
+
+/// `menus` as this layout shows them: whole on a desktop, without Quit on
+/// a phone or tablet.
+fn for_layout<'a>(ctx: &egui::Context, menus: &'a [Menu]) -> Cow<'a, [Menu]> {
+    if crate::widgets::is_touch(ctx) {
+        Cow::Owned(
+            menus
+                .iter()
+                .map(|menu| Menu::new(menu.title.clone(), without_quit(&menu.items)))
+                .collect(),
+        )
+    } else {
+        Cow::Borrowed(menus)
+    }
+}
+
+/// `items` as this layout shows them (see [`for_layout`]).
+fn items_for_layout<'a>(ctx: &egui::Context, items: &'a [MenuItem]) -> Cow<'a, [MenuItem]> {
+    if crate::widgets::is_touch(ctx) {
+        Cow::Owned(without_quit(items))
+    } else {
+        Cow::Borrowed(items)
+    }
+}
+
 /// A menu bar's state between frames: which menu is open, and the state of
 /// that menu (its open submenus, the row the keyboard is on).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -264,6 +312,8 @@ impl MenuBar {
         state: &dyn Fn(&str) -> ItemState,
         theme: &Theme,
     ) -> Option<String> {
+        let menus = for_layout(ui.ctx(), menus);
+        let menus = &*menus;
         let base = ui.scope_id().with("sue-menubar");
         if self.open.is_some_and(|open| open >= menus.len()) {
             self.close();
@@ -402,6 +452,8 @@ impl MenuBar {
             return None;
         }
         let base: Id = ui.scope_id().with("sue-dropdown");
+        let items = items_for_layout(ui.ctx(), items);
+        let items = &*items;
         let event = self.menu.show(
             ui.ctx(),
             &MenuRequest {
@@ -1248,6 +1300,32 @@ mod tests {
                 MenuItem::sub("B", vec![MenuItem::action("C", "c")]),
             ]
         );
+    }
+
+    #[test]
+    fn phones_and_tablets_show_no_quit_desktops_do() {
+        let mut menus = menus();
+        menus[0].items.push(MenuItem::Separator);
+        menus[0]
+            .items
+            .push(MenuItem::action("Quit Sue", QUIT).key("Ctrl+Q"));
+        let shown = |touch: bool| {
+            let ctx = egui::Context::default();
+            crate::widgets::set_touch(&ctx, touch);
+            let mut bar = MenuBar::new();
+            bar.open(&menus, "File");
+            drawn(&ctx, &mut bar, &menus, Vec::new());
+            drawn(&ctx, &mut bar, &menus, Vec::new())
+        };
+        let desktop = shown(false);
+        assert!(desktop.iter().any(|text| text == "Quit Sue"), "{desktop:?}");
+        let touch = shown(true);
+        assert!(touch.iter().any(|text| text == "New..."), "{touch:?}");
+        assert!(!touch.iter().any(|text| text == "Quit Sue"), "{touch:?}");
+        // The line before Quit goes with it.
+        let file = without_quit(&menus[0].items);
+        assert!(!matches!(file.last(), Some(MenuItem::Separator)));
+        assert_eq!(file.len(), 3);
     }
 
     #[test]
