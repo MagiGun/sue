@@ -274,6 +274,16 @@ const PICTURE: &[(&str, &str, Exempt)] = &[
     ("crates/sue-ve/src/ui", "draw_layers", Exempt::All),
     ("crates/sue-ve/src/ui", "picture", Exempt::All),
     ("crates/sue-ve/src/ui", "clip_picture", Exempt::All),
+    // Sue VE's processed frames, the scopes' traces, the clip strip's
+    // pictures, and the color wheels and hue curves (color fields, as
+    // Sue Paint's color wheel).
+    ("crates/sue-ve/src/ui", "processed_frame", Exempt::All),
+    ("crates/sue-ve/src/ui", "scopes_ui", Exempt::All),
+    ("crates/sue-ve/src/ui", "clips_strip", Exempt::All),
+    ("crates/sue-ve/src/ui", "wheel_ui", Exempt::All),
+    ("crates/sue-ve/src/ui", "hue_curve_box", Exempt::All),
+    // The phone's timeline: the thumbnails of the main track.
+    ("crates/sue-ve/src/ui", "lanes_ui", Exempt::Colors),
 ];
 
 /// `true` when the file `name` (from the repository root) belongs to the

@@ -204,7 +204,7 @@ fn mask_overlay(studio: &mut SueVe, ui: &Ui, cx: &mut AppletContext<'_>, theme: 
     for spot in &spots {
         painter.rect_filled(
             Rect::from_center_size(*spot, vec2(side, side)),
-            0.0,
+            SQUARE,
             theme.focus(),
         );
     }

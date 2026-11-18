@@ -18,6 +18,9 @@ use crate::edit::EditError;
 use crate::keys::{self, Ease};
 use crate::studio::SueVe;
 
+/// A Bezier handle's dot, a share of a key's square.
+const HANDLE_DOT: f32 = 0.4;
+
 /// The channels of `clip` that have keys, by name, with a name to show.
 #[must_use]
 pub fn keyed_channels(clip: &Clip) -> Vec<(String, String)> {
@@ -273,7 +276,7 @@ pub fn graph_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, the
         let picked = studio.graph.picked.contains(&key.time);
         painter.rect_filled(
             Rect::from_center_size(at, vec2(side, side)),
-            0.0,
+            SQUARE,
             if picked { theme.focus() } else { theme.text },
         );
         handles.push((key.time, 0, at));
@@ -297,7 +300,7 @@ pub fn graph_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, the
                 (pos2(x_of(next.time), y_of(next.value)), in_at, 2, next.time),
             ] {
                 painter.line_segment([start, end], theme.hairline_active());
-                painter.circle_filled(end, side / 2.5, theme.focus());
+                painter.circle_filled(end, side * HANDLE_DOT, theme.focus());
                 handles.push((owner, which, end));
             }
         }

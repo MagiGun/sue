@@ -103,6 +103,12 @@ impl Panel {
 /// Square corners, for the panels that tile the page.
 pub(crate) const SQUARE: egui::CornerRadius = egui::CornerRadius::ZERO;
 
+/// The least a floating palette is, in header heights: across and
+/// down.
+const FLOAT_WIDE: f32 = 4.0;
+/// See [`FLOAT_WIDE`].
+const FLOAT_TALL: f32 = 3.0;
+
 /// The meters' width: room for two bars and their scale.
 const METERS_WIDTH: f32 = 64.0;
 
@@ -586,7 +592,7 @@ impl SueVe {
                 .title_bar(false)
                 .collapsible(false)
                 .resizable(true)
-                .min_size(vec2(header * 4.0, header * 3.0));
+                .min_size(vec2(header * FLOAT_WIDE, header * FLOAT_TALL));
             if let Some(at) = moved {
                 window = window.current_pos(at);
             }

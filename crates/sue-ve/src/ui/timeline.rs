@@ -990,7 +990,7 @@ fn clip_ui(
                 let x = body.left() + body.width() * (offset / span) as f32;
                 painter.circle_filled(
                     pos2(x, volume_y(content, found.value)),
-                    theme.space(Space::S1) * 1.2,
+                    theme.space(Space::S1),
                     theme.warning(),
                 );
             }

@@ -21,6 +21,10 @@ use crate::studio::SueVe;
 
 /// The timeline's share of the page's height.
 const TIMELINE_SHARE: f32 = 0.42;
+/// A strip's meter, a share of a button's width.
+const METER_SHARE: f32 = 0.6;
+/// The equalizer graph's height, in rows.
+const EQ_ROWS: f32 = 3.0;
 /// The track settings' share of the width.
 const SIDE_SHARE: f32 = 0.3;
 
@@ -399,7 +403,7 @@ fn strip_ui(
             studio.commit_live(cx, &tr!("mixer-fader"));
         }
         let (bars, _) = ui.allocate_exact_size(
-            vec2(Density::Compact.icon_button() * 0.6, fader_height),
+            vec2(Density::Compact.icon_button() * METER_SHARE, fader_height),
             Sense::hover(),
         );
         if let Some(found) = &meters {
@@ -663,8 +667,10 @@ fn side_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, theme: &
 /// The equalizer's response across the hearing range.
 fn eq_graph(ui: &mut Ui, fx: &TrackFx, theme: &Theme) {
     let width = ui.available_width();
-    let (rect, _) =
-        ui.allocate_exact_size(vec2(width, Density::Regular.row() * 3.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(width, Density::Regular.row() * EQ_ROWS),
+        Sense::hover(),
+    );
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, SQUARE, theme.void);
     painter.hline(rect.x_range(), rect.center().y, theme.hairline());

@@ -89,6 +89,9 @@ pub struct NumberRow {
     pub suffix: String,
 }
 
+/// The share of a mask's row its name takes.
+const MASK_NAME_SHARE: f32 = 0.3;
+
 /// The share of a row its label takes.
 const LABEL_SHARE: f32 = 0.42;
 
@@ -914,7 +917,7 @@ pub fn curve_box(
         let at = to_screen(*point);
         painter.rect_filled(
             Rect::from_center_size(at, vec2(reach, reach)),
-            0.0,
+            super::SQUARE,
             theme.focus(),
         );
     }
@@ -955,7 +958,7 @@ fn masks_ui(
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 let (spot, picked) =
-                    ui.allocate_exact_size(vec2(room * 0.3, button), Sense::click());
+                    ui.allocate_exact_size(vec2(room * MASK_NAME_SHARE, button), Sense::click());
                 if studio.mask_picked == Some(index) {
                     ui.painter().rect_filled(
                         spot,

@@ -34,6 +34,13 @@ pub const TOOLS: [(&str, Icon, &str); 11] = [
     ("delete", Icon::Delete, "mobile-delete"),
 ];
 
+/// How far a tool's icon sits over its middle, a share of the icon.
+const TOOL_ICON_LIFT: f32 = 0.4;
+/// How far its name sits under its middle.
+const TOOL_LABEL_DROP: f32 = 0.5;
+/// How far a sheet tile's icon sits over its middle.
+const TILE_ICON_LIFT: f32 = 0.35;
+
 /// The frame shapes the Aspect sheet offers: name and width to height.
 pub const ASPECTS: [(&str, u32, u32); 4] = [
     ("9:16", 9, 16),
@@ -179,7 +186,10 @@ fn top_bar(studio: &mut SueVe, ui: &mut Ui, rect: Rect, cx: &mut AppletContext<'
             rect.right() - width - theme.space(Space::S4),
             rect.top() + theme.space(Space::S2),
         ),
-        vec2(width, rect.height() - theme.space(Space::S2) * 2.0),
+        vec2(
+            width,
+            rect.height() - theme.space(Space::S2) - theme.space(Space::S2),
+        ),
     );
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(export));
     if sue_wm::ui::button("sve-mobile-export", &tr!("mobile-export"))
@@ -446,7 +456,7 @@ fn lanes_ui(
                 body.shrink(1.0),
                 theme.corner(sue_wm::ui::Radius::Sm),
                 if selected {
-                    egui::Stroke::new(Theme::STRONG_STROKE * 1.5, theme.focus())
+                    egui::Stroke::new(Theme::STRONG_STROKE, theme.focus())
                 } else {
                     theme.hairline()
                 },
@@ -571,14 +581,14 @@ fn tools_ui(studio: &mut SueVe, ui: &mut Ui, rect: Rect, theme: &Theme) {
                     icons::paint(
                         ui.painter(),
                         Rect::from_center_size(
-                            place.center() - vec2(0.0, icon_side * 0.4),
+                            place.center() - egui::Vec2::Y * (icon_side * TOOL_ICON_LIFT),
                             vec2(icon_side, icon_side),
                         ),
                         icon,
                         theme.text,
                     );
                     ui.painter().text(
-                        place.center() + vec2(0.0, icon_side * 0.5),
+                        place.center() + egui::Vec2::Y * (icon_side * TOOL_LABEL_DROP),
                         Align2::CENTER_TOP,
                         sue_lang::tr!("ve", label),
                         font(theme, TextRole::Micro),
@@ -668,7 +678,7 @@ fn tile(ui: &mut Ui, salt: &str, icon: Icon, label: &str, on: bool, theme: &Them
     icons::paint(
         ui.painter(),
         Rect::from_center_size(
-            place.center() - vec2(0.0, icon_side * 0.35),
+            place.center() - egui::Vec2::Y * (icon_side * TILE_ICON_LIFT),
             vec2(icon_side, icon_side),
         ),
         icon,
