@@ -92,3 +92,90 @@ pub fn write_movie(
     }
     std::fs::write(path, bytes).map_err(|error| error.to_string())
 }
+
+/// Makes a sample project in the arena, every step undoable: the sample
+/// movie (written into `dir`, where this system can write MP4) in the
+/// pool, two pieces of it on V1 with their sound linked on A1 and a
+/// dissolve between them, a title over the first with a fade in, a
+/// marker and in and out marks. Returns the project and its sequence.
+pub fn sample_project(
+    cx: &mut sue_wm::AppletContext<'_>,
+    dir: &Path,
+) -> Option<(sue_core::EntityId, sue_core::EntityId)> {
+    use sue_core::{Rate, Time};
+    use sue_wm::ArenaEdit;
+
+    use crate::edit;
+    use crate::model;
+
+    let made = model::new_project(
+        &tr!("sample-project"),
+        &tr!("sequence-name", number = 1),
+        1280,
+        720,
+        Rate::FPS_25,
+    );
+    let (project, sequence) = (made.project, made.sequence);
+    cx.apply(ArenaEdit(made.batch)).ok()?;
+    let movie = dir.join("sue-ve-sample.mp4");
+    if !movie.is_file() {
+        let _ = write_movie(&movie, 1280, 720, 25, 8.0, true);
+    }
+    let film = crate::media::import::entity_for(&movie, false)
+        .ok()
+        .map(|entity| {
+            let id = entity.id();
+            (id, entity)
+        });
+    let title = crate::media::import::title(&tr!("title-name"), &tr!("sample-title"));
+    let title_id = title.id();
+    let mut batch = sue_core::txn::Batch::new(tr!("import-media"));
+    let mut entities = vec![title];
+    if let Some((_, entity)) = &film {
+        entities.insert(0, entity.clone());
+    }
+    model::spawn_all_under(cx.arena(), project, entities, &mut batch);
+    cx.apply(ArenaEdit(batch)).ok()?;
+    let second = Time::SECOND;
+    let secs = Time::from_seconds;
+    let (step, _) = model::plan(cx.arena(), sequence, &tr!("overwrite"), |edit_sequence| {
+        if let Some((film, _)) = film {
+            let first = sue_model::Clip::new(film, Time::ZERO, secs(4.0));
+            let mut later = sue_model::Clip::new(film, secs(4.0), secs(3.0));
+            later.source_in = secs(5.0);
+            let ids = edit::overwrite(
+                edit_sequence,
+                vec![
+                    (2, first.clone()),
+                    (3, first),
+                    (2, later.clone()),
+                    (3, later),
+                ],
+            )?;
+            edit::link(edit_sequence, &[ids[0], ids[1]])?;
+            edit::link(edit_sequence, &[ids[2], ids[3]])?;
+            edit::add_transition(edit_sequence, 2, "dissolve", secs(4.0), second)?;
+            edit::add_transition(edit_sequence, 3, "dissolve", secs(4.0), second)?;
+        }
+        let mut words =
+            sue_model::Clip::new(title_id, Time::from_seconds(0.5), Time::from_seconds(2.5));
+        words.properties.set(model::key::POS_Y, 220.0);
+        edit::overwrite(edit_sequence, vec![(1, words)])?;
+        edit::add_transition(
+            edit_sequence,
+            1,
+            "dissolve",
+            Time::from_seconds(0.5),
+            Time::from_seconds(0.5),
+        )?;
+        edit::add_marker(edit_sequence, secs(2.0), &tr!("marker-name", number = 1));
+        edit::set_mark(edit_sequence, false, Some(second));
+        edit::set_mark(edit_sequence, true, Some(secs(6.0)));
+        Ok(())
+    })
+    .ok()?;
+    if let Some(step) = step {
+        cx.apply(ArenaEdit(step)).ok()?;
+    }
+    Some((project, sequence))
+}

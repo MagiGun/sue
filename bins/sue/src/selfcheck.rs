@@ -93,7 +93,7 @@ type CheckFn = fn(&mut Subject) -> Result<String, String>;
 
 /// Runs every check against `subject`, in dependency order.
 pub fn run(subject: &mut Subject) -> Report {
-    let checks: [(&'static str, CheckFn); 10] = [
+    let checks: [(&'static str, CheckFn); 11] = [
         ("platform", check_platform),
         ("rice", check_rice),
         ("arena", check_arena),
@@ -104,6 +104,7 @@ pub fn run(subject: &mut Subject) -> Report {
         ("backbone", check_backbone),
         ("sue paint", check_paint_studio),
         ("sue writer", check_writer_studio),
+        ("sue ve", check_ve_studio),
     ];
     Report {
         checks: checks
@@ -1026,7 +1027,7 @@ fn check_window_manager(subject: &mut Subject) -> Result<String, String> {
         )?;
     }
     ensure(
-        runtime.shell.sue_menu_labels(&["Studios"]) == ["Sue Paint", "Sue Writer"],
+        runtime.shell.sue_menu_labels(&["Studios"]) == ["Sue Paint", "Sue Writer", "Sue VE"],
         "the Sue menu's Studios are not the studios",
     )?;
     ensure(
@@ -1261,6 +1262,125 @@ fn check_writer_studio(subject: &mut Subject) -> Result<String, String> {
         sizes.len(),
         pdf.div_ceil(1024)
     ))
+}
+
+/// Sue VE: a sample edit made (a movie written by Sue's own MP4 export,
+/// imported, cut, dissolved, a title over it), every step undone and
+/// redone, saved in the project and opened again, an exact frame decoded,
+/// and a second of the edit exported to MP4 and read back.
+fn check_ve_studio(subject: &mut Subject) -> Result<String, String> {
+    let runtime = &mut subject.runtime;
+    let studio = sue_wm::AppletId::new(sue_ve::ID).map_err(text)?;
+    let now = Instant::now();
+    let mut textures = sue_platform::NoTextures;
+    runtime.request(ShellRequest::Open(studio.clone()), &mut textures, now);
+    ensure(runtime.shell.page() == Some(&studio), "Sue VE did not open")?;
+    let dir = runtime.engine.paths.cache_dir.join("self-check-ve");
+    std::fs::create_dir_all(&dir).map_err(text)?;
+    let depth = runtime.engine.history.depth();
+    let (project, sequence) = runtime
+        .with_context(&mut textures, now, |cx| {
+            sue_ve::sample::sample_project(cx, &dir)
+        })
+        .ok_or("the sample edit was not made")?;
+    let steps = runtime.engine.history.depth() - depth;
+    let read =
+        |runtime: &Runtime| sue_ve::model::sequence(&runtime.engine.world.arena, sequence).cloned();
+    let made = read(runtime).ok_or("the sample has no sequence")?;
+    let movies = sue_platform::movie::mp4_available();
+    let clips: usize = made.tracks.iter().map(|track| track.clips().len()).sum();
+    ensure(
+        clips >= if movies { 5 } else { 1 },
+        "the sample edit has too few clips",
+    )?;
+    // Every step undoes, and comes back.
+    for _ in 0..steps {
+        runtime
+            .engine
+            .history
+            .undo(&mut runtime.engine.world)
+            .map_err(text)?;
+    }
+    ensure(
+        runtime.engine.world.arena.get_by_id(project).is_err(),
+        "undo left the project behind",
+    )?;
+    for _ in 0..steps {
+        runtime
+            .engine
+            .history
+            .redo(&mut runtime.engine.world)
+            .map_err(text)?;
+    }
+    ensure(
+        read(runtime).as_ref() == Some(&made),
+        "redo did not bring the edit back",
+    )?;
+    // The edit lives in the project.
+    let path = dir.join("video.sue");
+    runtime.save_project_to(&path)?;
+    let bytes = std::fs::read(&path).map_err(text)?;
+    runtime.open_project(&path, &bytes)?;
+    ensure(
+        read(runtime).as_ref() == Some(&made),
+        "the project changed the edit",
+    )?;
+    let mut detail = format!(
+        "sample edit of {clips} clips in {steps} undo steps, undone, redone, saved in the project"
+    );
+    if movies {
+        // An exact frame, decoded by the system's decoder.
+        let movie = dir.join("sue-ve-sample.mp4");
+        let mut decoder =
+            sue_platform::video::VideoDecoder::open(&movie, None, false).map_err(text)?;
+        let target = 37_i64;
+        let time = target * 10_000_000 / 25;
+        let mut rgba = Vec::new();
+        decoder.seek(time).map_err(text)?;
+        let frame = decoder
+            .frame_at(time, &mut rgba)
+            .map_err(text)?
+            .ok_or("no frame decoded")?;
+        let expected = sue_ve::sample::frame(1280, 720, target as u32);
+        let at = (100 * 1280 + 100) * 4;
+        ensure(
+            (frame.time - time).abs() < 200_000 && rgba[at].abs_diff(expected[at]) <= 8,
+            "the decoder did not land on the exact frame",
+        )?;
+        // A second of the edit, exported and read back.
+        let mut settings = sue_ve::export::Settings::whole(&made);
+        settings.size = (320, 180);
+        settings.range = (sue_core::Time::ZERO, sue_core::Time::SECOND);
+        let out = dir.join("second.mp4");
+        let report = sue_ve::export::run(
+            runtime.engine.world.arena.clone(),
+            sequence,
+            settings,
+            &out,
+            false,
+            None,
+        )?;
+        let facts = sue_platform::video::probe(&out).map_err(text)?;
+        ensure(
+            report.frames == 25
+                && (facts.width, facts.height) == (320, 180)
+                && facts.audio.is_some(),
+            "the exported movie is not what was asked for",
+        )?;
+        detail = format!(
+            "{detail}; frame 37 decoded exactly; one second exported to MP4 ({} KiB) and read back",
+            report.bytes.div_ceil(1024)
+        );
+    } else {
+        detail = format!("{detail}; no MP4 route on this system, so no movie was decoded");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    runtime.request(ShellRequest::Hub, &mut textures, now);
+    ensure(
+        runtime.shell.hub_open(),
+        "Sue VE did not go back to the Hub",
+    )?;
+    Ok(detail)
 }
 
 /// Sue Paint: a layered illustration painted with the real brushes, laid
@@ -1550,7 +1670,7 @@ mod tests {
         let mut subject = Subject { host, runtime };
         let report = run(&mut subject);
         assert!(report.passed(), "{report}");
-        assert_eq!(report.checks.len(), 10);
+        assert_eq!(report.checks.len(), 11);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

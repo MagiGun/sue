@@ -10,11 +10,17 @@ macro_rules! tr {
     ($($arg:tt)*) => { sue_lang::tr!("ve", $($arg)*) };
 }
 
+mod commands;
 pub mod edit;
 pub mod export;
 pub mod media;
+mod menus;
 pub mod mix;
 pub mod model;
 pub mod playback;
 pub mod render;
 pub mod sample;
+pub mod studio;
+pub mod ui;
+
+pub use studio::{ID, SueVe};

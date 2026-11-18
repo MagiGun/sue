@@ -23,6 +23,7 @@ sue-brush = { path = "crates/sue-brush" }
 sue-paint = { path = "crates/sue-paint" }
 sue-picture = { path = "crates/sue-picture" }
 sue-type = { path = "crates/sue-type" }
+sue-ve = { path = "crates/sue-ve" }
 sue-writer = { path = "crates/sue-writer" }
 sue-lang = { path = "crates/sue-lang" }
 

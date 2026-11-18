@@ -138,7 +138,7 @@ struct Area {
 /// P2-3 had made every folder: the same numbers. Every area is held. For
 /// comparison, `code-ui-polish.md` 2.1 counted these files at 823b060
 /// with a coarser rule (six columns, `vec2` positions included).
-const AREAS: [Area; 11] = [
+const AREAS: [Area; 12] = [
     Area {
         folder: "crates/sue-paint/src/panels",
         baseline: Counts::new([2, 0, 4, 0, 5, 1, 1]),
@@ -184,6 +184,12 @@ const AREAS: [Area; 11] = [
     },
     Area {
         folder: "bins/sue/src/update",
+        baseline: Counts::new([0, 0, 0, 0, 0, 0, 0]),
+    },
+    // Sue VE's interface (0.0.83), taken in at what its first version
+    // holds.
+    Area {
+        folder: "crates/sue-ve/src/ui",
         baseline: Counts::new([0, 0, 0, 0, 0, 0, 0]),
     },
 ];
@@ -263,6 +269,11 @@ const PICTURE: &[(&str, &str, Exempt)] = &[
     ("crates/sue-paint/src/dialogs", "paint_fake", Exempt::All),
     // The miniature page of a template on Sue Writer's start page.
     ("crates/sue-writer/src/ui", "template_thumb", Exempt::All),
+    // Sue VE: the video frames and pictures of the monitors, the pool
+    // and the clips on the timeline, drawn in their own colors.
+    ("crates/sue-ve/src/ui", "draw_layers", Exempt::All),
+    ("crates/sue-ve/src/ui", "picture", Exempt::All),
+    ("crates/sue-ve/src/ui", "clip_picture", Exempt::All),
 ];
 
 /// `true` when the file `name` (from the repository root) belongs to the
@@ -274,12 +285,13 @@ fn in_area(name: &str, folder: &str) -> bool {
 
 /// The crates whose code draws Sue's interface, for the guard against
 /// font characters used as icons.
-const INTERFACE: [&str; 5] = [
+const INTERFACE: [&str; 6] = [
     "crates/sue-wm/src",
     "crates/sue-paint/src",
     "crates/sue-writer/src",
     "crates/sue-type/src",
     "bins/sue/src",
+    "crates/sue-ve/src",
 ];
 
 /// The most font characters each crate of [`INTERFACE`] may still use as
@@ -298,7 +310,7 @@ const INTERFACE: [&str; 5] = [
 /// 0.0.82 brought `sue-wm` to zero: its last count was the close cross of a
 /// tool's floating window, now the Close icon. Every crate draws its
 /// icons with `sue_wm::icons`, and the row stays at zero.
-const GLYPH_BASELINE: [u32; 5] = [0, 0, 0, 0, 0];
+const GLYPH_BASELINE: [u32; 6] = [0, 0, 0, 0, 0, 0];
 
 /// Characters that are text where they stand, not icons: a file or a
 /// folder from the repository root, the character (`None` for every

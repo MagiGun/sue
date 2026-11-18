@@ -52,6 +52,7 @@ mod scanner;
 mod settings;
 mod shell;
 mod shell_polish;
+mod sve;
 mod ui_buttons;
 mod ui_dialogs;
 mod ui_export;
@@ -110,6 +111,10 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
         tour.settle();
         p81_figures::figures(tour)?;
         return p82_figures::figures(tour);
+    }
+    // `SUE_SNAPSHOT_ONLY=sve` runs Sue VE's scenes alone.
+    if std::env::var("SUE_SNAPSHOT_ONLY").as_deref() == Ok("sve") {
+        return sve::scenes(tour);
     }
     // 00 to 03. The Hub and what the shell lays over it.
     hub::opening(tour)?;
@@ -197,6 +202,8 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     writer_document::comments(tour)?;
     // 19a1. What the rich text editor marks on the page.
     rich_text::marks(tour)?;
+    // 50a to 50h. Sue VE on a sample edit.
+    sve::scenes(tour)?;
 
     // 19b to 19k. The Hub with work in it (and 31a to 31f: Home and
     // Files in the other presets), languages and the Layout menu.
