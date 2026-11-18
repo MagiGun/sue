@@ -76,6 +76,7 @@ pub mod update;
     )
 )]
 mod vfs;
+pub mod video;
 #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
 mod viewports;
 #[cfg(any(

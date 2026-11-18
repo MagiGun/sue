@@ -95,7 +95,7 @@ impl std::fmt::Display for MediaError {
 impl std::error::Error for MediaError {}
 
 /// Turns a failed call into a [`MediaError::Os`] naming `step`.
-fn os(step: &'static str) -> impl FnOnce(windows::core::Error) -> MediaError {
+pub(crate) fn os(step: &'static str) -> impl FnOnce(windows::core::Error) -> MediaError {
     move |error| {
         if error.code() == MF_E_TOPO_CODEC_NOT_FOUND {
             MediaError::NoEncoder
@@ -311,7 +311,7 @@ fn pack(high: u32, low: u32) -> u64 {
 }
 
 /// A media type made from `(key, value)` pairs.
-enum Value {
+pub(crate) enum Value {
     Guid(GUID),
     U32(u32),
     U64(u64),
@@ -321,7 +321,7 @@ enum Value {
     unsafe_code,
     reason = "building Media Foundation attribute stores is COM (standing approval, rule 13)"
 )]
-fn media_type(values: &[(GUID, Value)]) -> Result<IMFMediaType, MediaError> {
+pub(crate) fn media_type(values: &[(GUID, Value)]) -> Result<IMFMediaType, MediaError> {
     // SAFETY: MFCreateMediaType takes nothing and returns a new object.
     let kind = unsafe { MFCreateMediaType() }.map_err(os("making a media type"))?;
     for (key, value) in values {
@@ -343,7 +343,7 @@ fn media_type(values: &[(GUID, Value)]) -> Result<IMFMediaType, MediaError> {
     unsafe_code,
     reason = "building Media Foundation attribute stores is COM (standing approval, rule 13)"
 )]
-fn attributes(values: &[(GUID, u32)]) -> Result<IMFAttributes, MediaError> {
+pub(crate) fn attributes(values: &[(GUID, u32)]) -> Result<IMFAttributes, MediaError> {
     let mut store = None;
     // SAFETY: `store` is a valid place for the out pointer.
     unsafe { MFCreateAttributes(&mut store, values.len() as u32) }
@@ -358,7 +358,7 @@ fn attributes(values: &[(GUID, u32)]) -> Result<IMFAttributes, MediaError> {
 
 /// A file name in the system's temporary folder no other writer uses,
 /// removed when this is dropped.
-struct TempFile(PathBuf);
+pub(crate) struct TempFile(pub(crate) PathBuf);
 
 impl TempFile {
     fn new() -> Self {
