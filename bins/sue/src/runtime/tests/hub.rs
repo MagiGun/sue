@@ -20,7 +20,7 @@ fn a_click_on_a_hub_box_glides_its_studio_in_and_then_sleeps() {
         .iter()
         .map(|(id, _, _)| id.as_str())
         .collect();
-    assert_eq!(boxes, [sue_paint::ID, sue_writer::ID]);
+    assert_eq!(boxes, [sue_paint::ID, sue_writer::ID, sue_ve::ID]);
     let (rect, _) = hub_box(&runtime, sue_paint::ID).expect("Sue Paint's box");
     let at = rect.left_top() + vec2(30.0, 30.0);
     let count = frames(&mut runtime, &ctx, vec2(1440.0, 900.0), start, click_at(at));
@@ -82,8 +82,8 @@ fn pages_slide_in_over_the_hub_and_back_out() {
     assert!(runtime.shell.reveal() < 0.001);
     assert_eq!(
         runtime.shell.hub_boxes().len(),
-        2,
-        "the Hub shows both studios again"
+        3,
+        "the Hub shows every studio again"
     );
 
     // With instant transitions the same trip takes a frame or two.

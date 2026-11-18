@@ -1686,6 +1686,7 @@ mod tests {
                 "files",
                 sue_paint::ID,
                 sue_writer::ID,
+                sue_ve::ID,
                 "keymaps",
                 "packages",
                 ADVANCED_PAGE,

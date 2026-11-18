@@ -16,6 +16,7 @@ pub fn launchpad() -> Result<Launchpad, WmError> {
     // Studios.
     launchpad.register(|| Box::new(sue_paint::SuePaint::default()))?;
     launchpad.register(|| Box::new(sue_writer::SueWriter::default()))?;
+    launchpad.register(|| Box::new(sue_ve::SueVe::default()))?;
     // Windows.
     launchpad.register(|| Box::new(Settings::default()))?;
     // Hidden: the design system's gallery, only in `sue --gallery`.

@@ -23,6 +23,15 @@ windows = { workspace = true, features = [
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
+    # The module decode (Sue VE): seeking takes a PROPVARIANT, and
+    # decoding on the graphics card hands Media Foundation a Direct3D 11
+    # device through its DXGI device manager.
+    "Win32_System_Variant",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
 ] }
 
 # Media Foundation is COM, and every COM call is unsafe in the windows

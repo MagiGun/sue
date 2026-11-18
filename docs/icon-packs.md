@@ -526,3 +526,21 @@ own files are. A twin marked "yes" also has a `<name>.solid.svg`.
 | `text-center` |  | Three short lines of writing in the middle, and a solid head on each side pointing in at them: words centered on their spot. |
 | `corkboard` |  | Four index cards in two rows, each held by a solid round pin in its middle. The corkboard, where the parts of a manuscript are laid out as cards. |
 | `outliner` |  | An outline: a line of writing after a solid dot, and two lines further in hanging from it by a bent line. The outliner, the parts of a manuscript as a tree. |
+
+### Video editing
+
+| Name | Twin | What it shows |
+| --- | --- | --- |
+| `app-video` |  | A clapperboard: a box with round lower corners, and over its top a slanted board with two stripes across it. Sue VE, the studio. |
+| `tool-razor` |  | A small box like a blade, a short line across it, and a line running down from it: cut a clip in two where it is clicked. |
+| `tool-ripple` |  | An opening bracket at the left, and beside it an arrow pointing right: trim an edge and move what follows with it. |
+| `tool-roll` |  | A closing and an opening bracket back to back, with an arrow head on each side pointing out: move the cut between two clips. |
+| `tool-slip` |  | A wide box with an arrow inside pointing both ways: other frames of the clip, in the same place. |
+| `tool-slide` |  | A box between two open boxes, and over it an arrow pointing both ways: move a clip between its neighbours. |
+| `magnet` |  | A horseshoe magnet, its two poles marked by a line across each: edges snap to each other. |
+| `marker` |  | A tag hanging point down, as on a ruler: a marker. |
+| `mark-in` |  | An opening bracket, a short line before it: where the part to use begins, the in mark. |
+| `mark-out` |  | A closing bracket, a short line after it: where the part to use ends, the out mark. |
+| `insert` |  | An arrow pointing down into the gap between two boxes: put a clip in, moving what follows. |
+| `overwrite` |  | An arrow pointing down onto a long box: put a clip over what is there. |
+| `effects` |  | A four pointed star: effects. |

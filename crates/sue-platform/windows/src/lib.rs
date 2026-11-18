@@ -16,6 +16,9 @@
 //!
 //! - [`camera`]: the cameras of this computer and pictures from one,
 //!   through the Media Foundation Source Reader, for the Hand Scanner.
+//! - [`decode`]: movies and sound read through the Media Foundation
+//!   Source Reader, on the graphics card where it can, with exact frame
+//!   seeking, for Sue VE.
 //! - [`media`]: MP4 movies through the Media Foundation Sink Writer, with
 //!   Windows' own H.264 and AAC encoders, and reading one back.
 //! - [`screen`]: the colour of a pixel on the screen, and a pick that
@@ -25,6 +28,8 @@
 
 #[cfg(target_os = "windows")]
 pub mod camera;
+#[cfg(target_os = "windows")]
+pub mod decode;
 #[cfg(target_os = "windows")]
 pub mod media;
 #[cfg(target_os = "windows")]

@@ -35,6 +35,7 @@ style).
 ```text
 bins/sue      ──► every crate below                   + egui
 sue-writer    ──► sue-type, sue-picture, sue-wm, sue-lang, sue-io, sue-model, sue-rice, sue-core   + egui
+sue-ve        ──► sue-type, sue-picture, sue-wm, sue-lang, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
 sue-paint     ──► sue-picture, sue-wm, sue-lang, sue-io, sue-model, sue-rice, sue-platform, sue-core   + egui
 sue-picture   ──► sue-type, sue-lang, sue-io, sue-model, sue-platform, sue-core   (the picture engine: layered pictures, compositing, brushes, selections, fills, filters; no interface code of its own, no studio)
 sue-type      ──► sue-wm, sue-lang, sue-io, sue-model, sue-core   + egui, ttf-parser
@@ -689,6 +690,19 @@ Three shared shapes need no component of their own:
 | Layered pictures (`sue_model::picture`) | a `sue.image` entity without a base, ordered `CHILD` layers, shared properties | Size (`image.width`, `image.height`) and resolution (`image.dpi`); raster layers (any child with a `RasterTile2D` base, usually class `sue.layer`) and paper layers (`sue.layer.paper`, one `layer.color`); `LayerStyle` reads visibility, opacity, blend, clipping, draft and offset from `style.*` and `layer.*` properties | painting, photo editing, compositing, textures, thumbnails |
 | Manuscripts (`sue_model::manuscript`) | a `sue.manuscript` entity, ordered `CHILD` folders and documents | A binder with draft, research and trash folders (`manuscript.role`); synopsis, notes, status, label, include, word target and keywords as `doc.*` properties (§3.8) | novels, scripts, theses, manuals, e-books, outlines |
 | `BlendMode` | its name in `style.blend` | 28 blend modes (normal; darken, multiply, burns, subtract; lighten, screen, dodges with glow dodge, add with add glow; overlay and the lights; difference, exclusion, divide; hue, saturation, color, luminosity) and W3C compositing with straight alpha; names from a newer Sue fall back to normal | every feature that stacks layers |
+
+`sue.sequence` version 2 (0.0.83, Sue VE) adds to `Sequence` what an
+edit needs, so every timeline shares one model: each `Clip` has an id
+unique in its sequence (`Sequence::ensure_ids`, `alloc_id`), an enabled
+switch, a link group (a picture and its sound) and an `Animation` keyed in
+the source's time (trims never move keys); each `Track` has
+`Transition`s (a kind, a span, the ids of the clips it joins); the
+sequence has `Marker`s, `Properties` (a video's frame size, the in and out
+marks) and `next_id`. Version 1 reads with every new field at its default
+(a test reads bytes written as 0.0.82 wrote them). `SequenceEdit` is the
+undo step of a change to a sequence: it keeps only the tracks that
+changed, before and after, and the rest of the sequence when that changed
+too, and refuses to apply to a sequence that is not as it found it.
 
 A layer can be any raster entity, so a photo in the project can also be a
 layer of a picture: the same entity, never a copy.
@@ -3440,6 +3454,32 @@ stale ones and mismatched variables (CONTRIBUTING.md, "Adding or updating a
 language").
 
 ---
+
+### 3.10 Sue VE (`sue-ve`)
+
+Sue VE is the video editing studio. Where it sits on the backbone:
+
+| Part | On the backbone | Where |
+| --- | --- | --- |
+| A project | an entity of class `ve.project` whose `CHILD` tree is the media pool (bins are `sue.folder`); a Sue Paint picture sent in, which has a parent already, is linked by `REF` | `sue-ve/src/model.rs` |
+| A movie or a sound | a kept encoded file: `sue.video` or `sue.audio` linking to its file by `media.path`, with `Encoded` bytes when the project embeds it (`sue_ve.embed_media`); what probing found in `media.*` properties | `media/import.rs` |
+| Stills, titles, solids, adjustment clips, image sequences | a raster `sue.image`; `ve.title` (its text is the entity's text), `ve.solid`, `ve.adjustment`, `ve.image-sequence` | `media/import.rs` |
+| A sequence | `sue.sequence` with the shared `Sequence` (version 2): video tracks first, top track first, then audio tracks; its frame size and marks in its properties | `model.rs` |
+| Every edit | a pure function of the edit algebra on a copy of the sequence (`model::plan`), turned into one `SequenceEdit`; a value dragged in the inspector changes the sequence in place and is recorded with `UndoStack::record` when the drag ends | `edit.rs`, `studio.rs` |
+| Decoding | `sue_platform::video`, over the audited `sue-windows` module `decode` (Media Foundation's Source Reader, Direct3D 11 for the graphics card); a worker thread per movie decodes into one frame cache with a memory budget (`sue_ve.cache_mb`) | `media/frames.rs` |
+| Sound | decoded once per source to 48 kHz stereo (Symphonia through `sue-io`, or the system's decoder) with its waveform; derived data, not in the arena | `media/sound.rs` |
+| Pictures on screen | `render::layers_at` gives the layers at a time (placement, opacity, tints of dips, dissolves); the program monitor draws each as a textured quad through Sue's painter (`TextureUpload`), the export with `render::composite` on the processor | `render.rs`, `ui/monitor.rs` |
+| Playback | `playback::Clock`: the sound device's played frames are the clock while playing at normal speed; the wall clock while shuttling | `playback.rs`, `mix.rs` |
+| Export | a `Transfers` job on a clone of the arena (no pixel copied), with progress and Cancel; MP4 through `sue_platform::movie` (now with a bit rate), WAV, PNG, JPEG, PNG runs | `export.rs` |
+| Interface | `sue-wm`'s dock (`DockLayout<Panel>`), widgets, icons and theme tokens; commands in a `CommandRegistry` (menus, shortcuts in Settings, the palette) | `ui/`, `commands.rs`, `menus.rs` |
+
+The edit algebra (insert, overwrite, razor, lift, extract, ripple delete,
+trims, roll, slip, slide, moves, speed, frame holds, keys, links,
+transitions, marks, snapping) is adapted from FilmCraft's
+(`crates/edit/src/lib.rs`, MIT OR Apache-2.0) onto Sue's `Sequence`.
+What stage 2 builds on it is in `docs/sve-handover.md`; parity with
+Premiere Pro, DaVinci Resolve, After Effects and CapCut is tracked in
+`docs/ve-parity.md`.
 
 ## 4. Introspective rice engine (`sue-rice`)
 

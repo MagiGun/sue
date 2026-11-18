@@ -135,6 +135,7 @@ mod windows_mp4 {
                 rate: settings.rate,
                 quality: settings.quality.h264_quality(),
                 key_interval,
+                bitrate: settings.bitrate,
             };
             let audio = settings.sound.map(|sound| AudioSpec {
                 rate: sound.rate,

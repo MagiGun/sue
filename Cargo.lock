@@ -3706,6 +3706,7 @@ dependencies = [
  "sue-platform",
  "sue-rice",
  "sue-type",
+ "sue-ve",
  "sue-wm",
  "sue-writer",
 ]
@@ -3906,6 +3907,22 @@ dependencies = [
  "sue-rice",
  "sue-wm",
  "ttf-parser",
+]
+
+[[package]]
+name = "sue-ve"
+version = "0.0.82"
+dependencies = [
+ "egui",
+ "sue-core",
+ "sue-io",
+ "sue-lang",
+ "sue-model",
+ "sue-picture",
+ "sue-platform",
+ "sue-rice",
+ "sue-type",
+ "sue-wm",
 ]
 
 [[package]]
