@@ -23,6 +23,7 @@ mod p81_issue12;
 mod p81_scanner;
 mod p82_figures;
 mod p82_layers;
+mod p83_figures;
 mod paint_3d;
 mod paint_anim;
 mod paint_basics;

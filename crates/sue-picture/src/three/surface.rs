@@ -4,7 +4,7 @@
 //! Drawing figures and imported models are drawn this way; Sue Paint's
 //! plain shapes keep the flat renderer in the parent module.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use super::{Buffers, Camera, ShadowMap, View3D, cross, dot, normalized, sub};
 
@@ -242,6 +242,85 @@ pub fn light_of(view: &View3D) -> [f32; 3] {
     ])
 }
 
+/// Runs `work(first_row, band)` on `data` (`width` values a row) cut
+/// into bands of rows, on the shared workers (the compositor's), each
+/// worker taking the next band not yet begun so uneven bands even out.
+pub(crate) fn in_bands<T: Send>(
+    data: &mut [T],
+    width: usize,
+    work: impl Fn(usize, &mut [T]) + Sync,
+) {
+    if data.is_empty() || width == 0 {
+        return;
+    }
+    let height = data.len() / width;
+    // Enough bands that every worker has several to take.
+    let rows = height
+        .div_ceil(crate::composite::workers().max(1) * 8)
+        .max(4);
+    let bands: Vec<Mutex<&mut [T]>> = data.chunks_mut(width * rows).map(Mutex::new).collect();
+    let _ = crate::composite::each_index(bands.len(), |index| {
+        let mut band = bands[index].lock().unwrap_or_else(PoisonError::into_inner);
+        work(index * rows, &mut band);
+    });
+}
+
+/// A 5 by 5 box blur of `values` (`width` across), each value the mean
+/// of those round it that lie inside, worked as a pass across and a pass
+/// down, both in bands on the shared workers.
+fn box_blur(values: &[f32], width: usize) -> Vec<f32> {
+    if values.is_empty() || width == 0 {
+        return values.to_vec();
+    }
+    let height = values.len() / width;
+    let mut across = vec![0.0_f32; values.len()];
+    in_bands(&mut across, width, |first, band| {
+        for (row, line) in band.chunks_mut(width).enumerate() {
+            let source = &values[(first + row) * width..(first + row + 1) * width];
+            for (x, out) in line.iter_mut().enumerate() {
+                let (from, to) = (x.saturating_sub(2), (x + 3).min(width));
+                *out = source[from..to].iter().sum::<f32>();
+            }
+        }
+    });
+    let mut out = vec![0.0_f32; values.len()];
+    in_bands(&mut out, width, |first, band| {
+        for (row, line) in band.chunks_mut(width).enumerate() {
+            let y = first + row;
+            let (from, to) = (y.saturating_sub(2), (y + 3).min(height));
+            for (x, value) in line.iter_mut().enumerate() {
+                let count = ((x + 3).min(width) - x.saturating_sub(2)) * (to - from);
+                let sum: f32 = (from..to).map(|sy| across[sy * width + x]).sum();
+                *value = sum / count as f32;
+            }
+        }
+    });
+    out
+}
+
+/// A triangle as it lies on the finer picture: its corners there (and
+/// their depths), its twice signed area, and the rows and columns it
+/// may cover.
+#[derive(Clone, Copy)]
+struct Placed {
+    corners: [[f32; 3]; 3],
+    area: f32,
+    rows: [usize; 2],
+    columns: [usize; 2],
+}
+
+/// One band of the canvas's rows of [`Buffers`], for one worker to fill.
+struct Rows<'a> {
+    first: usize,
+    depth: &'a mut [f32],
+    normal: &'a mut [[f32; 3]],
+    light: &'a mut [f32],
+    fog: &'a mut [f32],
+    cover: &'a mut [f32],
+    color: &'a mut [[f32; 3]],
+    guide: &'a mut [f32],
+}
+
 /// One sample of the finer picture the surface is drawn into before it
 /// is brought down to the canvas.
 #[derive(Clone, Copy)]
@@ -277,6 +356,7 @@ pub fn render_surface(
         guide: Vec::new(),
         floor: Vec::new(),
         color: Vec::new(),
+        region: [0; 4],
     };
     if surface.positions.is_empty() || w == 0 || h == 0 {
         return buffers;
@@ -318,14 +398,6 @@ pub fn render_surface(
     }
     let fine = if view.fast { 1 } else { 2 };
     let (tw, th) = ((x1 - x0) * fine, (y1 - y0) * fine);
-    let empty = Sample {
-        depth: f32::INFINITY,
-        normal: [0.0; 3],
-        light: 0.0,
-        fog: 0.0,
-        color: [1.0; 3],
-    };
-    let mut tile = vec![empty; tw * th];
     // Its own colors, when it has any: a color at each point, pictures
     // laid over its triangles, or both.
     let tinted = surface.colors.len() == surface.positions.len();
@@ -352,129 +424,230 @@ pub fn render_surface(
         .relief
         .as_deref()
         .filter(|_| !surface.detail.is_empty());
-    for (face, t) in surface.indices.as_chunks::<3>().0.iter().enumerate() {
-        let [ia, ib, ic] = t.map(|i| i as usize);
-        if !(screen[ia][0].is_finite() && screen[ib][0].is_finite() && screen[ic][0].is_finite()) {
-            continue;
-        }
-        let tints = tinted.then(|| [ia, ib, ic].map(|i| surface.colors[i]));
-        let picture = if pictured {
-            surface
-                .skins
-                .get(face)
-                .or(surface.skins.is_empty().then_some(&0))
-                .and_then(|skin| surface.textures.get(*skin as usize))
-                .map(|texture| (texture, [ia, ib, ic].map(|i| surface.uvs[i])))
-        } else {
-            None
-        };
-        let [pa, pb, pc] = [ia, ib, ic].map(|i| to_tile(screen[i]));
-        let area = (pb[0] - pa[0]) * (pc[1] - pa[1]) - (pb[1] - pa[1]) * (pc[0] - pa[0]);
-        if area.abs() < 1e-6 {
-            continue;
-        }
-        let bx0 = pa[0].min(pb[0]).min(pc[0]).floor().max(0.0) as usize;
-        let bx1 = (pa[0].max(pb[0]).max(pc[0]).ceil().max(0.0) as usize).min(tw);
-        let by0 = pa[1].min(pb[1]).min(pc[1]).floor().max(0.0) as usize;
-        let by1 = (pa[1].max(pb[1]).max(pc[1]).ceil().max(0.0) as usize).min(th);
-        let [na, nb, nc] = [ia, ib, ic].map(|i| surface.normals[i]);
-        let [wa_, wb_, wc_] = [ia, ib, ic].map(|i| worlds[i]);
-        let detail = relief.map(|_| [ia, ib, ic].map(|i| surface.detail[i]));
-        for y in by0..by1 {
-            for x in bx0..bx1 {
-                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-                let wa = ((pb[0] - px) * (pc[1] - py) - (pb[1] - py) * (pc[0] - px)) / area;
-                let wb = ((pc[0] - px) * (pa[1] - py) - (pc[1] - py) * (pa[0] - px)) / area;
-                let wc = 1.0 - wa - wb;
-                if wa < 0.0 || wb < 0.0 || wc < 0.0 {
-                    continue;
-                }
-                let (ka, kb, kc) = (wa / pa[2], wb / pb[2], wc / pc[2]);
-                let depth = 1.0 / (ka + kb + kc);
-                let at = y * tw + x;
-                if depth >= tile[at].depth {
-                    continue;
-                }
-                let (ka, kb, kc) = (ka * depth, kb * depth, kc * depth);
-                let mix = |a: [f32; 3], b: [f32; 3], c: [f32; 3]| {
-                    [0, 1, 2].map(|axis| ka * a[axis] + kb * b[axis] + kc * c[axis])
-                };
-                let world = mix(wa_, wb_, wc_);
-                let mut normal = normalized(mix(na, nb, nc));
-                if let (Some(relief), Some([da, db, dc])) = (relief, detail) {
-                    let amount = ka * da[2] + kb * db[2] + kc * dc[2];
-                    if amount > 0.01
-                        && let Some([across, up]) = surface.axes.get(da[3] as usize)
-                    {
-                        let u = ka * da[0] + kb * db[0] + kc * dc[0];
-                        let v = ka * da[1] + kb * db[1] + kc * dc[1];
-                        let [su, sv] = relief.slope(u, v);
-                        normal = normalized([0, 1, 2].map(|axis| {
-                            normal[axis] - amount * (su * across[axis] + sv * up[axis])
-                        }));
-                    }
-                }
-                // Toward the camera, whichever way the face winds.
-                let toward = normalized(sub(lens.eye, world));
-                let mut facing_eye = dot(normal, toward);
-                if facing_eye < 0.0 {
-                    normal = normal.map(|value| -value);
-                    facing_eye = -facing_eye;
-                }
-                let sunlit = if view.shadows {
-                    shadow.as_ref().map_or(1.0, |shadow| shadow.lit(world))
-                } else {
-                    1.0
-                };
-                // A soft key light that wraps a little round the form, a
-                // faint fill from the camera, and edges that turn away
-                // a touch darker, as a clay figure under a studio lamp.
-                let wrap = 0.25;
-                let key = ((dot(normal, light) + wrap) / (1.0 + wrap)).max(0.0);
-                let fill = 0.12 * facing_eye;
-                let rim = 0.86 + 0.14 * facing_eye.sqrt();
-                let lit = (view.ambient
-                    + (1.0 - view.ambient) * view.intensity * (key * sunlit * 0.92 + fill))
-                    * rim;
-                let mut color = tints.map_or([1.0; 3], |[a, b, c]| mix(a, b, c));
-                if let Some((texture, [ua, ub, uc])) = &picture {
-                    let u = ka * ua[0] + kb * ub[0] + kc * uc[0];
-                    let v = ka * ua[1] + kb * ub[1] + kc * uc[1];
-                    let seen = texture.at(u, v);
-                    color = [0, 1, 2].map(|k| color[k] * seen[k]);
-                }
-                tile[at] = Sample {
-                    depth,
-                    normal,
-                    light: lit.clamp(0.0, 1.0),
-                    fog: fog_at(world[1]),
-                    color,
-                };
+    // Where each triangle lies on the finer picture.
+    let triangles = surface.indices.as_chunks::<3>().0;
+    let placed: Vec<Option<Placed>> = triangles
+        .iter()
+        .map(|t| {
+            let [ia, ib, ic] = t.map(|i| i as usize);
+            if !(screen[ia][0].is_finite()
+                && screen[ib][0].is_finite()
+                && screen[ic][0].is_finite())
+            {
+                return None;
             }
+            let [pa, pb, pc] = [ia, ib, ic].map(|i| to_tile(screen[i]));
+            let area = (pb[0] - pa[0]) * (pc[1] - pa[1]) - (pb[1] - pa[1]) * (pc[0] - pa[0]);
+            if area.abs() < 1e-6 {
+                return None;
+            }
+            let bx0 = pa[0].min(pb[0]).min(pc[0]).floor().max(0.0) as usize;
+            let bx1 = (pa[0].max(pb[0]).max(pc[0]).ceil().max(0.0) as usize).min(tw);
+            let by0 = pa[1].min(pb[1]).min(pc[1]).floor().max(0.0) as usize;
+            let by1 = (pa[1].max(pb[1]).max(pc[1]).ceil().max(0.0) as usize).min(th);
+            (bx0 < bx1 && by0 < by1).then_some(Placed {
+                corners: [pa, pb, pc],
+                area,
+                rows: [by0, by1],
+                columns: [bx0, bx1],
+            })
+        })
+        .collect();
+    // Where sample `(x, y)` lies in triangle `on`: its three screen
+    // weights, or `None` outside it.
+    let weights = |on: &Placed, x: usize, y: usize| {
+        let [pa, pb, pc] = on.corners;
+        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+        let wa = ((pb[0] - px) * (pc[1] - py) - (pb[1] - py) * (pc[0] - px)) / on.area;
+        let wb = ((pc[0] - px) * (pa[1] - py) - (pc[1] - py) * (pa[0] - px)) / on.area;
+        let wc = 1.0 - wa - wb;
+        (wa >= 0.0 && wb >= 0.0 && wc >= 0.0).then_some([wa, wb, wc])
+    };
+    // Guide lines on the finer picture, each from end to end with its
+    // depth at both.
+    let half = 0.55 * f;
+    let segments: Vec<([f32; 3], [f32; 3])> = surface
+        .guides
+        .iter()
+        .filter_map(|[a, b]| {
+            let (ca, cb) = (lens.see(*a).1, lens.see(*b).1);
+            (ca[2] > 0.05 && cb[2] > 0.05)
+                .then(|| (to_tile(lens.screen(ca)), to_tile(lens.screen(cb))))
+        })
+        .collect();
+    let guided = !surface.guides.is_empty();
+    if guided {
+        buffers.guide = vec![0.0; w * h];
+    }
+    // Band by band of the canvas's rows on the shared workers, each band
+    // its own rows of the finer picture: first which triangle is
+    // nearest at each sample (every triangle in order, as one pass
+    // would), then that one sample shaded once, the guide lines laid on
+    // it, and each canvas pixel the mean of its samples.
+    let share = 1.0 / (fine * fine) as f32;
+    let (from, to) = (y0 * w, y1 * w);
+    let mut rows: Vec<Mutex<Rows<'_>>> = Vec::new();
+    {
+        let per = (y1 - y0)
+            .div_ceil(crate::composite::workers().max(1) * 8)
+            .max(2)
+            * w;
+        let mut colors = buffers.color.get_mut(from..to).map(|c| c.chunks_mut(per));
+        let mut guides = buffers.guide.get_mut(from..to).map(|g| g.chunks_mut(per));
+        for (index, ((((depth, normal), light), fog), cover)) in buffers.depth[from..to]
+            .chunks_mut(per)
+            .zip(buffers.normal[from..to].chunks_mut(per))
+            .zip(buffers.light[from..to].chunks_mut(per))
+            .zip(buffers.fog[from..to].chunks_mut(per))
+            .zip(buffers.cover[from..to].chunks_mut(per))
+            .enumerate()
+        {
+            rows.push(Mutex::new(Rows {
+                first: y0 + index * (per / w),
+                depth,
+                normal,
+                light,
+                fog,
+                cover,
+                color: colors.as_mut().and_then(Iterator::next).unwrap_or_default(),
+                guide: guides.as_mut().and_then(Iterator::next).unwrap_or_default(),
+            }));
         }
     }
-    // Guide lines, lying on the surface: drawn where nothing nearer hides
-    // them.
-    let mut guide = vec![
-        0.0_f32;
-        if surface.guides.is_empty() {
-            0
-        } else {
-            tw * th
-        }
-    ];
-    if !surface.guides.is_empty() {
-        let half = 0.55 * f;
-        for [a, b] in &surface.guides {
-            let (ca, cb) = (lens.see(*a).1, lens.see(*b).1);
-            if ca[2] <= 0.05 || cb[2] <= 0.05 {
+    let _ = crate::composite::each_index(rows.len(), |index| {
+        let mut out = rows[index].lock().unwrap_or_else(PoisonError::into_inner);
+        let out = &mut *out;
+        let count = out.depth.len() / w;
+        // This band's rows of the finer picture.
+        let top = (out.first - y0) * fine;
+        let last = top + count * fine;
+        let empty = Sample {
+            depth: f32::INFINITY,
+            normal: [0.0; 3],
+            light: 0.0,
+            fog: 0.0,
+            color: [1.0; 3],
+        };
+        let mut samples = vec![empty; count * fine * tw];
+        let mut nearest = vec![u32::MAX; samples.len()];
+        for (face, on) in placed.iter().enumerate() {
+            let Some(on) = on else { continue };
+            if on.rows[1] <= top || on.rows[0] >= last {
                 continue;
             }
-            let (sa, sb) = (to_tile(lens.screen(ca)), to_tile(lens.screen(cb)));
+            let [pa, pb, pc] = on.corners;
+            for y in on.rows[0].max(top)..on.rows[1].min(last) {
+                for x in on.columns[0]..on.columns[1] {
+                    let Some([wa, wb, wc]) = weights(on, x, y) else {
+                        continue;
+                    };
+                    let (ka, kb, kc) = (wa / pa[2], wb / pb[2], wc / pc[2]);
+                    let depth = 1.0 / (ka + kb + kc);
+                    let at = (y - top) * tw + x;
+                    if depth >= samples[at].depth {
+                        continue;
+                    }
+                    samples[at].depth = depth;
+                    nearest[at] = face as u32;
+                }
+            }
+        }
+        for (at, face) in nearest.iter().enumerate() {
+            let face = *face as usize;
+            let Some(Some(on)) = placed.get(face) else {
+                continue;
+            };
+            let (x, y) = (at % tw, top + at / tw);
+            let Some([wa, wb, wc]) = weights(on, x, y) else {
+                continue;
+            };
+            let [pa, pb, pc] = on.corners;
+            let [ia, ib, ic] = triangles[face].map(|i| i as usize);
+            let (ka, kb, kc) = (wa / pa[2], wb / pb[2], wc / pc[2]);
+            let depth = 1.0 / (ka + kb + kc);
+            let (ka, kb, kc) = (ka * depth, kb * depth, kc * depth);
+            let mix = |a: [f32; 3], b: [f32; 3], c: [f32; 3]| {
+                [0, 1, 2].map(|axis| ka * a[axis] + kb * b[axis] + kc * c[axis])
+            };
+            let world = mix(worlds[ia], worlds[ib], worlds[ic]);
+            let [na, nb, nc] = [ia, ib, ic].map(|i| surface.normals[i]);
+            let mut normal = normalized(mix(na, nb, nc));
+            if let Some(relief) = relief {
+                let [da, db, dc] = [ia, ib, ic].map(|i| surface.detail[i]);
+                let amount = ka * da[2] + kb * db[2] + kc * dc[2];
+                if amount > 0.01
+                    && let Some([across, up]) = surface.axes.get(da[3] as usize)
+                {
+                    let u = ka * da[0] + kb * db[0] + kc * dc[0];
+                    let v = ka * da[1] + kb * db[1] + kc * dc[1];
+                    let [su, sv] = relief.slope(u, v);
+                    normal =
+                        normalized([0, 1, 2].map(|axis| {
+                            normal[axis] - amount * (su * across[axis] + sv * up[axis])
+                        }));
+                }
+            }
+            // Toward the camera, whichever way the face winds.
+            let toward = normalized(sub(lens.eye, world));
+            let mut facing_eye = dot(normal, toward);
+            if facing_eye < 0.0 {
+                normal = normal.map(|value| -value);
+                facing_eye = -facing_eye;
+            }
+            let sunlit = if view.shadows {
+                shadow.as_ref().map_or(1.0, |shadow| shadow.lit(world))
+            } else {
+                1.0
+            };
+            // A soft key light that wraps a little round the form, a
+            // faint fill from the camera, and edges that turn away a
+            // touch darker, as a clay figure under a studio lamp.
+            let wrap = 0.25;
+            let key = ((dot(normal, light) + wrap) / (1.0 + wrap)).max(0.0);
+            let fill = 0.12 * facing_eye;
+            let rim = 0.86 + 0.14 * facing_eye.sqrt();
+            let lit = (view.ambient
+                + (1.0 - view.ambient) * view.intensity * (key * sunlit * 0.92 + fill))
+                * rim;
+            let mut color = if tinted {
+                mix(surface.colors[ia], surface.colors[ib], surface.colors[ic])
+            } else {
+                [1.0; 3]
+            };
+            if pictured
+                && let Some(texture) = surface
+                    .skins
+                    .get(face)
+                    .or(surface.skins.is_empty().then_some(&0))
+                    .and_then(|skin| surface.textures.get(*skin as usize))
+            {
+                let [ua, ub, uc] = [ia, ib, ic].map(|i| surface.uvs[i]);
+                let u = ka * ua[0] + kb * ub[0] + kc * uc[0];
+                let v = ka * ua[1] + kb * ub[1] + kc * uc[1];
+                let seen = texture.at(u, v);
+                color = [0, 1, 2].map(|k| color[k] * seen[k]);
+            }
+            samples[at] = Sample {
+                depth,
+                normal,
+                light: lit.clamp(0.0, 1.0),
+                fog: fog_at(world[1]),
+                color,
+            };
+        }
+        // Guide lines, lying on the surface: drawn where nothing nearer
+        // hides them.
+        let mut guide = vec![0.0_f32; if guided { samples.len() } else { 0 }];
+        for (sa, sb) in &segments {
+            let (sa, sb) = (*sa, *sb);
             let gx0 = (sa[0].min(sb[0]) - half - 1.0).floor().max(0.0) as usize;
             let gx1 = ((sa[0].max(sb[0]) + half + 2.0).max(0.0) as usize).min(tw);
             let gy0 = (sa[1].min(sb[1]) - half - 1.0).floor().max(0.0) as usize;
             let gy1 = ((sa[1].max(sb[1]) + half + 2.0).max(0.0) as usize).min(th);
+            let (gy0, gy1) = (gy0.max(top), gy1.min(last));
+            if gy0 >= gy1 {
+                continue;
+            }
             let (dx, dy) = (sb[0] - sa[0], sb[1] - sa[1]);
             let length = (dx * dx + dy * dy).max(1e-6);
             for y in gy0..gy1 {
@@ -488,66 +661,67 @@ pub fn render_surface(
                         continue;
                     }
                     let depth = 1.0 / ((1.0 - along) / sa[2] + along / sb[2]);
-                    let at = y * tw + x;
-                    if depth <= tile[at].depth * 1.012 + 0.004 && tile[at].depth.is_finite() {
+                    let at = (y - top) * tw + x;
+                    if depth <= samples[at].depth * 1.012 + 0.004 && samples[at].depth.is_finite() {
                         guide[at] = guide[at].max(ink);
                     }
                 }
             }
         }
-        buffers.guide = vec![0.0; w * h];
-    }
-    // Down to the canvas: each pixel the mean of its samples.
-    let share = 1.0 / (fine * fine) as f32;
-    for y in y0..y1 {
-        for x in x0..x1 {
-            let (mut depth, mut normal, mut lit, mut fog, mut count, mut line) =
-                (f32::INFINITY, [0.0_f32; 3], 0.0, 0.0, 0.0_f32, 0.0);
-            let mut color = [0.0_f32; 3];
-            for sy in 0..fine {
-                for sx in 0..fine {
-                    let at = ((y - y0) * fine + sy) * tw + (x - x0) * fine + sx;
-                    let sample = &tile[at];
-                    if sample.depth.is_finite() {
-                        depth = depth.min(sample.depth);
-                        for axis in 0..3 {
-                            normal[axis] += sample.normal[axis];
+        // Down to the canvas: each pixel the mean of its samples.
+        for row in 0..count {
+            for x in x0..x1 {
+                let (mut depth, mut normal, mut lit, mut fog, mut hits, mut line) =
+                    (f32::INFINITY, [0.0_f32; 3], 0.0, 0.0, 0.0_f32, 0.0);
+                let mut color = [0.0_f32; 3];
+                for sy in 0..fine {
+                    for sx in 0..fine {
+                        let at = (row * fine + sy) * tw + (x - x0) * fine + sx;
+                        let sample = &samples[at];
+                        if sample.depth.is_finite() {
+                            depth = depth.min(sample.depth);
+                            for axis in 0..3 {
+                                normal[axis] += sample.normal[axis];
+                            }
+                            lit += sample.light;
+                            fog += sample.fog;
+                            for k in 0..3 {
+                                color[k] += sample.color[k];
+                            }
+                            hits += 1.0;
                         }
-                        lit += sample.light;
-                        fog += sample.fog;
-                        for k in 0..3 {
-                            color[k] += sample.color[k];
+                        if guided {
+                            line += guide[at];
                         }
-                        count += 1.0;
-                    }
-                    if !guide.is_empty() {
-                        line += guide[at];
                     }
                 }
-            }
-            if count > 0.0 {
-                let at = y * w + x;
-                buffers.depth[at] = depth;
-                buffers.normal[at] = normalized(normal);
-                buffers.light[at] = lit / count;
-                buffers.fog[at] = fog / count;
-                buffers.cover[at] = count * share;
-                if colored {
-                    buffers.color[at] = color.map(|value| value / count);
-                }
-                if !guide.is_empty() {
-                    buffers.guide[at] = line * share;
+                if hits > 0.0 {
+                    let to = row * w + x;
+                    out.depth[to] = depth;
+                    out.normal[to] = normalized(normal);
+                    out.light[to] = lit / hits;
+                    out.fog[to] = fog / hits;
+                    out.cover[to] = hits * share;
+                    if colored {
+                        out.color[to] = color.map(|value| value / hits);
+                    }
+                    if guided {
+                        out.guide[to] = line * share;
+                    }
                 }
             }
         }
-    }
+    });
+    drop(rows);
     if !view.fast {
         occlude(&mut buffers, &lens, [x0, y0, x1, y1]);
     }
+    buffers.region = [x0, y0, x1, y1].map(|value| value as u32);
     if view.floor
         && let Some(shadow) = &shadow
     {
         buffers.floor = floor_shadow(&lens, shadow, low, [w, h], &buffers);
+        buffers.region = [0, 0, size[0], size[1]];
     }
     buffers
 }
@@ -558,39 +732,44 @@ pub fn render_surface(
 fn occlude(buffers: &mut Buffers, lens: &Camera, [x0, y0, x1, y1]: [usize; 4]) {
     let w = buffers.size[0] as usize;
     let h = buffers.size[1] as usize;
-    const DIRS: [(f32, f32); 8] = [
-        (1.0, 0.0),
-        (0.7, 0.7),
-        (0.0, 1.0),
-        (-0.7, 0.7),
-        (-1.0, 0.0),
-        (-0.7, -0.7),
-        (0.0, -1.0),
-        (0.7, -0.7),
-    ];
+    // The 24 samples round each pixel: eight directions, three rings
+    // out, each ring turned a little so the samples do not line up into
+    // bands. Their turns (before each pixel's own) are worked once.
+    let turns: Vec<([f32; 2], f32)> = (0..8)
+        .flat_map(|k| {
+            [0.3_f32, 0.65, 1.0]
+                .into_iter()
+                .enumerate()
+                .map(move |(ring, step)| {
+                    let (sin, cos) = ((k as f32 + ring as f32 * 0.37) * 0.785).sin_cos();
+                    ([cos, sin], step)
+                })
+        })
+        .collect();
     let reach = 0.05_f32;
-    let mut shade = vec![1.0_f32; (x1 - x0) * (y1 - y0)];
-    for y in y0..y1 {
-        for x in x0..x1 {
-            let at = y * w + x;
-            let depth = buffers.depth[at];
+    let span = x1 - x0;
+    let mut shade = vec![1.0_f32; span * (y1 - y0)];
+    let depths = &buffers.depth;
+    in_bands(&mut shade, span, |first, band| {
+        for (at, value) in band.iter_mut().enumerate() {
+            let (x, y) = (x0 + at % span, y0 + first + at / span);
+            let depth = depths[y * w + x];
             if !depth.is_finite() {
                 continue;
             }
             let radius = (reach * lens.focal / depth).clamp(2.0, 48.0);
             let mut hidden = 0.0;
-            for (k, (dx, dy)) in DIRS.iter().enumerate() {
-                for (ring, step) in [0.3, 0.65, 1.0].into_iter().enumerate() {
-                    // Each ring turned a little, so the samples do not
-                    // line up into bands.
-                    let turn = (k as f32 + ring as f32 * 0.37 + (x + y * 3) as f32 * 0.61) * 0.785;
-                    let _ = (dx, dy);
-                    let sx = (x as f32 + turn.cos() * radius * step).round();
-                    let sy = (y as f32 + turn.sin() * radius * step).round();
+            // The pixel's own turn, added to each sample's.
+            let (sin, cos) = ((x + y * 3) as f32 * 0.61 * 0.785).sin_cos();
+            for &([c, s], step) in &turns {
+                {
+                    let (tc, ts) = (c * cos - s * sin, s * cos + c * sin);
+                    let sx = (x as f32 + tc * radius * step).round();
+                    let sy = (y as f32 + ts * radius * step).round();
                     if sx < 0.0 || sy < 0.0 || sx >= w as f32 || sy >= h as f32 {
                         continue;
                     }
-                    let other = buffers.depth[sy as usize * w + sx as usize];
+                    let other = depths[sy as usize * w + sx as usize];
                     if !other.is_finite() {
                         continue;
                     }
@@ -601,33 +780,14 @@ fn occlude(buffers: &mut Buffers, lens: &Camera, [x0, y0, x1, y1]: [usize; 4]) {
                     hidden += rises * (1.0 - (nearer / (reach * 3.0)).min(1.0)) / 24.0;
                 }
             }
-            shade[(y - y0) * (x1 - x0) + (x - x0)] = 1.0 - 0.9 * hidden.min(1.0);
+            *value = 1.0 - 0.9 * hidden.min(1.0);
         }
-    }
+    });
     // Smoothed, so the shade lies soft and shows no grain.
-    let (sw, sh) = (x1 - x0, y1 - y0);
-    for _ in 0..2 {
-        let mut soft = shade.clone();
-        for y in 0..sh {
-            for x in 0..sw {
-                let (mut sum, mut count) = (0.0, 0.0);
-                for dy in -2_i32..=2 {
-                    for dx in -2_i32..=2 {
-                        let (sx, sy) = (x as i32 + dx, y as i32 + dy);
-                        if sx >= 0 && sy >= 0 && (sx as usize) < sw && (sy as usize) < sh {
-                            sum += shade[sy as usize * sw + sx as usize];
-                            count += 1.0;
-                        }
-                    }
-                }
-                soft[y * sw + x] = sum / count;
-            }
-        }
-        shade = soft;
-    }
+    let shade = box_blur(&box_blur(&shade, span), span);
     for y in y0..y1 {
         for x in x0..x1 {
-            buffers.light[y * w + x] *= shade[(y - y0) * (x1 - x0) + (x - x0)];
+            buffers.light[y * w + x] *= shade[(y - y0) * span + (x - x0)];
         }
     }
 }
@@ -642,8 +802,9 @@ fn floor_shadow(
     buffers: &Buffers,
 ) -> Vec<f32> {
     let mut dark = vec![0.0_f32; w * h];
-    for y in 0..h {
-        for x in 0..w {
+    in_bands(&mut dark, w, |first, band| {
+        for (at, value) in band.iter_mut().enumerate() {
+            let (x, y) = (at % w, first + at / w);
             // The ray through the pixel, to the floor.
             let (cx, cy) = (
                 (x as f32 + 0.5 - lens.size[0] / 2.0) / lens.focal,
@@ -660,28 +821,11 @@ fn floor_shadow(
             }
             let hit = [0, 1, 2].map(|axis| lens.eye[axis] + ray[axis] * t);
             let depth = t * dot(ray, lens.forward);
-            let at = y * w + x;
-            if depth < buffers.depth[at] {
-                dark[at] = 1.0 - shadow.lit([hit[0], hit[1] + 0.002, hit[2]]);
+            if depth < buffers.depth[y * w + x] {
+                *value = 1.0 - shadow.lit([hit[0], hit[1] + 0.002, hit[2]]);
             }
         }
-    }
+    });
     // Softened a little, so the shadow's edge is not a stair.
-    let mut soft = vec![0.0_f32; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            let (mut sum, mut count) = (0.0, 0.0);
-            for dy in -2_i32..=2 {
-                for dx in -2_i32..=2 {
-                    let (sx, sy) = (x as i32 + dx, y as i32 + dy);
-                    if sx >= 0 && sy >= 0 && (sx as usize) < w && (sy as usize) < h {
-                        sum += dark[sy as usize * w + sx as usize];
-                        count += 1.0;
-                    }
-                }
-            }
-            soft[y * w + x] = sum / count;
-        }
-    }
-    soft
+    box_blur(&dark, w)
 }

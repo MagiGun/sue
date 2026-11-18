@@ -371,16 +371,31 @@ impl SuePaint {
         else {
             return;
         };
-        if let (Some(into), Some(from)) = (
-            doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut),
-            drawn.bytes(),
-        ) && into.len() == from.len()
-        {
-            into.copy_from_slice(from);
-        }
+        self.show_drawn(cx, layer, &drawn);
+    }
+
+    /// Puts `drawn` in 3D layer `layer`'s pixels while it is dragged and
+    /// shows it: only the rows that changed are copied, and only the
+    /// rectangle that changed is composited again (the figure where it
+    /// was and where it is), not the whole picture.
+    fn show_drawn(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        layer: EntityId,
+        drawn: &sue_core::RasterTile2D,
+    ) {
+        let width = drawn.width() as usize;
+        let Some(changed) = doc::raster_mut(&mut cx.world.arena, layer)
+            .and_then(sue_core::RasterTile2D::bytes_mut)
+            .zip(drawn.bytes())
+            .filter(|(into, from)| into.len() == from.len())
+            .and_then(|(into, from)| copy_changed(into, from, width))
+        else {
+            return;
+        };
         if let Some(doc) = self.doc_mut() {
             doc.compositor
-                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+                .refresh_rects(&cx.world.arena, &[changed], Some(layer));
         }
     }
 
@@ -456,16 +471,7 @@ impl SuePaint {
         else {
             return;
         };
-        if let (Some(into), Some(from)) = (
-            doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut),
-            drawn.bytes(),
-        ) {
-            into.copy_from_slice(from);
-        }
-        if let Some(doc) = self.doc_mut() {
-            doc.compositor
-                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
-        }
+        self.show_drawn(cx, layer, &drawn);
     }
 
     /// Records a figure's pose change as one step: back to `base` and
@@ -957,6 +963,34 @@ fn shown_now(arena: &sue_core::Arena, layer: EntityId, model: Option<EntityId>) 
     )
 }
 
+/// Copies the rows of RGBA pixels `from` that differ from `into` (both
+/// `width` pixels a row) into it, and answers the rectangle
+/// `[x0, y0, x1, y1]` that changed (`None` when nothing did).
+fn copy_changed(into: &mut [u8], from: &[u8], width: usize) -> Option<[u32; 4]> {
+    let stride = width * 4;
+    if stride == 0 {
+        return None;
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+    for (y, (old, new)) in into.chunks_mut(stride).zip(from.chunks(stride)).enumerate() {
+        if old == new {
+            continue;
+        }
+        let first = old.iter().zip(new).position(|(a, b)| a != b).unwrap_or(0);
+        let last = old
+            .iter()
+            .zip(new)
+            .rposition(|(a, b)| a != b)
+            .unwrap_or(stride - 1);
+        x0 = x0.min(first / 4);
+        x1 = x1.max(last / 4 + 1);
+        y0 = y0.min(y);
+        y1 = y + 1;
+        old.copy_from_slice(new);
+    }
+    (y1 > y0).then(|| [x0, y0, x1, y1].map(|value| value as u32))
+}
+
 /// The properties that say how an imported model looks and poses.
 const LOOK_KEYS: [&str; 3] = [
     crate::model3d::COLORS,
@@ -965,7 +999,7 @@ const LOOK_KEYS: [&str; 3] = [
 ];
 
 /// The properties of a figure's body shape.
-const BODY_KEYS: [&str; 9] = [
+const BODY_KEYS: [&str; 10] = [
     crate::figure::GROUND,
     crate::figure::HEIGHT,
     crate::figure::HEADS,
@@ -975,11 +1009,12 @@ const BODY_KEYS: [&str; 9] = [
     crate::figure::PARTS_TEXT,
     crate::figure::SIDE,
     crate::figure::GUIDES,
+    crate::figure::ANATOMY,
 ];
 
 /// The properties of a 3D layer's model a drag may change: its placement
 /// and a figure's body shape.
-const MODEL_KEYS: [&str; 19] = [
+const MODEL_KEYS: [&str; 20] = [
     crate::model3d::COLORS,
     crate::model3d::MORPHS,
     crate::figure::LIMITS,
@@ -999,6 +1034,7 @@ const MODEL_KEYS: [&str; 19] = [
     crate::figure::PARTS_TEXT,
     crate::figure::SIDE,
     crate::figure::GUIDES,
+    crate::figure::ANATOMY,
 ];
 
 /// The properties of a 3D layer's view.
@@ -1011,7 +1047,7 @@ fn view_keys() -> Vec<&'static str> {
 }
 
 /// A body shape as the properties of its model.
-fn body_values(body: &crate::figure::Body) -> [(&'static str, Value); 9] {
+fn body_values(body: &crate::figure::Body) -> [(&'static str, Value); 10] {
     [
         (crate::figure::GROUND, Value::from(body.ground)),
         (crate::figure::HEIGHT, Value::from(f64::from(body.height))),
@@ -1022,6 +1058,7 @@ fn body_values(body: &crate::figure::Body) -> [(&'static str, Value); 9] {
         (crate::figure::PARTS_TEXT, Value::from(body.parts_text())),
         (crate::figure::SIDE, Value::from(body.side.key())),
         (crate::figure::GUIDES, Value::from(body.guides)),
+        (crate::figure::ANATOMY, Value::from(body.anatomy)),
     ]
 }
 

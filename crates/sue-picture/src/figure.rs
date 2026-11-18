@@ -90,6 +90,7 @@ use sue_model::{Geometry, PrimKind};
 use crate::doc::Edit;
 
 pub(crate) mod human;
+mod modest;
 mod posing;
 pub(crate) mod skin;
 pub use posing::{
@@ -170,6 +171,10 @@ pub const LIMITS: &str = "figure.limits";
 /// The hands and feet pinned where they are while the rest of the body
 /// is posed: their joint numbers, `,` between (`Text`).
 pub const PINS: &str = "figure.pins";
+/// A body shows its anatomical detail: nipples and the shape between
+/// the legs (`Bool`; off unless set on, so a body is a smooth mannequin
+/// there, old files included).
+pub const ANATOMY: &str = "figure.anatomy";
 
 /// A body's type: how its shoulders, waist and hips are built.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1131,6 +1136,9 @@ pub struct Body {
     pub rig: u64,
     /// An imported model keeps to joint angle limits ([`LIMITS`]).
     pub limits: bool,
+    /// A body shows its nipples and the shape between its legs; without
+    /// them it is a smooth mannequin there ([`ANATOMY`]).
+    pub anatomy: bool,
     /// Where it stands, how it is turned and how large it is.
     pub place: crate::three::Placement,
 }
@@ -1198,6 +1206,10 @@ impl Body {
             },
             limits: entity
                 .property(LIMITS)
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            anatomy: entity
+                .property(ANATOMY)
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             place: crate::three::Placement::of(entity),
@@ -1334,18 +1346,19 @@ impl Body {
     }
 
     /// The body shape as text, for a body shape material: one `key=value`
-    /// line each for the type, height, ratio, chart and whether the ratio
-    /// follows the height.
+    /// line each for the type, height, ratio, chart, whether the ratio
+    /// follows the height, the sliders and the anatomical detail.
     #[must_use]
     pub fn shape_text(&self) -> String {
         format!(
-            "build={}\nheight={}\nheads={}\nshape={}\nfollow={}\nparts={}\n",
+            "build={}\nheight={}\nheads={}\nshape={}\nfollow={}\nparts={}\nanatomy={}\n",
             self.build.key(),
             self.height,
             self.heads,
             self.shape.to_text(),
             self.follow,
             self.parts_text(),
+            self.anatomy,
         )
     }
 
@@ -1374,6 +1387,7 @@ impl Body {
                 "shape" => body.shape = Shape::from_text(value),
                 "follow" => body.follow = value == "true",
                 "parts" => body.parts = Self::parts_from_text(value),
+                "anatomy" => body.anatomy = value == "true",
                 _ => continue,
             }
             read = true;
@@ -1476,6 +1490,7 @@ impl Default for Body {
             ground: true,
             rig: 0,
             limits: false,
+            anatomy: false,
             place: crate::three::Placement::default(),
         }
     }
@@ -2424,7 +2439,8 @@ pub fn set_body(arena: &Arena, layer: EntityId, body: &Body, label: &str) -> Opt
         edit = edit
             .then(SetProperty::new(model, BUILD, body.build.key()))
             .then(SetProperty::new(model, SHAPE, body.shape.to_text()))
-            .then(SetProperty::new(model, FOLLOW, body.follow));
+            .then(SetProperty::new(model, FOLLOW, body.follow))
+            .then(SetProperty::new(model, ANATOMY, body.anatomy));
     }
     for set in body.place.edits(model) {
         edit = edit.then(set);
@@ -3023,6 +3039,97 @@ mod tests {
     }
 
     #[test]
+    fn anatomical_detail_is_off_unless_said_and_round_trips() {
+        assert!(!Body::default().anatomy, "off by default");
+        let old = Entity::empty("figure", CLASS).with_property(KIND, Value::from("body"));
+        assert!(!Body::of(&old).anatomy, "a figure from an older file: off");
+        let on = old.clone().with_property(ANATOMY, Value::from(true));
+        assert!(Body::of(&on).anatomy, "on where the file says so");
+        let body = Body {
+            anatomy: true,
+            ..Body::default()
+        };
+        let read = Body::default().with_shape_text(&body.shape_text()).unwrap();
+        assert!(read.anatomy, "a body shape material keeps it");
+        let older = "build=male\nheight=170\n";
+        assert!(
+            body.with_shape_text(older).unwrap().anatomy,
+            "a material that says nothing of it leaves it as it is"
+        );
+    }
+
+    #[test]
+    fn anatomical_detail_moves_only_the_chest_and_between_the_legs() {
+        for build in [Build::Male, Build::Female] {
+            let body = Body {
+                build,
+                ..Body::default()
+            };
+            let (worked, moved) = human::modesty(&body);
+            let joints = solve(&Pose::rest(), &body);
+            let (hips, chest, neck) = (
+                joints[human::at::HIPS].0,
+                joints[human::at::CHEST].0,
+                joints[human::at::NECK].0,
+            );
+            let shaped = human::shaped(&Body {
+                anatomy: true,
+                ..body
+            });
+            let mut chest_moved = 0.0_f32;
+            let mut crotch_moved = 0.0_f32;
+            for (index, (w, by)) in worked.iter().zip(&moved).enumerate() {
+                if *w == 0.0 {
+                    assert_eq!(*by, 0.0, "{build:?}: point {index} is left alone");
+                    continue;
+                }
+                // Where the point is on the standing body, in its own
+                // scale (the mesh is measured before it is stood up).
+                let p = shaped.rest[index];
+                if p[1] > (hips[1] + chest[1]) / 2.0 {
+                    assert!(p[1] < neck[1], "{build:?}: {p:?} is on the chest");
+                    assert!(p[2] > chest[2], "{build:?}: {p:?} is on the front");
+                    chest_moved = chest_moved.max(*by);
+                } else {
+                    assert!(p[0].abs() < 0.15, "{build:?}: {p:?} is between the legs");
+                    assert!(p[1] < hips[1] + 0.12, "{build:?}: {p:?} is below the navel");
+                    crotch_moved = crotch_moved.max(*by);
+                }
+            }
+            let touched = worked.iter().filter(|w| **w > 0.0).count();
+            assert!(
+                touched * 20 < worked.len(),
+                "{build:?}: a small part of the body: {touched} of {}",
+                worked.len()
+            );
+            assert!(chest_moved > 0.001, "{build:?}: the nipples went in");
+            assert!(crotch_moved > 0.003, "{build:?}: the crotch was smoothed");
+            // Nothing is hidden or cut: the same mesh, its points moved.
+            let off = surface(&body.standing(), &body);
+            let on = surface(
+                &body.standing(),
+                &Body {
+                    anatomy: true,
+                    ..body
+                },
+            );
+            // (Each quad is split along its shorter diagonal, which may
+            // be the other one where the points moved.)
+            assert_eq!(
+                off.indices.len(),
+                on.indices.len(),
+                "{build:?}: as many triangles"
+            );
+            assert_eq!(
+                off.positions.len(),
+                on.positions.len(),
+                "{build:?}: and points"
+            );
+            assert_ne!(off.positions, on.positions, "{build:?}: in other places");
+        }
+    }
+
+    #[test]
     fn a_placed_figure_moves_turns_and_grows_whole() {
         let rest = Pose::rest();
         let still = Body::default();
@@ -3151,6 +3258,103 @@ mod preview {
             ..male
         };
         save("head", &head, &head.preset(1), &front, [700, 800]);
+    }
+
+    /// Sheets of both body types with and without their anatomical
+    /// detail, close on the trunk, from the front, the side, three
+    /// quarters and below, standing and in poses that open the legs, in
+    /// the folder `SUE_FIGURE_PREVIEW` names. Run with `--ignored`.
+    #[test]
+    #[ignore = "writes pictures to look at"]
+    fn anatomy_to_look_at() {
+        let Ok(folder) = std::env::var("SUE_FIGURE_PREVIEW") else {
+            return;
+        };
+        let size = [360, 400];
+        let views: [(f32, f32); 6] = [
+            (0.0, 0.0),
+            (35.0, 5.0),
+            (90.0, 0.0),
+            (150.0, 5.0),
+            (20.0, -40.0),
+            (0.0, -70.0),
+        ];
+        let poses = [0_usize, 4, 12, 16, 17];
+        for build in [Build::Male, Build::Female] {
+            for anatomy in [false, true] {
+                let body = Body {
+                    build,
+                    anatomy,
+                    guides: false,
+                    ..Body::default()
+                };
+                for (close, name) in [(0, ""), (1, "-close"), (2, "-chest")] {
+                    let mut tiles = Vec::new();
+                    for &index in &poses {
+                        let pose = body.preset(index);
+                        let placed = solve(&pose, &body);
+                        // Close on the hips and chest wherever the pose puts them.
+                        let hips = placed[human::at::HIPS].0;
+                        let chest = placed[human::at::CHEST].0;
+                        let (middle, reach) = match close {
+                            1 => (hips, 0.32),
+                            2 => (chest, 0.36),
+                            _ => ([0, 1, 2].map(|k| (hips[k] + chest[k]) / 2.0), 0.6),
+                        };
+                        for (yaw, pitch) in views {
+                            let view = View3D {
+                                yaw,
+                                pitch,
+                                distance: 4.2,
+                                style: 0,
+                                floor: false,
+                                ..View3D::default()
+                            };
+                            if std::env::var("SUE_FIGURE_WEIGHTS").is_ok() {
+                                let (worked, _) = human::modesty(&body);
+                                let mut seen = surface(&pose, &body);
+                                seen.colors = (0..seen.positions.len())
+                                    .map(|i| {
+                                        let w = worked.get(i).copied().unwrap_or(0.0);
+                                        [1.0, 1.0 - w, 1.0 - w]
+                                    })
+                                    .collect();
+                                let buffers = crate::three::render_surface(
+                                    &seen,
+                                    &view,
+                                    size,
+                                    (middle, reach),
+                                );
+                                let drawn = crate::three::draw(&buffers, &view).unwrap();
+                                let mut pixels = drawn.bytes().unwrap().to_vec();
+                                for pixel in pixels.as_chunks_mut::<4>().0 {
+                                    let alpha = f32::from(pixel[3]) / 255.0;
+                                    for channel in pixel.iter_mut().take(3) {
+                                        *channel = (f32::from(*channel) * alpha
+                                            + 250.0 * (1.0 - alpha))
+                                            as u8;
+                                    }
+                                    pixel[3] = 255;
+                                }
+                                tiles.push(pixels);
+                                continue;
+                            }
+                            tiles.push(tile(&pose, &body, &view, (middle, reach), size));
+                        }
+                    }
+                    sheet(
+                        &format!(
+                            "{folder}/anatomy-{}-{}{name}.png",
+                            build.key(),
+                            if anatomy { "on" } else { "off" }
+                        ),
+                        &tiles,
+                        size,
+                        views.len(),
+                    );
+                }
+            }
+        }
     }
 
     /// One picture of a sheet: the figure seen close, opaque on paper.
@@ -3499,5 +3703,155 @@ mod preview {
             [300, 340],
             8,
         );
+    }
+}
+
+#[cfg(test)]
+mod speed {
+    use super::*;
+    use crate::three::{View3D, figure_view};
+    use std::time::{Duration, Instant};
+
+    /// What the benchmark draws: a name, the figure, how it is seen and
+    /// on how large a canvas.
+    fn cases() -> Vec<(&'static str, Body, View3D, [u32; 2])> {
+        let body = Body::default();
+        let hand = Body {
+            kind: Kind::Hand,
+            ..body
+        };
+        let lit = View3D {
+            shadows: true,
+            floor: true,
+            ..figure_view(Kind::Body)
+        };
+        let lined = View3D {
+            style: 2,
+            ..figure_view(Kind::Body)
+        };
+        vec![
+            (
+                "body 1600x1200",
+                body,
+                figure_view(Kind::Body),
+                [1600, 1200],
+            ),
+            (
+                "body 2480x3508",
+                body,
+                figure_view(Kind::Body),
+                [2480, 3508],
+            ),
+            ("body shadows 1600x1200", body, lit, [1600, 1200]),
+            ("body lines 1600x1200", body, lined, [1600, 1200]),
+            (
+                "hand 1600x1200",
+                hand,
+                figure_view(Kind::Hand),
+                [1600, 1200],
+            ),
+            (
+                "hand 2480x3508",
+                hand,
+                figure_view(Kind::Hand),
+                [2480, 3508],
+            ),
+            ("body 128", body, figure_view(Kind::Body), [128, 128]),
+            ("hand 128", hand, figure_view(Kind::Hand), [128, 128]),
+        ]
+    }
+
+    /// The middle of `runs` timings.
+    fn median(mut runs: Vec<Duration>) -> Duration {
+        runs.sort();
+        runs[runs.len() / 2]
+    }
+
+    /// How long each case takes to draw, at rest and while dragged, split
+    /// into bending the skin (the surface), drawing it into buffers and
+    /// turning those into the layer's pixels. With `SUE_FIGURE_REF_SAVE`
+    /// naming a folder it keeps each picture at rest there; with
+    /// `SUE_FIGURE_REF` it compares with the kept ones. Run in release
+    /// with `--ignored --nocapture`.
+    #[test]
+    #[ignore = "measures how fast figures draw"]
+    fn figures_draw_fast() {
+        let save = std::env::var("SUE_FIGURE_REF_SAVE").ok();
+        let compare = std::env::var("SUE_FIGURE_REF").ok();
+        // Shaping a body anew (each slider move does), with its
+        // anatomical detail and without.
+        for anatomy in [true, false] {
+            let runs = (0..7)
+                .map(|step| {
+                    let body = Body {
+                        anatomy,
+                        height: 150.0 + step as f32,
+                        ..Body::default()
+                    };
+                    let started = Instant::now();
+                    let _ = human::shaped(&body);
+                    started.elapsed()
+                })
+                .collect();
+            println!(
+                "shaping a body, anatomical detail {anatomy}: {:.2} ms",
+                median(runs).as_secs_f64() * 1e3
+            );
+        }
+        // Warm the shaped figures and the asset.
+        for (_, body, view, _) in cases() {
+            let _ = render(&body.standing(), &body, &view, [64, 64]);
+        }
+        for (name, body, view, size) in cases() {
+            for fast in [false, true] {
+                let view = View3D { fast, ..view };
+                let pose = body.preset(if body.kind == Kind::Body { 7 } else { 3 });
+                let (mut skins, mut renders, mut draws, mut totals) =
+                    (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+                let mut last = None;
+                for _ in 0..7 {
+                    let started = Instant::now();
+                    let surface = surface(&pose, &body);
+                    let skinned = started.elapsed();
+                    let buffers = crate::three::render_surface(&surface, &view, size, body.frame());
+                    let rendered = started.elapsed();
+                    let tile = crate::three::draw(&buffers, &view).unwrap();
+                    let total = started.elapsed();
+                    skins.push(skinned);
+                    renders.push(rendered - skinned);
+                    draws.push(total - rendered);
+                    totals.push(total);
+                    last = Some(tile);
+                }
+                println!(
+                    "{name:24} {:5} total {:7.2} ms  skin {:6.2}  render {:7.2}  draw {:6.2}",
+                    if fast { "drag" } else { "rest" },
+                    median(totals).as_secs_f64() * 1e3,
+                    median(skins).as_secs_f64() * 1e3,
+                    median(renders).as_secs_f64() * 1e3,
+                    median(draws).as_secs_f64() * 1e3,
+                );
+                if fast {
+                    continue;
+                }
+                let bytes = last.unwrap().bytes().unwrap().to_vec();
+                let file = name.replace(' ', "-");
+                if let Some(folder) = &save {
+                    std::fs::write(format!("{folder}/{file}.rgba"), &bytes).unwrap();
+                }
+                if let Some(folder) = &compare {
+                    let kept = std::fs::read(format!("{folder}/{file}.rgba")).unwrap();
+                    let (mut most, mut differ) = (0_u8, 0_usize);
+                    for (a, b) in kept.iter().zip(&bytes) {
+                        let d = a.abs_diff(*b);
+                        most = most.max(d);
+                        differ += usize::from(d > 2);
+                    }
+                    println!(
+                        "    against the kept picture: largest change {most}, {differ} values off by more than 2"
+                    );
+                }
+            }
+        }
     }
 }

@@ -1040,7 +1040,9 @@ Once a canvas is open:
   part** has a slider for each part: head width and length, neck,
   shoulders, chest and bust, torso, waist, hips, arm and leg length and
   width, hand size, finger length and thickness, foot size, and for the
-  hands **Veins** and **Tendon and knuckle prominence**. **Light
+  hands **Veins** and **Tendon and knuckle prominence**, and for a body
+  **Anatomical detail** (off unless ticked: the body is a smooth
+  mannequin, without nipples or a shape between the legs). **Light
   source** has the light's height and **Shadow on the floor**. Every
   drag is one step to undo.
 - **3D hands and heads:** Layer, New Layer, **3D Hand** and **3D Head**

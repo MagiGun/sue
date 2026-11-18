@@ -640,6 +640,9 @@ pub struct Buffers {
     /// The surface's own color at the pixel, red, green and blue from 0
     /// to 1 (empty for a model of plain clay).
     pub color: Vec<[f32; 3]>,
+    /// The part of the canvas anything was drawn on, `[x0, y0, x1, y1]`:
+    /// outside it every pixel is empty.
+    pub region: [u32; 4],
 }
 
 impl Buffers {
@@ -806,6 +809,7 @@ pub fn render_framed(
         guide: Vec::new(),
         floor: Vec::new(),
         color: Vec::new(),
+        region: [0, 0, size[0], size[1]],
     };
     let positions = mesh.positions();
     if positions.is_empty() || w == 0 || h == 0 {
@@ -946,34 +950,47 @@ impl ShadowMap {
             bias: (near - far).max(1e-3) * 0.01 + cell * 1.5,
         };
         let n = Self::SIZE as f32;
-        for triangle in indices.as_chunks::<3>().0 {
-            let [a, b, c] = [0, 1, 2].map(|k| {
-                let q = flat(worlds[triangle[k] as usize]);
-                [(q[0] - min[0]) / cell, (q[1] - min[1]) / cell, q[2]]
-            });
-            let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-            if area.abs() < 1e-9 {
-                continue;
-            }
-            let x0 = a[0].min(b[0]).min(c[0]).floor().clamp(0.0, n) as usize;
-            let x1 = (a[0].max(b[0]).max(c[0]).ceil() + 1.0).clamp(0.0, n) as usize;
-            let y0 = a[1].min(b[1]).min(c[1]).floor().clamp(0.0, n) as usize;
-            let y1 = (a[1].max(b[1]).max(c[1]).ceil() + 1.0).clamp(0.0, n) as usize;
-            for y in y0..y1 {
-                for x in x0..x1 {
-                    let (px, py) = (x as f32, y as f32);
-                    let wa = ((b[0] - px) * (c[1] - py) - (b[1] - py) * (c[0] - px)) / area;
-                    let wb = ((c[0] - px) * (a[1] - py) - (c[1] - py) * (a[0] - px)) / area;
-                    let wc = 1.0 - wa - wb;
-                    if wa < -1e-4 || wb < -1e-4 || wc < -1e-4 {
-                        continue;
+        // Each triangle on the map's grid, with the cells it may cover.
+        let flats: Vec<([[f32; 3]; 3], f32, [usize; 4])> = indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .filter_map(|triangle| {
+                let [a, b, c] = [0, 1, 2].map(|k| {
+                    let q = flat(worlds[triangle[k] as usize]);
+                    [(q[0] - min[0]) / cell, (q[1] - min[1]) / cell, q[2]]
+                });
+                let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+                if area.abs() < 1e-9 {
+                    return None;
+                }
+                let x0 = a[0].min(b[0]).min(c[0]).floor().clamp(0.0, n) as usize;
+                let x1 = (a[0].max(b[0]).max(c[0]).ceil() + 1.0).clamp(0.0, n) as usize;
+                let y0 = a[1].min(b[1]).min(c[1]).floor().clamp(0.0, n) as usize;
+                let y1 = (a[1].max(b[1]).max(c[1]).ceil() + 1.0).clamp(0.0, n) as usize;
+                Some(([a, b, c], area, [x0, y0, x1, y1]))
+            })
+            .collect();
+        // Band by band of the map's rows on the shared workers.
+        surface::in_bands(&mut map.nearest, Self::SIZE, |first, band| {
+            let last = first + band.len() / Self::SIZE;
+            for ([a, b, c], area, [x0, y0, x1, y1]) in &flats {
+                for y in (*y0).max(first)..(*y1).min(last) {
+                    for x in *x0..*x1 {
+                        let (px, py) = (x as f32, y as f32);
+                        let wa = ((b[0] - px) * (c[1] - py) - (b[1] - py) * (c[0] - px)) / area;
+                        let wb = ((c[0] - px) * (a[1] - py) - (c[1] - py) * (a[0] - px)) / area;
+                        let wc = 1.0 - wa - wb;
+                        if wa < -1e-4 || wb < -1e-4 || wc < -1e-4 {
+                            continue;
+                        }
+                        let height = wa * a[2] + wb * b[2] + wc * c[2];
+                        let at = (y - first) * Self::SIZE + x;
+                        band[at] = band[at].max(height);
                     }
-                    let height = wa * a[2] + wb * b[2] + wc * c[2];
-                    let at = y * Self::SIZE + x;
-                    map.nearest[at] = map.nearest[at].max(height);
                 }
             }
-        }
+        });
         map
     }
 
@@ -1005,8 +1022,16 @@ pub fn lines(buffers: &Buffers, width: f32, crease: f32) -> Vec<f32> {
     let [w, h] = buffers.size.map(|value| value as usize);
     let fold = crease.to_radians().cos();
     let mut edge = vec![0.0_f32; w * h];
-    for y in 0..h {
-        for x in 0..w {
+    // Lines lie on the drawn part and the pixel round it, and grow from
+    // there by their width.
+    let [rx0, ry0, rx1, ry1] = buffers.region.map(|value| value as usize);
+    if rx1 <= rx0 || ry1 <= ry0 {
+        return edge;
+    }
+    let (ex0, ey0) = (rx0.saturating_sub(1), ry0.saturating_sub(1));
+    let (ex1, ey1) = ((rx1 + 1).min(w), (ry1 + 1).min(h));
+    for y in ey0..ey1 {
+        for x in ex0..ex1 {
             let at = y * w + x;
             for (nx, ny) in [(x + 1, y), (x, y + 1)] {
                 if nx >= w || ny >= h {
@@ -1038,6 +1063,13 @@ pub fn lines(buffers: &Buffers, width: f32, crease: f32) -> Vec<f32> {
     if width <= 1.0 {
         return edge;
     }
+    let grow = width.ceil() as usize + 2;
+    let rect = [
+        ex0.saturating_sub(grow),
+        ey0.saturating_sub(grow),
+        (ex1 + grow).min(w),
+        (ey1 + grow).min(h),
+    ];
     let grown = crate::effects::Edge::build(
         |x, y| {
             if x < 0 || y < 0 || x >= w as i64 || y >= h as i64 {
@@ -1046,12 +1078,16 @@ pub fn lines(buffers: &Buffers, width: f32, crease: f32) -> Vec<f32> {
                 edge[y as usize * w + x as usize]
             }
         },
-        [0, 0, buffers.size[0], buffers.size[1]],
+        rect.map(|value| value as u32),
         (width - 1.0) / 2.0,
     );
-    (0..w * h)
-        .map(|at| grown.at((at % w) as u32, (at / w) as u32))
-        .collect()
+    let mut out = vec![0.0_f32; w * h];
+    for y in rect[1]..rect[3] {
+        for x in rect[0]..rect[2] {
+            out[y * w + x] = grown.at(x as u32, y as u32);
+        }
+    }
+    out
 }
 
 /// The layer's pixels: the model shaded in gray, as lines, or both, on
@@ -1061,46 +1097,83 @@ pub fn draw(buffers: &Buffers, view: &View3D) -> Option<RasterTile2D> {
     let [w, h] = buffers.size;
     let line = (view.style > 0).then(|| lines(buffers, view.line_width, view.crease));
     let color = view.line_color.map(|c| f32::from(c) / 255.0);
-    let mut pixels = Vec::with_capacity((w * h * 4) as usize);
-    for at in 0..(w * h) as usize {
-        // Fog whitens what is behind it, lines too.
-        let fog = buffers.fog.get(at).copied().unwrap_or(0.0);
-        let ink = line.as_ref().map_or(0.0, |line| line[at]) * view.line_opacity * (1.0 - fog);
-        let (rgb, alpha) = if view.style != 1 && buffers.covered(at) {
-            // Guide lines lie on the surface, a darker gray.
-            let guide = buffers.guide.get(at).copied().unwrap_or(0.0);
-            let lit = buffers.light[at] * (1.0 - 0.6 * guide);
-            // The surface's own color under the light (plain clay is
-            // white, so it shows the light alone).
-            let own = buffers.color.get(at).copied().unwrap_or([1.0; 3]);
-            let shade = own.map(|c| {
-                let c = c * lit;
-                c + (1.0 - c) * fog
-            });
-            // A soft edge: the pixel shows as much as the model covers.
-            let cover = buffers.cover.get(at).copied().unwrap_or(1.0);
-            (
-                [0, 1, 2].map(|k| shade[k] + (color[k] - shade[k]) * ink),
-                cover + (1.0 - cover) * ink,
-            )
-        } else {
-            // The model's shadow on the floor, where the model is not.
-            let floor = buffers.floor.get(at).copied().unwrap_or(0.0) * 0.38;
-            let alpha = ink + (1.0 - ink) * floor;
-            if alpha <= 0.0 {
-                (color, 0.0)
-            } else {
-                (color.map(|c| c * ink / alpha), alpha)
+    // An empty pixel: clear, in the lines' color.
+    let clear = [
+        view.line_color[0],
+        view.line_color[1],
+        view.line_color[2],
+        0,
+    ];
+    let mut pixels = if clear == [0; 4] {
+        vec![0_u8; (w * h * 4) as usize]
+    } else {
+        clear.repeat((w * h) as usize)
+    };
+    // Only the drawn part (and the lines' reach round it) has anything
+    // else; it is worked in bands on the shared workers.
+    let reach = if line.is_some() {
+        view.line_width.ceil().max(0.0) as u32 + 3
+    } else {
+        0
+    };
+    let [x0, y0, x1, y1] = buffers.region;
+    let (x0, y0) = (
+        x0.saturating_sub(reach) as usize,
+        y0.saturating_sub(reach) as usize,
+    );
+    let (x1, y1) = ((x1 + reach).min(w) as usize, (y1 + reach).min(h) as usize);
+    let w = w as usize;
+    if x1 > x0 && y1 > y0 {
+        surface::in_bands(&mut pixels[y0 * w * 4..y1 * w * 4], w * 4, |first, band| {
+            for (row, out) in band.chunks_mut(w * 4).enumerate() {
+                let y = y0 + first + row;
+                for x in x0..x1 {
+                    let at = y * w + x;
+                    // Fog whitens what is behind it, lines too.
+                    let fog = buffers.fog.get(at).copied().unwrap_or(0.0);
+                    let ink = line.as_ref().map_or(0.0, |line| line[at])
+                        * view.line_opacity
+                        * (1.0 - fog);
+                    let (rgb, alpha) = if view.style != 1 && buffers.covered(at) {
+                        // Guide lines lie on the surface, a darker gray.
+                        let guide = buffers.guide.get(at).copied().unwrap_or(0.0);
+                        let lit = buffers.light[at] * (1.0 - 0.6 * guide);
+                        // The surface's own color under the light (plain
+                        // clay is white, so it shows the light alone).
+                        let own = buffers.color.get(at).copied().unwrap_or([1.0; 3]);
+                        let shade = own.map(|c| {
+                            let c = c * lit;
+                            c + (1.0 - c) * fog
+                        });
+                        // A soft edge: the pixel shows as much as the
+                        // model covers.
+                        let cover = buffers.cover.get(at).copied().unwrap_or(1.0);
+                        (
+                            [0, 1, 2].map(|k| shade[k] + (color[k] - shade[k]) * ink),
+                            cover + (1.0 - cover) * ink,
+                        )
+                    } else {
+                        // The model's shadow on the floor, where the model
+                        // is not.
+                        let floor = buffers.floor.get(at).copied().unwrap_or(0.0) * 0.38;
+                        let alpha = ink + (1.0 - ink) * floor;
+                        if alpha <= 0.0 {
+                            (color, 0.0)
+                        } else {
+                            (color.map(|c| c * ink / alpha), alpha)
+                        }
+                    };
+                    out[x * 4..x * 4 + 4].copy_from_slice(&[
+                        (rgb[0] * 255.0).round() as u8,
+                        (rgb[1] * 255.0).round() as u8,
+                        (rgb[2] * 255.0).round() as u8,
+                        (alpha * 255.0).round() as u8,
+                    ]);
+                }
             }
-        };
-        pixels.extend_from_slice(&[
-            (rgb[0] * 255.0).round() as u8,
-            (rgb[1] * 255.0).round() as u8,
-            (rgb[2] * 255.0).round() as u8,
-            (alpha * 255.0).round() as u8,
-        ]);
+        });
     }
-    RasterTile2D::from_bytes(w, h, PixelFormat::Rgba8, pixels).ok()
+    RasterTile2D::from_bytes(w as u32, h, PixelFormat::Rgba8, pixels).ok()
 }
 
 /// The model of 3D layer `layer` as `view` sees it on a `size` canvas.

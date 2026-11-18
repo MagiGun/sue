@@ -47,6 +47,27 @@ follow [Semantic Versioning](https://semver.org/).
   crawl. Every value now gives an animation that overshoots by less than
   5 percent and comes to rest within about a second and a half, and the
   page coming over the Hub no longer flickers on its way in.
+### Added
+
+- Sue Paint, 3D drawing figures: **Anatomical detail** in Body shape by
+  part. It is off unless you tick it, for new figures and for figures
+  in files from before: the male and female bodies are then smooth
+  mannequins, the nipples smoothed into the chest and a neutral, rounded
+  form between the legs, in every pose and from every side. Ticked, the
+  body is as before. It is one step to undo, kept in the file and in
+  body shape materials.
+
+### Changed
+
+- Sue Paint, 3D layers draw several times faster: the figure is drawn in
+  bands on every core, each pixel shaded once, only the part of the
+  canvas the model is on is worked, and while you pose or turn a figure
+  only the part of the picture that changed is shown again. A body on a
+  1600 x 1200 canvas takes 16 ms at rest instead of 103 ms and 8 ms
+  while dragged instead of 35 ms; a hand on an A4 canvas at 300 dpi
+  takes 0.12 s instead of 1.5 s. A posing frame, from the pointer's move
+  to the picture shown, went from 59 ms to 20 ms. Pictures at rest look
+  the same as before.
 
 ## [0.0.82] - 2026-11-17
 

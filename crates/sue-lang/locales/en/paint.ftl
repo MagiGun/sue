@@ -3957,6 +3957,7 @@ hand-shape = Hand shape
 body-shape-details = Body shape by part
 show-guide-lines = Show guide lines
 keep-on-the-ground = Keep on the ground
+anatomical-detail = Anatomical detail
 joint-angle-limits = Joint angle limits
 reset-part = Reset part
 hand-setup = Hand setup

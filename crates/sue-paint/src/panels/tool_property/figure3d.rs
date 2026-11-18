@@ -248,6 +248,11 @@ impl SuePaint {
                     tr!("keep-on-the-ground"),
                     &mut body.ground,
                 ));
+                ticks.push((
+                    "sue-paint-figure-anatomy",
+                    tr!("anatomical-detail"),
+                    &mut body.anatomy,
+                ));
             }
             for (salt, name, on) in ticks {
                 if check(ui, theme, salt, &name, on) {
