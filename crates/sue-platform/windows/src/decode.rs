@@ -29,14 +29,15 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11Multithread,
 };
 use windows::Win32::Media::MediaFoundation::{
-    IMF2DBuffer, IMFDXGIDeviceManager, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader,
+    IMF2DBuffer2, IMFDXGIDeviceManager, IMFMediaBuffer, IMFMediaType, IMFSample, IMFSourceReader,
     MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS,
     MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE,
     MF_MT_SUBTYPE, MF_PD_DURATION, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
     MF_SOURCE_READER_ALL_STREAMS, MF_SOURCE_READER_D3D_MANAGER,
     MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
     MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READER_MEDIASOURCE,
-    MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED, MF_SOURCE_READERF_ENDOFSTREAM, MFAudioFormat_Float,
+    MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED, MF_SOURCE_READERF_ENDOFSTREAM, MF2DBuffer_LockFlags_Read,
+    MFAudioFormat_Float,
     MFCreateDXGIDeviceManager, MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video,
     MFVideoFormat_RGB32,
 };
@@ -538,28 +539,53 @@ impl MediaReader {
             unsafe { sample.ConvertToContiguousBuffer() }.map_err(os("joining a picture"))?;
         let (width, height) = (self.size.0 as usize, self.size.1 as usize);
         rgba.resize(width * height * 4, 0);
-        if let Ok(flat) = buffer.cast::<IMF2DBuffer>() {
-            let mut start: *mut u8 = std::ptr::null_mut();
+        if let Ok(flat) = buffer.cast::<IMF2DBuffer2>() {
+            let mut first: *mut u8 = std::ptr::null_mut();
             let mut pitch = 0_i32;
-            // SAFETY: the out values point at live locals.
-            unsafe { flat.Lock2D(&mut start, &mut pitch) }.map_err(os("locking a picture"))?;
+            let mut start: *mut u8 = std::ptr::null_mut();
+            let mut length = 0_u32;
+            // SAFETY: the out values point at live locals; read access
+            // only.
+            unsafe {
+                flat.Lock2DSize(
+                    MF2DBuffer_LockFlags_Read,
+                    &mut first,
+                    &mut pitch,
+                    &mut start,
+                    &mut length,
+                )
+            }
+            .map_err(os("locking a picture"))?;
             let row_bytes = width * 4;
-            if start.is_null() || (pitch.unsigned_abs() as usize) < row_bytes {
-                // SAFETY: pairs the Lock2D above.
+            // Every row must lie inside the buffer Lock2DSize described:
+            // a picture whose size changed without notice is refused
+            // rather than read past its end.
+            let fits = rows_fit(
+                first as usize,
+                pitch as isize,
+                start as usize,
+                length as usize,
+                row_bytes,
+                height,
+            );
+            if first.is_null() || start.is_null() || !fits {
+                // SAFETY: pairs the Lock2DSize above.
                 let _ = unsafe { flat.Unlock2D() };
                 return Err(MediaError::BadInput("a picture smaller than its size"));
             }
             for y in 0..height {
-                // SAFETY: Lock2D gave the first row of the picture at
-                // `start` and the step to the next as `pitch` (negative for
-                // a picture stored bottom up); each of the `height` rows
-                // holds at least `width * 4` readable bytes until Unlock2D.
+                // SAFETY: Lock2DSize gave the first row of the picture at
+                // `first`, the step to the next as `pitch` (negative for a
+                // picture stored bottom up) and the whole buffer as `start`
+                // and `length`; `rows_fit` checked that each of the
+                // `height` rows of `width * 4` bytes lies inside it. They
+                // stay readable until Unlock2D.
                 let row = unsafe {
-                    std::slice::from_raw_parts(start.offset(pitch as isize * y as isize), row_bytes)
+                    std::slice::from_raw_parts(first.offset(pitch as isize * y as isize), row_bytes)
                 };
                 bgrx_to_rgba(row, &mut rgba[y * row_bytes..(y + 1) * row_bytes]);
             }
-            // SAFETY: pairs the Lock2D above.
+            // SAFETY: pairs the Lock2DSize above.
             let _ = unsafe { flat.Unlock2D() };
         } else {
             let mut data: *mut u8 = std::ptr::null_mut();
@@ -659,6 +685,32 @@ impl MediaReader {
         let _ = unsafe { buffer.Unlock() };
         Ok(Some(time))
     }
+}
+
+/// Whether `rows` rows of `row_bytes` bytes, the first at address
+/// `first` and each `pitch` bytes after the one before (negative bottom
+/// up), all lie inside the buffer of `length` bytes at address `start`.
+fn rows_fit(
+    first: usize,
+    pitch: isize,
+    start: usize,
+    length: usize,
+    row_bytes: usize,
+    rows: usize,
+) -> bool {
+    if rows == 0 || pitch.unsigned_abs() < row_bytes {
+        return rows == 0;
+    }
+    let end = start.saturating_add(length);
+    let last = (rows - 1) as isize;
+    let Some(last_row) = pitch
+        .checked_mul(last)
+        .and_then(|offset| first.checked_add_signed(offset))
+    else {
+        return false;
+    };
+    let (low, high) = (first.min(last_row), first.max(last_row));
+    low >= start && high.checked_add(row_bytes).is_some_and(|stop| stop <= end)
 }
 
 /// Media Foundation's RGB32 (blue, green, red, unused) as opaque RGBA.
@@ -830,6 +882,20 @@ mod tests {
         assert!(reader.next_frame(&mut rgba).unwrap().is_some());
         assert_eq!(rgba.len(), 80 * 44 * 4);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rows_are_read_only_inside_the_locked_buffer() {
+        // Top down: 4 rows of 16 bytes with a pitch of 20 in 80 bytes.
+        assert!(rows_fit(1000, 20, 1000, 80, 16, 4));
+        assert!(!rows_fit(1000, 20, 1000, 75, 16, 4), "the last row runs out");
+        // Bottom up: the first row is the last in memory.
+        assert!(rows_fit(1060, -20, 1000, 80, 16, 4));
+        assert!(!rows_fit(1060, -20, 1010, 70, 16, 4), "rows before the start");
+        // A pitch narrower than a row is refused; no rows always fit.
+        assert!(!rows_fit(1000, 8, 1000, 80, 16, 4));
+        assert!(rows_fit(0, 0, 0, 0, 16, 0));
+        assert!(!rows_fit(usize::MAX - 4, 20, 0, usize::MAX, 16, 4));
     }
 
     #[test]

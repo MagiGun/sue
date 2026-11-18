@@ -865,9 +865,14 @@ pub fn read_mp4(bytes: &[u8], keep: usize) -> Result<Mp4Contents, MediaError> {
         // SAFETY: the out values point at live locals.
         unsafe { buffer.Lock(&mut data, None, Some(&mut filled)) }
             .map_err(os("locking a picture"))?;
-        // SAFETY: Lock gave `data`, readable for `filled` bytes until the
-        // Unlock below; the slice is copied out before then.
-        let all = unsafe { std::slice::from_raw_parts(data, filled as usize) }.to_vec();
+        let all = if data.is_null() {
+            Vec::new()
+        } else {
+            // SAFETY: Lock gave `data`, non-null and readable for `filled`
+            // bytes until the Unlock below; the slice is copied out before
+            // then. (A null pointer, even with no bytes, is not a slice.)
+            unsafe { std::slice::from_raw_parts(data, filled as usize) }.to_vec()
+        };
         // SAFETY: pairs the Lock above.
         let _ = unsafe { buffer.Unlock() };
         // Rows may be wider than the picture and the buffer taller (a
@@ -918,9 +923,14 @@ pub fn read_mp4(bytes: &[u8], keep: usize) -> Result<Mp4Contents, MediaError> {
             // SAFETY: the out values point at live locals.
             unsafe { buffer.Lock(&mut data, None, Some(&mut filled)) }
                 .map_err(os("locking sound"))?;
-            // SAFETY: Lock gave `data`, readable for `filled` bytes until
-            // the Unlock below; the slice is read before then.
-            let all = unsafe { std::slice::from_raw_parts(data, filled as usize) };
+            let all: &[u8] = if data.is_null() {
+                &[]
+            } else {
+                // SAFETY: Lock gave `data`, non-null and readable for
+                // `filled` bytes until the Unlock below; the slice is read
+                // before then.
+                unsafe { std::slice::from_raw_parts(data, filled as usize) }
+            };
             for pair in all.as_chunks::<2>().0 {
                 let value = i16::from_le_bytes(*pair).unsigned_abs();
                 out.sound_peak = out.sound_peak.max(value.min(32_767));
