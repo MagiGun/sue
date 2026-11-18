@@ -136,9 +136,11 @@ fn the_preview_is_the_export_at_a_smaller_size() {
         let clip = clip_mut(sequence, a);
         fx::add(clip, "blur.gaussian");
         fx::add(clip, "stylize.vignette");
-        let mut grade = crate::grade::Corrector::default();
-        grade.saturation = 1.4;
-        grade.lift = [0.0, 0.0, 0.05, 0.0];
+        let grade = crate::grade::Corrector {
+            saturation: 1.4,
+            lift: [0.0, 0.0, 0.05, 0.0],
+            ..crate::grade::Corrector::default()
+        };
         crate::grade::set_grade(clip, &[grade]);
         place(sequence, 0, ids[1], 0.0, 2.0);
     });

@@ -493,7 +493,7 @@ impl Loudness {
         let fs = f64::from(rate.max(8000));
         // The K weighting's two stages (BS.1770-4's, worked for any rate).
         let shelf = {
-            let f0 = 1681.974_450_955_533;
+            let f0 = 1_681.974_450_955_533;
             let g = 3.999_843_853_973_347;
             let q = 0.707_175_236_955_419_6;
             let k = (std::f64::consts::PI * f0 / fs).tan();

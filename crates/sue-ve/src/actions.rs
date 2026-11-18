@@ -45,11 +45,9 @@ pub fn run(studio: &mut SueVe, cx: &mut AppletContext<'_>, name: &str) -> bool {
                         .is_some_and(|(track, _)| model::is_video(&sequence.tracks[track]));
                     if let (true, Some((_, clip))) = (video, sequence.find_mut(*id)) {
                         let mut list = fx::effects(clip);
-                        let mut next = fx::next_id(clip);
-                        for effect in &copied {
+                        for (next, effect) in (fx::next_id(clip)..).zip(copied.iter()) {
                             let mut effect = effect.clone();
                             effect.id = next;
-                            next += 1;
                             list.push(effect);
                         }
                         fx::set_effects(clip, &list);

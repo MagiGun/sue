@@ -256,6 +256,9 @@ pub struct DeliverForm {
     pub rate: Option<u32>,
 }
 
+/// A stretch of the render bar: from, to, and whether it is rendered.
+pub type RenderSpan = (Time, Time, bool);
+
 /// The Color page's state: which corrector is picked, the before and
 /// after split, the scope shown, the copied grade and the open tab.
 #[derive(Clone, Debug, PartialEq)]
@@ -453,7 +456,7 @@ pub struct SueVe {
     pub zoom_target: Option<f32>,
     /// The render bar's marks: what they were worked out for, and the
     /// spans (start, end, drawn).
-    pub render_bar: Option<(u64, Vec<(Time, Time, bool)>)>,
+    pub render_bar: Option<(u64, Vec<RenderSpan>)>,
     /// The mask being edited on the monitor.
     pub mask_picked: Option<usize>,
     /// The missing movie being relinked.

@@ -544,3 +544,10 @@ own files are. A twin marked "yes" also has a `<name>.solid.svg`.
 | `insert` |  | An arrow pointing down into the gap between two boxes: put a clip in, moving what follows. |
 | `overwrite` |  | An arrow pointing down onto a long box: put a clip over what is there. |
 | `effects` |  | A four pointed star: effects. |
+| `speed` |  | A half dial over its middle with a needle leaning right: speed, a clip played faster or slower. |
+| `mixer` |  | Three upright lines, each with a small square knob at its own height: the faders of a mixing desk. |
+| `microphone` |  | A rounded capsule standing up in a cup, on a short stand with a foot: a microphone, recording a voice over. |
+| `graph` |  | Two axes meeting at the bottom left and a curve rising from low to a small square key at its top right: the graph editor. |
+| `scope` |  | A wide box with a zigzag trace across it: the video scopes. |
+| `aspect` |  | Four corner marks of a frame: the frame's shape, its aspect ratio. |
+| `captions` |  | A wide box with two short lines and a longer one under them, as words on a screen: captions. |

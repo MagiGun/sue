@@ -255,13 +255,8 @@ mod tests {
     fn mask_handles_move_their_shapes() {
         let mut rect = Mask::rect();
         move_handle(&mut rect, 2, [0.9, 0.8]);
-        assert_eq!(
-            rect.shape,
-            Shape::Rect {
-                at: [0.25, 0.25],
-                size: [0.65, 0.55000000000000004]
-            }
-        );
+        assert!(matches!(rect.shape, Shape::Rect { at, size }
+            if at == [0.25, 0.25] && (size[0] - 0.65).abs() < 1e-9 && (size[1] - 0.55).abs() < 1e-9));
         let mut ellipse = Mask::ellipse();
         move_handle(&mut ellipse, 1, [0.9, 0.5]);
         assert!(

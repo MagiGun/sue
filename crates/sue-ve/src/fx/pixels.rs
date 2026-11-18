@@ -353,8 +353,8 @@ fn box_line(
     for offset in 0..=radius * 2 {
         sum += get(input, offset.saturating_sub(radius).min(length - 1));
     }
-    for at in 0..length {
-        out[at] = sum / span;
+    for (at, value) in out.iter_mut().enumerate().take(length) {
+        *value = sum / span;
         let leaving = at.saturating_sub(radius);
         let entering = (at + radius + 1).min(length - 1);
         sum += get(input, entering) - get(input, leaving);

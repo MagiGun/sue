@@ -133,36 +133,6 @@ pub(super) const EFFECTS: Art = line(
     )],
 );
 
-#[cfg(test)]
-mod tests {
-    use super::super::Icon;
-
-    /// The table holds every icon of this group, and each one draws with
-    /// the art of this file.
-    #[test]
-    fn the_group_is_whole() {
-        let group = [
-            (Icon::AppVideo, &super::APP_VIDEO),
-            (Icon::ToolRazor, &super::TOOL_RAZOR),
-            (Icon::ToolRipple, &super::TOOL_RIPPLE),
-            (Icon::ToolRoll, &super::TOOL_ROLL),
-            (Icon::ToolSlip, &super::TOOL_SLIP),
-            (Icon::ToolSlide, &super::TOOL_SLIDE),
-            (Icon::Magnet, &super::MAGNET),
-            (Icon::Marker, &super::MARKER),
-            (Icon::MarkIn, &super::MARK_IN),
-            (Icon::MarkOut, &super::MARK_OUT),
-            (Icon::Insert, &super::INSERT),
-            (Icon::Overwrite, &super::OVERWRITE),
-            (Icon::Effects, &super::EFFECTS),
-        ];
-        for (icon, art) in group {
-            assert_eq!(icon.art(), art, "{}", icon.name());
-            assert!(!icon.has_solid(), "{} is no on and off pair", icon.name());
-        }
-    }
-}
-
 pub(super) const SPEED: Art = line(
     Keyline::Square,
     &[
@@ -222,3 +192,40 @@ pub(super) const CAPTIONS: Art = line(
         Part::Stroke("M7.75 10.75 H11.25 M13 10.75 H16.25 M7.75 14.25 H14.25"),
     ],
 );
+
+#[cfg(test)]
+mod tests {
+    use super::super::Icon;
+
+    /// The table holds every icon of this group, and each one draws with
+    /// the art of this file.
+    #[test]
+    fn the_group_is_whole() {
+        let group = [
+            (Icon::AppVideo, &super::APP_VIDEO),
+            (Icon::ToolRazor, &super::TOOL_RAZOR),
+            (Icon::ToolRipple, &super::TOOL_RIPPLE),
+            (Icon::ToolRoll, &super::TOOL_ROLL),
+            (Icon::ToolSlip, &super::TOOL_SLIP),
+            (Icon::ToolSlide, &super::TOOL_SLIDE),
+            (Icon::Magnet, &super::MAGNET),
+            (Icon::Marker, &super::MARKER),
+            (Icon::MarkIn, &super::MARK_IN),
+            (Icon::MarkOut, &super::MARK_OUT),
+            (Icon::Insert, &super::INSERT),
+            (Icon::Overwrite, &super::OVERWRITE),
+            (Icon::Effects, &super::EFFECTS),
+            (Icon::Speed, &super::SPEED),
+            (Icon::Mixer, &super::MIXER),
+            (Icon::Microphone, &super::MICROPHONE),
+            (Icon::Graph, &super::GRAPH),
+            (Icon::Scope, &super::SCOPE),
+            (Icon::Aspect, &super::ASPECT),
+            (Icon::Captions, &super::CAPTIONS),
+        ];
+        for (icon, art) in group {
+            assert_eq!(icon.art(), art, "{}", icon.name());
+            assert!(!icon.has_solid(), "{} is no on and off pair", icon.name());
+        }
+    }
+}

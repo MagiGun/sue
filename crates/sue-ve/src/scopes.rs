@@ -202,11 +202,15 @@ pub fn compute(scope: Scope, frame: &VideoFrame) -> VideoFrame {
     }
 }
 
+/// A scope worked out: of which frame (its serial), which scope, the
+/// picture.
+pub type Worked = (u64, Scope, Arc<VideoFrame>);
+
 /// The scopes' worker: it works out the scope of the newest frame asked
 /// for and drops the ones it did not get to.
 pub struct Scopes {
     to: Option<Sender<(Scope, Arc<VideoFrame>)>>,
-    done: Arc<Mutex<Option<(u64, Scope, Arc<VideoFrame>)>>>,
+    done: Arc<Mutex<Option<Worked>>>,
     busy: Arc<AtomicBool>,
     asked: Option<(u64, Scope)>,
 }
@@ -255,7 +259,7 @@ impl Scopes {
     /// The newest scope worked out: of which frame, which scope, the
     /// picture.
     #[must_use]
-    pub fn latest(&self) -> Option<(u64, Scope, Arc<VideoFrame>)> {
+    pub fn latest(&self) -> Option<Worked> {
         self.done
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -269,11 +273,7 @@ impl Scopes {
     }
 }
 
-fn run(
-    from: &Receiver<(Scope, Arc<VideoFrame>)>,
-    done: &Mutex<Option<(u64, Scope, Arc<VideoFrame>)>>,
-    busy: &AtomicBool,
-) {
+fn run(from: &Receiver<(Scope, Arc<VideoFrame>)>, done: &Mutex<Option<Worked>>, busy: &AtomicBool) {
     while let Ok(mut job) = from.recv() {
         // Only the newest.
         loop {

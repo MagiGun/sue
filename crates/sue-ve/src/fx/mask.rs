@@ -210,7 +210,9 @@ impl Mask {
             },
             "path" => Shape::Path(
                 points
-                    .chunks_exact(3)
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
                     .map(|triple| PathPoint {
                         at: triple[0],
                         incoming: triple[1],
@@ -368,7 +370,7 @@ pub fn fill(polygon: &[[f64; 2]], width: usize, height: usize) -> Vec<f32> {
                 }
             }
             crossings.sort_by(f64::total_cmp);
-            for pair in crossings.chunks_exact(2) {
+            for pair in crossings.as_chunks::<2>().0 {
                 let (x0, x1) = (pair[0].max(0.0), pair[1].min(width as f64));
                 if x1 <= x0 {
                     continue;

@@ -586,9 +586,9 @@ pub fn correct(
     }
     let c = corrector;
     let mut x = rgb;
-    for channel in 0..3 {
+    for (channel, value) in x.iter_mut().enumerate() {
         let wheel = |w: [f32; 4]| w[channel] + w[3];
-        let mut v = x[channel] + wheel(c.offset);
+        let mut v = *value + wheel(c.offset);
         let lift = wheel(c.lift);
         v += lift * (1.0 - v);
         v *= 1.0 + wheel(c.gain);
@@ -596,7 +596,7 @@ pub fn correct(
         v = v.max(0.0).powf(exponent);
         // Contrast about the pivot.
         v = (v - c.pivot) * c.contrast + c.pivot;
-        x[channel] = v;
+        *value = v;
     }
     // Temperature and tint.
     let warm = c.temperature / 100.0 * 0.25;
@@ -611,9 +611,9 @@ pub fn correct(
     }
     // Custom curves.
     let master = sue_model::Response::new(&c.curves[0]);
-    for channel in 0..3 {
-        let own = sue_model::Response::new(&c.curves[channel + 1]);
-        x[channel] = own.eval(master.eval(x[channel].clamp(0.0, 1.0)));
+    for (value, curve) in x.iter_mut().zip(&c.curves[1..]) {
+        let own = sue_model::Response::new(curve);
+        *value = own.eval(master.eval(value.clamp(0.0, 1.0)));
     }
     // Hue curves.
     if !(c.hue_hue.is_empty() && c.hue_sat.is_empty() && c.hue_lum.is_empty()) {
@@ -625,8 +625,8 @@ pub fn correct(
     }
     if let Some(table) = c.lut.and_then(luts) {
         let looked = table.sample(x);
-        for channel in 0..3 {
-            x[channel] += (looked[channel] - x[channel]) * c.lut_mix.clamp(0.0, 1.0);
+        for (value, target) in x.iter_mut().zip(looked) {
+            *value += (target - *value) * c.lut_mix.clamp(0.0, 1.0);
         }
     }
     let x = x.map(|v| v.clamp(0.0, 1.0));
