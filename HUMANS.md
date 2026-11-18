@@ -1006,6 +1006,19 @@ Once a canvas is open:
   setup**: a pad that opens the hand, makes a fist or folds the fingers
   flat, with a spread slider and a lock for each finger. A figure keeps
   to the ground when it sits or crouches (**Keep on the ground**).
+  Drag the hips and the whole body moves: pinned hands and feet stay
+  put and their limbs bend to reach, and a figure that keeps to the
+  ground comes down on bent knees. With the hips picked, three arrows
+  beside the rings move the body along one axis each; drag the spine
+  or the chest to lean the trunk; Ctrl and drag bends and swings the
+  hips. Joints keep their volume as they bend, and a twist runs along
+  the whole limb. **Face** shapes the head and face part by part (with
+  **Age**, **Face age** and **Drawn style**), wears an **Expression**
+  or mixes several, and **Gaze across** and **Gaze up** turn the eyes.
+  A model from a file shows its own colors and pictures (or plain gray,
+  by **Show its colors and pictures**), has a slider for each of its
+  morph targets, and keeps to **Joint angle limits** only when its own
+  tick is on.
   Convert to Lines and Tones makes line art from the pose to draw over;
   Convert to Vector Lines and Tones makes those lines strokes you can
   reshape with the vector tools.

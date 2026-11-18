@@ -91,10 +91,48 @@ use crate::doc::Edit;
 
 pub(crate) mod human;
 mod posing;
+pub(crate) mod skin;
 pub use posing::{
     HandSetup, Limits, aimed_at, hand_from_body, hand_onto_body, hand_pose, hand_setup, hanging,
-    held, limb_of, limited, limits, reached, retargeted, turned,
+    held, leaned, limb_of, limited, limits, moved, reached, retargeted, turned,
 };
+
+/// How far the eyes may look across and up or down, in degrees.
+pub const GAZE: [f32; 2] = [35.0, 30.0];
+
+/// Where the eyes of `pose` look: degrees across (positive toward the
+/// figure's left) and up, the mean of both eyes.
+#[must_use]
+pub fn gaze(pose: &Pose, body: &Body) -> [f32; 2] {
+    let Some(eyes) = body.eyes() else {
+        return [0.0; 2];
+    };
+    let turn = |eye: usize| pose.0.get(eye).copied().unwrap_or([0.0; 3]);
+    let (left, right) = (turn(eyes[0]), turn(eyes[1]));
+    [(left[1] + right[1]) / 2.0, -(left[0] + right[0]) / 2.0]
+}
+
+/// `pose` with both eyes looking `across` and `up` degrees (kept
+/// within [`GAZE`]).
+#[must_use]
+pub fn with_gaze(pose: &Pose, body: &Body, [across, up]: [f32; 2]) -> Pose {
+    let mut out = pose.clone();
+    let Some(eyes) = body.eyes() else {
+        return out;
+    };
+    let turn = [
+        -up.clamp(-GAZE[1], GAZE[1]),
+        across.clamp(-GAZE[0], GAZE[0]),
+        0.0,
+    ];
+    for eye in eyes {
+        if out.0.len() <= eye {
+            out.0.resize(eye + 1, [0.0; 3]);
+        }
+        out.0[eye] = turn;
+    }
+    out
+}
 
 /// The class of a drawing figure's model entity.
 pub const CLASS: &str = "sue.paint.figure";
@@ -125,6 +163,10 @@ pub const GUIDES: &str = "figure.guides";
 /// sits or crouches (`Bool`; a figure from before this was kept does
 /// not).
 pub const GROUND: &str = "figure.ground";
+/// An imported figure keeps to joint angle limits (`Bool`; off unless
+/// set on: its file says nothing of how far its bones may turn, so the
+/// limits are the same wide ones for every bone).
+pub const LIMITS: &str = "figure.limits";
 /// The hands and feet pinned where they are while the rest of the body
 /// is posed: their joint numbers, `,` between (`Text`).
 pub const PINS: &str = "figure.pins";
@@ -316,9 +358,42 @@ const PART: [f32; 2] = [0.0, 1.0];
 
 /// The body shape's sliders, part by part, in the order people see
 /// them.
-pub const SLIDERS: [Slider; 20] = [
+pub const SLIDERS: [Slider; 54] = [
+    slider("age", "Age", "Whole body", WHOLE, 0.0, false),
     slider("head_width", "Head width", "Head", WHOLE, 0.0, false),
     slider("head_length", "Head length", "Head", WHOLE, 0.0, false),
+    slider("face_depth", "Head depth", "Head", WHOLE, 0.0, false),
+    slider("anime", "Drawn style", "Face", PART, 0.0, false),
+    slider("face_age", "Face age", "Face", WHOLE, 0.0, false),
+    slider("forehead", "Forehead height", "Face", WHOLE, 0.0, false),
+    slider("temples", "Temples", "Face", WHOLE, 0.0, false),
+    slider("cheeks", "Cheeks", "Face", WHOLE, 0.0, false),
+    slider("cheekbones", "Cheekbones", "Face", WHOLE, 0.0, false),
+    slider("jaw", "Jaw", "Face", WHOLE, 0.0, false),
+    slider("chin", "Chin length", "Face", WHOLE, 0.0, false),
+    slider("chin_width", "Chin width", "Face", WHOLE, 0.0, false),
+    slider("chin_forward", "Chin forward", "Face", WHOLE, 0.0, false),
+    slider("eye_size", "Eye size", "Eyes", WHOLE, 0.0, false),
+    slider("eye_spacing", "Eye spacing", "Eyes", WHOLE, 0.0, false),
+    slider("eye_height", "Eye height", "Eyes", WHOLE, 0.0, false),
+    slider("eye_slant", "Eye slant", "Eyes", WHOLE, 0.0, false),
+    slider("brows", "Eyebrow height", "Eyes", WHOLE, 0.0, false),
+    slider("nose_length", "Nose length", "Nose", WHOLE, 0.0, false),
+    slider("nose_width", "Nose width", "Nose", WHOLE, 0.0, false),
+    slider("nose_depth", "Nose depth", "Nose", WHOLE, 0.0, false),
+    slider("nose_height", "Nose height", "Nose", WHOLE, 0.0, false),
+    slider("nose_bridge", "Nose bridge", "Nose", WHOLE, 0.0, false),
+    slider("mouth_width", "Mouth width", "Mouth", WHOLE, 0.0, false),
+    slider("mouth_height", "Mouth height", "Mouth", WHOLE, 0.0, false),
+    slider("lips", "Lips", "Mouth", WHOLE, 0.0, false),
+    slider("ear_size", "Ear size", "Ears", WHOLE, 0.0, false),
+    slider("ear_wing", "Ears out", "Ears", WHOLE, 0.0, false),
+    slider("smile", "Smile", "Expression", PART, 0.0, false),
+    slider("angry", "Angry", "Expression", PART, 0.0, false),
+    slider("surprised", "Surprised", "Expression", PART, 0.0, false),
+    slider("sad", "Sad", "Expression", PART, 0.0, false),
+    slider("eyes_closed", "Eyes closed", "Expression", PART, 0.0, false),
+    slider("mouth_open", "Mouth open", "Expression", PART, 0.0, false),
     slider("neck_length", "Neck length", "Neck", WHOLE, 0.0, false),
     slider("neck_width", "Neck width", "Neck", WHOLE, 0.0, false),
     slider(
@@ -347,6 +422,7 @@ pub const SLIDERS: [Slider; 20] = [
         true,
     ),
     slider("veins", "Veins", "Hands", PART, 0.3, true),
+    slider("vein_pattern", "Vein pattern", "Hands", PART, 0.0, true),
     slider(
         "prominence",
         "Tendon and knuckle prominence",
@@ -359,6 +435,48 @@ pub const SLIDERS: [Slider; 20] = [
     slider("leg_width", "Leg width", "Legs", WHOLE, 0.0, false),
     slider("foot_size", "Foot size", "Feet", WHOLE, 0.0, false),
 ];
+
+/// The groups of [`SLIDERS`] that shape the head and face: what a head
+/// figure has, and what the Face section lists for a body.
+pub const FACE_GROUPS: [&str; 7] = [
+    "Head",
+    "Face",
+    "Eyes",
+    "Nose",
+    "Mouth",
+    "Ears",
+    "Expression",
+];
+
+/// The expressions: what people read, and the slider that makes each
+/// (none for the neutral face).
+pub const EXPRESSIONS: [(&str, Option<&str>); 5] = [
+    ("Neutral", None),
+    ("Smile", Some("smile")),
+    ("Angry", Some("angry")),
+    ("Surprised", Some("surprised")),
+    ("Sad", Some("sad")),
+];
+
+impl Slider {
+    /// Whether a figure of `kind` has this slider: a body all of them, a
+    /// hand its own, a head those of the head, the face and the neck.
+    #[must_use]
+    pub fn suits(&self, kind: Kind) -> bool {
+        match kind {
+            Kind::Body => true,
+            Kind::Hand => self.hand,
+            Kind::Head => FACE_GROUPS.contains(&self.group) || self.group == "Neck",
+            Kind::Imported => false,
+        }
+    }
+
+    /// Whether it shapes the head or face ([`FACE_GROUPS`]).
+    #[must_use]
+    pub fn of_face(&self) -> bool {
+        FACE_GROUPS.contains(&self.group)
+    }
+}
 
 /// The sliders' values on a new figure.
 const SLIDERS_REST: [f32; SLIDERS.len()] = {
@@ -1011,6 +1129,8 @@ pub struct Body {
     pub ground: bool,
     /// An imported model's skeleton, by number (0 for Sue's own figures).
     pub rig: u64,
+    /// An imported model keeps to joint angle limits ([`LIMITS`]).
+    pub limits: bool,
     /// Where it stands, how it is turned and how large it is.
     pub place: crate::three::Placement,
 }
@@ -1076,6 +1196,10 @@ impl Body {
             } else {
                 0
             },
+            limits: entity
+                .property(LIMITS)
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             place: crate::three::Placement::of(entity),
         }
     }
@@ -1100,6 +1224,45 @@ impl Body {
             self.parts[at] = value.clamp(least, most);
         }
         self
+    }
+
+    /// The same body wearing expression `index` of [`EXPRESSIONS`]
+    /// whole, the other expressions gone (the first is the neutral
+    /// face).
+    #[must_use]
+    pub fn with_expression(self, index: usize) -> Self {
+        let mut body = self;
+        for (at, (_, key)) in EXPRESSIONS.iter().enumerate() {
+            if let Some(key) = key {
+                body = body.with_slider(key, if at == index { 1.0 } else { 0.0 });
+            }
+        }
+        body
+    }
+
+    /// Which of [`EXPRESSIONS`] the body wears whole and alone, if any.
+    #[must_use]
+    pub fn expression(&self) -> Option<usize> {
+        let worn: Vec<f32> = EXPRESSIONS
+            .iter()
+            .map(|(_, key)| key.map_or(0.0, |key| self.slider(key)))
+            .collect();
+        if worn.iter().all(|value| *value == 0.0) {
+            return Some(0);
+        }
+        let at = worn.iter().position(|value| *value == 1.0)?;
+        (worn.iter().filter(|value| **value != 0.0).count() == 1).then_some(at)
+    }
+
+    /// The joints of this kind's two eyes (left, right), when it has
+    /// eyes to turn.
+    #[must_use]
+    pub fn eyes(&self) -> Option<[usize; 2]> {
+        match self.kind {
+            Kind::Body => Some(human::at::EYES),
+            Kind::Head => Some([5, 6]),
+            _ => None,
+        }
     }
 
     /// The sliders that are not at rest as text: `key=value`, `;`
@@ -1164,6 +1327,7 @@ impl Body {
             side: self.side,
             ground: self.ground,
             rig: self.rig,
+            limits: self.limits,
             place: self.place,
             ..Self::default()
         }
@@ -1251,7 +1415,7 @@ impl Body {
             Kind::Body => {
                 // The body's pose, its hands relaxed (or as the pose
                 // holds them).
-                let mut pose = preset(index);
+                let mut pose = posing::settled(self, index, preset(index));
                 let hands = match index {
                     15 => [2, 2],
                     10 => [1, 0],
@@ -1311,6 +1475,7 @@ impl Default for Body {
             guides: true,
             ground: true,
             rig: 0,
+            limits: false,
             place: crate::three::Placement::default(),
         }
     }
@@ -1591,9 +1756,14 @@ pub fn preset(index: usize) -> Pose {
             set(8, [-30.0, 0.0, -8.0]);
             set(9, [-40.0, 0.0, 0.0]);
         }
+        // Arms up: the shoulders rise with them.
         5 => {
-            set(5, [0.0, 0.0, 165.0]);
-            set(8, [0.0, 0.0, -165.0]);
+            set(17, [0.0, 0.0, 12.0]);
+            set(18, [0.0, 0.0, -12.0]);
+            set(5, [-8.0, 0.0, 152.0]);
+            set(8, [-8.0, 0.0, -152.0]);
+            set(6, [-10.0, 0.0, 0.0]);
+            set(9, [-10.0, 0.0, 0.0]);
         }
         6 => {
             set(4, [12.0, 0.0, -6.0]);
@@ -1629,15 +1799,17 @@ pub fn preset(index: usize) -> Pose {
         }
         // Arms crossed.
         9 => {
-            set(5, [-34.0, -62.0, 14.0]);
-            set(6, [-104.0, 0.0, 0.0]);
-            set(8, [-28.0, 62.0, -14.0]);
-            set(9, [-112.0, 0.0, 0.0]);
+            set(5, [-18.0, -60.0, 16.0]);
+            set(6, [-95.0, 0.0, 0.0]);
+            set(7, [0.0, 0.0, 0.0]);
+            set(8, [-18.0, 60.0, -16.0]);
+            set(9, [-95.0, 0.0, 0.0]);
             set(4, [4.0, 0.0, 0.0]);
         }
         // Wave.
         10 => {
-            set(8, [0.0, -90.0, -96.0]);
+            set(18, [0.0, 0.0, -6.0]);
+            set(8, [0.0, -90.0, -90.0]);
             set(9, [-78.0, 0.0, 0.0]);
             set(5, [0.0, 0.0, 10.0]);
             set(6, [-10.0, 0.0, 0.0]);
@@ -1693,10 +1865,14 @@ pub fn preset(index: usize) -> Pose {
             set(14, [22.0, 0.0, -6.0]);
             set(15, [64.0, 0.0, 0.0]);
             set(16, [30.0, 0.0, 0.0]);
-            set(5, [-10.0, 0.0, 142.0]);
-            set(6, [-12.0, 0.0, 0.0]);
-            set(8, [-10.0, 0.0, -152.0]);
-            set(9, [-12.0, 0.0, 0.0]);
+            set(2, [-8.0, 0.0, 0.0]);
+            set(17, [0.0, 0.0, 10.0]);
+            set(18, [0.0, 0.0, -10.0]);
+            set(5, [-14.0, 0.0, 130.0]);
+            set(6, [-24.0, 0.0, 0.0]);
+            set(8, [-14.0, 0.0, -140.0]);
+            set(9, [-20.0, 0.0, 0.0]);
+            set(13, [34.0, 0.0, 0.0]);
             set(4, [-12.0, 0.0, 0.0]);
         }
         // Punch.
@@ -2036,6 +2212,29 @@ pub fn rings(pose: &Pose, body: &Body, joint: usize) -> Option<[Vec<[f32; 3]>; 3
     }))
 }
 
+/// The three arrows of the translate manipulator at the root of the
+/// posed body (its hips): for the world's x, y and z, where the arrow
+/// starts and ends, just outside the rotation rings. Dragging one moves
+/// the whole body along that axis ([`moved`]). `None` for a joint that
+/// is not the root.
+#[must_use]
+pub fn arrows(pose: &Pose, body: &Body, joint: usize) -> Option<[[[f32; 3]; 2]; 3]> {
+    let joints = body.joints();
+    if joints.get(joint)?.parent.is_some() {
+        return None;
+    }
+    let at = solve(pose, body).get(joint)?.0;
+    let size = body.frame().1 * body.place.scale;
+    let (from, to) = (size * 0.085, size * 0.16);
+    Some([0, 1, 2].map(|axis| {
+        let mut start = at;
+        let mut end = at;
+        start[axis] += from;
+        end[axis] += to;
+        [start, end]
+    }))
+}
+
 /// The hands and feet pinned on figure model `entity`, by joint.
 #[must_use]
 pub fn pins_of(entity: &Entity) -> Vec<usize> {
@@ -2148,6 +2347,35 @@ pub fn set_pose(arena: &Arena, layer: EntityId, pose: &Pose, label: &str) -> Opt
             .then(SetProperty::new(model, POSE, pose.to_text()))
             .then(ReplaceComponent::new(layer, drawn, label)),
     )
+}
+
+/// [`set_pose`], also standing the figure at `position`, as one step:
+/// what moving the whole body records.
+#[must_use]
+pub fn set_pose_placed(
+    arena: &Arena,
+    layer: EntityId,
+    pose: &Pose,
+    position: [f32; 3],
+    label: &str,
+) -> Option<Edit> {
+    let model = of_layer(arena, layer)?;
+    let raster = crate::doc::raster(arena, layer)?;
+    let size = [raster.width(), raster.height()];
+    let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
+    let mut body = Body::of(arena.get_by_id(model).ok()?);
+    body.place.position = position;
+    let buffers = render(pose, &body, &view, size);
+    let drawn = crate::three::draw(&buffers, &view)?;
+    let mut edit = Edit::new(label).then(SetProperty::new(model, POSE, pose.to_text()));
+    for (key, value) in [
+        (crate::three::OBJECT_X, position[0]),
+        (crate::three::OBJECT_Y, position[1]),
+        (crate::three::OBJECT_Z, position[2]),
+    ] {
+        edit = edit.then(SetProperty::new(model, key, f64::from(value)));
+    }
+    Some(edit.then(ReplaceComponent::new(layer, drawn, label)))
 }
 
 /// [`set_pose`], also turning the layer's camera to `view`, as one step.
@@ -2434,7 +2662,7 @@ mod tests {
             // Veins are drawn in the light on a body (its hands are too
             // coarse to raise them), so they move no point there.
             assert!(
-                far > 0.0005 || slider.key == "veins",
+                far > 0.0005 || matches!(slider.key, "veins" | "vein_pattern"),
                 "{} shapes the body: {far}",
                 slider.key
             );
@@ -2469,6 +2697,168 @@ mod tests {
             .with_shape_text(&shaped.shape_text())
             .unwrap();
         assert_eq!(read.parts, shaped.parts);
+    }
+
+    #[test]
+    fn faces_take_their_shape_expression_and_gaze() {
+        let head = Body {
+            kind: Kind::Head,
+            ..Body::default()
+        };
+        let rest = head.standing();
+        let plain = surface(&rest, &head);
+        // A head has the sliders of the head and face, not the legs'.
+        let own: Vec<&str> = SLIDERS
+            .iter()
+            .filter(|slider| slider.suits(Kind::Head))
+            .map(|slider| slider.key)
+            .collect();
+        for key in ["head_width", "jaw", "eye_size", "nose_length", "smile"] {
+            assert!(own.contains(&key), "{key}");
+        }
+        assert!(!own.contains(&"leg_length") && !own.contains(&"veins"));
+        // Each of its sliders moves the head's own points.
+        for slider in SLIDERS.iter().filter(|slider| slider.of_face()) {
+            let shaped = surface(&rest, &head.with_slider(slider.key, slider.range[1]));
+            let far = shaped
+                .positions
+                .iter()
+                .zip(&plain.positions)
+                // (Not the cut at the neck, whose points are not
+                // numbered the same way each time.)
+                .filter(|(a, b)| a[1] > 0.04 && b[1] > 0.04)
+                .map(|(a, b)| (0..3).map(|k| (a[k] - b[k]).abs()).fold(0.0, f32::max))
+                .fold(0.0_f32, f32::max);
+            assert!(far > 0.0003, "{} shapes the head: {far}", slider.key);
+        }
+        // An expression is worn whole and alone; the sliders mix them.
+        assert_eq!(head.expression(), Some(0));
+        let smiling = head.with_expression(1);
+        assert_eq!(smiling.slider("smile"), 1.0);
+        assert_eq!(smiling.expression(), Some(1));
+        let sad = smiling.with_expression(4);
+        assert_eq!((sad.slider("smile"), sad.slider("sad")), (0.0, 1.0));
+        assert_eq!(sad.with_slider("smile", 0.5).expression(), None);
+        assert_eq!(sad.with_expression(0).expression(), Some(0));
+        // The face is kept with the body shape: as text on the model
+        // and in a body shape material.
+        let shaped = smiling.with_slider("jaw", -0.5);
+        assert_eq!(Body::parts_from_text(&shaped.parts_text()), shaped.parts);
+        let read = Body::default()
+            .with_shape_text(&shaped.shape_text())
+            .unwrap();
+        assert_eq!((read.slider("jaw"), read.slider("smile")), (-0.5, 1.0));
+        // The eyes have an iris and a pupil of their own color, and
+        // turn where they are told to look, both together.
+        assert_eq!(plain.colors.len(), plain.positions.len());
+        let dark = plain.colors.iter().filter(|color| color[0] < 0.5).count();
+        assert!(dark >= 80, "irises and pupils: {dark}");
+        assert_eq!(gaze(&rest, &head), [0.0, 0.0]);
+        let looking = with_gaze(&rest, &head, [20.0, 10.0]);
+        assert_eq!(gaze(&looking, &head), [20.0, 10.0]);
+        assert_eq!(looking.0[5], looking.0[6]);
+        assert_eq!(
+            with_gaze(&rest, &head, [90.0, -90.0]).0[5],
+            [30.0, 35.0, 0.0]
+        );
+        let turned = surface(&looking, &head);
+        let moved = turned
+            .positions
+            .iter()
+            .zip(&plain.positions)
+            .zip(&plain.colors)
+            .filter(|((a, b), color)| color[0] < 0.5 && a != b)
+            .count();
+        assert_eq!(moved, dark, "the irises went with the eyes");
+        // A body's eyes are its own joints; a hand has none.
+        let body = Body::default();
+        assert_eq!(body.eyes(), Some([52, 53]));
+        let pose = with_gaze(&body.standing(), &body, [-15.0, 0.0]);
+        assert_eq!(pose.0[52], [0.0, -15.0, 0.0]);
+        assert!(
+            Body {
+                kind: Kind::Hand,
+                ..body
+            }
+            .eyes()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn veins_come_in_with_the_slider_and_have_patterns() {
+        let hand = Body {
+            kind: Kind::Hand,
+            ..Body::default()
+        };
+        let pose = hand.standing();
+        let bare = surface(&pose, &hand.with_slider("veins", 0.0)).positions;
+        // How many points the veins raise, and how high the highest.
+        let raised = |veins: f32, pattern: f32| {
+            let body = hand
+                .with_slider("veins", veins)
+                .with_slider("vein_pattern", pattern);
+            let lifts: Vec<f32> = surface(&pose, &body)
+                .positions
+                .iter()
+                .zip(&bare)
+                // (Not the cut at the forearm, whose points are not
+                // numbered the same way each time.)
+                .filter(|(a, b)| a[1] > -0.03 && b[1] > -0.03)
+                .map(|(a, b)| (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f32>().sqrt())
+                .collect();
+            (
+                lifts.iter().filter(|lift| **lift > 0.0001).count(),
+                lifts.iter().copied().fold(0.0_f32, f32::max),
+            )
+        };
+        let (few, low) = raised(0.3, 0.0);
+        let (some, _) = raised(0.65, 0.0);
+        let (many, high) = raised(1.0, 0.0);
+        // More veins show as the slider rises, rather than the same
+        // ones standing ever higher: at most a millimeter.
+        assert!(few > 50, "a few veins at rest: {few}");
+        assert!(
+            some > few * 5 / 4 && many > some * 11 / 10,
+            "{few} {some} {many}"
+        );
+        assert!(low > 0.0002 && high < 0.0012, "{low} {high}");
+        assert!(high < low * 3.5, "more veins, not cords: {low} {high}");
+        // Another pattern is another hand's veins: other points rise.
+        let veined = |pattern: f32| {
+            surface(
+                &pose,
+                &hand
+                    .with_slider("veins", 1.0)
+                    .with_slider("vein_pattern", pattern),
+            )
+            .positions
+        };
+        let (first, other) = (veined(0.0), veined(0.6));
+        let differ = first
+            .iter()
+            .zip(&other)
+            .filter(|(a, b)| a[1] > -0.03 && b[1] > -0.03)
+            .filter(|(a, b)| (0..3).any(|k| (a[k] - b[k]).abs() > 0.0001))
+            .count();
+        assert!(differ > 100, "the pattern moves the veins: {differ}");
+        // A body's hands are too coarse to raise veins, so the light
+        // shows them whole: its relief stands higher than the hand
+        // figure's, which only sharpens veins its points already hold.
+        let most = |body: &Body| {
+            human::shaped(body).relief.as_ref().map_or(0.0, |relief| {
+                relief.heights.iter().copied().fold(0.0, f32::max)
+            })
+        };
+        let body = Body::default().with_slider("veins", 1.0);
+        let figure = hand.with_slider("veins", 1.0);
+        assert!(
+            most(&body) > most(&figure) * 1.3,
+            "{} {}",
+            most(&body),
+            most(&figure)
+        );
+        assert!(most(&body.with_slider("veins", 0.0)) < most(&body));
     }
 
     #[test]
@@ -2761,5 +3151,353 @@ mod preview {
             ..male
         };
         save("head", &head, &head.preset(1), &front, [700, 800]);
+    }
+
+    /// One picture of a sheet: the figure seen close, opaque on paper.
+    fn tile(
+        pose: &Pose,
+        body: &Body,
+        view: &View3D,
+        frame: ([f32; 3], f32),
+        size: [u32; 2],
+    ) -> Vec<u8> {
+        let buffers = crate::three::render_surface(&surface(pose, body), view, size, frame);
+        let tile = crate::three::draw(&buffers, view).unwrap();
+        let mut pixels = tile.bytes().unwrap().to_vec();
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            let alpha = f32::from(pixel[3]) / 255.0;
+            for channel in pixel.iter_mut().take(3) {
+                *channel = (f32::from(*channel) * alpha + 250.0 * (1.0 - alpha)) as u8;
+            }
+            pixel[3] = 255;
+        }
+        pixels
+    }
+
+    /// Tiles (each `size`) laid `across` a row and saved as one PNG.
+    fn sheet(path: &str, tiles: &[Vec<u8>], size: [u32; 2], across: usize) {
+        let rows = tiles.len().div_ceil(across);
+        let (w, h) = (size[0] as usize * across, size[1] as usize * rows);
+        let mut pixels = vec![250_u8; w * h * 4];
+        for (index, tile) in tiles.iter().enumerate() {
+            let (left, top) = (
+                (index % across) * size[0] as usize,
+                (index / across) * size[1] as usize,
+            );
+            for y in 0..size[1] as usize {
+                let from = y * size[0] as usize * 4;
+                let to = ((top + y) * w + left) * 4;
+                pixels[to..to + size[0] as usize * 4]
+                    .copy_from_slice(&tile[from..from + size[0] as usize * 4]);
+            }
+        }
+        let png = sue_io::encode_png(
+            &RasterTile2D::from_bytes(w as u32, h as u32, PixelFormat::Rgba8, pixels).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(path, png).unwrap();
+    }
+
+    /// What a joint sheet turns, which joint it looks at, from where
+    /// (degrees round and above) and how close.
+    type Case = (&'static [(usize, [f32; 3])], usize, f32, f32, f32);
+
+    /// Every big joint at its limits, by part of the body.
+    const CASES: [(&str, &[Case]); 4] = [
+        (
+            "arms",
+            &[
+                (&[(6, [-90.0, 0.0, 0.0])], 6, 90.0, 5.0, 0.4),
+                (&[(6, [-150.0, 0.0, 0.0])], 6, 90.0, 5.0, 0.4),
+                (&[(6, [-150.0, 0.0, 0.0])], 6, 20.0, 5.0, 0.4),
+                (&[(6, [-150.0, 0.0, 0.0])], 6, 150.0, 5.0, 0.4),
+                (&[(7, [85.0, 0.0, 0.0])], 7, 90.0, 5.0, 0.3),
+                (&[(7, [-85.0, 0.0, 0.0])], 7, 90.0, 5.0, 0.3),
+                (&[(7, [0.0, 0.0, 35.0])], 7, 90.0, 5.0, 0.3),
+                (&[(7, [0.0, 25.0, 0.0])], 7, 60.0, 5.0, 0.3),
+                (&[(6, [0.0, 90.0, 0.0])], 6, 60.0, 5.0, 0.5),
+                (&[(6, [0.0, -90.0, 0.0])], 6, 60.0, 5.0, 0.5),
+                (&[(5, [0.0, 90.0, 0.0])], 5, 60.0, 5.0, 0.6),
+                (&[(5, [0.0, -90.0, 0.0])], 5, 60.0, 5.0, 0.6),
+            ],
+        ),
+        (
+            "shoulders",
+            &[
+                (&[(5, [0.0, 0.0, 90.0])], 5, 0.0, 10.0, 0.5),
+                (&[(5, [0.0, 0.0, 90.0])], 5, 180.0, 10.0, 0.5),
+                (&[(5, [0.0, 0.0, 170.0])], 5, 0.0, 10.0, 0.5),
+                (&[(5, [0.0, 0.0, 170.0])], 5, 180.0, 10.0, 0.5),
+                (&[(5, [-90.0, 0.0, 0.0])], 5, 45.0, 10.0, 0.5),
+                (&[(5, [-90.0, 0.0, 0.0])], 5, 135.0, 10.0, 0.5),
+                (&[(5, [-170.0, 0.0, 0.0])], 5, 60.0, 10.0, 0.5),
+                (&[(5, [60.0, 0.0, 0.0])], 5, 150.0, 10.0, 0.5),
+            ],
+        ),
+        (
+            "legs",
+            &[
+                (&[(12, [90.0, 0.0, 0.0])], 12, 90.0, 5.0, 0.5),
+                (&[(12, [150.0, 0.0, 0.0])], 12, 90.0, 5.0, 0.5),
+                (&[(12, [150.0, 0.0, 0.0])], 12, 10.0, 5.0, 0.5),
+                (&[(12, [150.0, 0.0, 0.0])], 12, 170.0, 5.0, 0.5),
+                (&[(11, [-90.0, 0.0, 0.0])], 11, 90.0, 5.0, 0.6),
+                (&[(11, [-130.0, 0.0, 0.0])], 11, 90.0, 5.0, 0.6),
+                (&[(11, [-90.0, 0.0, 0.0])], 11, 180.0, 5.0, 0.6),
+                (&[(11, [0.0, 0.0, 70.0])], 11, 0.0, 5.0, 0.6),
+                (&[(11, [45.0, 0.0, 0.0])], 11, 110.0, 5.0, 0.6),
+                (&[(11, [0.0, 50.0, 0.0])], 12, 20.0, 5.0, 0.9),
+                (&[(13, [-50.0, 0.0, 0.0])], 13, 90.0, 5.0, 0.35),
+                (&[(13, [40.0, 0.0, 0.0])], 13, 90.0, 5.0, 0.35),
+            ],
+        ),
+        (
+            "trunk",
+            &[
+                (
+                    &[(1, [50.0, 0.0, 0.0]), (2, [40.0, 0.0, 0.0])],
+                    1,
+                    90.0,
+                    5.0,
+                    0.8,
+                ),
+                (
+                    &[(1, [0.0, 35.0, 0.0]), (2, [0.0, 40.0, 0.0])],
+                    1,
+                    10.0,
+                    5.0,
+                    0.8,
+                ),
+                (
+                    &[(3, [0.0, 60.0, 0.0]), (4, [0.0, 50.0, 0.0])],
+                    3,
+                    10.0,
+                    5.0,
+                    0.4,
+                ),
+                (
+                    &[(3, [45.0, 0.0, 0.0]), (4, [40.0, 0.0, 0.0])],
+                    3,
+                    90.0,
+                    5.0,
+                    0.4,
+                ),
+            ],
+        ),
+    ];
+
+    /// Contact sheets of every joint at its limits and of the preset
+    /// poses, in the folder `SUE_FIGURE_PREVIEW` names. Run with
+    /// `--ignored`.
+    #[test]
+    #[ignore = "writes pictures to look at"]
+    fn joints_to_look_at() {
+        let Ok(folder) = std::env::var("SUE_FIGURE_PREVIEW") else {
+            return;
+        };
+        skin::PLAIN.with(|plain| plain.set(std::env::var("SUE_FIGURE_PLAIN").is_ok()));
+        let body = Body {
+            guides: std::env::var("SUE_FIGURE_GUIDES").is_ok(),
+            ..Body::default()
+        };
+        let view = |yaw: f32, pitch: f32| View3D {
+            yaw,
+            pitch,
+            distance: 4.2,
+            style: 0,
+            ..View3D::default()
+        };
+        let size = [480, 480];
+        for (part, cases) in CASES {
+            let mut tiles = Vec::new();
+            for (turns, look, yaw, pitch, close) in cases {
+                let mut pose = body.standing();
+                for (joint, turn) in *turns {
+                    pose.0[*joint] = *turn;
+                }
+                let at = solve(&pose, &body)[*look].0;
+                tiles.push(tile(&pose, &body, &view(*yaw, *pitch), (at, *close), size));
+            }
+            sheet(
+                &format!("{folder}/sheet-joints-{part}.png"),
+                &tiles,
+                size,
+                4,
+            );
+        }
+        // The fist, on the body and on the hand figure, from all round.
+        let mut tiles = Vec::new();
+        let mut pose = body.standing();
+        pose.0[6] = [-90.0, 0.0, 0.0];
+        for side in [Side::Left, Side::Right] {
+            hand_onto_body(&body, &mut pose, side, &hand_pose(&body, 2));
+        }
+        let at = solve(&pose, &body)[24].0;
+        for yaw in [0.0, 60.0, 120.0, 180.0, 240.0, 300.0] {
+            tiles.push(tile(&pose, &body, &view(yaw, 15.0), (at, 0.16), size));
+        }
+        let hand = Body {
+            kind: Kind::Hand,
+            ..Body::default()
+        };
+        for index in [2, 6] {
+            for yaw in [0.0, 60.0, 120.0, 180.0, 240.0, 300.0] {
+                tiles.push(tile(
+                    &hand.preset(index),
+                    &hand,
+                    &View3D {
+                        light: yaw + 30.0,
+                        ..view(yaw, 15.0)
+                    },
+                    ([0.0, 0.07, 0.0], 0.16),
+                    size,
+                ));
+            }
+        }
+        sheet(&format!("{folder}/sheet-fist.png"), &tiles, size, 6);
+        if let Ok(only) = std::env::var("SUE_FIGURE_ONLY") {
+            let mut tiles = Vec::new();
+            for index in only.split(',').filter_map(|n| n.parse::<usize>().ok()) {
+                for yaw in [0.0, 60.0, 180.0, 300.0] {
+                    let frame = ([0.0, 1.2, 0.0], 1.1);
+                    tiles.push(tile(
+                        &body.preset(index),
+                        &body,
+                        &view(yaw, 8.0),
+                        frame,
+                        [480, 480],
+                    ));
+                }
+            }
+            sheet(&format!("{folder}/sheet-only.png"), &tiles, [480, 480], 4);
+            return;
+        }
+        let mut tiles = Vec::new();
+        for index in 0..PRESETS.len() {
+            tiles.push(tile(
+                &body.preset(index),
+                &body,
+                &View3D {
+                    distance: 3.2,
+                    ..view(25.0, 8.0)
+                },
+                body.frame(),
+                [300, 420],
+            ));
+        }
+        sheet(
+            &format!("{folder}/sheet-body-poses.png"),
+            &tiles,
+            [300, 420],
+            7,
+        );
+        // The back of the hand across the veins slider, two patterns,
+        // then lean hands, then a body's hand seen close.
+        let mut tiles = Vec::new();
+        let back = View3D {
+            light: 215.0,
+            distance: 2.6,
+            ..view(165.0, 22.0)
+        };
+        for (pattern, prominence) in [(0.0, 0.35), (0.6, 0.35), (0.0, 1.0)] {
+            for veins in [0.0, 0.3, 0.65, 1.0] {
+                let shaped = hand
+                    .with_slider("veins", veins)
+                    .with_slider("vein_pattern", pattern)
+                    .with_slider("prominence", prominence);
+                tiles.push(tile(
+                    &shaped.preset(0),
+                    &shaped,
+                    &back,
+                    ([0.0, 0.06, 0.0], 0.24),
+                    [480, 480],
+                ));
+            }
+        }
+        let veined = body.with_slider("veins", 1.0);
+        let mut pose = veined.standing();
+        pose.0[6] = [-90.0, 0.0, 0.0];
+        let at = solve(&pose, &veined)[24].0;
+        for (yaw, pitch) in [(60.0, 60.0), (100.0, 40.0), (20.0, 70.0), (140.0, 50.0)] {
+            tiles.push(tile(
+                &pose,
+                &veined,
+                &View3D {
+                    light: 120.0,
+                    ..view(yaw, pitch)
+                },
+                (at, 0.2),
+                [480, 480],
+            ));
+        }
+        sheet(&format!("{folder}/sheet-veins.png"), &tiles, [480, 480], 4);
+        // The head: plain, its eyes turned, each expression, a few
+        // shapes of the face.
+        let head = Body {
+            kind: Kind::Head,
+            ..Body::default()
+        };
+        let looking = with_gaze(&head.standing(), &head, [25.0, 10.0]);
+        let mut faces: Vec<(Body, Pose)> = vec![
+            (head, head.standing()),
+            (head, looking),
+            (head.with_slider("eyes_closed", 1.0), head.standing()),
+        ];
+        for index in 1..EXPRESSIONS.len() {
+            faces.push((head.with_expression(index), head.standing()));
+        }
+        for (key, value) in [
+            ("anime", 1.0),
+            ("age", 1.0),
+            ("age", -1.0),
+            ("face_age", 1.0),
+            ("jaw", 1.0),
+            ("chin", 1.0),
+            ("cheeks", 1.0),
+            ("eye_size", 1.0),
+            ("eye_spacing", 1.0),
+            ("nose_length", 1.0),
+            ("nose_width", 1.0),
+            ("mouth_width", 1.0),
+            ("ear_size", 1.0),
+        ] {
+            faces.push((head.with_slider(key, value), head.standing()));
+        }
+        let tiles: Vec<Vec<u8>> = faces
+            .iter()
+            .map(|(body, pose)| {
+                tile(
+                    pose,
+                    body,
+                    &View3D {
+                        distance: 3.0,
+                        ..view(20.0, 5.0)
+                    },
+                    body.frame(),
+                    [360, 400],
+                )
+            })
+            .collect();
+        sheet(&format!("{folder}/sheet-faces.png"), &tiles, [360, 400], 5);
+        let mut tiles = Vec::new();
+        for index in 0..HAND_PRESETS.len() {
+            let yaw = if index % 2 == 0 { 20.0 } else { 160.0 };
+            tiles.push(tile(
+                &hand.preset(index),
+                &hand,
+                &View3D {
+                    light: yaw + 30.0,
+                    ..view(yaw, 20.0)
+                },
+                hand.frame(),
+                [300, 340],
+            ));
+        }
+        sheet(
+            &format!("{folder}/sheet-hand-poses.png"),
+            &tiles,
+            [300, 340],
+            8,
+        );
     }
 }

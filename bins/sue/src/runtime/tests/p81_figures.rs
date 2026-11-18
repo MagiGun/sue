@@ -13,12 +13,12 @@ use super::*;
 
 use sue_paint::figure::{Body, Kind, Pose, Side};
 
-fn layers(paint: &PaintDriver) -> Vec<sue_paint::doc::LayerInfo> {
+pub(super) fn layers(paint: &PaintDriver) -> Vec<sue_paint::doc::LayerInfo> {
     sue_paint::doc::layers(&paint.runtime.engine.world.arena, picture(paint))
 }
 
 /// The zoom, as the window's title carries it.
-fn zoom(paint: &PaintDriver) -> f32 {
+pub(super) fn zoom(paint: &PaintDriver) -> f32 {
     let title = paint
         .runtime
         .applets
@@ -37,7 +37,7 @@ fn zoom(paint: &PaintDriver) -> f32 {
 }
 
 /// Where picture point `p` is on screen while the view has not moved.
-fn screen_of(paint: &PaintDriver, p: [f32; 2]) -> Pos2 {
+pub(super) fn screen_of(paint: &PaintDriver, p: [f32; 2]) -> Pos2 {
     let [w, h] = sue_model::picture::size(
         paint
             .runtime
@@ -52,7 +52,10 @@ fn screen_of(paint: &PaintDriver, p: [f32; 2]) -> Pos2 {
 }
 
 /// The figure of `layer`: its pose, its body and the layer's camera.
-fn sight(paint: &PaintDriver, layer: sue_core::EntityId) -> (Pose, Body, sue_paint::three::Camera) {
+pub(super) fn sight(
+    paint: &PaintDriver,
+    layer: sue_core::EntityId,
+) -> (Pose, Body, sue_paint::three::Camera) {
     let arena = &paint.runtime.engine.world.arena;
     let entity = model(paint, layer);
     let (pose, body) = (Pose::of(entity), Body::of(entity));
@@ -64,13 +67,16 @@ fn sight(paint: &PaintDriver, layer: sue_core::EntityId) -> (Pose, Body, sue_pai
 }
 
 /// Where the model point `p` of the figure of `layer` is on screen.
-fn on_screen(paint: &PaintDriver, layer: sue_core::EntityId, p: [f32; 3]) -> Pos2 {
+pub(super) fn on_screen(paint: &PaintDriver, layer: sue_core::EntityId, p: [f32; 3]) -> Pos2 {
     let (_, _, lens) = sight(paint, layer);
     screen_of(paint, lens.project(p).expect("in front of the camera"))
 }
 
 /// The layer added since `before`.
-fn added(paint: &PaintDriver, before: &[sue_paint::doc::LayerInfo]) -> sue_core::EntityId {
+pub(super) fn added(
+    paint: &PaintDriver,
+    before: &[sue_paint::doc::LayerInfo],
+) -> sue_core::EntityId {
     layers(paint)
         .into_iter()
         .find(|info| !before.iter().any(|old| old.id == info.id))
@@ -78,19 +84,19 @@ fn added(paint: &PaintDriver, before: &[sue_paint::doc::LayerInfo]) -> sue_core:
         .id
 }
 
-fn undo(paint: &mut PaintDriver) {
+pub(super) fn undo(paint: &mut PaintDriver) {
     paint.command("edit.undo");
     paint.settle(4);
 }
 
-fn redo(paint: &mut PaintDriver) {
+pub(super) fn redo(paint: &mut PaintDriver) {
     paint.command("edit.redo");
     paint.settle(4);
 }
 
 /// Does `change`, which must change the document so that `check` holds,
 /// as one undo step; undo gives back the arena as before, redo as after.
-fn undo_pair(
+pub(super) fn undo_pair(
     paint: &mut PaintDriver,
     what: &str,
     change: impl FnOnce(&mut PaintDriver),
@@ -320,7 +326,7 @@ fn p81_a_dragged_hand_takes_its_arm_along_and_a_ring_turns_one_joint() {
 }
 
 /// The control named `name` for assistive technology, anywhere.
-fn named(paint: &mut PaintDriver, name: &str) -> egui::Rect {
+pub(super) fn named(paint: &mut PaintDriver, name: &str) -> egui::Rect {
     let told = step_told(paint, Vec::new());
     told.iter()
         .find(|(label, ..)| label == name)
@@ -333,7 +339,7 @@ fn named(paint: &mut PaintDriver, name: &str) -> egui::Rect {
         })
 }
 
-fn click_at(paint: &mut PaintDriver, at: Pos2) {
+pub(super) fn click_at(paint: &mut PaintDriver, at: Pos2) {
     let press = |pressed| egui::Event::PointerButton {
         pos: at,
         button: egui::PointerButton::Primary,
@@ -347,7 +353,7 @@ fn click_at(paint: &mut PaintDriver, at: Pos2) {
 }
 
 /// The Material palette at `folder`: the thumbnails it shows, by name.
-fn material_folder(paint: &mut PaintDriver, folder: &str) -> Vec<(String, egui::Rect)> {
+pub(super) fn material_folder(paint: &mut PaintDriver, folder: &str) -> Vec<(String, egui::Rect)> {
     paint.settle(2);
     if paint.rect_of("Material").is_none() {
         paint.command("window.material");
@@ -371,7 +377,7 @@ fn material_folder(paint: &mut PaintDriver, folder: &str) -> Vec<(String, egui::
 /// The thumbnail named `name` of the Material palette's open folder,
 /// brought near the top of the list (where `first`, the first thumbnail,
 /// was before any scrolling) with the wheel.
-fn scrolled_to(paint: &mut PaintDriver, name: &str, first: egui::Rect) -> egui::Rect {
+pub(super) fn scrolled_to(paint: &mut PaintDriver, name: &str, first: egui::Rect) -> egui::Rect {
     let thumbs = |paint: &mut PaintDriver| -> Vec<(String, egui::Rect)> {
         step_told(paint, Vec::new())
             .into_iter()

@@ -59,6 +59,51 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint, Layer palette: the line that marks a drop above the first
   row in sight is no longer cut off, and a pointer between two rows
   still marks a place.
+### Added
+
+- Sue Paint, 3D drawing figures: drag a figure's hips and the whole
+  body moves. Pinned hands and feet stay where they are and their arms
+  and legs bend to reach; a figure that keeps to the ground comes down
+  on bent knees instead of sinking through the floor. With the hips
+  picked, three arrows beside the rotation rings move the body along
+  one axis each. Drag the spine or the chest to lean the trunk. Ctrl
+  and drag still bends and swings the hips.
+- Sue Paint, **Face** in Tool Property: sliders for the head, the face
+  (forehead, temples, cheeks, cheekbones, jaw, chin), the eyes (size,
+  spacing, height, slant, eyebrows), the nose, the mouth and the ears,
+  **Age** for the whole body, **Face age**, and **Drawn style**, which
+  takes the head toward a drawn one (larger eyes, a small nose and
+  mouth, a pointed chin). **Expression** wears Neutral, Smile, Angry,
+  Surprised or Sad, and their own sliders, with Eyes closed and Mouth
+  open, mix them. The head figure has all of it. Body shape materials
+  keep the face with the rest.
+- Sue Paint, 3D drawing figures: eyes have an iris and a pupil, and
+  **Gaze across** and **Gaze up** turn both together.
+- Sue Paint, hands: **Vein pattern** gives a hand other veins.
+- Sue Paint, imported 3D models: a glTF or GLB model shows its own
+  colors and pictures (base color, the picture laid over it, colors at
+  its points), and an OBJ file takes the colors and pictures of the
+  material file beside it. **Show its colors and pictures** turns them
+  off for plain gray. A model's morph targets are sliders. **Joint
+  angle limits** is a setting of each imported model, off until you
+  turn it on.
+
+### Changed
+
+- Sue Paint, 3D drawing figures: joints keep their volume. Elbows and
+  knees no longer pinch when they fold right up, a twisted forearm,
+  upper arm, thigh or shin turns along its whole length instead of
+  wringing at the joint, and the hip keeps its shape as the leg lifts.
+  A fist wraps its thumb over its fingers, which draw together as they
+  close. The poses Arms up, Arms crossed, Hands on hips, Wave and Jump
+  are redone; hands that rest on the body reach it on every body shape.
+- Sue Paint, hands: more veins show as **Veins** rises, instead of the
+  same veins standing ever higher; they taper and swell along their
+  way. Tendons and knuckles at their strongest are a lean hand's, and
+  a body's hands show their veins as clearly as the hand figure does.
+- Sue Paint, imported 3D models: models with more than 255 bones are
+  posed by their bones too (up to 65535; more is refused with the
+  reason).
 
 ## [0.0.81] - 2026-11-17
 

@@ -18,6 +18,7 @@ mod p6_tools_a;
 mod p6_tools_b;
 mod p81_bugs;
 mod p81_figures;
+mod p82_figures;
 mod paint_3d;
 mod paint_assets;
 mod paint_canvas;
@@ -98,6 +99,18 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
         tour.settle();
         return p81_bugs::scenes(tour, &only);
     }
+    // `SUE_SNAPSHOT_ONLY=figures` runs the 3D drawing figures' scenes
+    // alone, on a sample canvas.
+    if std::env::var("SUE_SNAPSHOT_ONLY").as_deref() == Ok("figures") {
+        tour.runtime
+            .with_context(&mut tour.camera.painter, tour.camera.now, |cx| {
+                sue_paint::sample_picture(cx, 1600, 1200)
+            });
+        open_paint(tour);
+        tour.settle();
+        p81_figures::figures(tour)?;
+        return p82_figures::figures(tour);
+    }
     // 00 to 03. The Hub and what the shell lays over it.
     hub::opening(tour)?;
     // 00n to 00q. Notices: folded, unfolded, under a dialog, on a phone.
@@ -129,6 +142,7 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
     paint_layers::rows(tour)?;
     paint_3d::tool_property(tour)?;
     p81_figures::figures(tour)?;
+    p82_figures::figures(tour)?;
     shell::sue_menu_in_paint(tour)?;
     paint_dialogs::menu_and_dialogs(tour)?;
     paint_dialogs::families(tour)?;

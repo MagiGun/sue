@@ -257,8 +257,14 @@ pub(crate) enum Gesture {
         /// How the drag poses: 0 bends and swings the joint, 1 twists
         /// it, 2 takes the part where the pointer goes (a hand or foot
         /// with its limb following), 3 to 5 turn the joint about its own
-        /// x, y or z (a ring of the rotation manipulator).
+        /// x, y or z (a ring of the rotation manipulator), 6 to 8 move
+        /// the whole body along the world's x, y or z (an arrow of the
+        /// translate manipulator), 9 moves it where the pointer goes,
+        /// 10 leans its trunk toward the pointer.
         how: u8,
+        /// Where the figure stood when the drag began: its place along
+        /// x, y and z, each `None` while nothing had placed it yet.
+        stood: [Option<f32>; 3],
         /// Where on the layer the drag began.
         grip: [f32; 2],
         /// The point of the model the drag carries, and for a ring the
@@ -705,6 +711,9 @@ pub struct SuePaint {
     /// this frame, shown at once and kept when let go.
     pub(crate) pending_place: Option<(EntityId, crate::three::Placement)>,
     pub(crate) pending_shape: Option<(EntityId, crate::figure::Body)>,
+    /// How Tool Property asked an imported model to look this frame:
+    /// properties of its model (its colors, morph targets and limits).
+    pub(crate) pending_look: Option<(EntityId, Vec<(&'static str, sue_core::Value)>)>,
     /// The body part the body shape chart shapes (0 the full body).
     pub(crate) figure_part: usize,
     /// A camera being set up and not keyed yet: its folder, the frame and
@@ -1067,6 +1076,7 @@ impl Default for SuePaint {
             three_draft: None,
             pending_place: None,
             pending_shape: None,
+            pending_look: None,
             figure_part: 0,
             view3d_release: false,
             material_kind: 0,

@@ -9,7 +9,9 @@ project:
 - the default skeleton and its skin weights,
   `makehuman/data/rigs/default.mhskel` and `default_weights.mhw`;
 - morph targets from `makehuman/data/targets/` (macrodetails, breast,
-  head, measure, torso and armslegs).
+  head, measure, torso and armslegs; for the face: forehead, cheek,
+  chin, eyes, eyebrows, nose, mouth and ears; for the expressions: the
+  units in expression/units).
 
 Source: <https://github.com/makehumancommunity/makehuman>
 
@@ -40,4 +42,6 @@ these assets to the public domain.
 What Sue adds on top is Sue's own and under Sue's licence: the joints
 people pose, the rest stance, the hand and head figures cut from the
 body, the guide lines, the veins, tendons and knuckles of the hands,
-and every pose.
+every pose, the drawn style (Sue's own mix of the face targets), the
+expressions (Sue's own mixes of the expression units) and the irises
+of the eyes.

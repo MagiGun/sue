@@ -72,6 +72,57 @@ pub struct Surface {
     pub axes: Vec<[[f32; 3]; 2]>,
     /// The relief itself.
     pub relief: Option<Arc<Relief>>,
+    /// Each point's own color, red, green and blue from 0 to 1 (empty
+    /// for plain clay).
+    pub colors: Vec<[f32; 3]>,
+    /// Where each point is on the picture laid over the surface, across
+    /// and down from 0 to 1 (empty without one).
+    pub uvs: Vec<[f32; 2]>,
+    /// For each triangle, which of [`Self::textures`] is laid over it
+    /// (`u32::MAX` for none; empty when no triangle has one).
+    pub skins: Vec<u32>,
+    /// The pictures laid over the surface.
+    pub textures: Vec<Arc<Texture>>,
+}
+
+/// A picture laid over a surface.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Texture {
+    /// Width and height.
+    pub size: [u32; 2],
+    /// Red, green, blue and alpha for each pixel, rows from the top.
+    pub rgba: Vec<u8>,
+}
+
+impl Texture {
+    /// The color at `(u, v)` (across and down; the picture repeats
+    /// beyond 0 to 1), blended between its nearest pixels.
+    #[must_use]
+    pub fn at(&self, u: f32, v: f32) -> [f32; 3] {
+        let [w, h] = self.size.map(|value| value as usize);
+        if w == 0 || h == 0 || self.rgba.len() < w * h * 4 {
+            return [1.0; 3];
+        }
+        let x = (u - u.floor()) * w as f32 - 0.5;
+        let y = (v - v.floor()) * h as f32 - 0.5;
+        let (x0, y0) = (x.floor(), y.floor());
+        let (fx, fy) = (x - x0, y - y0);
+        let pixel = |x: f32, y: f32| {
+            let x = (x as i64).rem_euclid(w as i64) as usize;
+            let y = (y as i64).rem_euclid(h as i64) as usize;
+            let at = (y * w + x) * 4;
+            [0, 1, 2].map(|k| f32::from(self.rgba[at + k]) / 255.0)
+        };
+        let (a, b, c, d) = (
+            pixel(x0, y0),
+            pixel(x0 + 1.0, y0),
+            pixel(x0, y0 + 1.0),
+            pixel(x0 + 1.0, y0 + 1.0),
+        );
+        [0, 1, 2].map(|k| {
+            (a[k] * (1.0 - fx) + b[k] * fx) * (1.0 - fy) + (c[k] * (1.0 - fx) + d[k] * fx) * fy
+        })
+    }
 }
 
 impl Surface {
@@ -199,6 +250,7 @@ struct Sample {
     normal: [f32; 3],
     light: f32,
     fog: f32,
+    color: [f32; 3],
 }
 
 /// `surface` as `view` sees it on a `size` canvas, framed by `frame`:
@@ -224,6 +276,7 @@ pub fn render_surface(
         cover: vec![0.0; w * h],
         guide: Vec::new(),
         floor: Vec::new(),
+        color: Vec::new(),
     };
     if surface.positions.is_empty() || w == 0 || h == 0 {
         return buffers;
@@ -258,6 +311,11 @@ pub fn render_surface(
     if x1 <= x0 || y1 <= y0 {
         return buffers;
     }
+    if surface.colors.len() == surface.positions.len()
+        || (surface.uvs.len() == surface.positions.len() && !surface.textures.is_empty())
+    {
+        buffers.color = vec![[1.0; 3]; w * h];
+    }
     let fine = if view.fast { 1 } else { 2 };
     let (tw, th) = ((x1 - x0) * fine, (y1 - y0) * fine);
     let empty = Sample {
@@ -265,8 +323,14 @@ pub fn render_surface(
         normal: [0.0; 3],
         light: 0.0,
         fog: 0.0,
+        color: [1.0; 3],
     };
     let mut tile = vec![empty; tw * th];
+    // Its own colors, when it has any: a color at each point, pictures
+    // laid over its triangles, or both.
+    let tinted = surface.colors.len() == surface.positions.len();
+    let pictured = surface.uvs.len() == surface.positions.len() && !surface.textures.is_empty();
+    let colored = tinted || pictured;
     let (low, high) = seen
         .iter()
         .fold((f32::INFINITY, f32::NEG_INFINITY), |(low, high), (p, _)| {
@@ -288,11 +352,22 @@ pub fn render_surface(
         .relief
         .as_deref()
         .filter(|_| !surface.detail.is_empty());
-    for t in surface.indices.as_chunks::<3>().0 {
+    for (face, t) in surface.indices.as_chunks::<3>().0.iter().enumerate() {
         let [ia, ib, ic] = t.map(|i| i as usize);
         if !(screen[ia][0].is_finite() && screen[ib][0].is_finite() && screen[ic][0].is_finite()) {
             continue;
         }
+        let tints = tinted.then(|| [ia, ib, ic].map(|i| surface.colors[i]));
+        let picture = if pictured {
+            surface
+                .skins
+                .get(face)
+                .or(surface.skins.is_empty().then_some(&0))
+                .and_then(|skin| surface.textures.get(*skin as usize))
+                .map(|texture| (texture, [ia, ib, ic].map(|i| surface.uvs[i])))
+        } else {
+            None
+        };
         let [pa, pb, pc] = [ia, ib, ic].map(|i| to_tile(screen[i]));
         let area = (pb[0] - pa[0]) * (pc[1] - pa[1]) - (pb[1] - pa[1]) * (pc[0] - pa[0]);
         if area.abs() < 1e-6 {
@@ -361,11 +436,19 @@ pub fn render_surface(
                 let lit = (view.ambient
                     + (1.0 - view.ambient) * view.intensity * (key * sunlit * 0.92 + fill))
                     * rim;
+                let mut color = tints.map_or([1.0; 3], |[a, b, c]| mix(a, b, c));
+                if let Some((texture, [ua, ub, uc])) = &picture {
+                    let u = ka * ua[0] + kb * ub[0] + kc * uc[0];
+                    let v = ka * ua[1] + kb * ub[1] + kc * uc[1];
+                    let seen = texture.at(u, v);
+                    color = [0, 1, 2].map(|k| color[k] * seen[k]);
+                }
                 tile[at] = Sample {
                     depth,
                     normal,
                     light: lit.clamp(0.0, 1.0),
                     fog: fog_at(world[1]),
+                    color,
                 };
             }
         }
@@ -420,6 +503,7 @@ pub fn render_surface(
         for x in x0..x1 {
             let (mut depth, mut normal, mut lit, mut fog, mut count, mut line) =
                 (f32::INFINITY, [0.0_f32; 3], 0.0, 0.0, 0.0_f32, 0.0);
+            let mut color = [0.0_f32; 3];
             for sy in 0..fine {
                 for sx in 0..fine {
                     let at = ((y - y0) * fine + sy) * tw + (x - x0) * fine + sx;
@@ -431,6 +515,9 @@ pub fn render_surface(
                         }
                         lit += sample.light;
                         fog += sample.fog;
+                        for k in 0..3 {
+                            color[k] += sample.color[k];
+                        }
                         count += 1.0;
                     }
                     if !guide.is_empty() {
@@ -445,6 +532,9 @@ pub fn render_surface(
                 buffers.light[at] = lit / count;
                 buffers.fog[at] = fog / count;
                 buffers.cover[at] = count * share;
+                if colored {
+                    buffers.color[at] = color.map(|value| value / count);
+                }
                 if !guide.is_empty() {
                     buffers.guide[at] = line * share;
                 }

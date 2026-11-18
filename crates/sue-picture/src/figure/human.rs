@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use super::skin::{self, Twist};
 use super::{
     Body, Build, HAND, HEAD_JOINTS, IDENTITY, JOINTS, Joint, Kind, Mat3, Pose, SLIDERS, Side, add,
     apply, between, euler, mul, transpose, unit,
@@ -38,7 +39,65 @@ pub(crate) mod at {
     pub(crate) const FINGERS: [usize; 2] = [21, 36];
     pub(crate) const JAW: usize = 51;
     pub(crate) const EYES: [usize; 2] = [52, 53];
+    /// The helpers that carry each side's shoulder cap and hip (skin
+    /// that turns part of the way with the limb): their numbers in a
+    /// body's skin, after the joints people pose.
+    pub(crate) const SHOULDER_CAPS: [usize; 2] = [54, 56];
+    pub(crate) const HIP_CAPS: [usize; 2] = [55, 57];
 }
+
+/// A helper: skin between two joints that turns part of the way from
+/// the one to the other, about the place where the second starts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Helper {
+    /// The joint it rests on.
+    pub base: usize,
+    /// The joint it follows part of the way.
+    pub follow: usize,
+    /// How far it follows, 0 to 1.
+    pub share: f32,
+}
+
+/// A body's helpers, by their names in the asset, in the order of their
+/// numbers ([`at::SHOULDER_CAPS`], [`at::HIP_CAPS`]).
+/// The side of the hip turns a third of the way with the thigh. The
+/// cap of the shoulder stays with the shoulder: MakeHuman hangs skin
+/// on it right up to the neck, which any turn with the arm tears
+/// from the trunk.
+const HELPERS: [(&str, Helper); 4] = [
+    (
+        "+Left shoulder cap",
+        Helper {
+            base: at::SHOULDERS[0],
+            follow: at::ARMS[0][0],
+            share: 0.0,
+        },
+    ),
+    (
+        "+Left hip cap",
+        Helper {
+            base: at::HIPS,
+            follow: at::LEGS[0][0],
+            share: 0.35,
+        },
+    ),
+    (
+        "+Right shoulder cap",
+        Helper {
+            base: at::SHOULDERS[1],
+            follow: at::ARMS[1][0],
+            share: 0.0,
+        },
+    ),
+    (
+        "+Right hip cap",
+        Helper {
+            base: at::HIPS,
+            follow: at::LEGS[1][0],
+            share: 0.35,
+        },
+    ),
+];
 
 /// One morph target: the points it moves and how far, and how far it
 /// moves each joint's two ends.
@@ -53,8 +112,9 @@ struct Asset {
     points: Vec<[f32; 3]>,
     quads: Vec<[u32; 4]>,
     /// Up to four joints (numbers in [`JOINTS`]) and weights a point.
-    skin: Vec<[(u8, f32); 4]>,
-    /// Each joint of [`JOINTS`]: where it starts and where its bone ends.
+    skin: Vec<[(u16, f32); 4]>,
+    /// Each joint of [`JOINTS`], then each of the helpers: where it
+    /// starts and where its bone ends.
     joints: Vec<[[f32; 3]; 2]>,
     morphs: HashMap<String, Morph>,
 }
@@ -120,7 +180,8 @@ fn asset() -> &'static Asset {
             .collect();
         // The asset's joints, each found in Sue's table by its name.
         let mut slot = vec![0_usize; joints];
-        let mut ends = vec![[[0.0_f32; 3]; 2]; JOINTS.len()];
+        let all = JOINTS.len() + HELPERS.len();
+        let mut ends = vec![[[0.0_f32; 3]; 2]; all];
         for slot in slot.iter_mut() {
             let name = r.text();
             let _parent = r.i16();
@@ -128,6 +189,12 @@ fn asset() -> &'static Asset {
             *slot = JOINTS
                 .iter()
                 .position(|joint| joint.name == name)
+                .or_else(|| {
+                    HELPERS
+                        .iter()
+                        .position(|(helper, _)| *helper == name)
+                        .map(|at| JOINTS.len() + at)
+                })
                 .expect("the asset's joints are Sue's");
             ends[*slot] = [head, tail];
         }
@@ -136,7 +203,7 @@ fn asset() -> &'static Asset {
             .map(|(joints, weights)| {
                 [0, 1, 2, 3].map(|k| {
                     (
-                        slot[usize::from(joints[k])] as u8,
+                        slot[usize::from(joints[k])] as u16,
                         f32::from(weights[k]) / 255.0,
                     )
                 })
@@ -151,7 +218,7 @@ fn asset() -> &'static Asset {
             let moves = (0..count)
                 .map(|_| [0; 3].map(|_: i32| f32::from(r.i16()) * step))
                 .collect();
-            let mut moved = vec![[[0.0_f32; 3]; 2]; JOINTS.len()];
+            let mut moved = vec![[[0.0_f32; 3]; 2]; all];
             for &slot in &slot {
                 moved[slot] = [scaled(r.point()), scaled(r.point())];
             }
@@ -181,7 +248,7 @@ pub struct Shaped {
     /// The points as modeled (the bind stance), at scale 1.
     pub rest: Vec<[f32; 3]>,
     /// Up to four joints and weights a point.
-    pub skin: Vec<[(u8, f32); 4]>,
+    pub skin: Vec<[(u16, f32); 4]>,
     /// The triangles.
     pub tris: Vec<u32>,
     /// The joints, in the stance poses are measured from.
@@ -211,6 +278,30 @@ pub struct Shaped {
     /// The limbs that follow a dragged hand or foot: the upper joint,
     /// the lower one, and the hand or foot.
     pub limbs: Vec<[usize; 3]>,
+    /// The parts whose twist is spread along their length.
+    pub twists: Vec<Twist>,
+    /// Where each point is along each twisting part it follows (see
+    /// [`super::skin`]); empty when nothing twists.
+    pub along: Vec<[f32; 4]>,
+    /// For each joint, how much of the blend of what follows it is of
+    /// dual quaternions (the rest is the plain blend, which rounds a
+    /// joint's outside less); empty for dual quaternions throughout.
+    pub dual: Vec<f32>,
+    /// The helpers: numbered in the skin after the joints, each with
+    /// its own entry in [`Self::bind`] (where it turns about).
+    pub helpers: Vec<Helper>,
+    /// The hinges (elbows and knees) whose point stands out as they
+    /// fold, so the joint keeps its flesh.
+    pub hinges: Vec<usize>,
+    /// Each point's own color (empty for plain clay): the irises and
+    /// pupils of the eyes, an imported model's colors.
+    pub colors: Vec<[f32; 3]>,
+    /// An imported model's place on its pictures at each point, which
+    /// picture lies over each triangle, and the pictures (see
+    /// [`Surface`]).
+    pub uvs: Vec<[f32; 2]>,
+    pub skins: Vec<u32>,
+    pub textures: Vec<Arc<crate::three::Texture>>,
 }
 
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
@@ -301,7 +392,8 @@ fn morphed(body: &Body) -> (Vec<[f32; 3]>, Vec<[[f32; 3]; 2]>) {
     for (index, slider) in SLIDERS.iter().enumerate() {
         let value = body.parts[index];
         match slider.key {
-            "veins" | "prominence" => {}
+            "veins" | "vein_pattern" | "prominence" => {}
+            "age" => slide(&format!("{sex}:age"), value),
             "bust" => {
                 if body.build == Build::Female {
                     slide("bust", value);
@@ -334,7 +426,7 @@ fn morphed(body: &Body) -> (Vec<[f32; 3]>, Vec<[[f32; 3]; 2]>) {
 }
 
 /// How much of point `skin` follows the joints `of`.
-fn follows(skin: &[(u8, f32); 4], of: &[usize]) -> f32 {
+fn follows(skin: &[(u16, f32); 4], of: &[usize]) -> f32 {
     skin.iter()
         .filter(|(joint, _)| of.contains(&usize::from(*joint)))
         .map(|(_, weight)| weight)
@@ -350,7 +442,7 @@ const HEAD_GROUP: [usize; 4] = [at::HEAD, at::JAW, at::EYES[0], at::EYES[1]];
 fn proportioned(
     points: &mut [[f32; 3]],
     joints: &mut [[[f32; 3]; 2]],
-    skin: &[[(u8, f32); 4]],
+    skin: &[[(u16, f32); 4]],
     heads: Option<f32>,
     tall: f32,
 ) {
@@ -511,7 +603,7 @@ fn rigged(
     ends: &[[[f32; 3]; 2]],
     frames: &[Mat3],
     points: &[[f32; 3]],
-    skin: &[[(u8, f32); 4]],
+    skin: &[[(u16, f32); 4]],
 ) -> Vec<Joint> {
     // How thick each part is: the mean distance of its own points from
     // its bone.
@@ -600,8 +692,8 @@ fn triangles(points: &[[f32; 3]], faces: &[Vec<u32>]) -> Vec<u32> {
 }
 
 /// A weighted mean of skin weights, kept to its four strongest joints.
-fn blended(parts: &[(&[(u8, f32); 4], f32)]) -> [(u8, f32); 4] {
-    let mut sum: Vec<(u8, f32)> = Vec::with_capacity(8);
+fn blended(parts: &[(&[(u16, f32); 4], f32)]) -> [(u16, f32); 4] {
+    let mut sum: Vec<(u16, f32)> = Vec::with_capacity(8);
     for (skin, share) in parts {
         for (joint, weight) in skin.iter() {
             if *weight <= 0.0 {
@@ -616,7 +708,7 @@ fn blended(parts: &[(&[(u8, f32); 4], f32)]) -> [(u8, f32); 4] {
     sum.sort_by(|a, b| b.1.total_cmp(&a.1));
     sum.truncate(4);
     let total: f32 = sum.iter().map(|(_, weight)| weight).sum();
-    let mut out = [(0_u8, 0.0_f32); 4];
+    let mut out = [(0_u16, 0.0_f32); 4];
     for (slot, (joint, weight)) in out.iter_mut().zip(sum) {
         *slot = (joint, weight / total.max(1e-9));
     }
@@ -624,12 +716,12 @@ fn blended(parts: &[(&[(u8, f32); 4], f32)]) -> [(u8, f32); 4] {
 }
 
 /// A piece of mesh: its points, their skin and its faces.
-type Cut = (Vec<[f32; 3]>, Vec<[(u8, f32); 4]>, Vec<Vec<u32>>);
+type Cut = (Vec<[f32; 3]>, Vec<[(u16, f32); 4]>, Vec<Vec<u32>>);
 
 /// One step of Catmull-Clark subdivision: every face split into quads
 /// round its middle and the whole surface smoothed, the skin weights
 /// carried along.
-fn subdivided(points: &[[f32; 3]], skin: &[[(u8, f32); 4]], faces: &[Vec<u32>]) -> Cut {
+fn subdivided(points: &[[f32; 3]], skin: &[[(u16, f32); 4]], faces: &[Vec<u32>]) -> Cut {
     let count = points.len();
     // Each new point as shares of the old ones.
     let mut shares: Vec<Vec<(u32, f32)>> = Vec::new();
@@ -726,7 +818,7 @@ fn subdivided(points: &[[f32; 3]], skin: &[[(u8, f32); 4]], faces: &[Vec<u32>]) 
     let new_skin = shares
         .iter()
         .map(|mine| {
-            let parts: Vec<(&[(u8, f32); 4], f32)> = mine
+            let parts: Vec<(&[(u16, f32); 4], f32)> = mine
                 .iter()
                 .map(|(other, share)| (&skin[*other as usize], *share))
                 .collect();
@@ -753,7 +845,7 @@ fn subdivided(points: &[[f32; 3]], skin: &[[(u8, f32); 4]], faces: &[Vec<u32>]) 
 /// cut away: its points, their skin and its faces.
 fn cut(
     points: &[[f32; 3]],
-    skin: &[[(u8, f32); 4]],
+    skin: &[[(u16, f32); 4]],
     keep: impl Fn(usize) -> bool,
     flat: ([f32; 3], [f32; 3]),
 ) -> Cut {
@@ -820,7 +912,7 @@ fn cut(
             middle = add(middle, out_points[v as usize]);
         }
         let middle = scale(middle, 1.0 / ring.len() as f32);
-        let parts: Vec<(&[(u8, f32); 4], f32)> =
+        let parts: Vec<(&[(u16, f32); 4], f32)> =
             ring.iter().map(|&v| (&out_skin[v as usize], 1.0)).collect();
         let middle_skin = blended(&parts);
         let hub = out_points.len() as u32;
@@ -857,46 +949,80 @@ fn to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> (f32, f32) {
     (((p[0] - qx).powi(2) + (p[1] - qy).powi(2)).sqrt(), along)
 }
 
-/// The veins on the back of a hand, each a line of points across (-1 at
-/// the index knuckle, 1 at the little finger's) and up (0 at the wrist,
-/// 1 at the knuckles): two long veins down either side that run on up
-/// the forearm, joined by an arch below the knuckles, with branches
-/// between the fingers. Drawn by hand for Sue.
-const VEINS: [&[[f32; 2]]; 7] = [
-    &[
-        [-0.74, 0.93],
-        [-0.63, 0.76],
-        [-0.5, 0.57],
-        [-0.5, 0.4],
-        [-0.63, 0.22],
-        [-0.76, 0.04],
-        [-0.8, -0.22],
-        [-0.72, -0.62],
-        [-0.76, -0.95],
-    ],
-    &[[-0.06, 0.96], [-0.13, 0.79], [-0.29, 0.64], [-0.5, 0.57]],
-    &[
-        [0.56, 0.91],
-        [0.5, 0.74],
-        [0.37, 0.6],
-        [0.3, 0.42],
-        [0.4, 0.24],
-        [0.55, 0.06],
-        [0.63, -0.22],
-        [0.56, -0.62],
-        [0.6, -0.95],
-    ],
-    &[[-0.13, 0.79], [0.1, 0.68], [0.37, 0.6]],
-    &[
-        [0.3, 0.42],
-        [0.06, 0.28],
-        [-0.08, 0.09],
-        [-0.04, -0.2],
-        [-0.12, -0.6],
-        [-0.08, -0.95],
-    ],
-    &[[0.95, 0.8], [0.84, 0.6], [0.7, 0.4], [0.55, 0.06]],
-    &[[-0.5, 0.4], [-0.34, 0.24], [-0.3, 0.02], [-0.4, -0.3]],
+/// One vein on the back of a hand: the slider value it starts to show
+/// at, how strong it is against the main veins, and its line of points
+/// across (-1 at the index knuckle, 1 at the little finger's) and up (0
+/// at the wrist, 1 at the knuckles).
+type Vein = (f32, f32, &'static [[f32; 2]]);
+
+/// The veins on the back of a hand: two long veins down either side
+/// that run on up the forearm, joined by an arch below the knuckles,
+/// with branches between the fingers and, on a hand with many, fine
+/// ones between those. The long veins show first; the others come in
+/// as the slider rises, so more veins show rather than the same ones
+/// standing ever higher. Drawn by hand for Sue.
+const VEINS: [Vein; 10] = [
+    (
+        0.0,
+        1.0,
+        &[
+            [-0.74, 0.93],
+            [-0.63, 0.76],
+            [-0.5, 0.57],
+            [-0.5, 0.4],
+            [-0.63, 0.22],
+            [-0.76, 0.04],
+            [-0.8, -0.22],
+            [-0.72, -0.62],
+            [-0.76, -0.95],
+        ],
+    ),
+    (
+        0.4,
+        0.7,
+        &[[-0.06, 0.96], [-0.13, 0.79], [-0.29, 0.64], [-0.5, 0.57]],
+    ),
+    (
+        0.0,
+        1.0,
+        &[
+            [0.56, 0.91],
+            [0.5, 0.74],
+            [0.37, 0.6],
+            [0.3, 0.42],
+            [0.4, 0.24],
+            [0.55, 0.06],
+            [0.63, -0.22],
+            [0.56, -0.62],
+            [0.6, -0.95],
+        ],
+    ),
+    (0.15, 0.8, &[[-0.13, 0.79], [0.1, 0.68], [0.37, 0.6]]),
+    (
+        0.15,
+        0.85,
+        &[
+            [0.3, 0.42],
+            [0.06, 0.28],
+            [-0.08, 0.09],
+            [-0.04, -0.2],
+            [-0.12, -0.6],
+            [-0.08, -0.95],
+        ],
+    ),
+    (
+        0.4,
+        0.7,
+        &[[0.95, 0.8], [0.84, 0.6], [0.7, 0.4], [0.55, 0.06]],
+    ),
+    (
+        0.4,
+        0.7,
+        &[[-0.5, 0.4], [-0.34, 0.24], [-0.3, 0.02], [-0.4, -0.3]],
+    ),
+    (0.65, 0.5, &[[-0.29, 0.64], [-0.2, 0.45], [-0.08, 0.09]]),
+    (0.65, 0.5, &[[0.1, 0.68], [0.14, 0.52], [0.06, 0.28]]),
+    (0.7, 0.45, &[[-0.63, 0.22], [-0.47, 0.1], [-0.3, 0.02]]),
 ];
 
 /// A line of points with its corners rounded, twice.
@@ -915,6 +1041,36 @@ fn rounded(line: &[[f32; 2]]) -> Vec<[f32; 2]> {
     points
 }
 
+/// Where the vein point `p` lies for vein pattern `pattern` (0 to 1):
+/// moved a little across and up, each point its own way, so every
+/// pattern is another hand's veins. Points that veins share move
+/// together, so branches stay joined; pattern 0 is the hand as drawn.
+fn wandered(p: [f32; 2], pattern: f32) -> [f32; 2] {
+    if pattern <= 0.0 {
+        return p;
+    }
+    // Each point's own phase, from where it is.
+    let phase = |salt: f32| {
+        let mixed = (p[0] * 12.9898 + p[1] * 78.233 + salt).sin() * 43_758.547;
+        (mixed - mixed.floor()) * std::f32::consts::TAU
+    };
+    let sway = |salt: f32, turns: f32| {
+        let at = phase(salt);
+        (at + pattern * turns * std::f32::consts::TAU).sin() - at.sin()
+    };
+    // (Not whole turns, so the last pattern is not the first again.)
+    [p[0] + 0.07 * sway(1.0, 0.8), p[1] + 0.05 * sway(2.0, 1.45)]
+}
+
+/// A vein laid on a hand: its points, how far along the vein each is
+/// (0 to 1), how strongly it shows and its own phase.
+struct Laid {
+    points: Vec<[f32; 2]>,
+    along: Vec<f32>,
+    shows: f32,
+    phase: f32,
+}
+
 /// The back of a hand in relief: its knuckles and the tendons that run
 /// to them, and its veins, over the hand's own across and up (meters,
 /// the wrist at 0).
@@ -923,10 +1079,9 @@ struct Back {
     knuckles: Vec<([f32; 2], f32, f32)>,
     /// The tendons, from the wrist to each knuckle.
     tendons: Vec<([f32; 2], [f32; 2])>,
-    /// The veins.
-    veins: Vec<Vec<[f32; 2]>>,
+    /// The veins that show.
+    veins: Vec<Laid>,
     prominence: f32,
-    vein: f32,
     /// The hand's size against a grown hand's.
     size: f32,
 }
@@ -934,7 +1089,7 @@ struct Back {
 impl Back {
     /// For a hand whose fifteen finger joints start at `heads` (in the
     /// hand's own axes).
-    fn new(heads: &[[f32; 3]], prominence: f32, vein: f32) -> Self {
+    fn new(heads: &[[f32; 3]], prominence: f32, vein: f32, pattern: f32) -> Self {
         let flat = |p: [f32; 3]| [p[0], p[1]];
         let (index, middle, little) = (flat(heads[0]), flat(heads[3]), flat(heads[9]));
         let size = (middle[1] / 0.09).clamp(0.2, 5.0);
@@ -942,31 +1097,52 @@ impl Back {
         let mut tendons = Vec::new();
         for finger in 0..4 {
             let base = flat(heads[finger * 3]);
-            knuckles.push((base, 0.0105 * size, 0.0022 * size));
-            knuckles.push((flat(heads[finger * 3 + 1]), 0.0075 * size, 0.0008 * size));
-            knuckles.push((flat(heads[finger * 3 + 2]), 0.0056 * size, 0.0004 * size));
+            knuckles.push((base, 0.0115 * size, 0.0019 * size));
+            knuckles.push((flat(heads[finger * 3 + 1]), 0.0078 * size, 0.0008 * size));
+            knuckles.push((flat(heads[finger * 3 + 2]), 0.0058 * size, 0.0004 * size));
             tendons.push(([base[0] * 0.3, 0.012 * size], base));
         }
-        knuckles.push((flat(heads[13]), 0.009 * size, 0.0016 * size));
-        knuckles.push((flat(heads[14]), 0.0065 * size, 0.0008 * size));
+        knuckles.push((flat(heads[13]), 0.0095 * size, 0.0015 * size));
+        knuckles.push((flat(heads[14]), 0.0068 * size, 0.0008 * size));
         tendons.push(([flat(heads[12])[0] * 0.6, 0.012 * size], flat(heads[13])));
         // The veins laid between the index and little knuckles.
         let (center, half) = ((index[0] + little[0]) / 2.0, (little[0] - index[0]) / 2.0);
-        let veins = VEINS
-            .iter()
-            .map(|line| {
-                rounded(line)
-                    .iter()
-                    .map(|[x, y]| [center + x * half, y * middle[1]])
-                    .collect()
-            })
-            .collect();
+        let mut veins = Vec::new();
+        for (number, (from, strong, line)) in VEINS.iter().enumerate() {
+            // More veins show as the slider rises; each stands a
+            // little higher with it, never as high as a cord.
+            let shows = strong * smoothstep(from - 0.05, from + 0.4, vein) * (0.28 + 0.72 * vein);
+            if vein <= 0.0 || shows <= 0.0 {
+                continue;
+            }
+            let moved: Vec<[f32; 2]> = line.iter().map(|p| wandered(*p, pattern)).collect();
+            let points: Vec<[f32; 2]> = rounded(&moved)
+                .iter()
+                .map(|[x, y]| [center + x * half, y * middle[1]])
+                .collect();
+            let mut along = vec![0.0_f32];
+            for pair in points.windows(2) {
+                let step =
+                    ((pair[1][0] - pair[0][0]).powi(2) + (pair[1][1] - pair[0][1]).powi(2)).sqrt();
+                along.push(along[along.len() - 1] + step);
+            }
+            let whole = along[along.len() - 1].max(1e-9);
+            for value in &mut along {
+                *value /= whole;
+            }
+            veins.push(Laid {
+                points,
+                along,
+                shows,
+                phase: number as f32 * 2.4,
+            });
+        }
         Self {
             knuckles,
             tendons,
             veins,
-            prominence,
-            vein,
+            // The strongest setting is a lean hand, not a skeleton's.
+            prominence: prominence * (1.0 - 0.22 * prominence),
             size,
         }
     }
@@ -981,12 +1157,14 @@ impl Back {
         let mut ridge = 0.0_f32;
         for (from, to) in &self.tendons {
             let (far, along) = to_segment(p, *from, *to);
+            // A tendon rises out of the wrist, is clearest behind its
+            // knuckle and sinks into it.
             ridge = ridge.max(
-                0.001
+                0.00085
                     * self.size
-                    * bell(far / (0.0046 * self.size))
-                    * smoothstep(0.15, 0.75, along)
-                    * (1.0 - smoothstep(0.93, 1.0, along) * 0.5),
+                    * bell(far / (0.0052 * self.size))
+                    * smoothstep(0.1, 0.8, along)
+                    * (1.0 - smoothstep(0.9, 1.0, along) * 0.6),
             );
         }
         (height + ridge) * self.prominence
@@ -994,17 +1172,20 @@ impl Back {
 
     /// How high the veins stand at `p`.
     fn veins(&self, p: [f32; 2]) -> f32 {
-        if self.vein <= 0.0 {
-            return 0.0;
-        }
         let mut height = 0.0_f32;
-        for line in &self.veins {
-            for pair in line.windows(2) {
-                let (far, _) = to_segment(p, pair[0], pair[1]);
-                height = height.max(bell(far / (0.0034 * self.size)));
+        for vein in &self.veins {
+            for (at, pair) in vein.points.windows(2).enumerate() {
+                let (far, part) = to_segment(p, pair[0], pair[1]);
+                let along = vein.along[at] + (vein.along[at + 1] - vein.along[at]) * part;
+                // A vein widens toward the wrist, swells and thins a
+                // little along its way and fades out at its ends.
+                let wide = 0.0034 * self.size * (0.62 + 0.38 * along) * (0.7 + 0.3 * vein.shows);
+                let swell = 0.8 + 0.2 * (along * 11.0 + vein.phase).sin();
+                let ends = smoothstep(0.0, 0.12, along) * (1.0 - smoothstep(0.9, 1.0, along));
+                height = height.max(bell(far / wide) * vein.shows * swell * ends);
             }
         }
-        height * 0.0011 * self.size * self.vein
+        height * 0.00085 * self.size
     }
 }
 
@@ -1024,8 +1205,11 @@ fn on_relief(p: [f32; 3], normal: [f32; 3], size: f32) -> [f32; 3] {
     [u, v, back * inside]
 }
 
-/// The relief of `back` as heights over [`RELIEF_BOX`].
-fn relief_of(back: &Back) -> Relief {
+/// The relief of `back` as heights over [`RELIEF_BOX`]. `whole` is for
+/// a mesh too coarse to hold the veins itself (a body's hands): the
+/// light then shows all of them, as high as a hand figure raises its
+/// own.
+fn relief_of(back: &Back, whole: bool) -> Relief {
     let (from, span) = RELIEF_BOX;
     let cell = 0.0006 * back.size;
     let size = [
@@ -1041,7 +1225,9 @@ fn relief_of(back: &Back) -> Relief {
             ];
             // The knuckles and tendons are in the mesh already; the
             // light only sharpens them.
-            heights.push(0.7 * back.veins(p) + 0.35 * back.bones(p));
+            let veins = if whole { 1.7 } else { 0.7 };
+            let bones = if whole { 0.6 } else { 0.35 };
+            heights.push(veins * back.veins(p) + bones * back.bones(p));
         }
     }
     Relief {
@@ -1088,7 +1274,7 @@ fn sliced(
 /// joints, as on an artist's mannequin.
 fn body_guides(
     points: &[[f32; 3]],
-    skin: &[[(u8, f32); 4]],
+    skin: &[[(u16, f32); 4]],
     tris: &[u32],
     joints: &[[[f32; 3]; 2]],
     tall: f32,
@@ -1125,7 +1311,19 @@ fn body_guides(
         tris,
         along(at::SPINE, 0.45),
         up,
-        |t| within(t, &[at::HIPS, at::SPINE, at::CHEST], 0.9),
+        |t| {
+            within(
+                t,
+                &[
+                    at::HIPS,
+                    at::SPINE,
+                    at::CHEST,
+                    at::HIP_CAPS[0],
+                    at::HIP_CAPS[1],
+                ],
+                0.9,
+            )
+        },
         &mut guides,
     );
     sliced(
@@ -1134,8 +1332,18 @@ fn body_guides(
         along(at::CHEST, 0.5),
         up,
         |t| {
-            within(t, &[at::SPINE, at::CHEST, 17, 18], 0.9)
-                && near(t, along(at::CHEST, 0.5), 0.13 * tall)
+            within(
+                t,
+                &[
+                    at::SPINE,
+                    at::CHEST,
+                    17,
+                    18,
+                    at::SHOULDER_CAPS[0],
+                    at::SHOULDER_CAPS[1],
+                ],
+                0.9,
+            ) && near(t, along(at::CHEST, 0.5), 0.13 * tall)
         },
         &mut guides,
     );
@@ -1164,10 +1372,15 @@ fn body_guides(
         let [thigh, shin, foot] = at::LEGS[side];
         let shoulder = at::SHOULDERS[side];
         let rings: [(usize, f32, &[usize], f32); 6] = [
-            (upper, 0.16, &[upper, shoulder, at::CHEST], 0.07),
+            (
+                upper,
+                0.16,
+                &[upper, shoulder, at::CHEST, at::SHOULDER_CAPS[side]],
+                0.07,
+            ),
             (upper, 0.97, &[upper, fore], 0.06),
             (fore, 0.96, &[fore, hand], 0.05),
-            (thigh, 0.14, &[thigh, at::HIPS], 0.1),
+            (thigh, 0.14, &[thigh, at::HIPS, at::HIP_CAPS[side]], 0.1),
             (thigh, 0.97, &[thigh, shin], 0.08),
             (shin, 0.95, &[shin, foot], 0.06),
         ];
@@ -1233,6 +1446,121 @@ fn embossed(
     }
 }
 
+/// The parts of a body whose twist is spread along them: the upper
+/// arms and thighs (still at the trunk, turned at the elbow or knee),
+/// and the forearms and shins, which also take half of the twist of
+/// the hand or foot at their far end.
+fn body_twists() -> Vec<Twist> {
+    let mut twists = Vec::new();
+    for limb in at::ARMS.iter().chain(at::LEGS.iter()) {
+        twists.push(Twist {
+            joint: limb[0],
+            child: None,
+            share: 0.0,
+        });
+        twists.push(Twist {
+            joint: limb[1],
+            child: Some(limb[2]),
+            share: 0.5,
+        });
+    }
+    twists
+}
+
+/// How much of a body's blend is of dual quaternions, by joint: whole
+/// at the hinges (elbows, knees, fingers), a little less where a ball
+/// joint swings far (the shoulders and hips), which whole would puff
+/// out.
+fn body_dual() -> Vec<f32> {
+    let mut dual = vec![1.0; JOINTS.len() + HELPERS.len()];
+    for side in 0..2 {
+        dual[at::ARMS[side][0]] = 0.3;
+        dual[at::SHOULDER_CAPS[side]] = 0.3;
+        dual[at::SHOULDERS[side]] = 0.5;
+        dual[at::LEGS[side][0]] = 0.7;
+        dual[at::HIP_CAPS[side]] = 0.7;
+    }
+    dual[at::HIPS] = 0.7;
+    dual
+}
+
+/// How dark an iris and a pupil are against the clay of the figure.
+const IRIS: [f32; 3] = [0.42; 3];
+const PUPIL: [f32; 3] = [0.1; 3];
+
+/// Gives each eye an iris and a pupil, so it reads as an eye that
+/// looks somewhere: two rings of flat color lying on the eyeball, where
+/// the eye's joint points, carried by that joint. `eyes` are the eye
+/// joints as the skin numbers them, with the way each looks. Returns
+/// the color of every point.
+fn with_irises(
+    points: &mut Vec<[f32; 3]>,
+    skin: &mut Vec<[(u16, f32); 4]>,
+    tris: &mut Vec<u32>,
+    eyes: &[(usize, [f32; 3])],
+) -> Vec<[f32; 3]> {
+    let mut colors = vec![[1.0_f32; 3]; points.len()];
+    for &(joint, looks) in eyes {
+        // The eyeball: what follows the eye's joint alone.
+        let ball: Vec<[f32; 3]> = points
+            .iter()
+            .zip(skin.iter())
+            .filter(|(_, skin)| follows(skin, &[joint]) > 0.9)
+            .map(|(p, _)| *p)
+            .collect();
+        if ball.len() < 8 {
+            continue;
+        }
+        let mut middle = [0.0_f32; 3];
+        for p in &ball {
+            middle = add(middle, *p);
+        }
+        let middle = scale(middle, 1.0 / ball.len() as f32);
+        let looks = unit_or(looks, [0.0, 0.0, 1.0]);
+        // As far out as the ball reaches the way it looks.
+        let radius = ball
+            .iter()
+            .map(|p| dot(sub(*p, middle), looks))
+            .fold(0.0_f32, f32::max);
+        if radius <= 0.0 {
+            continue;
+        }
+        let across = unit_or(cross([0.0, 1.0, 0.0], looks), [1.0, 0.0, 0.0]);
+        let up = cross(looks, across);
+        let own = [(joint as u16, 1.0), (0, 0.0), (0, 0.0), (0, 0.0)];
+        const ROUND: usize = 20;
+        // A ring of points on the ball, `wide` of its radius from the
+        // line of sight, lifted a hair so it lies over the white.
+        let mut ring = |wide: f32, color: [f32; 3]| -> u32 {
+            let first = points.len() as u32;
+            let out = radius * 1.012;
+            let (sin, cos) = (wide, (1.0 - wide * wide).max(0.0).sqrt());
+            for step in 0..ROUND {
+                let (s, c) = (step as f32 / ROUND as f32 * std::f32::consts::TAU).sin_cos();
+                let way = add(
+                    scale(looks, cos),
+                    add(scale(across, sin * c), scale(up, sin * s)),
+                );
+                points.push(add(middle, scale(way, out)));
+                skin.push(own);
+                colors.push(color);
+            }
+            first
+        };
+        let hub = ring(0.0, PUPIL);
+        let pupil = ring(0.2, PUPIL);
+        let inner = ring(0.2, IRIS);
+        let outer = ring(0.5, IRIS);
+        for step in 0..ROUND as u32 {
+            let next = (step + 1) % ROUND as u32;
+            tris.extend([hub + step, pupil + step, pupil + next]);
+            tris.extend([inner + step, outer + step, outer + next]);
+            tris.extend([inner + step, outer + next, inner + next]);
+        }
+    }
+    colors
+}
+
 /// A body, shaped.
 fn shaped_body(body: &Body) -> Shaped {
     let asset = asset();
@@ -1242,14 +1570,18 @@ fn shaped_body(body: &Body) -> Shaped {
     let (frames, hands, thumb_axes) = body_frames(&ends);
     let joints = rigged(&JOINTS, &ends, &frames, &points, &asset.skin);
     let faces: Vec<Vec<u32>> = asset.quads.iter().map(|quad| quad.to_vec()).collect();
-    let tris = triangles(&points, &faces);
+    let mut tris = triangles(&points, &faces);
     let guides = body_guides(&points, &asset.skin, &tris, &ends, tall);
+    let mut skin = asset.skin.clone();
+    let eyes = at::EYES.map(|eye| (eye, sub(ends[eye][1], ends[eye][0])));
+    let colors = with_irises(&mut points, &mut skin, &mut tris, &eyes);
     // The hands' relief: one relief (a left hand's), both hands on it.
     let normals = crate::three::smooth_normals(&points, &tris);
     let mut detail = vec![[0.0_f32; 4]; points.len()];
     let mut axes = Vec::new();
     let mut relief = None;
     let (vein, prominence) = (body.slider("veins"), body.slider("prominence"));
+    let pattern = body.slider("vein_pattern");
     for side in 0..2 {
         let (hand_frame, wrist, mut hand) = hand_ends(&ends, side);
         if side == 1 {
@@ -1258,7 +1590,7 @@ fn shaped_body(body: &Body) -> Shaped {
             }
         }
         let heads: Vec<[f32; 3]> = hand.iter().map(|end| end[0]).collect();
-        let back = Back::new(&heads, prominence, vein);
+        let back = Back::new(&heads, prominence, vein, pattern);
         let chain: Vec<usize> = std::iter::once(at::ARMS[side][2])
             .chain(at::FINGERS[side]..at::FINGERS[side] + 15)
             .chain(std::iter::once(at::ARMS[side][1]))
@@ -1268,7 +1600,7 @@ fn shaped_body(body: &Body) -> Shaped {
             &mut points,
             &normals,
             &mut detail,
-            |index| follows(&asset.skin[index], &chain) > 0.5,
+            |index| follows(&skin[index], &chain) > 0.5,
             |p, place| {
                 let mut local = apply(
                     &transpose(&hand_frame),
@@ -1285,14 +1617,29 @@ fn shaped_body(body: &Body) -> Shaped {
         let up = apply(&hand_frame, [0.0, 1.0, 0.0]);
         axes.push((at::ARMS[side][2], [across, up]));
         if side == 0 {
-            relief = Some(Arc::new(relief_of(&back)));
+            relief = Some(Arc::new(relief_of(&back, true)));
         }
     }
     let bind = frames.iter().zip(&ends).map(|(f, e)| (*f, e[0])).collect();
+    let twists = body_twists();
     Shaped {
         order: ordered(&joints),
+        along: skin::along(&points, &skin, &ends, &twists),
+        twists,
+        colors,
+        uvs: Vec::new(),
+        skins: Vec::new(),
+        textures: Vec::new(),
+        dual: body_dual(),
+        helpers: HELPERS.iter().map(|(_, helper)| *helper).collect(),
+        hinges: vec![
+            at::ARMS[0][1],
+            at::ARMS[1][1],
+            at::LEGS[0][1],
+            at::LEGS[1][1],
+        ],
         rest: points,
-        skin: asset.skin.clone(),
+        skin,
         tris,
         joints,
         bind,
@@ -1322,15 +1669,15 @@ fn shaped_hand(body: &Body) -> Shaped {
     let size = hand[3][0][1] / 0.09;
     let local: Vec<[f32; 3]> = points.iter().map(|p| own(*p)).collect();
     // The hand's joints: the palm, then the fingers.
-    let to_hand = |joint: u8| -> u8 {
+    let to_hand = |joint: u16| -> u16 {
         let joint = usize::from(joint);
         if (at::FINGERS[0]..at::FINGERS[0] + 15).contains(&joint) {
-            (joint - at::FINGERS[0] + 1) as u8
+            (joint - at::FINGERS[0] + 1) as u16
         } else {
             0
         }
     };
-    let skin: Vec<[(u8, f32); 4]> = asset
+    let skin: Vec<[(u16, f32); 4]> = asset
         .skin
         .iter()
         .map(|skin| blended(&[(&skin.map(|(joint, weight)| (to_hand(joint), weight)), 1.0)]))
@@ -1354,7 +1701,12 @@ fn shaped_hand(body: &Body) -> Shaped {
     let tris = triangles(&points, &faces);
     let normals = crate::three::smooth_normals(&points, &tris);
     let heads: Vec<[f32; 3]> = hand.iter().map(|end| end[0]).collect();
-    let back = Back::new(&heads, body.slider("prominence"), body.slider("veins"));
+    let back = Back::new(
+        &heads,
+        body.slider("prominence"),
+        body.slider("veins"),
+        body.slider("vein_pattern"),
+    );
     let mut detail = vec![[0.0_f32; 4]; points.len()];
     embossed(
         &mut points,
@@ -1387,11 +1739,20 @@ fn shaped_hand(body: &Body) -> Shaped {
         guides: Vec::new(),
         detail,
         axes: vec![(0, [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])],
-        relief: Some(Arc::new(relief_of(&back))),
+        relief: Some(Arc::new(relief_of(&back, false))),
         hands: [IDENTITY; 2],
         thumb_axes: thumb.to_vec(),
         frame: None,
         limbs: Vec::new(),
+        twists: Vec::new(),
+        along: Vec::new(),
+        dual: Vec::new(),
+        helpers: Vec::new(),
+        hinges: Vec::new(),
+        colors: Vec::new(),
+        uvs: Vec::new(),
+        skins: Vec::new(),
+        textures: Vec::new(),
     }
 }
 
@@ -1407,7 +1768,7 @@ fn shaped_head(body: &Body) -> Shaped {
     let group = [at::NECK, at::HEAD, at::JAW, at::EYES[0], at::EYES[1]];
     // The head's joints: neck, skull, jaw, then the eyes; the nose, brow
     // and ears of the old head stay as joints that hold nothing.
-    let to_head = |joint: u8| -> u8 {
+    let to_head = |joint: u16| -> u16 {
         match usize::from(joint) {
             at::HEAD => 1,
             at::JAW => 2,
@@ -1416,7 +1777,7 @@ fn shaped_head(body: &Body) -> Shaped {
             _ => 0,
         }
     };
-    let skin: Vec<[(u8, f32); 4]> = asset
+    let skin: Vec<[(u16, f32); 4]> = asset
         .skin
         .iter()
         .map(|skin| blended(&[(&skin.map(|(joint, weight)| (to_head(joint), weight)), 1.0)]))
@@ -1435,7 +1796,7 @@ fn shaped_head(body: &Body) -> Shaped {
         (through, normal),
     );
     (points, skin, faces) = subdivided(&points, &skin, &faces);
-    let tris = triangles(&points, &faces);
+    let mut tris = triangles(&points, &faces);
     let place = |joint: usize| [sub(ends[joint][0], foot), sub(ends[joint][1], foot)];
     let skull = place(at::HEAD);
     let on_skull = |offset: [f32; 3], bone: [f32; 3]| {
@@ -1460,18 +1821,21 @@ fn shaped_head(body: &Body) -> Shaped {
     ];
     let frames = vec![IDENTITY; all_ends.len()];
     let joints = rigged(&HEAD_JOINTS, &all_ends, &frames, &points, &skin);
+    let eyes = [5, 6].map(|eye| (eye, sub(all_ends[eye][1], all_ends[eye][0])));
+    let lined = (points.len(), tris.len());
+    let colors = with_irises(&mut points, &mut skin, &mut tris, &eyes);
     let mut guides = Vec::new();
     sliced(
-        &points,
-        &tris,
+        &points[..lined.0],
+        &tris[..lined.1],
         [0.0004, 0.0, 0.0],
         [1.0, 0.0, 0.0],
         |t| t.iter().all(|&v| follows(&skin[v as usize], &[5, 6]) < 0.5),
         &mut guides,
     );
     sliced(
-        &points,
-        &tris,
+        &points[..lined.0],
+        &tris[..lined.1],
         all_ends[5][0],
         [0.0, 1.0, 0.0],
         |t| t.iter().all(|&v| follows(&skin[v as usize], &[1, 2]) > 0.9),
@@ -1497,6 +1861,15 @@ fn shaped_head(body: &Body) -> Shaped {
         thumb_axes: Vec::new(),
         frame: None,
         limbs: Vec::new(),
+        twists: Vec::new(),
+        along: Vec::new(),
+        dual: Vec::new(),
+        helpers: Vec::new(),
+        hinges: Vec::new(),
+        colors,
+        uvs: Vec::new(),
+        skins: Vec::new(),
+        textures: Vec::new(),
     }
 }
 
@@ -1518,6 +1891,15 @@ fn shaped_nothing() -> Shaped {
         thumb_axes: Vec::new(),
         frame: None,
         limbs: Vec::new(),
+        twists: Vec::new(),
+        along: Vec::new(),
+        dual: Vec::new(),
+        helpers: Vec::new(),
+        hinges: Vec::new(),
+        colors: Vec::new(),
+        uvs: Vec::new(),
+        skins: Vec::new(),
+        textures: Vec::new(),
     }
 }
 
@@ -1535,6 +1917,7 @@ pub(crate) fn shaped(body: &Body) -> Arc<Shaped> {
         guides: true,
         follow: false,
         ground: true,
+        limits: false,
         ..*body
     };
     let mut kept = SHAPED.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -1645,25 +2028,9 @@ pub(crate) fn surface(pose: &Pose, body: &Body) -> Surface {
             turned
         }
     };
-    let positions: Vec<[f32; 3]> = shaped
-        .rest
-        .iter()
-        .zip(&shaped.skin)
-        .map(|(p, skin)| {
-            let p = scale(*p, size);
-            let mut out = [0.0_f32; 3];
-            for (joint, weight) in skin {
-                if *weight <= 0.0 {
-                    continue;
-                }
-                let (turn, shift) = &moves[usize::from(*joint)];
-                let moved = add(apply(turn, p), *shift);
-                for axis in 0..3 {
-                    out[axis] += moved[axis] * weight;
-                }
-            }
-            finish(out, true)
-        })
+    let positions: Vec<[f32; 3]> = skin::skinned(&shaped, pose, &placed, size)
+        .into_iter()
+        .map(|p| finish(p, true))
         .collect();
     let mut indices = shaped.tris.clone();
     if flip {
@@ -1699,5 +2066,9 @@ pub(crate) fn surface(pose: &Pose, body: &Body) -> Surface {
         detail: shaped.detail.clone(),
         axes,
         relief: shaped.relief.clone(),
+        colors: shaped.colors.clone(),
+        uvs: shaped.uvs.clone(),
+        skins: shaped.skins.clone(),
+        textures: shaped.textures.clone(),
     }
 }

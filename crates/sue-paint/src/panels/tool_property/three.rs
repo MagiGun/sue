@@ -379,6 +379,14 @@ impl SuePaint {
         slid |= outline_rows(ui, theme, &mut view);
         let figure = model.filter(|model| crate::figure::is_figure(model));
         let mut shape: Option<(crate::figure::Body, crate::figure::Body)> = None;
+        // A model from a file: its colors, limits and morph targets.
+        let mut look = None;
+        if let Some(model) = model.filter(|model| crate::model3d::is_imported(model)) {
+            ui.add_space(gap);
+            let (set, moved) = self.look_rows(ui, theme, model);
+            look = set;
+            slid |= moved;
+        }
         if let Some(model) = figure {
             let body = crate::figure::Body::of(model);
             ui.add_space(gap);
@@ -393,7 +401,6 @@ impl SuePaint {
             }
             if body.kind != crate::figure::Kind::Imported {
                 slid |= self.part_rows(ui, theme, &mut shaped);
-                shape = Some((body, shaped));
             }
             ui.add_space(gap);
             self.figure_properties(
@@ -404,6 +411,12 @@ impl SuePaint {
                 arena,
                 theme,
             );
+            // The face comes last: it is the longest list.
+            if body.kind != crate::figure::Kind::Imported {
+                ui.add_space(gap);
+                slid |= self.face_rows(ui, theme, &mut shaped);
+                shape = Some((body, shaped));
+            }
         }
         ui.add_space(gap);
         ui.label(
@@ -413,7 +426,7 @@ impl SuePaint {
         );
         let place_changed = place != place_now;
         let shape_changed = shape.is_some_and(|(was, now)| was != now);
-        if view != now || place_changed || shape_changed {
+        if view != now || place_changed || shape_changed || look.is_some() {
             if self
                 .view3d_before
                 .as_ref()
@@ -430,6 +443,9 @@ impl SuePaint {
             }
             if let Some((_, shaped)) = shape.filter(|_| shape_changed) {
                 self.pending_shape = Some((layer, shaped));
+            }
+            if let Some(look) = look {
+                self.pending_look = Some((layer, look));
             }
             self.pending_view3d = Some((layer, view));
         }
@@ -973,6 +989,12 @@ impl SuePaint {
                 }
             }
             if let Some((set, let_go)) = self.hand_setup_rows(ui, theme, pose, body) {
+                if set != *pose {
+                    next = Some(set);
+                }
+                released |= let_go;
+            }
+            if let Some((set, let_go)) = self.gaze_rows(ui, theme, pose, body) {
                 if set != *pose {
                     next = Some(set);
                 }

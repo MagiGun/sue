@@ -102,6 +102,80 @@ impl SuePaint {
         });
     }
 
+    /// How a model from a file looks and poses: its own colors and
+    /// pictures or plain gray, joint angle limits (off until turned on,
+    /// for a model with bones), and a slider for each of its morph
+    /// targets. Returns the model properties to set when one changed.
+    pub(super) fn look_rows(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        model: &sue_core::Entity,
+    ) -> (Option<Vec<(&'static str, sue_core::Value)>>, Slid) {
+        let mut slid = Slid::default();
+        let mut set = Vec::new();
+        let look = crate::model3d::Look::of(model);
+        let figure = crate::figure::is_figure(model);
+        if !crate::model3d::has_colors(model) && look.morphs.is_empty() && !figure {
+            return (None, slid);
+        }
+        ui::section(ui, theme, &tr!("model-look"), |ui| {
+            if crate::model3d::has_colors(model) {
+                let mut colors = look.colors;
+                if check(
+                    ui,
+                    theme,
+                    "sue-paint-model-colors",
+                    &tr!("model-own-colors"),
+                    &mut colors,
+                ) {
+                    set.push((crate::model3d::COLORS, sue_core::Value::from(colors)));
+                    slid.changed = true;
+                    slid.released = true;
+                }
+            }
+            if figure {
+                let mut limits = Body::of(model).limits;
+                if check(
+                    ui,
+                    theme,
+                    "sue-paint-model-limits",
+                    &tr!("joint-angle-limits"),
+                    &mut limits,
+                ) {
+                    set.push((crate::figure::LIMITS, sue_core::Value::from(limits)));
+                    slid.changed = true;
+                    slid.released = true;
+                }
+            }
+            let mut shaped = look.clone();
+            for (index, (name, weight)) in look.morphs.iter().enumerate() {
+                let mut value = weight * 100.0;
+                let moved = slide(
+                    ui,
+                    theme,
+                    ("sue-paint-model-morph", index),
+                    name,
+                    &mut value,
+                    0.0..=100.0,
+                    "",
+                    0,
+                );
+                if moved.changed {
+                    shaped = shaped.with_morph(name, value / 100.0);
+                }
+                slid |= moved;
+            }
+            if shaped != look {
+                set.push((
+                    crate::model3d::MORPHS,
+                    sue_core::Value::from(shaped.morphs_text()),
+                ));
+            }
+        });
+        ((!set.is_empty()).then_some(set), slid)
+    }
+
     /// The body shape part by part: every slider of [`SLIDERS`] the
     /// figure has, under the part it shapes, with what the figure shows
     /// (guide lines) and whether it keeps to the ground.
@@ -132,11 +206,10 @@ impl SuePaint {
             }
             let mut group = "";
             for (index, slider) in SLIDERS.iter().enumerate() {
-                let shown = match body.kind {
-                    Kind::Hand => slider.hand,
-                    Kind::Body => slider.key != "bust" || body.build == Build::Female,
-                    _ => false,
-                };
+                // The head and face have their own section.
+                let shown = slider.suits(body.kind)
+                    && !slider.of_face()
+                    && (slider.key != "bust" || body.build == Build::Female);
                 if !shown {
                     continue;
                 }
@@ -184,6 +257,103 @@ impl SuePaint {
             }
         });
         slid
+    }
+
+    /// The head and face: an expression to wear, then every slider of
+    /// the head, the face, the eyes, the nose, the mouth, the ears and
+    /// the expressions, under the part it shapes.
+    pub(super) fn face_rows(&mut self, ui: &mut Ui, theme: &Theme, body: &mut Body) -> Slid {
+        let mut slid = Slid::default();
+        if !matches!(body.kind, Kind::Body | Kind::Head) {
+            return slid;
+        }
+        ui::section(ui, theme, &tr!("face-shape"), |ui| {
+            let names: Vec<String> = crate::figure::EXPRESSIONS
+                .iter()
+                .map(|(name, _)| crate::localize(name))
+                .chain(std::iter::once(tr!("expression-mixed")))
+                .collect();
+            let now = body
+                .expression()
+                .unwrap_or(crate::figure::EXPRESSIONS.len());
+            let mut chosen = now;
+            let response = ui::dropdown("sue-paint-figure-expression", &mut chosen, &names)
+                .label(&tr!("expression"))
+                .show(ui, theme);
+            let response = ui::tooltip(response, &Tip::new(&tr!("expression-help")), theme);
+            if response.changed() && chosen != now && chosen < crate::figure::EXPRESSIONS.len() {
+                *body = body.with_expression(chosen);
+                slid.changed = true;
+                slid.released = true;
+            }
+            let mut group = "";
+            for (index, slider) in SLIDERS.iter().enumerate() {
+                if !slider.of_face() {
+                    continue;
+                }
+                if slider.group != group {
+                    group = slider.group;
+                    ui.label(
+                        egui::RichText::new(crate::localize(group))
+                            .font(theme.text_font(TextRole::Caption))
+                            .color(theme.text_muted()),
+                    );
+                }
+                let mut value = body.parts[index] * 100.0;
+                let moved = slide(
+                    ui,
+                    theme,
+                    ("sue-paint-figure-slider", slider.key),
+                    &crate::localize(slider.name),
+                    &mut value,
+                    slider.range[0] * 100.0..=slider.range[1] * 100.0,
+                    "",
+                    0,
+                );
+                if moved.changed {
+                    *body = body.with_slider(slider.key, value / 100.0);
+                }
+                slid |= moved;
+            }
+        });
+        slid
+    }
+
+    /// Where the eyes look: across and up. Returns the pose with both
+    /// eyes turned when a slider moved, and whether it was let go.
+    pub(super) fn gaze_rows(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        pose: &Pose,
+        body: &Body,
+    ) -> Option<(Pose, bool)> {
+        body.eyes()?;
+        let now = crate::figure::gaze(pose, body);
+        let mut gaze = now;
+        let mut slid = Slid::default();
+        ui.label(
+            egui::RichText::new(tr!("gaze"))
+                .font(theme.text_font(TextRole::Caption))
+                .color(theme.text_muted()),
+        );
+        for (axis, name) in [tr!("gaze-across"), tr!("gaze-up")].iter().enumerate() {
+            let most = crate::figure::GAZE[axis];
+            slid |= slide(
+                ui,
+                theme,
+                ("sue-paint-figure-gaze", axis),
+                name,
+                &mut gaze[axis],
+                -most..=most,
+                &tr!("deg"),
+                0,
+            );
+        }
+        if gaze != now {
+            return Some((crate::figure::with_gaze(pose, body, gaze), slid.released));
+        }
+        slid.released.then(|| (pose.clone(), true))
     }
 
     /// The posing options under the pose buttons: Joint angle limits,

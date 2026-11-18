@@ -331,6 +331,7 @@ impl SuePaint {
         let model = crate::three::model_of(&cx.world.arena, layer);
         let place = self.pending_place.take().filter(|(id, _)| *id == layer);
         let shape = self.pending_shape.take().filter(|(id, _)| *id == layer);
+        let look = self.pending_look.take().filter(|(id, _)| *id == layer);
         if let Some(model) = model
             && let Ok(entity) = cx.world.arena.get_by_id_mut(model)
         {
@@ -342,6 +343,11 @@ impl SuePaint {
             }
             if let Some((_, body)) = shape {
                 for (key, value) in body_values(&body) {
+                    properties.set(key, value);
+                }
+            }
+            if let Some((_, look)) = look {
+                for (key, value) in look {
                     properties.set(key, value);
                 }
             }
@@ -409,13 +415,16 @@ impl SuePaint {
         });
     }
 
-    /// Shows the drawing figure of 3D layer `layer` posed as `pose`, in
-    /// place (while it is being posed; [`Self::finish_pose`] records it).
+    /// Shows the drawing figure of 3D layer `layer` posed as `pose`
+    /// (and, when its whole body is being moved, standing at `stands`),
+    /// in place (while it is being posed; [`Self::finish_pose`] records
+    /// it).
     pub(crate) fn preview_pose(
         &mut self,
         cx: &mut AppletContext<'_>,
         layer: EntityId,
         pose: &crate::figure::Pose,
+        stands: Option<[f32; 3]>,
     ) {
         let Some(model) = crate::figure::of_layer(&cx.world.arena, layer) else {
             return;
@@ -424,6 +433,9 @@ impl SuePaint {
             entity
                 .properties_mut()
                 .set(crate::figure::POSE, pose.to_text());
+            if let Some(stands) = stands {
+                stand_at(entity, stands);
+            }
         }
         let Some(raster) = doc::raster(&cx.world.arena, layer) else {
             return;
@@ -457,13 +469,15 @@ impl SuePaint {
     }
 
     /// Records a figure's pose change as one step: back to `base` and
-    /// `before` (its pixels), then the new pose.
+    /// `before` (its pixels) and, when its whole body was moved, to
+    /// where it `stood`, then the new pose and place.
     pub(crate) fn finish_pose(
         &mut self,
         cx: &mut AppletContext<'_>,
         layer: EntityId,
         base: &crate::figure::Pose,
         before: &[u8],
+        stood: Option<[Option<f32>; 3]>,
     ) {
         let Some(model) = crate::figure::of_layer(&cx.world.arena, layer) else {
             return;
@@ -477,13 +491,27 @@ impl SuePaint {
         else {
             return;
         };
-        if now == *base {
+        let stands = cx
+            .world
+            .arena
+            .get_by_id(model)
+            .ok()
+            .map(|entity| crate::three::Placement::of(entity).position);
+        // Where it was moved to, when it was moved at all.
+        let went = stood
+            .zip(stands)
+            .filter(|(stood, stands)| stood.map(|value| value.unwrap_or(0.0)) != *stands)
+            .map(|(_, stands)| stands);
+        if now == *base && went.is_none() {
             return;
         }
         if let Ok(entity) = cx.world.arena.get_by_id_mut(model) {
             entity
                 .properties_mut()
                 .set(crate::figure::POSE, base.to_text());
+            if let (Some(stood), Some(_)) = (stood, went) {
+                stand_back(entity, stood);
+            }
         }
         if let Some(into) =
             doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut)
@@ -491,7 +519,17 @@ impl SuePaint {
         {
             into.copy_from_slice(before);
         }
-        if let Some(edit) = crate::figure::set_pose(&cx.world.arena, layer, &now, &tr!("pose")) {
+        let edit = match went {
+            Some(stands) => crate::figure::set_pose_placed(
+                &cx.world.arena,
+                layer,
+                &now,
+                stands,
+                &tr!("figure-move"),
+            ),
+            None => crate::figure::set_pose(&cx.world.arena, layer, &now, &tr!("pose")),
+        };
+        if let Some(edit) = edit {
             Self::apply(cx, edit);
         }
     }
@@ -558,8 +596,11 @@ impl SuePaint {
             return;
         };
         let shaped = model_changed.iter().any(|(key, _)| BODY_KEYS.contains(key));
+        let looks = model_changed.iter().any(|(key, _)| LOOK_KEYS.contains(key));
         let label = if shaped {
             tr!("body-shape")
+        } else if looks {
+            tr!("model-look")
         } else if model_changed.is_empty() {
             tr!("move-camera")
         } else {
@@ -916,6 +957,13 @@ fn shown_now(arena: &sue_core::Arena, layer: EntityId, model: Option<EntityId>) 
     )
 }
 
+/// The properties that say how an imported model looks and poses.
+const LOOK_KEYS: [&str; 3] = [
+    crate::model3d::COLORS,
+    crate::model3d::MORPHS,
+    crate::figure::LIMITS,
+];
+
 /// The properties of a figure's body shape.
 const BODY_KEYS: [&str; 9] = [
     crate::figure::GROUND,
@@ -931,7 +979,10 @@ const BODY_KEYS: [&str; 9] = [
 
 /// The properties of a 3D layer's model a drag may change: its placement
 /// and a figure's body shape.
-const MODEL_KEYS: [&str; 16] = [
+const MODEL_KEYS: [&str; 19] = [
+    crate::model3d::COLORS,
+    crate::model3d::MORPHS,
+    crate::figure::LIMITS,
     crate::figure::GROUND,
     crate::three::OBJECT_X,
     crate::three::OBJECT_Y,
@@ -1006,5 +1057,34 @@ fn restore(arena: &mut sue_core::Arena, id: EntityId, props: &[(&'static str, Op
                 }
             }
         }
+    }
+}
+
+/// Stands the figure model `entity` at `position`, in place (a preview;
+/// the pose's undo step records it).
+fn stand_at(entity: &mut sue_core::Entity, position: [f32; 3]) {
+    for (key, value) in [
+        (crate::three::OBJECT_X, position[0]),
+        (crate::three::OBJECT_Y, position[1]),
+        (crate::three::OBJECT_Z, position[2]),
+    ] {
+        entity.properties_mut().set(key, f64::from(value));
+    }
+}
+
+/// Puts the figure model `entity` back where it `stood` before a
+/// preview moved it: a place it had no property for (nothing had moved
+/// it yet) loses the property again, so undo finds the model exactly
+/// as it was.
+fn stand_back(entity: &mut sue_core::Entity, stood: [Option<f32>; 3]) {
+    for (key, value) in [
+        (crate::three::OBJECT_X, stood[0]),
+        (crate::three::OBJECT_Y, stood[1]),
+        (crate::three::OBJECT_Z, stood[2]),
+    ] {
+        let _ = match value {
+            Some(value) => entity.properties_mut().set(key, f64::from(value)),
+            None => entity.properties_mut().remove(key),
+        };
     }
 }

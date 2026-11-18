@@ -569,12 +569,12 @@ impl SuePaint {
         }
         // A figure's pose from Tool Property: shown now, kept when let go.
         if let Some((layer, pose)) = self.pending_pose.take() {
-            self.preview_pose(cx, layer, &pose);
+            self.preview_pose(cx, layer, &pose, None);
         }
         if std::mem::take(&mut self.pose_release)
             && let Some((layer, base, before)) = self.pose_before.take()
         {
-            self.finish_pose(cx, layer, &base, &before);
+            self.finish_pose(cx, layer, &base, &before, None);
         }
         if let Some((layer, body)) = self.pending_body.take()
             && let Some(edit) =
