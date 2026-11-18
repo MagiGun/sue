@@ -680,7 +680,7 @@ Three shared shapes need no component of their own:
 | --- | --- | --- | --- |
 | Layered pictures (`sue_model::picture`) | a `sue.image` entity without a base, ordered `CHILD` layers, shared properties | Size (`image.width`, `image.height`) and resolution (`image.dpi`); raster layers (any child with a `RasterTile2D` base, usually class `sue.layer`) and paper layers (`sue.layer.paper`, one `layer.color`); `LayerStyle` reads visibility, opacity, blend, clipping, draft and offset from `style.*` and `layer.*` properties | painting, photo editing, compositing, textures, thumbnails |
 | Manuscripts (`sue_model::manuscript`) | a `sue.manuscript` entity, ordered `CHILD` folders and documents | A binder with draft, research and trash folders (`manuscript.role`); synopsis, notes, status, label, include, word target and keywords as `doc.*` properties (§3.8) | novels, scripts, theses, manuals, e-books, outlines |
-| `BlendMode` | its name in `style.blend` | 26 blend modes (normal; darken, multiply, burns; lighten, screen, dodges, add; overlay and the lights; difference, exclusion, divide; hue, saturation, color, luminosity) and W3C compositing with straight alpha; names from a newer Sue fall back to normal | every feature that stacks layers |
+| `BlendMode` | its name in `style.blend` | 28 blend modes (normal; darken, multiply, burns, subtract; lighten, screen, dodges with glow dodge, add with add glow; overlay and the lights; difference, exclusion, divide; hue, saturation, color, luminosity) and W3C compositing with straight alpha; names from a newer Sue fall back to normal | every feature that stacks layers |
 
 A layer can be any raster entity, so a photo in the project can also be a
 layer of a picture: the same entity, never a copy.
@@ -1604,14 +1604,15 @@ sequence wait under hidden temporary names (`Staged`) that a cancel
 takes away.
 
 **Start pages** (`sue_wm::start`). Shared widgets for the page a studio
-opens on: a rail of large buttons with labels (`rail`, the first round),
-icon buttons (`icon_button`, `glyph` draws Sue's own monochrome glyphs),
-a search box, chips, a tri-state check (`check`), toolbar actions, a
+opens on: icon buttons (`icon_button`; `square_icon` draws an icon of
+Sue's set, `sue_wm::icons`, in the middle of a box), a search box,
+chips, a tri-state check (`check`), toolbar actions, a
 dropdown, category rows and trees (`category`), cards with a picture, a
 tick, a heart and a `>` (`card`, `list_row`), and popups (`popup`) centered
 over the dimmed page with a title, an X and grouped rows (`group`, `Row`,
-`Trailing::{More, External, Switch, Text}`). Sharp corners and theme
-colors, as on the Hub. `ShellRequest::Command("open-url:<link>")` opens a
+`Trailing::{More, External, Switch, Text}`). Corners take the theme's
+radius and every color is the theme's, as on the Hub.
+`ShellRequest::Command("open-url:<link>")` opens a
 web page in the system's browser.
 
 **Autosave.** Work nobody saved is kept by itself: `general.autosave_seconds`

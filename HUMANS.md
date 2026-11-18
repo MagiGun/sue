@@ -1437,6 +1437,33 @@ A few things make projects safe to keep for years:
 
 ---
 
+## Not built on purpose
+
+A few things Sue Paint's model program has are left out for good, or for
+now, so nobody waits for them:
+
+- **The material store and material downloads.** Sue shows no page of
+  another program's material store, has no button that opens it and
+  downloads no brush or picture from a link. Brushes, pictures and
+  materials that are already on your device are imported instead (the
+  Sub Tool palette, the Hub's Materials place).
+- **Clip Studio account features.** Nothing in Sue signs in to a Clip
+  Studio account, so its cloud files and anything tied to that account
+  or to Clip Studio's own hardware have no menu item and no settings
+  page.
+- **Five menu entries no lesson Sue follows uses:** the three Toei
+  exposure sheet entries of the Timeline menu, OpenToonz Scene File
+  under Export Animation, and Edit, Shading Assist. Sue's own exposure
+  sheet, as a CSV file in and out, is there.
+- **The desktop layout on a phone, for now.** A phone gets Simple Mode
+  and Studio Mode, whose palettes come up as sheets. The layout with
+  docked palettes needs more room than a phone has.
+
+The list for engineers, with every other row of Sue Paint's parity, is
+`docs/paint-parity.md`.
+
+---
+
 ## Where Sue is heading
 
 Sue is meant to grow into the one app for nearly every kind of creative and

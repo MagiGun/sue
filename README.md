@@ -42,14 +42,14 @@ theme (black to white, nothing else), straight onto the **Hub**:
   and sub tools (pens, pencils, brushes, airbrushes, erasers, fill, gradient,
   figures, selections, eyedropper, hand, zoom, move layer) with pen pressure
   and stabilization, a color wheel and sets, canvas tabs with a turnable
-  view, a navigator, and layers with 26 blend modes, clipping and locks. Its
+  view, a navigator, and layers with 28 blend modes, clipping and locks. Its
   page comes in over the Hub and its palettes slide in from the edges.
 - **Sue Writer:** pages, styles, a binder, a corkboard, an outliner,
   composition mode and compiling to PDF, Word, OpenDocument, EPUB and more.
 - **The command palette:** `Tab` or `/` for a fuzzy search over every action
   and template.
-- **Settings:** a floating window (the Sue menu or `Ctrl+,`) with nine
-  categories, a filter box and a live control for every rice parameter.
+- **Settings:** a dialog over the page (the Sue menu or `Ctrl+,`) with a list
+  of categories, a filter box and a live control for every rice parameter.
 
 Every text field selects with the mouse, double-clicks words, copies, cuts and
 pastes, and `Ctrl+Z` and `Ctrl+Y` undo through the one global undo tree. Every
