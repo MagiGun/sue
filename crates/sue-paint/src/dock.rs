@@ -1983,13 +1983,28 @@ impl SuePaint {
         } else {
             0.0
         };
-        let builder = egui::ViewportBuilder::default()
+        // Its place and size are asked of the window when it opens only:
+        // after that it is where it is moved and as big as it is made
+        // (its title bar and edges, or the system's), and that is kept.
+        // Asked every frame, the window could not be moved, and its own
+        // title bar made it a bar taller each frame.
+        let shown_key = egui::Id::NULL.with(("sue-paint-palette-window", palette.key()));
+        let pass = ctx.cumulative_pass_nr();
+        let open = ctx
+            .data(|data| data.get_temp::<u64>(shown_key))
+            .is_some_and(|last| last + 1 >= pass);
+        ctx.data_mut(|data| data.insert_temp(shown_key, pass));
+        let mut builder = egui::ViewportBuilder::default()
             .with_title(palette.title())
-            .with_position(main + rect.min.to_vec2())
-            .with_inner_size(rect.size() + vec2(0.0, bar))
             .with_min_inner_size(vec2(palette.fixed_width().unwrap_or(160.0), 100.0 + bar))
             .with_resizable(true)
             .with_decorations(!own_frame);
+        if !open {
+            // `rect` is the palette below its title bar.
+            builder = builder
+                .with_position(main + rect.min.to_vec2() - vec2(0.0, bar))
+                .with_inner_size(rect.size() + vec2(0.0, bar));
+        }
         let (closed, redock, now) = ctx.show_viewport_immediate(
             egui::ViewportId::from_hash_of(("sue-paint-palette", palette.key())),
             builder,
@@ -2030,7 +2045,8 @@ impl SuePaint {
             },
         );
         if let Some(now) = now {
-            self.keep_window(palette, now.translate(-main.to_vec2()));
+            let below_bar = Rect::from_min_max(now.min + vec2(0.0, bar), now.max);
+            self.keep_window(palette, below_bar.translate(-main.to_vec2()));
         }
         if closed {
             self.close_palette(palette);
