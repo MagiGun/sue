@@ -179,7 +179,20 @@ fn sue_paint_palettes_drag_by_their_title_bars() {
     for _ in 0..10 {
         texts = step(&mut runtime, Vec::new());
     }
-    let after = layers_at(&texts).expect("Layer 1 is still listed");
+    // The palette is short in the crowded left column, and rows out of
+    // sight are not drawn, so its place is read from its title and its
+    // blend mode row.
+    let after = texts
+        .iter()
+        .find(|(text, at)| text == "Layer" && at.y > 300.0)
+        .map(|(_, at)| *at)
+        .expect("the Layer palette is still shown");
+    assert!(
+        texts
+            .iter()
+            .any(|(text, at)| text == "Normal" && at.x < 400.0 && at.y > after.y),
+        "the Layer palette's own rows came with it"
+    );
     assert!(
         after.x < 400.0,
         "the Layer palette moved to the left column: {before:?} then {after:?}"

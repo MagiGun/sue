@@ -11,6 +11,37 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.82] - 2026-11-17
+
+### Added
+
+- Sue Paint, 3D drawing figures: drag a figure's hips and the whole
+  body moves. Pinned hands and feet stay where they are and their arms
+  and legs bend to reach; a figure that keeps to the ground comes down
+  on bent knees instead of sinking through the floor. With the hips
+  picked, three arrows beside the rotation rings move the body along
+  one axis each. Drag the spine or the chest to lean the trunk. Ctrl
+  and drag still bends and swings the hips.
+- Sue Paint, **Face** in Tool Property: sliders for the head, the face
+  (forehead, temples, cheeks, cheekbones, jaw, chin), the eyes (size,
+  spacing, height, slant, eyebrows), the nose, the mouth and the ears,
+  **Age** for the whole body, **Face age**, and **Drawn style**, which
+  takes the head toward a drawn one (larger eyes, a small nose and
+  mouth, a pointed chin). **Expression** wears Neutral, Smile, Angry,
+  Surprised or Sad, and their own sliders, with Eyes closed and Mouth
+  open, mix them. The head figure has all of it. Body shape materials
+  keep the face with the rest.
+- Sue Paint, 3D drawing figures: eyes have an iris and a pupil, and
+  **Gaze across** and **Gaze up** turn both together.
+- Sue Paint, hands: **Vein pattern** gives a hand other veins.
+- Sue Paint, imported 3D models: a glTF or GLB model shows its own
+  colors and pictures (base color, the picture laid over it, colors at
+  its points), and an OBJ file takes the colors and pictures of the
+  material file beside it. **Show its colors and pictures** turns them
+  off for plain gray. A model's morph targets are sliders. **Joint
+  angle limits** is a setting of each imported model, off until you
+  turn it on.
+
 ### Changed
 
 - Sue Paint: the tabs a palette shows on a phone or a tablet, and in the
@@ -45,51 +76,6 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint, Layer palette: a layer dragged to the top or bottom edge
   of the list scrolls the list, so it can reach a row that was out of
   sight.
-
-### Fixed
-
-- Sue Paint, Layer palette: a long list of layers no longer slows the
-  interface; rows that are scrolled out of sight cost nothing.
-- Sue Paint, Layer palette: a layer let go outside the list no longer
-  moves onto a row hidden under the palette's buttons.
-- Sue Paint, Layer palette: dropping a layer where it already is no
-  longer adds an empty step to Undo.
-- Sue Paint, Layer palette: pressing an eye and letting go a little
-  beside it no longer drags the layer to another place in the list.
-- Sue Paint, Layer palette: the line that marks a drop above the first
-  row in sight is no longer cut off, and a pointer between two rows
-  still marks a place.
-### Added
-
-- Sue Paint, 3D drawing figures: drag a figure's hips and the whole
-  body moves. Pinned hands and feet stay where they are and their arms
-  and legs bend to reach; a figure that keeps to the ground comes down
-  on bent knees instead of sinking through the floor. With the hips
-  picked, three arrows beside the rotation rings move the body along
-  one axis each. Drag the spine or the chest to lean the trunk. Ctrl
-  and drag still bends and swings the hips.
-- Sue Paint, **Face** in Tool Property: sliders for the head, the face
-  (forehead, temples, cheeks, cheekbones, jaw, chin), the eyes (size,
-  spacing, height, slant, eyebrows), the nose, the mouth and the ears,
-  **Age** for the whole body, **Face age**, and **Drawn style**, which
-  takes the head toward a drawn one (larger eyes, a small nose and
-  mouth, a pointed chin). **Expression** wears Neutral, Smile, Angry,
-  Surprised or Sad, and their own sliders, with Eyes closed and Mouth
-  open, mix them. The head figure has all of it. Body shape materials
-  keep the face with the rest.
-- Sue Paint, 3D drawing figures: eyes have an iris and a pupil, and
-  **Gaze across** and **Gaze up** turn both together.
-- Sue Paint, hands: **Vein pattern** gives a hand other veins.
-- Sue Paint, imported 3D models: a glTF or GLB model shows its own
-  colors and pictures (base color, the picture laid over it, colors at
-  its points), and an OBJ file takes the colors and pictures of the
-  material file beside it. **Show its colors and pictures** turns them
-  off for plain gray. A model's morph targets are sliders. **Joint
-  angle limits** is a setting of each imported model, off until you
-  turn it on.
-
-### Changed
-
 - Sue Paint, 3D drawing figures: joints keep their volume. Elbows and
   knees no longer pinch when they fold right up, a twisted forearm,
   upper arm, thigh or shin turns along its whole length instead of
@@ -104,6 +90,20 @@ follow [Semantic Versioning](https://semver.org/).
 - Sue Paint, imported 3D models: models with more than 255 bones are
   posed by their bones too (up to 65535; more is refused with the
   reason).
+
+### Fixed
+
+- Sue Paint, Layer palette: a long list of layers no longer slows the
+  interface; rows that are scrolled out of sight cost nothing.
+- Sue Paint, Layer palette: a layer let go outside the list no longer
+  moves onto a row hidden under the palette's buttons.
+- Sue Paint, Layer palette: dropping a layer where it already is no
+  longer adds an empty step to Undo.
+- Sue Paint, Layer palette: pressing an eye and letting go a little
+  beside it no longer drags the layer to another place in the list.
+- Sue Paint, Layer palette: the line that marks a drop above the first
+  row in sight is no longer cut off, and a pointer between two rows
+  still marks a place.
 
 ## [0.0.81] - 2026-11-17
 
@@ -2415,7 +2415,8 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.81...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.82...HEAD
+[0.0.82]: https://github.com/MagiGun/sue/compare/v0.0.81...v0.0.82
 [0.0.81]: https://github.com/MagiGun/sue/compare/v0.0.8...v0.0.81
 [0.0.8]: https://github.com/MagiGun/sue/compare/v0.0.75...v0.0.8
 [0.0.75]: https://github.com/MagiGun/sue/compare/v0.0.74...v0.0.75
