@@ -53,7 +53,7 @@ pub use layout::{
     FIELDS, Frame, PAGE_SIZES, Page, PageFields, PageLayout, Rect, Running, RunningPiece,
     page_size, points, running_pieces,
 };
-pub use sequence::{Clip, Note, Notes, Sequence, Track};
+pub use sequence::{Clip, Marker, Note, Notes, Sequence, SequenceEdit, Track, Transition};
 pub use table::{
     Axis, Cell, Column, HEADER_ROWS, Reshape, SetCell, TEXT_TABLE, Table, WIDTHS, column_name,
     column_shares, parse_a1, text_table,
