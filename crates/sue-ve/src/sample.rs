@@ -179,3 +179,111 @@ pub fn sample_project(
     }
     Some((project, sequence))
 }
+
+/// Dresses the sample edit with what stage 2 adds, for the tour and the
+/// tests: the first shot gets a vignette (its amount keyed and eased) and
+/// a warmer color balance, the second a grade, the title a typewriter
+/// animator, and the sound track an equalizer.
+pub fn dress(cx: &mut sue_wm::AppletContext<'_>, sequence: sue_core::EntityId) -> Option<()> {
+    use crate::{fx, model};
+    use sue_core::Time;
+    let (step, ()) = model::plan(
+        cx.arena(),
+        sequence,
+        &tr!("sample-dress"),
+        |edit_sequence| {
+            // V1 holds the shots; the tracks over it the title.
+            let main = edit_sequence.tracks.iter().rposition(model::is_video);
+            let mut shots: Vec<u64> = Vec::new();
+            let mut words: Vec<u64> = Vec::new();
+            for (index, track) in edit_sequence.tracks.iter().enumerate() {
+                if !model::is_video(track) {
+                    continue;
+                }
+                for clip in track.clips() {
+                    if Some(index) == main {
+                        shots.push(clip.id);
+                    } else {
+                        words.push(clip.id);
+                    }
+                }
+            }
+            if let Some(first) = shots.first().copied()
+                && let Some((_, clip)) = edit_sequence.find_mut(first)
+            {
+                let vignette = fx::add(clip, "stylize.vignette");
+                let warm = fx::add(clip, "color.balance");
+                fx::update(clip, warm, |effect| {
+                    effect.params.set("mid_red", 25.0);
+                    effect.params.set("mid_blue", -20.0);
+                });
+                let curve = clip.animation.channel_mut(&fx::channel(vignette, "amount"));
+                for (seconds, value) in [(0.0, 0.0), (2.0, 80.0)] {
+                    curve.insert(sue_model::Key {
+                        time: Time::from_seconds(seconds),
+                        value,
+                        interpolation: sue_model::Interpolation::Linear,
+                    });
+                }
+                let at = Time::ZERO;
+                crate::keys::ease_key(curve, at, crate::keys::Ease::Both);
+                crate::keys::ease_key(curve, Time::from_seconds(2.0), crate::keys::Ease::Both);
+            }
+            if let Some(second) = shots.get(1).copied()
+                && let Some((_, clip)) = edit_sequence.find_mut(second)
+            {
+                crate::grade::set_grade(
+                    clip,
+                    &[crate::grade::Corrector {
+                        lift: [0.0, 0.0, 0.04, -0.02],
+                        gain: [0.06, 0.02, 0.0, 0.05],
+                        saturation: 1.25,
+                        contrast: 1.1,
+                        ..crate::grade::Corrector::default()
+                    }],
+                );
+            }
+            if let Some(title) = words.first().copied()
+                && let Some((_, clip)) = edit_sequence.find_mut(title)
+            {
+                let animator = crate::layers::Animator {
+                    softness: 1.0,
+                    ..crate::layers::Animator::default()
+                };
+                clip.properties
+                    .set(crate::layers::ANIMATOR, animator.to_value());
+                let (start, end) = (clip.source_in, clip.source_in + Time::from_seconds(1.5));
+                let curve = clip.animation.channel_mut(crate::layers::RANGE);
+                for (time, value) in [(start, 0.0), (end, 100.0)] {
+                    curve.insert(sue_model::Key {
+                        time,
+                        value,
+                        interpolation: sue_model::Interpolation::Linear,
+                    });
+                }
+            }
+            if let Some(track) = edit_sequence
+                .tracks
+                .iter_mut()
+                .find(|track| !model::is_video(track))
+            {
+                let mut fx = crate::audio::TrackFx {
+                    eq_on: true,
+                    comp_on: true,
+                    ..crate::audio::TrackFx::default()
+                };
+                fx.bands[0].gain = -4.0;
+                fx.bands[3].gain = 3.0;
+                track
+                    .properties
+                    .set(crate::fx::key::AUDIO_FX, fx.to_value());
+            }
+            Ok(())
+        },
+    )
+    .ok()?;
+    if let Some(step) = step {
+        cx.apply(sue_wm::ArenaEdit(step)).ok()?;
+    }
+    Some(())
+}

@@ -213,6 +213,7 @@ const FX: &[Command<SueVe>] = &[
     c("fx.save_preset", "cmd-save-effect-preset", "fx").with(Flags::PALETTE),
     c("fx.import_preset", "cmd-import-effect-preset", "fx").with(Flags::LEAVES_CANVAS),
     c("fx.export_preset", "cmd-export-effect-preset", "fx").with(Flags::LEAVES_CANVAS),
+    c("fx.add_key", "cmd-toggle-keyframe", "fx").keys("Ctrl+Alt+K"),
     c("fx.ease", "cmd-easy-ease", "fx").keys("F9"),
     c("fx.ease_in", "cmd-ease-in", "fx").keys("Shift+F9"),
     c("fx.ease_out", "cmd-ease-out", "fx").keys("Ctrl+Shift+F9"),
@@ -327,7 +328,8 @@ fn state(studio: &SueVe, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
             on_off(has_selection)
         }
         "edit.paste" => on_off(has_sequence && !studio.clipboard.is_empty()),
-        "fx.copy"
+        "fx.add_key"
+        | "fx.copy"
         | "fx.remove_all"
         | "fx.save_preset"
         | "fx.export_preset"

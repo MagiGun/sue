@@ -460,6 +460,10 @@ pub struct SueVe {
     pub relinking: Option<EntityId>,
     /// The audio track the Audio page's settings edit.
     pub audio_track: Option<usize>,
+    /// Navigation targets that need the arena, done on the next frame
+    /// (`select/video/<n>`, `select/title`, `select/audio/<n>`,
+    /// `seek/<seconds>`).
+    pub pending: Vec<String>,
 }
 
 impl Default for SueVe {
@@ -522,6 +526,7 @@ impl Default for SueVe {
             mask_picked: None,
             relinking: None,
             audio_track: None,
+            pending: Vec::new(),
         }
     }
 }
@@ -723,6 +728,42 @@ impl SueVe {
         };
         if let Some(step) = SequenceEdit::between(id, label, &before, after) {
             cx.record(ArenaEdit(step));
+        }
+    }
+
+    /// Does the navigation targets that need the arena: picks a clip by
+    /// its place, moves the playhead.
+    pub fn follow_pending(&mut self, cx: &mut AppletContext<'_>) {
+        for target in std::mem::take(&mut self.pending) {
+            let Some(sequence) = self.current(cx).cloned() else {
+                continue;
+            };
+            if let Some(seconds) = target
+                .strip_prefix("seek/")
+                .and_then(|s| s.parse::<f64>().ok())
+            {
+                let now = cx.view.now;
+                self.clock.seek(Time::from_seconds(seconds), now, cx.sink());
+                continue;
+            }
+            let parts: Vec<&str> = target.split('/').collect();
+            let main = sequence.tracks.iter().rposition(model::is_video);
+            let track = match parts.get(1).copied() {
+                Some("video") => main,
+                Some("title") => main.and_then(|main| main.checked_sub(1)),
+                Some("audio") => sequence
+                    .tracks
+                    .iter()
+                    .position(|track| !model::is_video(track)),
+                _ => None,
+            };
+            let index: usize = parts.get(2).and_then(|n| n.parse().ok()).unwrap_or(0);
+            if let Some(clip) = track.and_then(|track| sequence.tracks[track].clips().get(index)) {
+                self.selection = vec![clip.id];
+                self.picked = Some(clip.source);
+                self.fx_picked = None;
+                self.color.corrector = 0;
+            }
         }
     }
 
@@ -1512,6 +1553,31 @@ impl SueApplet for SueVe {
             }
             "pool/thumbs" => {
                 self.list = false;
+                true
+            }
+            "export-sheet" => {
+                self.mobile.export = true;
+                self.mobile.sheet = None;
+                true
+            }
+            target if target.starts_with("sheet/") => {
+                let name = &target["sheet/".len()..];
+                self.mobile.export = false;
+                self.mobile.sheet = crate::ui::mobile::TOOLS
+                    .iter()
+                    .find(|(tool, _, _)| *tool == name)
+                    .map(|(tool, _, _)| *tool);
+                self.mobile.sheet.is_some()
+            }
+            target if target.starts_with("workspace/") => {
+                self.dock = crate::ui::workspace(&format!(
+                    "view.workspace_{}",
+                    &target["workspace/".len()..]
+                ));
+                true
+            }
+            target if target.starts_with("select/") || target.starts_with("seek/") => {
+                self.pending.push(target.to_owned());
                 true
             }
             _ => false,

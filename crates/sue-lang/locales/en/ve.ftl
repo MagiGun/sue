@@ -589,3 +589,7 @@ canvas-black = Black
 canvas-white = White
 canvas-gray = Gray
 canvas-blue = Night Blue
+cmd-toggle-keyframe = Add or Remove Keyframe
+graph-pick-a-value = Pick a value in Effect Controls first (click its name)
+graph-playhead-outside = Put the playhead over the clip first
+sample-dress = Sample Effects

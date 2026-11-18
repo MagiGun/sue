@@ -554,9 +554,6 @@ pub(crate) fn program_monitor(
         studio.focus == Monitor::Program,
         theme,
     );
-    let size = model::frame_size(&sequence);
-    let frame_rect = fitted(parts.picture.shrink(theme.space(Space::S2)), size);
-    studio.program_rect = Some(frame_rect);
     let pressed = ui.interact(
         parts.picture,
         egui::Id::unique("sve-program-picture"),
@@ -565,6 +562,27 @@ pub(crate) fn program_monitor(
     if pressed.clicked() {
         studio.focus = Monitor::Program;
     }
+    program_picture(studio, ui, parts.picture, &sequence, cx, theme);
+    let length = sequence.duration().max(Time::SECOND);
+    let marks = model::marks(&sequence);
+    program_chrome(studio, ui, &parts, length, marks, cx, theme);
+}
+
+/// The program monitor's picture alone, fitted in `area`: the frame at
+/// the playhead, drawn on the graphics card or by the processor, and the
+/// dropped frames note while playing (the phone layout shows only this).
+pub(crate) fn program_picture(
+    studio: &mut SueVe,
+    ui: &mut Ui,
+    area: Rect,
+    sequence: &sue_model::Sequence,
+    cx: &mut AppletContext<'_>,
+    theme: &Theme,
+) {
+    let sequence = sequence.clone();
+    let size = model::frame_size(&sequence);
+    let frame_rect = fitted(area.shrink(theme.space(Space::S2)), size);
+    studio.program_rect = Some(frame_rect);
     let time = studio.clock.position;
     let arena = cx.arena();
     let kind = |id: EntityId| {
@@ -607,8 +625,18 @@ pub(crate) fn program_monitor(
             theme.text_muted(),
         );
     }
-    let length = sequence.duration().max(Time::SECOND);
-    let marks = model::marks(&sequence);
+}
+
+/// The program monitor's jog bar and transport row.
+fn program_chrome(
+    studio: &mut SueVe,
+    ui: &mut Ui,
+    parts: &Parts,
+    length: Time,
+    marks: (Option<Time>, Option<Time>),
+    cx: &mut AppletContext<'_>,
+    theme: &Theme,
+) {
     if let Some((at, dragging)) = jog(
         ui,
         parts.jog,

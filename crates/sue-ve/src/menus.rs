@@ -176,6 +176,7 @@ pub fn menus() -> Vec<Menu> {
                 "fx.mask_path",
                 "fx.track_mask",
                 "",
+                "fx.add_key",
                 "fx.ease",
                 "fx.ease_in",
                 "fx.ease_out",

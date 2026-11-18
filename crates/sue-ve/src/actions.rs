@@ -101,6 +101,33 @@ pub fn run(studio: &mut SueVe, cx: &mut AppletContext<'_>, name: &str) -> bool {
                 cx.request(ShellRequest::PickFile(pick));
             }
         }
+        "fx.add_key" => {
+            let (Some((_, clip)), Some(channel)) =
+                (studio.selected_clip(cx), studio.graph.channel.clone())
+            else {
+                cx.notify(tr!("graph-pick-a-value"));
+                return true;
+            };
+            let at = studio.clock.position;
+            if at < clip.start || at >= clip.end() {
+                cx.notify(tr!("graph-playhead-outside"));
+                return true;
+            }
+            let time = clip.source_time(at);
+            let on_key = clip
+                .animation
+                .channel(&channel)
+                .is_some_and(|curve| curve.keys().iter().any(|key| key.time == time));
+            let value = channel_value(&clip, &channel, at);
+            let id = clip.id;
+            studio.edit(cx, &tr!("cmd-toggle-keyframe"), |sequence, _| {
+                if on_key {
+                    crate::edit::remove_key(sequence, id, &channel, at)
+                } else {
+                    crate::edit::set_key(sequence, id, &channel, at, value)
+                }
+            });
+        }
         "fx.ease" | "fx.ease_in" | "fx.ease_out" | "fx.linear" | "fx.hold" => {
             let ease = match name {
                 "fx.ease_in" => Ease::In,
@@ -292,6 +319,40 @@ pub fn run(studio: &mut SueVe, cx: &mut AppletContext<'_>, name: &str) -> bool {
         _ => return false,
     }
     true
+}
+
+/// The value channel `channel` of `clip` has at sequence time `at`: its
+/// keys, else the property, effect parameter or mask number it drives,
+/// else its default.
+#[must_use]
+pub fn channel_value(clip: &sue_model::Clip, channel: &str, at: Time) -> f64 {
+    if let Some(value) = clip
+        .animation
+        .channel(channel)
+        .and_then(|curve| curve.sample(clip.source_time(at)))
+    {
+        return value;
+    }
+    if let Some((id, param)) = fx::parse_channel(channel) {
+        return fx::effects(clip)
+            .into_iter()
+            .find(|effect| effect.id == id)
+            .map_or(0.0, |effect| effect.number(clip, param, at));
+    }
+    if let Some(rest) = channel.strip_prefix("mask.") {
+        let mut parts = rest.splitn(2, '.');
+        if let (Some(Ok(index)), Some(param)) =
+            (parts.next().map(str::parse::<usize>), parts.next())
+            && let Some(found) = mask::masks(clip).get(index)
+        {
+            return match param {
+                "feather" => found.feather,
+                "expansion" => found.expansion,
+                _ => found.opacity,
+            };
+        }
+    }
+    clip.value_at(channel, at, model::default_of(channel))
 }
 
 /// Eases the keys the graph editor picked, else every key at the playhead

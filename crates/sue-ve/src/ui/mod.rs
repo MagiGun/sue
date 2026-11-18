@@ -267,6 +267,21 @@ impl SueVe {
     pub(crate) fn menu_bar(&mut self, ui: &mut Ui, cx: &mut AppletContext<'_>) {
         let theme = cx.theme.clone();
         let rect = ui.max_rect();
+        if cx.view.form_factor != sue_platform::FormFactor::Desktop {
+            // A phone's bar is short: the project's name, as CapCut's.
+            let name = self
+                .project
+                .and_then(|id| cx.arena().get_by_id(id).ok())
+                .map_or_else(|| tr!("applet-name"), |entity| entity.name().to_owned());
+            ui.painter().text(
+                pos2(rect.left() + theme.space(Space::S4), rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                name,
+                font(&theme, TextRole::Body),
+                theme.text,
+            );
+            return;
+        }
         let picked = {
             let mut menubar = std::mem::take(&mut self.menubar);
             let facts = Facts::of(cx);
@@ -310,6 +325,7 @@ impl SueVe {
         {
             self.source = crate::studio::SourceView::default();
         }
+        self.follow_pending(cx);
         // What finished in the background, whenever the ticks run.
         if self.hub.poll() {
             ui.ctx().request_repaint();

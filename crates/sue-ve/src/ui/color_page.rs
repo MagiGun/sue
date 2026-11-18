@@ -80,6 +80,7 @@ pub fn color_page(
             .max_rect(controls.shrink(theme.space(Space::S3)))
             .id_salt("sve-color-controls"),
     );
+    child.set_clip_rect(controls);
     let (changed, done) = controls_ui(studio, &mut child, &mut corrector, cx, theme);
     if changed && corrector != before {
         list[index] = corrector;
@@ -502,7 +503,7 @@ fn slide(
     }
 }
 
-/// The four wheels and the primary sliders.
+/// The four wheels at the left and the primary sliders beside them.
 fn primaries(
     ui: &mut Ui,
     corrector: &mut Corrector,
@@ -511,11 +512,14 @@ fn primaries(
     theme: &Theme,
 ) {
     let room = ui.available_rect_before_wrap();
-    let sliders_height = Density::Compact.row() * 2.0 + theme.space(Space::S3);
-    let wheel_height = (room.height() - sliders_height).max(64.0);
-    let side = ((room.width() - theme.space(Space::S4) * 3.0) / 4.0)
-        .min(wheel_height)
+    let gap = theme.space(Space::S4);
+    // Over a wheel its name, under it its master slider.
+    let extra = theme.text_size(TextRole::Caption) + Density::Compact.row() + gap;
+    let wheels_width = room.width() * 0.66;
+    let side = ((wheels_width - gap * 3.0) / 4.0)
+        .min(room.height() - extra)
         .max(48.0);
+    let sliders = Rect::from_min_max(pos2(room.left() + (side + gap) * 4.0, room.top()), room.max);
     ui.horizontal(|ui| {
         for (index, name) in [
             tr!("color-lift"),
@@ -537,64 +541,53 @@ fn primaries(
             *done |= d;
         }
     });
-    ui.add_space(theme.space(Space::S2));
-    ui.columns(3, |columns| {
-        slide(
-            &mut columns[0],
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(sliders)
+            .id_salt("sve-primary-sliders"),
+    );
+    let column = &mut child;
+    for (salt, label, value, range, decimals) in [
+        (
             "sve-contrast",
-            &tr!("color-contrast"),
+            tr!("color-contrast"),
             &mut corrector.contrast,
             0.0..=2.0,
             2,
-            changed,
-            done,
-            theme,
-        );
-        slide(
-            &mut columns[0],
+        ),
+        (
             "sve-pivot",
-            &tr!("color-pivot"),
+            tr!("color-pivot"),
             &mut corrector.pivot,
             0.0..=1.0,
             3,
-            changed,
-            done,
-            theme,
-        );
-        slide(
-            &mut columns[1],
+        ),
+        (
             "sve-saturation",
-            &tr!("color-saturation"),
+            tr!("color-saturation"),
             &mut corrector.saturation,
             0.0..=2.0,
             2,
-            changed,
-            done,
-            theme,
-        );
-        slide(
-            &mut columns[1],
+        ),
+        (
             "sve-temperature",
-            &tr!("color-temperature"),
+            tr!("color-temperature"),
             &mut corrector.temperature,
             -100.0..=100.0,
             0,
-            changed,
-            done,
-            theme,
-        );
-        slide(
-            &mut columns[2],
+        ),
+        (
             "sve-tint",
-            &tr!("color-tint"),
+            tr!("color-tint"),
             &mut corrector.tint,
             -100.0..=100.0,
             0,
-            changed,
-            done,
-            theme,
+        ),
+    ] {
+        slide(
+            column, salt, &label, value, range, decimals, changed, done, theme,
         );
-    });
+    }
 }
 
 /// The chroma a wheel's red, green and blue offsets point at, as a point
@@ -631,11 +624,10 @@ fn wheel_ui(
     let mut done = false;
     ui.vertical(|ui| {
         ui.label(egui::RichText::new(name).font(font(theme, TextRole::Caption)));
-        let pad = side - Density::Compact.row();
-        let (rect, response) =
-            ui.allocate_exact_size(vec2(side, pad.max(32.0)), Sense::click_and_drag());
+        let (rect, response) = ui.allocate_exact_size(vec2(side, side), Sense::click_and_drag());
         let center = rect.center();
-        let radius = rect.width().min(rect.height()) / 2.0 - theme.space(Space::S1);
+        // The hue ring's dots stay inside the wheel's square.
+        let radius = (rect.width().min(rect.height()) / 2.0 - theme.space(Space::S1)) / 1.07;
         let painter = ui.painter_at(rect);
         // The hue ring, faint, so the puck's direction reads.
         for step in 0..36 {

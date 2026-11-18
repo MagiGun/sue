@@ -164,7 +164,8 @@ fn mixer_ui(
     let Some(sequence) = studio.current(cx).cloned() else {
         return;
     };
-    let strip_width = (theme.space(Space::S9) * 2.4).max(Density::Compact.icon_button() * 3.0);
+    let strip_width = (theme.space(Space::S9) * 3.2).max(Density::Compact.icon_button() * 4.0);
+    let master_width = strip_width * 1.4;
     let inner = rect.shrink(theme.space(Space::S2));
     let picked = picked_track(studio, cx);
     let tracks: Vec<usize> = sequence
@@ -179,7 +180,7 @@ fn mixer_ui(
     for index in tracks {
         let strip = Rect::from_min_size(pos2(x, inner.top()), vec2(strip_width, inner.height()));
         x += strip_width + theme.space(Space::S2);
-        if strip.right() > inner.right() - strip_width {
+        if strip.right() > inner.right() - master_width {
             break;
         }
         let track = &sequence.tracks[index];
@@ -200,7 +201,7 @@ fn mixer_ui(
         studio.audio_track = Some(index);
     }
     // The master: the mix's peaks and loudness.
-    let master = Rect::from_min_max(pos2(inner.right() - strip_width, inner.top()), inner.max);
+    let master = Rect::from_min_max(pos2(inner.right() - master_width, inner.top()), inner.max);
     ui.painter().rect_filled(
         master,
         theme.corner(sue_wm::ui::Radius::Sm),
@@ -313,7 +314,7 @@ fn strip_ui(
     );
     let fx = audio::track_fx(track);
     let mut flip = None;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         for (what, label, on) in [
             ("eq", tr!("mixer-eq"), fx.eq_on),
             ("gate", tr!("mixer-gate"), fx.gate_on),

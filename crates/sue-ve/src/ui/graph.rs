@@ -166,12 +166,18 @@ pub fn graph_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, the
         return;
     }
     // The graph.
-    let area = Rect::from_min_max(pos2(rect.left(), bar.bottom()), rect.max)
-        .shrink2(vec2(theme.space(Space::S6), theme.space(Space::S4)));
+    let margin = theme.space(Space::S9) * 1.2;
+    let area = Rect::from_min_max(
+        pos2(rect.left() + margin, bar.bottom() + theme.space(Space::S4)),
+        rect.max - vec2(theme.space(Space::S6), theme.space(Space::S4)),
+    );
     if area.width() < 8.0 || area.height() < 8.0 {
         return;
     }
-    let painter = ui.painter_at(area.expand(theme.space(Space::S3)));
+    let painter = ui.painter_at(Rect::from_min_max(
+        pos2(rect.left(), area.top() - theme.space(Space::S3)),
+        area.max + vec2(theme.space(Space::S3), theme.space(Space::S3)),
+    ));
     let (from, to) = (
         clip.source_in,
         clip.source_out().max(clip.source_in + Time(1)),

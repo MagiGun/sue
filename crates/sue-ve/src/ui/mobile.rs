@@ -147,7 +147,10 @@ pub fn mobile_ui(
         super::pages::start_ui(studio, &mut child, rest, cx, theme);
         return;
     }
-    monitor::program_monitor(studio, ui, preview, cx, theme);
+    if let Some(sequence) = studio.current(cx).cloned() {
+        ui.painter().rect_filled(preview, SQUARE, theme.void);
+        monitor::program_picture(studio, ui, preview, &sequence, cx, theme);
+    }
     play_ui(studio, ui, play_row, cx, theme);
     lanes_ui(studio, ui, lanes, cx, theme);
     tools_ui(studio, ui, tools, theme);
@@ -599,7 +602,9 @@ fn sheet(
     theme: &Theme,
     content: impl FnOnce(&mut Ui),
 ) -> bool {
-    let height = (body.height() * 0.36).max(Density::Touch.row() * 4.0);
+    let height = (body.height() * 0.36)
+        .min(Density::Touch.row() * 7.0)
+        .max(Density::Touch.row() * 4.0);
     let tools = Density::Touch.icon_button() * 1.7;
     let rect = Rect::from_min_max(
         pos2(body.left(), body.bottom() - tools - height),
@@ -669,13 +674,19 @@ fn tile(ui: &mut Ui, salt: &str, icon: Icon, label: &str, on: bool, theme: &Them
         icon,
         theme.text,
     );
-    ui.painter().text(
-        place.center() + vec2(0.0, icon_side * 0.45),
-        Align2::CENTER_TOP,
-        label,
+    let galley = ui.painter().layout(
+        label.to_owned(),
         font(theme, TextRole::Micro),
         theme.text,
+        side - theme.space(Space::S2),
     );
+    let at = pos2(
+        place.center().x - galley.size().x / 2.0,
+        place.center().y + icon_side * 0.35,
+    );
+    ui.painter()
+        .with_clip_rect(place)
+        .galley(at, galley, theme.text);
     let _ = salt;
     response.clicked()
 }
