@@ -2629,6 +2629,33 @@ is kept as the model's `Encoded` bytes, a skinned glTF becomes a figure
 of `Kind::Imported` whose bones are its joints, and imported files are
 copied to the materials location's `models/`.
 
+**Figure skinning, whole body moves, faces and model looks (0.0.82).**
+`figure::skin` bends the skin: the joints' moves are blended as dual
+quaternions (a per joint share in `Shaped::dual` keeps the plain blend
+where a ball joint swings far), the twist of the upper arms, forearms,
+thighs and shins is spread along them (`Shaped::twists`, measured by a
+swing and twist split of each joint's turn), helpers carry skin part of
+the way between two joints (`Shaped::helpers`: the asset's joints named
+`+...`, the side of the hip a third of the way with the thigh), and the
+point of a folded elbow or knee is pushed out (`Shaped::hinges`). Skin
+joints are numbered with `u16`. `posing::moved` moves the whole body by
+a shift of its root: the limbs of the pins, and the feet of a body that
+keeps to the ground, reach back for where they were on a copy that does
+not keep to the ground, and the figure's `object.x`, `y` and `z` take
+the shift (`set_pose_placed` is the one step); `leaned` bends the spine
+and chest; `figure::arrows` are the translate manipulator's. Presets
+whose hands rest on the body are settled by `posing::settled`. The face
+is more of `figure::SLIDERS` (`FACE_GROUPS`, `Slider::suits`), kept in
+`figure.parts` like the rest; `EXPRESSIONS` are sliders of their own;
+`figure::gaze` and `with_gaze` turn the eye joints; irises are points
+added on the eyeballs with a color (`Shaped::colors`). `three::Surface`
+takes a color at each point, places on pictures and `Texture`s, and
+`Buffers::color` carries them to `draw`. `model3d` reads a glTF's base
+color factor, picture and point colors and its morph targets, turns an
+OBJ and its material file into one GLB, and shows a model by its
+`Look` (`model.colors`, `model.morphs`; another look is another cached
+rig); `figure.limits` is an imported figure's own limits switch.
+
 **Exposure sheet, curved text, fog.** `anim::sheet` reads a folder's
 keys as cels, blanks and holds a frame each; `sheet_csv` and
 `from_sheet_csv` write and read it, cels named by their layers.
