@@ -78,14 +78,33 @@ pub fn graph_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, the
             .show(&mut child, theme);
         return;
     };
-    let channels = keyed_channels(&clip);
-    if studio
-        .graph
-        .channel
-        .as_ref()
-        .is_none_or(|name| !channels.iter().any(|(found, _)| found == name))
-    {
-        studio.graph.channel = channels.first().map(|(name, _)| name.clone());
+    let mut channels = keyed_channels(&clip);
+    // A value of another clip (an effect or a mask this one lacks) goes.
+    if let Some(name) = studio.graph.channel.clone() {
+        let belongs = match crate::fx::parse_channel(&name) {
+            Some((id, _)) => crate::fx::effects(&clip)
+                .iter()
+                .any(|effect| effect.id == id),
+            None => name.strip_prefix("mask.").is_none_or(|rest| {
+                rest.split('.')
+                    .next()
+                    .and_then(|index| index.parse::<usize>().ok())
+                    .is_some_and(|index| index < crate::fx::mask::masks(&clip).len())
+            }),
+        };
+        if !belongs {
+            studio.graph.channel = None;
+        }
+    }
+    // The value picked in Effect Controls stays picked before it has a
+    // key (Add Keyframe keys it); with none picked, the first keyed one.
+    match studio.graph.channel.clone() {
+        Some(name) if !channels.iter().any(|(found, _)| *found == name) => {
+            let label = channel_label(&clip, &name);
+            channels.insert(0, (name, label));
+        }
+        Some(_) => {}
+        None => studio.graph.channel = channels.first().map(|(name, _)| name.clone()),
     }
     // The bar: the channel, value or speed, the eases.
     let bar_height = Density::Compact.icon_button() + theme.space(Space::S2);

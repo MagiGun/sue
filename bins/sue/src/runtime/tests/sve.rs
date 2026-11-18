@@ -1,7 +1,10 @@
 //! Sue VE driven through real frames: the Hub's New, the pages, importing
 //! a movie Sue made itself, placing it on the timeline by dragging it
 //! from the pool, cutting it with the keys, undo and redo, the inspector,
-//! and an export from the Deliver page.
+//! and an export from the Deliver page; then stage 2: an effect added from
+//! the browser and keyframed, a key eased, a grade dragged on the Color
+//! page, the mixer's equalizer switched, the phone layout's tool sheets,
+//! and an export with effects that matches the preview, each with undo.
 
 use super::*;
 use egui::pos2;
@@ -173,7 +176,8 @@ fn the_hub_makes_a_video_and_the_pages_say_what_they_hold() {
         applet: sve(),
         key: "hd".to_owned(),
     });
-    driver.settle(40);
+    // The page glides in; it takes clicks once it is in place.
+    driver.settle(90);
     assert_eq!(driver.runtime.shell.page(), Some(&sve()));
     let (_, sequence) = driver.sequence().expect("a project with a sequence");
     assert_eq!(sue_ve::model::frame_size(&sequence), (1920, 1080));
@@ -205,17 +209,33 @@ fn the_hub_makes_a_video_and_the_pages_say_what_they_hold() {
     }
     // The pool holds the new sequence.
     assert!(driver.rect_of("Sequence 1").is_some(), "{:?}", driver.texts);
-    // Pages not built yet say so, and lead back.
+    // The Color, Effects and Audio pages hold what they say.
     driver.click_page("Color");
-    assert!(
-        driver.has("Color grading comes in a later version"),
-        "{:?}",
-        driver.texts
-    );
-    driver.click_text("Back to the Edit page");
-    assert!(driver.rect_of("Timeline").is_some());
+    for wanted in ["Waveform", "Vectorscope", "Select a clip to grade it"] {
+        assert!(
+            driver.has(wanted),
+            "{wanted} on the Color page: {:?}",
+            driver.texts
+        );
+    }
     driver.click_page("Effects");
-    assert!(driver.has("Effects and compositing come in a later version"));
+    for wanted in ["Search effects", "Gaussian Blur", "Chroma Key"] {
+        assert!(
+            driver.has(wanted),
+            "{wanted} on the Effects page: {:?}",
+            driver.texts
+        );
+    }
+    driver.click_page("Audio");
+    for wanted in ["Master", "Record Voice Over", "Normalize Loudness"] {
+        assert!(
+            driver.has(wanted),
+            "{wanted} on the Audio page: {:?}",
+            driver.texts
+        );
+    }
+    driver.click_page("Edit");
+    assert!(driver.rect_of("Timeline").is_some());
     driver.click_page("Deliver");
     assert!(
         driver.has("A bit rate of 0 lets the quality decide"),
@@ -392,4 +412,337 @@ fn the_deliver_page_exports_the_edit_in_the_background() {
     assert!(facts.audio.is_some());
     let _ = std::fs::remove_file(out);
     let _ = Time::ZERO;
+}
+
+impl Driver {
+    /// Sends Sue VE to `target` (a page, a clip to pick, the playhead).
+    fn go(&mut self, target: &str) {
+        if let Some(applet) = self.runtime.applets.get_mut(&sve()) {
+            applet.navigate(target);
+        }
+        self.settle(3);
+    }
+
+    /// The sample edit, opened, its page come to rest.
+    fn sample(&mut self) -> EntityId {
+        let dir = self.root.join("media");
+        std::fs::create_dir_all(&dir).unwrap();
+        let made = self.runtime.with_context(&mut NoTextures, self.now, |cx| {
+            sue_ve::sample::sample_project(cx, &dir)
+        });
+        let (project, sequence) = made.expect("the sample edit");
+        self.request(ShellRequest::OpenIn {
+            entity: project,
+            applet: sve(),
+        });
+        self.settle(90);
+        sequence
+    }
+
+    /// The clip `index` of the track named `track`.
+    fn clip(&self, track: &str, index: usize) -> sue_model::Clip {
+        let (_, sequence) = self.sequence().expect("a sequence");
+        sequence
+            .tracks
+            .iter()
+            .find(|found| found.name == track)
+            .and_then(|found| found.clips().get(index))
+            .cloned()
+            .unwrap_or_else(|| panic!("{track} has a clip {index}"))
+    }
+
+    /// A double click on the text `text` (the topmost so named).
+    fn double_click_text(&mut self, text: &str) {
+        let at = self
+            .rect_of(text)
+            .unwrap_or_else(|| panic!("{text:?} is on screen: {:?}", self.texts))
+            .center();
+        // Long enough after the last click that this one is not counted
+        // as its second or third.
+        self.settle(30);
+        self.step(vec![egui::Event::PointerMoved(at)]);
+        self.step(vec![
+            Self::press(at, true, egui::Modifiers::NONE),
+            Self::press(at, false, egui::Modifiers::NONE),
+        ]);
+        self.step(vec![
+            Self::press(at, true, egui::Modifiers::NONE),
+            Self::press(at, false, egui::Modifiers::NONE),
+        ]);
+        self.settle(3);
+    }
+}
+
+#[test]
+fn an_effect_from_the_browser_is_keyframed_eased_and_undone() {
+    let mut driver = Driver::new("sve-effects");
+    driver.sample();
+    // The title on V2 picked, the playhead in it.
+    driver.go("select/title/0");
+    driver.go("seek/1.5");
+    driver.click_page("Effects");
+    // A double click in the browser adds the effect to the picked clip.
+    driver.double_click_text("Gaussian Blur");
+    let effects = sue_ve::fx::effects(&driver.clip("V2", 0));
+    assert_eq!(effects.len(), 1, "{effects:?}");
+    assert_eq!(effects[0].kind, "blur.gaussian");
+    // Its Radius in Effect Controls, picked by its name, then keyed at
+    // the playhead (Ctrl+Alt+K) and moved on a second and keyed again.
+    // Effect Controls scrolled down to the effect, under Motion and
+    // Opacity.
+    let over = driver.rect_of("Motion").expect("Effect Controls").center();
+    driver.step(vec![egui::Event::PointerMoved(over)]);
+    for _ in 0..4 {
+        driver.step(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -200.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+            source: egui::MouseWheelSource::Wheel,
+        }]);
+    }
+    driver.settle(10);
+    driver.click_text("Radius");
+    driver.keys(
+        egui::Key::K,
+        egui::Modifiers::COMMAND | egui::Modifiers::ALT,
+    );
+    let channel = sue_ve::fx::channel(effects[0].id, "radius");
+    let keys = |driver: &Driver| {
+        driver
+            .clip("V2", 0)
+            .animation
+            .channel(&channel)
+            .map(|curve| curve.keys().to_vec())
+            .unwrap_or_default()
+    };
+    assert_eq!(keys(&driver).len(), 1, "a key at the playhead");
+    driver.go("seek/2.5");
+    driver.keys(
+        egui::Key::K,
+        egui::Modifiers::COMMAND | egui::Modifiers::ALT,
+    );
+    assert_eq!(keys(&driver).len(), 2);
+    // F9 eases the key at the playhead (After Effects' Easy Ease): the
+    // segment arriving there turns Bezier.
+    driver.keys(egui::Key::F9, egui::Modifiers::NONE);
+    let eased = keys(&driver);
+    assert!(
+        matches!(
+            eased[0].interpolation,
+            sue_model::Interpolation::Bezier { .. }
+        ),
+        "{eased:?}"
+    );
+    // The graph editor shows the curve's name.
+    assert!(driver.has("Gaussian Blur: Radius"), "{:?}", driver.texts);
+    // Undo takes back the ease, the second key, the first, the effect.
+    for left in [2, 1, 0] {
+        driver.keys(egui::Key::Z, egui::Modifiers::COMMAND);
+        assert_eq!(keys(&driver).len(), left);
+    }
+    assert!(matches!(
+        keys(&driver).first().map(|key| key.interpolation),
+        None | Some(sue_model::Interpolation::Linear)
+    ));
+    driver.keys(egui::Key::Z, egui::Modifiers::COMMAND);
+    assert!(
+        sue_ve::fx::effects(&driver.clip("V2", 0)).is_empty(),
+        "the effect went"
+    );
+}
+
+#[test]
+fn a_grade_dragged_on_the_color_page_is_one_step() {
+    let mut driver = Driver::new("sve-grade");
+    driver.sample();
+    driver.go("select/title/0");
+    driver.go("seek/1.5");
+    driver.click_page("Color");
+    assert!(sue_ve::grade::grade_of(&driver.clip("V2", 0)).is_empty());
+    // A drag across the Lift wheel's pad sets its balance.
+    let label = driver.rect_of("Lift").expect("the Lift wheel's name");
+    let from = pos2(label.left() + 40.0, label.bottom() + 50.0);
+    driver.drag(from, from + vec2(30.0, -10.0));
+    let graded = sue_ve::grade::grade_of(&driver.clip("V2", 0));
+    assert_eq!(graded.len(), 1, "one corrector: {graded:?}");
+    let lift = graded[0].lift;
+    assert!(lift[..3].iter().any(|value| value.abs() > 0.01), "{lift:?}");
+    // Alt+S adds a corrector after it (Resolve's serial node).
+    driver.keys(egui::Key::S, egui::Modifiers::ALT);
+    assert_eq!(sue_ve::grade::grade_of(&driver.clip("V2", 0)).len(), 2);
+    driver.keys(egui::Key::Z, egui::Modifiers::COMMAND);
+    driver.keys(egui::Key::Z, egui::Modifiers::COMMAND);
+    assert!(
+        sue_ve::grade::grade_of(&driver.clip("V2", 0)).is_empty(),
+        "the drag was one step"
+    );
+}
+
+#[test]
+fn the_mixer_switches_an_equalizer_and_undo_takes_it_back() {
+    let mut driver = Driver::new("sve-mixer");
+    driver.sample();
+    driver.click_page("Audio");
+    let a1 = |driver: &Driver| {
+        let (_, sequence) = driver.sequence().unwrap();
+        let track = sequence
+            .tracks
+            .iter()
+            .find(|track| track.name == "A1")
+            .unwrap()
+            .clone();
+        sue_ve::audio::track_fx(&track)
+    };
+    assert!(!a1(&driver).eq_on);
+    // A1's strip is the first: its EQ chip is the topmost leftmost.
+    driver.click_text("EQ");
+    assert!(a1(&driver).eq_on, "{:?}", driver.texts);
+    driver.keys(egui::Key::Z, egui::Modifiers::COMMAND);
+    assert!(!a1(&driver).eq_on);
+}
+
+#[test]
+fn the_phone_layout_shows_capcuts_tools_and_its_sheets_edit_the_video() {
+    let mut driver = Driver::new("sve-phone");
+    driver.request(ShellRequest::SueMenu);
+    let start = driver.now;
+    let picked = driver
+        .runtime
+        .with_shell(&mut NoTextures, start, |shell, io, now| {
+            shell.sue_menu_pick(&["Interface", "Phone"], io, now)
+        });
+    assert!(picked);
+    driver.settle(10);
+    assert_eq!(
+        driver.runtime.shell.form_factor(),
+        sue_platform::FormFactor::Mobile
+    );
+    driver.request(ShellRequest::Create {
+        applet: sve(),
+        key: "hd".to_owned(),
+    });
+    driver.settle(90);
+    for tool in [
+        "Edit", "Audio", "Text", "Effects", "Filters", "Overlay", "Export",
+    ] {
+        assert!(
+            driver.rect_of(tool).is_some(),
+            "{tool} on the phone: {:?}",
+            driver.texts
+        );
+    }
+    // The Aspect sheet: 9:16 makes the video upright, undo takes it back.
+    driver.go("sheet/aspect");
+    assert!(driver.has("9:16"), "{:?}", driver.texts);
+    driver.click_text("9:16");
+    let size = sue_ve::model::frame_size(&driver.sequence().unwrap().1);
+    assert_eq!(size, (1080, 1920));
+    driver.command("edit.undo");
+    assert_eq!(
+        sue_ve::model::frame_size(&driver.sequence().unwrap().1),
+        (1920, 1080)
+    );
+    // The Text sheet adds a title at the playhead.
+    driver.go("sheet/text");
+    driver.click_text("Add Text");
+    assert_eq!(driver.clips("V1"), 1, "the title landed on the main track");
+    // The Export sheet offers sizes and rates.
+    driver.go("export-sheet");
+    for wanted in ["720p", "1080p", "2160p", "30", "60", "Start Export"] {
+        assert!(driver.has(wanted), "{wanted}: {:?}", driver.texts);
+    }
+}
+
+#[test]
+fn an_export_with_effects_matches_the_preview() {
+    if !sue_platform::movie::mp4_available() {
+        return;
+    }
+    let mut driver = Driver::new("sve-export-effects");
+    let sequence = driver.sample();
+    // Every shot gray (a hue and saturation effect at -100), as one step.
+    let made = driver
+        .runtime
+        .with_context(&mut NoTextures, driver.now, |cx| {
+            let (step, ()) = sue_ve::model::plan(cx.arena(), sequence, "Gray", |edit| {
+                let main = edit
+                    .tracks
+                    .iter()
+                    .rposition(sue_ve::model::is_video)
+                    .unwrap();
+                let ids: Vec<u64> = edit.tracks[main]
+                    .clips()
+                    .iter()
+                    .map(|clip| clip.id)
+                    .collect();
+                for id in ids {
+                    let (_, clip) = edit.find_mut(id).unwrap();
+                    let effect = sue_ve::fx::add(clip, "color.hue_saturation");
+                    sue_ve::fx::update(clip, effect, |found| {
+                        found.params.set("saturation", -100.0);
+                    });
+                }
+                Ok(())
+            })
+            .ok()?;
+            cx.apply(sue_wm::ArenaEdit(step?)).ok()
+        });
+    assert!(made.is_some());
+    driver.settle(10);
+    // The preview's frame two seconds in, drawn as the monitor draws it.
+    let arena = driver.runtime.engine.world.arena.clone();
+    let mut renderer = sue_ve::export::Renderer::new(arena, sequence, (320, 180), false).unwrap();
+    let preview = renderer.frame(Time::from_seconds(2.0));
+    driver.click_page("Deliver");
+    driver.click_text("Whole sequence (else in to out)");
+    driver.click_text("Start Export");
+    let ctx = driver.ctx.clone();
+    let mut now = driver.now;
+    until_exports_end(&mut driver.runtime, |runtime| {
+        now += Duration::from_millis(16);
+        frame_with(runtime, &ctx, now, Vec::new());
+    });
+    driver.settle(10);
+    let out = sue_ve::media::import::cache_dir()
+        .join("exports")
+        .join("Sequence 1.mp4");
+    let mut decoder = sue_platform::video::VideoDecoder::open(&out, Some((320, 180)), false)
+        .expect("the movie reads back");
+    let mut rgba = Vec::new();
+    // In 1 s: two seconds into the sequence is one second into the movie.
+    let at = 10_000_000;
+    decoder.seek(at).unwrap();
+    decoder.frame_at(at, &mut rgba).unwrap().expect("a frame");
+    // Gray everywhere, and as the preview drew it (within the encoder's
+    // loss).
+    let mut worst = 0_i32;
+    let mut colorful = 0;
+    for (written, drawn) in rgba.chunks(4).zip(preview.chunks(4)) {
+        let spread = i32::from(written[0].max(written[1]).max(written[2]))
+            - i32::from(written[0].min(written[1]).min(written[2]));
+        if spread > 40 {
+            colorful += 1;
+        }
+        for channel in 0..3 {
+            worst = worst.max((i32::from(written[channel]) - i32::from(drawn[channel])).abs());
+        }
+    }
+    assert!(
+        colorful < rgba.len() / 4 / 100,
+        "the export is gray: {colorful} colorful pixels"
+    );
+    let mean: f64 = rgba
+        .iter()
+        .zip(&preview)
+        .enumerate()
+        .filter(|(index, _)| index % 4 != 3)
+        .map(|(_, (a, b))| f64::from((i32::from(*a) - i32::from(*b)).abs()))
+        .sum::<f64>()
+        / (rgba.len() as f64 * 0.75);
+    assert!(
+        mean < 8.0,
+        "the export matches the preview: mean {mean}, worst {worst}"
+    );
+    let _ = std::fs::remove_file(out);
 }
