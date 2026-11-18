@@ -11,4 +11,10 @@ macro_rules! tr {
 }
 
 pub mod edit;
+pub mod export;
+pub mod media;
+pub mod mix;
 pub mod model;
+pub mod playback;
+pub mod render;
+pub mod sample;
