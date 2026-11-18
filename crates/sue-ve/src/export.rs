@@ -385,6 +385,12 @@ impl Renderer {
         &self.sequence
     }
 
+    /// The size it draws at.
+    #[must_use]
+    pub fn size(&self) -> (u32, u32) {
+        self.size
+    }
+
     /// The arena it reads.
     #[must_use]
     pub fn arena(&self) -> &Arena {

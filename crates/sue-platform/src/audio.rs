@@ -439,6 +439,118 @@ impl AudioSink for AudioOutput {
     }
 }
 
+/// A microphone (the system's default input) being recorded: what it
+/// hears queues in a lock-free ring the caller drains with
+/// [`AudioInput::take`], as interleaved float samples.
+pub struct AudioInput {
+    stream: cpal::Stream,
+    ring: Arc<Ring>,
+    /// Its rate and channels.
+    pub rate: u32,
+    /// See `rate`.
+    pub channels: u16,
+    /// The device's name.
+    pub device: String,
+}
+
+impl std::fmt::Debug for AudioInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AudioInput")
+            .field("device", &self.device)
+            .field("rate", &self.rate)
+            .field("channels", &self.channels)
+            .finish_non_exhaustive()
+    }
+}
+
+impl AudioInput {
+    /// Starts recording from the default input device, holding up to
+    /// `seconds` of sound not yet taken.
+    ///
+    /// # Errors
+    /// [`PlatformError::Audio`] when there is no microphone or it will not
+    /// open.
+    pub fn open(seconds: f32) -> Result<Self, PlatformError> {
+        let host = cpal::default_host();
+        let device = host
+            .default_input_device()
+            .ok_or_else(|| PlatformError::Audio("no input device".to_owned()))?;
+        let name = device.name().unwrap_or_else(|_| "Input".to_owned());
+        let supported = device
+            .default_input_config()
+            .map_err(|error| audio_error("no usable input configuration", error))?;
+        let config = supported.config();
+        let channels = config.channels.max(1);
+        let rate = config.sample_rate.0;
+        let capacity = (rate as f32 * seconds.max(1.0)) as usize * usize::from(channels);
+        let ring = Arc::new(Ring::new(capacity));
+        let stream = match supported.sample_format() {
+            cpal::SampleFormat::I16 => build_input::<i16>(&device, &config, &ring),
+            cpal::SampleFormat::U16 => build_input::<u16>(&device, &config, &ring),
+            _ => build_input::<f32>(&device, &config, &ring),
+        }?;
+        stream
+            .play()
+            .map_err(|error| audio_error("cannot start recording", error))?;
+        Ok(Self {
+            stream,
+            ring,
+            rate,
+            channels,
+            device: name,
+        })
+    }
+
+    /// Appends what was heard since the last call to `out`.
+    pub fn take(&mut self, out: &mut Vec<f32>) {
+        let mut chunk = [0.0_f32; 4096];
+        loop {
+            let got = self.ring.pop(&mut chunk);
+            out.extend_from_slice(&chunk[..got]);
+            if got < chunk.len() {
+                break;
+            }
+        }
+    }
+
+    /// Stops recording.
+    pub fn stop(&mut self) {
+        let _ = self.stream.pause();
+    }
+}
+
+fn build_input<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    ring: &Arc<Ring>,
+) -> Result<cpal::Stream, PlatformError>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    let ring = Arc::clone(ring);
+    // Scratch space is allocated once, here, never in the callback.
+    let mut scratch = vec![0.0_f32; 16_384];
+    let data = move |input: &[T], _: &cpal::InputCallbackInfo| {
+        for chunk in input.chunks(scratch.len()) {
+            let scratch = &mut scratch[..chunk.len()];
+            for (out, sample) in scratch.iter_mut().zip(chunk) {
+                *out = <f32 as FromSample<T>>::from_sample_(*sample);
+            }
+            // What does not fit (nobody took it) is dropped.
+            let _ = ring.push(scratch);
+        }
+    };
+    device
+        .build_input_stream::<T, _, _>(
+            config,
+            data,
+            |error| eprintln!("sue: audio input error: {error}"),
+            None,
+        )
+        .map_err(|error| audio_error("cannot open the microphone", error))
+}
+
 /// A sink without a device: it "plays" queued audio when told to by
 /// [`NullAudio::advance`], so players can be tested headlessly.
 #[derive(Debug)]

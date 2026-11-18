@@ -102,7 +102,7 @@ mod wintab_pen;
 mod xinput_pen;
 
 pub use audio::{
-    AudioConfig, AudioOutput, AudioSink, AudioStreamInfo, NullAudio, RealtimeStatus,
+    AudioConfig, AudioInput, AudioOutput, AudioSink, AudioStreamInfo, NullAudio, RealtimeStatus,
     audio_output_devices,
 };
 pub use desktop::{
