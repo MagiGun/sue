@@ -235,6 +235,16 @@ fn about(axis: [f32; 3], angle: f32) -> Mat3 {
     ]
 }
 
+/// Turn `m` done only `share` of the way (0 none, 1 all of it).
+fn partly(m: &Mat3, share: f32) -> Mat3 {
+    let mut q = super::skin::quat_of(m);
+    if q[0] < 0.0 {
+        q = q.map(|value| -value);
+    }
+    let angle = 2.0 * q[0].clamp(-1.0, 1.0).acos();
+    about([q[1], q[2], q[3]], (angle * share).to_degrees())
+}
+
 /// Hand pose `base` with its unlocked fingers set as `setup` says.
 /// `body` is the hand figure (or the body whose hand it is), which
 /// knows how the thumb really bends.
@@ -261,9 +271,10 @@ pub fn hand_setup(body: &Body, base: &Pose, setup: &HandSetup) -> Pose {
         // The little finger closes a touch more, as a fist does.
         let more = 1.0 + finger as f32 * 0.03;
         let relaxed = (1.0 - closed) * (6.0 + finger as f32 * 2.0) * (1.0 - spread.max(0.0));
+        let curl = (fist * 86.0 + fold * 84.0) * more + relaxed * 0.4;
         pose.0[first] = [
-            (fist * 86.0 + fold * 84.0) * more + relaxed * 0.4,
-            0.0,
+            curl,
+            gathered(finger, curl) * fist,
             wide[finger] * spread * (1.0 - closed * 0.85),
         ];
         pose.0[first + 1] = [fist * 102.0 * more + fold * 6.0 + relaxed, 0.0, 0.0];
@@ -272,16 +283,22 @@ pub fn hand_setup(body: &Body, base: &Pose, setup: &HandSetup) -> Pose {
     if !setup.locks[0] {
         let axes = &human::shaped(body).thumb_axes;
         let axis = |part: usize| axes.get(part).copied().unwrap_or([1.0, 0.0, 0.0]);
-        // The thumb swings out with the spread, and folds across the
-        // fingers (a fist) or along the palm's edge (a flat fold).
+        // The thumb swings out with the spread, and wraps the fingers
+        // (a fist) or folds along the palm's edge (a flat fold).
         let out = about(
             [0.0, 0.0, 1.0],
             spread.max(0.0) * 22.0 - spread.min(0.0) * -8.0,
         );
-        let base_turn = mul(&out, &about(axis(0), fist * 30.0 + fold * 18.0));
-        pose.0[13] = degrees(&base_turn);
-        pose.0[14] = degrees(&about(axis(1), fist * 38.0 + fold * 12.0));
-        pose.0[15] = degrees(&about(axis(2), fist * 52.0 + fold * 10.0));
+        let wrap = thumb_wrap();
+        let folds = [18.0, 12.0, 10.0];
+        for part in 0..3 {
+            let wrapped = partly(&euler(wrap[part]), fist);
+            let mut turn = mul(&wrapped, &about(axis(part), fold * folds[part]));
+            if part == 0 {
+                turn = mul(&out, &turn);
+            }
+            pose.0[13 + part] = degrees(&turn);
+        }
     }
     pose
 }
@@ -468,7 +485,52 @@ type HandShape = ([[f32; 4]; 4], [f32; 4]);
 
 const CURLED: [f32; 4] = [86.0, 100.0, 62.0, 0.0];
 const STRAIGHT: [f32; 4] = [0.0; 4];
-const THUMB_IN: [f32; 4] = [34.0, 40.0, 50.0, -6.0];
+/// What a thumb's swing is set to when it wraps the closed fingers.
+const WRAPPED: f32 = 999.0;
+/// The thumb folded over the closed fingers, as in a fist.
+const THUMB_IN: [f32; 4] = [0.0, 0.0, 0.0, WRAPPED];
+
+/// The directions a thumb's three bones rest along (the stance its
+/// turns are measured from), in the hand's own axes.
+const THUMB_BONES: [[f32; 3]; 3] = [
+    [-0.016, 0.03, 0.014],
+    [-0.006, 0.026, 0.008],
+    [-0.003, 0.021, 0.005],
+];
+
+/// Where a thumb's three bones point when it wraps a fist, in the
+/// hand's own axes: out of the palm, then up and across the closed
+/// fingers, its tip on the middle finger.
+const THUMB_WRAP: [[f32; 3]; 3] = [[-0.5, 0.53, 0.68], [0.39, 0.79, 0.47], [0.96, 0.26, 0.13]];
+
+/// The turns of a thumb's three joints that lay its bones along
+/// `toward` (directions in the hand's own axes).
+fn thumb_toward(toward: &[[f32; 3]; 3]) -> [[f32; 3]; 3] {
+    let mut parent = IDENTITY;
+    let mut out = [[0.0; 3]; 3];
+    for part in 0..3 {
+        let (Some(bone), Some(target)) = (unit(THUMB_BONES[part]), unit(toward[part])) else {
+            continue;
+        };
+        let turn = between(bone, apply(&transpose(&parent), target));
+        out[part] = degrees(&turn);
+        parent = mul(&parent, &turn);
+    }
+    out
+}
+
+/// The thumb wrapped over the closed fingers.
+fn thumb_wrap() -> [[f32; 3]; 3] {
+    thumb_toward(&THUMB_WRAP)
+}
+
+/// How far a finger (0 the index to 3 the little) turns toward the
+/// middle of the hand when its base is curled `curl` degrees: the
+/// fingers of a fist lie together, though an open hand's are apart.
+fn gathered(finger: usize, curl: f32) -> f32 {
+    let most = [9.0, 2.0, -6.0, -13.0][finger.min(3)];
+    most * ((curl - 30.0) / 50.0).clamp(0.0, 1.0)
+}
 
 /// Sue's hand poses, in [`super::HAND_PRESETS`]' order.
 const HAND_SHAPES: [HandShape; 16] = [
@@ -499,7 +561,7 @@ const HAND_SHAPES: [HandShape; 16] = [
     // Peace sign.
     (
         [[0.0, 0.0, 0.0, 10.0], [0.0, 0.0, 0.0, -8.0], CURLED, CURLED],
-        [38.0, 42.0, 52.0, -6.0],
+        THUMB_IN,
     ),
     // Thumbs up.
     ([CURLED, CURLED, CURLED, CURLED], [-8.0, 0.0, 0.0, 26.0]),
@@ -573,7 +635,7 @@ const HAND_SHAPES: [HandShape; 16] = [
             [0.0, 0.0, 0.0, -10.0],
             CURLED,
         ],
-        [38.0, 42.0, 52.0, -6.0],
+        THUMB_IN,
     ),
     // Call me.
     (
@@ -602,6 +664,16 @@ pub fn hand_pose(body: &Body, index: usize) -> Pose {
         pose.0[first + 1] = [*middle, 0.0, 0.0];
         pose.0[first + 2] = [*tip, 0.0, 0.0];
     }
+    // A fist draws its fingers together as it closes.
+    for finger in 0..4 {
+        let first = 1 + finger * 3;
+        pose.0[first][1] = gathered(finger, pose.0[first][0]);
+    }
+    if thumb[3] == WRAPPED {
+        let wrap = thumb_wrap();
+        pose.0[13..16].copy_from_slice(&wrap);
+        return pose;
+    }
     let axes = &human::shaped(body).thumb_axes;
     let axis = |part: usize| axes.get(part).copied().unwrap_or([1.0, 0.0, 0.0]);
     let out = about([0.0, 0.0, 1.0], thumb[3]);
@@ -609,6 +681,39 @@ pub fn hand_pose(body: &Body, index: usize) -> Pose {
     pose.0[14] = degrees(&about(axis(1), thumb[1]));
     pose.0[15] = degrees(&about(axis(2), thumb[2]));
     pose
+}
+
+/// Body pose `index` of Sue's own settled on `body`: the poses whose
+/// hands rest on the body (hands on hips, arms crossed) reach for the
+/// places on this body's own shape, whatever its build and height.
+#[must_use]
+pub(crate) fn settled(body: &Body, index: usize, pose: Pose) -> Pose {
+    if body.kind != Kind::Body || !matches!(index, 8 | 9) {
+        return pose;
+    }
+    let placed = super::solve(&pose, body);
+    let stand = body.place.matrix();
+    // The body's own measure: half the width across its shoulders.
+    let half = long(minus(placed[5].0, placed[8].0)) / 2.0;
+    let from = |joint: usize, [x, y, z]: [f32; 3]| {
+        let by = apply(&stand, [x * half, y * half, z * half]);
+        [0, 1, 2].map(|axis| placed[joint].0[axis] + by[axis])
+    };
+    let mut out = pose;
+    match index {
+        // Hands on hips: each wrist beside its hip, the elbow out.
+        8 => {
+            out = reached(&out, body, at::ARMS[0], from(11, [0.46, 0.55, 0.1]), false);
+            out = reached(&out, body, at::ARMS[1], from(14, [-0.46, 0.55, 0.1]), false);
+        }
+        // Arms crossed: each wrist at the other elbow, one forearm
+        // over the other.
+        _ => {
+            out = reached(&out, body, at::ARMS[0], from(2, [-0.2, 0.42, 0.8]), false);
+            out = reached(&out, body, at::ARMS[1], from(2, [0.26, 0.3, 0.97]), false);
+        }
+    }
+    out
 }
 
 /// `pose` (made on a figure with the joints `from`) as it lies on a

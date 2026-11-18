@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use super::skin::{self, Twist};
 use super::{
     Body, Build, HAND, HEAD_JOINTS, IDENTITY, JOINTS, Joint, Kind, Mat3, Pose, SLIDERS, Side, add,
     apply, between, euler, mul, transpose, unit,
@@ -38,7 +39,61 @@ pub(crate) mod at {
     pub(crate) const FINGERS: [usize; 2] = [21, 36];
     pub(crate) const JAW: usize = 51;
     pub(crate) const EYES: [usize; 2] = [52, 53];
+    /// The helpers that carry each side's shoulder cap and hip (skin
+    /// that turns part of the way with the limb): their numbers in a
+    /// body's skin, after the joints people pose.
+    pub(crate) const SHOULDER_CAPS: [usize; 2] = [54, 56];
+    pub(crate) const HIP_CAPS: [usize; 2] = [55, 57];
 }
+
+/// A helper: skin between two joints that turns part of the way from
+/// the one to the other, about the place where the second starts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Helper {
+    /// The joint it rests on.
+    pub base: usize,
+    /// The joint it follows part of the way.
+    pub follow: usize,
+    /// How far it follows, 0 to 1.
+    pub share: f32,
+}
+
+/// A body's helpers, by their names in the asset, in the order of their
+/// numbers ([`at::SHOULDER_CAPS`], [`at::HIP_CAPS`]).
+const HELPERS: [(&str, Helper); 4] = [
+    (
+        "+Left shoulder cap",
+        Helper {
+            base: at::SHOULDERS[0],
+            follow: at::ARMS[0][0],
+            share: 0.5,
+        },
+    ),
+    (
+        "+Left hip cap",
+        Helper {
+            base: at::HIPS,
+            follow: at::LEGS[0][0],
+            share: 0.35,
+        },
+    ),
+    (
+        "+Right shoulder cap",
+        Helper {
+            base: at::SHOULDERS[1],
+            follow: at::ARMS[1][0],
+            share: 0.5,
+        },
+    ),
+    (
+        "+Right hip cap",
+        Helper {
+            base: at::HIPS,
+            follow: at::LEGS[1][0],
+            share: 0.35,
+        },
+    ),
+];
 
 /// One morph target: the points it moves and how far, and how far it
 /// moves each joint's two ends.
@@ -54,7 +109,8 @@ struct Asset {
     quads: Vec<[u32; 4]>,
     /// Up to four joints (numbers in [`JOINTS`]) and weights a point.
     skin: Vec<[(u8, f32); 4]>,
-    /// Each joint of [`JOINTS`]: where it starts and where its bone ends.
+    /// Each joint of [`JOINTS`], then each of the helpers: where it
+    /// starts and where its bone ends.
     joints: Vec<[[f32; 3]; 2]>,
     morphs: HashMap<String, Morph>,
 }
@@ -120,7 +176,8 @@ fn asset() -> &'static Asset {
             .collect();
         // The asset's joints, each found in Sue's table by its name.
         let mut slot = vec![0_usize; joints];
-        let mut ends = vec![[[0.0_f32; 3]; 2]; JOINTS.len()];
+        let all = JOINTS.len() + HELPERS.len();
+        let mut ends = vec![[[0.0_f32; 3]; 2]; all];
         for slot in slot.iter_mut() {
             let name = r.text();
             let _parent = r.i16();
@@ -128,6 +185,12 @@ fn asset() -> &'static Asset {
             *slot = JOINTS
                 .iter()
                 .position(|joint| joint.name == name)
+                .or_else(|| {
+                    HELPERS
+                        .iter()
+                        .position(|(helper, _)| *helper == name)
+                        .map(|at| JOINTS.len() + at)
+                })
                 .expect("the asset's joints are Sue's");
             ends[*slot] = [head, tail];
         }
@@ -151,7 +214,7 @@ fn asset() -> &'static Asset {
             let moves = (0..count)
                 .map(|_| [0; 3].map(|_: i32| f32::from(r.i16()) * step))
                 .collect();
-            let mut moved = vec![[[0.0_f32; 3]; 2]; JOINTS.len()];
+            let mut moved = vec![[[0.0_f32; 3]; 2]; all];
             for &slot in &slot {
                 moved[slot] = [scaled(r.point()), scaled(r.point())];
             }
@@ -211,6 +274,21 @@ pub struct Shaped {
     /// The limbs that follow a dragged hand or foot: the upper joint,
     /// the lower one, and the hand or foot.
     pub limbs: Vec<[usize; 3]>,
+    /// The parts whose twist is spread along their length.
+    pub twists: Vec<Twist>,
+    /// Where each point is along each twisting part it follows (see
+    /// [`super::skin`]); empty when nothing twists.
+    pub along: Vec<[f32; 4]>,
+    /// For each joint, how much of the blend of what follows it is of
+    /// dual quaternions (the rest is the plain blend, which rounds a
+    /// joint's outside less); empty for dual quaternions throughout.
+    pub dual: Vec<f32>,
+    /// The helpers: numbered in the skin after the joints, each with
+    /// its own entry in [`Self::bind`] (where it turns about).
+    pub helpers: Vec<Helper>,
+    /// The hinges (elbows and knees) whose point stands out as they
+    /// fold, so the joint keeps its flesh.
+    pub hinges: Vec<usize>,
 }
 
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
@@ -1125,7 +1203,19 @@ fn body_guides(
         tris,
         along(at::SPINE, 0.45),
         up,
-        |t| within(t, &[at::HIPS, at::SPINE, at::CHEST], 0.9),
+        |t| {
+            within(
+                t,
+                &[
+                    at::HIPS,
+                    at::SPINE,
+                    at::CHEST,
+                    at::HIP_CAPS[0],
+                    at::HIP_CAPS[1],
+                ],
+                0.9,
+            )
+        },
         &mut guides,
     );
     sliced(
@@ -1134,8 +1224,18 @@ fn body_guides(
         along(at::CHEST, 0.5),
         up,
         |t| {
-            within(t, &[at::SPINE, at::CHEST, 17, 18], 0.9)
-                && near(t, along(at::CHEST, 0.5), 0.13 * tall)
+            within(
+                t,
+                &[
+                    at::SPINE,
+                    at::CHEST,
+                    17,
+                    18,
+                    at::SHOULDER_CAPS[0],
+                    at::SHOULDER_CAPS[1],
+                ],
+                0.9,
+            ) && near(t, along(at::CHEST, 0.5), 0.13 * tall)
         },
         &mut guides,
     );
@@ -1164,10 +1264,15 @@ fn body_guides(
         let [thigh, shin, foot] = at::LEGS[side];
         let shoulder = at::SHOULDERS[side];
         let rings: [(usize, f32, &[usize], f32); 6] = [
-            (upper, 0.16, &[upper, shoulder, at::CHEST], 0.07),
+            (
+                upper,
+                0.16,
+                &[upper, shoulder, at::CHEST, at::SHOULDER_CAPS[side]],
+                0.07,
+            ),
             (upper, 0.97, &[upper, fore], 0.06),
             (fore, 0.96, &[fore, hand], 0.05),
-            (thigh, 0.14, &[thigh, at::HIPS], 0.1),
+            (thigh, 0.14, &[thigh, at::HIPS, at::HIP_CAPS[side]], 0.1),
             (thigh, 0.97, &[thigh, shin], 0.08),
             (shin, 0.95, &[shin, foot], 0.06),
         ];
@@ -1233,6 +1338,44 @@ fn embossed(
     }
 }
 
+/// The parts of a body whose twist is spread along them: the upper
+/// arms and thighs (still at the trunk, turned at the elbow or knee),
+/// and the forearms and shins, which also take half of the twist of
+/// the hand or foot at their far end.
+fn body_twists() -> Vec<Twist> {
+    let mut twists = Vec::new();
+    for limb in at::ARMS.iter().chain(at::LEGS.iter()) {
+        twists.push(Twist {
+            joint: limb[0],
+            child: None,
+            share: 0.0,
+        });
+        twists.push(Twist {
+            joint: limb[1],
+            child: Some(limb[2]),
+            share: 0.5,
+        });
+    }
+    twists
+}
+
+/// How much of a body's blend is of dual quaternions, by joint: whole
+/// at the hinges (elbows, knees, fingers), a little less where a ball
+/// joint swings far (the shoulders and hips), which whole would puff
+/// out.
+fn body_dual() -> Vec<f32> {
+    let mut dual = vec![1.0; JOINTS.len() + HELPERS.len()];
+    for side in 0..2 {
+        dual[at::ARMS[side][0]] = 0.3;
+        dual[at::SHOULDER_CAPS[side]] = 0.3;
+        dual[at::SHOULDERS[side]] = 0.5;
+        dual[at::LEGS[side][0]] = 0.7;
+        dual[at::HIP_CAPS[side]] = 0.7;
+    }
+    dual[at::HIPS] = 0.7;
+    dual
+}
+
 /// A body, shaped.
 fn shaped_body(body: &Body) -> Shaped {
     let asset = asset();
@@ -1289,8 +1432,19 @@ fn shaped_body(body: &Body) -> Shaped {
         }
     }
     let bind = frames.iter().zip(&ends).map(|(f, e)| (*f, e[0])).collect();
+    let twists = body_twists();
     Shaped {
         order: ordered(&joints),
+        along: skin::along(&points, &asset.skin, &ends, &twists),
+        twists,
+        dual: body_dual(),
+        helpers: HELPERS.iter().map(|(_, helper)| *helper).collect(),
+        hinges: vec![
+            at::ARMS[0][1],
+            at::ARMS[1][1],
+            at::LEGS[0][1],
+            at::LEGS[1][1],
+        ],
         rest: points,
         skin: asset.skin.clone(),
         tris,
@@ -1392,6 +1546,11 @@ fn shaped_hand(body: &Body) -> Shaped {
         thumb_axes: thumb.to_vec(),
         frame: None,
         limbs: Vec::new(),
+        twists: Vec::new(),
+        along: Vec::new(),
+        dual: Vec::new(),
+        helpers: Vec::new(),
+        hinges: Vec::new(),
     }
 }
 
@@ -1497,6 +1656,11 @@ fn shaped_head(body: &Body) -> Shaped {
         thumb_axes: Vec::new(),
         frame: None,
         limbs: Vec::new(),
+        twists: Vec::new(),
+        along: Vec::new(),
+        dual: Vec::new(),
+        helpers: Vec::new(),
+        hinges: Vec::new(),
     }
 }
 
@@ -1518,6 +1682,11 @@ fn shaped_nothing() -> Shaped {
         thumb_axes: Vec::new(),
         frame: None,
         limbs: Vec::new(),
+        twists: Vec::new(),
+        along: Vec::new(),
+        dual: Vec::new(),
+        helpers: Vec::new(),
+        hinges: Vec::new(),
     }
 }
 
@@ -1645,25 +1814,9 @@ pub(crate) fn surface(pose: &Pose, body: &Body) -> Surface {
             turned
         }
     };
-    let positions: Vec<[f32; 3]> = shaped
-        .rest
-        .iter()
-        .zip(&shaped.skin)
-        .map(|(p, skin)| {
-            let p = scale(*p, size);
-            let mut out = [0.0_f32; 3];
-            for (joint, weight) in skin {
-                if *weight <= 0.0 {
-                    continue;
-                }
-                let (turn, shift) = &moves[usize::from(*joint)];
-                let moved = add(apply(turn, p), *shift);
-                for axis in 0..3 {
-                    out[axis] += moved[axis] * weight;
-                }
-            }
-            finish(out, true)
-        })
+    let positions: Vec<[f32; 3]> = skin::skinned(&shaped, pose, &placed, size)
+        .into_iter()
+        .map(|p| finish(p, true))
         .collect();
     let mut indices = shaped.tris.clone();
     if flip {

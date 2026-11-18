@@ -604,6 +604,11 @@ fn rigged(parsed: &Parsed) -> Option<Shaped> {
         thumb_axes: Vec::new(),
         frame: Some(crate::three::frame_of_points(&parsed.points)),
         limbs,
+        twists: Vec::new(),
+        along: Vec::new(),
+        dual: Vec::new(),
+        helpers: Vec::new(),
+        hinges: Vec::new(),
     })
 }
 

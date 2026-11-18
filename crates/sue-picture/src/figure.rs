@@ -91,6 +91,7 @@ use crate::doc::Edit;
 
 pub(crate) mod human;
 mod posing;
+pub(crate) mod skin;
 pub use posing::{
     HandSetup, Limits, aimed_at, hand_from_body, hand_onto_body, hand_pose, hand_setup, hanging,
     held, limb_of, limited, limits, reached, retargeted, turned,
@@ -1251,7 +1252,7 @@ impl Body {
             Kind::Body => {
                 // The body's pose, its hands relaxed (or as the pose
                 // holds them).
-                let mut pose = preset(index);
+                let mut pose = posing::settled(self, index, preset(index));
                 let hands = match index {
                     15 => [2, 2],
                     10 => [1, 0],
@@ -1591,9 +1592,14 @@ pub fn preset(index: usize) -> Pose {
             set(8, [-30.0, 0.0, -8.0]);
             set(9, [-40.0, 0.0, 0.0]);
         }
+        // Arms up: the shoulders rise with them.
         5 => {
-            set(5, [0.0, 0.0, 165.0]);
-            set(8, [0.0, 0.0, -165.0]);
+            set(17, [0.0, 0.0, 12.0]);
+            set(18, [0.0, 0.0, -12.0]);
+            set(5, [-8.0, 0.0, 152.0]);
+            set(8, [-8.0, 0.0, -152.0]);
+            set(6, [-10.0, 0.0, 0.0]);
+            set(9, [-10.0, 0.0, 0.0]);
         }
         6 => {
             set(4, [12.0, 0.0, -6.0]);
@@ -1629,15 +1635,17 @@ pub fn preset(index: usize) -> Pose {
         }
         // Arms crossed.
         9 => {
-            set(5, [-34.0, -62.0, 14.0]);
-            set(6, [-104.0, 0.0, 0.0]);
-            set(8, [-28.0, 62.0, -14.0]);
-            set(9, [-112.0, 0.0, 0.0]);
+            set(5, [-18.0, -60.0, 16.0]);
+            set(6, [-95.0, 0.0, 0.0]);
+            set(7, [0.0, 0.0, 0.0]);
+            set(8, [-18.0, 60.0, -16.0]);
+            set(9, [-95.0, 0.0, 0.0]);
             set(4, [4.0, 0.0, 0.0]);
         }
         // Wave.
         10 => {
-            set(8, [0.0, -90.0, -96.0]);
+            set(18, [0.0, 0.0, -6.0]);
+            set(8, [0.0, -90.0, -90.0]);
             set(9, [-78.0, 0.0, 0.0]);
             set(5, [0.0, 0.0, 10.0]);
             set(6, [-10.0, 0.0, 0.0]);
@@ -1693,10 +1701,14 @@ pub fn preset(index: usize) -> Pose {
             set(14, [22.0, 0.0, -6.0]);
             set(15, [64.0, 0.0, 0.0]);
             set(16, [30.0, 0.0, 0.0]);
-            set(5, [-10.0, 0.0, 142.0]);
-            set(6, [-12.0, 0.0, 0.0]);
-            set(8, [-10.0, 0.0, -152.0]);
-            set(9, [-12.0, 0.0, 0.0]);
+            set(2, [-8.0, 0.0, 0.0]);
+            set(17, [0.0, 0.0, 10.0]);
+            set(18, [0.0, 0.0, -10.0]);
+            set(5, [-14.0, 0.0, 130.0]);
+            set(6, [-24.0, 0.0, 0.0]);
+            set(8, [-14.0, 0.0, -140.0]);
+            set(9, [-20.0, 0.0, 0.0]);
+            set(13, [34.0, 0.0, 0.0]);
             set(4, [-12.0, 0.0, 0.0]);
         }
         // Punch.
@@ -2761,5 +2773,265 @@ mod preview {
             ..male
         };
         save("head", &head, &head.preset(1), &front, [700, 800]);
+    }
+
+    /// One picture of a sheet: the figure seen close, opaque on paper.
+    fn tile(
+        pose: &Pose,
+        body: &Body,
+        view: &View3D,
+        frame: ([f32; 3], f32),
+        size: [u32; 2],
+    ) -> Vec<u8> {
+        let buffers = crate::three::render_surface(&surface(pose, body), view, size, frame);
+        let tile = crate::three::draw(&buffers, view).unwrap();
+        let mut pixels = tile.bytes().unwrap().to_vec();
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            let alpha = f32::from(pixel[3]) / 255.0;
+            for channel in pixel.iter_mut().take(3) {
+                *channel = (f32::from(*channel) * alpha + 250.0 * (1.0 - alpha)) as u8;
+            }
+            pixel[3] = 255;
+        }
+        pixels
+    }
+
+    /// Tiles (each `size`) laid `across` a row and saved as one PNG.
+    fn sheet(path: &str, tiles: &[Vec<u8>], size: [u32; 2], across: usize) {
+        let rows = tiles.len().div_ceil(across);
+        let (w, h) = (size[0] as usize * across, size[1] as usize * rows);
+        let mut pixels = vec![250_u8; w * h * 4];
+        for (index, tile) in tiles.iter().enumerate() {
+            let (left, top) = (
+                (index % across) * size[0] as usize,
+                (index / across) * size[1] as usize,
+            );
+            for y in 0..size[1] as usize {
+                let from = y * size[0] as usize * 4;
+                let to = ((top + y) * w + left) * 4;
+                pixels[to..to + size[0] as usize * 4]
+                    .copy_from_slice(&tile[from..from + size[0] as usize * 4]);
+            }
+        }
+        let png = sue_io::encode_png(
+            &RasterTile2D::from_bytes(w as u32, h as u32, PixelFormat::Rgba8, pixels).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(path, png).unwrap();
+    }
+
+    /// What a joint sheet turns, which joint it looks at, from where
+    /// (degrees round and above) and how close.
+    type Case = (&'static [(usize, [f32; 3])], usize, f32, f32, f32);
+
+    /// Every big joint at its limits, by part of the body.
+    const CASES: [(&str, &[Case]); 4] = [
+        (
+            "arms",
+            &[
+                (&[(6, [-90.0, 0.0, 0.0])], 6, 90.0, 5.0, 0.4),
+                (&[(6, [-150.0, 0.0, 0.0])], 6, 90.0, 5.0, 0.4),
+                (&[(6, [-150.0, 0.0, 0.0])], 6, 20.0, 5.0, 0.4),
+                (&[(6, [-150.0, 0.0, 0.0])], 6, 150.0, 5.0, 0.4),
+                (&[(7, [85.0, 0.0, 0.0])], 7, 90.0, 5.0, 0.3),
+                (&[(7, [-85.0, 0.0, 0.0])], 7, 90.0, 5.0, 0.3),
+                (&[(7, [0.0, 0.0, 35.0])], 7, 90.0, 5.0, 0.3),
+                (&[(7, [0.0, 25.0, 0.0])], 7, 60.0, 5.0, 0.3),
+                (&[(6, [0.0, 90.0, 0.0])], 6, 60.0, 5.0, 0.5),
+                (&[(6, [0.0, -90.0, 0.0])], 6, 60.0, 5.0, 0.5),
+                (&[(5, [0.0, 90.0, 0.0])], 5, 60.0, 5.0, 0.6),
+                (&[(5, [0.0, -90.0, 0.0])], 5, 60.0, 5.0, 0.6),
+            ],
+        ),
+        (
+            "shoulders",
+            &[
+                (&[(5, [0.0, 0.0, 90.0])], 5, 0.0, 10.0, 0.5),
+                (&[(5, [0.0, 0.0, 90.0])], 5, 180.0, 10.0, 0.5),
+                (&[(5, [0.0, 0.0, 170.0])], 5, 0.0, 10.0, 0.5),
+                (&[(5, [0.0, 0.0, 170.0])], 5, 180.0, 10.0, 0.5),
+                (&[(5, [-90.0, 0.0, 0.0])], 5, 45.0, 10.0, 0.5),
+                (&[(5, [-90.0, 0.0, 0.0])], 5, 135.0, 10.0, 0.5),
+                (&[(5, [-170.0, 0.0, 0.0])], 5, 60.0, 10.0, 0.5),
+                (&[(5, [60.0, 0.0, 0.0])], 5, 150.0, 10.0, 0.5),
+            ],
+        ),
+        (
+            "legs",
+            &[
+                (&[(12, [90.0, 0.0, 0.0])], 12, 90.0, 5.0, 0.5),
+                (&[(12, [150.0, 0.0, 0.0])], 12, 90.0, 5.0, 0.5),
+                (&[(12, [150.0, 0.0, 0.0])], 12, 10.0, 5.0, 0.5),
+                (&[(12, [150.0, 0.0, 0.0])], 12, 170.0, 5.0, 0.5),
+                (&[(11, [-90.0, 0.0, 0.0])], 11, 90.0, 5.0, 0.6),
+                (&[(11, [-130.0, 0.0, 0.0])], 11, 90.0, 5.0, 0.6),
+                (&[(11, [-90.0, 0.0, 0.0])], 11, 180.0, 5.0, 0.6),
+                (&[(11, [0.0, 0.0, 70.0])], 11, 0.0, 5.0, 0.6),
+                (&[(11, [45.0, 0.0, 0.0])], 11, 110.0, 5.0, 0.6),
+                (&[(11, [0.0, 50.0, 0.0])], 12, 20.0, 5.0, 0.9),
+                (&[(13, [-50.0, 0.0, 0.0])], 13, 90.0, 5.0, 0.35),
+                (&[(13, [40.0, 0.0, 0.0])], 13, 90.0, 5.0, 0.35),
+            ],
+        ),
+        (
+            "trunk",
+            &[
+                (
+                    &[(1, [50.0, 0.0, 0.0]), (2, [40.0, 0.0, 0.0])],
+                    1,
+                    90.0,
+                    5.0,
+                    0.8,
+                ),
+                (
+                    &[(1, [0.0, 35.0, 0.0]), (2, [0.0, 40.0, 0.0])],
+                    1,
+                    10.0,
+                    5.0,
+                    0.8,
+                ),
+                (
+                    &[(3, [0.0, 60.0, 0.0]), (4, [0.0, 50.0, 0.0])],
+                    3,
+                    10.0,
+                    5.0,
+                    0.4,
+                ),
+                (
+                    &[(3, [45.0, 0.0, 0.0]), (4, [40.0, 0.0, 0.0])],
+                    3,
+                    90.0,
+                    5.0,
+                    0.4,
+                ),
+            ],
+        ),
+    ];
+
+    /// Contact sheets of every joint at its limits and of the preset
+    /// poses, in the folder `SUE_FIGURE_PREVIEW` names. Run with
+    /// `--ignored`.
+    #[test]
+    #[ignore = "writes pictures to look at"]
+    fn joints_to_look_at() {
+        let Ok(folder) = std::env::var("SUE_FIGURE_PREVIEW") else {
+            return;
+        };
+        skin::PLAIN.with(|plain| plain.set(std::env::var("SUE_FIGURE_PLAIN").is_ok()));
+        let body = Body {
+            guides: std::env::var("SUE_FIGURE_GUIDES").is_ok(),
+            ..Body::default()
+        };
+        let view = |yaw: f32, pitch: f32| View3D {
+            yaw,
+            pitch,
+            distance: 4.2,
+            style: 0,
+            ..View3D::default()
+        };
+        let size = [480, 480];
+        for (part, cases) in CASES {
+            let mut tiles = Vec::new();
+            for (turns, look, yaw, pitch, close) in cases {
+                let mut pose = body.standing();
+                for (joint, turn) in *turns {
+                    pose.0[*joint] = *turn;
+                }
+                let at = solve(&pose, &body)[*look].0;
+                tiles.push(tile(&pose, &body, &view(*yaw, *pitch), (at, *close), size));
+            }
+            sheet(
+                &format!("{folder}/sheet-joints-{part}.png"),
+                &tiles,
+                size,
+                4,
+            );
+        }
+        // The fist, on the body and on the hand figure, from all round.
+        let mut tiles = Vec::new();
+        let mut pose = body.standing();
+        pose.0[6] = [-90.0, 0.0, 0.0];
+        for side in [Side::Left, Side::Right] {
+            hand_onto_body(&body, &mut pose, side, &hand_pose(&body, 2));
+        }
+        let at = solve(&pose, &body)[24].0;
+        for yaw in [0.0, 60.0, 120.0, 180.0, 240.0, 300.0] {
+            tiles.push(tile(&pose, &body, &view(yaw, 15.0), (at, 0.16), size));
+        }
+        let hand = Body {
+            kind: Kind::Hand,
+            ..Body::default()
+        };
+        for index in [2, 6] {
+            for yaw in [0.0, 60.0, 120.0, 180.0, 240.0, 300.0] {
+                tiles.push(tile(
+                    &hand.preset(index),
+                    &hand,
+                    &View3D {
+                        light: yaw + 30.0,
+                        ..view(yaw, 15.0)
+                    },
+                    ([0.0, 0.07, 0.0], 0.16),
+                    size,
+                ));
+            }
+        }
+        sheet(&format!("{folder}/sheet-fist.png"), &tiles, size, 6);
+        if let Ok(only) = std::env::var("SUE_FIGURE_ONLY") {
+            let mut tiles = Vec::new();
+            for index in only.split(',').filter_map(|n| n.parse::<usize>().ok()) {
+                for yaw in [0.0, 60.0, 180.0, 300.0] {
+                    let frame = ([0.0, 1.2, 0.0], 1.1);
+                    tiles.push(tile(
+                        &body.preset(index),
+                        &body,
+                        &view(yaw, 8.0),
+                        frame,
+                        [480, 480],
+                    ));
+                }
+            }
+            sheet(&format!("{folder}/sheet-only.png"), &tiles, [480, 480], 4);
+            return;
+        }
+        let mut tiles = Vec::new();
+        for index in 0..PRESETS.len() {
+            tiles.push(tile(
+                &body.preset(index),
+                &body,
+                &View3D {
+                    distance: 3.2,
+                    ..view(25.0, 8.0)
+                },
+                body.frame(),
+                [300, 420],
+            ));
+        }
+        sheet(
+            &format!("{folder}/sheet-body-poses.png"),
+            &tiles,
+            [300, 420],
+            7,
+        );
+        let mut tiles = Vec::new();
+        for index in 0..HAND_PRESETS.len() {
+            let yaw = if index % 2 == 0 { 20.0 } else { 160.0 };
+            tiles.push(tile(
+                &hand.preset(index),
+                &hand,
+                &View3D {
+                    light: yaw + 30.0,
+                    ..view(yaw, 20.0)
+                },
+                hand.frame(),
+                [300, 340],
+            ));
+        }
+        sheet(
+            &format!("{folder}/sheet-hand-poses.png"),
+            &tiles,
+            [300, 340],
+            8,
+        );
     }
 }
