@@ -175,35 +175,23 @@ impl Occupancy {
         Some(Self { columns, bits })
     }
 
-    /// The rectangle of a picture of `size` holding every tile the layer
-    /// has a pixel in, or `None` when it has none.
-    pub(super) fn bounds(&self, size: [u32; 2]) -> Option<[u32; 4]> {
-        let mut found: Option<[u32; 4]> = None;
+    /// `true` if the layer has any pixel in tile `index` (in rows from
+    /// the top left), or the tile is not one of the picture's.
+    pub(super) fn has_tile(&self, index: usize) -> bool {
+        self.bits
+            .get(index / 64)
+            .is_none_or(|word| word & (1 << (index % 64)) != 0)
+    }
+
+    /// Runs `visit(index)` for every tile the layer has a pixel in.
+    pub(super) fn each_tile(&self, mut visit: impl FnMut(usize)) {
         for (word_index, word) in self.bits.iter().enumerate() {
             let mut word = *word;
             while word != 0 {
-                let index = word_index as u32 * 64 + word.trailing_zeros();
+                visit(word_index * 64 + word.trailing_zeros() as usize);
                 word &= word - 1;
-                let (tx, ty) = (index % self.columns.max(1), index / self.columns.max(1));
-                let tile = [tx, ty, tx + 1, ty + 1];
-                found = Some(found.map_or(tile, |[a, b, c, d]| {
-                    [
-                        a.min(tile[0]),
-                        b.min(tile[1]),
-                        c.max(tile[2]),
-                        d.max(tile[3]),
-                    ]
-                }));
             }
         }
-        found.map(|[x0, y0, x1, y1]| {
-            [
-                x0 * OCCUPANCY_TILE,
-                y0 * OCCUPANCY_TILE,
-                (x1 * OCCUPANCY_TILE).min(size[0]),
-                (y1 * OCCUPANCY_TILE).min(size[1]),
-            ]
-        })
     }
 
     /// `true` if the layer has any pixel in the tile of picture pixel

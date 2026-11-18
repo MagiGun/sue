@@ -13,6 +13,10 @@ use super::{Doc, Gesture, ID, KEYS_SECTION, SuePaint, shortcut_table};
 use crate::dialogs::NewDialog;
 use crate::doc::{self, NewPicture};
 
+/// How long a frame may composite the canvas while a button is held
+/// (see `Compositor::sync_within`).
+const FRAME_COMPOSITE: std::time::Duration = std::time::Duration::from_millis(8);
+
 impl SuePaint {
     /// Opens a tab for every picture in the arena that has none (the newest
     /// becomes current), drops tabs whose picture is gone, and keeps every
@@ -236,9 +240,23 @@ impl SuePaint {
             .rice()
             .get_bool(crate::commands::PALETTE_ON_CANVAS)
             .unwrap_or(false);
+        // While a button is held (a slider dragged, a row dragged in the
+        // Layer palette) the canvas follows the layers for a few
+        // milliseconds a frame, what is on screen first, so the drag
+        // never waits for a big picture; let go, it is brought exact.
+        let held = ui.ctx().input(|input| input.pointer.any_down());
+        let (visible, step) = self.on_screen;
         if let Some(doc) = self.docs.get_mut(self.active) {
             doc.compositor.set_palette_colors(palette);
-            doc.compositor.sync(&cx.world.arena);
+            if held && doc.playing.is_none() {
+                doc.compositor
+                    .sync_within(&cx.world.arena, visible, step, FRAME_COMPOSITE);
+                if doc.compositor.settling() {
+                    ui.ctx().request_repaint();
+                }
+            } else {
+                doc.compositor.sync(&cx.world.arena);
+            }
             if doc.compositor.take_starved() {
                 cx.fail(tr!("canvas-no-memory"));
             }

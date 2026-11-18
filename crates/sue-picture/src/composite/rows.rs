@@ -74,100 +74,205 @@ fn own_cover(layer: &Layer<'_>, x: u32, y: u32) -> f32 {
 /// Through is composited on its own first, from nothing, and the result
 /// laid over `state` as one layer.
 pub(super) fn fold(layers: &[Layer<'_>], x: u32, y: u32, state: &mut Stack) {
-    let Stack {
-        mut color,
-        mut base_alpha,
-        mut base_visible,
-    } = *state;
     for layer in layers {
         if let Source::Correction(correction) = &layer.source {
             let strength = layer.style.opacity * own_cover(layer, x, y) * outer_cover(layer, x, y);
-            correct(&mut color, correction, layer, strength);
+            correct(&mut state.color, correction, layer, strength);
             continue;
         }
         if layer.empty_at(x, y) {
             // What a clear pixel does: the layers clipped to this one
             // show nothing over it.
             if !layer.style.clip {
-                base_visible = layer.style.visible;
-                base_alpha = 0.0;
+                state.base_visible = layer.style.visible;
+                state.base_alpha = 0.0;
             }
             continue;
         }
-        if !layer.style.clip {
-            base_visible = layer.style.visible;
-        }
-        if !layer.style.visible || (layer.style.clip && !base_visible) {
-            if !layer.style.clip {
-                base_alpha = 0.0;
-            }
-            continue;
-        }
-        let mut source = match &layer.source {
-            Source::Group(members) => {
-                let mut inner = Stack::EMPTY;
-                fold(members, x, y, &mut inner);
-                inner.color
-            }
-            _ => layer.sample(x, y),
-        };
-        source[3] *= own_cover(layer, x, y);
-        if !layer.outer.is_empty() {
-            source[3] *= outer_cover(layer, x, y);
-        }
-        if let Some((color, amount)) = layer.tint {
-            for channel in 0..3 {
-                source[channel] += (color[channel] - source[channel]) * amount;
-            }
-        }
-        if let Some(lines) = &layer.lines {
-            // Extract line: the layer as its lines, in black.
-            source = [0.0, 0.0, 0.0, lines.at(x, y)];
-        }
-        if let (Some(rim), Some((_, darkness))) = (&layer.rim, layer.effects.watercolor)
-            && source[3] > 0.0
-        {
-            // Watercolor edge: the paint darker where it stops.
-            let near = rim.at(x, y);
-            for channel in &mut source[..3] {
-                *channel *= 1.0 - darkness * near * 0.85;
-            }
-        }
-        if !layer.effects.is_plain() {
-            source = layer.effects.apply(source, x, y);
-        }
-        if let (Some(edge), Some((_, rim))) = (&layer.edge, layer.effects.border) {
-            // The border, under the layer.
-            let cover = layer.effects.border_cover(edge.at(x, y));
-            let alpha = source[3] + cover * (1.0 - source[3]);
-            if alpha > 0.0 {
-                for channel in 0..3 {
-                    source[channel] = (source[channel] * source[3]
-                        + rim[channel] * cover * (1.0 - source[3]))
-                        / alpha;
-                }
-            }
-            source[3] = alpha;
-        }
-        source[3] *= layer.effects.laid_opacity(layer.style.opacity);
-        if layer.style.clip {
-            source[3] *= base_alpha;
-        } else {
-            base_alpha = source[3];
-        }
-        color = layer.style.blend.composite(color, source);
+        lay(layer, x, y, state, |members| {
+            let mut inner = Stack::EMPTY;
+            fold(members, x, y, &mut inner);
+            inner.color
+        });
     }
-    *state = Stack {
-        color,
-        base_alpha,
-        base_visible,
+}
+
+/// [`fold`] for the layers a tile's [`Pick`]s kept: the same steps for
+/// each of them, the layers that show nothing in the tile passed over.
+pub(super) fn fold_picked(layers: &[Layer<'_>], picks: &[Pick], x: u32, y: u32) -> [f32; 4] {
+    let mut state = Stack::EMPTY;
+    for pick in picks {
+        let layer = &layers[pick.index];
+        if let Source::Correction(correction) = &layer.source {
+            let strength = layer.style.opacity * own_cover(layer, x, y) * outer_cover(layer, x, y);
+            correct(&mut state.color, correction, layer, strength);
+            continue;
+        }
+        lay(layer, x, y, &mut state, |members| {
+            fold_picked(members, &pick.members, x, y)
+        });
+    }
+    state.color
+}
+
+/// One layer of [`fold`] that is neither a correction nor known to be
+/// empty at `(x, y)`, laid over `state`; `group` composites a folder's
+/// members.
+#[inline]
+fn lay(
+    layer: &Layer<'_>,
+    x: u32,
+    y: u32,
+    state: &mut Stack,
+    group: impl FnOnce(&[Layer<'_>]) -> [f32; 4],
+) {
+    if !layer.style.clip {
+        state.base_visible = layer.style.visible;
+    }
+    if !layer.style.visible || (layer.style.clip && !state.base_visible) {
+        if !layer.style.clip {
+            state.base_alpha = 0.0;
+        }
+        return;
+    }
+    let mut source = match &layer.source {
+        Source::Group(members) => group(members),
+        _ => layer.sample(x, y),
     };
+    source[3] *= own_cover(layer, x, y);
+    if !layer.outer.is_empty() {
+        source[3] *= outer_cover(layer, x, y);
+    }
+    if let Some((color, amount)) = layer.tint {
+        for channel in 0..3 {
+            source[channel] += (color[channel] - source[channel]) * amount;
+        }
+    }
+    if let Some(lines) = &layer.lines {
+        // Extract line: the layer as its lines, in black.
+        source = [0.0, 0.0, 0.0, lines.at(x, y)];
+    }
+    if let (Some(rim), Some((_, darkness))) = (&layer.rim, layer.effects.watercolor)
+        && source[3] > 0.0
+    {
+        // Watercolor edge: the paint darker where it stops.
+        let near = rim.at(x, y);
+        for channel in &mut source[..3] {
+            *channel *= 1.0 - darkness * near * 0.85;
+        }
+    }
+    if !layer.effects.is_plain() {
+        source = layer.effects.apply(source, x, y);
+    }
+    if let (Some(edge), Some((_, rim))) = (&layer.edge, layer.effects.border) {
+        // The border, under the layer.
+        let cover = layer.effects.border_cover(edge.at(x, y));
+        let alpha = source[3] + cover * (1.0 - source[3]);
+        if alpha > 0.0 {
+            for channel in 0..3 {
+                source[channel] = (source[channel] * source[3]
+                    + rim[channel] * cover * (1.0 - source[3]))
+                    / alpha;
+            }
+        }
+        source[3] = alpha;
+    }
+    source[3] *= layer.effects.laid_opacity(layer.style.opacity);
+    if layer.style.clip {
+        source[3] *= state.base_alpha;
+    } else {
+        state.base_alpha = source[3];
+    }
+    state.color = layer.style.blend.composite(state.color, source);
+}
+
+/// A layer a tile composites, by its place among `layers`, and for a
+/// folder composited on its own the members the tile composites. The
+/// layers left out show nothing anywhere in the tile (see [`picks`]).
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct Pick {
+    pub(super) index: usize,
+    pub(super) members: Vec<Pick>,
+}
+
+/// The layers of `layers` that can show anything in the 64 pixel tile of
+/// picture pixel `(x, y)`, bottom first. Left out are the layers [`fold`]
+/// passes over at every pixel of the tile, or lays on with no alpha
+/// (which changes nothing under any blending mode): a hidden layer, one
+/// with no pixel in the tile, and a layer clipped to either. What is
+/// kept composites to exactly what all of `layers` do.
+pub(super) fn picks(layers: &[Layer<'_>], x: u32, y: u32) -> Vec<Pick> {
+    let mut out = Vec::new();
+    // Whether the layer the next clipped ones clip to shows anything
+    // here; clipped layers at the very bottom show as they are.
+    let mut base = true;
+    for (index, layer) in layers.iter().enumerate() {
+        if matches!(layer.source, Source::Correction(_)) {
+            if layer.style.visible {
+                out.push(Pick {
+                    index,
+                    members: Vec::new(),
+                });
+            }
+            continue;
+        }
+        let shows = layer.style.visible && !layer.empty_at(x, y);
+        if !layer.style.clip {
+            base = shows;
+        }
+        if !shows || !base {
+            continue;
+        }
+        let members = match &layer.source {
+            Source::Group(members) => picks(members, x, y),
+            _ => Vec::new(),
+        };
+        out.push(Pick { index, members });
+    }
+    out
+}
+
+/// `true` when every layer `picks` keeps is plain (see [`Layer::plain`];
+/// of a folder, its kept members).
+pub(super) fn picks_plain(layers: &[Layer<'_>], picks: &[Pick]) -> bool {
+    picks.iter().all(|pick| {
+        let layer = &layers[pick.index];
+        match &layer.source {
+            Source::Group(members) => {
+                layer.plain_but_members() && picks_plain(members, &pick.members)
+            }
+            _ => layer.plain(),
+        }
+    })
+}
+
+/// The layers `picks` keeps along picture row `y`, as [`Layer::row`]
+/// gives each.
+pub(super) fn pick_rows<'a>(layers: &'a [Layer<'_>], picks: &[Pick], y: u32) -> Vec<RowSource<'a>> {
+    picks
+        .iter()
+        .map(|pick| {
+            let layer = &layers[pick.index];
+            match &layer.source {
+                Source::Group(members) => RowSource::Group(pick_rows(members, &pick.members, y)),
+                _ => layer.row(y),
+            }
+        })
+        .collect()
 }
 
 /// Bytes to 0 to 1, as `f32::from(byte) / 255.0` gives them.
 pub(super) fn unit(byte: u8) -> f32 {
-    static TABLE: std::sync::OnceLock<[f32; 256]> = std::sync::OnceLock::new();
-    TABLE.get_or_init(|| std::array::from_fn(|i| i as f32 / 255.0))[usize::from(byte)]
+    const TABLE: [f32; 256] = {
+        let mut table = [0.0; 256];
+        let mut byte = 0;
+        while byte < 256 {
+            table[byte] = byte as f32 / 255.0;
+            byte += 1;
+        }
+        table
+    };
+    TABLE[byte as usize]
 }
 
 /// One row of a mask as the fast path reads it: its bytes, the picture x
@@ -213,6 +318,14 @@ impl Layer<'_> {
     /// correction or a folder of such layers, with no camera, tint,
     /// effect, border or folder mask, and a mask only on pixels.
     pub(super) fn plain(&self) -> bool {
+        match &self.source {
+            Source::Group(members) => self.plain_but_members() && members.iter().all(Layer::plain),
+            _ => self.plain_but_members(),
+        }
+    }
+
+    /// [`Self::plain`] without looking at a folder's members.
+    pub(super) fn plain_but_members(&self) -> bool {
         let source = match &self.source {
             Source::Paper(_) | Source::Correction(_) => self.mask.is_none(),
             Source::Raster { raster, .. } => {
@@ -223,7 +336,7 @@ impl Layer<'_> {
                             && mask.bytes().is_some()
                     })
             }
-            Source::Group(members) => self.mask.is_none() && members.iter().all(Layer::plain),
+            Source::Group(_) => self.mask.is_none(),
             // Drawn from their settings pixel by pixel.
             Source::Solid(_) | Source::Gradient(_) | Source::Material { .. } => false,
         };
@@ -311,72 +424,109 @@ pub(super) fn fold_plain(
     y: u32,
     state: &mut Stack,
 ) {
-    let Stack {
-        mut color,
-        mut base_alpha,
-        mut base_visible,
-    } = *state;
     for (layer, row) in layers.iter().zip(rows) {
         if let RowSource::Correction(correction) = row {
-            correct(&mut color, correction, layer, layer.style.opacity);
+            correct(&mut state.color, correction, layer, layer.style.opacity);
             continue;
         }
         if layer.empty_at(x, y) {
             // What a clear pixel does: the layers clipped to this one
             // show nothing over it.
             if !layer.style.clip {
-                base_visible = layer.style.visible;
-                base_alpha = 0.0;
+                state.base_visible = layer.style.visible;
+                state.base_alpha = 0.0;
             }
             continue;
         }
-        if !layer.style.clip {
-            base_visible = layer.style.visible;
-        }
-        if !layer.style.visible || (layer.style.clip && !base_visible) {
-            if !layer.style.clip {
-                base_alpha = 0.0;
-            }
-            continue;
-        }
-        let mut source = match row {
-            RowSource::Paper(rgb) => [rgb[0], rgb[1], rgb[2], 1.0],
-            RowSource::Correction(_) => [0.0; 4],
-            RowSource::Pixels { bytes, left, mask } => {
-                let lx = i64::from(x) - left;
-                let mut source = if lx >= 0 && (lx as usize) * 4 < bytes.len() {
-                    let p = &bytes[lx as usize * 4..lx as usize * 4 + 4];
-                    [unit(p[0]), unit(p[1]), unit(p[2]), unit(p[3])]
-                } else {
-                    [0.0; 4]
-                };
-                if let Some(mask) = mask {
-                    source[3] *= mask.at(x);
-                }
-                source
-            }
-            RowSource::Group(rows) => {
-                let Source::Group(members) = &layer.source else {
-                    continue;
-                };
-                let mut inner = Stack::EMPTY;
-                fold_plain(members, rows, x, y, &mut inner);
-                inner.color
-            }
-        };
-        source[3] *= layer.style.opacity;
-        if layer.style.clip {
-            source[3] *= base_alpha;
-        } else {
-            base_alpha = source[3];
-        }
-        color = layer.style.blend.composite(color, source);
+        lay_plain(layer, row, x, state, |members, rows| {
+            let mut inner = Stack::EMPTY;
+            fold_plain(members, rows, x, y, &mut inner);
+            inner.color
+        });
     }
-    *state = Stack {
-        color,
-        base_alpha,
-        base_visible,
+}
+
+/// [`fold_picked`] for plain layers, each read from its row (`rows`, one
+/// for each of `picks`, see [`pick_rows`]).
+pub(super) fn fold_plain_picked(
+    layers: &[Layer<'_>],
+    picks: &[Pick],
+    rows: &[RowSource<'_>],
+    x: u32,
+) -> [f32; 4] {
+    let mut state = Stack::EMPTY;
+    for (pick, row) in picks.iter().zip(rows) {
+        let layer = &layers[pick.index];
+        if let RowSource::Correction(correction) = row {
+            correct(&mut state.color, correction, layer, layer.style.opacity);
+            continue;
+        }
+        lay_plain(layer, row, x, &mut state, |members, rows| {
+            fold_plain_picked(members, &pick.members, rows, x)
+        });
+    }
+    state.color
+}
+
+/// One layer of [`fold_plain`] that is neither a correction nor known to
+/// be empty at `x`, laid over `state`; `group` composites a folder's
+/// members from their rows.
+#[inline]
+fn lay_plain(
+    layer: &Layer<'_>,
+    row: &RowSource<'_>,
+    x: u32,
+    state: &mut Stack,
+    group: impl FnOnce(&[Layer<'_>], &[RowSource<'_>]) -> [f32; 4],
+) {
+    if !layer.style.clip {
+        state.base_visible = layer.style.visible;
+    }
+    if !layer.style.visible || (layer.style.clip && !state.base_visible) {
+        if !layer.style.clip {
+            state.base_alpha = 0.0;
+        }
+        return;
+    }
+    let mut source = match row {
+        RowSource::Paper(rgb) => [rgb[0], rgb[1], rgb[2], 1.0],
+        RowSource::Correction(_) => [0.0; 4],
+        RowSource::Pixels { bytes, left, mask } => {
+            let lx = i64::from(x) - left;
+            let mut source = if lx >= 0 && (lx as usize) * 4 < bytes.len() {
+                let p = &bytes[lx as usize * 4..lx as usize * 4 + 4];
+                if p[3] == 0 {
+                    // A clear pixel, as most of a drawing's are: its
+                    // alpha stays 0 through mask, opacity and clipping,
+                    // and laying it on changes nothing.
+                    if !layer.style.clip {
+                        state.base_alpha = 0.0;
+                    }
+                    return;
+                }
+                [unit(p[0]), unit(p[1]), unit(p[2]), unit(p[3])]
+            } else {
+                [0.0; 4]
+            };
+            if let Some(mask) = mask {
+                source[3] *= mask.at(x);
+            }
+            source
+        }
+        RowSource::Group(rows) => {
+            let Source::Group(members) = &layer.source else {
+                return;
+            };
+            group(members, rows)
+        }
     };
+    source[3] *= layer.style.opacity;
+    if layer.style.clip {
+        source[3] *= state.base_alpha;
+    } else {
+        state.base_alpha = source[3];
+    }
+    state.color = layer.style.blend.composite(state.color, source);
 }
 
 /// `color` (straight RGBA) as the screen shows it at `(x, y)`: over the

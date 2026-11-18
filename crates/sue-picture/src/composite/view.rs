@@ -176,7 +176,9 @@ impl Compositor {
     }
 
     /// Shows the layers as animation frame `view` has them (`None`: all
-    /// of them); a change is composited on the next [`Self::sync`].
+    /// of them); a change is composited on the next [`Self::sync`], and
+    /// only where the frame shows something else than the last one (the
+    /// cels that come and go, a layer its keyframes move).
     pub fn set_view(&mut self, mut view: Option<FrameView>) {
         // The palette colors stay shown through every frame's view.
         if self.palette_colors {
@@ -184,7 +186,7 @@ impl Compositor {
         }
         if self.view != view {
             self.view = view;
-            self.seen.clear();
+            self.view_changed = true;
             self.focus = None;
         }
     }

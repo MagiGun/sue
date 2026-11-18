@@ -2,10 +2,12 @@
 //! other with the shared blend modes ([`sue_model::BlendMode`]).
 //!
 //! [`render`] composites any rectangle (exports, merges, the eyedropper).
-//! A [`Compositor`] keeps the screen image of one picture: it recomposites
-//! everything when the layers changed behind its back (undo, a property, a
-//! new layer) and only the painted rectangle while a stroke is drawn.
-//! Large areas are split into bands of rows composited on every core.
+//! A [`Compositor`] keeps the screen image of one picture by 64 pixel
+//! tiles: when the layers changed behind its back (undo, a property, a
+//! new layer, another animation frame) it composites the tiles that show
+//! something else, each from the layers that show in it, on every core,
+//! and keeps composited tiles for a state seen again; while a stroke is
+//! drawn, only the painted rectangle.
 
 #[cfg(test)]
 mod folders_tests;
@@ -15,6 +17,9 @@ mod layer_ops_tests;
 mod preview;
 mod rows;
 mod stroke;
+mod tiles;
+#[cfg(test)]
+mod tiles_tests;
 mod view;
 
 pub use preview::{preview, signature, thumbnail};
@@ -25,8 +30,7 @@ pub use view::{FrameView, Skin, flatten_view, render_view};
 use sue_core::{Arena, EntityId, RasterTile2D};
 use sue_model::picture;
 
-use gather::{Layer, Occupancy, Source, gather_view, prepare};
-use rows::{composite_span, rows};
+use gather::Occupancy;
 use stroke::Focus;
 
 /// What a render includes.
@@ -168,160 +172,40 @@ pub struct Compositor {
     palette_colors: bool,
     /// There was no memory for the screen image, and nobody was told yet.
     starved: bool,
-    /// What each layer showed when the screen image was last known to
+    /// What each tile showed when the screen image was last known to
     /// match the arena (see [`Looks`]).
     looks: Option<Looks>,
     /// How many looks in a row found the arena unchanged while the looks
     /// were out of date.
     calm: u8,
+    /// The composited tiles kept, for a state of the layers seen again.
+    tiles: tiles::TileCache,
+    /// The tiles a change of the layers touched that are not composited
+    /// yet (see [`Self::sync_within`]), by their place in rows from the
+    /// top left.
+    waiting: std::collections::BTreeSet<u32>,
+    /// The tiles a stroke's refresh painted through its kept stacks
+    /// (see `stroke::Focus`, which keeps bytes): a step off at most, and
+    /// composited again once the stroke is over.
+    rough: std::collections::BTreeSet<u32>,
+    /// The view changed since the last look (see [`Self::set_view`]).
+    view_changed: bool,
+    /// How many tiles a second the last timed composite made.
+    rate: f64,
+    /// How many waiting tiles are composited at once whatever time a
+    /// frame is given.
+    small_change: usize,
 }
 
-/// What each layer of the stack showed, bottom first, at the arena state
-/// `signature`. The screen image is trusted to match them only while the
-/// compositor's own record of the arena is that same signature: a stroke
-/// repaints its tiles and moves the record on without them.
+/// What each 64 pixel tile of the picture showed, as a number a tile
+/// (see `tiles::tile_hashes`), at the arena state `signature`. The screen
+/// image is trusted to match them only while the compositor's own record
+/// of the arena is that same signature: a stroke repaints its tiles and
+/// moves the record on without them.
 #[derive(Debug)]
 struct Looks {
     signature: Vec<(EntityId, u64)>,
-    items: Vec<Look>,
-}
-
-/// What one layer of the stack (a folder composited on its own is one)
-/// puts on the screen.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Look {
-    /// Changes whenever the layer's pixels on the screen may: its pixels,
-    /// place, style, mask, effects and, for a folder, its members. Not
-    /// its name, lock, palette row or anything else the picture does not
-    /// show.
-    key: u64,
-    /// The rectangle of the picture it can show anything in: empty for a
-    /// layer nothing is drawn on, `None` when that is not known (paper, a
-    /// fill, a correction, a layer with a border or seen through a
-    /// camera) and it may be anywhere.
-    bounds: Option<[u32; 4]>,
-}
-
-/// The look of `layer` in a picture of `size`.
-fn look_of(arena: &Arena, layer: &Layer<'_>, size: [u32; 2]) -> Look {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    let stamp = |raster: &RasterTile2D, hasher: &mut std::collections::hash_map::DefaultHasher| {
-        (raster.width(), raster.height()).hash(hasher);
-        raster.tile_revisions().hash(hasher);
-    };
-    layer.id.map(|id| id.to_u128()).hash(&mut hasher);
-    format!(
-        "{:?}{:?}{:?}{:?}{:?}",
-        layer.style, layer.tint, layer.warp, layer.effects, layer.mask_offset
-    )
-    .hash(&mut hasher);
-    layer.live.is_some().hash(&mut hasher);
-    if let Some(mask) = layer.mask {
-        stamp(mask, &mut hasher);
-    }
-    for (mask, offset) in &layer.outer {
-        stamp(mask, &mut hasher);
-        offset.hash(&mut hasher);
-    }
-    // A source whose content is not cheap to tell apart counts as
-    // changed whenever its entity changed at all.
-    let revision = |hasher: &mut std::collections::hash_map::DefaultHasher| {
-        layer
-            .id
-            .and_then(|id| arena.get_by_id(id).ok())
-            .map(sue_core::Entity::revision)
-            .hash(hasher);
-    };
-    let mut bounds = match &layer.source {
-        Source::Raster { raster, offset } => {
-            stamp(raster, &mut hasher);
-            offset.hash(&mut hasher);
-            layer
-                .occupancy
-                .as_ref()
-                .map(|tiles| tiles.bounds(size).unwrap_or([0; 4]))
-        }
-        Source::Group(members) => {
-            let mut all = Some([0_u32; 4]);
-            for member in members {
-                let look = look_of(arena, member, size);
-                look.key.hash(&mut hasher);
-                all = match (all, look.bounds) {
-                    (Some(all), Some(bounds)) => Some(union(all, bounds)),
-                    _ => None,
-                };
-            }
-            // The folder's own settings (how it is composited) count too.
-            revision(&mut hasher);
-            all
-        }
-        Source::Paper(rgb) => {
-            rgb.map(f32::to_bits).hash(&mut hasher);
-            None
-        }
-        Source::Correction(_)
-        | Source::Solid(_)
-        | Source::Gradient(_)
-        | Source::Material { .. } => {
-            revision(&mut hasher);
-            None
-        }
-    };
-    // A border or a glow reaches past the layer's own pixels, and a
-    // camera moves them.
-    if layer.effects != crate::effects::Effects::default() || layer.warp.is_some() {
-        bounds = None;
-    }
-    Look {
-        key: hasher.finish(),
-        bounds,
-    }
-}
-
-/// The smallest rectangle holding `a` and `b` (an empty one holds
-/// nothing).
-fn union(a: [u32; 4], b: [u32; 4]) -> [u32; 4] {
-    let empty = |r: [u32; 4]| r[0] >= r[2] || r[1] >= r[3];
-    match (empty(a), empty(b)) {
-        (true, _) => b,
-        (_, true) => a,
-        _ => [
-            a[0].min(b[0]),
-            a[1].min(b[1]),
-            a[2].max(b[2]),
-            a[3].max(b[3]),
-        ],
-    }
-}
-
-/// The rectangle of the picture that may look different when the stack
-/// showing `old` becomes the one showing `new` (empty when nothing
-/// does), or `None` when that is the whole picture. The layers at the
-/// bottom and at the top that show the same in both draw the same
-/// wherever the layers between have and had no pixels: a clear pixel
-/// changes nothing under any blending mode, and a layer clipped to one
-/// of them shows only inside it.
-fn changed_rect(old: &[Look], new: &[Look]) -> Option<[u32; 4]> {
-    let below = old
-        .iter()
-        .zip(new)
-        .take_while(|(before, after)| before == after)
-        .count();
-    let above = old[below..]
-        .iter()
-        .rev()
-        .zip(new[below..].iter().rev())
-        .take_while(|(before, after)| before == after)
-        .count();
-    let mut rect = [0; 4];
-    for look in old[below..old.len() - above]
-        .iter()
-        .chain(&new[below..new.len() - above])
-    {
-        rect = union(rect, look.bounds?);
-    }
-    Some(rect)
+    hashes: Vec<u64>,
 }
 
 /// Versions come from one count for every compositor, so a texture made
@@ -355,6 +239,12 @@ impl Compositor {
             starved: false,
             looks: None,
             calm: 0,
+            tiles: tiles::TileCache::default(),
+            waiting: std::collections::BTreeSet::new(),
+            rough: std::collections::BTreeSet::new(),
+            view_changed: false,
+            rate: 0.0,
+            small_change: tiles::SMALL_CHANGE,
         }
     }
 
@@ -477,134 +367,17 @@ impl Compositor {
         signature(arena, self.picture)
     }
 
-    /// Recomposites everything if the layers changed since the last look.
-    /// Returns `true` if the image changed.
+    /// Recomposites what the layers changed since the last look: the
+    /// tiles that show something else, all of them at once. Returns
+    /// `true` if the image changed.
     pub fn sync(&mut self, arena: &Arena) -> bool {
-        let Some(size) = arena.get_by_id(self.picture).ok().and_then(picture::size) else {
-            return false;
-        };
-        let seen = self.signature(arena);
-        if size == self.size && seen == self.seen {
-            // The image matches the arena. Once a stroke is over (it
-            // repaints by itself and leaves the looks behind), what each
-            // layer shows is found again, so the next change of a layer
-            // redraws only its part.
-            let stale = self
-                .looks
-                .as_ref()
-                .is_none_or(|looks| looks.signature != self.seen);
-            if stale && self.live.is_none() && self.pending.is_empty() && size != [0, 0] {
-                self.calm = self.calm.saturating_add(1);
-                if self.calm >= 2 {
-                    self.looks = Some(self.looks_now(arena, seen));
-                }
-            }
-            return false;
-        }
-        self.calm = 0;
-        // A change of the layers (not of the canvas's size, and not while
-        // parts of the image wait for detail): only where a layer that
-        // shows something else has or had pixels is composited again.
-        // A name, a lock or a folder closed in the palette shows nothing
-        // new and costs nothing; before, each composited the whole
-        // picture again and sent all of it to the GPU.
-        if size == self.size
-            && self.pending.is_empty()
-            && let Some(looks) = self
-                .looks
-                .take()
-                .filter(|looks| looks.signature == self.seen)
-        {
-            let now = self.looks_now(arena, seen.clone());
-            if let Some(rect) = changed_rect(&looks.items, &now.items) {
-                self.looks = Some(now);
-                let rect = [
-                    rect[0].min(size[0]),
-                    rect[1].min(size[1]),
-                    rect[2].min(size[0]),
-                    rect[3].min(size[1]),
-                ];
-                if rect[0] >= rect[2] || rect[1] >= rect[3] {
-                    self.seen = seen;
-                    return false;
-                }
-                self.paint(arena, rect);
-                self.seen = seen;
-                return true;
-            }
-        }
-        // Asked for in a way that can fail: a canvas there is no memory
-        // to show is told to the person (`take_starved`), where `vec!`
-        // would end the program.
-        let len = size[0] as usize * size[1] as usize * 4;
-        if self.display.len() != len {
-            let mut display: Vec<u8> = Vec::new();
-            if display.try_reserve_exact(len).is_err() {
-                self.size = [0, 0];
-                self.display = Vec::new();
-                self.seen = seen;
-                self.starved = true;
-                return false;
-            }
-            drop(display);
-            self.display = vec![0; len];
-        }
-        self.size = size;
-        self.paint(arena, [0, 0, size[0], size[1]]);
-        self.looks = Some(self.looks_now(arena, seen.clone()));
-        self.seen = seen;
-        self.pending.clear();
-        self.pending_layer = None;
-        true
-    }
-
-    /// What every layer shows now, for the arena at `signature`.
-    fn looks_now(&mut self, arena: &Arena, signature: Vec<(EntityId, u64)>) -> Looks {
-        let mut layers = gather_view(
-            arena,
-            self.picture,
-            RenderOptions::default(),
-            self.view.as_ref(),
-        );
-        self.attach(arena, &mut layers, true);
-        let items = layers
-            .iter()
-            .map(|layer| look_of(arena, layer, self.size))
-            .collect();
-        Looks { signature, items }
-    }
-
-    fn paint(&mut self, arena: &Arena, [x0, y0, x1, y1]: [u32; 4]) {
-        let mut layers = gather_view(
-            arena,
-            self.picture,
-            RenderOptions::default(),
-            self.view.as_ref(),
-        );
-        prepare(&mut layers, [x0, y0, x1, y1]);
-        // A whole picture finds what each layer covers; a piece reuses it.
-        let whole = [x0, y0, x1, y1] == [0, 0, self.size[0], self.size[1]];
-        self.attach(arena, &mut layers, whole);
-        let stride = self.size[0] as usize * 4;
-        let band = &mut self.display[y0 as usize * stride..y1 as usize * stride];
-        let area = (x1.saturating_sub(x0) * y1.saturating_sub(y0)) as usize;
-        rows(band, stride, y0, area, |y, row| {
-            composite_span(&layers, y, x0, x1, row);
-        });
-        self.version = next_version();
-        self.changes
-            .push_back((self.version, vec![[x0, y0, x1, y1]]));
-        if self.changes.len() > 64
-            && let Some((version, _)) = self.changes.pop_front()
-        {
-            self.forgotten = version;
-        }
+        self.follow(arena, None)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::gather::gather;
+    use super::gather::{Layer, gather};
     use super::rows::{RowSource, checker, pixel, pixel_plain, shown};
     use super::*;
     use crate::doc::{self, NewPicture};

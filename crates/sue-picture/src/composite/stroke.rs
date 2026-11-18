@@ -6,7 +6,7 @@ use sue_core::{Arena, EntityId};
 
 use super::gather::{Layer, Source, gather_view, prepare};
 use super::rows::{Stack, composite_span, fold, fold_plain, pixel, rows, shown, to_byte, unit};
-use super::{Compositor, LiveStroke, RenderOptions, next_version, share_pool, workers};
+use super::{Compositor, LiveStroke, RenderOptions, share_pool, workers};
 
 /// A stroke of the brush worker (`sue_brush::worker`) shown over its
 /// layer: the compositor reads the coverage the worker has laid so far
@@ -477,14 +477,11 @@ impl Compositor {
                 }
             }
         }
-        self.focus = focus.map(|(focus, _, _)| focus);
-        self.version = next_version();
-        self.changes.push_back((self.version, rects.to_vec()));
-        if self.changes.len() > 64
-            && let Some((version, _)) = self.changes.pop_front()
-        {
-            self.forgotten = version;
+        if focus.is_some() {
+            self.roughly(rects);
         }
+        self.focus = focus.map(|(focus, _, _)| focus);
+        self.record(rects.to_vec());
         self.seen = signature;
     }
 
@@ -624,6 +621,21 @@ impl Compositor {
             rect[2].min(self.size[0]),
             rect[3].min(self.size[1]),
         ];
+        // The whole picture, while what every tile showed before the
+        // edit is known: only the tiles that show something else now (a
+        // layer moved or transformed redraws where it was and where it
+        // is, not the picture).
+        if rect == [0, 0, self.size[0], self.size[1]]
+            && self.pending.is_empty()
+            && self
+                .looks
+                .as_ref()
+                .is_some_and(|looks| looks.signature == self.seen)
+            && self.signature(arena) != self.seen
+        {
+            self.follow(arena, None);
+            return;
+        }
         self.paint(arena, rect);
         self.seen = self.signature(arena);
     }
@@ -703,14 +715,11 @@ impl Compositor {
                 }
             }
         });
-        self.focus = focus.map(|(focus, _, _)| focus);
-        self.version = next_version();
-        self.changes.push_back((self.version, rects));
-        if self.changes.len() > 64
-            && let Some((version, _)) = self.changes.pop_front()
-        {
-            self.forgotten = version;
+        if focus.is_some() {
+            self.roughly(&rects);
         }
+        self.focus = focus.map(|(focus, _, _)| focus);
+        self.record(rects);
         self.seen = signature;
     }
 }
