@@ -609,6 +609,10 @@ fn rigged(parsed: &Parsed) -> Option<Shaped> {
         dual: Vec::new(),
         helpers: Vec::new(),
         hinges: Vec::new(),
+        colors: Vec::new(),
+        uvs: Vec::new(),
+        skins: Vec::new(),
+        textures: Vec::new(),
     })
 }
 

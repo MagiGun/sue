@@ -18,7 +18,9 @@ use sue_model::{Geometry, PrimKind};
 use crate::doc::Edit;
 
 mod surface;
-pub use surface::{Relief, Surface, frame_of_points, light_of, render_surface, smooth_normals};
+pub use surface::{
+    Relief, Surface, Texture, frame_of_points, light_of, render_surface, smooth_normals,
+};
 
 /// The class of a 3D layer.
 pub const CLASS: &str = "sue.paint.layer3d";
@@ -635,6 +637,9 @@ pub struct Buffers {
     /// How dark the model's shadow on the floor is at the pixel (empty
     /// without one).
     pub floor: Vec<f32>,
+    /// The surface's own color at the pixel, red, green and blue from 0
+    /// to 1 (empty for a model of plain clay).
+    pub color: Vec<[f32; 3]>,
 }
 
 impl Buffers {
@@ -800,6 +805,7 @@ pub fn render_framed(
         cover: Vec::new(),
         guide: Vec::new(),
         floor: Vec::new(),
+        color: Vec::new(),
     };
     let positions = mesh.positions();
     if positions.is_empty() || w == 0 || h == 0 {
@@ -1064,11 +1070,17 @@ pub fn draw(buffers: &Buffers, view: &View3D) -> Option<RasterTile2D> {
             // Guide lines lie on the surface, a darker gray.
             let guide = buffers.guide.get(at).copied().unwrap_or(0.0);
             let lit = buffers.light[at] * (1.0 - 0.6 * guide);
-            let gray = lit + (1.0 - lit) * fog;
+            // The surface's own color under the light (plain clay is
+            // white, so it shows the light alone).
+            let own = buffers.color.get(at).copied().unwrap_or([1.0; 3]);
+            let shade = own.map(|c| {
+                let c = c * lit;
+                c + (1.0 - c) * fog
+            });
             // A soft edge: the pixel shows as much as the model covers.
             let cover = buffers.cover.get(at).copied().unwrap_or(1.0);
             (
-                color.map(|c| gray + (c - gray) * ink),
+                [0, 1, 2].map(|k| shade[k] + (color[k] - shade[k]) * ink),
                 cover + (1.0 - cover) * ink,
             )
         } else {

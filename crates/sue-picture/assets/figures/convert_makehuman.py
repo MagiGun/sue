@@ -243,9 +243,27 @@ def main():
                 mine = per[slot[vertex]]
                 mine[joint] = mine.get(joint, 0.0) + weight
     head = [j[0] for j in JOINTS].index("Head")
+    # Each helper's base: the joint it rests on.
+    names = [j[0] for j in JOINTS]
+    base_of = {at: names.index(j[1]) for at, j in enumerate(JOINTS) if j[0].startswith("+")}
     skin = []
     for mine in per:
-        best = sorted(mine.items(), key=lambda kv: -kv[1])[:4] or [(head, 1.0)]
+        # The four strongest joints, a helper counted with its base (so
+        # no point loses a joint to the helpers), then each helper given
+        # its own share back where there is room for it.
+        whole = {}
+        for joint, weight in mine.items():
+            at = base_of.get(joint, joint)
+            whole[at] = whole.get(at, 0.0) + weight
+        kept = dict(sorted(whole.items(), key=lambda kv: -kv[1])[:4])
+        for joint, weight in sorted(mine.items(), key=lambda kv: -kv[1]):
+            base = base_of.get(joint)
+            if base in kept and (len(kept) < 4 or kept[base] - weight < 1e-6):
+                kept[base] -= weight
+                if kept[base] < 1e-6:
+                    del kept[base]
+                kept[joint] = weight
+        best = sorted(kept.items(), key=lambda kv: -kv[1])[:4] or [(head, 1.0)]
         total = sum(w for _, w in best)
         bytes_ = [round(w / total * 255) for _, w in best]
         bytes_[0] += 255 - sum(bytes_)

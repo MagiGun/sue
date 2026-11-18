@@ -6,10 +6,10 @@
 //! it was and redoes exactly.
 
 use super::p81_figures::{click_at, on_screen, redo, sight, undo};
-use super::paint_3d::{arena_bytes, new_3d, one_step};
+use super::paint_3d::{arena_bytes, click_control, drag_control, model, new_3d, one_step};
 use super::*;
 
-use sue_paint::figure::{Body, Pose};
+use sue_paint::figure::{Body, Kind, Pose};
 
 fn far(a: [f32; 3], b: [f32; 3]) -> f32 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
@@ -180,5 +180,113 @@ fn p82_an_arrow_moves_the_body_along_one_axis_and_the_chest_leans_it() {
             assert!(far(after[13], now[13]) < 0.03, "the feet stay");
             assert_eq!(pose.0[11], posed.0[11], "the legs did not turn");
         },
+    );
+}
+
+#[test]
+fn p82_the_face_is_shaped_wears_an_expression_and_looks_where_it_is_told() {
+    let mut paint = PaintDriver::new("p82-figure-face");
+    let layer = new_3d(&mut paint, "layer.new.figure");
+    let body = |paint: &PaintDriver| Body::of(model(paint, layer));
+    // The Face section of Tool Property: a slider of the face, dragged.
+    one_step(
+        &mut paint,
+        layer,
+        "a longer nose",
+        |paint| drag_control(paint, "Nose length", vec2(40.0, 0.0)),
+        |paint| {
+            assert!(
+                body(paint).slider("nose_length") > 0.1,
+                "{:?}",
+                body(paint).parts
+            )
+        },
+    );
+    one_step(
+        &mut paint,
+        layer,
+        "larger eyes",
+        |paint| drag_control(paint, "Eye size", vec2(50.0, 0.0)),
+        |paint| assert!(body(paint).slider("eye_size") > 0.1),
+    );
+    // An expression's own slider.
+    one_step(
+        &mut paint,
+        layer,
+        "a smile",
+        |paint| drag_control(paint, "Smile", vec2(200.0, 0.0)),
+        |paint| {
+            assert_eq!(body(paint).slider("smile"), 1.0);
+            assert_eq!(body(paint).expression(), Some(1));
+        },
+    );
+    // The face is kept with the body shape, on the model.
+    let kept = model(&paint, layer)
+        .property(sue_paint::figure::PARTS_TEXT)
+        .and_then(sue_core::Value::as_str)
+        .unwrap()
+        .to_owned();
+    assert!(
+        kept.contains("nose_length=") && kept.contains("smile=1"),
+        "{kept}"
+    );
+    // The gaze: both eyes turned by one slider, as one pose step.
+    let (base, ..) = sight(&paint, layer);
+    one_step(
+        &mut paint,
+        layer,
+        "the eyes look across",
+        |paint| drag_control(paint, "Gaze across", vec2(40.0, 0.0)),
+        |paint| {
+            let (pose, body, _) = sight(paint, layer);
+            let [across, up] = sue_paint::figure::gaze(&pose, &body);
+            assert!(across > 5.0 && up == 0.0, "{across} {up}");
+            assert_eq!(pose.0[52], pose.0[53], "both eyes together");
+            for joint in 0..52 {
+                assert_eq!(pose.0[joint], base.0[joint], "only the eyes turned");
+            }
+        },
+    );
+    // The head figure has the face's rows too, and none of the legs'.
+    paint.command("figure.model.4");
+    paint.settle(4);
+    assert_eq!(body(&paint).kind, Kind::Head);
+    assert!(body(&paint).slider("smile") == 1.0, "the face stays");
+    one_step(
+        &mut paint,
+        layer,
+        "a wider jaw on the head",
+        |paint| drag_control(paint, "Jaw", vec2(40.0, 0.0)),
+        |paint| assert!(body(paint).slider("jaw") > 0.1),
+    );
+    let told = super::paint_3d::step_named(&mut paint, Vec::new());
+    assert!(
+        !told.iter().any(|(name, _)| name == "Leg length"),
+        "a head has no legs to shape"
+    );
+    let _ = click_control;
+}
+
+#[test]
+fn p82_the_hands_veins_have_a_pattern_slider() {
+    let mut paint = PaintDriver::new("p82-figure-veins");
+    let layer = new_3d(&mut paint, "layer.new.figure");
+    paint.command("figure.model.2");
+    paint.settle(4);
+    let body = |paint: &PaintDriver| Body::of(model(paint, layer));
+    assert_eq!(body(&paint).kind, Kind::Hand);
+    one_step(
+        &mut paint,
+        layer,
+        "more veins",
+        |paint| drag_control(paint, "Veins", vec2(80.0, 0.0)),
+        |paint| assert!(body(paint).slider("veins") > 0.5),
+    );
+    one_step(
+        &mut paint,
+        layer,
+        "another vein pattern",
+        |paint| drag_control(paint, "Vein pattern", vec2(60.0, 0.0)),
+        |paint| assert!(body(paint).slider("vein_pattern") > 0.2),
     );
 }

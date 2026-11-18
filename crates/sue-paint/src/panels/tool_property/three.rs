@@ -393,7 +393,6 @@ impl SuePaint {
             }
             if body.kind != crate::figure::Kind::Imported {
                 slid |= self.part_rows(ui, theme, &mut shaped);
-                shape = Some((body, shaped));
             }
             ui.add_space(gap);
             self.figure_properties(
@@ -404,6 +403,12 @@ impl SuePaint {
                 arena,
                 theme,
             );
+            // The face comes last: it is the longest list.
+            if body.kind != crate::figure::Kind::Imported {
+                ui.add_space(gap);
+                slid |= self.face_rows(ui, theme, &mut shaped);
+                shape = Some((body, shaped));
+            }
         }
         ui.add_space(gap);
         ui.label(
@@ -973,6 +978,12 @@ impl SuePaint {
                 }
             }
             if let Some((set, let_go)) = self.hand_setup_rows(ui, theme, pose, body) {
+                if set != *pose {
+                    next = Some(set);
+                }
+                released |= let_go;
+            }
+            if let Some((set, let_go)) = self.gaze_rows(ui, theme, pose, body) {
                 if set != *pose {
                     next = Some(set);
                 }
