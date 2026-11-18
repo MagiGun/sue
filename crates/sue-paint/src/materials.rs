@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use sue_core::txn::SetProperty;
 use sue_core::{Arena, Entity, EntityId, PixelFormat, RasterTile2D, SueFile, UndoStack, Value};
-use sue_wm::start::Glyph;
+use sue_wm::icons::Icon;
 
 /// How a material goes onto a canvas.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,7 +46,7 @@ pub struct MaterialKind {
     /// What people read, kept in English (`localize` shows it).
     pub name: String,
     /// Its picture in lists.
-    pub glyph: Glyph,
+    pub glyph: Icon,
     /// How it goes onto a canvas.
     pub placement: Placement,
     /// Finds its materials.
@@ -66,53 +66,65 @@ impl MaterialKinds {
     #[must_use]
     pub fn builtin() -> Self {
         let mut kinds = Self::default();
-        let own: [(&str, &str, Glyph, Placement, Scan); 11] = [
-            (TONE, "Tones", Glyph::Tone, Placement::Cover, scan_tones),
+        let own: [(&str, &str, Icon, Placement, Scan); 11] = [
+            (
+                TONE,
+                "Tones",
+                Icon::MaterialTone,
+                Placement::Cover,
+                scan_tones,
+            ),
             (
                 PATTERN,
                 "Patterns",
-                Glyph::Pattern,
+                Icon::MaterialPattern,
                 Placement::Cover,
                 scan_patterns,
             ),
-            (IMAGE, "Images", Glyph::Picture, Placement::Fit, scan_images),
-            (TIP, "Brush tips", Glyph::Brush, Placement::Fit, scan_tips),
-            (POSE, "Poses", Glyph::Cube, Placement::Pose, scan_poses),
+            (IMAGE, "Images", Icon::Picture, Placement::Fit, scan_images),
+            (
+                TIP,
+                "Brush tips",
+                Icon::ToolBrush,
+                Placement::Fit,
+                scan_tips,
+            ),
+            (POSE, "Poses", Icon::Cube, Placement::Pose, scan_poses),
             (
                 BODY,
                 "Body shapes",
-                Glyph::Cube,
+                Icon::Cube,
                 Placement::Pose,
                 scan_bodies,
             ),
             (
                 EFFECT,
                 "Effect lines",
-                Glyph::Pattern,
+                Icon::MaterialPattern,
                 Placement::Cover,
                 |_| scan_own(EFFECT, Placement::Cover),
             ),
-            (BALLOON, "Balloons", Glyph::Bubble, Placement::Fit, |_| {
+            (BALLOON, "Balloons", Icon::Feedback, Placement::Fit, |_| {
                 scan_own(BALLOON, Placement::Fit)
             }),
             (
                 TEMPLATE,
                 "Templates",
-                Glyph::Projects,
+                Icon::Projects,
                 Placement::Layers,
                 scan_templates,
             ),
             (
                 BACKGROUND,
                 "3D backgrounds",
-                Glyph::Cube,
+                Icon::Cube,
                 Placement::Model,
                 |_| scan_own(BACKGROUND, Placement::Model),
             ),
             (
                 OBJECT,
                 "3D objects",
-                Glyph::Cube,
+                Icon::Cube,
                 Placement::Model,
                 scan_objects,
             ),
@@ -1279,7 +1291,7 @@ mod tests {
             .register(MaterialKind {
                 id: "test.nothing".to_owned(),
                 name: "Nothing".to_owned(),
-                glyph: Glyph::Cube,
+                glyph: Icon::Cube,
                 placement: Placement::Fit,
                 scan: |_| Vec::new(),
             })

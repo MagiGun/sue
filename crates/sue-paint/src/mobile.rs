@@ -9,7 +9,8 @@
 //! (owner note 11).
 
 use egui::{Rect, Sense, Ui, UiBuilder, Vec2};
-use sue_wm::start::{self as page, Glyph, Preview};
+use sue_wm::icons::Icon;
+use sue_wm::start::{self as page, Preview};
 use sue_wm::{AppletContext, AppletId, FilePick, ShellRequest, Theme};
 
 use crate::studio::SuePaint;
@@ -101,7 +102,8 @@ impl SuePaint {
         // The back arrow, the title, Import and Advanced Settings.
         area.horizontal(|ui| {
             let (back, _) = ui.allocate_exact_size(Vec2::splat(44.0), Sense::hover());
-            if page::icon_button(ui, back, Glyph::Back, &tr!("start-back"), false, theme).clicked()
+            if page::icon_button(ui, back, Icon::ArrowLeft, &tr!("start-back"), false, theme)
+                .clicked()
             {
                 self.new_canvas.category = None;
             }
@@ -141,9 +143,9 @@ impl SuePaint {
                         ui.spacing_mut().item_spacing.x = 12.0;
                         for template in &templates {
                             let preview = match template.make {
-                                Make::FromImage => Preview::Glyph(Glyph::Picture),
-                                Make::FromMovie => Preview::Glyph(Glyph::Film),
-                                Make::Custom => Preview::Glyph(Glyph::Add),
+                                Make::FromImage => Preview::Icon(Icon::Picture),
+                                Make::FromMovie => Preview::Icon(Icon::Film),
+                                Make::Custom => Preview::Icon(Icon::Plus),
                                 Make::Size { .. } | Make::Screen => {
                                     let picture = template.picture(screen);
                                     Preview::Paper(picture.map_or(1.0, |picture| {
