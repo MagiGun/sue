@@ -586,6 +586,12 @@ fn run_frames(
         ctx.run_ui(raw, |ui| runtime.ui(ui, &mut NoTextures, now))
             .drop_without_applying_deltas();
         *clock += Duration::from_millis(8);
+        // As the desktop loop: timed work that is due runs first.
+        if let FramePacing::WakeAt(at) = runtime.pacing(*clock)
+            && at <= *clock
+        {
+            runtime.timer(&mut NoTextures, *clock);
+        }
         if count > 2 && !matches!(runtime.pacing(*clock), FramePacing::Animate { .. }) {
             return count;
         }

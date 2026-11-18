@@ -78,6 +78,7 @@ mod settings_screens;
 mod shell;
 mod shell_polish;
 mod sve;
+mod sve_playback;
 mod tutorial_animate_2025;
 mod tutorial_animate_beginners;
 mod tutorial_crash_tips;
@@ -176,6 +177,12 @@ pub(crate) fn frames(
             .drop_without_applying_deltas();
         count += 1;
         now += Duration::from_millis(8);
+        // As the desktop loop: timed work that is due runs first.
+        if let FramePacing::WakeAt(at) = runtime.pacing(now)
+            && at <= now
+        {
+            runtime.timer(&mut NoTextures, now);
+        }
         let asleep = !matches!(runtime.pacing(now), FramePacing::Animate { .. });
         if (asleep && count > 2) || count > 2_000 {
             return count;

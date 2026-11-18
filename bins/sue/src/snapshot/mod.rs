@@ -185,6 +185,12 @@ impl Camera2 {
                 .values()
                 .any(|viewport| viewport.repaint_delay.is_zero());
             self.painter.apply_textures(output.textures_delta);
+            // As the desktop loop: timed work that is due runs first.
+            if let FramePacing::WakeAt(at) = runtime.pacing(self.now)
+                && at <= self.now
+            {
+                runtime.timer(&mut self.painter, self.now);
+            }
             let asleep =
                 !egui_moving && !matches!(runtime.pacing(self.now), FramePacing::Animate { .. });
             if (asleep && count > 3 && self.input.is_empty()) || count > 600 {

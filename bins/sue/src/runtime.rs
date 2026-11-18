@@ -471,7 +471,16 @@ impl Runtime {
             self.quit_dialog(ui.ctx());
         }
         self.updates(ui.ctx(), now);
+        // Input or a request may have changed what an applet's tick
+        // looks after (Space starts a clock, a click asks a monitor for
+        // a frame): the ticks run right after this frame, not only when
+        // something else wakes the loop.
+        let asked =
+            !self.engine.requests.is_empty() || ui.ctx().input(|input| !input.events.is_empty());
         self.serve_requests(textures, now);
+        if asked {
+            self.next_tick = Some(self.next_tick.map_or(now, |due| due.min(now)));
+        }
         self.refresh_rice();
         // The Hub's lists are read again each time it opens.
         let hub = self.shell.hub_open();
@@ -621,14 +630,11 @@ impl Runtime {
             return FramePacing::Sleep;
         }
         let shell = self.shell.pacing(now);
-        if matches!(shell, FramePacing::Animate { .. }) {
-            return shell;
-        }
         let shell_wake = match shell {
             FramePacing::WakeAt(at) => Some(at),
             _ => None,
         };
-        [
+        let wake = [
             shell_wake,
             self.transport
                 .is_playing()
@@ -642,8 +648,17 @@ impl Runtime {
         ]
         .into_iter()
         .flatten()
-        .min()
-        .map_or(FramePacing::Sleep, FramePacing::WakeAt)
+        .min();
+        if matches!(shell, FramePacing::Animate { .. }) {
+            // The loop runs the timer only for a wake that is due: one
+            // that is due goes first, so the applets' ticks (a playing
+            // clock) never starve while the shell animates.
+            return match wake {
+                Some(at) if at <= now => FramePacing::WakeAt(at),
+                _ => shell,
+            };
+        }
+        wake.map_or(FramePacing::Sleep, FramePacing::WakeAt)
     }
 
     /// Runs timed work that is due. Returns `true` if the window must be
@@ -1882,6 +1897,7 @@ impl Runtime {
     ) {
         self.engine.requests.push(request);
         self.serve_requests(textures, now);
+        self.next_tick = Some(self.next_tick.map_or(now, |due| due.min(now)));
     }
 }
 
