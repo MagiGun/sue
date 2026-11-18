@@ -190,6 +190,16 @@ pub(crate) fn along(
         .collect()
 }
 
+/// A twisting part for a pose: the bone's direction and the joint's
+/// place as modeled, where the joint is now, and the twist at its two
+/// ends (radians).
+type Twisting = ([f32; 3], [f32; 3], [f32; 3], [f32; 2]);
+
+/// A folded hinge for a pose: the hinge and the joint above it, where
+/// it is, the way out of its bend, how far its point is pushed out and
+/// how far along the limb that reaches.
+type Bulge = (usize, usize, [f32; 3], [f32; 3], f32, f32);
+
 /// One joint's move for a pose, ready to blend.
 #[derive(Clone, Copy)]
 struct Move {
@@ -198,7 +208,7 @@ struct Move {
     /// For a twisting part: the bone's direction and the joint's place
     /// as modeled, where the joint is now, and the twist at its two
     /// ends (radians).
-    twist: Option<([f32; 3], [f32; 3], [f32; 3], [f32; 2])>,
+    twist: Option<Twisting>,
 }
 
 fn smoothstep(from: f32, to: f32, x: f32) -> f32 {
@@ -298,7 +308,7 @@ pub(crate) fn skinned(
     // The hinges that are bent: where each is, the way out of its bend
     // (toward the point of the elbow, the cap of the knee) and how far
     // the flesh there is pushed out.
-    let bulges: Vec<(usize, usize, [f32; 3], [f32; 3], f32, f32)> = shaped
+    let bulges: Vec<Bulge> = shaped
         .hinges
         .iter()
         .filter(|_| !plain_only)

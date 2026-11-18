@@ -1060,8 +1060,8 @@ mod tests {
             ..body
         };
         let after = solve(&pose, &placed);
-        for axis in 0..3 {
-            assert!((after[0].0[axis] - before[0].0[axis] - shift[axis]).abs() < 1e-4);
+        for (axis, by) in shift.iter().enumerate() {
+            assert!((after[0].0[axis] - before[0].0[axis] - by).abs() < 1e-4);
         }
         for pin in pins {
             assert!(
