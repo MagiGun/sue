@@ -31,27 +31,29 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
 use windows::Win32::Media::MediaFoundation::{
-    CODECAPI_AVEncCommonQuality, CODECAPI_AVEncCommonRateControlMode,
-    CODECAPI_AVEncMPVDefaultBPictureCount, CODECAPI_AVEncMPVGOPSize, IMFActivate, IMFAttributes,
-    IMFMediaType, IMFSinkWriter, IMFSourceReader, MF_ACCESSMODE_READWRITE,
-    MF_E_TOPO_CODEC_NOT_FOUND, MF_FILEFLAGS_NONE, MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION,
-    MF_MT_AAC_PAYLOAD_TYPE, MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
-    MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS,
-    MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE,
-    MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_MINIMUM_DISPLAY_APERTURE,
-    MF_MT_MPEG2_PROFILE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_MT_TRANSFER_FUNCTION,
-    MF_MT_VIDEO_NOMINAL_RANGE, MF_MT_VIDEO_PRIMARIES, MF_MT_YUV_MATRIX,
-    MF_OPENMODE_DELETE_IF_EXIST, MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
-    MF_SINK_WRITER_DISABLE_THROTTLING, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
-    MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READERF_ENDOFSTREAM, MF_TRANSCODE_CONTAINERTYPE,
-    MF_VERSION, MFAudioFormat_AAC, MFAudioFormat_PCM, MFCreateAttributes, MFCreateFile,
-    MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample, MFCreateSinkWriterFromURL,
-    MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video, MFNominalRange_16_235,
-    MFSTARTUP_LITE, MFShutdown, MFStartup, MFT_CATEGORY_AUDIO_ENCODER, MFT_CATEGORY_VIDEO_ENCODER,
-    MFT_ENUM_FLAG_LOCALMFT, MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT,
-    MFT_REGISTER_TYPE_INFO, MFTEnumEx, MFTranscodeContainerType_MPEG4, MFVideoFormat_H264,
-    MFVideoFormat_NV12, MFVideoInterlace_Progressive, MFVideoPrimaries_BT709, MFVideoTransFunc_709,
-    MFVideoTransferMatrix_BT709, eAVEncCommonRateControlMode_Quality, eAVEncH264VProfile_High,
+    CODECAPI_AVEncCommonMeanBitRate, CODECAPI_AVEncCommonQuality,
+    CODECAPI_AVEncCommonRateControlMode, CODECAPI_AVEncMPVDefaultBPictureCount,
+    CODECAPI_AVEncMPVGOPSize, IMFActivate, IMFAttributes, IMFMediaType, IMFSinkWriter,
+    IMFSourceReader, MF_ACCESSMODE_READWRITE, MF_E_TOPO_CODEC_NOT_FOUND, MF_FILEFLAGS_NONE,
+    MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, MF_MT_AAC_PAYLOAD_TYPE,
+    MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AUDIO_AVG_BYTES_PER_SECOND, MF_MT_AUDIO_BITS_PER_SAMPLE,
+    MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND,
+    MF_MT_AVG_BITRATE, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
+    MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_MINIMUM_DISPLAY_APERTURE, MF_MT_MPEG2_PROFILE,
+    MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE, MF_MT_TRANSFER_FUNCTION, MF_MT_VIDEO_NOMINAL_RANGE,
+    MF_MT_VIDEO_PRIMARIES, MF_MT_YUV_MATRIX, MF_OPENMODE_DELETE_IF_EXIST,
+    MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, MF_SINK_WRITER_DISABLE_THROTTLING,
+    MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+    MF_SOURCE_READERF_ENDOFSTREAM, MF_TRANSCODE_CONTAINERTYPE, MF_VERSION, MFAudioFormat_AAC,
+    MFAudioFormat_PCM, MFCreateAttributes, MFCreateFile, MFCreateMediaType, MFCreateMemoryBuffer,
+    MFCreateSample, MFCreateSinkWriterFromURL, MFCreateSourceReaderFromURL, MFMediaType_Audio,
+    MFMediaType_Video, MFNominalRange_16_235, MFSTARTUP_LITE, MFShutdown, MFStartup,
+    MFT_CATEGORY_AUDIO_ENCODER, MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_LOCALMFT,
+    MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_REGISTER_TYPE_INFO, MFTEnumEx,
+    MFTranscodeContainerType_MPEG4, MFVideoFormat_H264, MFVideoFormat_NV12,
+    MFVideoInterlace_Progressive, MFVideoPrimaries_BT709, MFVideoTransFunc_709,
+    MFVideoTransferMatrix_BT709, eAVEncCommonRateControlMode_CBR,
+    eAVEncCommonRateControlMode_Quality, eAVEncH264VProfile_High,
 };
 use windows::Win32::System::Com::{
     COINIT_MULTITHREADED, CoInitializeEx, CoTaskMemFree, CoUninitialize,
@@ -279,6 +281,9 @@ pub struct VideoSpec {
     pub quality: u32,
     /// Frames from one key frame to the next.
     pub key_interval: u32,
+    /// A bit rate in bits a second: the encoder then holds to it
+    /// (constant bit rate) instead of to `quality`. `None`: quality.
+    pub bitrate: Option<u32>,
 }
 
 /// The sound side of an MP4: AAC-LC from 16-bit PCM.
@@ -519,7 +524,9 @@ impl Mp4Writer {
         let pixels_a_second =
             u64::from(spec.width) * u64::from(spec.height) * u64::from(spec.rate.0)
                 / u64::from(spec.rate.1);
-        let bitrate = u32::try_from((pixels_a_second / 4).max(1_000_000)).unwrap_or(u32::MAX);
+        let bitrate = spec.bitrate.unwrap_or_else(|| {
+            u32::try_from((pixels_a_second / 4).max(1_000_000)).unwrap_or(u32::MAX)
+        });
         let mut out = vec![
             (MF_MT_MAJOR_TYPE, Value::Guid(MFMediaType_Video)),
             (MF_MT_SUBTYPE, Value::Guid(MFVideoFormat_H264)),
@@ -537,12 +544,27 @@ impl Mp4Writer {
             (MF_MT_ALL_SAMPLES_INDEPENDENT, Value::U32(1)),
         ];
         input.extend(colour());
+        let rate_control = match spec.bitrate {
+            // A bit rate asked for: constant (the software encoder takes
+            // no mean in its unconstrained mode; tried on build 26300).
+            Some(mean) => [
+                (
+                    CODECAPI_AVEncCommonRateControlMode,
+                    eAVEncCommonRateControlMode_CBR.0 as u32,
+                ),
+                (CODECAPI_AVEncCommonMeanBitRate, mean),
+            ],
+            None => [
+                (
+                    CODECAPI_AVEncCommonRateControlMode,
+                    eAVEncCommonRateControlMode_Quality.0 as u32,
+                ),
+                (CODECAPI_AVEncCommonQuality, spec.quality),
+            ],
+        };
         let encoding = attributes(&[
-            (
-                CODECAPI_AVEncCommonRateControlMode,
-                eAVEncCommonRateControlMode_Quality.0 as u32,
-            ),
-            (CODECAPI_AVEncCommonQuality, spec.quality),
+            rate_control[0],
+            rate_control[1],
             (CODECAPI_AVEncMPVGOPSize, spec.key_interval.max(1)),
             // No B frames. With them the encoder shows the first picture
             // one frame after it is decoded, and Windows' own player (the
@@ -937,6 +959,7 @@ mod tests {
             rate: (24, 1),
             quality: 75,
             key_interval: 48,
+            bitrate: None,
         }
     }
 
@@ -1028,6 +1051,44 @@ mod tests {
             "the tone is there: {}",
             read.sound_peak
         );
+    }
+
+    #[test]
+    fn a_bit_rate_asked_for_sets_the_size() {
+        // Two seconds of a moving pattern with some grain at 320 by 240:
+        // the encoder spends what it is given.
+        let encode = |bitrate: u32| {
+            let mut movie = Mp4Writer::new(
+                VideoSpec {
+                    bitrate: Some(bitrate),
+                    ..spec(320, 240)
+                },
+                None,
+            )
+            .unwrap();
+            let tick = 10_000_000 / 24;
+            for frame in 0..48_u32 {
+                let picture: Vec<u8> = (0..320 * 240 * 3 / 2)
+                    .map(|at: u32| {
+                        let (x, y) = (at % 320, at / 320);
+                        let grain = (at.wrapping_mul(2_654_435_761) ^ frame * 977) >> 29;
+                        ((x * 3 + y * 2 + frame * 5) % 200 + 20 + grain) as u8
+                    })
+                    .collect();
+                movie
+                    .write_video(&picture, i64::from(frame) * tick, tick)
+                    .unwrap();
+            }
+            let bytes = movie.finish().unwrap();
+            assert_eq!(read_mp4(&bytes, 0).unwrap().frames, 48);
+            bytes.len()
+        };
+        let (low, high) = (encode(300_000), encode(3_000_000));
+        // A lower rate makes a smaller file (CBR may spend less than it is
+        // given on a simple picture, never much more): measured 190 and
+        // 505 KB on Windows 11 build 26300.
+        assert!(low * 2 < high, "{low} and {high} bytes");
+        assert!(high < 2 * 750_000, "two seconds at 3 Mbit/s: {high}");
     }
 
     #[test]

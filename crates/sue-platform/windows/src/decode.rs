@@ -708,6 +708,7 @@ mod tests {
                 rate: (fps, 1),
                 quality: 90,
                 key_interval: 12,
+                bitrate: None,
             },
             Some(AudioSpec {
                 rate: 48_000,

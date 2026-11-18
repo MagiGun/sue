@@ -212,6 +212,9 @@ pub struct MovieSettings {
     pub quality: MovieQuality,
     /// The sound track, or none.
     pub sound: Option<MovieSound>,
+    /// An average bit rate in bits a second for encoders that take one
+    /// (MP4): `None` lets [`MovieSettings::quality`] decide, as before.
+    pub bitrate: Option<u32>,
 }
 
 /// Media time counts in 100 nanosecond units, as Media Foundation and
@@ -228,6 +231,7 @@ impl MovieSettings {
             rate: (fps, 1),
             quality: MovieQuality::Normal,
             sound: None,
+            bitrate: None,
         }
     }
 
