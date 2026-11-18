@@ -1425,6 +1425,65 @@ Everything you do can be undone, and it all saves inside your project.
 
 ---
 
+## Sue VE: video editing
+
+**Sue VE** (SVE for short) is where you edit video. Start one from the
+Hub's New (HD, 4K, a vertical video for phones or a square one), or open
+the studio and press **New Project**. On a computer it looks like the Edit
+page of DaVinci Resolve with Premiere Pro's tools; on phones a CapCut
+style layout comes later.
+
+- **The pages** along the bottom: **Media** (the pool large, with the
+  clip you picked in the viewer and its facts under it), **Edit**,
+  **Effects**, **Color**, **Audio** and **Deliver**. Effects, Color and
+  Audio say plainly that they come in a later version and lead back to
+  Edit. `Shift+3` to `Shift+8` switch pages as in Resolve.
+- **The media pool** (left) holds the project's movies, sounds, pictures,
+  titles, solids and sequences, as thumbnails or a list. **Import** brings
+  in MP4 and MOV movies, sound files and pictures (File, **Import Image
+  Sequence** takes a numbered run of pictures as one clip). A picture or
+  an animation from Sue Paint comes in from the Sue menu's **Send To**,
+  and plays as it is drawn. Double click an item to see it in the source
+  monitor; drag it onto the timeline to place it (hold `Ctrl` to insert
+  instead of covering what is there).
+- **The monitors**: the source monitor shows a pool item, with its own
+  in and out marks (`I`, `O`), and puts the marked part on the timeline
+  at the playhead with **Insert** (`,`) or **Overwrite** (`.`) on the
+  targeted tracks. The program monitor shows the sequence. Both have a
+  bar to scrub along and the playback buttons.
+- **The timeline**: video tracks over audio tracks, with thumbnails on
+  pictures and waveforms on sound. Each track can be targeted, locked,
+  hidden or muted, soloed, and sync locked. The tools are above it:
+  **Selection** (`V`: move clips, drag their edges), **Ripple** (`B`),
+  **Roll** (`N`), **Slip** (`Y`), **Slide** (`U`) and **Razor** (`C`),
+  with **Snapping** (`S`) and **Linked Selection**. While you drag, the
+  timeline shows what the edit will make; letting go makes it one undo
+  step. `Ctrl+K` cuts at the playhead, `Shift+Delete` deletes and closes
+  the gap, `;` and `'` lift and extract the in to out range.
+- **Playing**: `Space` plays and pauses, `J` and `L` play backward and
+  forward (again for 2, 4 and 8 times), `K` stops, the arrows step a
+  frame, `Up` and `Down` jump to the cuts. The sound keeps the time: if
+  the computer cannot decode every frame in time, frames are skipped,
+  never the sound.
+- **The inspector** (right) changes the selected clip: scale, position,
+  rotation and opacity for pictures, volume and fades for sound, speed
+  for both, and a title's words, size and color. The diamond beside a
+  value puts a keyframe at the playhead.
+- **Transitions**: the Effects palette's dissolve, dips to black and
+  white and the sound crossfade go onto a cut by dragging, or with
+  `Ctrl+D` at the cut nearest the playhead.
+- **Deliver** exports the sequence: MP4 (by quality, or at a bit rate
+  you choose), WAV, a PNG or JPEG of the frame at the playhead, or every
+  frame as PNG files. It runs in the background with its progress and a
+  Cancel button.
+
+Movies decode through Windows' own decoders (on other systems Sue VE
+says decoding is not available yet). A project links to its movies by
+default; Settings can keep them inside the `.sue` instead. View, **Use
+Proxies** plays smaller copies made by File, **Make Proxies**.
+
+---
+
 ## Projects: one file for everything
 
 Press `Ctrl+S` to save your work as a **project**, a single `.sue` file. It

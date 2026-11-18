@@ -11,6 +11,41 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Sue VE**, a new studio for editing video. On a computer it looks like
+  DaVinci Resolve's Edit page with Premiere Pro's tools: a media pool
+  (thumbnails or a list), source and program monitors side by side, a
+  timeline of video and audio tracks with thumbnails and waveforms, an
+  inspector and audio meters, and the pages Media, Edit, Effects, Color,
+  Audio and Deliver along the bottom (Effects, Color and Audio say they
+  come in a later version). Start one from the Hub's New (HD, 4K,
+  vertical or square video).
+- Sue VE imports MP4 and MOV movies (H.264, and HEVC where Windows has
+  it), WAV, FLAC, MP3, AAC and Ogg sound, still pictures and numbered
+  runs of pictures, and plays Sue Paint pictures and animations sent to
+  it from the Sue menu's Send To. Movies decode through Windows' own
+  decoders, exact to the frame when paused and fast while scrubbing.
+  Projects link to the files, or keep them inside (Settings).
+- Sue VE's editing: insert and overwrite from the source monitor, the
+  selection, ripple, roll, slip, slide and razor tools, lift and extract,
+  ripple delete, snapping, linked picture and sound, track targeting,
+  locking, hiding, muting, solo and sync lock, clip speed and reverse,
+  frame holds, J and L cuts, dissolves, dips to black and white and
+  sound crossfades, volume and fades, titles, color solids and
+  adjustment clips, markers and in and out marks. Scale, position,
+  rotation, opacity and volume take keyframes at the playhead. Every
+  edit undoes.
+- Sue VE plays with the sound as the clock (Space, and J, K and L to
+  shuttle at up to 8 times), loops the in to out range, and previews
+  cuts, opacity, transforms and dissolves in real time on the graphics
+  card. Proxies (half size copies) are made in the background on request.
+- Sue VE exports MP4 (H.264 and AAC) at any size and frame rate, by
+  quality or at a chosen bit rate, a WAV of the sound, one frame as PNG
+  or JPEG, or every frame as numbered PNG files, in the background with
+  progress and Cancel.
+- Thirteen new icons for video editing, for icon packs too.
+
 ## [0.0.82] - 2026-11-17
 
 ### Added
