@@ -453,6 +453,13 @@ impl DockPanel for Palette {
             Self::CommandBar => 34.0,
             Self::Tools | Self::BrushSize => 120.0,
             Self::Color => 150.0,
+            // Its blend mode, opacity and tools, and three layers: in a
+            // crowded column the others give up room before its list.
+            Self::Layer => 250.0,
+            // Its zoom and angle rows and its buttons, laid from its
+            // bottom, and a strip of the picture above them: shorter, the
+            // rows ran up over its own header.
+            Self::Navigator => 170.0,
             _ => 90.0,
         }
     }

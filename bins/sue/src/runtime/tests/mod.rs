@@ -82,6 +82,7 @@ mod tutorial_crash_tips;
 mod tutorial_full_guide;
 mod tutorial_timeline_pro_rigs;
 mod tutorial_workspace;
+mod v83_ui;
 mod windows;
 mod writer;
 mod writer_bars;
