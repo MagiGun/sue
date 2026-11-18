@@ -379,6 +379,14 @@ impl SuePaint {
         slid |= outline_rows(ui, theme, &mut view);
         let figure = model.filter(|model| crate::figure::is_figure(model));
         let mut shape: Option<(crate::figure::Body, crate::figure::Body)> = None;
+        // A model from a file: its colors, limits and morph targets.
+        let mut look = None;
+        if let Some(model) = model.filter(|model| crate::model3d::is_imported(model)) {
+            ui.add_space(gap);
+            let (set, moved) = self.look_rows(ui, theme, model);
+            look = set;
+            slid |= moved;
+        }
         if let Some(model) = figure {
             let body = crate::figure::Body::of(model);
             ui.add_space(gap);
@@ -418,7 +426,7 @@ impl SuePaint {
         );
         let place_changed = place != place_now;
         let shape_changed = shape.is_some_and(|(was, now)| was != now);
-        if view != now || place_changed || shape_changed {
+        if view != now || place_changed || shape_changed || look.is_some() {
             if self
                 .view3d_before
                 .as_ref()
@@ -435,6 +443,9 @@ impl SuePaint {
             }
             if let Some((_, shaped)) = shape.filter(|_| shape_changed) {
                 self.pending_shape = Some((layer, shaped));
+            }
+            if let Some(look) = look {
+                self.pending_look = Some((layer, look));
             }
             self.pending_view3d = Some((layer, view));
         }

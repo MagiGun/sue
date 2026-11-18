@@ -1141,6 +1141,11 @@ pub fn render_model(
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
+        // A model from a glTF: with its own colors and pictures and
+        // its morph targets.
+        if let Some((surface, frame)) = crate::model3d::surface_of(model, place) {
+            return Some(render_surface(&surface, view, size, frame));
+        }
         let placed = if place.is_identity() {
             mesh.clone()
         } else {

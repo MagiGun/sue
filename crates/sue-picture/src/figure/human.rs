@@ -112,7 +112,7 @@ struct Asset {
     points: Vec<[f32; 3]>,
     quads: Vec<[u32; 4]>,
     /// Up to four joints (numbers in [`JOINTS`]) and weights a point.
-    skin: Vec<[(u8, f32); 4]>,
+    skin: Vec<[(u16, f32); 4]>,
     /// Each joint of [`JOINTS`], then each of the helpers: where it
     /// starts and where its bone ends.
     joints: Vec<[[f32; 3]; 2]>,
@@ -203,7 +203,7 @@ fn asset() -> &'static Asset {
             .map(|(joints, weights)| {
                 [0, 1, 2, 3].map(|k| {
                     (
-                        slot[usize::from(joints[k])] as u8,
+                        slot[usize::from(joints[k])] as u16,
                         f32::from(weights[k]) / 255.0,
                     )
                 })
@@ -248,7 +248,7 @@ pub struct Shaped {
     /// The points as modeled (the bind stance), at scale 1.
     pub rest: Vec<[f32; 3]>,
     /// Up to four joints and weights a point.
-    pub skin: Vec<[(u8, f32); 4]>,
+    pub skin: Vec<[(u16, f32); 4]>,
     /// The triangles.
     pub tris: Vec<u32>,
     /// The joints, in the stance poses are measured from.
@@ -426,7 +426,7 @@ fn morphed(body: &Body) -> (Vec<[f32; 3]>, Vec<[[f32; 3]; 2]>) {
 }
 
 /// How much of point `skin` follows the joints `of`.
-fn follows(skin: &[(u8, f32); 4], of: &[usize]) -> f32 {
+fn follows(skin: &[(u16, f32); 4], of: &[usize]) -> f32 {
     skin.iter()
         .filter(|(joint, _)| of.contains(&usize::from(*joint)))
         .map(|(_, weight)| weight)
@@ -442,7 +442,7 @@ const HEAD_GROUP: [usize; 4] = [at::HEAD, at::JAW, at::EYES[0], at::EYES[1]];
 fn proportioned(
     points: &mut [[f32; 3]],
     joints: &mut [[[f32; 3]; 2]],
-    skin: &[[(u8, f32); 4]],
+    skin: &[[(u16, f32); 4]],
     heads: Option<f32>,
     tall: f32,
 ) {
@@ -603,7 +603,7 @@ fn rigged(
     ends: &[[[f32; 3]; 2]],
     frames: &[Mat3],
     points: &[[f32; 3]],
-    skin: &[[(u8, f32); 4]],
+    skin: &[[(u16, f32); 4]],
 ) -> Vec<Joint> {
     // How thick each part is: the mean distance of its own points from
     // its bone.
@@ -692,8 +692,8 @@ fn triangles(points: &[[f32; 3]], faces: &[Vec<u32>]) -> Vec<u32> {
 }
 
 /// A weighted mean of skin weights, kept to its four strongest joints.
-fn blended(parts: &[(&[(u8, f32); 4], f32)]) -> [(u8, f32); 4] {
-    let mut sum: Vec<(u8, f32)> = Vec::with_capacity(8);
+fn blended(parts: &[(&[(u16, f32); 4], f32)]) -> [(u16, f32); 4] {
+    let mut sum: Vec<(u16, f32)> = Vec::with_capacity(8);
     for (skin, share) in parts {
         for (joint, weight) in skin.iter() {
             if *weight <= 0.0 {
@@ -708,7 +708,7 @@ fn blended(parts: &[(&[(u8, f32); 4], f32)]) -> [(u8, f32); 4] {
     sum.sort_by(|a, b| b.1.total_cmp(&a.1));
     sum.truncate(4);
     let total: f32 = sum.iter().map(|(_, weight)| weight).sum();
-    let mut out = [(0_u8, 0.0_f32); 4];
+    let mut out = [(0_u16, 0.0_f32); 4];
     for (slot, (joint, weight)) in out.iter_mut().zip(sum) {
         *slot = (joint, weight / total.max(1e-9));
     }
@@ -716,12 +716,12 @@ fn blended(parts: &[(&[(u8, f32); 4], f32)]) -> [(u8, f32); 4] {
 }
 
 /// A piece of mesh: its points, their skin and its faces.
-type Cut = (Vec<[f32; 3]>, Vec<[(u8, f32); 4]>, Vec<Vec<u32>>);
+type Cut = (Vec<[f32; 3]>, Vec<[(u16, f32); 4]>, Vec<Vec<u32>>);
 
 /// One step of Catmull-Clark subdivision: every face split into quads
 /// round its middle and the whole surface smoothed, the skin weights
 /// carried along.
-fn subdivided(points: &[[f32; 3]], skin: &[[(u8, f32); 4]], faces: &[Vec<u32>]) -> Cut {
+fn subdivided(points: &[[f32; 3]], skin: &[[(u16, f32); 4]], faces: &[Vec<u32>]) -> Cut {
     let count = points.len();
     // Each new point as shares of the old ones.
     let mut shares: Vec<Vec<(u32, f32)>> = Vec::new();
@@ -818,7 +818,7 @@ fn subdivided(points: &[[f32; 3]], skin: &[[(u8, f32); 4]], faces: &[Vec<u32>]) 
     let new_skin = shares
         .iter()
         .map(|mine| {
-            let parts: Vec<(&[(u8, f32); 4], f32)> = mine
+            let parts: Vec<(&[(u16, f32); 4], f32)> = mine
                 .iter()
                 .map(|(other, share)| (&skin[*other as usize], *share))
                 .collect();
@@ -845,7 +845,7 @@ fn subdivided(points: &[[f32; 3]], skin: &[[(u8, f32); 4]], faces: &[Vec<u32>]) 
 /// cut away: its points, their skin and its faces.
 fn cut(
     points: &[[f32; 3]],
-    skin: &[[(u8, f32); 4]],
+    skin: &[[(u16, f32); 4]],
     keep: impl Fn(usize) -> bool,
     flat: ([f32; 3], [f32; 3]),
 ) -> Cut {
@@ -912,7 +912,7 @@ fn cut(
             middle = add(middle, out_points[v as usize]);
         }
         let middle = scale(middle, 1.0 / ring.len() as f32);
-        let parts: Vec<(&[(u8, f32); 4], f32)> =
+        let parts: Vec<(&[(u16, f32); 4], f32)> =
             ring.iter().map(|&v| (&out_skin[v as usize], 1.0)).collect();
         let middle_skin = blended(&parts);
         let hub = out_points.len() as u32;
@@ -1058,7 +1058,8 @@ fn wandered(p: [f32; 2], pattern: f32) -> [f32; 2] {
         let at = phase(salt);
         (at + pattern * turns * std::f32::consts::TAU).sin() - at.sin()
     };
-    [p[0] + 0.07 * sway(1.0, 1.0), p[1] + 0.05 * sway(2.0, 2.0)]
+    // (Not whole turns, so the last pattern is not the first again.)
+    [p[0] + 0.07 * sway(1.0, 0.8), p[1] + 0.05 * sway(2.0, 1.45)]
 }
 
 /// A vein laid on a hand: its points, how far along the vein each is
@@ -1273,7 +1274,7 @@ fn sliced(
 /// joints, as on an artist's mannequin.
 fn body_guides(
     points: &[[f32; 3]],
-    skin: &[[(u8, f32); 4]],
+    skin: &[[(u16, f32); 4]],
     tris: &[u32],
     joints: &[[[f32; 3]; 2]],
     tall: f32,
@@ -1494,7 +1495,7 @@ const PUPIL: [f32; 3] = [0.1; 3];
 /// the color of every point.
 fn with_irises(
     points: &mut Vec<[f32; 3]>,
-    skin: &mut Vec<[(u8, f32); 4]>,
+    skin: &mut Vec<[(u16, f32); 4]>,
     tris: &mut Vec<u32>,
     eyes: &[(usize, [f32; 3])],
 ) -> Vec<[f32; 3]> {
@@ -1526,7 +1527,7 @@ fn with_irises(
         }
         let across = unit_or(cross([0.0, 1.0, 0.0], looks), [1.0, 0.0, 0.0]);
         let up = cross(looks, across);
-        let own = [(joint as u8, 1.0), (0, 0.0), (0, 0.0), (0, 0.0)];
+        let own = [(joint as u16, 1.0), (0, 0.0), (0, 0.0), (0, 0.0)];
         const ROUND: usize = 20;
         // A ring of points on the ball, `wide` of its radius from the
         // line of sight, lifted a hair so it lies over the white.
@@ -1668,15 +1669,15 @@ fn shaped_hand(body: &Body) -> Shaped {
     let size = hand[3][0][1] / 0.09;
     let local: Vec<[f32; 3]> = points.iter().map(|p| own(*p)).collect();
     // The hand's joints: the palm, then the fingers.
-    let to_hand = |joint: u8| -> u8 {
+    let to_hand = |joint: u16| -> u16 {
         let joint = usize::from(joint);
         if (at::FINGERS[0]..at::FINGERS[0] + 15).contains(&joint) {
-            (joint - at::FINGERS[0] + 1) as u8
+            (joint - at::FINGERS[0] + 1) as u16
         } else {
             0
         }
     };
-    let skin: Vec<[(u8, f32); 4]> = asset
+    let skin: Vec<[(u16, f32); 4]> = asset
         .skin
         .iter()
         .map(|skin| blended(&[(&skin.map(|(joint, weight)| (to_hand(joint), weight)), 1.0)]))
@@ -1767,7 +1768,7 @@ fn shaped_head(body: &Body) -> Shaped {
     let group = [at::NECK, at::HEAD, at::JAW, at::EYES[0], at::EYES[1]];
     // The head's joints: neck, skull, jaw, then the eyes; the nose, brow
     // and ears of the old head stay as joints that hold nothing.
-    let to_head = |joint: u8| -> u8 {
+    let to_head = |joint: u16| -> u16 {
         match usize::from(joint) {
             at::HEAD => 1,
             at::JAW => 2,
@@ -1776,7 +1777,7 @@ fn shaped_head(body: &Body) -> Shaped {
             _ => 0,
         }
     };
-    let skin: Vec<[(u8, f32); 4]> = asset
+    let skin: Vec<[(u16, f32); 4]> = asset
         .skin
         .iter()
         .map(|skin| blended(&[(&skin.map(|(joint, weight)| (to_head(joint), weight)), 1.0)]))
@@ -1916,6 +1917,7 @@ pub(crate) fn shaped(body: &Body) -> Arc<Shaped> {
         guides: true,
         follow: false,
         ground: true,
+        limits: false,
         ..*body
     };
     let mut kept = SHAPED.lock().unwrap_or_else(|poison| poison.into_inner());

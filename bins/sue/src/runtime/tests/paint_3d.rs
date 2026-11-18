@@ -107,7 +107,9 @@ const COLUMN: f32 = 200.0;
 /// Where the control named `name` is, scrolled into Tool Property's view
 /// with the wheel when it is above or below it.
 pub(super) fn control(paint: &mut PaintDriver, name: &str) -> egui::Rect {
-    for _ in 0..80 {
+    // (A figure's Tool Property is long: its face alone has thirty
+    // sliders.)
+    for _ in 0..300 {
         let told = step_told(paint, Vec::new());
         // A slider and its number field share a name: the track is the
         // slider.

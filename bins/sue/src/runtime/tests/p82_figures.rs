@@ -290,3 +290,94 @@ fn p82_the_hands_veins_have_a_pattern_slider() {
         |paint| assert!(body(paint).slider("vein_pattern") > 0.2),
     );
 }
+
+/// How many of the layer's pixels are colored (not a gray).
+fn colored(paint: &PaintDriver, layer: sue_core::EntityId) -> usize {
+    super::paint_3d::pixels(paint, layer)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| pixel[3] > 0 && pixel[0].abs_diff(pixel[1]) > 12)
+        .count()
+}
+
+#[test]
+fn p82_an_imported_model_shows_its_colors_morphs_and_keeps_to_limits_when_asked() {
+    use super::p81_figures::{added, layers, undo_pair};
+    let mut paint = PaintDriver::new("p82-import-look");
+    let folder = std::env::temp_dir().join(format!("sue-p82-import-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let square = folder.join("Square.gltf");
+    std::fs::write(&square, sue_paint::model3d::sample::painted_gltf(true)).unwrap();
+    let (obj, mtl) = sue_paint::model3d::sample::painted_obj();
+    let pyramid = folder.join("pyramid.obj");
+    std::fs::write(&pyramid, obj).unwrap();
+    std::fs::write(folder.join("pyramid.mtl"), mtl).unwrap();
+    std::fs::write(
+        folder.join("colors.png"),
+        sue_paint::model3d::sample::four_colors_png(),
+    )
+    .unwrap();
+    let import = |paint: &mut PaintDriver, path: &std::path::Path| {
+        paint.command("file.import.3d");
+        paint.settle(2);
+        let now = paint.now;
+        let _ = paint.runtime.answer_pick(path, &mut NoTextures, now);
+        paint.settle(6);
+    };
+    // The glTF with a skeleton: it shows its colors and its picture.
+    let had = layers(&paint);
+    import(&mut paint, &square);
+    let layer = added(&paint, &had);
+    super::paint_3d::show_tool_property(&mut paint);
+    let entity = |paint: &PaintDriver| model(paint, layer).clone();
+    assert!(sue_paint::figure::is_figure(&entity(&paint)));
+    assert!(colored(&paint, layer) > 200, "it shows in color");
+    // Joint angle limits are off until its own tick turns them on.
+    assert!(!Body::of(&entity(&paint)).limits);
+    let depth = paint.runtime.engine.history.depth();
+    let before = arena_bytes(&paint);
+    click_control(&mut paint, "Joint angle limits");
+    assert!(Body::of(&entity(&paint)).limits, "limits on for this model");
+    assert_eq!(paint.runtime.engine.history.depth(), depth + 1, "one step");
+    undo(&mut paint);
+    assert!(arena_bytes(&paint) == before, "undone exactly");
+    // Plain gray, by its tick.
+    one_step(
+        &mut paint,
+        layer,
+        "plain gray",
+        |paint| click_control(paint, "Show its colors and pictures"),
+        |paint| {
+            assert!(!sue_paint::model3d::Look::of(&entity(paint)).colors);
+            assert_eq!(colored(paint, layer), 0, "all gray");
+        },
+    );
+    undo(&mut paint);
+    // Its morph target, by its own slider.
+    one_step(
+        &mut paint,
+        layer,
+        "the morph target brought in",
+        |paint| drag_control(paint, "Taller", vec2(300.0, 0.0)),
+        |paint| {
+            let look = sue_paint::model3d::Look::of(&entity(paint));
+            assert_eq!(look.morphs, vec![("Taller".to_owned(), 1.0)]);
+        },
+    );
+    // The OBJ with its material file and picture beside it.
+    let count = layers(&paint).len();
+    let had = layers(&paint);
+    undo_pair(
+        &mut paint,
+        "an OBJ with materials imported",
+        |paint| import(paint, &pyramid),
+        |paint| layers(paint).len() == count + 1,
+    );
+    let layer = added(&paint, &had);
+    let pyramid = model(&paint, layer);
+    assert!(sue_paint::model3d::has_colors(pyramid));
+    assert_eq!(sue_paint::model3d::file_of(pyramid).unwrap().1, "glb");
+    assert!(colored(&paint, layer) > 100, "its red side shows");
+    let _ = std::fs::remove_dir_all(&folder);
+}

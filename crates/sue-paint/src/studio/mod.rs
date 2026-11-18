@@ -711,6 +711,9 @@ pub struct SuePaint {
     /// this frame, shown at once and kept when let go.
     pub(crate) pending_place: Option<(EntityId, crate::three::Placement)>,
     pub(crate) pending_shape: Option<(EntityId, crate::figure::Body)>,
+    /// How Tool Property asked an imported model to look this frame:
+    /// properties of its model (its colors, morph targets and limits).
+    pub(crate) pending_look: Option<(EntityId, Vec<(&'static str, sue_core::Value)>)>,
     /// The body part the body shape chart shapes (0 the full body).
     pub(crate) figure_part: usize,
     /// A camera being set up and not keyed yet: its folder, the frame and
@@ -1073,6 +1076,7 @@ impl Default for SuePaint {
             three_draft: None,
             pending_place: None,
             pending_shape: None,
+            pending_look: None,
             figure_part: 0,
             view3d_release: false,
             material_kind: 0,

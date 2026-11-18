@@ -163,6 +163,10 @@ pub const GUIDES: &str = "figure.guides";
 /// sits or crouches (`Bool`; a figure from before this was kept does
 /// not).
 pub const GROUND: &str = "figure.ground";
+/// An imported figure keeps to joint angle limits (`Bool`; off unless
+/// set on: its file says nothing of how far its bones may turn, so the
+/// limits are the same wide ones for every bone).
+pub const LIMITS: &str = "figure.limits";
 /// The hands and feet pinned where they are while the rest of the body
 /// is posed: their joint numbers, `,` between (`Text`).
 pub const PINS: &str = "figure.pins";
@@ -1125,6 +1129,8 @@ pub struct Body {
     pub ground: bool,
     /// An imported model's skeleton, by number (0 for Sue's own figures).
     pub rig: u64,
+    /// An imported model keeps to joint angle limits ([`LIMITS`]).
+    pub limits: bool,
     /// Where it stands, how it is turned and how large it is.
     pub place: crate::three::Placement,
 }
@@ -1190,6 +1196,10 @@ impl Body {
             } else {
                 0
             },
+            limits: entity
+                .property(LIMITS)
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             place: crate::three::Placement::of(entity),
         }
     }
@@ -1317,6 +1327,7 @@ impl Body {
             side: self.side,
             ground: self.ground,
             rig: self.rig,
+            limits: self.limits,
             place: self.place,
             ..Self::default()
         }
@@ -1464,6 +1475,7 @@ impl Default for Body {
             guides: true,
             ground: true,
             rig: 0,
+            limits: false,
             place: crate::three::Placement::default(),
         }
     }

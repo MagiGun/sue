@@ -165,7 +165,7 @@ pub(crate) fn twist_of(q: Quat, axis: [f32; 3]) -> (f32, f32) {
 /// at the joint, 1 at the bone's end; 0 for the other joints).
 pub(crate) fn along(
     points: &[[f32; 3]],
-    skin: &[[(u8, f32); 4]],
+    skin: &[[(u16, f32); 4]],
     ends: &[[[f32; 3]; 2]],
     twists: &[Twist],
 ) -> Vec<[f32; 4]> {

@@ -331,6 +331,7 @@ impl SuePaint {
         let model = crate::three::model_of(&cx.world.arena, layer);
         let place = self.pending_place.take().filter(|(id, _)| *id == layer);
         let shape = self.pending_shape.take().filter(|(id, _)| *id == layer);
+        let look = self.pending_look.take().filter(|(id, _)| *id == layer);
         if let Some(model) = model
             && let Ok(entity) = cx.world.arena.get_by_id_mut(model)
         {
@@ -342,6 +343,11 @@ impl SuePaint {
             }
             if let Some((_, body)) = shape {
                 for (key, value) in body_values(&body) {
+                    properties.set(key, value);
+                }
+            }
+            if let Some((_, look)) = look {
+                for (key, value) in look {
                     properties.set(key, value);
                 }
             }
@@ -590,8 +596,11 @@ impl SuePaint {
             return;
         };
         let shaped = model_changed.iter().any(|(key, _)| BODY_KEYS.contains(key));
+        let looks = model_changed.iter().any(|(key, _)| LOOK_KEYS.contains(key));
         let label = if shaped {
             tr!("body-shape")
+        } else if looks {
+            tr!("model-look")
         } else if model_changed.is_empty() {
             tr!("move-camera")
         } else {
@@ -948,6 +957,13 @@ fn shown_now(arena: &sue_core::Arena, layer: EntityId, model: Option<EntityId>) 
     )
 }
 
+/// The properties that say how an imported model looks and poses.
+const LOOK_KEYS: [&str; 3] = [
+    crate::model3d::COLORS,
+    crate::model3d::MORPHS,
+    crate::figure::LIMITS,
+];
+
 /// The properties of a figure's body shape.
 const BODY_KEYS: [&str; 9] = [
     crate::figure::GROUND,
@@ -963,7 +979,10 @@ const BODY_KEYS: [&str; 9] = [
 
 /// The properties of a 3D layer's model a drag may change: its placement
 /// and a figure's body shape.
-const MODEL_KEYS: [&str; 16] = [
+const MODEL_KEYS: [&str; 19] = [
+    crate::model3d::COLORS,
+    crate::model3d::MORPHS,
+    crate::figure::LIMITS,
     crate::figure::GROUND,
     crate::three::OBJECT_X,
     crate::three::OBJECT_Y,

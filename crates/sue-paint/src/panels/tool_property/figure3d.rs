@@ -102,6 +102,80 @@ impl SuePaint {
         });
     }
 
+    /// How a model from a file looks and poses: its own colors and
+    /// pictures or plain gray, joint angle limits (off until turned on,
+    /// for a model with bones), and a slider for each of its morph
+    /// targets. Returns the model properties to set when one changed.
+    pub(super) fn look_rows(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        model: &sue_core::Entity,
+    ) -> (Option<Vec<(&'static str, sue_core::Value)>>, Slid) {
+        let mut slid = Slid::default();
+        let mut set = Vec::new();
+        let look = crate::model3d::Look::of(model);
+        let figure = crate::figure::is_figure(model);
+        if !crate::model3d::has_colors(model) && look.morphs.is_empty() && !figure {
+            return (None, slid);
+        }
+        ui::section(ui, theme, &tr!("model-look"), |ui| {
+            if crate::model3d::has_colors(model) {
+                let mut colors = look.colors;
+                if check(
+                    ui,
+                    theme,
+                    "sue-paint-model-colors",
+                    &tr!("model-own-colors"),
+                    &mut colors,
+                ) {
+                    set.push((crate::model3d::COLORS, sue_core::Value::from(colors)));
+                    slid.changed = true;
+                    slid.released = true;
+                }
+            }
+            if figure {
+                let mut limits = Body::of(model).limits;
+                if check(
+                    ui,
+                    theme,
+                    "sue-paint-model-limits",
+                    &tr!("joint-angle-limits"),
+                    &mut limits,
+                ) {
+                    set.push((crate::figure::LIMITS, sue_core::Value::from(limits)));
+                    slid.changed = true;
+                    slid.released = true;
+                }
+            }
+            let mut shaped = look.clone();
+            for (index, (name, weight)) in look.morphs.iter().enumerate() {
+                let mut value = weight * 100.0;
+                let moved = slide(
+                    ui,
+                    theme,
+                    ("sue-paint-model-morph", index),
+                    name,
+                    &mut value,
+                    0.0..=100.0,
+                    "",
+                    0,
+                );
+                if moved.changed {
+                    shaped = shaped.with_morph(name, value / 100.0);
+                }
+                slid |= moved;
+            }
+            if shaped != look {
+                set.push((
+                    crate::model3d::MORPHS,
+                    sue_core::Value::from(shaped.morphs_text()),
+                ));
+            }
+        });
+        ((!set.is_empty()).then_some(set), slid)
+    }
+
     /// The body shape part by part: every slider of [`SLIDERS`] the
     /// figure has, under the part it shapes, with what the figure shows
     /// (guide lines) and whether it keeps to the ground.

@@ -99,6 +99,10 @@ pub fn limits(body: &Body, joint: usize) -> Limits {
                 None => FREE,
             }
         }
+        // A file says nothing of how far its bones may turn: when its
+        // model is asked to keep to limits, every bone has the same
+        // wide ones.
+        Kind::Imported if body.limits => [[-120.0, 120.0], [-90.0, 90.0], [-120.0, 120.0]],
         Kind::Imported => FREE,
     }
 }
