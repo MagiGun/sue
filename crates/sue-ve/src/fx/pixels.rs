@@ -181,11 +181,89 @@ fn image_width(w: usize) -> u32 {
     u32::try_from(w).unwrap_or(u32::MAX)
 }
 
+/// From this radius on, a blur runs on a picture half the size and is
+/// scaled back up: a quarter of the work, and the same look (a wide blur
+/// holds no detail a half size picture loses).
+const HALF_SIZE_BLUR: f32 = 4.0;
+
 /// A gaussian blur of `radius` pixels (Sue's).
 pub fn blur(image: &mut Image, radius: f32) {
-    if radius >= 0.25 {
-        run_filter(&Filter::GaussianBlur { radius }, image);
+    if radius < 0.25 {
+        return;
     }
+    if radius < HALF_SIZE_BLUR || image.width < 8 || image.height < 8 {
+        run_filter(&Filter::GaussianBlur { radius }, image);
+        return;
+    }
+    let mut small = halve(image);
+    run_filter(
+        &Filter::GaussianBlur {
+            radius: radius / 2.0,
+        },
+        &mut small,
+    );
+    double_into(&small, image);
+}
+
+/// `image` at half its size, each pixel the mean of four (by alpha, so
+/// clear pixels lend no color).
+fn halve(image: &Image) -> Image {
+    let (w, h) = (image.width as usize, image.height as usize);
+    let (sw, sh) = (w.div_ceil(2), h.div_ceil(2));
+    let mut out = Image::clear(sw as u32, sh as u32);
+    let source = &image.rgba;
+    strips(&mut out.rgba, sw * 4, sh, &|first, part| {
+        for (index, pixel) in part.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let (x, y) = (index % sw, first + index / sw);
+            let mut sum = [0.0_f32; 4];
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let (sx, sy) = ((x * 2 + dx).min(w - 1), (y * 2 + dy).min(h - 1));
+                let at = (sy * w + sx) * 4;
+                let alpha = f32::from(source[at + 3]);
+                for channel in 0..3 {
+                    sum[channel] += f32::from(source[at + channel]) * alpha;
+                }
+                sum[3] += alpha;
+            }
+            for channel in 0..3 {
+                pixel[channel] = if sum[3] > 0.0 {
+                    (sum[channel] / sum[3]).round().clamp(0.0, 255.0) as u8
+                } else {
+                    0
+                };
+            }
+            pixel[3] = (sum[3] / 4.0).round() as u8;
+        }
+    });
+    out
+}
+
+/// `small` scaled back up over `image` (twice its size, give or take a
+/// pixel), between pixels linearly.
+fn double_into(small: &Image, image: &mut Image) {
+    let (w, h) = (image.width as usize, image.height as usize);
+    let (sw, sh) = (small.width as usize, small.height as usize);
+    let source = &small.rgba;
+    strips(&mut image.rgba, w * 4, h, &|first, part| {
+        for (index, pixel) in part.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            let (x, y) = (index % w, first + index / w);
+            let fx = ((x as f32 + 0.5) / 2.0 - 0.5).clamp(0.0, (sw - 1) as f32);
+            let fy = ((y as f32 + 0.5) / 2.0 - 0.5).clamp(0.0, (sh - 1) as f32);
+            let (x0, y0) = (fx.floor() as usize, fy.floor() as usize);
+            let (x1, y1) = ((x0 + 1).min(sw - 1), (y0 + 1).min(sh - 1));
+            let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+            let at = |px: usize, py: usize| (py * sw + px) * 4;
+            for channel in 0..4 {
+                let a = f32::from(source[at(x0, y0) + channel]);
+                let b = f32::from(source[at(x1, y0) + channel]);
+                let c = f32::from(source[at(x0, y1) + channel]);
+                let d = f32::from(source[at(x1, y1) + channel]);
+                let top = a + (b - a) * tx;
+                let bottom = c + (d - c) * tx;
+                pixel[channel] = (top + (bottom - top) * ty).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    });
 }
 
 /// A plane of numbers (a mask, an alpha) blurred by `radius` pixels with
@@ -394,6 +472,20 @@ fn hash(x: i64, y: i64, seed: u64) -> f32 {
     h = h.wrapping_mul(0xFF51_AFD7_ED55_8CCD);
     h ^= h >> 33;
     (h >> 40) as f32 / (1_u64 << 24) as f32
+}
+
+/// `true` for an effect that changes each pixel's color by its color
+/// alone (no neighbours, no place): a run of them bakes into one table.
+#[must_use]
+pub fn is_pointwise(kind: &str) -> bool {
+    matches!(
+        kind,
+        "color.brightness_contrast"
+            | "color.hue_saturation"
+            | "color.levels"
+            | "color.curves"
+            | "color.balance"
+    )
 }
 
 /// Runs effect `kind` with `params` over `image`. Kinds this build does

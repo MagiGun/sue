@@ -187,9 +187,30 @@ fn processed_frame(
     let Some(id) = studio.sequence else {
         return false;
     };
-    let drawn = studio.quality.of(size);
     let hardware = studio.hub.hardware;
     let playing = studio.clock.playing;
+    // While playing, a frame larger than 720p that needs the processor is
+    // drawn at half size unless already rendered (Premiere Pro's playback
+    // resolution, which defaults to a half): paused, it is full.
+    let drawn = {
+        let full = studio.quality.of(size);
+        let half = crate::media::Quality::Half.of(size);
+        let held = |at: (u32, u32)| {
+            let arena = cx.arena();
+            studio.preview.has(compose::frame_key(
+                arena,
+                sequence,
+                time,
+                at,
+                Options::default(),
+            ))
+        };
+        if playing && full.0 * full.1 > 1280 * 720 && !held(full) {
+            half
+        } else {
+            full
+        }
+    };
     let mut due = true;
     let sides: Vec<(Options, Rect, Rect)> = if split {
         let middle = frame_rect.center().x;

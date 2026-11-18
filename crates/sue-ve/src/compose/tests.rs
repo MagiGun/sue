@@ -491,3 +491,56 @@ fn masks_cut_a_layer_in_the_frame() {
     assert_eq!(px(&picture, 64, 32, 18)[0], 255);
     assert_eq!(px(&picture, 64, 3, 3)[0], 0);
 }
+
+#[test]
+fn color_effects_baked_into_a_table_match_them_run_one_by_one() {
+    use crate::fx::pixels::{Ctx, Image, apply};
+    let (mut project, ids) = project(vec![still(64, 36, [180, 90, 40, 255], [30, 140, 210, 255])]);
+    let mut stack = Vec::new();
+    edit(&mut project, |sequence| {
+        let id = place(sequence, 1, ids[0], 0.0, 2.0);
+        let clip = clip_mut(sequence, id);
+        for (kind, key, value) in [
+            ("color.brightness_contrast", "contrast", 25.0),
+            ("color.hue_saturation", "hue", 40.0),
+            ("color.levels", "gamma", 1.4),
+            ("color.balance", "mid_blue", 30.0),
+        ] {
+            let effect = fx::add(clip, kind);
+            fx::update(clip, effect, |found| {
+                found.params.set(key, value);
+            });
+        }
+        stack = fx::effects(clip)
+            .iter()
+            .map(|effect| (effect.kind.clone(), effect.at(clip, s(1.0))))
+            .collect();
+    });
+    let baked = draw(&project, s(1.0), (64, 36));
+    let mut direct = Image::new(64, 36, {
+        let mut rgba = Vec::new();
+        for _ in 0..36 {
+            for x in 0..64 {
+                rgba.extend_from_slice(if x < 32 {
+                    &[180, 90, 40, 255]
+                } else {
+                    &[30, 140, 210, 255]
+                });
+            }
+        }
+        rgba
+    });
+    for (kind, params) in &stack {
+        apply(kind, params, &mut direct, &Ctx::default());
+    }
+    let worst = baked
+        .iter()
+        .zip(&direct.rgba)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0);
+    assert!(
+        worst <= 4,
+        "the table is the effects to {worst} steps in 255"
+    );
+}

@@ -419,3 +419,133 @@ fn a_movies_sound_and_thumbnails_come_in_the_background() {
     assert_eq!(strip.frames[0].height, crate::media::thumbs::THUMB_HEIGHT);
     let _ = std::fs::remove_file(path);
 }
+
+/// Stage 2's numbers: a 1080p30 shot with three effects (a gaussian
+/// blur, a vignette, hue and saturation) and a grade, drawn as the
+/// program monitor's worker draws it (full and half size) and exported
+/// to MP4. Run with
+/// `cargo test -p sue-ve --release measure_effects -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check: run it by hand in release"]
+fn measure_effects() {
+    let (mut arena, sequence, _, path) = project(1920, 1080, 4.0);
+    let (step, ()) = model::plan(&arena, sequence, "Effects", |edit| {
+        let id = edit.tracks[2].clips()[0].id;
+        let (_, clip) = edit.find_mut(id).unwrap();
+        let blur = crate::fx::add(clip, "blur.gaussian");
+        crate::fx::update(clip, blur, |effect| {
+            effect.params.set("radius", 6.0);
+        });
+        crate::fx::add(clip, "stylize.vignette");
+        let hue = crate::fx::add(clip, "color.hue_saturation");
+        crate::fx::update(clip, hue, |effect| {
+            effect.params.set("saturation", 20.0);
+        });
+        crate::grade::set_grade(
+            clip,
+            &[crate::grade::Corrector {
+                lift: [0.0, 0.0, 0.03, 0.02],
+                gain: [0.05, 0.0, 0.0, 0.0],
+                saturation: 1.2,
+                contrast: 1.1,
+                ..crate::grade::Corrector::default()
+            }],
+        );
+        Ok(())
+    })
+    .unwrap();
+    UndoStack::new().apply(&mut arena, step.unwrap()).unwrap();
+    for (size, name) in [((1920_u32, 1080_u32), "full"), ((960, 540), "half")] {
+        let mut renderer = Renderer::new(arena.clone(), sequence, size, false).unwrap();
+        // The first frame opens the decoder and bakes the grade.
+        let _ = renderer.frame(Time::ZERO);
+        let frames = 60;
+        let started = Instant::now();
+        for index in 1..=frames {
+            let _ = renderer.frame(Time::from_frames(index, Rate::FPS_25));
+        }
+        let each = started.elapsed().as_secs_f64() * 1000.0 / frames as f64;
+        println!(
+            "| 1080p25, 3 effects and a grade | preview at {name} size ({} x {}) | {each:.1} ms a frame | {:.1} fps |",
+            size.0,
+            size.1,
+            1000.0 / each
+        );
+    }
+    let mut plain = arena.clone();
+    let (step, ()) = model::plan(&plain, sequence, "Plain", |edit| {
+        let id = edit.tracks[2].clips()[0].id;
+        let (_, clip) = edit.find_mut(id).unwrap();
+        clip.properties.remove(crate::fx::key::EFFECTS);
+        clip.properties.remove(crate::fx::key::GRADE);
+        Ok(())
+    })
+    .unwrap();
+    UndoStack::new().apply(&mut plain, step.unwrap()).unwrap();
+    for (arena, name) in [(arena, "with effects"), (plain, "without")] {
+        let out = scratch("measure-effects.mp4");
+        let settings = Settings::whole(model::sequence(&arena, sequence).unwrap());
+        let report = run(arena, sequence, settings, &out, false, None).unwrap();
+        println!(
+            "| 1080p25 export {name} | {} frames | {:.1} s | {:.1} fps |",
+            report.frames,
+            report.seconds,
+            report.frames as f64 / report.seconds
+        );
+        let _ = std::fs::remove_file(out);
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+#[ignore = "a measurement"]
+fn measure_effect_parts() {
+    let mut image = crate::fx::pixels::Image::new(1920, 1080, crate::sample::frame(1920, 1080, 3));
+    let params = |kind: &str| {
+        let mut out = crate::fx::Params::default();
+        for param in &crate::fx::kind(kind).unwrap().params {
+            out.values.set(param.key, param.default_value());
+        }
+        out
+    };
+    for kind in [
+        "blur.gaussian",
+        "stylize.vignette",
+        "color.hue_saturation",
+        "stylize.glow",
+        "key.chroma",
+    ] {
+        let p = params(kind).with("radius", 6.0);
+        let started = Instant::now();
+        for _ in 0..10 {
+            crate::fx::pixels::apply(kind, &p, &mut image, &crate::fx::pixels::Ctx::default());
+        }
+        println!(
+            "| {kind} | {:.1} ms |",
+            started.elapsed().as_secs_f64() * 100.0
+        );
+    }
+    let grade = crate::grade::Grade {
+        correctors: vec![crate::grade::Corrector {
+            saturation: 1.2,
+            ..crate::grade::Corrector::default()
+        }],
+    };
+    let baked = grade.bake(33, &|_| None);
+    let started = Instant::now();
+    for _ in 0..10 {
+        baked.apply(&mut image.rgba, 1920);
+    }
+    println!(
+        "| grade | {:.1} ms |",
+        started.elapsed().as_secs_f64() * 100.0
+    );
+    let started = Instant::now();
+    for _ in 0..10 {
+        let _ = image.rgba.clone();
+    }
+    println!(
+        "| copy | {:.1} ms |",
+        started.elapsed().as_secs_f64() * 100.0
+    );
+}

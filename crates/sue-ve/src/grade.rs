@@ -687,17 +687,23 @@ pub const BAKE_SIZE: usize = 33;
 impl Baked {
     /// Grades straight alpha RGBA pixels in place, on every core.
     pub fn apply(&self, rgba: &mut [u8], width: usize) {
-        let rows = rgba.len() / (width * 4).max(1);
-        crate::fx::pixels::strips(rgba, width * 4, rows, &|_, part| {
-            for pixel in part.as_chunks_mut::<4>().0 {
-                let rgb = [pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0);
-                let out = self.table.sample(rgb);
-                for channel in 0..3 {
-                    pixel[channel] = (out[channel] * 255.0).round().clamp(0.0, 255.0) as u8;
-                }
-            }
-        });
+        apply_table(&self.table, rgba, width);
     }
+}
+
+/// Looks every pixel of straight alpha RGBA `rgba` (rows `width` wide)
+/// up in `table`, on every core.
+pub fn apply_table(table: &Table, rgba: &mut [u8], width: usize) {
+    let rows = rgba.len() / (width * 4).max(1);
+    crate::fx::pixels::strips(rgba, width * 4, rows, &|_, part| {
+        for pixel in part.as_chunks_mut::<4>().0 {
+            let rgb = [pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0);
+            let out = table.sample(rgb);
+            for channel in 0..3 {
+                pixel[channel] = (out[channel] * 255.0).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    });
 }
 
 #[cfg(test)]

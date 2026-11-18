@@ -53,9 +53,63 @@ impl Default for Options {
 #[derive(Debug, Default)]
 pub struct Composer {
     grades: HashMap<u64, Arc<Baked>>,
+    tables: HashMap<u64, Arc<grade::Table>>,
 }
 
 impl Composer {
+    /// The table that does a run of color effects (`run`, each its kind
+    /// and parameters now) and then `grade`: the effects themselves run
+    /// over a picture of the table's points, so the table is theirs.
+    fn colors(&mut self, run: &[(String, fx::Params)], grade: Option<&Baked>) -> Arc<grade::Table> {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        format!("{run:?}").hash(&mut hasher);
+        grade.map(|baked| baked.table.data.len()).hash(&mut hasher);
+        if let Some(baked) = grade {
+            for value in baked.table.data.iter().step_by(97) {
+                for channel in value {
+                    channel.to_bits().hash(&mut hasher);
+                }
+            }
+        }
+        let key = hasher.finish();
+        if let Some(found) = self.tables.get(&key) {
+            return Arc::clone(found);
+        }
+        let size = grade::BAKE_SIZE;
+        let identity = grade::Table::identity(size);
+        let mut points = Image::new(
+            identity.data.len() as u32,
+            1,
+            identity
+                .data
+                .iter()
+                .flat_map(|rgb| {
+                    let byte = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
+                    [byte(rgb[0]), byte(rgb[1]), byte(rgb[2]), 255]
+                })
+                .collect(),
+        );
+        for (kind, params) in run {
+            fx::pixels::apply(kind, params, &mut points, &Ctx::default());
+        }
+        let data: Vec<[f32; 3]> = points
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| {
+                let rgb = [p[0], p[1], p[2]].map(|c| f32::from(c) / 255.0);
+                grade.map_or(rgb, |baked| baked.table.sample(rgb))
+            })
+            .collect();
+        let table = Arc::new(grade::Table { size, data });
+        if self.tables.len() > 64 {
+            self.tables.clear();
+        }
+        self.tables.insert(key, Arc::clone(&table));
+        table
+    }
+
     fn baked(&mut self, arena: &Arena, clip: &Clip) -> Option<Arc<Baked>> {
         let correctors = grade::grade_of(clip);
         let grade = Grade { correctors };
@@ -397,11 +451,36 @@ fn process(
         scale,
         frame: frame_index(sequence, time),
     };
-    for effect in &effects {
-        let params = effect.at(clip, time);
-        fx::pixels::apply(&effect.kind, &params, &mut image, &ctx);
+    // Runs of effects that change only colors are baked into one table
+    // (with the grade, when they are the last), so a stack of corrections
+    // costs one lookup a pixel.
+    let mut index = 0;
+    let mut grade_done = false;
+    while index < effects.len() {
+        if !fx::pixels::is_pointwise(&effects[index].kind) {
+            let params = effects[index].at(clip, time);
+            fx::pixels::apply(&effects[index].kind, &params, &mut image, &ctx);
+            index += 1;
+            continue;
+        }
+        let run_end = (index..effects.len())
+            .find(|at| !fx::pixels::is_pointwise(&effects[*at].kind))
+            .unwrap_or(effects.len());
+        let run: Vec<(String, fx::Params)> = effects[index..run_end]
+            .iter()
+            .map(|effect| (effect.kind.clone(), effect.at(clip, time)))
+            .collect();
+        let with_grade = if run_end == effects.len() {
+            grade_done = true;
+            baked.as_deref()
+        } else {
+            None
+        };
+        let table = composer.colors(&run, with_grade);
+        grade::apply_table(&table, &mut image.rgba, image.width as usize);
+        index = run_end;
     }
-    if let Some(baked) = baked {
+    if !grade_done && let Some(baked) = baked {
         baked.apply(&mut image.rgba, image.width as usize);
     }
     if let Some(cover) = mask::combined(&masks, image.width as usize, image.height as usize, scale)
