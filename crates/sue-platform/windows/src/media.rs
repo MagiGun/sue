@@ -1071,7 +1071,7 @@ mod tests {
                 let picture: Vec<u8> = (0..320 * 240 * 3 / 2)
                     .map(|at: u32| {
                         let (x, y) = (at % 320, at / 320);
-                        let grain = (at.wrapping_mul(2_654_435_761) ^ frame * 977) >> 29;
+                        let grain = (at.wrapping_mul(2_654_435_761) ^ (frame * 977)) >> 29;
                         ((x * 3 + y * 2 + frame * 5) % 200 + 20 + grain) as u8
                     })
                     .collect();

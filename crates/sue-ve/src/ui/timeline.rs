@@ -1060,23 +1060,22 @@ fn interact(
             Drag::Slip { from, delta, .. } => *delta = -seconds(*from),
         }
     }
-    if response.drag_stopped() {
-        if let Some(drag) = studio.drag.take()
-            && !matches!(drag, Drag::Scrub)
-        {
-            let label = match &drag {
-                Drag::Move { .. } => tr!("edit-move"),
-                Drag::Trim { ripple: true, .. } => tr!("cmd-tool-ripple"),
-                Drag::Trim { .. } => tr!("edit-trim"),
-                Drag::Roll { .. } => tr!("cmd-tool-roll"),
-                Drag::Slip { .. } => tr!("cmd-tool-slip"),
-                Drag::Slide { .. } => tr!("cmd-tool-slide"),
-                Drag::Scrub => String::new(),
-            };
-            studio.edit(cx, &label, |sequence, ctx| {
-                apply_drag(sequence, &drag, insert, ctx)
-            });
-        }
+    if response.drag_stopped()
+        && let Some(drag) = studio.drag.take()
+        && !matches!(drag, Drag::Scrub)
+    {
+        let label = match &drag {
+            Drag::Move { .. } => tr!("edit-move"),
+            Drag::Trim { ripple: true, .. } => tr!("cmd-tool-ripple"),
+            Drag::Trim { .. } => tr!("edit-trim"),
+            Drag::Roll { .. } => tr!("cmd-tool-roll"),
+            Drag::Slip { .. } => tr!("cmd-tool-slip"),
+            Drag::Slide { .. } => tr!("cmd-tool-slide"),
+            Drag::Scrub => String::new(),
+        };
+        studio.edit(cx, &label, |sequence, ctx| {
+            apply_drag(sequence, &drag, insert, ctx)
+        });
     }
 }
 

@@ -151,10 +151,10 @@ struct Reader {
 
 impl Reader {
     fn frame(&mut self, index: i64) -> Option<Arc<VideoFrame>> {
-        if let Some(last) = &self.last {
-            if last.index == index {
-                return Some(Arc::clone(last));
-            }
+        if let Some(last) = &self.last
+            && last.index == index
+        {
+            return Some(Arc::clone(last));
         }
         let close = self
             .last

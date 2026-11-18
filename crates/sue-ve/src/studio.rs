@@ -249,6 +249,9 @@ pub struct Running {
     pub report: Arc<Mutex<Option<export::Report>>>,
 }
 
+/// A movie to make a proxy of: its id, file, size, rate and length.
+type ToProxy = (EntityId, PathBuf, (u32, u32), (u32, u32), f64);
+
 /// A proxy being made.
 #[derive(Debug)]
 pub struct Proxying {
@@ -621,7 +624,7 @@ impl SueVe {
                 .find(|(_, track)| model::flag(track, key::TARGET))
                 .or_else(|| {
                     if video {
-                        tracks().last()
+                        tracks().next_back()
                     } else {
                         tracks().next()
                     }
@@ -884,28 +887,27 @@ impl SueVe {
     /// background.
     pub fn make_proxies(&mut self, cx: &mut AppletContext<'_>) {
         let Some(project) = self.project else { return };
-        let movies: Vec<(EntityId, PathBuf, (u32, u32), (u32, u32), f64)> =
-            model::pool(cx.arena(), project)
-                .into_iter()
-                .filter_map(|(id, _)| {
-                    let entity = cx.arena().get_by_id(id).ok()?;
-                    if SourceKind::of(entity) != SourceKind::Movie
-                        || model::text(entity, key::PROXY).is_some()
-                    {
-                        return None;
-                    }
-                    let size = model::size_of(cx.arena(), id)?;
-                    let rate = model::rate_of(entity)?;
-                    let seconds = model::length_of(cx.arena(), id)?.seconds();
-                    Some((
-                        id,
-                        import::file_of(entity)?,
-                        size,
-                        (rate.numerator(), rate.denominator()),
-                        seconds,
-                    ))
-                })
-                .collect();
+        let movies: Vec<ToProxy> = model::pool(cx.arena(), project)
+            .into_iter()
+            .filter_map(|(id, _)| {
+                let entity = cx.arena().get_by_id(id).ok()?;
+                if SourceKind::of(entity) != SourceKind::Movie
+                    || model::text(entity, key::PROXY).is_some()
+                {
+                    return None;
+                }
+                let size = model::size_of(cx.arena(), id)?;
+                let rate = model::rate_of(entity)?;
+                let seconds = model::length_of(cx.arena(), id)?.seconds();
+                Some((
+                    id,
+                    import::file_of(entity)?,
+                    size,
+                    (rate.numerator(), rate.denominator()),
+                    seconds,
+                ))
+            })
+            .collect();
         if movies.is_empty() {
             cx.notify(tr!("no-proxies-to-make"));
         }
@@ -960,7 +962,7 @@ impl SueVe {
             settings.range.0 = self.clock.position;
         }
         settings.bitrate =
-            (self.deliver.megabits > 0.0).then(|| (self.deliver.megabits * 1_000_000.0) as u32);
+            (self.deliver.megabits > 0.0).then_some((self.deliver.megabits * 1_000_000.0) as u32);
         settings.sound = self.deliver.sound;
         let arena = cx.arena().clone();
         let hardware = self.hub.hardware;

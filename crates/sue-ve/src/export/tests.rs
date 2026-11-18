@@ -119,7 +119,7 @@ fn an_mp4_export_reads_back_with_its_frames_length_and_pixels() {
     let mut rgba = Vec::new();
     let mut count = 0;
     let mut sampled = None;
-    while let Some(_) = decoder.next_frame(&mut rgba).unwrap() {
+    while decoder.next_frame(&mut rgba).unwrap().is_some() {
         if count == 20 {
             sampled = Some(rgba.clone());
         }
@@ -234,7 +234,12 @@ fn titles_solids_and_stills_render_into_the_export() {
     let mut renderer = Renderer::new(arena, made.sequence, (64, 36), false).unwrap();
     let first = renderer.frame(Time::from_seconds(0.5));
     assert_eq!(&first[..4], &[200, 0, 0, 255], "the solid fills the corner");
-    let letters = first.chunks_exact(4).filter(|p| p[1] > 100).count();
+    let letters = first
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[1] > 100)
+        .count();
     assert!(letters > 0, "the title's white letters show over the red");
     let second = renderer.frame(Time::from_seconds(1.5));
     assert_eq!(

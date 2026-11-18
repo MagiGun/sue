@@ -250,6 +250,16 @@ fn a_movie_dragged_from_the_pool_lands_on_the_timeline_and_the_keys_cut_it() {
         path: movie,
     });
     driver.settle(60);
+    // The Media page shows the movie just brought in, with its facts.
+    driver.command("view.page_media");
+    driver.settle(10);
+    assert!(
+        driver.has("About the clip") && driver.has("640 x 360, 25 fps, H264"),
+        "{:?}",
+        driver.texts
+    );
+    driver.command("view.page_edit");
+    driver.settle(10);
     let card = driver
         .rect_of("bars.mp4")
         .expect("the movie's card in the pool");

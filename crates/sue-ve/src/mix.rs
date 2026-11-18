@@ -165,14 +165,14 @@ impl Meter {
     /// Takes in a block of interleaved stereo that lasted `seconds`.
     pub fn feed(&mut self, block: &[f32], seconds: f32) {
         let mut peak = [0.0_f32; 2];
-        for pair in block.chunks_exact(2) {
+        for pair in block.as_chunks::<2>().0 {
             peak[0] = peak[0].max(pair[0].abs());
             peak[1] = peak[1].max(pair[1].abs());
         }
         self.decay(seconds);
-        for channel in 0..2 {
-            self.level[channel] = self.level[channel].max(peak[channel]);
-            self.hold[channel] = self.hold[channel].max(peak[channel]);
+        for ((level, hold), peak) in self.level.iter_mut().zip(&mut self.hold).zip(peak) {
+            *level = level.max(peak);
+            *hold = hold.max(peak);
         }
     }
 

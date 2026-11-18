@@ -240,7 +240,7 @@ fn sample(image: &VideoFrame, u: f32, v: f32) -> [f32; 4] {
 pub fn composite(frame: (u32, u32), layers: &[Placed]) -> Vec<u8> {
     let (width, height) = (frame.0 as usize, frame.1 as usize);
     let mut out = vec![0_u8; width * height * 4];
-    for pixel in out.chunks_exact_mut(4) {
+    for pixel in out.as_chunks_mut::<4>().0 {
         pixel[3] = 255;
     }
     // Each layer's inverse placement: from a frame pixel to its picture.
@@ -419,7 +419,7 @@ pub fn title(arena: &Arena, id: EntityId, frame: (u32, u32)) -> Option<VideoFram
     };
     sue_type::raster::draw_text(&mut pixels, width, height, &spec);
     if color[3] < 255 {
-        for pixel in pixels.chunks_exact_mut(4) {
+        for pixel in pixels.as_chunks_mut::<4>().0 {
             pixel[3] = ((u16::from(pixel[3]) * u16::from(color[3])) / 255) as u8;
         }
     }

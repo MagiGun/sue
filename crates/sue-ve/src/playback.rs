@@ -180,7 +180,9 @@ impl Clock {
                     self.block.iter().map(|s| s.clamp(-1.0, 1.0)).collect()
                 } else {
                     self.block
-                        .chunks_exact(2)
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
                         .flat_map(|pair| {
                             let mono = ((pair[0] + pair[1]) * 0.5).clamp(-1.0, 1.0);
                             std::iter::repeat_n(mono, channels)

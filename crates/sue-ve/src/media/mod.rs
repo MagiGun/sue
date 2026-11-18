@@ -96,6 +96,10 @@ pub fn ticks(time: Time) -> i64 {
     time.flicks() / (sue_core::FLICKS_PER_SECOND / 10_000_000)
 }
 
+/// A picture drawn from the arena: the source's revision, the frame, the
+/// size it was drawn for, and the pixels.
+type Generated = (u64, i64, (u32, u32), Arc<VideoFrame>);
+
 /// Everything the studio has decoded or is decoding.
 pub struct MediaHub {
     /// Decoded movie frames.
@@ -107,7 +111,7 @@ pub struct MediaHub {
     pub thumbs: Thumbs,
     /// Pictures drawn from the arena (stills, pictures, titles, solids)
     /// and image sequence frames: by source, its revision, frame and size.
-    generated: HashMap<EntityId, (u64, i64, (u32, u32), Arc<VideoFrame>)>,
+    generated: HashMap<EntityId, Generated>,
     /// Decode on the graphics card.
     pub hardware: bool,
     /// Play proxies where a movie has one.
@@ -199,6 +203,10 @@ impl MediaHub {
     /// worker as `need` says and come from the cache (a nearby frame
     /// standing in until the one asked for is decoded); the rest is drawn
     /// here and kept until the source changes.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "what a monitor asks for: a source, its kind and time, the frame, the quality and the need"
+    )]
     pub fn frame(
         &mut self,
         arena: &Arena,
