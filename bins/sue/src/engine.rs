@@ -1051,7 +1051,10 @@ pub(crate) mod tests {
                 .map(|manifest| manifest.name.clone())
                 .collect()
         };
-        assert_eq!(pages(AppletRole::Studio), ["Sue Paint", "Sue Writer"]);
+        assert_eq!(
+            pages(AppletRole::Studio),
+            ["Sue Paint", "Sue Writer", "Sue VE"]
+        );
         // Sue ships no tool of its own; a package may add one.
         assert_eq!(pages(AppletRole::Tool), Vec::<String>::new());
         assert_eq!(pages(AppletRole::Window), ["Settings"]);
@@ -1060,7 +1063,7 @@ pub(crate) mod tests {
             .iter()
             .map(|choice| choice.value.as_str())
             .collect();
-        assert_eq!(pins, ["", "sue-paint", "sue-writer"]);
+        assert_eq!(pins, ["", "sue-paint", "sue-writer", "sue-ve"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1130,6 +1133,7 @@ pub(crate) mod tests {
                 "Files",
                 "Sue Paint",
                 "Sue Writer",
+                "Sue VE",
                 "Keyboard Shortcuts",
                 "Packages",
                 "Advanced"

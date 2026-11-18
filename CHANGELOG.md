@@ -11,47 +11,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed
+## [0.0.83] - 2026-11-18
 
-- Sue Paint opens in its own Gray colors again, as Clip Studio Paint
-  does. Its Theme setting (Sue Paint's Preferences, and Sue Paint's page
-  in Settings) offers **Follow Sue's theme** to wear Sue's colors (Dark
-  unless you change them). If you never changed Sue Paint's theme you
-  get Gray; a theme you chose stays.
-- Every dialog opens where you last left it, at the size you made it,
-  or else centered on the window that opened it. The places are kept
-  between runs (Settings, Display and Performance, Dialog Places; empty
-  it to center every dialog again).
-- Docked palettes in a crowded column share its height more fairly: the
-  Layer palette keeps room for its tools and a few layers, and Sub Tool
-  for a few sub tools, taken from the palettes with room to spare.
-- Phones and tablets no longer show Quit Sue in the menus or the command
-  palette: leave Sue as any other app. Computers keep it.
-
-### Fixed
-
-- Sue VE: a palette dragged off the Edit page's dock floats in a window
-  of its own instead of snapping back; frames of image sequences and of
-  Sue Paint animations are drawn in the background, so they no longer
-  stutter playback; and the decoder reads a picture only inside the
-  buffer Windows hands it.
-- Dialogs and floating palettes in windows of their own (Sue Paint's
-  New, Export, Canvas Properties, Timelapse and the others) could not be
-  moved by their title bar or resized by their edges, and a floating
-  palette grew taller every frame. They now move, resize, and stay
-  where they are put. Dialogs drawn inside Sue's window (Export,
-  Settings, Sue Writer's, the release notes, every question) move by
-  their header too, and the larger ones resize from their corner.
-- Interface scale in Settings did nothing until Sue was restarted. It
-  now applies as soon as you let go of the slider, to every window,
-  dialog and palette, with text and icons drawn sharp at the new size.
-  Ctrl+Minus and Ctrl+0 no longer change the interface scale behind
-  Settings' back.
-- Springiness and Bounce in Settings, at the ends of their sliders, made
-  the interface bounce on and on, flicker and never stop drawing, or
-  crawl. Every value now gives an animation that overshoots by less than
-  5 percent and comes to rest within about a second and a half, and the
-  page coming over the Hub no longer flickers on its way in.
 ### Added
 
 - Sue Paint, 3D drawing figures: **Anatomical detail** in Body shape by
@@ -61,20 +22,6 @@ follow [Semantic Versioning](https://semver.org/).
   form between the legs, in every pose and from every side. Ticked, the
   body is as before. It is one step to undo, kept in the file and in
   body shape materials.
-
-### Changed
-
-- Sue Paint, 3D layers draw several times faster: the figure is drawn in
-  bands on every core, each pixel shaded once, only the part of the
-  canvas the model is on is worked, and while you pose or turn a figure
-  only the part of the picture that changed is shown again. A body on a
-  1600 x 1200 canvas takes 16 ms at rest instead of 103 ms and 8 ms
-  while dragged instead of 35 ms; a hand on an A4 canvas at 300 dpi
-  takes 0.12 s instead of 1.5 s. A posing frame, from the pointer's move
-  to the picture shown, went from 59 ms to 20 ms. Pictures at rest look
-  the same as before.
-### Added
-
 - **Sue VE**, a new studio for editing video. On a computer it looks like
   DaVinci Resolve's Edit page with Premiere Pro's tools: a media pool
   (thumbnails or a list), source and program monitors side by side, a
@@ -162,6 +109,57 @@ follow [Semantic Versioning](https://semver.org/).
   the mixer.
 - Seven new icons (speed, mixer, microphone, graph, scope, aspect,
   captions).
+
+### Changed
+
+- Sue Paint opens in its own Gray colors again, as Clip Studio Paint
+  does. Its Theme setting (Sue Paint's Preferences, and Sue Paint's page
+  in Settings) offers **Follow Sue's theme** to wear Sue's colors (Dark
+  unless you change them). If you never changed Sue Paint's theme you
+  get Gray; a theme you chose stays.
+- Every dialog opens where you last left it, at the size you made it,
+  or else centered on the window that opened it. The places are kept
+  between runs (Settings, Display and Performance, Dialog Places; empty
+  it to center every dialog again).
+- Docked palettes in a crowded column share its height more fairly: the
+  Layer palette keeps room for its tools and a few layers, and Sub Tool
+  for a few sub tools, taken from the palettes with room to spare.
+- Phones and tablets no longer show Quit Sue in the menus or the command
+  palette: leave Sue as any other app. Computers keep it.
+- Sue Paint, 3D layers draw several times faster: the figure is drawn in
+  bands on every core, each pixel shaded once, only the part of the
+  canvas the model is on is worked, and while you pose or turn a figure
+  only the part of the picture that changed is shown again. A body on a
+  1600 x 1200 canvas takes 16 ms at rest instead of 103 ms and 8 ms
+  while dragged instead of 35 ms; a hand on an A4 canvas at 300 dpi
+  takes 0.12 s instead of 1.5 s. A posing frame, from the pointer's move
+  to the picture shown, went from 59 ms to 20 ms. Pictures at rest look
+  the same as before.
+
+### Fixed
+
+- Sue VE: a palette dragged off the Edit page's dock floats in a window
+  of its own instead of snapping back; frames of image sequences and of
+  Sue Paint animations are drawn in the background, so they no longer
+  stutter playback; and the decoder reads a picture only inside the
+  buffer Windows hands it.
+- Dialogs and floating palettes in windows of their own (Sue Paint's
+  New, Export, Canvas Properties, Timelapse and the others) could not be
+  moved by their title bar or resized by their edges, and a floating
+  palette grew taller every frame. They now move, resize, and stay
+  where they are put. Dialogs drawn inside Sue's window (Export,
+  Settings, Sue Writer's, the release notes, every question) move by
+  their header too, and the larger ones resize from their corner.
+- Interface scale in Settings did nothing until Sue was restarted. It
+  now applies as soon as you let go of the slider, to every window,
+  dialog and palette, with text and icons drawn sharp at the new size.
+  Ctrl+Minus and Ctrl+0 no longer change the interface scale behind
+  Settings' back.
+- Springiness and Bounce in Settings, at the ends of their sliders, made
+  the interface bounce on and on, flicker and never stop drawing, or
+  crawl. Every value now gives an animation that overshoots by less than
+  5 percent and comes to rest within about a second and a half, and the
+  page coming over the Hub no longer flickers on its way in.
 
 ## [0.0.82] - 2026-11-17
 
@@ -2567,7 +2565,8 @@ The first release.
 - Packages for Windows, macOS, Linux, Android and iOS, under the Sayn
   License.
 
-[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.82...HEAD
+[Unreleased]: https://github.com/MagiGun/sue/compare/v0.0.83...HEAD
+[0.0.83]: https://github.com/MagiGun/sue/compare/v0.0.82...v0.0.83
 [0.0.82]: https://github.com/MagiGun/sue/compare/v0.0.81...v0.0.82
 [0.0.81]: https://github.com/MagiGun/sue/compare/v0.0.8...v0.0.81
 [0.0.8]: https://github.com/MagiGun/sue/compare/v0.0.75...v0.0.8

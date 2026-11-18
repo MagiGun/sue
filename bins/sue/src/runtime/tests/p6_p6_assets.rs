@@ -788,7 +788,21 @@ fn step_00_38_57_fg_16_adjust_density_of_the_interface_color() {
         assert_eq!(lum(dense.panel) < lum(base.panel), darker);
         let shown = fills(&mut paint);
         let now = shown.iter().filter(|fill| **fill == dense.panel).count();
-        let old = shown.iter().filter(|fill| **fill == base.panel).count();
+        // A lighter void can land on the old panel color by itself; a
+        // fill counts as left over only when no dense surface wears it.
+        let reused = [
+            dense.void,
+            dense.pill,
+            dense.hover,
+            dense.active,
+            dense.border,
+        ]
+        .contains(&base.panel);
+        let old = if reused {
+            0
+        } else {
+            shown.iter().filter(|fill| **fill == base.panel).count()
+        };
         assert!(now >= panels, "{percent}: {now} of {panels} panels");
         assert!(old * 4 < panels, "{percent}: {old} still the old color");
         assert!(sue_wm::ui::tokens::contrast(dense.text, dense.panel) >= 4.5);

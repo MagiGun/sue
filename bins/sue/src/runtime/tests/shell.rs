@@ -365,7 +365,7 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
     );
     assert_eq!(
         runtime.shell.sue_menu_labels(&["Studios"]),
-        ["Sue Paint", "Sue Writer"]
+        ["Sue Paint", "Sue Writer", "Sue VE"]
     );
     // Sue ships no tool, so the menu has no empty Tools entry.
     assert!(
@@ -375,7 +375,7 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
     assert_eq!(runtime.shell.sue_menu_labels(&["Tools"]), [""; 0]);
     assert_eq!(
         runtime.shell.sue_menu_labels(&["New"]),
-        ["Picture", "Writing"]
+        ["Picture", "Writing", "Video"]
     );
     assert!(
         runtime
@@ -407,7 +407,11 @@ fn the_sue_menu_follows_the_context_and_sends_work_between_studios() {
     // Sue Paint's own File menu's, and nothing pins.
     runtime.request(ShellRequest::SueMenu, &mut NoTextures, start);
     let send = runtime.shell.sue_menu_labels(&["Send To"]);
-    assert_eq!(send, ["Sue Writer"], "the other studio, and only it");
+    assert_eq!(
+        send,
+        ["Sue Writer", "Sue VE"],
+        "the other studios, and only them"
+    );
     let inside = runtime.shell.sue_menu_labels(&[]);
     for gone in ["File", "Project", "Language"] {
         assert!(
