@@ -241,6 +241,57 @@ fn asset() -> &'static Asset {
     })
 }
 
+/// `skin` where `worked` marks it (0 to 1) blended `steps` times with
+/// its neighbors' along the mesh, so the skin there bends as one smooth
+/// piece instead of pinching between the legs.
+fn smoothed_skin(skin: &mut [[(u16, f32); 4]], near: &[Vec<u32>], worked: &[f32], steps: usize) {
+    let free: Vec<usize> = (0..skin.len().min(worked.len()))
+        .filter(|&i| worked[i] > 0.0 && !near[i].is_empty())
+        .collect();
+    for _ in 0..steps {
+        let next: Vec<[(u16, f32); 4]> = free
+            .iter()
+            .map(|&i| {
+                let share = worked[i] * 0.5 / near[i].len() as f32;
+                let mut parts = vec![(&skin[i], 1.0 - worked[i] * 0.5)];
+                parts.extend(near[i].iter().map(|&j| (&skin[j as usize], share)));
+                blended(&parts)
+            })
+            .collect();
+        for (&i, made) in free.iter().zip(next) {
+            skin[i] = made;
+        }
+    }
+}
+
+/// How many times [`smoothed_skin`] blends a mannequin's skin.
+const SKIN_STEPS: usize = 100;
+
+/// Each point of the shipped mesh's neighbors along its edges, found once.
+fn neighbors() -> &'static [Vec<u32>] {
+    static NEAR: OnceLock<Vec<Vec<u32>>> = OnceLock::new();
+    NEAR.get_or_init(|| {
+        let asset = asset();
+        super::modest::neighbors(asset.points.len(), &asset.quads)
+    })
+}
+
+/// How much taking `body`'s anatomical detail off moves each point of
+/// its mesh as modeled (0 where it stays), and the largest move, meters.
+#[cfg(test)]
+pub(crate) fn modesty(body: &Body) -> (Vec<f32>, Vec<f32>) {
+    let asset = asset();
+    let (mut points, ends) = morphed(body);
+    let before = points.clone();
+    let worked = super::modest::modest(&mut points, neighbors(), &asset.quads, &ends);
+    let moved = points
+        .iter()
+        .zip(&before)
+        .map(|(a, b)| length(sub(*a, *b)))
+        .collect();
+    (worked, moved)
+}
+
 /// A figure shaped and ready to pose: its points at rest as modeled, how
 /// each follows the joints, its joints as poses turn them, and what lies
 /// on its surface.
@@ -1565,6 +1616,11 @@ fn with_irises(
 fn shaped_body(body: &Body) -> Shaped {
     let asset = asset();
     let (mut points, mut ends) = morphed(body);
+    let mut skin = asset.skin.clone();
+    if !body.anatomy {
+        let worked = super::modest::modest(&mut points, neighbors(), &asset.quads, &ends);
+        smoothed_skin(&mut skin, neighbors(), &worked, SKIN_STEPS);
+    }
     let tall = 1.9 * body.height / Body::HEIGHT;
     proportioned(&mut points, &mut ends, &asset.skin, Some(body.heads), tall);
     let (frames, hands, thumb_axes) = body_frames(&ends);
@@ -1572,7 +1628,6 @@ fn shaped_body(body: &Body) -> Shaped {
     let faces: Vec<Vec<u32>> = asset.quads.iter().map(|quad| quad.to_vec()).collect();
     let mut tris = triangles(&points, &faces);
     let guides = body_guides(&points, &asset.skin, &tris, &ends, tall);
-    let mut skin = asset.skin.clone();
     let eyes = at::EYES.map(|eye| (eye, sub(ends[eye][1], ends[eye][0])));
     let colors = with_irises(&mut points, &mut skin, &mut tris, &eyes);
     // The hands' relief: one relief (a left hand's), both hands on it.
@@ -1918,6 +1973,8 @@ pub(crate) fn shaped(body: &Body) -> Arc<Shaped> {
         follow: false,
         ground: true,
         limits: false,
+        // Only a body has anatomical detail to take off.
+        anatomy: body.anatomy || body.kind != Kind::Body,
         ..*body
     };
     let mut kept = SHAPED.lock().unwrap_or_else(|poison| poison.into_inner());

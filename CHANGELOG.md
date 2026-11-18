@@ -11,6 +11,16 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Sue Paint, 3D drawing figures: **Anatomical detail** in Body shape by
+  part. It is off unless you tick it, for new figures and for figures
+  in files from before: the male and female bodies are then smooth
+  mannequins, the nipples smoothed into the chest and a neutral, rounded
+  form between the legs, in every pose and from every side. Ticked, the
+  body is as before. It is one step to undo, kept in the file and in
+  body shape materials.
+
 ## [0.0.82] - 2026-11-17
 
 ### Added

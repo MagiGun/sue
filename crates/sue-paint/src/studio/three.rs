@@ -965,7 +965,7 @@ const LOOK_KEYS: [&str; 3] = [
 ];
 
 /// The properties of a figure's body shape.
-const BODY_KEYS: [&str; 9] = [
+const BODY_KEYS: [&str; 10] = [
     crate::figure::GROUND,
     crate::figure::HEIGHT,
     crate::figure::HEADS,
@@ -975,11 +975,12 @@ const BODY_KEYS: [&str; 9] = [
     crate::figure::PARTS_TEXT,
     crate::figure::SIDE,
     crate::figure::GUIDES,
+    crate::figure::ANATOMY,
 ];
 
 /// The properties of a 3D layer's model a drag may change: its placement
 /// and a figure's body shape.
-const MODEL_KEYS: [&str; 19] = [
+const MODEL_KEYS: [&str; 20] = [
     crate::model3d::COLORS,
     crate::model3d::MORPHS,
     crate::figure::LIMITS,
@@ -999,6 +1000,7 @@ const MODEL_KEYS: [&str; 19] = [
     crate::figure::PARTS_TEXT,
     crate::figure::SIDE,
     crate::figure::GUIDES,
+    crate::figure::ANATOMY,
 ];
 
 /// The properties of a 3D layer's view.
@@ -1011,7 +1013,7 @@ fn view_keys() -> Vec<&'static str> {
 }
 
 /// A body shape as the properties of its model.
-fn body_values(body: &crate::figure::Body) -> [(&'static str, Value); 9] {
+fn body_values(body: &crate::figure::Body) -> [(&'static str, Value); 10] {
     [
         (crate::figure::GROUND, Value::from(body.ground)),
         (crate::figure::HEIGHT, Value::from(f64::from(body.height))),
@@ -1022,6 +1024,7 @@ fn body_values(body: &crate::figure::Body) -> [(&'static str, Value); 9] {
         (crate::figure::PARTS_TEXT, Value::from(body.parts_text())),
         (crate::figure::SIDE, Value::from(body.side.key())),
         (crate::figure::GUIDES, Value::from(body.guides)),
+        (crate::figure::ANATOMY, Value::from(body.anatomy)),
     ]
 }
 
