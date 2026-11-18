@@ -723,3 +723,33 @@ fn every_menu_item_shows_the_chord_that_runs_it() {
     assert_eq!(key_of("view.rotate_right"), Some("="));
     assert_eq!(key_of("window.hide_all"), Some("Tab"));
 }
+
+/// Rule 7 of the 0.0.8 plan: every command that changes a document is
+/// run, undone and redone by a test. Those tests go group by group
+/// through the registry (`paint_cmd_*.rs`, `paint_filter.rs`,
+/// `paint_select.rs`, `paint_view.rs` and `paint_window.rs` among the
+/// runtime's tests), so a command is covered the day it is registered,
+/// as long as its group is one of theirs. A new group fails here until
+/// it has such a test and is named in this list.
+#[test]
+fn every_command_is_in_a_group_whose_commands_are_all_run_by_a_test() {
+    const RUN_GROUP_BY_GROUP: [&str; 13] = [
+        "anim", "canvas", "edit", "figure", "file", "filter", "help", "layer", "select", "story",
+        "tool", "view", "window",
+    ];
+    // Groups that set up tools, color sets and touch, kept in Sue
+    // Paint's own files and not in a picture. No test runs them whole
+    // yet: the release gate of 0.0.82 records it.
+    const TOOL_SETUP: [&str; 4] = ["color", "subtool", "tool_palette", "touch"];
+    let outside: Vec<String> = registry()
+        .iter()
+        .filter(|command| {
+            !RUN_GROUP_BY_GROUP.contains(&command.group) && !TOOL_SETUP.contains(&command.group)
+        })
+        .map(|command| format!("{} ({})", command.name, command.group))
+        .collect();
+    assert!(
+        outside.is_empty(),
+        "commands in a group no test runs whole: {outside:?}"
+    );
+}

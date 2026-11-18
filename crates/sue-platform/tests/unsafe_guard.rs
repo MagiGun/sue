@@ -110,8 +110,19 @@ fn no_manifest_outside_the_audited_sub_crates_relaxes_unsafe_code() {
 }
 
 #[test]
-fn the_windows_sub_crate_documents_every_unsafe_block() {
-    let dir = root().join("crates/sue-platform/windows");
+fn the_windows_sub_crates_document_every_unsafe_block() {
+    // Media Foundation and the screen, then the pen's packet history.
+    let media = documented_blocks("crates/sue-platform/windows");
+    assert!(media > 10, "the media module's blocks are found: {media}");
+    let pen = documented_blocks("crates/sue-platform/winpen");
+    assert!(pen >= 1, "the pen history's block is found: {pen}");
+}
+
+/// How many `unsafe` blocks the audited sub-crate in `folder` holds, each
+/// checked for its `// SAFETY:` comment, and each `unsafe_code` exception
+/// for its reason.
+fn documented_blocks(folder: &str) -> usize {
+    let dir = root().join(folder);
     let manifest = std::fs::read_to_string(dir.join("Cargo.toml")).expect("its manifest");
     assert_eq!(
         value(&manifest, "[lints.clippy]", "undocumented_unsafe_blocks").as_deref(),
@@ -162,5 +173,5 @@ fn the_windows_sub_crate_documents_every_unsafe_block() {
             }
         }
     }
-    assert!(blocks > 10, "the media module's blocks are found: {blocks}");
+    blocks
 }
