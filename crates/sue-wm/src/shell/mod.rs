@@ -1079,7 +1079,10 @@ impl Shell {
         self.hub_boxes.clear();
         self.hub_rows.clear();
         self.hub.buttons.clear();
-        let settled = self.shown.is_some() && self.reveal.position() >= 0.999;
+        // Covered once the page has come all the way in: a swing back
+        // past it (a bouncy spring) does not uncover the Hub again, which
+        // flickered.
+        let settled = self.shown.is_some() && self.reveal.target() >= 1.0 && self.reveal.reached();
         // The Hub, unless a page covers it whole.
         if !settled {
             self.hub_ui(root, layout.page, io, &theme, now, dt);

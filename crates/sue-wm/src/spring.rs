@@ -20,6 +20,37 @@ impl SpringParams {
     pub fn damping_ratio(&self) -> f32 {
         self.damping / (2.0 * (self.stiffness * self.mass).sqrt())
     }
+
+    /// The least and most stiffness an animation runs with: softer
+    /// crawls for seconds, stiffer than this moves faster than a frame
+    /// shows.
+    pub const STIFFNESS: (f32, f32) = (120.0, 1000.0);
+
+    /// The least and most damping ratio an animation runs with. At the
+    /// least (0.7) a spring overshoots its target by under 5 percent and
+    /// comes to rest within a few swings; at the most (1.2) it still
+    /// arrives without crawling.
+    pub const DAMPING_RATIO: (f32, f32) = (0.7, 1.2);
+
+    /// These constants made safe for the interface: any `motion.spring_*`
+    /// values (from the ends of their sliders, or a hand-edited file)
+    /// give a spring that comes to rest soon, without bouncing on and on
+    /// (the interface flickered and never stopped drawing) or crawling.
+    #[must_use]
+    pub fn stable(self) -> Self {
+        let finite = |value: f32, fallback: f32| if value.is_finite() { value } else { fallback };
+        let mass = finite(self.mass, 1.0).max(0.01);
+        let (least, most) = Self::STIFFNESS;
+        let stiffness = finite(self.stiffness, 260.0).clamp(least * mass, most * mass);
+        let critical = 2.0 * (stiffness * mass).sqrt();
+        let (low, high) = Self::DAMPING_RATIO;
+        let damping = finite(self.damping, critical).clamp(low * critical, high * critical);
+        Self {
+            stiffness,
+            damping,
+            mass,
+        }
+    }
 }
 
 /// Whether a spring integrates or jumps straight to its target.
@@ -52,6 +83,9 @@ pub struct SpringDamper {
     position: f32,
     velocity: f32,
     target: f32,
+    /// It has come to its target since the target last changed (crossed
+    /// it, or rests there).
+    reached: bool,
 }
 
 impl SpringDamper {
@@ -62,20 +96,25 @@ impl SpringDamper {
     /// Distance and speed below which the spring counts as settled.
     pub const SETTLE_EPSILON: f32 = 1e-3;
 
-    /// A spring at rest at `position`.
+    /// A spring at rest at `position`. Its constants are made
+    /// [`stable`](SpringParams::stable).
     #[must_use]
     pub fn new(params: SpringParams, mode: SpringMode, position: f32) -> Self {
         Self {
-            params,
+            params: params.stable(),
             mode,
             position,
             velocity: 0.0,
             target: position,
+            reached: true,
         }
     }
 
     /// Sets a new target. In `InstantSnap` mode the spring is there at once.
     pub fn set_target(&mut self, target: f32) {
+        if target != self.target {
+            self.reached = false;
+        }
         self.target = target;
         if self.mode == SpringMode::InstantSnap {
             self.snap();
@@ -105,11 +144,15 @@ impl SpringDamper {
         }
         let mass = self.params.mass.max(f32::EPSILON);
         let mut remaining = dt.clamp(0.0, Self::MAX_FRAME_TIME);
+        let side = (self.position - self.target).signum();
         while remaining > 0.0 {
             let step = remaining.min(Self::MAX_SUBSTEP);
             self.velocity += self.force() / mass * step;
             self.position += self.velocity * step;
             remaining -= step;
+        }
+        if (self.position - self.target).signum() != side {
+            self.reached = true;
         }
         if self.is_settled() {
             self.snap();
@@ -127,9 +170,20 @@ impl SpringDamper {
         self.snap();
     }
 
-    /// Changes the spring constants (after a rice edit).
+    /// Changes the spring constants (after a rice edit), made
+    /// [`stable`](SpringParams::stable).
     pub fn set_params(&mut self, params: SpringParams) {
-        self.params = params;
+        self.params = params.stable();
+    }
+
+    /// `true` once it has come to its target since the target last
+    /// changed: it crossed it (and swings back by a hair at most) or rests
+    /// there. What switches on arriving (a page covering the Hub) asks
+    /// this, not the position, so a swing around the target does not
+    /// switch it back and forth.
+    #[must_use]
+    pub fn reached(&self) -> bool {
+        self.reached || self.is_settled()
     }
 
     #[must_use]
@@ -141,6 +195,7 @@ impl SpringDamper {
     fn snap(&mut self) {
         self.position = self.target;
         self.velocity = 0.0;
+        self.reached = true;
     }
 
     /// Current position.
@@ -251,5 +306,71 @@ mod tests {
         switched.set_mode(SpringMode::InstantSnap);
         assert_eq!(switched.position(), switched.target());
         assert!(frames_to_settle(&mut spring, 1.0 / 120.0) < 1_000);
+    }
+
+    /// Every pair of `motion.spring_stiffness` and `motion.spring_damping`
+    /// at the ends of their sliders (10 to 1000, 0 to 120), and the
+    /// shipped pair: the spring overshoots by under 5 percent, comes to
+    /// rest within 100 frames at 60 a second (the slowest, the softest
+    /// spring damped most, takes about 93), and asks for no frame after.
+    #[test]
+    fn every_setting_at_the_ends_of_its_sliders_comes_to_rest_soon() {
+        for stiffness in [10.0, 260.0, 1000.0] {
+            for damping in [0.0, 32.0, 120.0] {
+                let params = SpringParams {
+                    stiffness,
+                    damping,
+                    mass: 1.0,
+                };
+                let mut spring = SpringDamper::new(params, SpringMode::Physics, 0.0);
+                spring.set_target(1.0);
+                let mut peak = 0.0_f32;
+                let mut frames = 0;
+                while spring.step(1.0 / 60.0) {
+                    peak = peak.max(spring.position());
+                    frames += 1;
+                    assert!(frames < 100, "k {stiffness} c {damping}: still moving");
+                }
+                assert!(peak < 1.05, "k {stiffness} c {damping}: overshoot to {peak}");
+                assert_eq!(spring.position(), 1.0);
+                assert!(spring.reached());
+                assert!(!spring.step(1.0 / 60.0), "settled: no more frames");
+            }
+        }
+        // What cannot be a spring at all still is one.
+        let broken = SpringParams {
+            stiffness: f32::NAN,
+            damping: f32::INFINITY,
+            mass: 0.0,
+        }
+        .stable();
+        assert!(broken.stiffness.is_finite() && broken.damping.is_finite());
+        assert!(broken.mass > 0.0);
+    }
+
+    /// A spring that swings past its target has reached it, and stays so
+    /// while it swings back: what switches on arriving does not flicker.
+    #[test]
+    fn a_swing_back_past_the_target_still_counts_as_arrived() {
+        let bouncy = SpringParams {
+            stiffness: 1000.0,
+            damping: 0.0,
+            mass: 1.0,
+        };
+        let mut spring = SpringDamper::new(bouncy, SpringMode::Physics, 0.0);
+        spring.set_target(1.0);
+        assert!(!spring.reached());
+        let mut arrived_at = None;
+        for frame in 0..90 {
+            spring.step(1.0 / 60.0);
+            if spring.reached() {
+                arrived_at.get_or_insert(frame);
+            } else {
+                assert!(arrived_at.is_none(), "it left again in frame {frame}");
+            }
+        }
+        assert!(arrived_at.is_some());
+        spring.set_target(0.0);
+        assert!(!spring.reached(), "a new target is a new trip");
     }
 }

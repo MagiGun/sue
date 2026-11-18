@@ -693,7 +693,10 @@ impl<'a, T: AsRef<str>> Segmented<'a, T> {
                     id.with("sue-thumb-left"),
                     cell.left() - rect.left(),
                 );
-                let width = motion::spring(ui.ctx(), id.with("sue-thumb-width"), cell.width());
+                // A bouncy spring never swings it out of the strip.
+                let width = motion::spring(ui.ctx(), id.with("sue-thumb-width"), cell.width())
+                    .clamp(0.0, rect.width());
+                let left = left.clamp(0.0, (rect.width() - width).max(0.0));
                 Rect::from_min_size(
                     pos2(rect.left() + left, cell.top()),
                     vec2(width, cell.height()),
