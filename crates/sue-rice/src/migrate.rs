@@ -9,8 +9,8 @@
 use crate::{DEFAULT_RICE, RiceError, RiceSchema, RiceValue};
 
 /// The format of [`DEFAULT_RICE`], declared in its header as
-/// `# sue-rice format 7`.
-pub const RICE_FORMAT: u32 = 7;
+/// `# sue-rice format 8`.
+pub const RICE_FORMAT: u32 = 8;
 
 const MARKER: &str = "# sue-rice format ";
 
@@ -22,6 +22,7 @@ const HISTORY: &[(u32, &str)] = &[
     (4, include_str!("../rice/history/v4.suerice")),
     (5, include_str!("../rice/history/v5.suerice")),
     (6, include_str!("../rice/history/v6.suerice")),
+    (7, include_str!("../rice/history/v7.suerice")),
 ];
 
 /// The theme presets as they shipped from format 3 to format 6, by id.

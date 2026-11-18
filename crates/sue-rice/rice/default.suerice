@@ -2,7 +2,7 @@
 # "A jack of all trades is a master of none,
 #  but oftentimes better than a master of one."
 #
-# sue-rice format 7
+# sue-rice format 8
 #
 # Every key below is a live control in Settings. Metadata lives in the
 # trailing comment:   [min..max]  slider       {a|b|c}  choice
@@ -113,7 +113,7 @@ custom_key_4 = "select.none"   # @text The command Studio Mode's key T4 runs
 custom_key_5 = "layer.new"     # @text The command Studio Mode's key T5 runs
 custom_key_6 = "view.fit"      # @text The command Studio Mode's key T6 runs
 custom_key_7 = "view.flip_h"   # @text The command Studio Mode's key T7 runs
-theme = "sue-theme"            # {sue-theme|gray|void|graphite|paper|custom} Sue Paint's colors: Sue's own theme (follows it), Gray, a preset, or Custom (below)
+theme = "gray"                 # {gray|sue-theme|void|graphite|paper|custom} Sue Paint's colors: its own Gray, Sue's theme (follows it), a preset, or Custom (below)
 pen_pressure = "0,0 0.4,0.5 1,1" # @text Pen pressure curve for every tool, as pressure,output points (File, Pen Pressure Settings draws it)
 alt_tool = "eyedropper"        # {eyedropper|eraser|none} What Alt while drawing does on the canvas (File, Modifier Key Settings)
 space_tool = "hand"            # {hand|none} What Space does on the canvas (File, Modifier Key Settings)
