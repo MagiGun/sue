@@ -348,9 +348,11 @@ pub fn corners(layer: &Layer, natural: (u32, u32), frame: (u32, u32)) -> [[f32; 
 #[must_use]
 pub fn natural_size(kind: &SourceKind, image: (u32, u32), frame: (u32, u32)) -> (u32, u32) {
     match kind {
-        SourceKind::Title | SourceKind::Solid | SourceKind::Adjustment | SourceKind::Sequence => {
-            frame
-        }
+        SourceKind::Title
+        | SourceKind::Solid
+        | SourceKind::Shape
+        | SourceKind::Adjustment
+        | SourceKind::Sequence => frame,
         _ => image,
     }
 }
@@ -744,6 +746,7 @@ pub fn generated(
         SourceKind::Still => still(arena, id),
         SourceKind::Picture => picture(arena, id, source_time, frame.0.max(frame.1).max(256)),
         SourceKind::Title => title(arena, id, frame, unit),
+        SourceKind::Shape => crate::layers::draw_shape(arena, id, frame, unit),
         SourceKind::Solid => solid(arena, id),
         _ => None,
     }

@@ -1,10 +1,15 @@
 //! The source and program monitors, side by side as in DaVinci Resolve's
-//! Edit page. The program monitor draws the sequence's layers on the
-//! graphics card through Sue's painter: each source frame is a texture
-//! (uploaded once per new frame, straight from the decoded bytes) and
-//! each layer a textured quad placed, turned and faded as its clip says,
-//! so cuts, opacity, transforms and dissolves preview in real time
-//! without compositing on the processor.
+//! Edit page. The program monitor draws plain layers on the graphics
+//! card through Sue's painter: each source frame is a texture (uploaded
+//! once per new frame, straight from the decoded bytes) and each layer a
+//! textured quad placed, turned and faded as its clip says, so cuts,
+//! opacity, transforms and dissolves preview in real time without
+//! compositing on the processor. A frame with effects, grades, masks,
+//! wipes, adjustment clips or nested sequences is drawn by the export's
+//! own renderer on the preview worker (`crate::preview`) and shown from
+//! the render cache; until it is there, the last one drawn stands in.
+
+use std::sync::Arc;
 
 use egui::epaint::{Mesh, Vertex};
 use egui::{Align2, Color32, Rect, Sense, Ui, pos2, vec2};
@@ -15,10 +20,12 @@ use sue_wm::{AppletContext, Theme};
 
 use super::pool::texture_key;
 use super::{SQUARE, font, timecode};
+use crate::compose::{self, Options};
 use crate::media::Need;
 use crate::model::{self, SourceKind};
+use crate::preview::Want;
 use crate::render::{self, Layer};
-use crate::studio::{Monitor, SueVe};
+use crate::studio::{Monitor, Page, SueVe};
 
 /// Draws both monitors in `rect`.
 pub fn monitors(
@@ -155,6 +162,150 @@ fn draw_layers(
         }
     }
     due
+}
+
+/// The frame at `time` drawn on the processor (by the preview worker,
+/// shown from the render cache), filling `frame_rect`; with `split`, the
+/// left half as shot and the right half graded. Returns whether the
+/// frame due showed.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "what the program monitor draws: where, the sequence, the moment and the split"
+)]
+fn processed_frame(
+    studio: &mut SueVe,
+    ui: &Ui,
+    frame_rect: Rect,
+    size: (u32, u32),
+    sequence: &sue_model::Sequence,
+    time: Time,
+    split: bool,
+    cx: &mut AppletContext<'_>,
+) -> bool {
+    let painter = ui.painter_at(frame_rect);
+    painter.rect_filled(frame_rect, SQUARE, Color32::BLACK);
+    let Some(id) = studio.sequence else {
+        return false;
+    };
+    let drawn = studio.quality.of(size);
+    let hardware = studio.hub.hardware;
+    let playing = studio.clock.playing;
+    let mut due = true;
+    let sides: Vec<(Options, Rect, Rect)> = if split {
+        let middle = frame_rect.center().x;
+        vec![
+            (
+                Options { grades: false },
+                Rect::from_min_max(frame_rect.min, pos2(middle, frame_rect.bottom())),
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(0.5, 1.0)),
+            ),
+            (
+                Options::default(),
+                Rect::from_min_max(pos2(middle, frame_rect.top()), frame_rect.max),
+                Rect::from_min_max(pos2(0.5, 0.0), pos2(1.0, 1.0)),
+            ),
+        ]
+    } else {
+        vec![(
+            Options::default(),
+            frame_rect,
+            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+        )]
+    };
+    let mut wants = Vec::new();
+    for (index, (options, place, uv)) in sides.iter().enumerate() {
+        let arena = cx.arena();
+        let key = compose::frame_key(arena, sequence, time, drawn, *options);
+        let found = studio.preview.get(key);
+        if found.is_none() {
+            due = false;
+            let ahead = if playing { 10 } else { 1 };
+            for step in 0..ahead {
+                let at = time + Time::from_frames(step, sequence.rate);
+                wants.push(Want {
+                    time: at,
+                    key: compose::frame_key(arena, sequence, at, drawn, *options),
+                    options: *options,
+                });
+            }
+        }
+        let frame = found.or_else(|| studio.preview.last.clone());
+        let Some(frame) = frame else {
+            continue;
+        };
+        if index + 1 == sides.len() {
+            studio.preview.last = Some(Arc::clone(&frame));
+            studio.shown = Some(Arc::clone(&frame));
+        }
+        let key = texture_key(("sve-processed", index));
+        if let Some(texture) = cx.textures.texture(
+            key,
+            frame.serial,
+            [frame.width, frame.height],
+            4,
+            &frame.rgba,
+            false,
+        ) {
+            painter.image(texture, *place, *uv, Color32::WHITE);
+        }
+    }
+    if split {
+        painter.vline(
+            frame_rect.center().x,
+            frame_rect.y_range(),
+            egui::Stroke::new(Theme::STRONG_STROKE, Color32::WHITE),
+        );
+    }
+    if !wants.is_empty() {
+        studio.preview.sync(cx.arena(), id, drawn, hardware);
+        studio.preview.want(wants);
+        ui.ctx().request_repaint();
+    } else if !playing && !studio.preview.busy() {
+        render_ahead(studio, sequence, time, drawn, cx);
+    }
+    due
+}
+
+/// While paused, the next few seconds that need the processor are drawn
+/// into the render cache in the background (DaVinci Resolve's smart
+/// cache), so pressing play after an edit plays them at once.
+fn render_ahead(
+    studio: &mut SueVe,
+    sequence: &sue_model::Sequence,
+    time: Time,
+    drawn: (u32, u32),
+    cx: &AppletContext<'_>,
+) {
+    if !crate::studio::rice_bool(cx.rice(), crate::studio::rice::BACKGROUND_RENDER, true) {
+        return;
+    }
+    let arena = cx.arena();
+    let mark = (arena.revision(), time.frame(sequence.rate));
+    if studio.preview.ahead_for == Some(mark) {
+        return;
+    }
+    studio.preview.ahead_for = Some(mark);
+    let kind = |id: EntityId| {
+        arena
+            .get_by_id(id)
+            .map_or(SourceKind::Unknown, SourceKind::of)
+    };
+    let seconds = 5;
+    let frames = i64::from(sequence.rate.timecode_base()) * seconds;
+    let wants: Vec<Want> = (1..=frames)
+        .map(|step| time + Time::from_frames(step, sequence.rate))
+        .filter(|at| *at < sequence.duration())
+        .filter(|at| compose::needs_processing(sequence, *at, &kind))
+        .map(|at| Want {
+            time: at,
+            key: compose::frame_key(arena, sequence, at, drawn, Options::default()),
+            options: Options::default(),
+        })
+        .filter(|want| !studio.preview.has(want.key))
+        .collect();
+    if !wants.is_empty() {
+        studio.preview.render_ahead(wants);
+    }
 }
 
 /// A jog bar: the length of the source or sequence, its marks, and the
@@ -430,7 +581,14 @@ pub(crate) fn program_monitor(
     } else {
         Need::Exact
     };
-    let due = draw_layers(studio, ui, frame_rect, size, &layers, need, cx);
+    let processed = studio.page == Page::Color || compose::needs_processing(&sequence, time, &kind);
+    let due = if processed {
+        let split = studio.page == Page::Color && studio.color.split;
+        processed_frame(studio, ui, frame_rect, size, &sequence, time, split, cx)
+    } else {
+        studio.shown = None;
+        draw_layers(studio, ui, frame_rect, size, &layers, need, cx)
+    };
     if studio.clock.playing {
         studio.clock.count(due);
     }

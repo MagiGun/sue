@@ -789,7 +789,7 @@ pub fn needs_processing(clip: &Clip) -> bool {
         || crate::grade::grade_of(clip)
             .iter()
             .any(|corrector| corrector.enabled)
-        || clip.animation.channel(key::REMAP).is_some()
+        || clip.properties.get(crate::layers::ANIMATOR).is_some()
 }
 
 #[cfg(test)]

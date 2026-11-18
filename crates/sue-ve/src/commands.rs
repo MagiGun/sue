@@ -44,6 +44,10 @@ const FILE: &[Command<SueVe>] = &[
         .with(Flags::PALETTE),
     c("file.new_solid", "cmd-new-solid", "file"),
     c("file.new_adjustment", "cmd-new-adjustment", "file"),
+    c("file.new_shape", "cmd-new-shape", "file"),
+    c("file.new_bin", "cmd-new-bin", "file").keys("Ctrl+B"),
+    c("file.relink", "cmd-relink", "file").with(Flags::LEAVES_CANVAS),
+    c("file.import_lut", "cmd-import-lut", "file").with(Flags::LEAVES_CANVAS),
     c("file.proxies", "cmd-make-proxies", "file").with(Flags::PALETTE),
     c("file.save", "cmd-save", "file").with(Flags::LEAVES_CANVAS),
     c("file.save_as", "cmd-save-as", "file")
@@ -86,6 +90,8 @@ const CLIP: &[Command<SueVe>] = &[
     c("clip.speed_normal", "cmd-speed-normal", "clip"),
     c("clip.reverse", "cmd-reverse", "clip"),
     c("clip.fade", "cmd-sound-fades", "clip"),
+    c("clip.time_remap", "cmd-time-remapping", "clip"),
+    c("clip.nest", "cmd-nest", "clip"),
 ];
 
 const SEQUENCE: &[Command<SueVe>] = &[
@@ -100,6 +106,18 @@ const SEQUENCE: &[Command<SueVe>] = &[
     c("sequence.dip_black", "cmd-add-dip-black", "sequence"),
     c("sequence.dip_white", "cmd-add-dip-white", "sequence"),
     c("sequence.audio_dissolve", "cmd-add-crossfade", "sequence").keys("Ctrl+Shift+D"),
+    c("sequence.wipe", "cmd-add-wipe", "sequence"),
+    c("sequence.slide", "cmd-add-slide", "sequence"),
+    c("sequence.push", "cmd-add-push", "sequence"),
+    c("sequence.zoom", "cmd-add-zoom", "sequence"),
+    c(
+        "sequence.blur_transition",
+        "cmd-add-blur-transition",
+        "sequence",
+    ),
+    c("sequence.render", "cmd-render-in-to-out", "sequence")
+        .keys("Enter")
+        .with(Flags::PALETTE),
     c("sequence.close_gap", "cmd-close-gap", "sequence"),
     c("sequence.snap", "cmd-snapping", "sequence").keys("S"),
     c("sequence.linked", "cmd-linked-selection", "sequence").keys("Ctrl+Shift+L"),
@@ -118,6 +136,7 @@ const SEQUENCE: &[Command<SueVe>] = &[
 const MARKER: &[Command<SueVe>] = &[
     c("marker.add", "cmd-add-marker", "marker").keys("M"),
     c("marker.remove", "cmd-remove-marker", "marker"),
+    c("marker.clip_marker", "cmd-add-clip-marker", "marker").keys("Shift+M"),
     c("marker.in", "cmd-mark-in", "marker").keys("I"),
     c("marker.out", "cmd-mark-out", "marker").keys("O"),
     c("marker.clip", "cmd-mark-clip", "marker").keys("X"),
@@ -161,6 +180,9 @@ const TOOLS: &[Command<SueVe>] = &[
     c("tool.razor", "cmd-tool-razor", "tool")
         .keys("C")
         .icon("tool-razor"),
+    c("tool.rate_stretch", "cmd-tool-rate-stretch", "tool")
+        .keys("R")
+        .icon("speed"),
 ];
 
 const VIEW: &[Command<SueVe>] = &[
@@ -178,6 +200,45 @@ const VIEW: &[Command<SueVe>] = &[
     c("view.page_audio", "cmd-page-audio", "view").keys("Shift+7"),
     c("view.page_deliver", "cmd-page-deliver", "view").keys("Shift+8"),
     c("view.reset_layout", "cmd-reset-layout", "view"),
+    c("view.workspace_editing", "cmd-workspace-editing", "view").keys("Alt+Shift+1"),
+    c("view.workspace_effects", "cmd-workspace-effects", "view").keys("Alt+Shift+2"),
+    c("view.workspace_color", "cmd-workspace-color", "view").keys("Alt+Shift+3"),
+    c("view.workspace_audio", "cmd-workspace-audio", "view").keys("Alt+Shift+4"),
+];
+
+const FX: &[Command<SueVe>] = &[
+    c("fx.copy", "cmd-copy-effects", "fx").keys("Ctrl+Alt+C"),
+    c("fx.paste", "cmd-paste-effects", "fx").keys("Ctrl+Alt+V"),
+    c("fx.remove_all", "cmd-remove-effects", "fx"),
+    c("fx.save_preset", "cmd-save-effect-preset", "fx").with(Flags::PALETTE),
+    c("fx.import_preset", "cmd-import-effect-preset", "fx").with(Flags::LEAVES_CANVAS),
+    c("fx.export_preset", "cmd-export-effect-preset", "fx").with(Flags::LEAVES_CANVAS),
+    c("fx.ease", "cmd-easy-ease", "fx").keys("F9"),
+    c("fx.ease_in", "cmd-ease-in", "fx").keys("Shift+F9"),
+    c("fx.ease_out", "cmd-ease-out", "fx").keys("Ctrl+Shift+F9"),
+    c("fx.linear", "cmd-linear-keys", "fx"),
+    c("fx.hold", "cmd-hold-keys", "fx"),
+    c("fx.mask_ellipse", "cmd-mask-ellipse", "fx"),
+    c("fx.mask_rect", "cmd-mask-rect", "fx"),
+    c("fx.mask_path", "cmd-mask-path", "fx"),
+    c("fx.track_mask", "cmd-track-mask", "fx"),
+    c("fx.text_typewriter", "cmd-text-typewriter", "fx"),
+    c("fx.text_drop", "cmd-text-drop", "fx"),
+    c("fx.text_spin", "cmd-text-spin", "fx"),
+    c("fx.text_grow", "cmd-text-grow", "fx"),
+];
+
+const COLOR: &[Command<SueVe>] = &[
+    c("color.copy_grade", "cmd-copy-grade", "color").keys("Ctrl+Shift+C"),
+    c("color.paste_grade", "cmd-paste-grade", "color").keys("Ctrl+Shift+V"),
+    c("color.add_corrector", "cmd-add-corrector", "color").keys("Alt+S"),
+    c("color.reset_grade", "cmd-reset-grade", "color"),
+    c("color.split", "cmd-split-before-after", "color").keys("Ctrl+Alt+W"),
+];
+
+const AUDIO: &[Command<SueVe>] = &[
+    c("audio.normalize", "cmd-normalize", "audio").with(Flags::PALETTE),
+    c("audio.record", "cmd-record-voice-over", "audio").keys("Shift+R"),
 ];
 
 const HELP: &[Command<SueVe>] = &[
@@ -192,7 +253,7 @@ pub fn registry() -> &'static CommandRegistry<SueVe> {
     REGISTRY.get_or_init(|| {
         let mut registry = CommandRegistry::new("ve", KEYS_SECTION);
         for table in [
-            FILE, EDIT, CLIP, SEQUENCE, MARKER, PLAYBACK, TOOLS, VIEW, HELP,
+            FILE, EDIT, CLIP, SEQUENCE, MARKER, PLAYBACK, TOOLS, VIEW, FX, COLOR, AUDIO, HELP,
         ] {
             registry.add(table);
         }
@@ -246,6 +307,7 @@ fn state(studio: &SueVe, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
         "tool.slip" => ItemState::check(studio.tool == Tool::Slip),
         "tool.slide" => ItemState::check(studio.tool == Tool::Slide),
         "tool.razor" => ItemState::check(studio.tool == Tool::Razor),
+        "tool.rate_stretch" => ItemState::check(studio.tool == Tool::RateStretch),
         "sequence.snap" => ItemState::check(studio.snapping),
         "sequence.linked" => ItemState::check(studio.linked),
         "playback.loop" => ItemState::check(studio.clock.looping),
@@ -265,6 +327,35 @@ fn state(studio: &SueVe, facts: &Facts<'_>, call: Call<'_>) -> ItemState {
             on_off(has_selection)
         }
         "edit.paste" => on_off(has_sequence && !studio.clipboard.is_empty()),
+        "fx.copy"
+        | "fx.remove_all"
+        | "fx.save_preset"
+        | "fx.export_preset"
+        | "fx.mask_ellipse"
+        | "fx.mask_rect"
+        | "fx.mask_path"
+        | "fx.ease"
+        | "fx.ease_in"
+        | "fx.ease_out"
+        | "fx.linear"
+        | "fx.hold"
+        | "fx.text_typewriter"
+        | "fx.text_drop"
+        | "fx.text_spin"
+        | "fx.text_grow"
+        | "clip.time_remap"
+        | "clip.nest"
+        | "marker.clip_marker"
+        | "color.copy_grade"
+        | "color.add_corrector"
+        | "color.reset_grade"
+        | "audio.normalize" => on_off(has_selection),
+        "fx.paste" => on_off(has_selection && studio.fx_clipboard.is_some()),
+        "color.paste_grade" => on_off(has_selection && studio.color.clipboard.is_some()),
+        "fx.track_mask" => ItemState::off(),
+        "color.split" => ItemState::check(studio.color.split),
+        "audio.record" => ItemState::check(studio.recording.is_some()),
+        "file.new_bin" | "file.relink" | "file.import_lut" => on_off(studio.project.is_some()),
         "edit.undo"
         | "edit.redo"
         | "file.new"
@@ -329,9 +420,15 @@ fn targeted(studio: &SueVe, cx: &AppletContext<'_>) -> Vec<usize> {
     out
 }
 
+/// Adds a video transition of `kind` at the cut nearest the playhead on
+/// the targeted video tracks.
+pub fn add_transition(studio: &mut SueVe, cx: &mut AppletContext<'_>, kind: &str) {
+    transition(studio, cx, kind, false);
+}
+
 /// Adds a transition of `kind` at the cut nearest the playhead on the
 /// targeted tracks of the right kind.
-fn transition(studio: &mut SueVe, cx: &mut AppletContext<'_>, kind: &'static str, audio: bool) {
+fn transition(studio: &mut SueVe, cx: &mut AppletContext<'_>, kind: &str, audio: bool) {
     let Some(sequence) = studio.current(cx) else {
         return;
     };
@@ -827,9 +924,16 @@ fn run(studio: &mut SueVe, cx: &mut AppletContext<'_>, call: Call<'_>) {
         "tool.slip" => studio.tool = Tool::Slip,
         "tool.slide" => studio.tool = Tool::Slide,
         "tool.razor" => studio.tool = Tool::Razor,
+        "tool.rate_stretch" => studio.tool = Tool::RateStretch,
         // View.
-        "view.zoom_in" => studio.zoom = (studio.zoom * 1.5).min(crate::ui::timeline::MOST_ZOOM),
-        "view.zoom_out" => studio.zoom = (studio.zoom / 1.5).max(crate::ui::timeline::LEAST_ZOOM),
+        "view.zoom_in" => {
+            let from = studio.zoom_target.unwrap_or(studio.zoom);
+            studio.zoom_target = Some((from * 1.5).min(crate::ui::timeline::MOST_ZOOM));
+        }
+        "view.zoom_out" => {
+            let from = studio.zoom_target.unwrap_or(studio.zoom);
+            studio.zoom_target = Some((from / 1.5).max(crate::ui::timeline::LEAST_ZOOM));
+        }
         "view.zoom_fit" => {
             if let (Some(sequence), Some(rect)) = (studio.current(cx), studio.timeline_rect) {
                 let seconds = sequence.duration().seconds().max(1.0) as f32;
@@ -863,7 +967,9 @@ fn run(studio: &mut SueVe, cx: &mut AppletContext<'_>, call: Call<'_>) {
         "help.shortcuts" => studio.dialog = Some(Dialog::Shortcuts),
         "help.updates" => cx.request(ShellRequest::Command("app.check_updates".to_owned())),
         "help.about" => studio.dialog = Some(Dialog::About),
-        _ => {}
+        other => {
+            let _ = crate::actions::run(studio, cx, other);
+        }
     }
 }
 

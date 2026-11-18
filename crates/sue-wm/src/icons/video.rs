@@ -162,3 +162,63 @@ mod tests {
         }
     }
 }
+
+pub(super) const SPEED: Art = line(
+    Keyline::Square,
+    &[
+        Part::Stroke("M5.25 15.5 A6.75 6.75 0 1 1 18.75 15.5"),
+        Part::Stroke("M12 15.5 L15.25 10.75"),
+    ],
+);
+
+pub(super) const MIXER: Art = line(
+    Keyline::Square,
+    &[
+        Part::Stroke("M6.75 5.25 V18.75 M11.75 5.25 V18.75 M17.25 5.25 V18.75"),
+        Part::Stroke("M5.75 13.25 H7.75 V16.25 H5.75 Z"),
+        Part::Stroke("M10.75 6.75 H13.25 V9.75 H10.75 Z"),
+        Part::Stroke("M16.25 10.75 H18.25 V13.25 H16.25 Z"),
+    ],
+);
+
+pub(super) const MICROPHONE: Art = line(
+    Keyline::Square,
+    &[
+        Part::Stroke("M9.75 7 A2.25 2.25 0 0 1 14.25 7 V12 A2.25 2.25 0 0 1 9.75 12 Z"),
+        Part::Stroke("M6.75 11.5 A5.25 5.25 0 0 0 17.25 11.5"),
+        Part::Stroke("M11.75 16.75 V19.25 M9.25 19.25 H14.75"),
+    ],
+);
+
+pub(super) const GRAPH: Art = line(
+    Keyline::Square,
+    &[
+        Part::Stroke("M4.75 4.75 V19.25 H19.25"),
+        Part::Stroke("M7.25 16.25 C11 16.25 11.75 8 17.25 6.75"),
+        Part::Stroke("M17.25 5.75 H19.25 V7.75 H17.25 Z"),
+    ],
+);
+
+pub(super) const SCOPE: Art = line(
+    Keyline::Square,
+    &[
+        Part::Stroke("M4.75 5.75 H19.25 V18.25 H4.75 Z"),
+        Part::Stroke("M6.75 14 L9 10 L11 15 L13 9 L15.5 13.5 L17.25 11"),
+    ],
+);
+
+pub(super) const ASPECT: Art = line(
+    Keyline::Square,
+    &[
+        Part::Stroke("M4.75 9 V5.75 H8 M16 5.75 H19.25 V9"),
+        Part::Stroke("M19.25 15 V18.25 H16 M8 18.25 H4.75 V15"),
+    ],
+);
+
+pub(super) const CAPTIONS: Art = line(
+    Keyline::Square,
+    &[
+        Part::Stroke("M4.75 6.75 H19.25 V17.25 H4.75 Z"),
+        Part::Stroke("M7.75 10.75 H11.25 M13 10.75 H16.25 M7.75 14.25 H14.25"),
+    ],
+);

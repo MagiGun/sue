@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
+
 use std::time::Instant;
 
 use sue_core::{Entity, EntityId, Rate, Time, Value};
@@ -36,6 +37,10 @@ pub mod rice {
     pub const EMBED: &str = "sue_ve.embed_media";
     /// Sue VE's colors.
     pub const THEME: &str = "sue_ve.theme";
+    /// Draw what needs the processor ahead of the playhead while paused.
+    pub const BACKGROUND_RENDER: &str = "sue_ve.background_render";
+    /// The render cache's budget in megabytes.
+    pub const RENDER_CACHE_MB: &str = "sue_ve.render_cache_mb";
 }
 
 pub(crate) fn me() -> AppletId {
@@ -126,14 +131,18 @@ pub enum Tool {
     Slide,
     /// Cut clips in two.
     Razor,
+    /// Change a clip's speed by dragging its edge (the same frames fill
+    /// the new length).
+    RateStretch,
 }
 
 impl Tool {
     /// Every tool, as the tool strip shows them.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Select,
         Self::Ripple,
         Self::Roll,
+        Self::RateStretch,
         Self::Slip,
         Self::Slide,
         Self::Razor,
@@ -149,6 +158,7 @@ impl Tool {
             Self::Slip => "tool.slip",
             Self::Slide => "tool.slide",
             Self::Razor => "tool.razor",
+            Self::RateStretch => "tool.rate_stretch",
         }
     }
 
@@ -163,6 +173,7 @@ impl Tool {
             Self::Slip => Icon::ToolSlip,
             Self::Slide => Icon::ToolSlide,
             Self::Razor => Icon::ToolRazor,
+            Self::RateStretch => Icon::Speed,
         }
     }
 }
@@ -207,6 +218,11 @@ pub enum Dialog {
     Shortcuts,
     /// What Sue VE is.
     About,
+    /// Save the selected clip's effects as a preset: its name.
+    SavePreset {
+        /// The preset's name.
+        name: String,
+    },
 }
 
 /// The frame rates a new sequence offers.
@@ -236,6 +252,85 @@ pub struct DeliverForm {
     pub whole: bool,
     /// The MP4 carries sound.
     pub sound: bool,
+    /// Frames a second (`None`: the sequence's own).
+    pub rate: Option<u32>,
+}
+
+/// The Color page's state: which corrector is picked, the before and
+/// after split, the scope shown, the copied grade and the open tab.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColorState {
+    /// The corrector being edited.
+    pub corrector: usize,
+    /// The viewer splits before (left) and after (right).
+    pub split: bool,
+    /// The scope shown.
+    pub scope: crate::scopes::Scope,
+    /// A copied grade.
+    pub clipboard: Option<Vec<crate::grade::Corrector>>,
+    /// The tab under the wheels: 0 primaries, 1 curves, 2 hue curves, 3
+    /// qualifier.
+    pub tab: usize,
+    /// The viewer shows the qualifier's matte.
+    pub matte: bool,
+}
+
+impl Default for ColorState {
+    fn default() -> Self {
+        Self {
+            corrector: 0,
+            split: false,
+            scope: crate::scopes::Scope::Waveform,
+            clipboard: None,
+            tab: 0,
+            matte: false,
+        }
+    }
+}
+
+/// The graph editor's state.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GraphState {
+    /// The channel shown.
+    pub channel: Option<String>,
+    /// The speed graph (else the value graph).
+    pub speed: bool,
+    /// The keys picked: their source times.
+    pub picked: Vec<Time>,
+    /// A key being dragged: its time when the drag began, and which handle
+    /// (0 the key, 1 its outgoing handle, 2 the incoming handle of the
+    /// segment before it).
+    pub dragging: Option<(Time, u8)>,
+}
+
+/// The phone layout's state.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MobileState {
+    /// The tool whose sheet is open.
+    pub sheet: Option<&'static str>,
+    /// The export sheet is open.
+    pub export: bool,
+}
+
+/// A voice over being recorded.
+pub struct Recording {
+    /// The microphone.
+    pub input: sue_platform::AudioInput,
+    /// What it heard so far, interleaved.
+    pub samples: Vec<f32>,
+    /// Where on the sequence it started.
+    pub at: Time,
+    /// The track it goes on.
+    pub track: usize,
+}
+
+impl std::fmt::Debug for Recording {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Recording")
+            .field("at", &self.at)
+            .field("samples", &self.samples.len())
+            .finish_non_exhaustive()
+    }
 }
 
 /// An export under way.
@@ -333,6 +428,38 @@ pub struct SueVe {
     pub timeline_rect: Option<egui::Rect>,
     /// The title being typed into in the inspector.
     pub title_draft: Option<(EntityId, String)>,
+    /// Processed frames and the render cache.
+    pub preview: crate::preview::Preview,
+    /// The video scopes' worker.
+    pub scopes: crate::scopes::Scopes,
+    /// The frame the program monitor drew on the processor last (the
+    /// scopes read it).
+    pub shown: Option<Arc<crate::media::frames::VideoFrame>>,
+    /// The Color page.
+    pub color: ColorState,
+    /// The graph editor.
+    pub graph: GraphState,
+    /// The effects browser's search.
+    pub fx_search: String,
+    /// Copied effects (Paste Attributes).
+    pub fx_clipboard: Option<Vec<crate::fx::Effect>>,
+    /// The effect whose parameters the graph and the controls show first.
+    pub fx_picked: Option<u64>,
+    /// The phone layout.
+    pub mobile: MobileState,
+    /// A voice over being recorded.
+    pub recording: Option<Recording>,
+    /// Where the timeline's zoom is going (it eases there).
+    pub zoom_target: Option<f32>,
+    /// The render bar's marks: what they were worked out for, and the
+    /// spans (start, end, drawn).
+    pub render_bar: Option<(u64, Vec<(Time, Time, bool)>)>,
+    /// The mask being edited on the monitor.
+    pub mask_picked: Option<usize>,
+    /// The missing movie being relinked.
+    pub relinking: Option<EntityId>,
+    /// The audio track the Audio page's settings edit.
+    pub audio_track: Option<usize>,
 }
 
 impl Default for SueVe {
@@ -367,6 +494,7 @@ impl Default for SueVe {
                 megabits: 0.0,
                 whole: true,
                 sound: true,
+                rate: None,
             },
             exports: Vec::new(),
             proxying: Vec::new(),
@@ -379,6 +507,21 @@ impl Default for SueVe {
             program_rect: None,
             timeline_rect: None,
             title_draft: None,
+            preview: crate::preview::Preview::default(),
+            scopes: crate::scopes::Scopes::default(),
+            shown: None,
+            color: ColorState::default(),
+            graph: GraphState::default(),
+            fx_search: String::new(),
+            fx_clipboard: None,
+            fx_picked: None,
+            mobile: MobileState::default(),
+            recording: None,
+            zoom_target: None,
+            render_bar: None,
+            mask_picked: None,
+            relinking: None,
+            audio_track: None,
         }
     }
 }
@@ -581,6 +724,46 @@ impl SueVe {
         if let Some(step) = SequenceEdit::between(id, label, &before, after) {
             cx.record(ArenaEdit(step));
         }
+    }
+
+    /// The first selected clip, with its track.
+    #[must_use]
+    pub fn selected_clip(&self, cx: &AppletContext<'_>) -> Option<(usize, Clip)> {
+        let sequence = self.current(cx)?;
+        let id = self.selection.first()?;
+        sequence
+            .find(*id)
+            .map(|(track, clip)| (track, clip.clone()))
+    }
+
+    /// Changes clip `id` with `change` as one undo step named `label`.
+    pub fn change_clip(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        label: &str,
+        id: u64,
+        change: impl FnOnce(&mut Clip) -> Result<(), EditError>,
+    ) -> bool {
+        self.edit(cx, label, |sequence, _| {
+            let (_, clip) = sequence.find_mut(id).ok_or(EditError::NoClip(id))?;
+            change(clip)
+        })
+        .is_some()
+    }
+
+    /// Changes clip `id` in place while a value is dragged; the step is
+    /// made by [`Self::commit_live`].
+    pub fn live_clip(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        id: u64,
+        change: impl FnOnce(&mut Clip),
+    ) {
+        self.edit_live(cx, |sequence| {
+            if let Some((_, clip)) = sequence.find_mut(id) {
+                change(clip);
+            }
+        });
     }
 
     /// The selection with the clips linked to it (when linked selection
@@ -964,6 +1147,9 @@ impl SueVe {
         settings.bitrate =
             (self.deliver.megabits > 0.0).then_some((self.deliver.megabits * 1_000_000.0) as u32);
         settings.sound = self.deliver.sound;
+        if let Some(rate) = self.deliver.rate {
+            settings.rate = Rate::new(rate, 1);
+        }
         let arena = cx.arena().clone();
         let hardware = self.hub.hardware;
         let report = Arc::new(Mutex::new(None));
@@ -1119,6 +1305,20 @@ impl SueApplet for SueVe {
                 "How large the monitors decode movies: full, half or a quarter of their size",
             ),
             RiceDeclaration::new(
+                rice::BACKGROUND_RENDER,
+                RiceParameter::Bool { value: true },
+                "While paused, draw the seconds after the playhead that need effects, grades or masks into the render cache, so they play at once",
+            ),
+            RiceDeclaration::new(
+                rice::RENDER_CACHE_MB,
+                RiceParameter::IntRange {
+                    value: 768,
+                    min: Some(64),
+                    max: Some(16_384),
+                },
+                "Memory Sue VE keeps rendered frames (effects, grades, masks) in, in megabytes",
+            ),
+            RiceDeclaration::new(
                 rice::EMBED,
                 RiceParameter::Bool { value: false },
                 "Keep imported movies and sounds inside the project file (else it links to them)",
@@ -1198,6 +1398,8 @@ impl SueApplet for SueVe {
         if self.hub.poll() {
             tick.repaint = true;
         }
+        let budget = rice_int(cx.rice(), rice::RENDER_CACHE_MB, 768).max(32) as usize;
+        self.preview.set_budget_mb(budget);
         self.poll_jobs(cx);
         let here = cx.view.page.as_ref().map(AppletId::as_str) == Some(ID);
         if !here {
@@ -1237,8 +1439,16 @@ impl SueApplet for SueVe {
             || !self.exports.is_empty()
             || !self.proxying.is_empty()
             || self.drag.is_some()
+            || self.preview.busy()
+            || self.scopes.busy()
+            || self.recording.is_some()
+            || self.zoom_target.is_some()
         {
             tick.animating = true;
+        }
+        if let Some(recording) = self.recording.as_mut() {
+            let Recording { input, samples, .. } = recording;
+            input.take(samples);
         }
         // Ticks run when the earliest applet asks: while something moves
         // here, that is the next frame.
@@ -1370,6 +1580,38 @@ impl SueApplet for SueVe {
             }
             "image-sequence" => self.import_image_sequence(cx, path),
             "export" => self.export_to(cx, path),
+            "relink" => {
+                if let Some(id) = self.relinking.take() {
+                    crate::actions::relink(self, cx, id, path);
+                }
+            }
+            "lut" => crate::actions::import_lut(self, cx, path),
+            "preset-import" => match sue_platform::fs::read(path)
+                .map_err(|error| error.to_string())
+                .and_then(|bytes| crate::fx::preset::from_file(&bytes))
+            {
+                Ok(preset) => {
+                    let _ = crate::fx::preset::save(&preset);
+                    crate::ui::browser::apply_preset(self, cx, &preset);
+                }
+                Err(why) => cx.fail(why),
+            },
+            "preset-export" => {
+                if let Some((_, clip)) = self.selected_clip(cx) {
+                    let name = path.file_stem().map_or_else(
+                        || tr!("preset-default-name"),
+                        |stem| stem.to_string_lossy().into_owned(),
+                    );
+                    let preset = crate::fx::preset::capture(&clip, &name);
+                    if let Err(error) =
+                        sue_platform::fs::write(path, crate::fx::preset::to_file(&preset))
+                    {
+                        cx.fail(error.to_string());
+                    } else {
+                        cx.saved(path, tr!("preset-exported"));
+                    }
+                }
+            }
             _ => {}
         }
     }

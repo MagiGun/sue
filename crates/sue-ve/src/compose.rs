@@ -25,6 +25,17 @@ use crate::media::frames::VideoFrame;
 use crate::model::{self, SourceKind};
 use crate::render::{self, Draw, Layer};
 
+/// A sequence property: the color under everything (CapCut's canvas;
+/// black without it).
+pub const CANVAS: &str = "ve.canvas";
+
+/// The canvas color of `sequence`.
+#[must_use]
+pub fn canvas_of(sequence: &Sequence) -> [u8; 3] {
+    let rgba = crate::layers::rgba_of(sequence.properties.get(CANVAS), [0, 0, 0, 255]);
+    [rgba[0], rgba[1], rgba[2]]
+}
+
 /// How a frame is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Options {
@@ -141,10 +152,9 @@ pub fn frame(
     pictures: &mut Pictures<'_>,
     composer: &mut Composer,
 ) -> Vec<u8> {
-    let mut out = vec![0_u8; size.0 as usize * size.1 as usize * 4];
-    for pixel in out.as_chunks_mut::<4>().0 {
-        pixel[3] = 255;
-    }
+    let [r, g, b] = canvas_of(sequence);
+    let out_len = size.0 as usize * size.1 as usize * 4;
+    let mut out = [r, g, b, 255].repeat(out_len / 4);
     draw_tracks(
         arena, sequence, time, size, options, None, &mut out, pictures, composer, 0,
     );
@@ -240,12 +250,22 @@ fn draw_tracks(
                 Arc::new(VideoFrame::new(drawn.0, drawn.1, inner_canvas, 0)),
                 inner_size,
             )
+        } else if let (SourceKind::Title, Some(animator)) =
+            (&layer.kind, crate::layers::animator(clip))
+        {
+            let range = clip.value_at(crate::layers::RANGE, time, 100.0);
+            let Some(drawn) =
+                crate::layers::animated_title(arena, layer.source, size, unit, &animator, range)
+            else {
+                continue;
+            };
+            (Arc::new(drawn), seq_size)
         } else {
             let Some(picture) = pictures(layer) else {
                 continue;
             };
             let natural = match layer.kind {
-                SourceKind::Title | SourceKind::Solid => seq_size,
+                SourceKind::Title | SourceKind::Solid | SourceKind::Shape => seq_size,
                 _ => model::size_of(arena, layer.source).unwrap_or((picture.width, picture.height)),
             };
             (picture, natural)

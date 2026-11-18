@@ -20,6 +20,10 @@ pub(crate) fn page(title: &str) -> SettingsPage {
                     param(rice::CACHE_MB),
                 ],
             ),
+            SettingsGroup::new(
+                tr!("settings-group-rendering"),
+                vec![param(rice::BACKGROUND_RENDER), param(rice::RENDER_CACHE_MB)],
+            ),
             SettingsGroup::new(tr!("settings-group-media"), vec![param(rice::EMBED)]),
         ],
     );

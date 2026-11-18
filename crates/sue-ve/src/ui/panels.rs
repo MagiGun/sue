@@ -1,132 +1,12 @@
-//! The effects browser (transitions now; effects arrive in stage 2) and
-//! the audio meters.
+//! The audio meters, and the dock's scopes and mixer palettes (smaller
+//! forms of the Color and Audio pages' own).
 
-use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
-use sue_wm::icons::{self, Icon};
-use sue_wm::ui::{Density, Space, TextRole};
+use egui::{Align2, Rect, Ui, pos2};
+use sue_wm::ui::{Space, TextRole};
 use sue_wm::{AppletContext, Theme};
 
 use super::{SQUARE, font};
 use crate::studio::SueVe;
-
-/// A transition dragged from the browser onto a cut.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TransitionItem(pub &'static str);
-
-/// The effects browser.
-pub fn effects_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, theme: &Theme) {
-    let rect = ui.max_rect().shrink(theme.space(Space::S3));
-    let row = Density::Regular.row();
-    let mut y = rect.top();
-    let heading = |ui: &Ui, y: &mut f32, text: String| {
-        ui.painter().text(
-            pos2(rect.left(), *y),
-            Align2::LEFT_TOP,
-            text,
-            font(theme, TextRole::Caption),
-            theme.text_muted(),
-        );
-        *y += theme.text_size(TextRole::Caption) + theme.space(Space::S2);
-    };
-    heading(ui, &mut y, tr!("effects-video-transitions"));
-    let items: [(&'static str, String, &'static str); 3] = [
-        ("dissolve", tr!("transition-dissolve"), "sequence.dissolve"),
-        (
-            "dip-black",
-            tr!("transition-dip-black"),
-            "sequence.dip_black",
-        ),
-        (
-            "dip-white",
-            tr!("transition-dip-white"),
-            "sequence.dip_white",
-        ),
-    ];
-    let mut run = None;
-    for (kind, name, command) in items {
-        let place = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), row));
-        y += row;
-        let response = ui.interact(
-            place,
-            egui::Id::unique(("sve-effect", kind)),
-            Sense::click_and_drag(),
-        );
-        if response.hovered() {
-            ui.painter().rect_filled(
-                place,
-                theme.corner(sue_wm::ui::Radius::Sm),
-                theme.fill_hover(),
-            );
-        }
-        let side = Density::Compact.icon();
-        icons::paint(
-            ui.painter(),
-            Rect::from_min_size(
-                pos2(
-                    place.left() + theme.space(Space::S2),
-                    place.center().y - side / 2.0,
-                ),
-                vec2(side, side),
-            ),
-            Icon::Effects,
-            theme.text,
-        );
-        ui.painter().text(
-            pos2(
-                place.left() + side + theme.space(Space::S4),
-                place.center().y,
-            ),
-            Align2::LEFT_CENTER,
-            name,
-            font(theme, TextRole::Body),
-            theme.text,
-        );
-        if response.drag_started() {
-            response.dnd_set_drag_payload(TransitionItem(kind));
-        }
-        if response.double_clicked() {
-            run = Some(command);
-        }
-    }
-    y += theme.space(Space::S4);
-    heading(ui, &mut y, tr!("effects-audio-transitions"));
-    let place = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), row));
-    y += row;
-    let response = ui.interact(
-        place,
-        egui::Id::unique("sve-effect-crossfade"),
-        Sense::click(),
-    );
-    if response.hovered() {
-        ui.painter().rect_filled(
-            place,
-            theme.corner(sue_wm::ui::Radius::Sm),
-            theme.fill_hover(),
-        );
-    }
-    ui.painter().text(
-        pos2(place.left() + theme.space(Space::S2), place.center().y),
-        Align2::LEFT_CENTER,
-        tr!("transition-crossfade"),
-        font(theme, TextRole::Body),
-        theme.text,
-    );
-    if response.double_clicked() {
-        run = Some("sequence.audio_dissolve");
-    }
-    // Effects: stage 2.
-    let rest = Rect::from_min_max(pos2(rect.left(), y + theme.space(Space::S6)), rect.max);
-    if rest.height() > row * 2.0 {
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rest));
-        sue_wm::ui::empty_state("sve-effects-later", &tr!("effects-later"))
-            .icon(Icon::Effects)
-            .detail(&tr!("effects-later-detail"))
-            .show(&mut child, theme);
-    }
-    if let Some(command) = run {
-        studio.run(command, cx);
-    }
-}
 
 /// The audio meters: the program's left and right peaks.
 pub fn meters_ui(studio: &SueVe, ui: &mut Ui, theme: &Theme) {
@@ -186,5 +66,110 @@ pub fn meters_ui(studio: &SueVe, ui: &mut Ui, theme: &Theme) {
             hold,
             theme.hairline_active(),
         );
+    }
+}
+
+/// The scopes as a palette: the picked scope of the program monitor's
+/// processed frame (the Color page shows the frame it grades).
+pub fn scopes_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, theme: &Theme) {
+    let rect = ui.max_rect();
+    ui.painter().rect_filled(rect, SQUARE, theme.void);
+    let scope = studio.color.scope;
+    if let Some(frame) = studio.shown.clone() {
+        studio.scopes.want(scope, &frame);
+    } else {
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        sue_wm::ui::empty_state("sve-scopes-empty", &tr!("scopes-empty"))
+            .icon(sue_wm::icons::Icon::Scope)
+            .show(&mut child, theme);
+        return;
+    }
+    if let Some((_, _, picture)) = studio.scopes.latest() {
+        let key = super::pool::texture_key(("sve-scope-panel", scope.id()));
+        if let Some(texture) = cx.textures.texture(
+            key,
+            picture.serial,
+            [picture.width, picture.height],
+            4,
+            &picture.rgba,
+            false,
+        ) {
+            ui.painter().image(
+                texture,
+                rect.shrink(theme.space(Space::S3)),
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+}
+
+/// The mixer as a palette: each audio track's level, short term
+/// loudness and meter.
+pub fn mixer_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, theme: &Theme) {
+    let rect = ui.max_rect().shrink(theme.space(Space::S3));
+    let Some(sequence) = studio.current(cx) else {
+        return;
+    };
+    let mut y = rect.top();
+    let row = theme.text_size(TextRole::Caption) * 2.4;
+    for (index, track) in sequence.tracks.iter().enumerate() {
+        if crate::model::is_video(track) {
+            continue;
+        }
+        let meter = studio.clock.mixer.tracks.get(&index);
+        let level = meter.map_or(0.0, |m| m.meter.level[0].max(m.meter.level[1]));
+        let loudness = meter.map_or(-120.0, |m| m.loudness.short_term());
+        let gain = track
+            .properties
+            .get(crate::model::key::VOLUME)
+            .and_then(sue_core::Value::as_f64)
+            .unwrap_or(0.0);
+        ui.painter().text(
+            pos2(rect.left(), y),
+            Align2::LEFT_TOP,
+            format!("{}  {gain:+.1} dB", track.name),
+            crate::ui::font(theme, TextRole::Caption),
+            theme.text,
+        );
+        let shown = if loudness <= -100.0 {
+            "-".to_owned()
+        } else {
+            format!("{loudness:.0} LUFS")
+        };
+        ui.painter().text(
+            pos2(rect.right(), y),
+            Align2::RIGHT_TOP,
+            shown,
+            crate::ui::font(theme, TextRole::Mono),
+            theme.text_muted(),
+        );
+        let bar = Rect::from_min_size(
+            pos2(
+                rect.left(),
+                y + theme.text_size(TextRole::Caption) + theme.space(Space::S1),
+            ),
+            egui::vec2(rect.width(), theme.space(Space::S2)),
+        );
+        ui.painter().rect_filled(bar, SQUARE, theme.surface(1));
+        let db = if level <= 1e-5 {
+            -60.0
+        } else {
+            20.0 * level.log10()
+        };
+        let share = ((db + 60.0) / 60.0).clamp(0.0, 1.0);
+        ui.painter().rect_filled(
+            Rect::from_min_size(bar.min, egui::vec2(bar.width() * share, bar.height())),
+            SQUARE,
+            if level >= 1.0 {
+                theme.danger()
+            } else {
+                theme.success()
+            },
+        );
+        y += row;
+        if y > rect.bottom() {
+            break;
+        }
     }
 }

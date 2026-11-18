@@ -1,7 +1,10 @@
 //! Drawing Sue VE: the menu bar, the tool row, the pages along the bottom
 //! (as DaVinci Resolve has them), and on the Edit page Sue's dock with the
-//! media pool, the effects browser, the inspector, the timeline and the
-//! audio meters around the source and program monitors.
+//! media pool, the effects browser, the inspector, Effect Controls, the
+//! timeline, the graph editor, the scopes, the mixer and the audio meters
+//! around the source and program monitors, arranged by workspaces as
+//! Premiere Pro's are. On phones and tablets the studio takes CapCut's
+//! single column instead (`mobile`).
 
 use egui::{Rect, Ui, UiBuilder, pos2, vec2};
 use sue_core::Time;
@@ -13,7 +16,14 @@ use sue_wm::{AppletContext, AppletId, Facts, Theme};
 
 use crate::studio::{Dialog, ID, Page, RATES, SueVe, Tool};
 
+pub mod audio_page;
+pub mod browser;
+pub mod color_page;
+pub mod controls;
+pub mod effects_page;
+pub mod graph;
 pub mod inspector;
+pub mod mobile;
 pub mod monitor;
 pub mod pages;
 pub mod panels;
@@ -25,7 +35,7 @@ pub mod timeline;
 pub enum Panel {
     /// The media pool.
     Pool,
-    /// Transitions and, from stage 2, effects.
+    /// The effects browser: effects, transitions, presets.
     Effects,
     /// The selected clip's settings.
     Inspector,
@@ -33,16 +43,28 @@ pub enum Panel {
     Timeline,
     /// The audio meters.
     Meters,
+    /// Effect Controls: the selected clip's effects stack.
+    Controls,
+    /// The graph editor.
+    Graph,
+    /// The video scopes.
+    Scopes,
+    /// The mixer.
+    Mixer,
 }
 
 impl Panel {
     /// Every palette.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 9] = [
         Self::Pool,
         Self::Effects,
         Self::Inspector,
         Self::Timeline,
         Self::Meters,
+        Self::Controls,
+        Self::Graph,
+        Self::Scopes,
+        Self::Mixer,
     ];
 
     /// Its name.
@@ -54,6 +76,10 @@ impl Panel {
             Self::Inspector => tr!("panel-inspector"),
             Self::Timeline => tr!("panel-timeline"),
             Self::Meters => tr!("panel-meters"),
+            Self::Controls => tr!("panel-controls"),
+            Self::Graph => tr!("panel-graph"),
+            Self::Scopes => tr!("panel-scopes"),
+            Self::Mixer => tr!("panel-mixer"),
         }
     }
 
@@ -66,6 +92,10 @@ impl Panel {
             Self::Inspector => Icon::Details,
             Self::Timeline => Icon::PaletteTimeline,
             Self::Meters => Icon::Audio,
+            Self::Controls => Icon::Effects,
+            Self::Graph => Icon::Graph,
+            Self::Scopes => Icon::Scope,
+            Self::Mixer => Icon::Mixer,
         }
     }
 }
@@ -88,6 +118,10 @@ impl DockPanel for Panel {
             Self::Inspector => "inspector",
             Self::Timeline => "timeline",
             Self::Meters => "meters",
+            Self::Controls => "controls",
+            Self::Graph => "graph",
+            Self::Scopes => "scopes",
+            Self::Mixer => "mixer",
         }
     }
 
@@ -109,26 +143,90 @@ const COLUMN_WIDTH: f32 = 300.0;
 /// The timeline's height at first.
 const TIMELINE_HEIGHT: f32 = 380.0;
 
-/// The Edit page as it opens: the pool (with the effects behind it) at
-/// the left, the inspector at the right, the timeline and the meters
-/// along the bottom, the monitors in the middle.
+/// A group of `tabs`, the first showing.
+fn tabs(tabs: &[Panel], weight: f32) -> Group<Panel> {
+    Group {
+        tabs: tabs.to_vec(),
+        active: 0,
+        weight,
+    }
+}
+
+/// The Edit page as it opens (the Editing workspace): the pool (with the
+/// effects behind it) at the left, the inspector (Effect Controls behind
+/// it) at the right, the timeline (the graph editor behind it) and the
+/// meters along the bottom, the monitors in the middle.
 #[must_use]
 pub fn default_dock() -> DockLayout<Panel> {
     let mut dock = DockLayout::empty();
     dock.left = vec![Column {
-        groups: vec![Group {
-            tabs: vec![Panel::Pool, Panel::Effects],
-            active: 0,
-            weight: 1.0,
-        }],
+        groups: vec![tabs(&[Panel::Pool, Panel::Effects], 1.0)],
         width: COLUMN_WIDTH,
     }];
-    dock.right = vec![Column::of(&[(Panel::Inspector, 1.0)], COLUMN_WIDTH)];
+    dock.right = vec![Column {
+        groups: vec![tabs(
+            &[
+                Panel::Inspector,
+                Panel::Controls,
+                Panel::Scopes,
+                Panel::Mixer,
+            ],
+            1.0,
+        )],
+        width: COLUMN_WIDTH,
+    }];
     dock.bottom = vec![
-        Group::one(Panel::Timeline, 1.0),
+        tabs(&[Panel::Timeline, Panel::Graph], 1.0),
         Group::one(Panel::Meters, 0.04),
     ];
     dock.bottom_height = TIMELINE_HEIGHT;
+    dock
+}
+
+/// The Edit page's palettes arranged for a kind of work, as Premiere Pro's
+/// workspaces are: Editing, Effects (the browser and Effect Controls
+/// forward, the graph editor beside the timeline), Color (the scopes
+/// beside the inspector) and Audio (the mixer at the right).
+#[must_use]
+pub fn workspace(name: &str) -> DockLayout<Panel> {
+    let mut dock = default_dock();
+    match name {
+        "view.workspace_effects" => {
+            dock.left = vec![Column {
+                groups: vec![tabs(&[Panel::Effects, Panel::Pool], 1.0)],
+                width: COLUMN_WIDTH,
+            }];
+            dock.right = vec![Column {
+                groups: vec![tabs(&[Panel::Controls, Panel::Inspector], 1.0)],
+                width: COLUMN_WIDTH,
+            }];
+            dock.bottom = vec![
+                Group::one(Panel::Timeline, 0.6),
+                Group::one(Panel::Graph, 0.4),
+                Group::one(Panel::Meters, 0.04),
+            ];
+        }
+        "view.workspace_color" => {
+            dock.right = vec![Column {
+                groups: vec![
+                    Group::one(Panel::Scopes, 0.55),
+                    tabs(&[Panel::Inspector, Panel::Controls], 0.45),
+                ],
+                width: COLUMN_WIDTH * 1.2,
+            }];
+        }
+        "view.workspace_audio" => {
+            dock.right = vec![Column {
+                groups: vec![tabs(&[Panel::Mixer, Panel::Inspector], 1.0)],
+                width: COLUMN_WIDTH * 1.3,
+            }];
+            dock.bottom = vec![
+                Group::one(Panel::Timeline, 1.0),
+                Group::one(Panel::Meters, 0.06),
+            ];
+        }
+        _ => {}
+    }
     dock
 }
 
@@ -230,6 +328,13 @@ impl SueVe {
             pos2(full.left(), tools.bottom()),
             pos2(full.right(), pages.top()),
         );
+        // Phones and tablets: CapCut's single column.
+        if cx.view.form_factor != sue_platform::FormFactor::Desktop {
+            mobile::mobile_ui(self, ui, full, cx, &theme);
+            self.dialogs(ui.ctx(), cx, &theme);
+            return;
+        }
+        self.ease_zoom(ui);
         self.tool_row(ui, tools, cx, &theme);
         self.page_bar(ui, pages, &theme);
         if self.project.is_none() {
@@ -239,12 +344,31 @@ impl SueVe {
                 Page::Edit => self.edit_page(ui, body, cx, &theme),
                 Page::Media => pages::media_page(self, ui, body, cx, &theme),
                 Page::Deliver => pages::deliver_page(self, ui, body, cx, &theme),
-                Page::Effects | Page::Color | Page::Audio => {
-                    pages::later_page(self, ui, body, &theme)
-                }
+                Page::Effects => effects_page::effects_page(self, ui, body, cx, &theme),
+                Page::Color => color_page::color_page(self, ui, body, cx, &theme),
+                Page::Audio => audio_page::audio_page(self, ui, body, cx, &theme),
             }
         }
         self.dialogs(ui.ctx(), cx, &theme);
+    }
+
+    /// Moves the timeline's zoom a step toward where it is going, keeping
+    /// the time under the playhead where it is, so zooming glides.
+    fn ease_zoom(&mut self, ui: &Ui) {
+        let Some(target) = self.zoom_target else {
+            return;
+        };
+        let at = self.clock.position.seconds() as f32;
+        let place = (at - self.scroll) * self.zoom;
+        let next = self.zoom + (target - self.zoom) * 0.35;
+        self.zoom = if (next - target).abs() < target * 0.005 {
+            self.zoom_target = None;
+            target
+        } else {
+            next
+        };
+        self.scroll = (at - place / self.zoom).max(0.0);
+        ui.ctx().request_repaint();
     }
 
     /// The keys: the studio's shortcuts, unless a text field has them.
@@ -525,10 +649,14 @@ impl SueVe {
     fn panel_ui(&mut self, panel: Panel, ui: &mut Ui, cx: &mut AppletContext<'_>, theme: &Theme) {
         match panel {
             Panel::Pool => pool::pool_ui(self, ui, cx, theme),
-            Panel::Effects => panels::effects_ui(self, ui, cx, theme),
+            Panel::Effects => browser::browser_ui(self, ui, cx, theme),
             Panel::Inspector => inspector::inspector_ui(self, ui, cx, theme),
             Panel::Timeline => timeline::timeline_ui(self, ui, cx, theme),
             Panel::Meters => panels::meters_ui(self, ui, theme),
+            Panel::Controls => controls::controls_ui(self, ui, cx, theme),
+            Panel::Graph => graph::graph_ui(self, ui, cx, theme),
+            Panel::Scopes => panels::scopes_ui(self, ui, cx, theme),
+            Panel::Mixer => panels::mixer_ui(self, ui, cx, theme),
         }
     }
 
@@ -618,6 +746,33 @@ impl SueVe {
                     });
                 if shown.answer.is_some() {
                     self.dialog = None;
+                }
+            }
+            Dialog::SavePreset { mut name } => {
+                let title = tr!("cmd-save-effect-preset");
+                let shown = sue_wm::ui::Dialog::new("sve-save-preset", &title, theme)
+                    .ok_cancel()
+                    .show(ctx, |ui| {
+                        sue_wm::ui::form_grid(ui, "sve-save-preset-form", theme, |form| {
+                            form.row(&tr!("field-name"), |ui| {
+                                sue_wm::ui::text_field("sve-preset-name", &mut name)
+                                    .show(ui, theme);
+                            });
+                        });
+                    });
+                match shown.answer {
+                    Some(sue_wm::ui::Answer::Accept) => {
+                        self.dialog = None;
+                        if let Some((_, clip)) = self.selected_clip(cx) {
+                            let preset = crate::fx::preset::capture(&clip, name.trim());
+                            match crate::fx::preset::save(&preset) {
+                                Ok(path) => cx.saved(&path, tr!("preset-saved")),
+                                Err(why) => cx.fail(why),
+                            }
+                        }
+                    }
+                    Some(_) => self.dialog = None,
+                    None => self.dialog = Some(Dialog::SavePreset { name }),
                 }
             }
             Dialog::About => {

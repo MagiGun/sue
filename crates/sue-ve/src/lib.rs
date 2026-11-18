@@ -10,6 +10,7 @@ macro_rules! tr {
     ($($arg:tt)*) => { sue_lang::tr!("ve", $($arg)*) };
 }
 
+mod actions;
 pub mod audio;
 mod commands;
 pub mod compose;
@@ -18,6 +19,7 @@ pub mod export;
 pub mod fx;
 pub mod grade;
 pub mod keys;
+pub mod layers;
 pub mod media;
 mod menus;
 pub mod mix;
@@ -26,6 +28,7 @@ pub mod playback;
 pub mod preview;
 pub mod render;
 pub mod sample;
+pub mod scopes;
 mod settings_page;
 pub mod studio;
 pub mod ui;

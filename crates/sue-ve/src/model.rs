@@ -160,6 +160,8 @@ pub enum SourceKind {
     Title,
     /// A color solid.
     Solid,
+    /// A shape (a rectangle, an ellipse, a star, a polygon).
+    Shape,
     /// An adjustment clip.
     Adjustment,
     /// Another sequence (nested, stage 2 plays it).
@@ -177,6 +179,7 @@ impl SourceKind {
             model_class::AUDIO => Self::Sound,
             class::TITLE => Self::Title,
             class::SOLID => Self::Solid,
+            crate::layers::SHAPE => Self::Shape,
             class::ADJUSTMENT => Self::Adjustment,
             class::IMAGE_SEQUENCE => Self::ImageSequence,
             model_class::SEQUENCE => Self::Sequence,

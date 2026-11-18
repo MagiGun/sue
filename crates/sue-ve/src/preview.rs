@@ -87,6 +87,29 @@ impl RenderCache {
         self.generation += 1;
     }
 
+    /// Changes the budget to `budget` bytes, dropping the least used
+    /// frames beyond it.
+    pub fn set_budget(&mut self, budget: usize) {
+        if self.budget == budget {
+            return;
+        }
+        self.budget = budget;
+        while self.bytes > self.budget {
+            let Some(oldest) = self
+                .frames
+                .iter()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
+            if let Some((frame, _)) = self.frames.remove(&oldest) {
+                self.bytes -= frame.bytes();
+            }
+        }
+        self.generation += 1;
+    }
+
     /// Frames held.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -107,13 +130,15 @@ impl RenderCache {
     }
 }
 
-/// A frame to draw: when, and the key it is kept by.
+/// A frame to draw: when, how, and the key it is kept by.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Want {
     /// On the sequence.
     pub time: Time,
     /// Its key.
     pub key: u64,
+    /// How it is drawn.
+    pub options: Options,
 }
 
 enum Message {
@@ -125,9 +150,9 @@ enum Message {
         hardware: bool,
     },
     /// Draw these first (replacing what was asked before).
-    Now(Vec<Want>, Options),
+    Now(Vec<Want>),
     /// Draw these when nothing else is asked.
-    Ahead(Vec<Want>, Options),
+    Ahead(Vec<Want>),
 }
 
 /// The worker that draws processed frames, and the cache it fills.
@@ -144,6 +169,9 @@ pub struct Preview {
     busy: Arc<AtomicBool>,
     /// The last frame shown, while the one due is drawn.
     pub last: Option<Arc<VideoFrame>>,
+    /// The arena revision and frame the background render was last asked
+    /// from.
+    pub ahead_for: Option<(u64, i64)>,
     asked: Vec<Want>,
 }
 
@@ -175,6 +203,7 @@ impl Preview {
             last_ms: Arc::new(AtomicU64::new(0)),
             busy: Arc::new(AtomicBool::new(false)),
             last: None,
+            ahead_for: None,
             asked: Vec::new(),
         }
     }
@@ -240,20 +269,20 @@ impl Preview {
 
     /// Asks for `wants` first (nothing is sent when the same was asked
     /// last).
-    pub fn want(&mut self, wants: Vec<Want>, options: Options) {
+    pub fn want(&mut self, wants: Vec<Want>) {
         if wants == self.asked {
             return;
         }
         self.asked.clone_from(&wants);
         if let Some(to) = self.sender() {
-            let _ = to.send(Message::Now(wants, options));
+            let _ = to.send(Message::Now(wants));
         }
     }
 
     /// Asks for `wants` to be drawn when nothing else is asked.
-    pub fn render_ahead(&mut self, wants: Vec<Want>, options: Options) {
+    pub fn render_ahead(&mut self, wants: Vec<Want>) {
         if let Some(to) = self.sender() {
-            let _ = to.send(Message::Ahead(wants, options));
+            let _ = to.send(Message::Ahead(wants));
         }
     }
 
@@ -270,6 +299,14 @@ impl Preview {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .generation
+    }
+
+    /// Keeps the cache within `megabytes`.
+    pub fn set_budget_mb(&self, megabytes: usize) {
+        self.cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .set_budget(megabytes.max(32) * 1024 * 1024);
     }
 
     /// Drops every drawn frame.
@@ -292,14 +329,10 @@ fn run(
     let mut renderer: Option<Renderer> = None;
     let mut now: Vec<Want> = Vec::new();
     let mut ahead: Vec<Want> = Vec::new();
-    let mut options = Options::default();
-    let mut ahead_options = Options::default();
     let take = |message: Message,
                 renderer: &mut Option<Renderer>,
                 now: &mut Vec<Want>,
-                ahead: &mut Vec<Want>,
-                options: &mut Options,
-                ahead_options: &mut Options| match message {
+                ahead: &mut Vec<Want>| match message {
         Message::Snapshot {
             arena,
             sequence,
@@ -310,52 +343,32 @@ fn run(
             now.clear();
             ahead.clear();
         }
-        Message::Now(wants, with) => {
-            *now = wants;
-            *options = with;
-        }
-        Message::Ahead(wants, with) => {
-            *ahead = wants;
-            *ahead_options = with;
-        }
+        Message::Now(wants) => *now = wants,
+        Message::Ahead(wants) => *ahead = wants,
     };
     loop {
         // Wait when there is nothing to draw.
         if now.is_empty() && ahead.is_empty() {
             busy.store(false, Ordering::Relaxed);
             match from.recv() {
-                Ok(message) => take(
-                    message,
-                    &mut renderer,
-                    &mut now,
-                    &mut ahead,
-                    &mut options,
-                    &mut ahead_options,
-                ),
+                Ok(message) => take(message, &mut renderer, &mut now, &mut ahead),
                 Err(_) => return,
             }
         }
         loop {
             match from.try_recv() {
-                Ok(message) => take(
-                    message,
-                    &mut renderer,
-                    &mut now,
-                    &mut ahead,
-                    &mut options,
-                    &mut ahead_options,
-                ),
+                Ok(message) => take(message, &mut renderer, &mut now, &mut ahead),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return,
             }
         }
-        let (want, with) = if now.is_empty() {
+        let want = if now.is_empty() {
             if ahead.is_empty() {
                 continue;
             }
-            (ahead.remove(0), ahead_options)
+            ahead.remove(0)
         } else {
-            (now.remove(0), options)
+            now.remove(0)
         };
         let held = cache
             .lock()
@@ -372,7 +385,7 @@ fn run(
         busy.store(true, Ordering::Relaxed);
         let started = std::time::Instant::now();
         let size = drawer.size();
-        let rgba = drawer.frame_with(want.time, with);
+        let rgba = drawer.frame_with(want.time, want.options);
         last_ms.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
         drawn.fetch_add(1, Ordering::Relaxed);
         cache

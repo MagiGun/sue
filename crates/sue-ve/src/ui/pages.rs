@@ -1,6 +1,5 @@
-//! The pages besides Edit: the start (no project yet), Media, Deliver,
-//! and the pages a later stage fills (Effects, Color, Audio), which say
-//! so plainly.
+//! The pages besides Edit, Effects, Color and Audio: the start (no project
+//! yet), Media and Deliver.
 
 use egui::{Rect, Ui, UiBuilder, pos2, vec2};
 use sue_wm::icons::Icon;
@@ -9,7 +8,7 @@ use sue_wm::{AppletContext, FilePick, ShellRequest, Theme};
 
 use super::{SQUARE, monitor};
 use crate::export::Target;
-use crate::studio::{Page, SueVe, file_name, me};
+use crate::studio::{SueVe, file_name, me};
 
 /// With no project open: how to start.
 pub fn start_ui(
@@ -276,38 +275,4 @@ pub fn deliver_page(
         }
     }
     monitor::program_monitor(studio, ui, viewer, cx, theme);
-}
-
-/// A page a later stage fills: it says what will be there.
-pub fn later_page(studio: &mut SueVe, ui: &mut Ui, body: Rect, theme: &Theme) {
-    ui.painter().rect_filled(body, SQUARE, theme.panel);
-    let (title, detail, icon) = match studio.page {
-        Page::Effects => (
-            tr!("later-effects"),
-            tr!("later-effects-detail"),
-            Icon::Effects,
-        ),
-        Page::Color => (
-            tr!("later-color"),
-            tr!("later-color-detail"),
-            Icon::PaletteColorWheel,
-        ),
-        _ => (tr!("later-audio"), tr!("later-audio-detail"), Icon::Audio),
-    };
-    let mut child = ui.new_child(UiBuilder::new().max_rect(body));
-    let mut back = false;
-    sue_wm::ui::empty_state(("sve-later", studio.page.id()), &title)
-        .icon(icon)
-        .detail(&detail)
-        .show_actions(&mut child, theme, |ui| {
-            if sue_wm::ui::button("sve-later-edit", &tr!("later-back-to-edit"))
-                .show(ui, theme)
-                .clicked()
-            {
-                back = true;
-            }
-        });
-    if back {
-        studio.page = Page::Edit;
-    }
 }

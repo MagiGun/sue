@@ -1259,6 +1259,25 @@ icons! {
     Overwrite = "overwrite" => video::OVERWRITE,
     /// A four pointed star: effects.
     Effects = "effects" => video::EFFECTS,
+    /// A half dial over its middle with a needle leaning right: speed, a
+    /// clip played faster or slower.
+    Speed = "speed" => video::SPEED,
+    /// Three upright lines, each with a small square knob at its own
+    /// height: the faders of a mixing desk.
+    Mixer = "mixer" => video::MIXER,
+    /// A rounded capsule standing up in a cup, on a short stand with a
+    /// foot: a microphone, recording a voice over.
+    Microphone = "microphone" => video::MICROPHONE,
+    /// Two axes meeting at the bottom left and a curve rising from low
+    /// to a small square key at its top right: the graph editor.
+    Graph = "graph" => video::GRAPH,
+    /// A wide box with a zigzag trace across it: the video scopes.
+    Scope = "scope" => video::SCOPE,
+    /// Four corner marks of a frame: the frame's shape, its aspect ratio.
+    Aspect = "aspect" => video::ASPECT,
+    /// A wide box with two short lines and a longer one under them, as
+    /// words on a screen: captions.
+    Captions = "captions" => video::CAPTIONS,
 }
 
 /// Frames drawn without a window or a GPU, for the tests of this module.

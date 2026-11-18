@@ -39,10 +39,20 @@ pub fn menus() -> Vec<Menu> {
                 "file.new_title",
                 "file.new_solid",
                 "file.new_adjustment",
+                "file.new_shape",
+                "file.new_bin",
             ]),
         )
         .set(Slot::Open, item("file.import"))
-        .after(Slot::Open, items(&["file.import_sequence", "file.proxies"]))
+        .after(
+            Slot::Open,
+            items(&[
+                "file.import_sequence",
+                "file.import_lut",
+                "file.relink",
+                "file.proxies",
+            ]),
+        )
         .without(Slot::Recent)
         .without(Slot::Close)
         .without(Slot::Print)
@@ -71,6 +81,11 @@ pub fn menus() -> Vec<Menu> {
             "view.proxies",
             "",
             "view.reset_layout",
+            "",
+            "view.workspace_editing",
+            "view.workspace_effects",
+            "view.workspace_color",
+            "view.workspace_audio",
         ]))
         .menu(Menu::new(
             tr!("menu-clip"),
@@ -87,8 +102,12 @@ pub fn menus() -> Vec<Menu> {
                 "clip.speed_normal",
                 "clip.reverse",
                 "clip.freeze",
+                "clip.time_remap",
                 "",
                 "clip.fade",
+                "audio.normalize",
+                "",
+                "clip.nest",
             ]),
         ))
         .menu(Menu::new(
@@ -102,7 +121,14 @@ pub fn menus() -> Vec<Menu> {
                 "sequence.dissolve",
                 "sequence.dip_black",
                 "sequence.dip_white",
+                "sequence.wipe",
+                "sequence.slide",
+                "sequence.push",
+                "sequence.zoom",
+                "sequence.blur_transition",
                 "sequence.audio_dissolve",
+                "",
+                "sequence.render",
                 "",
                 "sequence.snap",
                 "sequence.linked",
@@ -113,6 +139,7 @@ pub fn menus() -> Vec<Menu> {
                 "tool.select",
                 "tool.ripple",
                 "tool.roll",
+                "tool.rate_stretch",
                 "tool.slip",
                 "tool.slide",
                 "tool.razor",
@@ -130,6 +157,47 @@ pub fn menus() -> Vec<Menu> {
                 "",
                 "marker.add",
                 "marker.remove",
+                "marker.clip_marker",
+            ]),
+        ))
+        .menu(Menu::new(
+            tr!("menu-effects"),
+            items(&[
+                "fx.copy",
+                "fx.paste",
+                "fx.remove_all",
+                "",
+                "fx.save_preset",
+                "fx.import_preset",
+                "fx.export_preset",
+                "",
+                "fx.mask_ellipse",
+                "fx.mask_rect",
+                "fx.mask_path",
+                "fx.track_mask",
+                "",
+                "fx.ease",
+                "fx.ease_in",
+                "fx.ease_out",
+                "fx.linear",
+                "fx.hold",
+                "",
+                "fx.text_typewriter",
+                "fx.text_drop",
+                "fx.text_spin",
+                "fx.text_grow",
+            ]),
+        ))
+        .menu(Menu::new(
+            tr!("menu-color"),
+            items(&[
+                "color.add_corrector",
+                "color.reset_grade",
+                "",
+                "color.copy_grade",
+                "color.paste_grade",
+                "",
+                "color.split",
             ]),
         ))
         .menu(Menu::new(
@@ -150,6 +218,8 @@ pub fn menus() -> Vec<Menu> {
                 "playback.loop",
                 "playback.source",
                 "playback.program",
+                "",
+                "audio.record",
             ]),
         ))
         .without(Slot::Guide)
@@ -168,7 +238,8 @@ mod tests {
         assert_eq!(
             titles,
             [
-                "File", "Edit", "View", "Clip", "Sequence", "Markers", "Playback", "Help"
+                "File", "Edit", "View", "Clip", "Sequence", "Markers", "Effects", "Color",
+                "Playback", "Help"
             ]
         );
         for menu in &menus {

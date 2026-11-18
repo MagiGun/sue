@@ -6,8 +6,12 @@
 //! The tools work by dragging: the selection tool moves clips (holding
 //! Ctrl inserts instead of overwriting) and trims their edges, the ripple
 //! tool trims and moves what follows, the roll tool moves a cut, the
-//! slip tool shows other frames of a clip, the slide tool moves a clip
-//! between its neighbours, and the razor cuts. While a drag goes on the
+//! rate stretch tool changes a clip's speed by its edge, the slip tool
+//! shows other frames of a clip, the slide tool moves a clip between its
+//! neighbours, and the razor cuts. A sound clip's volume line (its rubber
+//! band) drags up and down; Ctrl and a click on it adds a key there, and
+//! a key drags in time and level. The ruler's foot marks what needs the
+//! processor: red until it is rendered, green once it is. While a drag goes on the
 //! tracks show the sequence as the edit would leave it (the same edit
 //! algebra runs on a copy each frame); letting go makes it one undo step.
 
@@ -102,6 +106,25 @@ pub enum Drag {
         /// How far.
         delta: Time,
     },
+    /// Clips stretched by an edge: their speed changes, their frames stay.
+    Stretch {
+        /// The clips.
+        ids: Vec<u64>,
+        /// Which edge.
+        edge: Edge,
+        /// Where the press was.
+        from: Pos2,
+        /// How far.
+        delta: Time,
+    },
+    /// A sound clip's volume line (or one of its keys) dragged; the clip
+    /// changes live and the step is made on release.
+    Volume {
+        /// The clip.
+        id: u64,
+        /// The key dragged (its source time), or the whole line.
+        key: Option<Time>,
+    },
 }
 
 /// Does what `drag` does to `sequence` (a copy while dragging, the real
@@ -145,7 +168,35 @@ pub fn apply_drag(
             }
             Ok(())
         }
+        Drag::Stretch {
+            ids, edge, delta, ..
+        } => crate::keys::rate_stretch(sequence, ids, *edge, *delta),
+        Drag::Volume { .. } => Ok(()),
     }
+}
+
+/// The height across a sound clip's lane of `decibels` (+6 at the top,
+/// -60 at the bottom).
+fn volume_y(content: Rect, decibels: f64) -> f32 {
+    let share = ((decibels + 60.0) / 66.0).clamp(0.0, 1.0) as f32;
+    content.bottom() - content.height() * share
+}
+
+/// The level at height `y` of a sound clip's lane.
+fn volume_at(content: Rect, y: f32) -> f64 {
+    let share = f64::from((content.bottom() - y) / content.height().max(1.0));
+    (share * 66.0 - 60.0).clamp(-60.0, 6.0)
+}
+
+/// What a press near a sound clip's volume line grabs: the clip, the key
+/// near the pointer (its source time), and the lane the line is drawn in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Band {
+    id: u64,
+    key: Option<Time>,
+    content: Rect,
+    left: f32,
+    width: f32,
 }
 
 /// Where each track is down the lanes: its top and height.
@@ -185,6 +236,7 @@ pub(crate) fn waveform(
     let span = (to - from).seconds();
     let columns = rect.width().max(1.0) as usize;
     let color = theme.text_muted();
+    let mut mesh = egui::epaint::Mesh::default();
     for column in 0..columns {
         let a = from.seconds() + span * column as f64 / columns as f64;
         let b = from.seconds() + span * (column + 1) as f64 / columns as f64;
@@ -199,17 +251,19 @@ pub(crate) fn waveform(
             peak[0] = peak[0].min(point[0]);
             peak[1] = peak[1].max(point[1]);
         }
-        if peak == [0.0, 0.0] {
-            continue;
-        }
         let x = rect.left() + column as f32 + 0.5;
-        painter.vline(
-            x,
-            (middle - (peak[1] * gain).min(1.0) * half)
-                ..=(middle - (peak[0] * gain).max(-1.0) * half),
-            egui::Stroke::new(theme.border_width, color),
-        );
+        // At least a hairline, so silence still reads as a line.
+        let top = (middle - (peak[1] * gain).min(1.0) * half).min(middle - 0.5);
+        let bottom = (middle - (peak[0] * gain).max(-1.0) * half).max(middle + 0.5);
+        let base = mesh.vertices.len() as u32;
+        mesh.colored_vertex(pos2(x, top), color);
+        mesh.colored_vertex(pos2(x, bottom), color);
+        if column > 0 {
+            mesh.indices
+                .extend([base - 2, base - 1, base, base - 1, base + 1, base]);
+        }
     }
+    painter.add(mesh);
 }
 
 /// The timeline palette.
@@ -286,6 +340,7 @@ pub fn timeline_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, 
             let anchor = pointer.map_or(lanes.left(), |at| at.x);
             let at = time_of(anchor);
             studio.zoom = (zoom * (1.0 + delta.y / 200.0)).clamp(LEAST_ZOOM, MOST_ZOOM);
+            studio.zoom_target = None;
             studio.scroll = (at.seconds() as f32 - (anchor - lanes.left()) / studio.zoom).max(0.0);
         } else if down {
             let content: f32 = rows.iter().map(|row| row.1).sum();
@@ -372,6 +427,7 @@ pub fn timeline_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, 
     // The tracks.
     let pointer = ui.input(|input| input.pointer.interact_pos());
     let mut hit: Option<(usize, u64, Option<Edge>)> = None;
+    let mut band: Option<Band> = None;
     let mut track_under: Option<usize> = None;
     let mut header_actions: Vec<(usize, &'static str)> = Vec::new();
     for (index, track) in shown.tracks.iter().enumerate() {
@@ -492,6 +548,42 @@ pub fn timeline_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, 
                 ),
             );
             clip_ui(studio, ui, &lane_painter, body, clip, video, cx, theme);
+            // The volume line of a sound clip, grabbed within a few pixels.
+            if !video
+                && let Some(at) = pointer
+                && body.contains(at)
+                && ui.rect_contains_pointer(lanes)
+            {
+                let content = band_rect(body, theme);
+                let time = clip.source_time(time_of(at.x));
+                let level = clip.value_at(key::VOLUME, time_of(at.x), 0.0);
+                if (at.y - volume_y(content, level)).abs() <= EDGE_GRAB {
+                    let key = clip.animation.channel(key::VOLUME).and_then(|curve| {
+                        curve
+                            .keys()
+                            .iter()
+                            .map(|found| found.time)
+                            .min_by_key(|found| (*found - time).flicks().abs())
+                            .filter(|found| {
+                                let x = x_of(
+                                    clip.start
+                                        + Time::from_seconds(
+                                            (*found - clip.source_in).seconds()
+                                                / clip.speed.abs().max(1e-6),
+                                        ),
+                                );
+                                (x - at.x).abs() <= EDGE_GRAB * 1.5
+                            })
+                    });
+                    band = Some(Band {
+                        id: clip.id,
+                        key,
+                        content,
+                        left: body.left(),
+                        width: body.width(),
+                    });
+                }
+            }
             if let Some(at) = pointer
                 && body.contains(at)
                 && ui.rect_contains_pointer(lanes)
@@ -552,18 +644,24 @@ pub fn timeline_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, 
             egui::Stroke::new(Theme::STRONG_STROKE, theme.focus()),
         );
     }
+    // The render bar along the ruler's foot.
+    render_bar(studio, ui, ruler, &real, &x_of, &time_of, cx, theme);
+    // The volume line, before the tools: it takes its own drags.
+    let band_taken = volume_drag(studio, ui, lanes, band, &time_of, cx);
     // The tools.
-    interact(
-        studio,
-        ui,
-        lanes,
-        &real,
-        hit,
-        track_under,
-        &time_of,
-        insert,
-        cx,
-    );
+    if !band_taken {
+        interact(
+            studio,
+            ui,
+            lanes,
+            &real,
+            hit,
+            track_under,
+            &time_of,
+            insert,
+            cx,
+        );
+    }
     // Drops from the pool and the effects palette.
     let released = ui.input(|input| input.pointer.any_released());
     if released && ui.rect_contains_pointer(lanes) {
@@ -581,8 +679,15 @@ pub fn timeline_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, 
                 .unwrap_or(at);
             }
             studio.place(cx, item.0, at, track, None, insert);
+        } else if let Some(item) =
+            egui::DragAndDrop::take_payload::<super::browser::EffectItem>(ui.ctx())
+        {
+            match hit {
+                Some((_, id, _)) => super::browser::add_effect(studio, cx, item.0, &[id]),
+                None => cx.notify(tr!("effects-pick-a-clip")),
+            }
         } else if let Some(kind) =
-            egui::DragAndDrop::take_payload::<super::panels::TransitionItem>(ui.ctx())
+            egui::DragAndDrop::take_payload::<super::browser::TransitionItem>(ui.ctx())
             && let Some(track) = track_under
         {
             let cut = real.tracks[track]
@@ -629,10 +734,185 @@ pub fn timeline_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, 
 
 /// A transition's short name.
 fn transition_name(kind: &str) -> String {
-    match kind {
-        "dip-black" => tr!("transition-dip-black"),
-        "dip-white" => tr!("transition-dip-white"),
-        _ => tr!("transition-dissolve"),
+    super::browser::transition_label(kind)
+}
+
+/// Where a sound clip's volume line is drawn in its body.
+fn band_rect(body: Rect, theme: &Theme) -> Rect {
+    let inner = body.shrink(theme.space(Space::S1));
+    let label = theme.text_size(TextRole::Micro) + theme.space(Space::S1);
+    Rect::from_min_max(pos2(inner.left(), inner.top() + label), inner.max)
+}
+
+/// Drags on a sound clip's volume line: Ctrl and a click adds a key; a
+/// drag moves the key under the pointer (or the whole line when it has
+/// none). Returns whether it took the pointer this frame.
+fn volume_drag(
+    studio: &mut SueVe,
+    ui: &Ui,
+    lanes: Rect,
+    band: Option<Band>,
+    time_of: &dyn Fn(f32) -> Time,
+    cx: &mut AppletContext<'_>,
+) -> bool {
+    let dragging = matches!(studio.drag, Some(Drag::Volume { .. }));
+    if band.is_none() && !dragging {
+        return false;
+    }
+    if studio.tool != Tool::Select && !dragging {
+        return false;
+    }
+    let response = ui.interact(
+        lanes,
+        egui::Id::unique("sve-volume-line"),
+        Sense::click_and_drag(),
+    );
+    if band.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+    }
+    let command = ui.input(|input| input.modifiers.command);
+    if response.clicked()
+        && command
+        && let (Some(found), Some(at)) = (band, response.interact_pointer_pos())
+    {
+        let when = time_of(at.x);
+        let level = volume_at(found.content, at.y);
+        studio.edit(cx, &tr!("inspector-add-key"), |sequence, _| {
+            edit::set_key(sequence, found.id, key::VOLUME, when, level)
+        });
+        return true;
+    }
+    if response.clicked()
+        && let Some(found) = band
+    {
+        studio.selection = vec![found.id];
+    }
+    if response.drag_started()
+        && let Some(found) = band
+    {
+        studio.selection = vec![found.id];
+        studio.drag = Some(Drag::Volume {
+            id: found.id,
+            key: found.key,
+        });
+        ui.data_mut(|data| {
+            data.insert_temp(
+                egui::Id::unique("sve-volume-band"),
+                (found.content, found.left, found.width),
+            )
+        });
+    }
+    if response.dragged()
+        && let (Some(Drag::Volume { id, key: grabbed }), Some(at)) =
+            (studio.drag.clone(), response.interact_pointer_pos())
+    {
+        let (content, _, _): (Rect, f32, f32) = ui
+            .data(|data| data.get_temp(egui::Id::unique("sve-volume-band")))
+            .unwrap_or((lanes, lanes.left(), lanes.width()));
+        let level = (volume_at(content, at.y) * 10.0).round() / 10.0;
+        let when = time_of(at.x);
+        let mut moved = grabbed;
+        studio.live_clip(cx, id, |clip| match grabbed {
+            Some(time) => {
+                let to = clip.source_time(when);
+                let curve = clip.animation.channel_mut(key::VOLUME);
+                moved = crate::keys::move_key(curve, time, to, level);
+            }
+            None => {
+                clip.properties.set(key::VOLUME, level);
+            }
+        });
+        studio.drag = Some(Drag::Volume { id, key: moved });
+    }
+    if response.drag_stopped() && dragging {
+        studio.drag = None;
+        studio.commit_live(cx, &tr!("inspector-volume"));
+    }
+    true
+}
+
+/// Marks along the ruler's foot what needs the processor: red where it is
+/// not rendered yet, green where the render cache holds it. Worked out
+/// again only when the data, the cache or the view changed.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the bar needs the ruler, the sequence, the view's mapping and the studio"
+)]
+fn render_bar(
+    studio: &mut SueVe,
+    ui: &Ui,
+    ruler: Rect,
+    sequence: &Sequence,
+    x_of: &dyn Fn(Time) -> f32,
+    time_of: &dyn Fn(f32) -> Time,
+    cx: &AppletContext<'_>,
+    theme: &Theme,
+) {
+    use std::hash::{Hash, Hasher};
+    let arena = cx.arena();
+    let size = studio.quality.of(model::frame_size(sequence));
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    arena.revision().hash(&mut hasher);
+    studio.preview.generation().hash(&mut hasher);
+    studio.zoom.to_bits().hash(&mut hasher);
+    studio.scroll.to_bits().hash(&mut hasher);
+    ruler.width().to_bits().hash(&mut hasher);
+    size.hash(&mut hasher);
+    let stamp = hasher.finish();
+    if studio.render_bar.as_ref().map(|(seen, _)| *seen) != Some(stamp) {
+        let kind = |id: EntityId| {
+            arena
+                .get_by_id(id)
+                .map_or(SourceKind::Unknown, SourceKind::of)
+        };
+        let end = sequence.duration();
+        let step = 4.0;
+        let mut spans: Vec<(Time, Time, bool)> = Vec::new();
+        let mut x = ruler.left();
+        while x < ruler.right() {
+            let from = time_of(x);
+            let to = time_of(x + step);
+            x += step;
+            if from >= end {
+                break;
+            }
+            if !crate::compose::needs_processing(sequence, from, &kind) {
+                continue;
+            }
+            let key = crate::compose::frame_key(
+                arena,
+                sequence,
+                from,
+                size,
+                crate::compose::Options::default(),
+            );
+            let drawn = studio.preview.has(key);
+            match spans.last_mut() {
+                Some(last) if last.1 >= from && last.2 == drawn => last.1 = to,
+                _ => spans.push((from, to, drawn)),
+            }
+        }
+        studio.render_bar = Some((stamp, spans));
+    }
+    let Some((_, spans)) = &studio.render_bar else {
+        return;
+    };
+    let painter = ui.painter_at(ruler);
+    let height = theme.space(Space::S1);
+    for (from, to, drawn) in spans {
+        let bar = Rect::from_min_max(
+            pos2(x_of(*from), ruler.bottom() - height),
+            pos2(x_of(*to), ruler.bottom()),
+        );
+        painter.rect_filled(
+            bar,
+            SQUARE,
+            if *drawn {
+                theme.success()
+            } else {
+                theme.danger()
+            },
+        );
     }
 }
 
@@ -669,18 +949,67 @@ fn clip_ui(
     let content = Rect::from_min_max(pos2(inner.left(), inner.top() + label_height), inner.max);
     if video {
         clip_picture(studio, ui, painter, content, clip, &kind, cx);
-    } else if let Some(sound) = studio.hub.sounds.get(clip.source) {
-        let gain = crate::mix::gain(clip.value_at(key::VOLUME, clip.start, 0.0));
-        let from = clip.source_in;
-        let to = clip.source_out();
-        waveform(
-            ui,
-            content.intersect(painter.clip_rect()),
-            &sound,
-            from,
-            to,
-            gain,
-            theme,
+    } else {
+        if let Some(sound) = studio.hub.sounds.get(clip.source) {
+            let gain = crate::mix::gain(clip.value_at(key::VOLUME, clip.start, 0.0));
+            let from = clip.source_in;
+            let to = clip.source_out();
+            waveform(
+                ui,
+                content.intersect(painter.clip_rect()),
+                &sound,
+                from,
+                to,
+                gain,
+                theme,
+            );
+        }
+        // The volume line (the rubber band), with its keys.
+        let span = clip.duration.seconds().max(1e-6);
+        let columns = (body.width() / 3.0).ceil().max(1.0) as usize;
+        let line: Vec<egui::Pos2> = (0..=columns)
+            .map(|column| {
+                let share = column as f64 / columns as f64;
+                let at = clip.start + Time::from_seconds(span * share);
+                pos2(
+                    body.left() + body.width() * share as f32,
+                    volume_y(content, clip.value_at(key::VOLUME, at, 0.0)),
+                )
+            })
+            .collect();
+        painter.add(egui::Shape::line(
+            line,
+            egui::Stroke::new(Theme::STRONG_STROKE, theme.warning()),
+        ));
+        if let Some(curve) = clip.animation.channel(key::VOLUME) {
+            for found in curve.keys() {
+                let offset = (found.time - clip.source_in).seconds() / clip.speed.abs().max(1e-6);
+                if !(0.0..=span).contains(&offset) {
+                    continue;
+                }
+                let x = body.left() + body.width() * (offset / span) as f32;
+                painter.circle_filled(
+                    pos2(x, volume_y(content, found.value)),
+                    theme.space(Space::S1) * 1.2,
+                    theme.warning(),
+                );
+            }
+        }
+    }
+    // Clip markers, at their frames.
+    for (at, _) in crate::keys::clip_markers(clip) {
+        let offset = (at - clip.source_in).seconds() / clip.speed.abs().max(1e-6);
+        let span = clip.duration.seconds().max(1e-6);
+        if !(0.0..=span).contains(&offset) {
+            continue;
+        }
+        let x = body.left() + body.width() * (offset / span) as f32;
+        let side = Density::Compact.icon() * 0.7;
+        icons::paint(
+            painter,
+            Rect::from_center_size(pos2(x, body.top() + side / 2.0), vec2(side, side)),
+            Icon::Marker,
+            theme.warning(),
         );
     }
     let name = cx
@@ -869,6 +1198,7 @@ fn interact(
     {
         let cursor = match (studio.tool, edge) {
             (Tool::Razor, _) => egui::CursorIcon::Crosshair,
+            (Tool::RateStretch, Some(_)) => egui::CursorIcon::ResizeHorizontal,
             (Tool::Slip | Tool::Slide, _) => egui::CursorIcon::ResizeHorizontal,
             (_, Some(_)) => egui::CursorIcon::ResizeColumn,
             _ => egui::CursorIcon::Grab,
@@ -940,6 +1270,13 @@ fn interact(
                 from,
                 delta: Time::ZERO,
             }),
+            (Tool::RateStretch, Some(edge)) => Some(Drag::Stretch {
+                ids: own,
+                edge,
+                from,
+                delta: Time::ZERO,
+            }),
+            (Tool::RateStretch, None) => None,
             (Tool::Roll, Some(edge)) => {
                 let pairs: Vec<(u64, u64)> = own
                     .iter()
@@ -1054,9 +1391,10 @@ fn interact(
                 }
                 *delta = moved;
             }
-            Drag::Roll { from, delta, .. } | Drag::Slide { from, delta, .. } => {
-                *delta = seconds(*from)
-            }
+            Drag::Roll { from, delta, .. }
+            | Drag::Slide { from, delta, .. }
+            | Drag::Stretch { from, delta, .. } => *delta = seconds(*from),
+            Drag::Volume { .. } => {}
             Drag::Slip { from, delta, .. } => *delta = -seconds(*from),
         }
     }
@@ -1071,7 +1409,8 @@ fn interact(
             Drag::Roll { .. } => tr!("cmd-tool-roll"),
             Drag::Slip { .. } => tr!("cmd-tool-slip"),
             Drag::Slide { .. } => tr!("cmd-tool-slide"),
-            Drag::Scrub => String::new(),
+            Drag::Stretch { .. } => tr!("cmd-tool-rate-stretch"),
+            Drag::Scrub | Drag::Volume { .. } => String::new(),
         };
         studio.edit(cx, &label, |sequence, ctx| {
             apply_drag(sequence, &drag, insert, ctx)
