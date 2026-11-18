@@ -89,9 +89,15 @@ builds next. Read `CLAUDE.md` and `HUMANZ.md` §1 and §3.10 first;
   out; kerning between them is lost.
 - The voice over records the default microphone only, and needs a
   computer (phones need their permission flow).
-- The STATUS_HEAP_CORRUPTION seen once in stage 1's sue-platform tests
-  was not reproduced in 140 runs after the decode audit (see the 0.0.83
-  stage 2 report); the audit's fixes are in `decode.rs` and `media.rs`.
+- The STATUS_HEAP_CORRUPTION seen in stage 1's sue-platform tests came
+  back once in stage 2, after the decode audit (its fixes are in
+  `decode.rs` and `media.rs`), in a `cargo test` of several crates. The
+  tests still running then were three in `paint` (the wgpu painter) and
+  `packages::tests::a_dropped_download_carries_on_with_a_range_request`;
+  those alone (15 runs each) and the whole test binary (460 runs) did
+  not crash again. Running the binary under page heap (`gflags /p`)
+  would find the writer; it was not run here, as it changes system
+  settings.
 
 ## Performance (stage 2, this machine, release)
 
