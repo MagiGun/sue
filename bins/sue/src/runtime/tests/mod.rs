@@ -21,6 +21,7 @@ mod p81_bugs;
 mod p81_figures;
 mod p81_issue12;
 mod p81_scanner;
+mod p82_layers;
 mod paint_3d;
 mod paint_anim;
 mod paint_basics;

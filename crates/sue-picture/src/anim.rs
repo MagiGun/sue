@@ -1613,6 +1613,17 @@ pub fn set_folder(arena: &Arena, layer: EntityId, folder: Option<EntityId>) -> O
     Some(edit)
 }
 
+/// Where a layer dropped on a row of the Layer palette goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropPlace {
+    /// Right above the row's layer (or folder), in the folder it is in.
+    Above,
+    /// Right below the row's layer, in the folder it is in.
+    Below,
+    /// Into the row's folder, as its top layer.
+    Into,
+}
+
 /// The edit that drops `layer` (a folder with everything in it) onto the
 /// Layer palette's row of `onto`: into a folder as its top layer, or
 /// right above a layer, in that layer's folder. A cel dropped out of its
@@ -1624,6 +1635,26 @@ pub fn drop_layer(
     picture: EntityId,
     layer: EntityId,
     onto: EntityId,
+) -> Option<Edit> {
+    let place = if crate::doc::is_folder(arena, onto) {
+        DropPlace::Into
+    } else {
+        DropPlace::Above
+    };
+    drop_layer_at(arena, picture, layer, onto, place)
+}
+
+/// [`drop_layer`] with the place said: right above or right below the
+/// row of `onto` (in the folder `onto` is in), or into it when it is a
+/// folder (`Into` a layer is `Above` it, and `Below` a folder `Into`
+/// it: under a folder's row come its layers).
+#[must_use]
+pub fn drop_layer_at(
+    arena: &Arena,
+    picture: EntityId,
+    layer: EntityId,
+    onto: EntityId,
+    place: DropPlace,
 ) -> Option<Edit> {
     if layer == onto || crate::doc::folders_around(arena, onto).contains(&layer) {
         return None;
@@ -1642,19 +1673,42 @@ pub fn drop_layer(
     } else {
         vec![layer]
     };
-    let (low, folder) = if crate::doc::is_folder(arena, onto) {
-        // Right under the folder, above whatever is under it now.
+    // What is right under the row now, the moved layers aside.
+    let under = || {
         let rest: Vec<EntityId> = stack
             .iter()
             .copied()
             .filter(|id| !block.contains(id))
             .collect();
         let at = rest.iter().position(|id| *id == onto)?;
-        (at.checked_sub(1).map(|below| rest[below]), Some(onto))
-    } else {
-        (Some(onto), crate::doc::folder_of(arena, onto))
+        Some(at.checked_sub(1).map(|below| rest[below]))
     };
-    let moved = crate::doc::move_block(arena, picture, &block, low);
+    let (low, folder) = match (place, crate::doc::is_folder(arena, onto)) {
+        // Right under the folder, above whatever is under it now.
+        (DropPlace::Into | DropPlace::Below, true) => (under()?, Some(onto)),
+        (DropPlace::Below, false) => (under()?, crate::doc::folder_of(arena, onto)),
+        (DropPlace::Above, _) | (DropPlace::Into, false) => {
+            (Some(onto), crate::doc::folder_of(arena, onto))
+        }
+    };
+    // Already there: nothing to undo.
+    let top = block.last().copied();
+    let at = stack
+        .iter()
+        .position(|id| Some(*id) == block.first().copied());
+    let stays = match low {
+        Some(low) => {
+            at.and_then(|at| at.checked_sub(1))
+                .map(|below| stack[below])
+                == Some(low)
+        }
+        None => at == Some(0),
+    } && top == Some(layer);
+    let moved = if stays {
+        None
+    } else {
+        crate::doc::move_block(arena, picture, &block, low)
+    };
     let joined = set_folder(arena, layer, folder);
     if moved.is_none() && joined.is_none() {
         return None;

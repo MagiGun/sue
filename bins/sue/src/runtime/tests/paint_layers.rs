@@ -1221,12 +1221,14 @@ fn picked_layers_go_into_one_folder_and_drag_together() {
         egui::PointerButton::Primary,
         egui::Modifiers::SHIFT,
     );
-    // Dragged together onto the first layer: both land right above it, in
+    // Dragged together onto the upper half of the first layer's row (its
+    // mode and opacity line, over its name): both land right above it, in
     // their order, as one step.
     let row = driver.row(&driver.name_of(fourth));
     let onto = driver.row(&driver.name_of(first));
+    let upper = onto.center() - vec2(0.0, onto.height() * 1.5);
     undo_pair(&mut driver, |driver| {
-        driver.drag(row.center(), onto.center(), egui::PointerButton::Primary);
+        driver.drag(row.center(), upper, egui::PointerButton::Primary);
     });
     let stack = driver.stack();
     assert_eq!(stack[1..], [first, third, fourth, second], "{stack:?}");

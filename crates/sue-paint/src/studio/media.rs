@@ -50,7 +50,10 @@ impl SuePaint {
         if doc.playing.is_some() {
             return;
         }
-        let (pixels, size, version) = doc.compositor.display();
+        // By what the picture shows: pixels only brought exact after a
+        // stroke are no new frame.
+        let (pixels, size, _) = doc.compositor.display();
+        let version = doc.compositor.content_version();
         if size[0] == 0 || pixels.is_empty() || seen == version {
             return;
         }

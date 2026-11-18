@@ -19,6 +19,7 @@ use sue_wm::ui::tooltip::{Tip, tooltip};
 use sue_wm::{AppletContext, Facts, Theme};
 
 use super::search_layer::SearchLayer;
+use crate::anim::DropPlace;
 use crate::doc;
 use crate::icons::Icon;
 use crate::panels::child;
@@ -52,6 +53,19 @@ pub(crate) struct LayerPalette {
     pub(crate) drop_targets: Vec<(Rect, &'static str)>,
     /// Where every button of the palette was last drawn, with its command.
     pub(crate) buttons: Vec<(Rect, &'static str)>,
+    /// A press on an eye that goes on over other eyes (see [`EyeSweep`]).
+    pub(crate) eye_sweep: Option<EyeSweep>,
+}
+
+/// A press on a layer's eye held and moved over the eyes of other
+/// layers: each shows or hides as the first one did, and the whole sweep
+/// is one step to undo.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct EyeSweep {
+    /// Shown (`true`) or hidden.
+    visible: bool,
+    /// The layers it changed, each with what it had before.
+    old: Vec<(EntityId, Option<Value>)>,
 }
 
 /// The switches over the list, as Clip Studio Paint has them: each a
@@ -109,10 +123,17 @@ struct RowEvents {
     reopen: Option<(EntityId, crate::filters::Filter, String)>,
     dragging: Option<EntityId>,
     dropped: Option<EntityId>,
-    onto: Option<EntityId>,
+    /// The row a dragged layer is over, and where in it.
+    onto: Option<(EntityId, DropPlace)>,
+    /// An eye was pressed: the layer shows or hides, and a sweep begins.
+    sweep_from: Option<(EntityId, bool)>,
+    /// The eyes the pointer is held over while a sweep goes on.
+    swept: Vec<EntityId>,
     menu: Option<String>,
     /// Where the pointer is.
     pointer: Option<Pos2>,
+    /// The main button is held.
+    pointer_down: bool,
 }
 
 /// The sizes of the palette, from the theme's tokens.
@@ -520,6 +541,7 @@ impl SuePaint {
         let stack = doc::layers(&cx.world.arena, picture_id);
         let mut events = RowEvents {
             pointer: ui.ctx().pointer_latest_pos(),
+            pointer_down: ui.input(|input| input.pointer.primary_down()),
             ..RowEvents::default()
         };
         if self.layer_palette.two_panes && list.height() > metrics.row * 2.0 {
@@ -763,6 +785,38 @@ impl SuePaint {
             &mut list_ui,
             theme,
             |ui| {
+                // A row dragged to the list's top or bottom edge scrolls
+                // the list, so it reaches a row that was out of sight.
+                let pointer = ui.ctx().pointer_latest_pos();
+                if self.layer_drag.is_some()
+                    && let Some(at) = pointer
+                    && area.x_range().contains(at.x)
+                {
+                    let step = (metrics.row * 0.4).round();
+                    let reach = metrics.row * 0.75;
+                    let pull = if (area.top() - reach..area.top() + reach).contains(&at.y) {
+                        step
+                    } else if (area.bottom() - reach..area.bottom() + reach).contains(&at.y) {
+                        -step
+                    } else {
+                        0.0
+                    };
+                    if pull != 0.0 {
+                        ui.scroll_with_delta(egui::Vec2::DOWN * pull);
+                        ui.ctx().request_repaint();
+                    }
+                }
+                let sweeping = self
+                    .layer_palette
+                    .eye_sweep
+                    .as_ref()
+                    .map(|sweep| sweep.visible);
+                let (pressed, down) = ui.input(|input| {
+                    (
+                        input.pointer.primary_pressed(),
+                        input.pointer.primary_down(),
+                    )
+                });
                 let mut shown = 0_usize;
                 for info in stack.iter().rev() {
                     let arena = &cx.world.arena;
@@ -778,7 +832,6 @@ impl SuePaint {
                     }
                     shown += 1;
                     let depth = if search.is_some() { 0 } else { around.len() };
-                    let is_folder = doc::is_folder(arena, info.id);
                     // On touch screens a drag scrolls the list instead.
                     let (full, response) = ui.allocate_exact_size(
                         egui::Vec2::new(ui.available_width(), metrics.row),
@@ -794,13 +847,47 @@ impl SuePaint {
                     if response.drag_stopped() {
                         events.dropped = Some(info.id);
                     }
-                    let drop_here = self.layer_drag.is_some_and(|dragged| dragged != info.id)
-                        && ui
-                            .ctx()
-                            .pointer_hover_pos()
-                            .is_some_and(|pos| full.contains(pos));
-                    if drop_here {
-                        events.onto = Some(info.id);
+                    // A row out of sight draws nothing and takes no
+                    // pointer: a long list costs what shows of it. The
+                    // dragged row and the one being renamed go on.
+                    if !ui.is_rect_visible(full)
+                        && self.layer_drag != Some(info.id)
+                        && self.renaming.as_ref().is_none_or(|(id, _)| *id != info.id)
+                    {
+                        continue;
+                    }
+                    let is_folder = doc::is_folder(arena, info.id);
+                    // Half the gap between two rows: a pointer in the gap
+                    // is on the nearer row, and the mark of a drop
+                    // between two rows is one line in the middle of it.
+                    let between = ui.spacing().item_spacing.y / 2.0;
+                    // Where a dragged layer would go, by where in the row
+                    // the pointer is: above a layer from its upper half
+                    // and below it from its lower half; above a folder
+                    // from its top edge and into it from the rest. Only
+                    // rows in the list's own part of the screen take it.
+                    let drop_here = self
+                        .layer_drag
+                        .filter(|dragged| *dragged != info.id)
+                        .and(ui.ctx().pointer_hover_pos())
+                        .filter(|pos| {
+                            full.expand2(egui::Vec2::DOWN * between).contains(*pos)
+                                && area.contains(*pos)
+                        })
+                        .map(|pos| {
+                            if is_folder && pos.y < full.top() + full.height() * 0.25 {
+                                DropPlace::Above
+                            } else if is_folder {
+                                DropPlace::Into
+                            } else if pos.y < full.center().y || info.kind == LayerKind::Paper {
+                                // Nothing goes under the paper.
+                                DropPlace::Above
+                            } else {
+                                DropPlace::Below
+                            }
+                        });
+                    if let Some(place) = drop_here {
+                        events.onto = Some((info.id, place));
                     }
                     let chosen = Some(info.id) == self.layer();
                     let also = self.doc().is_some_and(|doc| doc.picked.contains(&info.id));
@@ -823,16 +910,36 @@ impl SuePaint {
                         fill.map_or_else(|| theme.text_muted(), |fill| theme.text_muted_on(fill));
                     painter.hline(full.x_range(), full.bottom(), theme.hairline());
                     // Where a dragged layer would go: into a folder (the
-                    // whole row), or right above a layer (a line on top).
-                    if drop_here && is_folder {
-                        painter.rect_stroke(
-                            full,
-                            theme.radius(Radius::Xs),
-                            theme.selected_stroke(),
-                            StrokeKind::Inside,
-                        );
-                    } else if drop_here {
-                        painter.hline(full.x_range(), full.top(), theme.selected_stroke());
+                    // whole row), or right above or below a layer (a line
+                    // on that edge).
+                    match drop_here {
+                        Some(DropPlace::Into) => {
+                            painter.rect_stroke(
+                                full,
+                                theme.radius(Radius::Xs),
+                                theme.selected_stroke(),
+                                StrokeKind::Inside,
+                            );
+                        }
+                        // Kept inside the list: over the first row and
+                        // under the last one the line would be cut off.
+                        Some(DropPlace::Above) => {
+                            let view = ui.clip_rect();
+                            painter.hline(
+                                full.x_range(),
+                                (full.top() - between).max(view.top() + 1.0),
+                                theme.selected_stroke(),
+                            );
+                        }
+                        Some(DropPlace::Below) => {
+                            let view = ui.clip_rect();
+                            painter.hline(
+                                full.x_range(),
+                                (full.bottom() + between).min(view.bottom() - 1.0),
+                                theme.selected_stroke(),
+                            );
+                        }
+                        None => {}
                     }
                     // The row is a control of its own: Tab reaches it,
                     // Space or Enter picks it, and it is read by its name.
@@ -934,8 +1041,22 @@ impl SuePaint {
                     )
                     .quiet()
                     .show_at(ui, eye, theme);
-                    if eye_response.clicked() && shown_cel.is_none() {
-                        events.toggle = Some((info.id, !info.style.visible));
+                    if shown_cel.is_none() {
+                        let over = ui.rect_contains_pointer(eye);
+                        // On touch screens a drag scrolls the list.
+                        let desktop = cx.view.form_factor == sue_platform::FormFactor::Desktop;
+                        if desktop && pressed && over && eye_response.is_pointer_button_down_on() {
+                            // A press shows or hides at once, and held
+                            // it goes on over the eyes it is moved to.
+                            events.sweep_from = Some((info.id, !info.style.visible));
+                        } else if let Some(visible) = sweeping {
+                            if down && over && info.style.visible != visible {
+                                events.swept.push(info.id);
+                            }
+                        } else if eye_response.clicked() {
+                            // Space or Enter on the eye.
+                            events.toggle = Some((info.id, !info.style.visible));
+                        }
                     }
                     // The pen on the layer being edited, a box on the rest
                     // to pick several (a cel locked against keyframes shows
@@ -1582,6 +1703,42 @@ impl SuePaint {
                 Self::apply(cx, edit);
             }
         }
+        // An eye pressed, and the eyes the press is held over: each
+        // layer changes at once, in place, and the sweep is recorded as
+        // one step when the button is let go.
+        let mut swept = events.swept.clone();
+        if let Some((id, visible)) = events.sweep_from {
+            self.end_eye_sweep(cx);
+            self.layer_palette.eye_sweep = Some(EyeSweep {
+                visible,
+                old: Vec::new(),
+            });
+            let picked = self.picked_layers(&cx.world.arena);
+            swept = if picked.contains(&id) {
+                picked
+            } else {
+                vec![id]
+            };
+        }
+        if let Some(sweep) = &mut self.layer_palette.eye_sweep {
+            for id in swept {
+                if sweep.old.iter().any(|(known, _)| *known == id) {
+                    continue;
+                }
+                let Ok(entity) = cx.world.arena.get_by_id_mut(id) else {
+                    continue;
+                };
+                sweep
+                    .old
+                    .push((id, entity.property(picture::VISIBLE).cloned()));
+                entity
+                    .properties_mut()
+                    .set(picture::VISIBLE, Value::Bool(sweep.visible));
+            }
+        }
+        if !events.pointer_down {
+            self.end_eye_sweep(cx);
+        }
         if let Some(command) = events.menu {
             self.run(&command, cx);
         }
@@ -1593,11 +1750,16 @@ impl SuePaint {
         {
             Self::apply(cx, edit);
         }
-        if let Some(id) = events.dragging {
+        // A press on an eye moved over other eyes sweeps them: the row
+        // under the eye is not dragged by it.
+        if let Some(id) = events.dragging
+            && self.layer_palette.eye_sweep.is_none()
+        {
             self.layer_drag = Some(id);
         }
-        if let Some(dragged) = events.dropped {
-            self.layer_drag = None;
+        if let Some(dragged) = events.dropped
+            && self.layer_drag.take() == Some(dragged)
+        {
             let recorded = cx.history.len();
             let unkeyed = self.unkeyed_cels(&cx.world.arena);
             let from = self.picture().and_then(|picture| {
@@ -1781,7 +1943,7 @@ impl SuePaint {
     fn drop_layer(
         &mut self,
         dragged: EntityId,
-        onto: Option<EntityId>,
+        onto: Option<(EntityId, DropPlace)>,
         at: Option<Pos2>,
         cx: &mut AppletContext<'_>,
     ) {
@@ -1821,16 +1983,39 @@ impl SuePaint {
                 let (Some(picture), Some(onto)) = (self.picture(), onto) else {
                     return;
                 };
+                let (onto, place) = onto;
                 let moving = if several {
                     Self::outermost(&cx.world.arena, &picked)
                 } else {
                     vec![dragged]
                 };
-                if let Some(edit) = Self::drop_several(&cx.world.arena, picture, &moving, onto) {
+                if let Some(edit) =
+                    Self::drop_several(&cx.world.arena, picture, &moving, onto, place)
+                {
                     Self::apply(cx, edit);
                 }
             }
         }
+    }
+
+    /// Ends a sweep over the eyes: what it changed in place becomes one
+    /// step to undo.
+    fn end_eye_sweep(&mut self, cx: &mut AppletContext<'_>) {
+        let Some(sweep) = self.layer_palette.eye_sweep.take() else {
+            return;
+        };
+        if sweep.old.is_empty() {
+            return;
+        }
+        let label = doc::label(picture::VISIBLE, &Value::Bool(sweep.visible));
+        let mut edit = doc::Edit::new(label);
+        for (id, old) in sweep.old {
+            edit = edit.then(match old {
+                Some(old) => sue_core::txn::SetProperty::new(id, picture::VISIBLE, old),
+                None => sue_core::txn::SetProperty::remove(id, picture::VISIBLE),
+            });
+        }
+        cx.record(sue_wm::ArenaEdit(edit));
     }
 
     /// The layers of `ids` (bottom first) that are not inside another of
@@ -1846,24 +2031,27 @@ impl SuePaint {
             .collect()
     }
 
-    /// The one step that drops `moving` (bottom first) onto `onto`: right
-    /// above a layer, or at the top inside a folder, in their order. Each
-    /// layer's move is worked out on a copy of the arena (its pixels are
-    /// shared, not copied) after the moves before it.
+    /// The one step that drops `moving` (bottom first) at `place` of the
+    /// row of `onto`: right above or below a layer, or at the top inside
+    /// a folder, in their order. Each layer's move is worked out on a
+    /// copy of the arena (its pixels are shared, not copied) after the
+    /// moves before it.
     fn drop_several(
         arena: &sue_core::Arena,
         picture: EntityId,
         moving: &[EntityId],
         onto: EntityId,
+        place: DropPlace,
     ) -> Option<doc::Edit> {
         use sue_core::ReversibleTransaction;
         if let [only] = moving {
-            return crate::anim::drop_layer(arena, picture, *only, onto);
+            return crate::anim::drop_layer_at(arena, picture, *only, onto, place);
         }
-        // Above a layer the top one goes first, so each next one lands
-        // under it; into a folder the bottom one goes first.
+        // Above a row the top one goes first, so each next one lands
+        // under it; below a layer and into a folder the bottom one goes
+        // first, each next one landing over it.
         let mut order: Vec<EntityId> = moving.iter().copied().filter(|id| *id != onto).collect();
-        if !doc::is_folder(arena, onto) {
+        if place == DropPlace::Above {
             order.reverse();
         }
         let mut scratch = arena.clone();
@@ -1871,8 +2059,8 @@ impl SuePaint {
         let mut any = false;
         for layer in order {
             let (Some(mut tried), Some(step)) = (
-                crate::anim::drop_layer(&scratch, picture, layer, onto),
-                crate::anim::drop_layer(&scratch, picture, layer, onto),
+                crate::anim::drop_layer_at(&scratch, picture, layer, onto, place),
+                crate::anim::drop_layer_at(&scratch, picture, layer, onto, place),
             ) else {
                 continue;
             };
