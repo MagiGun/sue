@@ -30,7 +30,10 @@ pub trait TextureUpload {
     /// that differ since that version and only they are sent again
     /// (`None` from it sends everything). Hosts without partial uploads
     /// send everything.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "it is `texture` with one more argument, and a host passes them straight to its GPU upload"
+    )]
     fn texture_changed(
         &mut self,
         key: u64,

@@ -474,7 +474,6 @@ impl ClipLayer {
 
     /// Opacity 0 to 255.
     #[must_use]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn opacity_u8(&self) -> u8 {
         ((self.opacity.clamp(0, 256) * 255 + 128) / 256) as u8
     }
@@ -549,7 +548,6 @@ impl ClipDrawColor {
 
     /// The color, 8 bits a channel.
     #[must_use]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn color(&self) -> [u8; 3] {
         self.main.map(|channel| (channel >> 24) as u8)
     }

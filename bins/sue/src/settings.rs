@@ -561,7 +561,10 @@ impl Settings {
     /// control's room, each with the setting's tooltip. Gives the number
     /// after this frame, and what happened to the slider (a field that
     /// changed reads as a plain change).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a number row is drawn from its setting, value, range, decimals and tip, each read from the rice just before the call"
+    )]
     fn number_control(
         &self,
         ui: &mut Ui,

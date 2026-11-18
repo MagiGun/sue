@@ -179,7 +179,10 @@ impl Canvas {
 
     /// A wandering stroke of `length` pixels that stays inside `region`
     /// and swells and thins like a pressed pen.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a test stroke is its region, radius, length, color, flow and edge, written as literals where the benchmark paints"
+    )]
     fn stroke(
         &mut self,
         rng: &mut Rng,

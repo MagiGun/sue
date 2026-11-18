@@ -187,7 +187,6 @@ fn resolution(mut data: &[u8]) -> Option<f64> {
 }
 
 /// The image resource block that says the resolution is `dpi`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn resolution_block(dpi: f64) -> Vec<u8> {
     let fixed = (dpi.clamp(1.0, 65_535.0) * 65536.0).round() as u32;
     let mut out = Vec::with_capacity(28);

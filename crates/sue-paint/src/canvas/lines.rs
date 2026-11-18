@@ -201,7 +201,10 @@ impl SuePaint {
     /// `layer` with lines picked: a handle of their box starts scaling
     /// or bending it, a press inside the box (Shift not held) moves them.
     /// `true` when the press was the box's.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "a press on a line box needs the layer, the point, the zoom and the lines with their geometry and offset, all in the hands of its one caller"
+    )]
     pub(crate) fn line_box_press(
         &mut self,
         layer: EntityId,

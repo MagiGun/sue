@@ -848,7 +848,6 @@ impl SuePaint {
 
     /// Starts a stroke of the engine for `sub` at `pos`. `false`, with a
     /// notice saying why, when the layer takes no stroke.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn engine_press(
         &mut self,
         pos: Pos2,

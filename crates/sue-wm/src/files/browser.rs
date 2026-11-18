@@ -824,7 +824,10 @@ fn kept_buttons(ui: &Ui, response: &egui::Response, view: View, theme: &Theme) -
 /// sheet over the whole screen when `full`). `armed` is `true` once
 /// Remove from List (Discard, for kept work) was clicked and asks again.
 /// Returns how the popup ended, and `true` when Open was chosen.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the popup reads the browser state its caller keeps in separate fields, and borrows two of them mutably"
+)]
 pub fn project_popup(
     ctx: &egui::Context,
     full: bool,

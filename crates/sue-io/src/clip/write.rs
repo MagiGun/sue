@@ -51,7 +51,6 @@ impl Fingerprint {
         self.word(u64::from_le_bytes(last));
     }
 
-    #[allow(clippy::cast_sign_loss)]
     fn layer(&mut self, layer: &ClipLayer) {
         self.bytes(layer.name.as_bytes());
         for value in [
