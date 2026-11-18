@@ -160,6 +160,14 @@ follow [Semantic Versioning](https://semver.org/).
   crawl. Every value now gives an animation that overshoots by less than
   5 percent and comes to rest within about a second and a half, and the
   page coming over the Hub no longer flickers on its way in.
+- Sue VE: pressing Space on the timeline played a few frames and then
+  stood still until you pressed Space again, and the program monitor
+  stayed black after a clip was dropped and the playhead moved, until
+  the mouse moved. Playback now runs at real time with sound from the
+  first press, and a monitor shows its picture as soon as it is
+  decoded. A sound device that stops taking sound no longer holds the
+  playhead: playing goes on by the clock, without sound, and a new
+  device takes the sound over where the playhead is.
 
 ## [0.0.82] - 2026-11-17
 

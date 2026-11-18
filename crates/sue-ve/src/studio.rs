@@ -25,6 +25,11 @@ use sue_wm::dock::DockLayout;
 pub const ID: &str = "sue-ve";
 /// The settings section the shortcuts live in.
 pub const KEYS_SECTION: &str = "sue_ve_keys";
+
+/// How long the monitors keep asking for a picture a decoder has not
+/// made yet before they wait for input again.
+pub const FRAME_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Rice keys.
 pub mod rice {
     /// Decode on the graphics card.
@@ -438,6 +443,14 @@ pub struct SueVe {
     /// The frame the program monitor drew on the processor last (the
     /// scopes read it).
     pub shown: Option<Arc<crate::media::frames::VideoFrame>>,
+    /// A monitor drew this frame without the picture it needs (a decoder
+    /// is still making it): the studio keeps ticking, so the picture shows
+    /// as soon as it comes, without waiting for input.
+    pub waiting_for_frame: bool,
+    /// Since when the monitors have been waiting, and for the program
+    /// and source playheads where they were then (they give up after
+    /// [`FRAME_WAIT`], so a source that never decodes costs nothing).
+    waiting_since: Option<(Instant, Time, Time)>,
     /// The Color page.
     pub color: ColorState,
     /// The graph editor.
@@ -517,6 +530,8 @@ impl Default for SueVe {
             preview: crate::preview::Preview::default(),
             scopes: crate::scopes::Scopes::default(),
             shown: None,
+            waiting_for_frame: false,
+            waiting_since: None,
             color: ColorState::default(),
             graph: GraphState::default(),
             fx_search: String::new(),
@@ -1416,6 +1431,8 @@ impl SueApplet for SueVe {
     }
 
     fn page_ui(&mut self, ui: &mut egui::Ui, cx: &mut AppletContext<'_>) {
+        // The monitors say again this frame whether they wait.
+        self.waiting_for_frame = false;
         self.frame(ui, cx);
     }
 
@@ -1489,6 +1506,23 @@ impl SueApplet for SueVe {
             || self.zoom_target.is_some()
         {
             tick.animating = true;
+        }
+        if self.waiting_for_frame {
+            let at = (self.clock.position, self.source.clock.position);
+            if self
+                .waiting_since
+                .is_none_or(|(_, program, source)| (program, source) != at)
+            {
+                self.waiting_since = Some((now, at.0, at.1));
+            }
+            if self
+                .waiting_since
+                .is_some_and(|(since, ..)| now.saturating_duration_since(since) < FRAME_WAIT)
+            {
+                tick.animating = true;
+            }
+        } else {
+            self.waiting_since = None;
         }
         if let Some(recording) = self.recording.as_mut() {
             let Recording { input, samples, .. } = recording;

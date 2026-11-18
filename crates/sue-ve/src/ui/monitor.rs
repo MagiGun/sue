@@ -108,9 +108,13 @@ fn draw_layers(
             need,
         ) else {
             due = false;
+            studio.waiting_for_frame |= studio.hub.error(layer.source).is_none();
             continue;
         };
         due &= found.exact;
+        if !found.exact && need != Need::Fast {
+            studio.waiting_for_frame |= studio.hub.error(layer.source).is_none();
+        }
         let frame = found.frame;
         let key = texture_key(("sve-layer", layer.source, slot));
         let Some(texture) = cx.textures.texture(
