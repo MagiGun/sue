@@ -802,7 +802,7 @@ impl SuePaint {
                         0.0
                     };
                     if pull != 0.0 {
-                        ui.scroll_with_delta(egui::vec2(0.0, pull));
+                        ui.scroll_with_delta(egui::Vec2::DOWN * pull);
                         ui.ctx().request_repaint();
                     }
                 }
@@ -871,7 +871,7 @@ impl SuePaint {
                         .filter(|dragged| *dragged != info.id)
                         .and(ui.ctx().pointer_hover_pos())
                         .filter(|pos| {
-                            full.expand2(egui::vec2(0.0, between)).contains(*pos)
+                            full.expand2(egui::Vec2::DOWN * between).contains(*pos)
                                 && area.contains(*pos)
                         })
                         .map(|pos| {

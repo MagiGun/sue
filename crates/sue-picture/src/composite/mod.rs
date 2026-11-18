@@ -190,6 +190,9 @@ pub struct Compositor {
     rough: std::collections::BTreeSet<u32>,
     /// The view changed since the last look (see [`Self::set_view`]).
     view_changed: bool,
+    /// The version of the last change of what the picture shows (see
+    /// [`Self::content_version`]).
+    content: u64,
     /// How many tiles a second the last timed composite made.
     rate: f64,
     /// How many waiting tiles are composited at once whatever time a
@@ -243,6 +246,7 @@ impl Compositor {
             waiting: std::collections::BTreeSet::new(),
             rough: std::collections::BTreeSet::new(),
             view_changed: false,
+            content: version,
             rate: 0.0,
             small_change: tiles::SMALL_CHANGE,
         }

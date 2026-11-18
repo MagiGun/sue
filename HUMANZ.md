@@ -2236,8 +2236,9 @@ source with no alpha changes nothing under any blend mode), on every
 core with each thread taking the next tile not yet begun
 (`tiles::each_index`, sized by `composite::workers` as before). Composited
 tiles are kept by tile and number (`TileCache`, 96 MB unless
-`set_tile_memory` says otherwise), so undo, a layer shown again or an
-animation's next round is a copy. `Compositor::sync_within` is `sync` for
+`set_tile_memory` says otherwise; the studio keeps them for the canvas
+in front only, and a quarter as many off the desktop), so undo, a layer
+shown again or an animation's next round is a copy. `Compositor::sync_within` is `sync` for
 a frame of the interface: it composites for the time it is given, what
 is on screen first, and, when the picture is seen small, first one
 sample a screen pixel all over what is on screen and the detail on the
@@ -2246,7 +2247,9 @@ row dragged), and `sync` when it is let go, which is always exact. A
 `refresh` of the whole picture after an edit in place goes the same way
 when what each tile showed before is known, and the tiles a stroke showed
 through its kept byte stacks (`Focus`, a step off at most) are
-composited again once the stroke is over. The test
+composited again once the stroke is over; that pass changes
+`display`'s version but not `content_version`, which the timelapse goes
+by, so it keeps one image a change. The test
 `random_layer_operations_keep_the_image_exact` compares the screen image
 with every layer composited at every pixel after a few hundred seeded
 operations with undo and redo; `layer_operations_speed` times it.

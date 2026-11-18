@@ -17,6 +17,10 @@ use crate::doc::{self, NewPicture};
 /// (see `Compositor::sync_within`).
 const FRAME_COMPOSITE: std::time::Duration = std::time::Duration::from_millis(8);
 
+/// The memory the composited tiles kept for the current canvas may take
+/// (see `Compositor::set_tile_memory`).
+const TILE_MEMORY: usize = 96 << 20;
+
 impl SuePaint {
     /// Opens a tab for every picture in the arena that has none (the newest
     /// becomes current), drops tabs whose picture is gone, and keeps every
@@ -246,6 +250,19 @@ impl SuePaint {
         // never waits for a big picture; let go, it is brought exact.
         let held = ui.ctx().input(|input| input.pointer.any_down());
         let (visible, step) = self.on_screen;
+        // Composited tiles are kept for the canvas being worked on only
+        // (undo, a layer shown again, an animation's next round), less
+        // of them where memory is short.
+        let kept = if cx.view.form_factor == sue_platform::FormFactor::Desktop {
+            TILE_MEMORY
+        } else {
+            TILE_MEMORY / 4
+        };
+        let active = self.active;
+        for (index, doc) in self.docs.iter_mut().enumerate() {
+            doc.compositor
+                .set_tile_memory(if index == active { kept } else { 0 });
+        }
         if let Some(doc) = self.docs.get_mut(self.active) {
             doc.compositor.set_palette_colors(palette);
             if held && doc.playing.is_none() {

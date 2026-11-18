@@ -533,7 +533,9 @@ fn step_00_20_56_fgv_16_dialog_switch_and_recorded_layer_drag_and_strokes() {
     press(&mut paint, egui::Key::Enter);
     let from = paint.rect_of(&third_name).expect("the dragged row");
     let onto = paint.rect_of(&first_name).expect("the row dropped on");
-    paint.drag(from.center(), onto.center(), egui::PointerButton::Primary);
+    // Onto the upper half of the row (over its name): right above it.
+    let upper = onto.center() - vec2(0.0, onto.height() * 1.5);
+    paint.drag(from.center(), upper, egui::PointerButton::Primary);
     assert_eq!(
         index_of(&paint, third) + 1,
         index_of(&paint, second),

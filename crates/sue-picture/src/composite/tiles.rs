@@ -331,6 +331,17 @@ fn compose_coarse(layers: &[Layer<'_>], [x0, y0, x1, y1]: [u32; 4], step: u32) -
     out
 }
 
+/// Why waiting tiles are composited.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Why {
+    /// The layers just changed.
+    Change,
+    /// The rest of a change shared out over frames.
+    Rest,
+    /// What a stroke showed a step off is brought exact.
+    Exact,
+}
+
 /// A frame of the interface the screen image is composited for (see
 /// [`Compositor::sync_within`]).
 #[derive(Clone, Copy, Debug)]
@@ -462,13 +473,13 @@ impl Compositor {
     /// core and writes them to the screen image. With `hashes` (each
     /// tile's number for the layers as they are, see [`tile_hashes`]) a
     /// whole tile kept from before is copied instead, and the ones made
-    /// are kept.
+    /// are kept. Answers the pieces whose pixels came out different.
     pub(super) fn paint_pieces(
         &mut self,
         layers: &[Layer<'_>],
         pieces: &[[u32; 4]],
         hashes: Option<&[u64]>,
-    ) {
+    ) -> Vec<[u32; 4]> {
         let columns = self.columns().max(1);
         let stride = self.size[0] as usize * 4;
         // A whole tile, by the number of what it shows.
@@ -477,17 +488,29 @@ impl Compositor {
             let hash = hashes?.get(tile as usize)?;
             (this.tile_rect(tile) == piece).then_some((tile, *hash))
         };
+        // Writes a piece; `true` if a pixel of it is new.
         let blit = |display: &mut [u8], [x0, y0, x1, y1]: [u32; 4], pixels: &[u8]| {
             let width = (x1 - x0) as usize * 4;
+            let mut new = false;
             for (row, line) in (y0..y1).zip(pixels.chunks_exact(width)) {
                 let at = row as usize * stride + x0 as usize * 4;
-                display[at..at + width].copy_from_slice(line);
+                let shown = &mut display[at..at + width];
+                if shown != line {
+                    shown.copy_from_slice(line);
+                    new = true;
+                }
             }
+            new
         };
+        let mut changed = Vec::new();
         let mut todo = Vec::new();
         for piece in pieces {
             match key(*piece, self).and_then(|key| self.tiles.get(key)) {
-                Some(pixels) => blit(&mut self.display, *piece, &pixels),
+                Some(pixels) => {
+                    if blit(&mut self.display, *piece, &pixels) {
+                        changed.push(*piece);
+                    }
+                }
                 None => todo.push(*piece),
             }
         }
@@ -495,12 +518,15 @@ impl Compositor {
         for batch in todo.chunks(1024) {
             let made = each_index(batch.len(), |index| compose(layers, batch[index]));
             for (piece, pixels) in batch.iter().zip(made) {
-                blit(&mut self.display, *piece, &pixels);
+                if blit(&mut self.display, *piece, &pixels) {
+                    changed.push(*piece);
+                }
                 if let Some(key) = key(*piece, self) {
                     self.tiles.put(key, pixels.into());
                 }
             }
         }
+        changed
     }
 
     /// Composites the rectangle `rect` of the picture again, as the
@@ -557,6 +583,21 @@ impl Compositor {
     /// Takes `rects` as repainted: a new version, with the rectangles on
     /// record for [`Self::changed_since`].
     pub(super) fn record(&mut self, rects: Vec<[u32; 4]>) {
+        self.record_pixels(rects);
+        self.content = self.version;
+    }
+
+    /// The version that changes with what the picture shows: as
+    /// [`Self::display`]'s, but not for pixels only brought exact after a
+    /// stroke (a step off at most before). What keeps one image a change
+    /// (a timelapse) goes by this one.
+    #[must_use]
+    pub fn content_version(&self) -> u64 {
+        self.content
+    }
+
+    /// [`Self::record`] for pixels that show the same picture as before.
+    fn record_pixels(&mut self, rects: Vec<[u32; 4]>) {
         self.version = next_version();
         self.changes.push_back((self.version, rects));
         if self.changes.len() > 64
@@ -588,7 +629,7 @@ impl Compositor {
                     self.view.as_ref(),
                 );
                 self.attach(arena, &mut layers, false);
-                return self.settle(layers, limit, false);
+                return self.settle(layers, limit, Why::Rest);
             }
             // The image matches the arena. Once a stroke is over (it
             // repaints by itself and leaves the looks behind), what each
@@ -616,7 +657,7 @@ impl Compositor {
                     // exact.
                     if !self.rough.is_empty() {
                         self.waiting.append(&mut self.rough);
-                        return self.settle(layers, limit, false);
+                        return self.settle(layers, limit, Why::Exact);
                     }
                 }
             }
@@ -695,7 +736,7 @@ impl Compositor {
         if self.waiting.is_empty() {
             return false;
         }
-        self.settle(layers, limit, true)
+        self.settle(layers, limit, Why::Change)
     }
 
     /// Composites the tiles that wait, all of them or, with a `limit`,
@@ -704,7 +745,7 @@ impl Compositor {
     /// just `changed` shows at a glance first: every tile on screen one
     /// sample a screen pixel, the detail on the frames after. Returns
     /// `true` if the image changed.
-    fn settle(&mut self, mut layers: Vec<Layer<'_>>, limit: Option<Frame>, changed: bool) -> bool {
+    fn settle(&mut self, mut layers: Vec<Layer<'_>>, limit: Option<Frame>, why: Why) -> bool {
         let columns = self.columns().max(1);
         // A few tiles take less than sharing them out over frames.
         let limit = limit.filter(|_| self.waiting.len() > self.small_change);
@@ -732,7 +773,7 @@ impl Compositor {
         prepare(&mut layers, bounds);
         if let Some(Frame { step, .. }) = limit
             && step > 1
-            && changed
+            && why == Why::Change
         {
             let seen = &order[..on_screen];
             if seen.is_empty() {
@@ -763,6 +804,8 @@ impl Compositor {
             .map(|looks| looks.hashes.as_slice());
         let started = Instant::now();
         let mut at = 0;
+        // The tiles that came out different from what was shown.
+        let mut new: Vec<[u32; 4]> = Vec::new();
         let mut batch = match limit {
             None => order.len(),
             Some(Frame { budget, .. }) => {
@@ -773,7 +816,7 @@ impl Compositor {
             let chunk = &order[at..(at + batch.max(1)).min(order.len())];
             let pieces: Vec<[u32; 4]> = chunk.iter().map(|tile| self.tile_rect(*tile)).collect();
             let begun = Instant::now();
-            self.paint_pieces(&layers, &pieces, hashes);
+            new.extend(self.paint_pieces(&layers, &pieces, hashes));
             at += chunk.len();
             let Some(Frame { budget, .. }) = limit else {
                 continue;
@@ -792,8 +835,22 @@ impl Compositor {
         for tile in &order[..at] {
             self.waiting.remove(tile);
         }
-        let rects = tile_rects(&order[..at], columns, self.size);
-        self.record(rects);
+        if why != Why::Exact {
+            let rects = tile_rects(&order[..at], columns, self.size);
+            self.record(rects);
+            return true;
+        }
+        // Brought exact: only the tiles that came out different are
+        // sent on, and the picture counts as the same.
+        if new.is_empty() {
+            return false;
+        }
+        let tiles: Vec<u32> = new
+            .iter()
+            .map(|piece| piece[1] / TILE * columns + piece[0] / TILE)
+            .collect();
+        let rects = tile_rects(&tiles, columns, self.size);
+        self.record_pixels(rects);
         true
     }
 
