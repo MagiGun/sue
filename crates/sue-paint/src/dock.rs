@@ -23,8 +23,6 @@ use sue_wm::icons::Icon as WmIcon;
 use sue_wm::ui::{Density, MenuEvent, MenuRequest, MenuState, Space};
 use sue_wm::{AppletContext, ItemState, MenuItem, Theme};
 
-use crate::icons::Icon;
-
 use crate::studio::{Panels, SuePaint};
 
 use sue_wm::dock::Row;
@@ -273,37 +271,6 @@ impl Palette {
             Self::Approximate => tr!("approximate-color"),
             Self::ColorHistory => tr!("color-history"),
             Self::SubToolDetail => tr!("sub-tool-detail"),
-        }
-    }
-
-    /// Its icon in the strip.
-    pub fn icon(self) -> Icon {
-        match self {
-            Self::CommandBar => Icon::Menu,
-            Self::QuickAccess => Icon::List,
-            Self::Tools => Icon::Pen,
-            Self::SubTool => Icon::Brush,
-            Self::BrushSize => Icon::BrushSize,
-            Self::Color => Icon::Wheel,
-            Self::ColorSet => Icon::Swatches,
-            Self::Navigator => Icon::Navigator,
-            Self::Layer => Icon::Layers,
-            Self::Material => Icon::Material,
-            Self::LayerProperty => Icon::LayerProperty,
-            Self::History => Icon::History,
-            Self::Cels => Icon::Cel,
-            Self::SubView => Icon::SubView,
-            Self::AutoAction => Icon::AutoAction,
-            Self::ItemBank => Icon::ItemBank,
-            Self::Info => Icon::Info,
-            Self::Timeline => Icon::Timeline,
-            Self::ToolProperty => Icon::Sliders,
-            Self::BrushGrid => Icon::BrushSize,
-            Self::ColorSlider => Icon::ColorSlider,
-            Self::Intermediate => Icon::Intermediate,
-            Self::Approximate => Icon::Approximate,
-            Self::ColorHistory => Icon::History,
-            Self::SubToolDetail => Icon::Wrench,
         }
     }
 

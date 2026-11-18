@@ -34,8 +34,8 @@ mod tool_property;
 use egui::{Color32, Id, Mesh, Pos2, Rect, Sense, Shape, Stroke, Ui, UiBuilder, pos2, vec2};
 use sue_wm::{AppletContext, Theme};
 
-use crate::icons::{self, Icon};
 use crate::studio::SuePaint;
+use sue_wm::icons::{self, Icon};
 
 pub(crate) use auto_action::MENU_COMMANDS as AUTO_ACTION_COMMANDS;
 pub(crate) use command_bar::icon_picker;
@@ -347,7 +347,7 @@ impl SuePaint {
         let (body, _) = header(
             ui,
             rect,
-            &[(palette.title(), palette.icon(), true)],
+            &[(palette.title(), palette.symbol(), true)],
             0,
             theme,
         );
@@ -395,11 +395,11 @@ impl SuePaint {
     /// dragging one of the others tears it off into a palette of its own.
     /// `tabs` are (name, icon, enabled, its own palette); returns the body
     /// and the tab showing (an index into `tabs`).
-    fn torn_header(
+    fn torn_header<I: Into<Icon> + Copy>(
         &mut self,
         ui: &mut Ui,
         rect: Rect,
-        tabs: &[(String, Icon, bool, Option<crate::dock::Palette>)],
+        tabs: &[(String, I, bool, Option<crate::dock::Palette>)],
         selected: u8,
         theme: &Theme,
     ) -> (Rect, u8) {
@@ -416,7 +416,7 @@ impl SuePaint {
         }
         let visible: Vec<(String, Icon, bool)> = shown
             .iter()
-            .map(|at| (tabs[*at].0.clone(), tabs[*at].1, tabs[*at].2))
+            .map(|at| (tabs[*at].0.clone(), tabs[*at].1.into(), tabs[*at].2))
             .collect();
         let tearing: Vec<bool> = shown.iter().map(|at| tabs[*at].3.is_some()).collect();
         let place = shown.iter().position(|at| *at == chosen).unwrap_or(0);

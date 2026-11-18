@@ -4,7 +4,7 @@ use egui::{Align2, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use sue_wm::Theme;
 use sue_wm::ui::{Radius, Space, TextRole};
 
-use crate::icons::Icon;
+use crate::dock::Palette;
 use crate::panels::{header, tall_slider};
 use crate::studio::SuePaint;
 use crate::tools::Tool;
@@ -133,7 +133,7 @@ impl SuePaint {
         let (body, _) = header(
             ui,
             rect,
-            &[(tr!("tool-sliders"), Icon::Sliders, true)],
+            &[(tr!("tool-sliders"), Palette::BrushSize.symbol(), true)],
             0,
             theme,
         );
