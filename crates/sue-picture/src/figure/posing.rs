@@ -468,6 +468,121 @@ pub fn held(pose: &Pose, before: &Pose, body: &Body, pins: &[usize], keep: bool)
     out
 }
 
+/// The body moved whole by `shift` (in the world), its held hands and
+/// feet staying where they are: the pose its limbs take and where the
+/// figure then stands. What holds are the `pins`, and the feet of a
+/// body that keeps to the ground (so dragging its hips down bends its
+/// knees, and it cannot be lifted off the floor; feet that are not
+/// pinned go across with it). With nothing held the figure just moves.
+#[must_use]
+pub fn moved(
+    pose: &Pose,
+    body: &Body,
+    shift: [f32; 3],
+    pins: &[usize],
+    keep: bool,
+) -> (Pose, [f32; 3]) {
+    let grounded = body.ground && body.kind == Kind::Body;
+    let before = super::solve(pose, body);
+    let mut holds: Vec<usize> = pins.to_vec();
+    if grounded {
+        for foot in [at::LEGS[0][2], at::LEGS[1][2]] {
+            if !holds.contains(&foot) {
+                holds.push(foot);
+            }
+        }
+    }
+    // Where the figure stands afterwards: a body that keeps to the
+    // ground is not lifted or sunk, its legs take that up.
+    let stood = body.place.position;
+    let position = if grounded {
+        [stood[0] + shift[0], stood[1], stood[2] + shift[2]]
+    } else {
+        [0, 1, 2].map(|axis| stood[axis] + shift[axis])
+    };
+    // The limbs reach for their holds on a copy that does not keep to
+    // the ground, placed where the body is to end up.
+    let loose = Body {
+        ground: false,
+        ..*body
+    };
+    let Some(root) = human::shaped(body).order.first().copied() else {
+        return (pose.clone(), position);
+    };
+    let (Some(now), Some(free)) = (
+        before.get(root).map(|placed| placed.0),
+        super::solve(pose, &loose).get(root).map(|placed| placed.0),
+    ) else {
+        return (pose.clone(), position);
+    };
+    let mut loose = loose;
+    loose.place.position = [0, 1, 2].map(|axis| stood[axis] + shift[axis] + now[axis] - free[axis]);
+    let mut out = pose.clone();
+    for &hold in &holds {
+        if let Some(limb) = limb_of(&loose, hold)
+            && limb[2] == hold
+            && let Some((target, _)) = before.get(hold)
+        {
+            // A pinned hand or foot stays where it is; a foot only the
+            // ground holds goes across with the body and stays down.
+            let target = if pins.contains(&hold) {
+                *target
+            } else {
+                [target[0] + shift[0], target[1], target[2] + shift[2]]
+            };
+            out = reached(&out, &loose, limb, target, keep);
+            // The held hand or foot keeps facing the way it did (a
+            // foot stays flat on the floor as its knee bends).
+            let placed = super::solve(&out, &loose);
+            if let (Some((_, above)), Some((_, was))) = (placed.get(limb[1]), before.get(hold)) {
+                let turn = degrees(&mul(&transpose(above), was));
+                out.0[hold] = if keep {
+                    clamped(turn, &limits(body, hold))
+                } else {
+                    turn
+                };
+            }
+        }
+    }
+    (out, position)
+}
+
+/// `pose` with the trunk leaned so the foot of the neck comes toward
+/// `target` (a point in the world): the spine takes half the turn, the
+/// chest the rest. On a figure without a trunk of its own (a hand, a
+/// head, an imported model) `joint` is aimed there instead.
+#[must_use]
+pub fn leaned(pose: &Pose, body: &Body, joint: usize, target: [f32; 3], keep: bool) -> Pose {
+    if body.kind != Kind::Body {
+        return aimed_at(pose, body, joint, target, keep);
+    }
+    let shaped = human::shaped(body);
+    let mut out = pose.clone();
+    if out.0.len() <= at::NECK {
+        out.0.resize(at::NECK + 1, [0.0; 3]);
+    }
+    let toward = own_space(body, target);
+    for (joint, share) in [(at::SPINE, 0.5), (at::CHEST, 1.0)] {
+        let placed = human::posed(&out, &shaped, body);
+        let (from, frame) = placed[joint];
+        let parent = shaped.joints[joint]
+            .parent
+            .map_or(IDENTITY, |parent| placed[parent].1);
+        let (Some(now), Some(aim)) = (
+            unit(minus(placed[at::NECK].0, from)),
+            unit(minus(toward, from)),
+        ) else {
+            continue;
+        };
+        let turned = mul(&partly(&between(now, aim), share), &frame);
+        out.0[joint] = degrees(&mul(&transpose(&parent), &turned));
+    }
+    if keep {
+        out = limited(&out, body);
+    }
+    out
+}
+
 /// A joint's turn with `by` degrees more about its own axis `axis` (0
 /// x, 1 y, 2 z): what a ring of the rotation manipulator does.
 #[must_use]
@@ -916,6 +1031,97 @@ mod tests {
             },
         );
         assert!(spread.0[1][2] > 10.0 && spread.0[10][2] < -15.0);
+    }
+
+    #[test]
+    fn the_whole_body_moves_and_leans_with_its_holds_staying_put() {
+        // Off the ground: the hips go where they are taken, pinned
+        // hands and feet stay, the rest of the body comes along.
+        let body = Body {
+            ground: false,
+            ..Body::default()
+        };
+        let mut base = body.standing();
+        base.0[6] = [-70.0, 0.0, 0.0];
+        base.0[9] = [-70.0, 0.0, 0.0];
+        let before = solve(&base, &body);
+        let shift = [0.06, -0.12, 0.05];
+        let pins = [7, 13, 16];
+        let (pose, position) = moved(&base, &body, shift, &pins, true);
+        let placed = Body {
+            place: crate::three::Placement {
+                position,
+                ..body.place
+            },
+            ..body
+        };
+        let after = solve(&pose, &placed);
+        for axis in 0..3 {
+            assert!((after[0].0[axis] - before[0].0[axis] - shift[axis]).abs() < 1e-4);
+        }
+        for pin in pins {
+            assert!(
+                far(after[pin].0, before[pin].0) < 0.02,
+                "{pin} stays: {}",
+                far(after[pin].0, before[pin].0)
+            );
+        }
+        assert!(far(after[10].0, before[10].0) > 0.1, "the free hand moves");
+        assert!(pose.0[12][0] > 20.0, "the knees bend: {:?}", pose.0[12]);
+        // Nothing held: the figure just moves, its pose untouched.
+        let (same, there) = moved(&base, &body, shift, &[], true);
+        assert_eq!(same, base);
+        assert_eq!(there, shift);
+        // A body that keeps to the ground: its feet hold by themselves,
+        // lowering the hips bends the knees and the feet stay on the
+        // floor; it is not sunk into it.
+        let grounded = Body::default();
+        let rest = grounded.standing();
+        let stood = solve(&rest, &grounded);
+        let (crouched, position) = moved(&rest, &grounded, [0.05, -0.2, 0.0], &[], true);
+        assert_eq!(position, [0.05, 0.0, 0.0]);
+        let low = solve(
+            &crouched,
+            &Body {
+                place: crate::three::Placement {
+                    position,
+                    ..grounded.place
+                },
+                ..grounded
+            },
+        );
+        assert!(
+            (low[0].0[1] - (stood[0].0[1] - 0.2)).abs() < 0.03,
+            "the hips came down: {} from {}",
+            low[0].0[1],
+            stood[0].0[1]
+        );
+        for foot in [13, 16] {
+            let went = [stood[foot].0[0] + 0.05, stood[foot].0[1], stood[foot].0[2]];
+            assert!(far(low[foot].0, went) < 0.03, "foot {foot} stays down");
+        }
+        // Leaning: the trunk bends toward the pointer, the hips and
+        // legs stay, a pinned hand is brought back by its arm.
+        let neck = stood[3].0;
+        let target = [neck[0] + 0.25, neck[1] - 0.05, neck[2] + 0.1];
+        let lean = leaned(&rest, &grounded, 2, target, true);
+        assert!(lean.0[1] != rest.0[1] && lean.0[2] != rest.0[2]);
+        assert_eq!(lean.0[0], rest.0[0]);
+        let bent = solve(&lean, &grounded);
+        assert!(far(bent[3].0, target) < far(neck, target) * 0.5);
+        assert!(far(bent[13].0, stood[13].0) < 1e-4);
+        let pinned = held(&lean, &rest, &grounded, &[7], true);
+        let kept = solve(&pinned, &grounded);
+        assert!(far(kept[7].0, stood[7].0) < 0.03, "the pinned hand stays");
+        // Dragging a pinned limb's own root (the upper arm) keeps the
+        // pin: the elbow swings, the wrist does not move.
+        let elbow = stood[6].0;
+        let out = [elbow[0] + 0.2, elbow[1] + 0.05, elbow[2] - 0.1];
+        let swung = aimed_at(&base, &body, 5, out, true);
+        let swung = held(&swung, &base, &body, &[7], true);
+        let now = solve(&swung, &body);
+        assert!(far(now[7].0, before[7].0) < 0.03, "the wrist is held");
+        assert!(far(now[6].0, before[6].0) > 0.02, "the elbow swung");
     }
 
     #[test]

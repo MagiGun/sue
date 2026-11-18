@@ -257,8 +257,14 @@ pub(crate) enum Gesture {
         /// How the drag poses: 0 bends and swings the joint, 1 twists
         /// it, 2 takes the part where the pointer goes (a hand or foot
         /// with its limb following), 3 to 5 turn the joint about its own
-        /// x, y or z (a ring of the rotation manipulator).
+        /// x, y or z (a ring of the rotation manipulator), 6 to 8 move
+        /// the whole body along the world's x, y or z (an arrow of the
+        /// translate manipulator), 9 moves it where the pointer goes,
+        /// 10 leans its trunk toward the pointer.
         how: u8,
+        /// Where the figure stood when the drag began: its place along
+        /// x, y and z, each `None` while nothing had placed it yet.
+        stood: [Option<f32>; 3],
         /// Where on the layer the drag began.
         grip: [f32; 2],
         /// The point of the model the drag carries, and for a ring the

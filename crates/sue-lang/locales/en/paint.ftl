@@ -2121,6 +2121,7 @@ name-chalk = Chalk
 drawing-figure = Drawing figure
 n-3d-drawing-figure = 3D Drawing Figure
 pose = Pose
+figure-move = Move figure
 choose-a-pose = Choose a pose
 flip-pose = Flip pose
 reset-pose = Reset pose

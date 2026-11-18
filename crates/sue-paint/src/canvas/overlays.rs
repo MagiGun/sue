@@ -17,6 +17,10 @@ const TITLE_SAFE: f32 = 0.8;
 
 /// A pinned joint's square, in small rings across.
 const PIN_SIDE: f32 = 2.6;
+/// How far back an arrow head of the translate manipulator reaches and
+/// how wide half of it is, in small rings.
+const ARROW_BACK: f32 = 0.6;
+const ARROW_HALF: f32 = 0.8;
 
 impl SuePaint {
     pub(super) fn overlays(
@@ -661,6 +665,36 @@ impl SuePaint {
                     painter.add(egui::Shape::line(
                         points,
                         Stroke::new(marks::heavy(theme), color),
+                    ));
+                }
+            }
+            // The translate manipulator at the root: an arrow along
+            // each of the world's axes, to move the whole body.
+            if let Some(arrows) =
+                chosen.and_then(|joint| crate::figure::arrows(&pose, &body, joint))
+            {
+                for ([from, to], color) in arrows.iter().zip([
+                    Color32::from_rgb(235, 80, 80),
+                    Color32::from_rgb(80, 190, 90),
+                    Color32::from_rgb(80, 130, 245),
+                ]) {
+                    let (Some(a), Some(b)) = (place(*from), place(*to)) else {
+                        continue;
+                    };
+                    let stroke = Stroke::new(marks::heavy(theme), color);
+                    painter.line_segment([a, b], stroke);
+                    // The arrow's head.
+                    let along = (b - a).normalized();
+                    let across = egui::Vec2::new(-along.y, along.x);
+                    let head = marks::ring_small(theme);
+                    painter.add(egui::Shape::convex_polygon(
+                        vec![
+                            b + along * head,
+                            b - along * head * ARROW_BACK + across * head * ARROW_HALF,
+                            b - along * head * ARROW_BACK - across * head * ARROW_HALF,
+                        ],
+                        color,
+                        Stroke::NONE,
                     ));
                 }
             }

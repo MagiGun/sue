@@ -263,8 +263,9 @@ impl SuePaint {
                 layer,
                 base,
                 before,
+                stood,
                 ..
-            } => self.finish_pose(cx, layer, &base, &before),
+            } => self.finish_pose(cx, layer, &base, &before, Some(stood)),
             gesture @ Gesture::RulerHandle { .. } => self.ruler_handle_release(gesture, cx),
             Gesture::Outline { sub, points } if sub.tool == Tool::Text => {
                 self.text_on_curve(&points, cx);

@@ -76,7 +76,29 @@ impl SuePaint {
                 }
                 best.map(|(axis, _, way)| (joint, axis, center, way))
             });
-            let part = if ring.is_some() {
+            // An arrow of the translate manipulator at the root: it
+            // moves the whole body along one of the world's axes.
+            let arrow = if ring.is_some() {
+                None
+            } else {
+                self.figure_joint.and_then(|joint| {
+                    let arrows = crate::figure::arrows(&sight.pose, &sight.body, joint)?;
+                    let mut best: Option<(usize, f32, [f32; 3])> = None;
+                    for (axis, [from, to]) in arrows.iter().enumerate() {
+                        let (Some(a), Some(b)) =
+                            (sight.lens.project(*from), sight.lens.project(*to))
+                        else {
+                            continue;
+                        };
+                        let near = crate::canvas::overlays::segment_distance(local, a, b);
+                        if near <= reach && best.is_none_or(|(_, least, _)| near < least) {
+                            best = Some((axis, near, *from));
+                        }
+                    }
+                    best.map(|(axis, _, from)| (joint, axis, from))
+                })
+            };
+            let part = if ring.is_some() || arrow.is_some() {
                 None
             } else {
                 self.figure_part_at(&cx.world.arena, layer, p, size)
@@ -84,6 +106,23 @@ impl SuePaint {
             let before = doc::raster(&cx.world.arena, layer)
                 .and_then(|raster| raster.bytes())
                 .map(<[u8]>::to_vec);
+            let stood = cx
+                .world
+                .arena
+                .get_by_id(sight.model)
+                .map_or([None; 3], |model| {
+                    [
+                        crate::three::OBJECT_X,
+                        crate::three::OBJECT_Y,
+                        crate::three::OBJECT_Z,
+                    ]
+                    .map(|key| {
+                        model
+                            .property(key)
+                            .and_then(sue_core::Value::as_f64)
+                            .map(|value| value as f32)
+                    })
+                });
             if let (Some((joint, axis, center, way)), Some(before)) = (ring, before.clone()) {
                 self.gesture = Some(Gesture::Pose {
                     layer,
@@ -92,8 +131,23 @@ impl SuePaint {
                     base: sight.pose,
                     before,
                     how: 3 + axis as u8,
+                    stood,
                     grip: local,
                     like: [center[0], center[1], way],
+                });
+                return;
+            }
+            if let (Some((joint, axis, from)), Some(before)) = (arrow, before.clone()) {
+                self.gesture = Some(Gesture::Pose {
+                    layer,
+                    joint,
+                    start: pos,
+                    base: sight.pose,
+                    before,
+                    how: 6 + axis as u8,
+                    stood,
+                    grip: local,
+                    like: from,
                 });
                 return;
             }
@@ -103,13 +157,18 @@ impl SuePaint {
                 // What the drag carries: the wrist or ankle of a limb,
                 // else the far end of the part.
                 let limb = crate::figure::limb_of(&sight.body, joint);
-                let like = match limb {
-                    Some(limb) => placed[limb[2]].0,
-                    None => placed[joint].1,
-                };
                 let root = joints
                     .get(joint)
                     .is_some_and(|joint| joint.parent.is_none());
+                let trunk = sight.body.kind == crate::figure::Kind::Body && matches!(joint, 1 | 2);
+                let like = match limb {
+                    Some(limb) => placed[limb[2]].0,
+                    // The hips are carried by their own place, the
+                    // trunk by the foot of the neck.
+                    None if root => placed[joint].0,
+                    None if trunk => placed[3].0,
+                    None => placed[joint].1,
+                };
                 self.figure_joint = Some(joint);
                 self.gesture = Some(Gesture::Pose {
                     layer,
@@ -117,13 +176,22 @@ impl SuePaint {
                     start: pos,
                     base: sight.pose,
                     before,
+                    // The hips carry the whole body where they are
+                    // dragged (Ctrl bends and swings it instead); the
+                    // spine and chest lean the trunk.
                     how: if modifiers.shift {
                         1
-                    } else if root {
+                    } else if root && modifiers.command {
                         0
+                    } else if root {
+                        9
+                    } else if sight.body.kind == crate::figure::Kind::Body && matches!(joint, 1 | 2)
+                    {
+                        10
                     } else {
                         2
                     },
+                    stood,
                     grip: local,
                     like,
                 });
@@ -175,6 +243,7 @@ impl SuePaint {
             start,
             base,
             how,
+            stood,
             grip,
             like,
             ..
@@ -183,6 +252,7 @@ impl SuePaint {
             return;
         };
         let (layer, joint, how, grip, like) = (*layer, *joint, *how, *grip, *like);
+        let stood = *stood;
         let (dx, dy) = (pos.x - start.x, pos.y - start.y);
         let base = base.clone();
         let mut pose = base.clone();
@@ -192,12 +262,26 @@ impl SuePaint {
         let Some(sight) = self.figure_sight(&cx.world.arena, layer) else {
             return;
         };
-        let body = sight.body;
+        // The body as it stood when the drag began: the previews since
+        // have moved it.
+        let mut body = sight.body;
+        body.place.position = stood.map(|value| value.unwrap_or(0.0));
         let keep = self.figure_limits;
+        let pinned: Vec<usize> = cx
+            .world
+            .arena
+            .get_by_id(sight.model)
+            .map(crate::figure::pins_of)
+            .unwrap_or_default();
+        let mut stands = None;
         let here = self
             .doc()
             .map(|doc| doc.view.to_picture(viewport, size, pos));
         let local = here.map(|p| [p.x - sight.offset[0], p.y - sight.offset[1]]);
+        // A press that has not moved yet moves nothing.
+        if matches!(how, 6..=10) && local.is_some_and(|local| local == grip) {
+            return;
+        }
         match (how, local) {
             (1, _) => {
                 pose.0[joint][1] = base.0[joint][1] + dx * 0.6;
@@ -218,6 +302,54 @@ impl SuePaint {
                     Some(limb) => crate::figure::reached(&base, &body, limb, target, keep),
                     None => crate::figure::aimed_at(&base, &body, joint, target, keep),
                 };
+            }
+            (6..=9, Some(local)) => {
+                // The whole body: along an arrow's axis as far as the
+                // pointer went along the arrow, or where the pointer
+                // takes the hips, as far from the camera as they were.
+                let lens = crate::three::Camera::new(
+                    &cx.world
+                        .arena
+                        .get_by_id(layer)
+                        .ok()
+                        .map(crate::three::View3D::of)
+                        .unwrap_or_default(),
+                    self.figure_canvas(&cx.world.arena, layer),
+                    body.frame(),
+                );
+                let Some(from) = lens.project(like) else {
+                    return;
+                };
+                let by = [local[0] - grip[0], local[1] - grip[1]];
+                let shift = if how == 9 {
+                    let to = lens.unproject([from[0] + by[0], from[1] + by[1]], like);
+                    [0, 1, 2].map(|axis| to[axis] - like[axis])
+                } else {
+                    let axis = usize::from(how - 6);
+                    let mut ahead = like;
+                    ahead[axis] += 1.0;
+                    let Some(to) = lens.project(ahead) else {
+                        return;
+                    };
+                    let along = [to[0] - from[0], to[1] - from[1]];
+                    let long = along[0] * along[0] + along[1] * along[1];
+                    let mut shift = [0.0; 3];
+                    if long > 1e-6 {
+                        shift[axis] = (by[0] * along[0] + by[1] * along[1]) / long;
+                    }
+                    shift
+                };
+                let (moved, position) = crate::figure::moved(&base, &body, shift, &pinned, keep);
+                pose = moved;
+                stands = Some(position);
+            }
+            (10, Some(local)) => {
+                let Some(from) = sight.lens.project(like) else {
+                    return;
+                };
+                let to = [from[0] + local[0] - grip[0], from[1] + local[1] - grip[1]];
+                let target = sight.lens.unproject(to, like);
+                pose = crate::figure::leaned(&base, &body, joint, target, keep);
             }
             (3..=5, Some(local)) => {
                 let angle = |p: [f32; 2]| (p[1] - like[1]).atan2(p[0] - like[0]).to_degrees();
@@ -251,19 +383,20 @@ impl SuePaint {
         // Pinned hands and feet stay where they were (but not the one
         // being dragged).
         let dragged = crate::figure::limb_of(&body, joint).map(|limb| limb[2]);
-        let pins: Vec<usize> = cx
-            .world
-            .arena
-            .get_by_id(sight.model)
-            .map(crate::figure::pins_of)
-            .unwrap_or_default()
+        let pins: Vec<usize> = pinned
             .into_iter()
             .filter(|pin| Some(*pin) != dragged || how != 2)
             .collect();
-        if !pins.is_empty() {
+        // (Moving the whole body has held them already.)
+        if !pins.is_empty() && stands.is_none() {
             pose = crate::figure::held(&pose, &base, &body, &pins, keep);
         }
-        self.preview_pose(cx, layer, &pose);
+        self.preview_pose(cx, layer, &pose, stands);
+    }
+
+    /// The size of 3D layer `layer`'s picture.
+    fn figure_canvas(&self, arena: &sue_core::Arena, layer: sue_core::EntityId) -> [u32; 2] {
+        doc::raster(arena, layer).map_or([1, 1], |raster| [raster.width(), raster.height()])
     }
 
     /// How the drawing figure of 3D layer `layer` is seen: its camera,

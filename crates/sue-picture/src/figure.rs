@@ -94,7 +94,7 @@ mod posing;
 pub(crate) mod skin;
 pub use posing::{
     HandSetup, Limits, aimed_at, hand_from_body, hand_onto_body, hand_pose, hand_setup, hanging,
-    held, limb_of, limited, limits, reached, retargeted, turned,
+    held, leaned, limb_of, limited, limits, moved, reached, retargeted, turned,
 };
 
 /// The class of a drawing figure's model entity.
@@ -2048,6 +2048,29 @@ pub fn rings(pose: &Pose, body: &Body, joint: usize) -> Option<[Vec<[f32; 3]>; 3
     }))
 }
 
+/// The three arrows of the translate manipulator at the root of the
+/// posed body (its hips): for the world's x, y and z, where the arrow
+/// starts and ends, just outside the rotation rings. Dragging one moves
+/// the whole body along that axis ([`moved`]). `None` for a joint that
+/// is not the root.
+#[must_use]
+pub fn arrows(pose: &Pose, body: &Body, joint: usize) -> Option<[[[f32; 3]; 2]; 3]> {
+    let joints = body.joints();
+    if joints.get(joint)?.parent.is_some() {
+        return None;
+    }
+    let at = solve(pose, body).get(joint)?.0;
+    let size = body.frame().1 * body.place.scale;
+    let (from, to) = (size * 0.085, size * 0.16);
+    Some([0, 1, 2].map(|axis| {
+        let mut start = at;
+        let mut end = at;
+        start[axis] += from;
+        end[axis] += to;
+        [start, end]
+    }))
+}
+
 /// The hands and feet pinned on figure model `entity`, by joint.
 #[must_use]
 pub fn pins_of(entity: &Entity) -> Vec<usize> {
@@ -2160,6 +2183,35 @@ pub fn set_pose(arena: &Arena, layer: EntityId, pose: &Pose, label: &str) -> Opt
             .then(SetProperty::new(model, POSE, pose.to_text()))
             .then(ReplaceComponent::new(layer, drawn, label)),
     )
+}
+
+/// [`set_pose`], also standing the figure at `position`, as one step:
+/// what moving the whole body records.
+#[must_use]
+pub fn set_pose_placed(
+    arena: &Arena,
+    layer: EntityId,
+    pose: &Pose,
+    position: [f32; 3],
+    label: &str,
+) -> Option<Edit> {
+    let model = of_layer(arena, layer)?;
+    let raster = crate::doc::raster(arena, layer)?;
+    let size = [raster.width(), raster.height()];
+    let view = crate::three::View3D::of(arena.get_by_id(layer).ok()?);
+    let mut body = Body::of(arena.get_by_id(model).ok()?);
+    body.place.position = position;
+    let buffers = render(pose, &body, &view, size);
+    let drawn = crate::three::draw(&buffers, &view)?;
+    let mut edit = Edit::new(label).then(SetProperty::new(model, POSE, pose.to_text()));
+    for (key, value) in [
+        (crate::three::OBJECT_X, position[0]),
+        (crate::three::OBJECT_Y, position[1]),
+        (crate::three::OBJECT_Z, position[2]),
+    ] {
+        edit = edit.then(SetProperty::new(model, key, f64::from(value)));
+    }
+    Some(edit.then(ReplaceComponent::new(layer, drawn, label)))
 }
 
 /// [`set_pose`], also turning the layer's camera to `view`, as one step.
