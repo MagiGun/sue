@@ -652,7 +652,10 @@ macro_rules! tr {
         $crate::text($namespace, $key)
     };
     ($namespace:expr, $key:expr, $($name:ident = $value:expr),+ $(,)?) => {{
-        #[allow(unused_imports)]
+        #[allow(
+            unused_imports,
+            reason = "each argument picks one of the two traits by its type, so a call whose arguments are all of one kind leaves the other unused"
+        )]
         use $crate::args::{ViaDisplay as _, ViaNumber as _};
         $crate::text_with(
             $namespace,

@@ -29,32 +29,32 @@ rows are at the end.
 
 | Area | done | partial | missing | percent |
 | --- | --- | --- | --- | --- |
-| File: new, open and save | 11 | 1 | 3 | 77 |
-| File: export | 15 | 1 | 2 | 86 |
-| File: import, batch and scanning | 6 | 4 | 5 | 53 |
+| File: new, open and save | 12 | 2 | 2 | 81 |
+| File: export | 17 | 1 | 1 | 92 |
+| File: import, batch and scanning | 8 | 4 | 4 | 63 |
 | Edit: undo, clipboard and fills | 9 | 5 | 0 | 82 |
-| Edit: transform and canvas size | 8 | 6 | 0 | 79 |
+| Edit: transform and canvas size | 12 | 2 | 0 | 93 |
 | Tonal correction and color | 11 | 1 | 0 | 96 |
 | Filters | 20 | 0 | 0 | 100 |
-| Layers | 17 | 5 | 0 | 89 |
-| Selection | 9 | 0 | 0 | 100 |
+| Layers | 22 | 5 | 0 | 91 |
+| Selection | 10 | 0 | 0 | 100 |
 | Rulers and symmetry | 7 | 1 | 0 | 94 |
 | Comics: frames, balloons and webtoons | 14 | 1 | 0 | 97 |
 | Story: multi-page works (EX) | 8 | 5 | 2 | 70 |
-| Animation | 21 | 1 | 0 | 98 |
-| Tools and drawing | 36 | 8 | 1 | 89 |
+| Animation | 28 | 1 | 0 | 98 |
+| Tools and drawing | 39 | 7 | 1 | 90 |
 | Text | 6 | 3 | 1 | 75 |
 | Vector | 11 | 2 | 0 | 92 |
-| 3D | 7 | 2 | 4 | 62 |
+| 3D | 13 | 7 | 6 | 63 |
 | Colors | 9 | 0 | 1 | 90 |
-| View and navigation | 10 | 3 | 0 | 88 |
-| Window, palettes and workspaces | 26 | 3 | 1 | 92 |
+| View and navigation | 11 | 3 | 0 | 89 |
+| Window, palettes and workspaces | 28 | 1 | 1 | 95 |
 | Materials and assets | 6 | 3 | 1 | 75 |
 | Print | 0 | 2 | 2 | 25 |
-| Preferences and settings | 5 | 2 | 1 | 75 |
-| File formats | 9 | 3 | 2 | 75 |
+| Preferences and settings | 6 | 1 | 1 | 81 |
+| File formats | 9 | 3 | 1 | 81 |
 | Sue's own, beyond Clip Studio | 7 | 0 | 0 | 100 |
-| **All of Sue Paint** | 277 | 61 | 26 | 84 |
+| **All of Sue Paint** | 324 | 60 | 24 | 87 |
 
 A row counts 1 as `done`, half as `partial` and 0 as `missing`:
 percent = (done + partial / 2) / (done + partial + missing) x 100,
@@ -112,7 +112,7 @@ The order of work is the plan at the end.
 | Register and Delete canvas presets | File > New | done | Kept with your other Sue Paint settings |
 | Create New from Clipboard | File > Create New from Clipboard | done | A new canvas from the picture on the clipboard |
 | Create new from movie | File > Create new from movie | missing | An animation project from a video |
-| Open pictures and projects | File > Open | done | PNG, JPEG, JPEG XL and Sue projects through the system's own dialog (`FilePick`) |
+| Open pictures and projects | File > Open | done | Sue projects, PNG, JPEG, JPEG XL, WebP, TIFF, BMP, GIF, Targa, QOI, ICO, the PPM family, Photoshop files and .clip (see the rows below for those two), through the system's own dialog (`FilePick`) |
 | Open .clip files | File > Open | partial | Layers, folders with their own blend mode and clipping, masks as masks, paper as paper, gray layers, pixels off the canvas, draft and reference come in, and the layer color effect. A .clip Sue wrote opens live: fill, gradient and correction layers, text, vector lines, effects, palette colors, rulers, layer comps and the timeline (animation folders and cels, keyframes, the 2D camera, sound). From a file Clip Studio saved, fill layers, linear gradients, text (its words, font, size, color and place) and vector lines (points, width, taper and color) open live from Clip Studio's own storage, Sue drawing the text and lines Clip Studio stores no pixels for; gray layers come in as their grays. Correction layers and circle or ellipse gradients still arrive empty, with their Clip Studio data kept for the way back. The status bar says per layer what was not exact |
 | Recent files, Clear Recent Files | File > Recent | done | |
 | Close | File > Close | done | |
@@ -121,7 +121,7 @@ The order of work is the plan at the end.
 | Save Duplicate: BMP, JPEG, PNG, TIFF, Targa, WebP, PSB, PSD | File > Save Duplicate | done | JPEG XL, GIF, QOI, ICO and PPM too; a flat picture goes through the export settings first |
 | Show in folder | none (Sue's own) | done | File > Show in Folder shows the file the canvas was opened from or last written to; grayed while it has none |
 | Revert | File > Revert | done | Reloads the last saved file, and says so when nothing was saved yet |
-| Manage fonts | File > Manage fonts | missing | Text reads the installed fonts from `sue_wm::fonts`; no manager yet |
+| Manage fonts | File > Manage fonts | partial | File > Manage Fonts lists the fonts every font menu of Sue offers (`sue_wm::fonts`), with a search, each family's faces and a sample line; fonts are not added or removed there |
 | Connect to smartphone | File > Connect to smartphone | missing | Companion Mode, a phone as a second screen |
 | Quit | File > Quit | done | Back to the Hub first |
 
@@ -137,7 +137,6 @@ The order of work is the plan at the end.
 | Export animation: movie | File > Export animation > Movie | done | MP4 (H.264 and AAC, through Windows' own encoder) with the timeline's sound; Motion JPEG AVI where Windows has no encoder; size, frame rate, quality, 2D camera, frames |
 | Export animation: Animated sticker (APNG) | File > Export animation | done | Loops forever; other viewers show the first frame |
 | Export animation: Animated WebP | File > Export animation | done | Lossless frames, looping |
-| Export animation: OpenToonz Scene File | File > Export animation | missing | |
 | Export animation: Exposure sheet | File > Export animation | done | As CSV: frames down, folders across |
 | Export animation cels | File > Export animation > Export animation cels | done | Every cel as its own picture, a folder for each animation folder |
 | Export multiple pages: PDF (EX) | File > Export multiple pages > .pdf | done | A book of every page, manga read right to left |
@@ -159,7 +158,7 @@ The order of work is the plan at the end.
 | Pattern from Image | File > Import > Pattern from Image | partial | Command exists; verify it lands as a tileable material |
 | Import vector | File > Import > Vector | partial | Command exists; verify what it reads |
 | Import audio | File > Import > Audio | done | A sound on the timeline from the frame you are on |
-| Import movie | File > Import > Movie | partial | Command exists; an animation from a movie is a phone template |
+| Import movie | File > Import > Movie | partial | The command takes an animated GIF, APNG, animated WebP or Motion JPEG AVI; MP4 is not read; verify how the frames land on the timeline |
 | Import 3D data (glTF, GLB, OBJ) | File > Import > 3D Data, or drop the file on the canvas | done | The file is kept inside the picture and among the 3D object materials; a skinned glTF is posed by its bones |
 | FBX import (5.1) | File > Import | missing | |
 | 3D pose from Posemaniacs | File > Import > 3D pose | missing | |
@@ -652,7 +651,6 @@ decorations. Light and heavy pressure and a flick need a tablet.
 | PDF, EPUB (EX) | Export multiple pages | done | |
 | Animated GIF, MP4 | Export animation | done | |
 | APNG, Animated WebP | Export animation | done | |
-| OpenToonz scene | Export animation | missing | |
 | OBJ (3D import) | File > Import > 3D Data | done | |
 | FBX (5.1) | File > Import | missing | |
 
@@ -680,9 +678,15 @@ should build them from this list:
 - Downloading a brush or a picture from a link. Brushes and pictures
   that are already on the device are imported instead (Sub Tool
   palette, the Hub's Materials place).
-- Anything that needs a Clip Studio account, its cloud files among
-  them, and anything for Clip Studio's own hardware: no menu item, no
-  settings page.
+$1- Five entries Clip Studio shows in its menus that no tutorial Sue
+  follows uses: the three Toei exposure sheet entries of the Timeline
+  menu, File, Export animation, OpenToonz Scene File, and Edit, Shading
+  Assist. Sue's own exposure sheet (CSV in and out) is in the rows
+  above.
+- The desktop layout on a phone, for now: a phone gets Simple Mode and
+  Studio Mode, whose palettes are sheets. The layout with docked
+  palettes needs more room than a phone has; it comes back to this list
+  when the phone app is looked at again.
 
 ## The plan
 
@@ -694,20 +698,17 @@ the rest:
    `sue-model` carry them.
 2. The Story menu's depth: Story Editor, Batch Import Text, Combine and
    Split Pages, project and page settings. Multi-page is what EX sells.
-3. Export: APNG and Animated WebP, movie export with its sound, Batch
-   process and fanzine printing data, Export vectors and layer comps.
-4. The last filters: Glow, Inflate and Drop shadow; the rest of the set
-   is built, so check each dialog against Clip Studio's as you go.
-5. Smart Shape, Clip Studio 5.0's headline feature, on every pen and
-   brush.
-6. 3D: drawing figures with poses, painting directly on 3D, heads and
+3. Export: Batch process and fanzine printing data.
+4. Filters: every one is built; check each dialog against Clip Studio's
+   as you go.
+5. 3D: drawing figures with poses, painting directly on 3D, heads and
    hands, then the rest of the 3D rows.
-7. Materials: user tags, pose and 3D materials.
-8. Text depth: mixed fonts and sizes in one layer, spacing and
+6. Materials: user tags, pose and 3D materials.
+7. Text depth: mixed fonts and sizes in one layer, spacing and
    justification.
-9. The verify rows: every row whose note says verify, checked against
+8. The verify rows: every row whose note says verify, checked against
    the running app and settled.
-10. Print: the print dialog and settings, then multiple pages and CMYK
-    PDF.
+9. Print: the print dialog and settings, then multiple pages and CMYK
+   PDF.
 
 Then the rest, row by row.

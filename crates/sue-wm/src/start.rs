@@ -20,272 +20,23 @@ use crate::Theme;
 use crate::icons::{self, Icon};
 use crate::ui::{Density, Radius, Space};
 
-/// A picture drawn for a button, a row or a card. Sue draws its own.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Glyph {
-    /// A pen nib: start drawing.
-    Draw,
-    /// A stack of pictures: projects.
-    Projects,
-    /// A circle, a square and a triangle: materials.
-    Materials,
-    /// Two arrows, one each way: data transfers.
-    Transfers,
-    /// A question mark: help.
-    Help,
-    /// A gear: settings.
-    Settings,
-    /// A plus.
-    Add,
-    /// A bin.
-    Delete,
-    /// A pencil: rename.
-    Rename,
-    /// A heart: a favorite.
-    Heart,
-    /// A right chevron in a circle: details.
-    Details,
-    /// A right chevron.
-    Chevron,
-    /// A down chevron.
-    ChevronDown,
-    /// A magnifying glass.
-    Search,
-    /// Large cards.
-    Grid,
-    /// Small cards.
-    GridSmall,
-    /// Rows.
-    List,
-    /// Sorting, first to last.
-    SortUp,
-    /// Sorting, last to first.
-    SortDown,
-    /// An X.
-    Close,
-    /// A box with an arrow out of it: opens elsewhere.
-    External,
-    /// A crescent: dark mode.
-    Moon,
-    /// A folder.
-    Folder,
-    /// A wrench.
-    Wrench,
-    /// A tick.
-    Check,
-    /// A landscape in a frame: a picture.
-    Picture,
-    /// A brush.
-    Brush,
-    /// Crossed lines: a pattern.
-    Pattern,
-    /// Dots: a screentone.
-    Tone,
-    /// A cube: 3D.
-    Cube,
-    /// A clock: recently used.
-    Clock,
-    /// A tag: a label.
-    Tag,
-    /// An arrow into a box: moving to a label.
-    Move,
-    /// A book: tips and guides.
-    Book,
-    /// A speech bubble: feedback.
-    Bubble,
-    /// An envelope: contact.
-    Mail,
-    /// A grid of dots: everything.
-    All,
-    /// An arrow to the left: back.
-    Back,
-    /// A strip of film: a movie.
-    Film,
-    /// Three dots: more.
-    More,
-    /// A house: home.
-    Home,
-    /// A circling arrow: load again.
-    Reload,
-}
-
-impl Glyph {
-    /// The icon of Sue's set ([`crate::icons`]) it is drawn as, so the
-    /// start pages and the Hub draw one family of pictures, and an icon
-    /// pack reaches them too.
-    #[must_use]
-    pub const fn icon(self) -> Icon {
-        match self {
-            Self::Draw => Icon::Draw,
-            Self::Projects => Icon::Projects,
-            Self::Materials => Icon::Materials,
-            Self::Transfers => Icon::Transfers,
-            Self::Help => Icon::Help,
-            Self::Settings => Icon::Settings,
-            Self::Add => Icon::Plus,
-            Self::Delete => Icon::Delete,
-            Self::Rename => Icon::Rename,
-            Self::Heart => Icon::Heart,
-            Self::Details => Icon::Details,
-            Self::Chevron => Icon::ChevronRight,
-            Self::ChevronDown => Icon::ChevronDown,
-            Self::Search => Icon::Search,
-            Self::Grid => Icon::ViewGrid,
-            Self::GridSmall => Icon::ViewGridSmall,
-            Self::List => Icon::ViewList,
-            Self::SortUp => Icon::SortUp,
-            Self::SortDown => Icon::SortDown,
-            Self::Close => Icon::Close,
-            Self::External => Icon::External,
-            Self::Moon => Icon::Moon,
-            Self::Folder => Icon::Folder,
-            Self::Wrench => Icon::Wrench,
-            Self::Check => Icon::Check,
-            Self::Picture => Icon::Picture,
-            Self::Brush => Icon::ToolBrush,
-            Self::Pattern => Icon::MaterialPattern,
-            Self::Tone => Icon::MaterialTone,
-            Self::Cube => Icon::Cube,
-            Self::Clock => Icon::Recent,
-            Self::Tag => Icon::Tag,
-            Self::Move => Icon::MoveTo,
-            Self::Book => Icon::Book,
-            Self::Bubble => Icon::Feedback,
-            Self::Mail => Icon::Mail,
-            Self::All => Icon::All,
-            Self::Back => Icon::ArrowLeft,
-            Self::Film => Icon::Film,
-            Self::More => Icon::More,
-            Self::Home => Icon::Home,
-            Self::Reload => Icon::Reload,
-        }
-    }
-}
-
-/// Draws `glyph` in `rect` in `color`: its icon from Sue's set.
-pub fn glyph(painter: &Painter, rect: Rect, glyph: Glyph, color: Color32) {
+/// Draws `icon` in the largest square in the middle of `rect`, in
+/// `color`.
+pub fn square_icon(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
     let side = rect.width().min(rect.height());
     icons::paint(
         painter,
         Rect::from_center_size(rect.center(), Vec2::splat(side)),
-        glyph.icon(),
+        icon,
         color,
     );
 }
 
-/// One button of a start page's rail.
-#[derive(Clone, Debug)]
-pub struct RailItem {
-    /// Its picture.
-    pub glyph: Glyph,
-    /// What it says under the picture.
-    pub label: String,
-    /// `true` for the large round button at the top (Draw, Write).
-    pub round: bool,
-}
-
-/// The rail: a column of large buttons with labels, filling `rect`.
-/// Returns the button clicked.
-pub fn rail(
-    ui: &mut Ui,
-    rect: Rect,
-    items: &[RailItem],
-    selected: Option<usize>,
-    theme: &Theme,
-) -> Option<usize> {
-    let painter = ui.painter().clone();
-    painter.rect_filled(rect, CornerRadius::ZERO, theme.panel);
-    painter.line_segment([rect.right_top(), rect.right_bottom()], theme.hairline());
-    let mut clicked = None;
-    let mut y = rect.top() + 8.0;
-    for (index, item) in items.iter().enumerate() {
-        let height = if item.round { 86.0 } else { 70.0 };
-        let cell = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), height));
-        let response = ui.interact(
-            cell,
-            ui.scope_id().with(("sue-start-rail", index)),
-            Sense::click(),
-        );
-        let on = selected == Some(index);
-        let hot = response.hovered();
-        let (ink, label) = if on || hot {
-            (theme.text, theme.text)
-        } else {
-            (theme.muted, theme.muted)
-        };
-        if item.round {
-            let center = pos2(cell.center().x, cell.top() + 32.0);
-            let fill = if hot { theme.text } else { theme.border_active };
-            painter.circle_filled(center, 25.0, fill);
-            glyph(
-                &painter,
-                Rect::from_center_size(center, Vec2::splat(26.0)),
-                item.glyph,
-                theme.void,
-            );
-            painter.text(
-                pos2(cell.center().x, cell.top() + 64.0),
-                Align2::CENTER_TOP,
-                &item.label,
-                theme.font(theme.small_size + 1.0),
-                theme.text,
-            );
-            // A line under the round button, as in a launcher.
-            painter.line_segment(
-                [
-                    pos2(cell.left() + 14.0, cell.bottom() - 1.0),
-                    pos2(cell.right() - 14.0, cell.bottom() - 1.0),
-                ],
-                theme.hairline(),
-            );
-        } else {
-            if on || hot {
-                painter.rect_filled(
-                    cell.shrink2(vec2(4.0, 2.0)),
-                    theme.radius(Radius::Md),
-                    if on { theme.active } else { theme.hover },
-                );
-            }
-            if on {
-                // The accent: a bar on the selected button's edge.
-                painter.rect_filled(
-                    Rect::from_min_max(
-                        pos2(cell.left(), cell.top() + 2.0),
-                        pos2(cell.left() + 3.0, cell.bottom() - 2.0),
-                    ),
-                    theme.radius(Radius::Full),
-                    theme.border_active,
-                );
-            }
-            glyph(
-                &painter,
-                Rect::from_center_size(pos2(cell.center().x, cell.top() + 24.0), Vec2::splat(26.0)),
-                item.glyph,
-                ink,
-            );
-            let galley = painter.layout(
-                item.label.clone(),
-                theme.font(theme.small_size),
-                label,
-                cell.width() - 8.0,
-            );
-            let at = pos2(cell.center().x - galley.size().x / 2.0, cell.top() + 42.0);
-            painter.galley(at, galley, label);
-        }
-        if response.clicked() {
-            clicked = Some(index);
-        }
-        let _ = response.on_hover_text(&item.label);
-        y += height + 4.0;
-    }
-    clicked
-}
-
-/// A square button with a glyph, lit when `on`.
+/// A square button with an icon, lit when `on`.
 pub fn icon_button(
     ui: &mut Ui,
     rect: Rect,
-    picture: Glyph,
+    picture: Icon,
     hint: &str,
     on: bool,
     theme: &Theme,
@@ -293,11 +44,11 @@ pub fn icon_button(
     icon_button_enabled(ui, rect, picture, hint, on, true, theme)
 }
 
-/// A square button with a glyph, grayed and deaf when not `enabled`.
+/// A square button with an icon, grayed and deaf when not `enabled`.
 pub fn icon_button_enabled(
     ui: &mut Ui,
     rect: Rect,
-    picture: Glyph,
+    picture: Icon,
     hint: &str,
     on: bool,
     enabled: bool,
@@ -339,7 +90,7 @@ pub fn icon_button_enabled(
         theme.muted
     };
     let side = (rect.width().min(rect.height()) * 0.6).max(8.0);
-    glyph(
+    square_icon(
         painter,
         Rect::from_center_size(rect.center(), Vec2::splat(side)),
         picture,
@@ -372,10 +123,10 @@ pub fn search_box(
         theme.hairline(),
         StrokeKind::Inside,
     );
-    glyph(
+    square_icon(
         painter,
         Rect::from_center_size(pos2(rect.left() + 15.0, rect.center().y), Vec2::splat(14.0)),
-        Glyph::Search,
+        Icon::Search,
         theme.muted,
     );
     let field = Rect::from_min_max(
@@ -396,18 +147,18 @@ pub fn search_box(
             pos2(rect.right() - 14.0, rect.center().y),
             Vec2::splat(20.0),
         );
-        if icon_button(ui, clear, Glyph::Close, "", false, theme).clicked() {
+        if icon_button(ui, clear, Icon::Close, "", false, theme).clicked() {
             text.clear();
         }
     }
     response
 }
 
-/// A toolbar button: a glyph and a label, grayed and deaf when not
+/// A toolbar button: an icon and a label, grayed and deaf when not
 /// `enabled`, lit while `armed` (a first click that asks again).
 pub fn action(
     ui: &mut Ui,
-    picture: Glyph,
+    picture: Icon,
     label: &str,
     enabled: bool,
     armed: bool,
@@ -445,7 +196,7 @@ pub fn action(
     } else {
         theme.muted.gamma_multiply(0.5)
     };
-    glyph(
+    square_icon(
         painter,
         Rect::from_center_size(pos2(rect.left() + 15.0, rect.center().y), Vec2::splat(15.0)),
         picture,
@@ -562,7 +313,7 @@ pub fn check(ui: &mut Ui, label: &str, chosen: Chosen, theme: &Theme) -> Respons
         StrokeKind::Inside,
     );
     match chosen {
-        Chosen::All => glyph(painter, square.shrink(3.0), Glyph::Check, theme.text),
+        Chosen::All => square_icon(painter, square.shrink(3.0), Icon::Check, theme.text),
         Chosen::Some => {
             painter.line_segment(
                 [
@@ -616,13 +367,13 @@ pub fn dropdown(
         theme.font(theme.ui_size),
         theme.text,
     );
-    glyph(
+    square_icon(
         painter,
         Rect::from_center_size(
             pos2(rect.right() - 12.0, rect.center().y),
             Vec2::splat(12.0),
         ),
-        Glyph::ChevronDown,
+        Icon::ChevronDown,
         theme.muted,
     );
     let mut changed = false;
@@ -659,7 +410,7 @@ pub fn toggle(ui: &mut Ui, rect: Rect, on: bool, id: Id, theme: &Theme) -> bool 
 #[derive(Clone, Debug)]
 pub struct Category {
     /// Its picture, if any.
-    pub glyph: Option<Glyph>,
+    pub glyph: Option<Icon>,
     /// Its name.
     pub label: String,
     /// How deep in the tree, 0 at the top.
@@ -709,13 +460,13 @@ pub fn category(
     if let Some(open) = row.open {
         let arrow = Rect::from_min_size(pos2(x, rect.top() + 5.0), Vec2::splat(16.0));
         let fold = ui.interact(arrow, response.id.with("fold"), Sense::click());
-        glyph(
+        square_icon(
             painter,
             arrow.shrink(3.0),
             if open {
-                Glyph::ChevronDown
+                Icon::ChevronDown
             } else {
-                Glyph::Chevron
+                Icon::ChevronRight
             },
             theme.muted,
         );
@@ -725,7 +476,7 @@ pub fn category(
         x += 18.0;
     }
     if let Some(picture) = row.glyph {
-        glyph(
+        square_icon(
             painter,
             Rect::from_min_size(pos2(x, rect.top() + 6.0), Vec2::splat(14.0)),
             picture,
@@ -745,13 +496,13 @@ pub fn category(
         },
     );
     if row.open.is_none() && row.depth == 0 && row.glyph.is_none() {
-        glyph(
+        square_icon(
             painter,
             Rect::from_center_size(
                 pos2(rect.right() - 12.0, rect.center().y),
                 Vec2::splat(12.0),
             ),
-            Glyph::Chevron,
+            Icon::ChevronRight,
             theme.muted,
         );
     }
@@ -771,7 +522,7 @@ pub struct Card {
     /// The picture and its size in pixels, once there is one.
     pub picture: Option<(TextureId, [u32; 2])>,
     /// What to draw while there is no picture.
-    pub placeholder: Glyph,
+    pub placeholder: Icon,
     /// `Some(on)` to show a heart.
     pub favorite: Option<bool>,
     /// Ticked for a group action.
@@ -852,7 +603,7 @@ pub fn card(ui: &mut Ui, size: Vec2, card: &Card, theme: &Theme) -> (Option<Card
             StrokeKind::Inside,
         );
         if card.chosen {
-            glyph(&painter, tick.shrink(3.0), Glyph::Check, theme.text);
+            square_icon(&painter, tick.shrink(3.0), Icon::Check, theme.text);
         }
     }
     if tick_response.clicked() {
@@ -862,7 +613,7 @@ pub fn card(ui: &mut Ui, size: Vec2, card: &Card, theme: &Theme) -> (Option<Card
         let mut right = rect.right() - 4.0;
         let row_y = rect.bottom() - 13.0;
         let details = Rect::from_center_size(pos2(right - 10.0, row_y), Vec2::splat(20.0));
-        if icon_button(ui, details, Glyph::Details, "", false, theme).clicked() {
+        if icon_button(ui, details, Icon::Details, "", false, theme).clicked() {
             click = Some(CardClick::Details);
         }
         right -= 24.0;
@@ -876,7 +627,7 @@ pub fn card(ui: &mut Ui, size: Vec2, card: &Card, theme: &Theme) -> (Option<Card
             } else {
                 theme.muted.gamma_multiply(0.55)
             };
-            glyph(&painter, heart.shrink(3.0), Glyph::Heart, ink);
+            square_icon(&painter, heart.shrink(3.0), Icon::Heart, ink);
             if heart_response.clicked() {
                 click = Some(CardClick::Favorite);
             }
@@ -901,7 +652,7 @@ pub fn card(ui: &mut Ui, size: Vec2, card: &Card, theme: &Theme) -> (Option<Card
             pos2(rect.right() - 11.0, rect.bottom() - 11.0),
             Vec2::splat(14.0),
         );
-        glyph(&painter, heart, Glyph::Heart, theme.text);
+        square_icon(&painter, heart, Icon::Heart, theme.text);
     }
     if click.is_none() && response.clicked() {
         click = Some(
@@ -924,7 +675,7 @@ pub fn card(ui: &mut Ui, size: Vec2, card: &Card, theme: &Theme) -> (Option<Card
 }
 
 /// A card's picture fitted inside `rect` on a light ground, or its
-/// placeholder glyph.
+/// placeholder icon.
 fn picture(painter: &Painter, rect: Rect, card: &Card, theme: &Theme) {
     let inner = rect.shrink(theme.border_width.max(1.0));
     // Round at the top, as the card around it is; square where the
@@ -951,7 +702,7 @@ fn picture(painter: &Painter, rect: Rect, card: &Card, theme: &Theme) {
         _ => {
             painter.rect_filled(inner, ground, theme.void);
             let side = (inner.width().min(inner.height()) * 0.4).max(10.0);
-            glyph(
+            square_icon(
                 painter,
                 Rect::from_center_size(inner.center(), Vec2::splat(side)),
                 card.placeholder,
@@ -999,7 +750,7 @@ pub fn list_row(
         StrokeKind::Inside,
     );
     if card.chosen {
-        glyph(&painter, tick.shrink(3.0), Glyph::Check, theme.text);
+        square_icon(&painter, tick.shrink(3.0), Icon::Check, theme.text);
     }
     if tick_response.clicked() {
         click = Some(CardClick::Choose);
@@ -1029,7 +780,7 @@ pub fn list_row(
         pos2(rect.right() - 16.0, rect.center().y),
         Vec2::splat(22.0),
     );
-    if icon_button(ui, details, Glyph::Details, "", false, theme).clicked() {
+    if icon_button(ui, details, Icon::Details, "", false, theme).clicked() {
         click = Some(CardClick::Details);
     }
     if let Some(on) = card.favorite {
@@ -1038,10 +789,10 @@ pub fn list_row(
             Vec2::splat(20.0),
         );
         let heart_response = ui.interact(heart, response.id.with("heart"), Sense::click());
-        glyph(
+        square_icon(
             &painter,
             heart.shrink(3.0),
-            Glyph::Heart,
+            Icon::Heart,
             if on {
                 theme.text
             } else {
@@ -1091,7 +842,7 @@ pub enum Trailing {
 #[derive(Clone, Debug)]
 pub struct Row {
     /// Its picture, if any.
-    pub glyph: Option<Glyph>,
+    pub glyph: Option<Icon>,
     /// What it says.
     pub label: String,
     /// A second line in small text, if any.
@@ -1103,9 +854,9 @@ pub struct Row {
 }
 
 impl Row {
-    /// A row saying `label`, with `glyph` and `trailing`.
+    /// A row saying `label`, with the icon `glyph` and `trailing`.
     #[must_use]
-    pub fn new(glyph: Option<Glyph>, label: impl Into<String>, trailing: Trailing) -> Self {
+    pub fn new(glyph: Option<Icon>, label: impl Into<String>, trailing: Trailing) -> Self {
         Self {
             glyph,
             label: label.into(),
@@ -1163,7 +914,7 @@ pub fn group(ui: &mut Ui, rows: &[Row], theme: &Theme) -> Option<usize> {
         };
         let mut x = rect.left() + 14.0;
         if let Some(picture) = row.glyph {
-            glyph(
+            square_icon(
                 painter,
                 Rect::from_center_size(pos2(x + 9.0, rect.center().y), Vec2::splat(18.0)),
                 picture,
@@ -1203,16 +954,16 @@ pub fn group(ui: &mut Ui, rows: &[Row], theme: &Theme) -> Option<usize> {
         let mut hit = row.enabled && response.clicked();
         match &row.trailing {
             Trailing::None => {}
-            Trailing::More => glyph(
+            Trailing::More => square_icon(
                 painter,
                 Rect::from_center_size(end - vec2(6.0, 0.0), Vec2::splat(14.0)),
-                Glyph::Chevron,
+                Icon::ChevronRight,
                 theme.muted,
             ),
-            Trailing::External => glyph(
+            Trailing::External => square_icon(
                 painter,
                 Rect::from_center_size(end - vec2(7.0, 0.0), Vec2::splat(15.0)),
-                Glyph::External,
+                Icon::External,
                 theme.muted,
             ),
             Trailing::Text(text) => {
@@ -1316,7 +1067,7 @@ pub fn popup(
                 pos2(rect.right() - 28.0, rect.top() + 28.0),
                 Vec2::splat(26.0),
             );
-            if icon_button(ui, close, Glyph::Close, "", false, theme).clicked() {
+            if icon_button(ui, close, Icon::Close, "", false, theme).clicked() {
                 outcome = PopupOutcome::Closed;
             }
             let inner = Rect::from_min_max(
@@ -1378,7 +1129,7 @@ pub fn sheet(
                 pos2(rect.right() - 32.0, rect.top() + 34.0),
                 Vec2::splat(44.0),
             );
-            if icon_button(ui, close, Glyph::Close, "", false, theme).clicked() {
+            if icon_button(ui, close, Icon::Close, "", false, theme).clicked() {
                 outcome = PopupOutcome::Closed;
             }
             let side = ((rect.width() - 560.0) / 2.0).max(16.0);
@@ -1405,133 +1156,6 @@ pub fn sheet(
         outcome = PopupOutcome::Closed;
     }
     outcome
-}
-
-/// A bar of large buttons along the bottom of a phone's page, filling
-/// `rect`: each with its glyph over its label, a round one raised in the
-/// middle. Returns the button tapped.
-pub fn tab_bar(
-    ui: &mut Ui,
-    rect: Rect,
-    items: &[RailItem],
-    selected: Option<usize>,
-    theme: &Theme,
-) -> Option<usize> {
-    let painter = ui.painter().clone();
-    painter.rect_filled(rect, CornerRadius::ZERO, theme.panel);
-    painter.line_segment([rect.left_top(), rect.right_top()], theme.hairline());
-    let width = rect.width() / items.len().max(1) as f32;
-    let mut tapped = None;
-    for (index, item) in items.iter().enumerate() {
-        let cell = Rect::from_min_size(
-            pos2(rect.left() + index as f32 * width, rect.top()),
-            vec2(width, rect.height()),
-        );
-        let on = selected == Some(index);
-        if item.round {
-            let center = pos2(cell.center().x, rect.top() + 6.0);
-            let hit = Rect::from_center_size(center + vec2(0.0, 8.0), Vec2::splat(72.0));
-            let response = ui.interact(
-                hit,
-                ui.scope_id().with(("sue-tab-bar", index)),
-                Sense::click(),
-            );
-            painter.circle_filled(center, 33.0, theme.panel);
-            painter.circle_filled(
-                center,
-                29.0,
-                if response.hovered() {
-                    theme.text
-                } else {
-                    theme.border_active
-                },
-            );
-            glyph(
-                &painter,
-                Rect::from_center_size(center, Vec2::splat(28.0)),
-                item.glyph,
-                theme.void,
-            );
-            painter.text(
-                pos2(cell.center().x, rect.bottom() - 10.0),
-                Align2::CENTER_BOTTOM,
-                &item.label,
-                theme.font(theme.small_size),
-                theme.text,
-            );
-            if response.clicked() {
-                tapped = Some(index);
-            }
-            continue;
-        }
-        let response = ui.interact(
-            cell,
-            ui.scope_id().with(("sue-tab-bar", index)),
-            Sense::click(),
-        );
-        let ink = if on { theme.text } else { theme.muted };
-        if on {
-            painter.rect_filled(
-                Rect::from_min_size(
-                    cell.left_top() + vec2(cell.width() * 0.3, 0.0),
-                    vec2(cell.width() * 0.4, 3.0),
-                ),
-                theme.radius(Radius::Full),
-                theme.border_active,
-            );
-        }
-        glyph(
-            &painter,
-            Rect::from_center_size(pos2(cell.center().x, cell.top() + 22.0), Vec2::splat(24.0)),
-            item.glyph,
-            ink,
-        );
-        painter.text(
-            pos2(cell.center().x, rect.bottom() - 10.0),
-            Align2::CENTER_BOTTOM,
-            &item.label,
-            theme.font(theme.small_size),
-            ink,
-        );
-        if response.clicked() {
-            tapped = Some(index);
-        }
-    }
-    tapped
-}
-
-/// A large row `size` big: a glyph and a label, for the first things a
-/// page offers (Create new file).
-pub fn big_row(ui: &mut Ui, size: Vec2, picture: Glyph, label: &str, theme: &Theme) -> Response {
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    let painter = ui.painter();
-    painter.rect(
-        rect,
-        theme.radius(Radius::Lg),
-        if response.hovered() {
-            theme.hover
-        } else {
-            theme.pill
-        },
-        theme.hairline(),
-        StrokeKind::Inside,
-    );
-    let side = (rect.height() * 0.42).clamp(22.0, 44.0);
-    let at = pos2(rect.left() + 24.0 + side / 2.0, rect.center().y);
-    glyph(
-        painter,
-        Rect::from_center_size(at, Vec2::splat(side)),
-        picture,
-        theme.text,
-    );
-    painter.text(
-        pos2(at.x + side / 2.0 + 20.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        label,
-        theme.font(theme.ui_size * 1.25),
-        theme.text,
-    );
-    response
 }
 
 /// A row of tabs `width` wide, the chosen one underlined. Returns the tab
@@ -1586,8 +1210,8 @@ pub fn tabs(
 /// What a tile shows above its name.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Preview {
-    /// A glyph.
-    Glyph(Glyph),
+    /// An icon.
+    Icon(Icon),
     /// A sheet of paper of this width to height.
     Paper(f32),
 }
@@ -1621,7 +1245,7 @@ pub fn tile(
         StrokeKind::Inside,
     );
     match preview {
-        Preview::Glyph(picture) => glyph(
+        Preview::Icon(picture) => square_icon(
             painter,
             Rect::from_center_size(square.center(), Vec2::splat(side * 0.4)),
             picture,
@@ -1661,9 +1285,9 @@ pub fn tile(
     response
 }
 
-/// An outlined button with a label (and a glyph before it, if any),
+/// An outlined button with a label (and an icon before it, if any),
 /// sized to its text.
-pub fn outline_button(ui: &mut Ui, picture: Option<Glyph>, label: &str, theme: &Theme) -> Response {
+pub fn outline_button(ui: &mut Ui, picture: Option<Icon>, label: &str, theme: &Theme) -> Response {
     let galley =
         ui.painter()
             .layout_no_wrap(label.to_owned(), theme.font(theme.ui_size), theme.text);
@@ -1681,7 +1305,7 @@ pub fn outline_button(ui: &mut Ui, picture: Option<Glyph>, label: &str, theme: &
         StrokeKind::Inside,
     );
     if let Some(picture) = picture {
-        glyph(
+        square_icon(
             painter,
             Rect::from_center_size(pos2(rect.left() + 24.0, rect.center().y), Vec2::splat(16.0)),
             picture,
@@ -1708,47 +1332,47 @@ pub fn gap(ui: &mut Ui) {
 mod tests {
     use super::*;
 
-    const EVERY: [Glyph; 40] = [
-        Glyph::More,
-        Glyph::Back,
-        Glyph::Film,
-        Glyph::Draw,
-        Glyph::Projects,
-        Glyph::Materials,
-        Glyph::Transfers,
-        Glyph::Help,
-        Glyph::Settings,
-        Glyph::Add,
-        Glyph::Delete,
-        Glyph::Rename,
-        Glyph::Heart,
-        Glyph::Details,
-        Glyph::Chevron,
-        Glyph::ChevronDown,
-        Glyph::Search,
-        Glyph::Grid,
-        Glyph::GridSmall,
-        Glyph::List,
-        Glyph::SortUp,
-        Glyph::SortDown,
-        Glyph::Close,
-        Glyph::External,
-        Glyph::Moon,
-        Glyph::Folder,
-        Glyph::Wrench,
-        Glyph::Check,
-        Glyph::Picture,
-        Glyph::Brush,
-        Glyph::Pattern,
-        Glyph::Tone,
-        Glyph::Cube,
-        Glyph::Clock,
-        Glyph::Tag,
-        Glyph::Move,
-        Glyph::Book,
-        Glyph::Bubble,
-        Glyph::Mail,
-        Glyph::All,
+    const EVERY: [Icon; 40] = [
+        Icon::More,
+        Icon::ArrowLeft,
+        Icon::Film,
+        Icon::Draw,
+        Icon::Projects,
+        Icon::Materials,
+        Icon::Transfers,
+        Icon::Help,
+        Icon::Settings,
+        Icon::Plus,
+        Icon::Delete,
+        Icon::Rename,
+        Icon::Heart,
+        Icon::Details,
+        Icon::ChevronRight,
+        Icon::ChevronDown,
+        Icon::Search,
+        Icon::ViewGrid,
+        Icon::ViewGridSmall,
+        Icon::ViewList,
+        Icon::SortUp,
+        Icon::SortDown,
+        Icon::Close,
+        Icon::External,
+        Icon::Moon,
+        Icon::Folder,
+        Icon::Wrench,
+        Icon::Check,
+        Icon::Picture,
+        Icon::ToolBrush,
+        Icon::MaterialPattern,
+        Icon::MaterialTone,
+        Icon::Cube,
+        Icon::Recent,
+        Icon::Tag,
+        Icon::MoveTo,
+        Icon::Book,
+        Icon::Feedback,
+        Icon::Mail,
+        Icon::All,
     ];
 
     #[test]
@@ -1773,22 +1397,8 @@ mod tests {
                 for (index, picture) in EVERY.iter().enumerate() {
                     let rect =
                         Rect::from_min_size(pos2(index as f32 * 20.0, 0.0), Vec2::splat(18.0));
-                    glyph(ui.painter(), rect, *picture, theme.text);
+                    square_icon(ui.painter(), rect, *picture, theme.text);
                 }
-                let items = [
-                    RailItem {
-                        glyph: Glyph::Draw,
-                        label: "Draw".into(),
-                        round: true,
-                    },
-                    RailItem {
-                        glyph: Glyph::Projects,
-                        label: "Projects".into(),
-                        round: false,
-                    },
-                ];
-                let rect = Rect::from_min_size(pos2(0.0, 40.0), vec2(80.0, 400.0));
-                rail(ui, rect, &items, Some(1), &theme);
                 let mut text = "cat".to_owned();
                 search_box(ui, &mut text, "Search", 200.0, &theme);
                 chip(ui, "Tones", true, &theme);
@@ -1803,7 +1413,7 @@ mod tests {
                     &theme,
                 );
                 let row = Category {
-                    glyph: Some(Glyph::All),
+                    glyph: Some(Icon::All),
                     label: "All".into(),
                     depth: 0,
                     open: Some(true),
@@ -1813,7 +1423,7 @@ mod tests {
                     title: "Cat".into(),
                     detail: "just now".into(),
                     picture: None,
-                    placeholder: Glyph::Picture,
+                    placeholder: Icon::Picture,
                     favorite: Some(true),
                     chosen: true,
                     hover: String::new(),
@@ -1825,7 +1435,7 @@ mod tests {
                     group(
                         ui,
                         &[
-                            Row::new(Some(Glyph::Moon), "Dark mode", Trailing::Switch(true)),
+                            Row::new(Some(Icon::Moon), "Dark mode", Trailing::Switch(true)),
                             Row::new(None, "Version", Trailing::Text("1.0".into())).detail("Sue"),
                         ],
                         &theme,

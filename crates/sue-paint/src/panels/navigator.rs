@@ -8,7 +8,7 @@ use sue_wm::icons::Icon;
 use sue_wm::ui::{Density, Space, Tip};
 use sue_wm::{AppletContext, Theme};
 
-use crate::icons::Icon as OldIcon;
+use crate::dock::Palette;
 use crate::panels::child;
 use crate::studio::{SuePaint, texture_key};
 
@@ -49,12 +49,12 @@ impl SuePaint {
             ui,
             rect,
             &[
-                (tr!("navigator"), OldIcon::Navigator, true, None),
+                (tr!("navigator"), Palette::Navigator.symbol(), true, None),
                 (
                     tr!("sub-view"),
-                    OldIcon::SubView,
+                    Palette::SubView.symbol(),
                     true,
-                    Some(crate::dock::Palette::SubView),
+                    Some(Palette::SubView),
                 ),
             ],
             self.nav_tab.min(1),

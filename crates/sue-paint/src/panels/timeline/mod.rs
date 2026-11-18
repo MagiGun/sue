@@ -29,7 +29,7 @@ use sue_wm::ui::Density;
 use sue_wm::{AppletContext, Theme};
 
 use crate::anim::editing::{Clipboard, Selection};
-use crate::icons::Icon;
+use crate::dock::Palette;
 use crate::panels::header;
 use crate::studio::SuePaint;
 
@@ -320,7 +320,7 @@ impl SuePaint {
         let (body, _) = header(
             ui,
             rect,
-            &[(tr!("timeline"), Icon::Timeline, true)],
+            &[(tr!("timeline"), Palette::Timeline.symbol(), true)],
             0,
             theme,
         );

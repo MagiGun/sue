@@ -12,9 +12,7 @@ use super::model::{
 };
 use super::thumbs::Thumbs;
 use crate::icons::Icon;
-use crate::start::{
-    self as page, Card, CardClick, Category, Chosen, Glyph, PopupOutcome, Row, Trailing,
-};
+use crate::start::{self as page, Card, CardClick, Category, Chosen, PopupOutcome, Row, Trailing};
 use crate::ui::{Density, Leading, ListRow, RowAction, Space, Thumbnail, ThumbnailCard};
 use crate::{
     AppletContext, LabelEdit, ShellRequest, Theme, TransferKind, TransferState, ago, unix_now,
@@ -173,7 +171,7 @@ pub fn browse(
             ui.spacing_mut().item_spacing.x = 2.0;
             let size = Vec2::splat(28.0);
             let (add, _) = ui.allocate_exact_size(size, Sense::hover());
-            if page::icon_button(ui, add, Glyph::Add, &tr!("start-add-label"), false, theme)
+            if page::icon_button(ui, add, Icon::Plus, &tr!("start-add-label"), false, theme)
                 .clicked()
             {
                 let mut name = tr!("start-new-label");
@@ -189,7 +187,7 @@ pub fn browse(
             if page::icon_button_enabled(
                 ui,
                 delete,
-                Glyph::Delete,
+                Icon::Delete,
                 &tr!("start-delete-label"),
                 false,
                 label.is_some(),
@@ -205,7 +203,7 @@ pub fn browse(
             if page::icon_button_enabled(
                 ui,
                 rename,
-                Glyph::Rename,
+                Icon::Rename,
                 &tr!("start-rename-label"),
                 false,
                 label.is_some(),
@@ -220,14 +218,14 @@ pub fn browse(
         col.add_space(6.0);
         col.spacing_mut().item_spacing.y = 3.0;
         let mut shelves = vec![
-            (Shelf::All, Glyph::All, tr!("start-all")),
-            (Shelf::Favorite, Glyph::Heart, tr!("start-favorite")),
+            (Shelf::All, Icon::All, tr!("start-all")),
+            (Shelf::Favorite, Icon::Heart, tr!("start-favorite")),
         ];
         shelves.extend(
             cx.work
                 .labels()
                 .iter()
-                .map(|label| (Shelf::Label(label.clone()), Glyph::Tag, label.clone())),
+                .map(|label| (Shelf::Label(label.clone()), Icon::Tag, label.clone())),
         );
         let width = column.width();
         for (shelf, glyph, name) in shelves {
@@ -451,7 +449,7 @@ pub fn browse(
         }
         ui.add_space(8.0);
         let some = !chosen.is_empty();
-        let move_to = page::action(ui, Glyph::Move, &tr!("start-move-to"), some, false, theme);
+        let move_to = page::action(ui, Icon::MoveTo, &tr!("start-move-to"), some, false, theme);
         egui::Popup::menu(&move_to).show(|ui| {
             for label in cx.work.labels() {
                 if ui.button(label).clicked() {
@@ -476,7 +474,7 @@ pub fn browse(
         if let Shelf::Label(label) = &state.shelf
             && page::action(
                 ui,
-                Glyph::Tag,
+                Icon::Tag,
                 &tr!("start-take-off-label"),
                 some,
                 false,
@@ -497,7 +495,7 @@ pub fn browse(
         } else {
             tr!("start-remove-from-list")
         };
-        let remove = page::action(ui, Glyph::Delete, &text, some, state.armed, theme)
+        let remove = page::action(ui, Icon::Delete, &text, some, state.armed, theme)
             .on_hover_text(tr!("start-remove-hint"));
         if remove.clicked() {
             if state.armed {
@@ -707,10 +705,9 @@ fn cards(
         let picture = pictures.get(index).copied().flatten();
         let (response, ticked, action) = match size {
             None => {
-                let leading = picture
-                    .map_or(Leading::Icon(item.kind.glyph().icon()), |(texture, _)| {
-                        Leading::Picture(texture)
-                    });
+                let leading = picture.map_or(Leading::Icon(item.kind.icon()), |(texture, _)| {
+                    Leading::Picture(texture)
+                });
                 let row = ListRow::new(("sue-files-row", &item.key), &item.title)
                     .detail(&detail)
                     .leading(leading)
@@ -722,7 +719,7 @@ fn cards(
             }
             Some(size) => {
                 let thumbnail = picture.map_or(
-                    Thumbnail::Placeholder(item.kind.glyph().icon()),
+                    Thumbnail::Placeholder(item.kind.icon()),
                     |(texture, size)| Thumbnail::Picture(texture, size),
                 );
                 let mut card = ThumbnailCard::new(("sue-files-card", &item.key), &item.title)
@@ -827,7 +824,10 @@ fn kept_buttons(ui: &Ui, response: &egui::Response, view: View, theme: &Theme) -
 /// sheet over the whole screen when `full`). `armed` is `true` once
 /// Remove from List (Discard, for kept work) was clicked and asks again.
 /// Returns how the popup ended, and `true` when Open was chosen.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the popup reads the browser state its caller keeps in separate fields, and borrows two of them mutably"
+)]
 pub fn project_popup(
     ctx: &egui::Context,
     full: bool,
@@ -864,12 +864,12 @@ pub fn project_popup(
         vec2(480.0, 620.0),
         theme,
         |ui| {
-            preview(ui, picture, item.kind.glyph(), theme);
+            preview(ui, picture, item.kind.icon(), theme);
             page::gap(ui);
             let rows = [
-                Row::new(Some(Glyph::Draw), tr!("start-open"), Trailing::More),
+                Row::new(Some(Icon::Draw), tr!("start-open"), Trailing::More),
                 Row::new(
-                    Some(Glyph::Folder),
+                    Some(Icon::Folder),
                     tr!("start-show-in-folder"),
                     Trailing::External,
                 ),
@@ -887,14 +887,14 @@ pub fn project_popup(
             }
             page::gap(ui);
             let mut rows = vec![Row::new(
-                Some(Glyph::Heart),
+                Some(Icon::Heart),
                 tr!("start-favorite"),
                 Trailing::Switch(item.favorite),
             )];
             let labels = cx.work.labels().to_vec();
             rows.extend(labels.iter().map(|label| {
                 Row::new(
-                    Some(Glyph::Tag),
+                    Some(Icon::Tag),
                     label.clone(),
                     Trailing::Switch(cx.work.has_label(&item.path, label)),
                 )
@@ -938,8 +938,9 @@ pub fn project_popup(
                 (_, false) => tr!("start-remove-from-list"),
                 (_, true) => tr!("start-really-remove"),
             };
-            let rows = [Row::new(Some(Glyph::Delete), text, Trailing::None)
-                .detail(tr!("start-remove-hint"))];
+            let rows =
+                [Row::new(Some(Icon::Delete), text, Trailing::None)
+                    .detail(tr!("start-remove-hint"))];
             if page::group(ui, &rows, theme).is_some() {
                 if was_armed {
                     forget(item, cx);
@@ -983,7 +984,7 @@ pub fn transfers_popup(
             ui.horizontal(|ui| {
                 if page::action(
                     ui,
-                    Glyph::Delete,
+                    Icon::Delete,
                     &tr!("start-clear-completed"),
                     finished > 0,
                     false,
@@ -1019,11 +1020,11 @@ pub fn transfers_popup(
                     egui::StrokeKind::Inside,
                 );
                 let glyph = match transfer.kind {
-                    TransferKind::Import => Glyph::Folder,
-                    TransferKind::Export => Glyph::External,
-                    TransferKind::Copy => Glyph::Transfers,
+                    TransferKind::Import => Icon::Folder,
+                    TransferKind::Export => Icon::External,
+                    TransferKind::Copy => Icon::Transfers,
                 };
-                page::glyph(
+                page::square_icon(
                     painter,
                     Rect::from_center_size(
                         pos2(rect.left() + 20.0, rect.center().y),
@@ -1081,7 +1082,7 @@ pub fn transfers_popup(
                         pos2(rect.right() - 24.0, rect.top() + 32.0),
                         Vec2::splat(18.0),
                     );
-                    if page::icon_button(ui, stop, Glyph::Close, &tr!("start-cancel"), false, theme)
+                    if page::icon_button(ui, stop, Icon::Close, &tr!("start-cancel"), false, theme)
                         .clicked()
                     {
                         cancel = Some(transfer.id);
@@ -1113,11 +1114,11 @@ pub fn toolbar_frame(ui: &mut Ui, width: f32, theme: &Theme, add: impl FnOnce(&m
 
 /// The view toggles (`small` adds small cards), right to left.
 pub fn view_buttons(ui: &mut Ui, view: &mut View, small: bool, theme: &Theme) {
-    let mut views = vec![(View::List, Glyph::List, tr!("start-view-list"))];
+    let mut views = vec![(View::List, Icon::ViewList, tr!("start-view-list"))];
     if small {
-        views.push((View::Small, Glyph::GridSmall, tr!("start-view-small")));
+        views.push((View::Small, Icon::ViewGridSmall, tr!("start-view-small")));
     }
-    views.push((View::Large, Glyph::Grid, tr!("start-view-large")));
+    views.push((View::Large, Icon::ViewGrid, tr!("start-view-large")));
     for (which, glyph, hint) in views {
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::hover());
         if page::icon_button(ui, rect, glyph, &hint, *view == which, theme).clicked() {
@@ -1137,9 +1138,9 @@ pub fn sort_buttons(
 ) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::hover());
     let glyph = if *reversed {
-        Glyph::SortUp
+        Icon::SortUp
     } else {
-        Glyph::SortDown
+        Icon::SortDown
     };
     if page::icon_button(ui, rect, glyph, &tr!("start-sort-direction"), false, theme).clicked() {
         *reversed = !*reversed;
@@ -1212,7 +1213,7 @@ pub fn show(
 pub fn preview(
     ui: &mut Ui,
     picture: Option<(egui::TextureId, [u32; 2])>,
-    placeholder: Glyph,
+    placeholder: Icon,
     theme: &Theme,
 ) {
     let width = ui.available_width();
@@ -1230,7 +1231,7 @@ pub fn preview(
                 egui::Color32::WHITE,
             );
         }
-        _ => page::glyph(
+        _ => page::square_icon(
             painter,
             Rect::from_center_size(rect.center(), Vec2::splat(56.0)),
             placeholder,

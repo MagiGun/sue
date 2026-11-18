@@ -117,7 +117,6 @@ impl Fingerprint {
     }
 
     /// Adds a signed number.
-    #[allow(clippy::cast_sign_loss)]
     pub fn signed(&mut self, value: i64) {
         self.word(value as u64);
     }

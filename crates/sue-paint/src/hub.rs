@@ -25,7 +25,7 @@ use sue_wm::files::thumbs::shrink;
 use sue_wm::files::{Thumb, Thumbnailer, View, texture_key};
 use sue_wm::icons::Icon;
 use sue_wm::start::{
-    self as page, CardClick, Category, CategoryClick, Chosen, Glyph, PopupOutcome, Row, Trailing,
+    self as page, CardClick, Category, CategoryClick, Chosen, PopupOutcome, Row, Trailing,
 };
 use sue_wm::ui::{Density, Leading, ListRow, RowAction, Space, TextRole, Thumbnail, ThumbnailCard};
 use sue_wm::{
@@ -571,7 +571,7 @@ impl SuePaint {
                 if page::icon_button(
                     ui,
                     add,
-                    Glyph::Add,
+                    Icon::Plus,
                     &tr!("start-add-material"),
                     false,
                     theme,
@@ -589,7 +589,7 @@ impl SuePaint {
                 if page::icon_button_enabled(
                     ui,
                     delete,
-                    Glyph::Delete,
+                    Icon::Delete,
                     &hint,
                     state.armed,
                     !removable.is_empty(),
@@ -611,7 +611,7 @@ impl SuePaint {
                 if page::icon_button(
                     ui,
                     reveal,
-                    Glyph::Folder,
+                    Icon::Folder,
                     &tr!("start-show-materials-folder"),
                     false,
                     theme,
@@ -740,7 +740,7 @@ impl SuePaint {
             if !narrow {
                 if page::action(
                     ui,
-                    Glyph::Heart,
+                    Icon::Heart,
                     &tr!("start-favorite"),
                     picked > 0,
                     false,
@@ -752,7 +752,7 @@ impl SuePaint {
                 }
                 if page::action(
                     ui,
-                    Glyph::Add,
+                    Icon::Plus,
                     &tr!("start-add-material"),
                     true,
                     false,
@@ -929,9 +929,9 @@ impl SuePaint {
             vec2(460.0, 600.0),
             theme,
             |ui| {
-                preview(ui, picture, Glyph::Materials, theme);
+                preview(ui, picture, Icon::Materials, theme);
                 page::gap(ui);
-                let mut put = Row::new(Some(Glyph::Draw), tr!("paste-to-canvas"), Trailing::More);
+                let mut put = Row::new(Some(Icon::Draw), tr!("paste-to-canvas"), Trailing::More);
                 if !canvas {
                     put = put.detail(tr!("start-open-canvas-for-materials"));
                     put.enabled = false;
@@ -939,7 +939,7 @@ impl SuePaint {
                 let rows = [
                     put,
                     Row::new(
-                        Some(Glyph::Heart),
+                        Some(Icon::Heart),
                         tr!("start-favorite"),
                         Trailing::Switch(entry.favorite),
                     ),
@@ -965,7 +965,7 @@ impl SuePaint {
                 if let crate::materials::Source::File(path) = &entry.material.source {
                     rows.push(
                         Row::new(
-                            Some(Glyph::Folder),
+                            Some(Icon::Folder),
                             tr!("start-show-in-folder"),
                             Trailing::External,
                         )
@@ -995,7 +995,7 @@ impl SuePaint {
                     };
                     if page::group(
                         ui,
-                        &[Row::new(Some(Glyph::Delete), text, Trailing::None)],
+                        &[Row::new(Some(Icon::Delete), text, Trailing::None)],
                         theme,
                     )
                     .is_some()
@@ -1160,7 +1160,7 @@ fn tree(kinds: &crate::materials::MaterialKinds, open: bool) -> Vec<(Node, Categ
     let mut nodes = vec![(
         Node::All,
         Category {
-            glyph: Some(Glyph::All),
+            glyph: Some(Icon::All),
             label: tr!("start-all-materials"),
             depth: 0,
             open: Some(open),
@@ -1182,7 +1182,7 @@ fn tree(kinds: &crate::materials::MaterialKinds, open: bool) -> Vec<(Node, Categ
     nodes.push((
         Node::Favorite,
         Category {
-            glyph: Some(Glyph::Heart),
+            glyph: Some(Icon::Heart),
             label: tr!("start-favorite"),
             depth: 0,
             open: None,
@@ -1191,7 +1191,7 @@ fn tree(kinds: &crate::materials::MaterialKinds, open: bool) -> Vec<(Node, Categ
     nodes.push((
         Node::Recent,
         Category {
-            glyph: Some(Glyph::Clock),
+            glyph: Some(Icon::Recent),
             label: tr!("start-recently-used"),
             depth: 0,
             open: None,

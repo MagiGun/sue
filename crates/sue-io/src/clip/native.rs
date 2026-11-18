@@ -89,7 +89,6 @@ fn quad(byte: u8) -> u32 {
 }
 
 /// The 8-bit channel of a value written four times over (its top byte).
-#[allow(clippy::cast_possible_truncation)]
 fn top(value: u32) -> u8 {
     (value >> 24) as u8
 }
@@ -102,7 +101,6 @@ pub(super) fn quad_column(byte: u8) -> i64 {
 
 /// The 8-bit channel of a `Layer` color column: its top byte, or the
 /// value itself when it is no more than 255.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 #[must_use]
 pub(super) fn column_byte(value: i64) -> u8 {
     if (0..=255).contains(&value) {
@@ -147,7 +145,6 @@ fn name_at(bytes: &[u8], at: usize) -> Option<(String, usize)> {
     Some((String::from_utf16(&units).ok()?, end))
 }
 
-#[allow(clippy::cast_possible_truncation)]
 fn rounded(value: f64) -> i32 {
     value
         .round()
@@ -207,7 +204,6 @@ fn gradation_blob(stops: &[ClipStop], line: [[f32; 2]; 2], plain: Option<[u8; 3]
             be(&mut data, quad(channel));
         }
         be(&mut data, stop_source(index));
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         be(
             &mut data,
             (f64::from(stop.at.clamp(0.0, 1.0)) * 32768.0).round() as u32,
@@ -272,7 +268,6 @@ pub fn gradation_of(blob: &[u8]) -> Option<ClipContent> {
                 ];
                 setting_ok = words == [0, 0, 1];
                 let real = |i: usize| be_real_at(blob, after + 12 + 8 * i);
-                #[allow(clippy::cast_possible_truncation)]
                 let point =
                     |i: usize| -> Option<[f32; 2]> { Some([real(i)? as f32, real(i + 1)? as f32]) };
                 line = Some([point(3)?, point(5)?]);
@@ -320,7 +315,6 @@ fn gradation_stops(data: &[u8]) -> Option<Vec<ClipStop>> {
         .map(|index| {
             let at = head.checked_add(index.checked_mul(size)?)?;
             let channel = |i: usize| be32(data, at + 4 * i).map(top);
-            #[allow(clippy::cast_precision_loss)]
             let position = be32(data, at + 20)? as f32 / 32768.0;
             Some(ClipStop {
                 at: position.clamp(0.0, 1.0),
@@ -399,7 +393,6 @@ fn text_box(text: &ClipText, dpi: f64) -> [i32; 4] {
         .max()
         .unwrap_or(0)
         .max(1);
-    #[allow(clippy::cast_precision_loss)]
     let (width, height) = match text.frame {
         Some([w, h]) => (f64::from(w), f64::from(h)),
         None => (longest as f64 * size * 0.55, lines as f64 * size * 1.2),
@@ -427,7 +420,6 @@ fn text_records(text: &ClipText, dpi: f64, full: bool) -> Vec<Record> {
     let face = first.map_or_else(|| "Regular".to_owned(), face_name);
     let family = first.map_or("", |run| run.font.as_str());
     let [r, g, b, _] = first.map_or([0, 0, 0, 255], |run| run.color);
-    #[allow(clippy::cast_possible_truncation)]
     let size = first.map_or(1200, |run| (f64::from(run.size) * 100.0).round() as i32);
     let [left, top_edge, right, bottom] = text_box(text, dpi);
     let (w, h) = (right - left, bottom - top_edge);
@@ -617,7 +609,6 @@ pub fn text_of(string: &[u8], attributes: &[u8]) -> Option<ClipText> {
             )
         })
         .unwrap_or_default();
-    #[allow(clippy::cast_precision_loss)]
     let size = find(32)
         .and_then(|data| le32_at(data, 0))
         .map_or(12.0, |value| value as f32 / 100.0);
@@ -626,7 +617,6 @@ pub fn text_of(string: &[u8], attributes: &[u8]) -> Option<ClipText> {
         [channel(0), channel(1), channel(2), 255]
     });
     let at = find(42).map_or([0.0, 0.0], |data| {
-        #[allow(clippy::cast_possible_wrap, clippy::cast_precision_loss)]
         let value = |i: usize| le32_at(data, 4 * i).map_or(0.0, |v| v as i32 as f32);
         [value(0), value(1)]
     });
@@ -660,12 +650,10 @@ const STROKE_SECOND: u32 = 76;
 const STROKE_FLAGS: u32 = 0x2081;
 const STROKE_LAST: u32 = 0x0180_09cc;
 
-#[allow(clippy::cast_possible_truncation)]
 fn floor(value: f64) -> u32 {
     value.floor().clamp(0.0, f64::from(u32::MAX)) as u32
 }
 
-#[allow(clippy::cast_possible_truncation)]
 fn ceil(value: f64) -> u32 {
     value.ceil().clamp(0.0, f64::from(u32::MAX)) as u32
 }
@@ -766,7 +754,6 @@ pub fn vector_of(bytes: &[u8]) -> Option<ClipVector> {
         let channel = |i: usize| be32(bytes, at + 40 + 4 * i).map(top);
         let opacity = be_real_at(bytes, at + 64)?;
         let radius = be_real_at(bytes, at + 80)?;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let alpha = (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
         let start = at.checked_add(head)?;
         // The whole stroke is there, or none of it is read.
@@ -774,7 +761,6 @@ pub fn vector_of(bytes: &[u8]) -> Option<ClipVector> {
         let points = (0..count)
             .map(|i| {
                 let p = start.checked_add(i.checked_mul(point_size)?)?;
-                #[allow(clippy::cast_possible_truncation)]
                 Some(ClipPoint {
                     at: [
                         be_real_at(bytes, p)? as f32,
@@ -787,7 +773,6 @@ pub fn vector_of(bytes: &[u8]) -> Option<ClipVector> {
                 })
             })
             .collect::<Option<Vec<_>>>()?;
-        #[allow(clippy::cast_possible_truncation)]
         lines.push(ClipLine {
             points,
             width: (radius * 2.0) as f32,

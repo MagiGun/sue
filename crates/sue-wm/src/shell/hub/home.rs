@@ -321,7 +321,7 @@ impl Shell {
                                 )
                                 .map(|texture| Thumbnail::Picture(texture, thumb.size))
                         })
-                        .unwrap_or(Thumbnail::Placeholder(item.kind.glyph().icon()));
+                        .unwrap_or(Thumbnail::Placeholder(item.kind.icon()));
                     let detail = crate::ago(item.when, now);
                     let out = ThumbnailCard::new(("sue-hub-jump", &item.path), &item.title)
                         .detail(&detail)

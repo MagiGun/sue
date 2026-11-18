@@ -84,7 +84,6 @@ impl Seeded {
     }
 
     /// A number below `bound` (0 when `bound` is 0).
-    #[allow(clippy::cast_possible_truncation)]
     pub fn below(&mut self, bound: usize) -> usize {
         if bound == 0 {
             0
@@ -105,7 +104,6 @@ impl Seeded {
     }
 
     /// A random value of any kind SQLite stores.
-    #[allow(clippy::cast_possible_wrap, clippy::cast_precision_loss)]
     pub fn value(&mut self) -> Value {
         match self.below(6) {
             0 => Value::Null,
@@ -128,7 +126,6 @@ impl Seeded {
 /// A checker of `width` by `height` in straight RGBA8: squares of 7 by 5,
 /// colored by position, every other one clear.
 #[must_use]
-#[allow(clippy::cast_possible_truncation)]
 pub fn checker(width: u32, height: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(width as usize * height as usize * 4);
     for y in 0..height {
@@ -147,7 +144,6 @@ pub fn checker(width: u32, height: u32) -> Vec<u8> {
 
 /// A gradient: red across, green down, alpha rising to the right.
 #[must_use]
-#[allow(clippy::cast_possible_truncation)]
 pub fn gradient(width: u32, height: u32) -> Vec<u8> {
     let mut out = Vec::with_capacity(width as usize * height as usize * 4);
     for y in 0..height {
@@ -161,7 +157,6 @@ pub fn gradient(width: u32, height: u32) -> Vec<u8> {
 
 /// Seeded noise, partly clear.
 #[must_use]
-#[allow(clippy::cast_possible_truncation)]
 pub fn noise(width: u32, height: u32, seed: u64) -> Vec<u8> {
     let mut random = Seeded::new(seed);
     (0..width as usize * height as usize)
@@ -197,7 +192,6 @@ pub fn tile_edges(width: u32, height: u32) -> Vec<u8> {
 
 /// A one channel picture: a ramp with seeded specks.
 #[must_use]
-#[allow(clippy::cast_possible_truncation)]
 pub fn ramp(width: u32, height: u32, seed: u64) -> Vec<u8> {
     let mut random = Seeded::new(seed);
     let (w, h) = (width as usize, height as usize);
@@ -224,7 +218,6 @@ fn layer(name: &str, left: i64, top: i64, width: u32, height: u32, rgba: &[u8]) 
 /// reference marks, and one small layer for every blend number Clip
 /// Studio has.
 #[must_use]
-#[allow(clippy::too_many_lines, clippy::cast_possible_wrap)]
 pub fn raster_subset(width: u32, height: u32, seed: u64) -> ClipDocument {
     let mut doc = ClipDocument::new(width, height, 350.0);
     let (w, h) = (i64::from(width), i64::from(height));
@@ -623,7 +616,6 @@ pub fn corrections() -> Vec<ClipCorrection> {
 }
 
 /// A vector line of `count` points in `color`.
-#[allow(clippy::cast_precision_loss)]
 fn line(count: usize, color: [u8; 4]) -> ClipLine {
     ClipLine {
         points: (0..count)
@@ -652,7 +644,6 @@ fn line(count: usize, color: [u8; 4]) -> ClipLine {
 /// sound, and the canvas preview. Each layer's pixels stand in for what
 /// Clip Studio would show.
 #[must_use]
-#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
 pub fn every_kind(width: u32, height: u32, seed: u64) -> ClipDocument {
     let mut doc = ClipDocument::new(width, height, 300.0);
     let (w, h) = (width as f32, height as f32);
@@ -1465,7 +1456,10 @@ mod tests {
     }
 
     /// The typed parts of every layer, by path.
-    #[allow(clippy::type_complexity)]
+    #[expect(
+        clippy::type_complexity,
+        reason = "the tuple is what one test compares of two documents, layer by layer; it is named nowhere else"
+    )]
     fn typed(
         doc: &ClipDocument,
     ) -> Vec<(

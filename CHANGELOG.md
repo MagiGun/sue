@@ -11,6 +11,12 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Sue Paint: the tabs a palette shows on a phone or a tablet, and in the
+  command bar's popover, draw the same icons as the Window menu and the
+  dock, so an icon pack replaces them too.
+
 ## [0.0.81] - 2026-11-17
 
 ### Added
@@ -576,8 +582,7 @@ follow [Semantic Versioning](https://semver.org/).
   cels ask for their settings first (file names, size, loop count,
   frames), and the cels of two animation folders go in a folder each.
 - Sue Paint: Audio Clip Settings on a sound of the timeline (volume,
-  cuts and fades, one step that undoes), and File, Export Animation,
-  Audio writes the timeline's sound as WAV, FLAC or AIFF.
+  cuts and fades, one step that undoes).
 - Sue Paint: stopping Record Timelapse asks whether to keep what was
   recorded or delete it.
 - Sue Paint: on the timeline, drag a picked cel's first frame to make
@@ -977,8 +982,7 @@ follow [Semantic Versioning](https://semver.org/).
   arrow keys once it has the keyboard. A picture open in two tabs no
   longer shows its second tab as changed.
 - Sue Paint's dialogs are as tall as what they hold, on the shared
-  controls with focus rings and tooltips; Drop Shadow, Focus Lines and
-  Speed Lines no longer hide their OK and Cancel.
+  controls with focus rings and tooltips.
 - Sue Paint: a floating palette has a slim header in place of a window
   title bar: its name and menu, and buttons to roll it up to the
   header, dock it again and hide it. Dragging the header moves it, and

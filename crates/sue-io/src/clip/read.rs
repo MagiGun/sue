@@ -720,7 +720,6 @@ pub fn read(bytes: &[u8]) -> Result<ClipDocument, String> {
     foreign.shapes = shapes;
     let strokes = Strokes::of(&foreign);
     native_in(&mut root, &strokes, dpi);
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     Ok(ClipDocument {
         width: width as u32,
         height: height as u32,
@@ -841,7 +840,6 @@ fn style(layer: &ClipLayer, record: &mut PsdLayer) {
 /// The record of one pixel layer, cut to the canvas: a mask that is on
 /// is multiplied into the alpha, paper is drawn in its color, and only
 /// color layers come in.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn record(doc: &ClipDocument, layer: &ClipLayer) -> Result<Option<PsdLayer>, String> {
     // Correction layers keep only their mask as pixels, and gradient
     // and fill layers are drawn from their settings: Sue cannot redo

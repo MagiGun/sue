@@ -66,14 +66,14 @@ impl Type {
         }
     }
 
-    /// The glyph a card without a picture shows.
+    /// The icon a card without a picture shows.
     #[must_use]
-    pub fn glyph(self) -> crate::start::Glyph {
-        use crate::start::Glyph;
+    pub fn icon(self) -> crate::icons::Icon {
+        use crate::icons::Icon;
         match self {
-            Self::Picture => Glyph::Picture,
-            Self::Project => Glyph::Projects,
-            Self::Unsaved => Glyph::Clock,
+            Self::Picture => Icon::Picture,
+            Self::Project => Icon::Projects,
+            Self::Unsaved => Icon::Recent,
         }
     }
 }

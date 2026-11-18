@@ -123,7 +123,6 @@ fn camel(name: &str) -> String {
 
 /// A record's pixels with its mask laid into the alpha when the mask is
 /// on.
-#[allow(clippy::cast_possible_truncation)]
 fn masked(layer: &PsdLayer) -> Vec<u8> {
     let mut pixels = layer.pixels.clone();
     let Some(mask) = layer.mask.as_ref().filter(|mask| mask.enabled) else {
@@ -186,7 +185,6 @@ fn flatten(nodes: &[Node<'_>], visible: bool, opacity: f64, out: &mut Vec<Entity
 
 /// A fingerprint of a picture: its size and resolution, and its layers'
 /// order, names, styles and pixels.
-#[allow(clippy::cast_possible_wrap)]
 fn fingerprint(size: [u32; 2], dpi: Option<f64>, layers: &[&Entity]) -> i64 {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     let mut eat = |bytes: &[u8]| {
@@ -222,7 +220,6 @@ fn raster(entity: &Entity) -> Option<&RasterTile2D> {
 }
 
 /// A layer's pixels as straight RGBA8, when it has pixels.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn rgba8(tile: &RasterTile2D) -> Option<Vec<u8>> {
     match tile.format() {
         PixelFormat::Rgba8 => tile.bytes().map(<[u8]>::to_vec),
@@ -239,7 +236,6 @@ fn rgba8(tile: &RasterTile2D) -> Option<Vec<u8>> {
 }
 
 /// The 8-bit sRGB of a color.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn srgb8(color: Color) -> [u8; 3] {
     color
         .to_space(ColorSpace::Srgb)
@@ -249,7 +245,6 @@ fn srgb8(color: Color) -> [u8; 3] {
 
 /// The picture's layers as Photoshop records (draft layers left out),
 /// and the picture merged.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn records(arena: &Arena, id: EntityId, size: [u32; 2]) -> Result<Psd, FormatError> {
     let [width, height] = size;
     let area = width as usize * height as usize;

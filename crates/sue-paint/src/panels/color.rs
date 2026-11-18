@@ -9,7 +9,6 @@ use sue_wm::ui::{self, Density, Radius, Space, TextRole};
 use crate::color::{self, Hsv};
 use crate::colorsets::SliderMode;
 use crate::dialogs::{cmyk_of, rgb_of_cmyk};
-use crate::icons::Icon;
 use crate::panels::child;
 use crate::studio::SuePaint;
 
@@ -187,22 +186,22 @@ impl SuePaint {
     pub(crate) fn color_panel(&mut self, ui: &mut Ui, rect: Rect, theme: &Theme) {
         use crate::dock::Palette;
         let tabs = [
-            (tr!("color-wheel"), Icon::Wheel, true, None),
+            (tr!("color-wheel"), Palette::Color.symbol(), true, None),
             (
                 tr!("color-slider"),
-                Icon::ColorSlider,
+                Palette::ColorSlider.symbol(),
                 true,
                 Some(Palette::ColorSlider),
             ),
             (
                 tr!("intermediate-color"),
-                Icon::Intermediate,
+                Palette::Intermediate.symbol(),
                 true,
                 Some(Palette::Intermediate),
             ),
             (
                 tr!("approximate-color"),
-                Icon::Approximate,
+                Palette::Approximate.symbol(),
                 true,
                 Some(Palette::Approximate),
             ),

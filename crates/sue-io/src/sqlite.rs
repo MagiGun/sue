@@ -34,7 +34,6 @@ pub enum Value {
 impl Value {
     /// The number, if this is one (reals are cut to whole numbers).
     #[must_use]
-    #[allow(clippy::cast_possible_truncation)]
     pub fn int(&self) -> Option<i64> {
         match self {
             Self::Integer(value) => Some(*value),
@@ -45,7 +44,6 @@ impl Value {
 
     /// The number as a float, if this is one.
     #[must_use]
-    #[allow(clippy::cast_precision_loss)]
     pub fn real(&self) -> Option<f64> {
         match self {
             Self::Integer(value) => Some(*value as f64),
@@ -287,7 +285,6 @@ impl Reader<'_> {
                             at: at + a + b,
                             size,
                         };
-                        #[allow(clippy::cast_possible_wrap)]
                         visit(rowid as i64, cell, page)?;
                     }
                 }
@@ -502,7 +499,6 @@ pub enum LazyValue {
 impl LazyValue {
     /// The number, if this is one (reals are cut to whole numbers).
     #[must_use]
-    #[allow(clippy::cast_possible_truncation)]
     pub fn int(&self) -> Option<i64> {
         match self {
             Self::Integer(value) => Some(*value),
@@ -934,7 +930,6 @@ impl Pages {
         let size = payload.len();
         let mut cell = Vec::new();
         put_varint(&mut cell, size as u64);
-        #[allow(clippy::cast_sign_loss)]
         put_varint(&mut cell, rowid as u64);
         let max_local = usable - 35;
         if size <= max_local {
@@ -1009,7 +1004,6 @@ impl Pages {
                 .iter()
                 .map(|(key, child)| {
                     let mut cell = child.to_be_bytes().to_vec();
-                    #[allow(clippy::cast_sign_loss)]
                     put_varint(&mut cell, *key as u64);
                     (*key, cell)
                 })

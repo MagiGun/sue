@@ -17,7 +17,6 @@ use sue_wm::{ItemState, MenuItem};
 
 use crate::colorsets::{self, ClsError, Standard};
 use crate::dialogs::ColorTarget;
-use crate::icons::Icon;
 use crate::studio::SuePaint;
 
 /// Small swatches, in control heights.
@@ -59,10 +58,10 @@ impl SuePaint {
         use crate::dock::Palette;
         // Material is a palette of its own, never a tab here.
         let tabs = [
-            (tr!("color-set"), Icon::Swatches, true, None),
+            (tr!("color-set"), Palette::ColorSet.symbol(), true, None),
             (
                 tr!("color-history"),
-                Icon::History,
+                Palette::ColorHistory.symbol(),
                 true,
                 Some(Palette::ColorHistory),
             ),

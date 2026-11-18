@@ -56,23 +56,22 @@ impl SuePaint {
         theme: &Theme,
     ) {
         use crate::dock::Palette;
-        use crate::icons::Icon as PaintIcon;
         let tabs = [
             (
                 tr!("tool-group"),
-                PaintIcon::SubTool,
+                Palette::SubTool.symbol(),
                 self.panels.sub_tool,
                 None,
             ),
             (
                 tr!("tool-settings"),
-                PaintIcon::Sliders,
+                Palette::ToolProperty.symbol(),
                 self.panels.tool_property,
                 Some(Palette::ToolProperty),
             ),
             (
                 tr!("brush-size"),
-                PaintIcon::BrushSize,
+                Palette::BrushGrid.symbol(),
                 true,
                 Some(Palette::BrushGrid),
             ),
