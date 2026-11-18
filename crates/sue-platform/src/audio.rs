@@ -442,8 +442,15 @@ impl AudioSink for AudioOutput {
 /// A microphone (the system's default input) being recorded: what it
 /// hears queues in a lock-free ring the caller drains with
 /// [`AudioInput::take`], as interleaved float samples.
+///
+/// The system's stream lives on a thread of its own (on some systems it
+/// may not move between threads), so an `AudioInput` can be kept by any
+/// studio.
 pub struct AudioInput {
-    stream: cpal::Stream,
+    /// Tells the stream's thread to stop; dropped when stopped.
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    /// The stream's thread.
+    thread: Option<std::thread::JoinHandle<()>>,
     ring: Arc<Ring>,
     /// Its rate and channels.
     pub rate: u32,
@@ -471,6 +478,38 @@ impl AudioInput {
     /// [`PlatformError::Audio`] when there is no microphone or it will not
     /// open.
     pub fn open(seconds: f32) -> Result<Self, PlatformError> {
+        let (ready, opened) = std::sync::mpsc::channel();
+        let (stop, stopped) = std::sync::mpsc::channel::<()>();
+        let thread = std::thread::Builder::new()
+            .name("sue-microphone".to_owned())
+            .spawn(move || match Self::start(seconds) {
+                Ok((stream, ring, rate, channels, device)) => {
+                    let _ = ready.send(Ok((ring, rate, channels, device)));
+                    // Records until told to stop or the owner is gone.
+                    let _ = stopped.recv();
+                    let _ = stream.pause();
+                }
+                Err(error) => {
+                    let _ = ready.send(Err(error));
+                }
+            })
+            .map_err(|error| audio_error("cannot start recording", error))?;
+        let (ring, rate, channels, device) = opened
+            .recv()
+            .map_err(|error| audio_error("cannot start recording", error))??;
+        Ok(Self {
+            stop: Some(stop),
+            thread: Some(thread),
+            ring,
+            rate,
+            channels,
+            device,
+        })
+    }
+
+    /// Opens and starts the default input's stream, on the thread that
+    /// will keep it.
+    fn start(seconds: f32) -> Result<(cpal::Stream, Arc<Ring>, u32, u16, String), PlatformError> {
         let host = cpal::default_host();
         let device = host
             .default_input_device()
@@ -492,13 +531,7 @@ impl AudioInput {
         stream
             .play()
             .map_err(|error| audio_error("cannot start recording", error))?;
-        Ok(Self {
-            stream,
-            ring,
-            rate,
-            channels,
-            device: name,
-        })
+        Ok((stream, ring, rate, channels, name))
     }
 
     /// Appends what was heard since the last call to `out`.
@@ -515,9 +548,25 @@ impl AudioInput {
 
     /// Stops recording.
     pub fn stop(&mut self) {
-        let _ = self.stream.pause();
+        drop(self.stop.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
     }
 }
+
+impl Drop for AudioInput {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+// A studio keeps its recording, and studios move between threads on
+// every system: this fails to build anywhere the input is not `Send`.
+const _: fn() = || {
+    fn send<T: Send>() {}
+    send::<AudioInput>();
+};
 
 fn build_input<T>(
     device: &cpal::Device,
