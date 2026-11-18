@@ -359,7 +359,7 @@ pub(super) struct Frame {
 /// big jobs take (see [`workers`]), each taking the next index not yet
 /// begun so uneven work evens out; the results in the order of the
 /// indices.
-pub(super) fn each_index<T: Send>(count: usize, work: impl Fn(usize) -> T + Sync) -> Vec<T> {
+pub(crate) fn each_index<T: Send>(count: usize, work: impl Fn(usize) -> T + Sync) -> Vec<T> {
     let threads = if count < 8 {
         1
     } else {

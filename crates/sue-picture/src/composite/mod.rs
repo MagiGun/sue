@@ -25,6 +25,7 @@ mod view;
 pub use preview::{preview, signature, thumbnail};
 pub use stroke::view_step;
 pub use stroke::{BrushLive, share_brush_pool};
+pub(crate) use tiles::each_index;
 pub use view::{FrameView, Skin, flatten_view, render_view};
 
 use sue_core::{Arena, EntityId, RasterTile2D};

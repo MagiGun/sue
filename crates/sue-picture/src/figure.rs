@@ -3705,3 +3705,153 @@ mod preview {
         );
     }
 }
+
+#[cfg(test)]
+mod speed {
+    use super::*;
+    use crate::three::{View3D, figure_view};
+    use std::time::{Duration, Instant};
+
+    /// What the benchmark draws: a name, the figure, how it is seen and
+    /// on how large a canvas.
+    fn cases() -> Vec<(&'static str, Body, View3D, [u32; 2])> {
+        let body = Body::default();
+        let hand = Body {
+            kind: Kind::Hand,
+            ..body
+        };
+        let lit = View3D {
+            shadows: true,
+            floor: true,
+            ..figure_view(Kind::Body)
+        };
+        let lined = View3D {
+            style: 2,
+            ..figure_view(Kind::Body)
+        };
+        vec![
+            (
+                "body 1600x1200",
+                body,
+                figure_view(Kind::Body),
+                [1600, 1200],
+            ),
+            (
+                "body 2480x3508",
+                body,
+                figure_view(Kind::Body),
+                [2480, 3508],
+            ),
+            ("body shadows 1600x1200", body, lit, [1600, 1200]),
+            ("body lines 1600x1200", body, lined, [1600, 1200]),
+            (
+                "hand 1600x1200",
+                hand,
+                figure_view(Kind::Hand),
+                [1600, 1200],
+            ),
+            (
+                "hand 2480x3508",
+                hand,
+                figure_view(Kind::Hand),
+                [2480, 3508],
+            ),
+            ("body 128", body, figure_view(Kind::Body), [128, 128]),
+            ("hand 128", hand, figure_view(Kind::Hand), [128, 128]),
+        ]
+    }
+
+    /// The middle of `runs` timings.
+    fn median(mut runs: Vec<Duration>) -> Duration {
+        runs.sort();
+        runs[runs.len() / 2]
+    }
+
+    /// How long each case takes to draw, at rest and while dragged, split
+    /// into bending the skin (the surface), drawing it into buffers and
+    /// turning those into the layer's pixels. With `SUE_FIGURE_REF_SAVE`
+    /// naming a folder it keeps each picture at rest there; with
+    /// `SUE_FIGURE_REF` it compares with the kept ones. Run in release
+    /// with `--ignored --nocapture`.
+    #[test]
+    #[ignore = "measures how fast figures draw"]
+    fn figures_draw_fast() {
+        let save = std::env::var("SUE_FIGURE_REF_SAVE").ok();
+        let compare = std::env::var("SUE_FIGURE_REF").ok();
+        // Shaping a body anew (each slider move does), with its
+        // anatomical detail and without.
+        for anatomy in [true, false] {
+            let runs = (0..7)
+                .map(|step| {
+                    let body = Body {
+                        anatomy,
+                        height: 150.0 + step as f32,
+                        ..Body::default()
+                    };
+                    let started = Instant::now();
+                    let _ = human::shaped(&body);
+                    started.elapsed()
+                })
+                .collect();
+            println!(
+                "shaping a body, anatomical detail {anatomy}: {:.2} ms",
+                median(runs).as_secs_f64() * 1e3
+            );
+        }
+        // Warm the shaped figures and the asset.
+        for (_, body, view, _) in cases() {
+            let _ = render(&body.standing(), &body, &view, [64, 64]);
+        }
+        for (name, body, view, size) in cases() {
+            for fast in [false, true] {
+                let view = View3D { fast, ..view };
+                let pose = body.preset(if body.kind == Kind::Body { 7 } else { 3 });
+                let (mut skins, mut renders, mut draws, mut totals) =
+                    (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+                let mut last = None;
+                for _ in 0..7 {
+                    let started = Instant::now();
+                    let surface = surface(&pose, &body);
+                    let skinned = started.elapsed();
+                    let buffers = crate::three::render_surface(&surface, &view, size, body.frame());
+                    let rendered = started.elapsed();
+                    let tile = crate::three::draw(&buffers, &view).unwrap();
+                    let total = started.elapsed();
+                    skins.push(skinned);
+                    renders.push(rendered - skinned);
+                    draws.push(total - rendered);
+                    totals.push(total);
+                    last = Some(tile);
+                }
+                println!(
+                    "{name:24} {:5} total {:7.2} ms  skin {:6.2}  render {:7.2}  draw {:6.2}",
+                    if fast { "drag" } else { "rest" },
+                    median(totals).as_secs_f64() * 1e3,
+                    median(skins).as_secs_f64() * 1e3,
+                    median(renders).as_secs_f64() * 1e3,
+                    median(draws).as_secs_f64() * 1e3,
+                );
+                if fast {
+                    continue;
+                }
+                let bytes = last.unwrap().bytes().unwrap().to_vec();
+                let file = name.replace(' ', "-");
+                if let Some(folder) = &save {
+                    std::fs::write(format!("{folder}/{file}.rgba"), &bytes).unwrap();
+                }
+                if let Some(folder) = &compare {
+                    let kept = std::fs::read(format!("{folder}/{file}.rgba")).unwrap();
+                    let (mut most, mut differ) = (0_u8, 0_usize);
+                    for (a, b) in kept.iter().zip(&bytes) {
+                        let d = a.abs_diff(*b);
+                        most = most.max(d);
+                        differ += usize::from(d > 2);
+                    }
+                    println!(
+                        "    against the kept picture: largest change {most}, {differ} values off by more than 2"
+                    );
+                }
+            }
+        }
+    }
+}

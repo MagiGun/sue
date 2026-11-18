@@ -371,16 +371,31 @@ impl SuePaint {
         else {
             return;
         };
-        if let (Some(into), Some(from)) = (
-            doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut),
-            drawn.bytes(),
-        ) && into.len() == from.len()
-        {
-            into.copy_from_slice(from);
-        }
+        self.show_drawn(cx, layer, &drawn);
+    }
+
+    /// Puts `drawn` in 3D layer `layer`'s pixels while it is dragged and
+    /// shows it: only the rows that changed are copied, and only the
+    /// rectangle that changed is composited again (the figure where it
+    /// was and where it is), not the whole picture.
+    fn show_drawn(
+        &mut self,
+        cx: &mut AppletContext<'_>,
+        layer: EntityId,
+        drawn: &sue_core::RasterTile2D,
+    ) {
+        let width = drawn.width() as usize;
+        let Some(changed) = doc::raster_mut(&mut cx.world.arena, layer)
+            .and_then(sue_core::RasterTile2D::bytes_mut)
+            .zip(drawn.bytes())
+            .filter(|(into, from)| into.len() == from.len())
+            .and_then(|(into, from)| copy_changed(into, from, width))
+        else {
+            return;
+        };
         if let Some(doc) = self.doc_mut() {
             doc.compositor
-                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
+                .refresh_rects(&cx.world.arena, &[changed], Some(layer));
         }
     }
 
@@ -456,16 +471,7 @@ impl SuePaint {
         else {
             return;
         };
-        if let (Some(into), Some(from)) = (
-            doc::raster_mut(&mut cx.world.arena, layer).and_then(sue_core::RasterTile2D::bytes_mut),
-            drawn.bytes(),
-        ) {
-            into.copy_from_slice(from);
-        }
-        if let Some(doc) = self.doc_mut() {
-            doc.compositor
-                .refresh(&cx.world.arena, [0, 0, u32::MAX, u32::MAX]);
-        }
+        self.show_drawn(cx, layer, &drawn);
     }
 
     /// Records a figure's pose change as one step: back to `base` and
@@ -955,6 +961,34 @@ fn shown_now(arena: &sue_core::Arena, layer: EntityId, model: Option<EntityId>) 
             .map(|model| snapshot(arena, model, &MODEL_KEYS))
             .unwrap_or_default(),
     )
+}
+
+/// Copies the rows of RGBA pixels `from` that differ from `into` (both
+/// `width` pixels a row) into it, and answers the rectangle
+/// `[x0, y0, x1, y1]` that changed (`None` when nothing did).
+fn copy_changed(into: &mut [u8], from: &[u8], width: usize) -> Option<[u32; 4]> {
+    let stride = width * 4;
+    if stride == 0 {
+        return None;
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+    for (y, (old, new)) in into.chunks_mut(stride).zip(from.chunks(stride)).enumerate() {
+        if old == new {
+            continue;
+        }
+        let first = old.iter().zip(new).position(|(a, b)| a != b).unwrap_or(0);
+        let last = old
+            .iter()
+            .zip(new)
+            .rposition(|(a, b)| a != b)
+            .unwrap_or(stride - 1);
+        x0 = x0.min(first / 4);
+        x1 = x1.max(last / 4 + 1);
+        y0 = y0.min(y);
+        y1 = y + 1;
+        old.copy_from_slice(new);
+    }
+    (y1 > y0).then(|| [x0, y0, x1, y1].map(|value| value as u32))
 }
 
 /// The properties that say how an imported model looks and poses.
