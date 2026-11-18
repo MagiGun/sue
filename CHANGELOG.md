@@ -30,6 +30,11 @@ follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Sue VE: a palette dragged off the Edit page's dock floats in a window
+  of its own instead of snapping back; frames of image sequences and of
+  Sue Paint animations are drawn in the background, so they no longer
+  stutter playback; and the decoder reads a picture only inside the
+  buffer Windows hands it.
 - Dialogs and floating palettes in windows of their own (Sue Paint's
   New, Export, Canvas Properties, Timelapse and the others) could not be
   moved by their title bar or resized by their edges, and a floating
@@ -75,9 +80,8 @@ follow [Semantic Versioning](https://semver.org/).
   (thumbnails or a list), source and program monitors side by side, a
   timeline of video and audio tracks with thumbnails and waveforms, an
   inspector and audio meters, and the pages Media, Edit, Effects, Color,
-  Audio and Deliver along the bottom (Effects, Color and Audio say they
-  come in a later version). Start one from the Hub's New (HD, 4K,
-  vertical or square video).
+  Audio and Deliver along the bottom. Start one from the Hub's New (HD,
+  4K, vertical or square video).
 - Sue VE imports MP4 and MOV movies (H.264, and HEVC where Windows has
   it), WAV, FLAC, MP3, AAC and Ogg sound, still pictures and numbered
   runs of pictures, and plays Sue Paint pictures and animations sent to
@@ -102,6 +106,62 @@ follow [Semantic Versioning](https://semver.org/).
   or JPEG, or every frame as numbered PNG files, in the background with
   progress and Cancel.
 - Thirteen new icons for video editing, for icon packs too.
+- Sue VE's **effects**, as Premiere Pro's Effect Controls and After
+  Effects have them: a stack of effects on each clip (Gaussian and
+  directional blur, sharpen, brightness and contrast, hue and
+  saturation, levels, curves, color balance, glow, drop shadow, stroke,
+  vignette, film grain, mosaic, chroma key with spill suppression, luma
+  key, track matte, crop, mirror), turned on and off, reordered, and
+  every number keyframable. Adjustment clips apply their effects to
+  what is under them. Search them in the effects browser and drag one
+  onto a clip, or double click it. Save a clip's effects as a preset,
+  and share it as a `.sveffect` file.
+- Sue VE's **Effects page**: the browser, the program monitor with the
+  clip's masks to drag, Effect Controls, the timeline and the **graph
+  editor** with value and speed graphs. F9 eases keys (Easy Ease), with
+  Ease In, Ease Out, Linear and Hold.
+- Masks on clips: ellipses, rectangles and Bezier paths, with feather,
+  expansion, opacity, add, subtract and intersect, and inversion.
+- Clips get an **anchor point**, **motion blur** (a shutter angle), a
+  **blend mode** (multiply, screen, overlay and the rest Sue Paint has),
+  and **time remapping** with speed ramps.
+- New transitions: wipe, slide, push, cross zoom and blur dissolve.
+- Text animators (typewriter, letters dropping, spinning or growing in)
+  and **shapes** (rectangles, ellipses, stars, polygons, filled and
+  outlined).
+- Sue VE's **Color page**, as DaVinci Resolve's: correctors one after
+  another, each with lift, gamma, gain and offset wheels, contrast,
+  pivot, saturation, temperature and tint, curves, hue against hue,
+  saturation and luminance, a qualifier that limits it to a color
+  range, and a LUT imported from a `.cube` file; a before and after
+  split; copy and paste a grade; and the waveform, RGB parade,
+  vectorscope and histogram, worked out off the interface's thread.
+- Sue VE's **Audio page**: a mixer with a fader, pan, mute, solo and a
+  meter with loudness (LUFS) on every audio track, a five band
+  equalizer, a noise gate and a compressor per track, the master's
+  momentary, short term and integrated loudness, **Normalize Loudness**
+  for sound clips, and **Record Voice Over** from the microphone. Sound
+  clips show their volume line on the timeline: drag it, or Ctrl and
+  click to add a key.
+- Sue VE on **phones and tablets** looks like CapCut: the preview large,
+  the timeline under it scrolled with a finger under a playhead that
+  stays in the middle (pinch to zoom, press and hold a clip to move it),
+  and a bar of tools (Edit, Audio, Text, Effects, Filters, Overlay,
+  Aspect, Canvas, Speed, Split, Delete), each opening a sheet. Aspect
+  makes the video 9:16, 16:9, 1:1 or 4:5; Export picks the size and
+  frame rate. Auto captions and templates say they come later.
+- Sue VE's timeline: a render bar on the ruler (red until a stretch with
+  effects is rendered, green after; Enter renders in to out, and paused
+  playback renders the next seconds by itself), the **rate stretch**
+  tool (`R`), clip markers (`Shift+M`), nested sequences (Clip, Nest),
+  zoom that glides, and filled waveforms.
+- Sue VE's media pool gets **New Bin** and **Relink Media**, which finds
+  the other missing files in the folder you point at.
+- Sue VE's Edit page: workspaces (Editing, Effects, Color, Audio) and
+  four more palettes: Effect Controls, the graph editor, the scopes and
+  the mixer.
+- Seven new icons (speed, mixer, microphone, graph, scope, aspect,
+  captions).
 
 ## [0.0.82] - 2026-11-17
 

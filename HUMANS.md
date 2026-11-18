@@ -1433,15 +1433,16 @@ Everything you do can be undone, and it all saves inside your project.
 
 **Sue VE** (SVE for short) is where you edit video. Start one from the
 Hub's New (HD, 4K, a vertical video for phones or a square one), or open
-the studio and press **New Project**. On a computer it looks like the Edit
-page of DaVinci Resolve with Premiere Pro's tools; on phones a CapCut
-style layout comes later.
+the studio and press **New Project**. On a computer it looks like DaVinci
+Resolve with Premiere Pro's tools and After Effects' effects; on phones
+and tablets it looks like CapCut.
 
 - **The pages** along the bottom: **Media** (the pool large, with the
   clip you picked in the viewer and its facts under it), **Edit**,
-  **Effects**, **Color**, **Audio** and **Deliver**. Effects, Color and
-  Audio say plainly that they come in a later version and lead back to
-  Edit. `Shift+3` to `Shift+8` switch pages as in Resolve.
+  **Effects**, **Color**, **Audio** and **Deliver**. `Shift+3` to
+  `Shift+8` switch pages as in Resolve. View, Workspaces arranges the
+  Edit page's palettes for editing, effects, color or sound
+  (`Alt+Shift+1` to `4`); a palette dragged off the dock floats.
 - **The media pool** (left) holds the project's movies, sounds, pictures,
   titles, solids and sequences, as thumbnails or a list. **Import** brings
   in MP4 and MOV movies, sound files and pictures (File, **Import Image
@@ -1473,9 +1474,60 @@ style layout comes later.
   rotation and opacity for pictures, volume and fades for sound, speed
   for both, and a title's words, size and color. The diamond beside a
   value puts a keyframe at the playhead.
-- **Transitions**: the Effects palette's dissolve, dips to black and
-  white and the sound crossfade go onto a cut by dragging, or with
-  `Ctrl+D` at the cut nearest the playhead.
+- **Transitions**: the effects browser's dissolve, dips to black and
+  white, wipe, slide, push, cross zoom, blur dissolve and the sound
+  crossfade go onto a cut by dragging, or with `Ctrl+D` (a dissolve)
+  at the cut nearest the playhead.
+- **Effects**: search the effects browser and drag an effect onto a clip
+  (or double click it to add it to the selected clips). **Effect
+  Controls** lists the clip's Motion (position, scale, rotation, anchor
+  point, motion blur), Opacity and blend mode, Time Remapping, its
+  effects (switch, reorder, remove) and its masks. Every number has a
+  diamond for a keyframe at the playhead; click a value's name to see
+  its curve in the **graph editor**, drag keys and handles there, and
+  ease them (`F9` Easy Ease, `Shift+F9` in, `Ctrl+Shift+F9` out). Effects
+  menu, **Save Effect Preset** keeps a clip's stack (shared as a
+  `.sveffect` file); **Copy Effects** and **Paste Effects** move it to
+  other clips. An adjustment clip's effects change what is under it.
+- **The Effects page** puts the browser, the monitor (drag the picked
+  mask's points on it), Effect Controls, the timeline and the graph
+  editor together, as After Effects does.
+- **The Color page** grades the selected clip with correctors one after
+  another (`Alt+S` adds one): lift, gamma, gain and offset wheels (drag
+  the dot; the slider under each sets its level; double click resets),
+  contrast and pivot, saturation, temperature and tint; Curves; Hue
+  Curves; a Qualifier that limits the corrector to a range of hue,
+  saturation and luminance; and a LUT (File, **Import LUT** reads a
+  `.cube`). The scopes beside the viewer show the waveform, the RGB
+  parade, the vectorscope or the histogram; **Before and After**
+  (`Ctrl+Alt+W`) splits the viewer. Copy and paste a grade with
+  `Ctrl+Shift+C` and `Ctrl+Shift+V`.
+- **The Audio page** is a mixer: each audio track's fader, pan, meter
+  with its loudness, mute and solo, and switches for its equalizer,
+  gate and compressor, set at the right for the picked track. The
+  master shows the mix's loudness in LUFS. **Normalize Loudness** sets
+  a sound clip's gain to -16 LUFS; **Record Voice Over** (`Shift+R`)
+  records from the microphone onto the targeted audio track. On the
+  timeline, drag a sound clip's volume line, or `Ctrl` and click it to
+  add a key.
+- **Rendering**: frames with effects, grades or masks are drawn by the
+  same code the export uses; the ruler's bar is red where they are not
+  rendered yet and green where they are. Paused, Sue VE renders the
+  next few seconds by itself; Sequence, **Render In to Out** (`Enter`)
+  renders the whole range.
+- **More editing**: the **Rate Stretch** tool (`R`) changes a clip's
+  speed by its edge; **Nest** (Clip menu) turns the selected clips into
+  a sequence used as one clip; `Shift+M` puts a marker on a clip; File,
+  **New Bin** and **Relink Media**; text animators (Effects menu:
+  Typewriter and letters dropping, spinning or growing in) and
+  **shapes** (File, **New Shape**).
+- **On a phone or a tablet**: the preview on top, the play row, the
+  timeline scrolled with a finger under the playhead in the middle
+  (pinch to zoom it; press and hold a clip, then drag, to move it), and
+  the tools along the bottom: Edit, Audio, Text, Effects, Filters (looks
+  such as Warm, Cool, Vivid, Mono), Overlay, Aspect (9:16, 16:9, 1:1,
+  4:5), Canvas (the color behind the video), Speed, Split and Delete.
+  **Export** at the top right asks the size and frame rate.
 - **Deliver** exports the sequence: MP4 (by quality, or at a bit rate
   you choose), WAV, a PNG or JPEG of the frame at the playhead, or every
   frame as PNG files. It runs in the background with its progress and a

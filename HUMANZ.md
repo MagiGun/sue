@@ -3471,13 +3471,19 @@ Sue VE is the video editing studio. Where it sits on the backbone:
 | Pictures on screen | `render::layers_at` gives the layers at a time (placement, opacity, tints of dips, dissolves); the program monitor draws each as a textured quad through Sue's painter (`TextureUpload`), the export with `render::composite` on the processor | `render.rs`, `ui/monitor.rs` |
 | Playback | `playback::Clock`: the sound device's played frames are the clock while playing at normal speed; the wall clock while shuttling | `playback.rs`, `mix.rs` |
 | Export | a `Transfers` job on a clone of the arena (no pixel copied), with progress and Cancel; MP4 through `sue_platform::movie` (now with a bit rate), WAV, PNG, JPEG, PNG runs | `export.rs` |
-| Interface | `sue-wm`'s dock (`DockLayout<Panel>`), widgets, icons and theme tokens; commands in a `CommandRegistry` (menus, shortcuts in Settings, the palette) | `ui/`, `commands.rs`, `menus.rs` |
+| Interface | `sue-wm`'s dock (`DockLayout<Panel>`, workspaces, floating palettes), widgets, icons and theme tokens; commands in a `CommandRegistry` (menus, shortcuts in Settings, the palette); the phone and tablet layout in `ui/mobile.rs` | `ui/`, `commands.rs`, `menus.rs`, `actions.rs` |
+| Effects | a clip's stack is a list in its properties (`ve.effects`), the serial form of a chain of registered effect kinds (`fx::register`, rule 3); number parameters keyframe on the clip's `Animation` (`fx.<id>.<param>`), so the sequence's `SequenceEdit` undoes them; masks (`ve.masks`), blend mode, anchor point, motion blur and time remapping (`ve.remap`) likewise; presets are Sue's `Preset` in a `.sveffect` file | `fx/`, `keys.rs`, `layers.rs` |
+| Pixels of effects | Sue's own filters from `sue-picture` (blur, sharpen, tone, levels, curves, color balance, drop shadow), run in strips on every core; video's own (keys, glow, stroke, vignette, grain, crop, mirror); one implementation of picture adjustments (`sue-io` `picture_ops`) through them | `fx/pixels.rs` |
+| Compositing | `compose::frame` draws a frame on the processor: effects, grade, masks, track matte, motion blur, blend modes (`sue_model::BlendMode`), adjustment clips, nested sequences, wipes; the export's `Renderer` and the program monitor's worker both call it, so the preview is the export; frames kept in the render cache by `compose::frame_key` | `compose.rs`, `preview.rs` |
+| Color | a clip's grade is a list of correctors (`ve.grade`); a grade (and a run of color effects before it) bakes into a 33 point 3D table; LUTs are entities of class `ve.lut` in the pool, named by `EntityId`; scopes worked out on their own thread | `grade.rs`, `scopes.rs` |
+| Sound | the `Mixer` carries each track's equalizer, gate and compressor (`ve.audio_fx` on the track) across blocks, pans, and meters each track (peaks, BS.1770 loudness); the microphone through `sue_platform::AudioInput` | `mix.rs`, `audio.rs` |
 
 The edit algebra (insert, overwrite, razor, lift, extract, ripple delete,
 trims, roll, slip, slide, moves, speed, frame holds, keys, links,
 transitions, marks, snapping) is adapted from FilmCraft's
 (`crates/edit/src/lib.rs`, MIT OR Apache-2.0) onto Sue's `Sequence`.
-What stage 2 builds on it is in `docs/sve-handover.md`; parity with
+Stage 2 (effects, Color, Audio, the phone layout) is described in
+`docs/sve-handover.md`, with what the next stage builds on; parity with
 Premiere Pro, DaVinci Resolve, After Effects and CapCut is tracked in
 `docs/ve-parity.md`.
 
