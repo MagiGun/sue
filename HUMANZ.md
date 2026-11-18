@@ -64,7 +64,15 @@ paints what it produces. On a computer the host gives each of egui's immediate
 viewports (`show_viewport_immediate`) a system window of its own
 (`sue-platform/src/viewports.rs`), so a studio's dialogs and floating
 palettes can leave the main window; in the browser and on phones they are
-drawn inside it, as egui does by itself. `unsafe` code is forbidden workspace-wide
+drawn inside it, as egui does by itself. egui hands an immediate viewport's
+commands (its own title bar's drag, its edges' resize, focus, close) over
+with the frame of the window that drew it, so the host carries them out
+after that frame (`Viewports::run_commands`). A viewport asks for its
+place and size only while it opens (the dialog host also for its height
+until someone sizes it), never every frame, or nobody could move it. The
+dialog host keeps each dialog's place and size in
+`sue_wm::ui::dialog::places`, which the shell writes to the rice
+(`display.dialog_places`) once a move has rested. `unsafe` code is forbidden workspace-wide
 (`[workspace.lints] rust.unsafe_code = "forbid"`). The `wgpu` window surface is
 created through its safe API, so `sue-platform` keeps the lint too. Native FFI
 is relaxed only in its two small entry crates, each item approved by the
@@ -1671,7 +1679,9 @@ path and the rest in `FilePick::also` (`FilePick::chosen` gives them all).
 **Studio themes.** A studio or tool whose rice section (its id with `-` as
 `_`) has a `theme` wears `Theme::for_studio`: a preset's colors, the Sue theme
 (`sue-theme`, the global colors, so it follows every change to them), or its
-own colors in `<section>_colors` (`custom`). Only the colors change. The
+own colors in `<section>_colors` (`custom`). Sue Paint ships `gray` (settings
+format 8; a format 7 file still at that format's `sue-theme` default takes
+`gray`), the others `sue-theme`. Only the colors change. The
 shell sets egui's visuals to the page's theme while the page and its part of
 the top bar draw, so its menus and popups wear it too, and back to Sue's for
 the status bar, the palette and Settings. The page's and the bar's own `Ui`s

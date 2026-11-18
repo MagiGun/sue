@@ -871,7 +871,9 @@ fn a_dialogs_own_window_moves_by_its_title_bar_and_opens_where_it_was_left() {
         move |frame| match frame {
             3 => vec![Event::PointerMoved(grip)],
             4 => vec![button(grip, true)],
-            5..=8 => vec![Event::PointerMoved(grip + vec2(12.0 * (frame - 4) as f32, 0.0))],
+            5..=8 => vec![Event::PointerMoved(
+                grip + vec2(12.0 * (frame - 4) as f32, 0.0),
+            )],
             9 => vec![button(grip + vec2(48.0, 0.0), false)],
             _ => Vec::new(),
         },
@@ -918,7 +920,10 @@ fn a_dialogs_own_window_moves_by_its_title_bar_and_opens_where_it_was_left() {
     // Its place is asked for while it opens only: a window told where to
     // be every frame could not be moved.
     assert!(asked[0].0.is_some());
-    assert!(asked[3..].iter().all(|(position, _)| position.is_none()), "{asked:#?}");
+    assert!(
+        asked[3..].iter().all(|(position, _)| position.is_none()),
+        "{asked:#?}"
+    );
     // The system moved it; it closes, and opens there again.
     place.set((20, pos2(40.0, 60.0)));
     run(&mut bench, 20, open, &mut asked);
@@ -945,7 +950,9 @@ fn a_dialog_in_the_window_moves_by_its_header_resizes_and_opens_where_left() {
     );
     // Its header moves it.
     let header = first.rect.left_top() + vec2(40.0, 20.0);
-    bench.drag(header, vec2(-100.0, -60.0), 4, |ui, theme| show(ui, sizable(theme)));
+    bench.drag(header, vec2(-100.0, -60.0), 4, |ui, theme| {
+        show(ui, sizable(theme))
+    });
     let moved = bench.frames(2, |ui, theme| show(ui, sizable(theme)));
     assert!(
         (moved.rect.min - (first.rect.min + vec2(-100.0, -60.0))).length() < 2.0,
@@ -955,7 +962,9 @@ fn a_dialog_in_the_window_moves_by_its_header_resizes_and_opens_where_left() {
     );
     // Its bottom right corner sizes it.
     let corner = moved.rect.right_bottom() - vec2(4.0, 4.0);
-    bench.drag(corner, vec2(120.0, 80.0), 4, |ui, theme| show(ui, sizable(theme)));
+    bench.drag(corner, vec2(120.0, 80.0), 4, |ui, theme| {
+        show(ui, sizable(theme))
+    });
     let sized = bench.frames(2, |ui, theme| show(ui, sizable(theme)));
     // As wide as dragged; at least as tall (a body has a least height).
     assert!(
@@ -969,6 +978,14 @@ fn a_dialog_in_the_window_moves_by_its_header_resizes_and_opens_where_left() {
     // Closed and opened again: where it was left, the size it was made.
     bench.frames(3, |_, _| ());
     let again = bench.frames(4, |ui, theme| show(ui, sizable(theme)));
-    assert!((again.rect.min - sized.rect.min).length() < 2.0, "{:?}", again.rect);
-    assert!((again.rect.size() - sized.rect.size()).length() < 3.0, "{:?}", again.rect);
+    assert!(
+        (again.rect.min - sized.rect.min).length() < 2.0,
+        "{:?}",
+        again.rect
+    );
+    assert!(
+        (again.rect.size() - sized.rect.size()).length() < 3.0,
+        "{:?}",
+        again.rect
+    );
 }

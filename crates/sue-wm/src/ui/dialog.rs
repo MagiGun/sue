@@ -604,12 +604,16 @@ impl<'a> Dialog<'a> {
             }
             builder = builder.with_inner_size(placed.asked);
             if !placed.centered {
-                // The first frame did not know how tall the body is: put
+                // The first frames do not know how tall the body is (the
+                // first measures it in a room it does not have yet): put
                 // it again around the parent's middle at the size it
-                // turned out to have, once.
-                placed.centered = true;
+                // turned out to have, until that size holds for a frame.
                 placed.at = parent.center() - placed.asked / 2.0;
                 builder = builder.with_position(placed.at);
+                let steady = known.is_some_and(|known| {
+                    (known.asked - placed.asked).length() < 1.0 && known.frames > 1
+                });
+                placed.centered = steady || placed.frames > 8;
             }
         }
         if self.resizable {
@@ -1020,12 +1024,9 @@ fn cut_fade(ui: &Ui, seen: Rect, fade: f32, above: bool, shade: Color32) {
 fn keep_in(at: Pos2, size: egui::Vec2, screen: Rect, header: f32) -> Pos2 {
     let grip = size.x.min(screen.width() / 4.0);
     pos2(
-        at.x
-            .clamp(screen.left() - size.x + grip, screen.right() - grip)
+        at.x.min(screen.right() - grip)
             .max(screen.left() - size.x + grip),
-        at.y
-            .clamp(screen.top(), screen.bottom() - header)
-            .max(screen.top()),
+        at.y.min(screen.bottom() - header).max(screen.top()),
     )
 }
 
@@ -1043,10 +1044,8 @@ fn resize_corner(ui: &mut Ui, id: Id, rect: Rect, theme: &Theme) -> egui::Vec2 {
     let tip = rect.max - egui::Vec2::splat(inset + theme.corner(Radius::Xl).se as f32 / 3.0);
     let stroke = Stroke::new(theme.border_width.max(1.0), theme.text_muted());
     for reach in [side / 2.0, side / 4.0] {
-        ui.painter().line_segment(
-            [tip - vec2(reach, 0.0), tip - vec2(0.0, reach)],
-            stroke,
-        );
+        ui.painter()
+            .line_segment([tip - vec2(reach, 0.0), tip - vec2(0.0, reach)], stroke);
     }
     if grip.dragged() {
         grip.drag_delta()
@@ -1088,8 +1087,9 @@ fn on_screen(at: Pos2, size: egui::Vec2, parent: Rect, monitor: Option<egui::Vec
     let reach = parent.expand2(monitor);
     let grip = size.x.min(size.y).min(reach.width() / 4.0);
     pos2(
-        at.x.clamp(reach.left() - size.x + grip, reach.right() - grip),
-        at.y.clamp(reach.top(), reach.bottom() - grip),
+        at.x.min(reach.right() - grip)
+            .max(reach.left() - size.x + grip),
+        at.y.min(reach.bottom() - grip).max(reach.top()),
     )
 }
 

@@ -1034,7 +1034,13 @@ impl Shell {
         }
         self.apply_scale(&ctx);
         // Where the dialogs were put, kept in the rice between runs.
-        dialog_places::load(&ctx, io.world.rice.get_str(dialog_places::PLACES_KEY).unwrap_or(""));
+        dialog_places::load(
+            &ctx,
+            io.world
+                .rice
+                .get_str(dialog_places::PLACES_KEY)
+                .unwrap_or(""),
+        );
         if let Some(places) = dialog_places::take_settled(&ctx) {
             // Kept by Sue, not an edit of anyone's: no undo step.
             let _ = io

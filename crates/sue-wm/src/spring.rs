@@ -331,7 +331,10 @@ mod tests {
                     frames += 1;
                     assert!(frames < 100, "k {stiffness} c {damping}: still moving");
                 }
-                assert!(peak < 1.05, "k {stiffness} c {damping}: overshoot to {peak}");
+                assert!(
+                    peak < 1.05,
+                    "k {stiffness} c {damping}: overshoot to {peak}"
+                );
                 assert_eq!(spring.position(), 1.0);
                 assert!(spring.reached());
                 assert!(!spring.step(1.0 / 60.0), "settled: no more frames");

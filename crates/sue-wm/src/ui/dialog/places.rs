@@ -54,7 +54,9 @@ fn with<R>(ctx: &Context, f: impl FnOnce(&mut Places) -> R) -> R {
 /// Where the dialog `id` was last put, if it was.
 #[must_use]
 pub fn remembered(ctx: &Context, id: Id) -> Option<Place> {
-    with(ctx, |places| places.map.get(&id.value()).map(|(_, place)| *place))
+    with(ctx, |places| {
+        places.map.get(&id.value()).map(|(_, place)| *place)
+    })
 }
 
 /// Keeps `place` for the dialog `id`. A change of less than a point is no
@@ -237,7 +239,10 @@ mod tests {
                     size: Some(vec2(500.0, 420.0)),
                 })
             );
-            assert_eq!(remembered(ctx, new).map(|place| place.at), Some(pos2(120.0, 80.0)));
+            assert_eq!(
+                remembered(ctx, new).map(|place| place.at),
+                Some(pos2(120.0, 80.0))
+            );
             // Read once: a later load leaves what is kept.
             load(ctx, "");
             assert!(remembered(ctx, new).is_some());

@@ -11,6 +11,43 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Sue Paint opens in its own Gray colors again, as Clip Studio Paint
+  does. Its Theme setting (Sue Paint's Preferences, and Sue Paint's page
+  in Settings) offers **Follow Sue's theme** to wear Sue's colors (Dark
+  unless you change them). If you never changed Sue Paint's theme you
+  get Gray; a theme you chose stays.
+- Every dialog opens where you last left it, at the size you made it,
+  or else centered on the window that opened it. The places are kept
+  between runs (Settings, Display and Performance, Dialog Places; empty
+  it to center every dialog again).
+- Docked palettes in a crowded column share its height more fairly: the
+  Layer palette keeps room for its tools and a few layers, and Sub Tool
+  for a few sub tools, taken from the palettes with room to spare.
+- Phones and tablets no longer show Quit Sue in the menus or the command
+  palette: leave Sue as any other app. Computers keep it.
+
+### Fixed
+
+- Dialogs and floating palettes in windows of their own (Sue Paint's
+  New, Export, Canvas Properties, Timelapse and the others) could not be
+  moved by their title bar or resized by their edges, and a floating
+  palette grew taller every frame. They now move, resize, and stay
+  where they are put. Dialogs drawn inside Sue's window (Export,
+  Settings, Sue Writer's, the release notes, every question) move by
+  their header too, and the larger ones resize from their corner.
+- Interface scale in Settings did nothing until Sue was restarted. It
+  now applies as soon as you let go of the slider, to every window,
+  dialog and palette, with text and icons drawn sharp at the new size.
+  Ctrl+Minus and Ctrl+0 no longer change the interface scale behind
+  Settings' back.
+- Springiness and Bounce in Settings, at the ends of their sliders, made
+  the interface bounce on and on, flicker and never stop drawing, or
+  crawl. Every value now gives an animation that overshoots by less than
+  5 percent and comes to rest within about a second and a half, and the
+  page coming over the Hub no longer flickers on its way in.
+
 ## [0.0.82] - 2026-11-17
 
 ### Added

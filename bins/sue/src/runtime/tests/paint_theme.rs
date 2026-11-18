@@ -433,8 +433,10 @@ fn sue_paint_ships_gray_and_old_settings_follow_it() {
     };
     // 0.0.82 (format 7) shipped Sue's theme: untouched, it becomes Gray.
     let v7 = include_str!("../../../../../crates/sue-rice/rice/history/v7.suerice");
-    assert!(v7.contains("
-theme = \"sue-theme\"            # {sue-theme|gray"));
+    assert!(v7.contains(
+        "
+theme = \"sue-theme\"            # {sue-theme|gray"
+    ));
     assert_eq!(theme(v7).as_deref(), Some("gray"));
     // Chosen on purpose in 0.0.82, Paper stays Paper.
     let picked = v7.replacen(
@@ -446,8 +448,13 @@ theme = \"sue-theme\"            # {sue-theme|gray"));
     assert_eq!(theme(&picked).as_deref(), Some("paper"));
     // 0.0.75 (format 6) shipped Gray: it stays Gray.
     let v6 = include_str!("../../../../../crates/sue-rice/rice/history/v6.suerice");
-    assert!(v6.contains("
-theme = \"gray\""), "0.0.75 shipped Gray");
+    assert!(
+        v6.contains(
+            "
+theme = \"gray\""
+        ),
+        "0.0.75 shipped Gray"
+    );
     assert_eq!(theme(v6).as_deref(), Some("gray"));
     let picked = v6.replacen(
         "theme = \"gray\"                 #",

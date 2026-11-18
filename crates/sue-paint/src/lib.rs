@@ -86,8 +86,8 @@ pub use dialogs::hand_scanner;
 pub use launchers::shown_buttons;
 pub use menus::menus;
 pub use studio::{
-    ID, STUDIO_THEME_GRAY, StrokeSeen, SuePaint, ViewSeen, canvas_probed, export_at_once, hold_export_starts,
-    hold_exports_to, last_stroke, last_view, mirror, probe_canvas,
+    ID, STUDIO_THEME_GRAY, StrokeSeen, SuePaint, ViewSeen, canvas_probed, export_at_once,
+    hold_export_starts, hold_exports_to, last_stroke, last_view, mirror, probe_canvas,
 };
 
 use sue_core::EntityId;
