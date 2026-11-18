@@ -670,9 +670,7 @@ impl SequenceEdit {
             (self.lengths.1, self.lengths.0)
         };
         if sequence.tracks.len() != from {
-            return Err(TxnError::new(
-                "the sequence is not as this edit found it",
-            ));
+            return Err(TxnError::new("the sequence is not as this edit found it"));
         }
         sequence.tracks.resize_with(to, Track::default);
         for (index, old, new) in &self.tracks {
@@ -961,10 +959,7 @@ mod tests {
         let mut out = Writer::new();
         ComponentType::encode(&read, &mut out);
         let bytes = out.into_bytes();
-        assert_eq!(
-            Sequence::decode(2, &mut Reader::new(&bytes)).unwrap(),
-            read
-        );
+        assert_eq!(Sequence::decode(2, &mut Reader::new(&bytes)).unwrap(), read);
     }
 
     #[test]
@@ -1007,8 +1002,14 @@ mod tests {
         let mut clip = Clip::new(EntityId::new(), Time::from_seconds(10.0), Time::SECOND);
         clip.source_in = Time::from_seconds(3.0);
         clip.properties.set("ve.scale", 2.0);
-        assert_eq!(clip.value_at("ve.scale", Time::from_seconds(10.5), 1.0), 2.0);
-        assert_eq!(clip.value_at("ve.rotation", Time::from_seconds(10.5), 0.0), 0.0);
+        assert_eq!(
+            clip.value_at("ve.scale", Time::from_seconds(10.5), 1.0),
+            2.0
+        );
+        assert_eq!(
+            clip.value_at("ve.rotation", Time::from_seconds(10.5), 0.0),
+            0.0
+        );
         let curve = clip.animation.channel_mut("ve.scale");
         for (at, value) in [(3.0, 1.0), (4.0, 3.0)] {
             curve.insert(crate::Key {
@@ -1031,7 +1032,9 @@ mod tests {
         let mut arena = Arena::new();
         let mut sequence = edit();
         for index in 0..10 {
-            sequence.tracks.push(Track::new(format!("V{index}"), "video"));
+            sequence
+                .tracks
+                .push(Track::new(format!("V{index}"), "video"));
         }
         sequence.ensure_ids();
         let entity = Entity::empty("Edit", crate::class::SEQUENCE).with_ext(sequence.clone());
@@ -1044,7 +1047,14 @@ mod tests {
         assert!(SequenceEdit::between(id, "Nothing", &sequence, &sequence).is_none());
         let mut history = UndoStack::new();
         history.apply(&mut arena, edit).unwrap();
-        let now = |arena: &Arena| arena.get_by_id(id).unwrap().ext::<Sequence>().unwrap().clone();
+        let now = |arena: &Arena| {
+            arena
+                .get_by_id(id)
+                .unwrap()
+                .ext::<Sequence>()
+                .unwrap()
+                .clone()
+        };
         assert_eq!(now(&arena), after);
         // A track added, a marker and a size changed: one step.
         let mut more = after.clone();
