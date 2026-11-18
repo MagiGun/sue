@@ -134,7 +134,7 @@ pub fn meters_ui(studio: &SueVe, ui: &mut Ui, theme: &Theme) {
     let rect = ui
         .max_rect()
         .shrink(theme.space(Space::S2))
-        .shrink2(vec2(0.0, theme.text_size(TextRole::Micro) / 2.0));
+        .shrink2(egui::Vec2::Y * (theme.text_size(TextRole::Micro) / 2.0));
     let scale = theme.text_size(TextRole::Micro) * 2.0;
     let bars = Rect::from_min_max(rect.min, pos2(rect.right() - scale, rect.bottom()));
     let gap = theme.space(Space::S1);

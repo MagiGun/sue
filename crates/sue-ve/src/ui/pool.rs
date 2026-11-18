@@ -388,11 +388,13 @@ fn list(
             font(theme, TextRole::Body),
             theme.text,
         );
-        let right = [length.unwrap_or_default(), detail]
-            .into_iter()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join("   ");
+        // The length at the right; the rest of what is known on hover.
+        let right = length.unwrap_or_default();
+        let response = if detail.is_empty() {
+            response
+        } else {
+            response.on_hover_text(detail)
+        };
         painter.text(
             pos2(rect.right() - pad, rect.center().y),
             Align2::RIGHT_CENTER,

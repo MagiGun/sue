@@ -539,7 +539,7 @@ pub fn timeline_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, 
         ui.painter_at(rect).hline(
             rect.x_range(),
             y,
-            egui::Stroke::new(theme.border_width * 2.0, theme.border),
+            egui::Stroke::new(Theme::STRONG_STROKE, theme.border),
         );
     }
     // The playhead.
@@ -549,7 +549,7 @@ pub fn timeline_ui(studio: &mut SueVe, ui: &mut Ui, cx: &mut AppletContext<'_>, 
         playhead.vline(
             x,
             rect.y_range(),
-            egui::Stroke::new(theme.border_width * 2.0, theme.focus()),
+            egui::Stroke::new(Theme::STRONG_STROKE, theme.focus()),
         );
     }
     // The tools.

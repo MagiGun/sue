@@ -185,7 +185,7 @@ fn jog(
     painter.vline(
         x,
         rect.y_range(),
-        egui::Stroke::new(theme.border_width * 2.0, theme.focus()),
+        egui::Stroke::new(Theme::STRONG_STROKE, theme.focus()),
     );
     let response = ui.interact(
         rect,
@@ -261,7 +261,7 @@ fn title_row(ui: &Ui, rect: Rect, name: &str, code: &str, focused: bool, theme: 
         painter.hline(
             rect.x_range(),
             rect.bottom(),
-            egui::Stroke::new(theme.border_width * 2.0, theme.focus()),
+            egui::Stroke::new(Theme::STRONG_STROKE, theme.focus()),
         );
     }
 }

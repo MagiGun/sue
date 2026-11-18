@@ -1075,6 +1075,10 @@ pub(crate) fn file_name(path: &Path) -> String {
 }
 
 impl SueApplet for SueVe {
+    fn settings_page(&self) -> Option<sue_wm::SettingsPage> {
+        Some(crate::settings_page::page(&self.manifest().title()))
+    }
+
     fn manifest(&self) -> AppletManifest {
         let mut manifest = AppletManifest::new(
             ID,

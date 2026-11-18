@@ -301,6 +301,58 @@ fn measure_decoding_and_export() {
                 if used { "graphics card" } else { "processor" }
             );
         }
+        // Playing through the monitors' decoders in real time: every
+        // 33 ms the frame due is asked for (with eight ahead), as the
+        // program monitor asks; a frame not decoded in time is dropped.
+        for (hardware, quality) in [
+            (false, Quality::Full),
+            (false, Quality::Half),
+            (true, Quality::Full),
+            (true, Quality::Half),
+        ] {
+            let mut arena = Arena::new();
+            let movie = import::entity_for(&path, false).unwrap();
+            let id = movie.id();
+            arena.insert_keep_id(movie).unwrap();
+            let mut hub = MediaHub::new(1024);
+            hub.hardware = hardware;
+            let kind = SourceKind::Movie;
+            let started = Instant::now();
+            let (mut shown, mut dropped) = (0, 0);
+            let mut first_exact = None;
+            while started.elapsed() < std::time::Duration::from_secs(5) {
+                let time = Time::from_seconds(started.elapsed().as_secs_f64());
+                let found = hub.frame(
+                    &arena,
+                    id,
+                    &kind,
+                    time,
+                    (width, height),
+                    quality,
+                    Need::Ahead(8),
+                );
+                match found {
+                    Some(found) if found.exact => {
+                        shown += 1;
+                        first_exact.get_or_insert(started.elapsed());
+                    }
+                    _ => dropped += 1,
+                }
+                std::thread::sleep(std::time::Duration::from_millis(33));
+            }
+            let memory = crate::media::frames::lock(&hub.cache).bytes();
+            println!(
+                "| {name} | play {} {} | {shown} shown, {dropped} late | first frame {:.0} ms | cache {} MB |",
+                if hardware {
+                    "graphics card"
+                } else {
+                    "processor"
+                },
+                quality.id(),
+                first_exact.map_or(0.0, |at| at.as_secs_f64() * 1000.0),
+                memory / (1024 * 1024)
+            );
+        }
         // Export the movie on a timeline at its own size.
         let mut arena = Arena::new();
         let mut history = UndoStack::new();

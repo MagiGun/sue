@@ -20,6 +20,7 @@ pub mod model;
 pub mod playback;
 pub mod render;
 pub mod sample;
+mod settings_page;
 pub mod studio;
 pub mod ui;
 

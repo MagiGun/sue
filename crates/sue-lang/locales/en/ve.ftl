@@ -262,3 +262,9 @@ kind-solid = Color solid
 kind-adjustment = Adjustment clip
 kind-sequence = Sequence
 kind-unknown = Not playable yet
+
+## settings_page.rs
+
+settings-group-playback = Playback
+settings-group-media = Media
+keys-group-other = Other
