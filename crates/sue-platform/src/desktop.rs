@@ -972,10 +972,12 @@ impl DesktopHost {
                 &mut Vec::new(),
             );
         }
-        // What it asked of the other windows (to come to the front).
+        // What it asked of the other windows (to come to the front), and
+        // of its dialogs' own windows (moved by their title bars).
         #[cfg(not(any(target_arch = "wasm32", target_os = "android", target_os = "ios")))]
         {
             self.window_commands(&output);
+            self.viewports.borrow_mut().run_commands(&ctx, &output);
             self.windows
                 .after_pass(&output, None, app.revision(), Instant::now());
         }
@@ -1238,8 +1240,10 @@ impl DesktopHost {
                 &mut Vec::new(),
             );
         }
-        // Its title bar's moves and buttons, and what it asked of others.
+        // Its title bar's moves and buttons, and what it asked of others
+        // and of its dialogs' own windows.
         self.window_commands(&output);
+        self.viewports.borrow_mut().run_commands(&ctx, &output);
         self.windows
             .after_pass(&output, Some(surface), after, Instant::now());
         // Its dialogs first: their textures came first.

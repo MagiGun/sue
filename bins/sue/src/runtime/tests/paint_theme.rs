@@ -217,6 +217,18 @@ fn sue_paint(layout: Layout) -> PaintDriver {
         Layout::Kept => PaintDriver::new("paint-theme"),
         Layout::Fresh => PaintDriver::fresh("paint-theme-fresh"),
     };
+    // Sue Paint ships in its own Gray: these checks are of it set to
+    // Follow Sue's theme.
+    paint
+        .runtime
+        .engine
+        .world
+        .rice
+        .set(
+            "sue_paint.theme",
+            sue_rice::RiceValue::Text(sue_wm::STUDIO_THEME_SUE.to_owned()),
+        )
+        .unwrap();
     paint.new_timeline();
     paint.settle(10);
     paint
@@ -404,31 +416,51 @@ fn sue_paints_text_and_icons_read_in_every_preset() {
     assert!(found.is_empty(), "{found:#?}");
 }
 
-/// Sue Paint ships wearing Sue's theme, and a settings file of 0.0.75
-/// that kept its old default (Gray) takes the new one when it is read.
+/// Sue Paint ships in its own Gray. A settings file of 0.0.82 that kept
+/// that release's default (Sue's theme) takes Gray when it is read, one of
+/// 0.0.75 (Gray then) stays Gray, and a preset picked on purpose stays.
 #[test]
-fn sue_paint_follows_sues_theme_from_the_start() {
+fn sue_paint_ships_gray_and_old_settings_follow_it() {
     let shipped = sue_rice::RiceSchema::parse(sue_rice::DEFAULT_RICE).unwrap();
     assert_eq!(
         shipped.get_str("sue_paint.theme"),
-        Some(sue_wm::STUDIO_THEME_SUE)
+        Some(sue_paint::STUDIO_THEME_GRAY)
     );
-    let old = include_str!("../../../../../crates/sue-rice/rice/history/v6.suerice");
-    assert!(old.contains("\ntheme = \"gray\""), "0.0.75 shipped Gray");
-    let migrated = sue_rice::migrate(old).unwrap().unwrap();
-    let schema = sue_rice::RiceSchema::parse(&migrated.text).unwrap();
-    assert_eq!(
-        schema.get_str("sue_paint.theme"),
-        Some(sue_wm::STUDIO_THEME_SUE)
+    let theme = |text: &str| {
+        let migrated = sue_rice::migrate(text).unwrap().unwrap();
+        let schema = sue_rice::RiceSchema::parse(&migrated.text).unwrap();
+        schema.get_str("sue_paint.theme").map(str::to_owned)
+    };
+    // 0.0.82 (format 7) shipped Sue's theme: untouched, it becomes Gray.
+    let v7 = include_str!("../../../../../crates/sue-rice/rice/history/v7.suerice");
+    assert!(v7.contains(
+        "
+theme = \"sue-theme\"            # {sue-theme|gray"
+    ));
+    assert_eq!(theme(v7).as_deref(), Some("gray"));
+    // Chosen on purpose in 0.0.82, Paper stays Paper.
+    let picked = v7.replacen(
+        "theme = \"sue-theme\"            # {sue-theme|gray",
+        "theme = \"paper\"                # {sue-theme|gray",
+        1,
     );
-    // A preset picked on purpose stays.
-    let picked = old.replacen(
+    assert_ne!(picked, v7);
+    assert_eq!(theme(&picked).as_deref(), Some("paper"));
+    // 0.0.75 (format 6) shipped Gray: it stays Gray.
+    let v6 = include_str!("../../../../../crates/sue-rice/rice/history/v6.suerice");
+    assert!(
+        v6.contains(
+            "
+theme = \"gray\""
+        ),
+        "0.0.75 shipped Gray"
+    );
+    assert_eq!(theme(v6).as_deref(), Some("gray"));
+    let picked = v6.replacen(
         "theme = \"gray\"                 #",
         "theme = \"paper\"                #",
         1,
     );
-    assert_ne!(picked, old);
-    let migrated = sue_rice::migrate(&picked).unwrap().unwrap();
-    let schema = sue_rice::RiceSchema::parse(&migrated.text).unwrap();
-    assert_eq!(schema.get_str("sue_paint.theme"), Some("paper"));
+    assert_ne!(picked, v6);
+    assert_eq!(theme(&picked).as_deref(), Some("paper"));
 }

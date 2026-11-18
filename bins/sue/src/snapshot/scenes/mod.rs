@@ -9,6 +9,7 @@
 //! after every picture (`Tour::shoot`), and Sue Paint's palettes are put
 //! at rest ([`paint_at_rest`]) where a run of scenes moved them.
 
+mod fit;
 mod gallery;
 mod hub;
 mod icons;
@@ -98,6 +99,18 @@ pub(super) fn run(tour: &mut Tour<'_>) -> Result<(), String> {
         open_paint(tour);
         tour.settle();
         return p81_bugs::scenes(tour, &only);
+    }
+    // `SUE_SNAPSHOT_ONLY=fit` runs how the interface fits the common
+    // window sizes and scales alone (`fit-1366x768@100` one size), on a
+    // sample canvas.
+    if let Ok(only) = std::env::var("SUE_SNAPSHOT_ONLY")
+        && only.starts_with("fit")
+    {
+        tour.runtime
+            .with_context(&mut tour.camera.painter, tour.camera.now, |cx| {
+                sue_paint::sample_picture(cx, 1600, 1200)
+            });
+        return fit::sizes(tour, &only);
     }
     // `SUE_SNAPSHOT_ONLY=figures` runs the 3D drawing figures' scenes
     // alone, on a sample canvas.

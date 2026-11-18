@@ -2,7 +2,7 @@
 # "A jack of all trades is a master of none,
 #  but oftentimes better than a master of one."
 #
-# sue-rice format 7
+# sue-rice format 8
 #
 # Every key below is a live control in Settings. Metadata lives in the
 # trailing comment:   [min..max]  slider       {a|b|c}  choice
@@ -27,6 +27,7 @@ ui_scale = 1.0                 # [0.75..2.0] Interface scale on top of the syste
 interface = "auto"             # {auto|desktop|tablet|phone} Layout: auto follows the device (touch layouts on tablets and phones); pick one to switch
 phone_frame = false            # On a computer, draw the phone layout in a phone-wide column in the middle of the window
 gpu_preference = "auto"        # {auto|integrated|discrete} GPU that draws the window; auto uses the display's GPU (applies after a restart)
+dialog_places = ""             # @text Where each dialog was last put and the size it was made; Sue keeps this itself (empty opens every dialog in the middle again)
 
 [motion]
 instant_transitions = false    # Snap pages, menus and windows in 0 ms instead of animating them
@@ -113,7 +114,7 @@ custom_key_4 = "select.none"   # @text The command Studio Mode's key T4 runs
 custom_key_5 = "layer.new"     # @text The command Studio Mode's key T5 runs
 custom_key_6 = "view.fit"      # @text The command Studio Mode's key T6 runs
 custom_key_7 = "view.flip_h"   # @text The command Studio Mode's key T7 runs
-theme = "sue-theme"            # {sue-theme|gray|void|graphite|paper|custom} Sue Paint's colors: Sue's own theme (follows it), Gray, a preset, or Custom (below)
+theme = "gray"                 # {gray|sue-theme|void|graphite|paper|custom} Sue Paint's colors: its own Gray, Sue's theme (follows it), a preset, or Custom (below)
 pen_pressure = "0,0 0.4,0.5 1,1" # @text Pen pressure curve for every tool, as pressure,output points (File, Pen Pressure Settings draws it)
 alt_tool = "eyedropper"        # {eyedropper|eraser|none} What Alt while drawing does on the canvas (File, Modifier Key Settings)
 space_tool = "hand"            # {hand|none} What Space does on the canvas (File, Modifier Key Settings)

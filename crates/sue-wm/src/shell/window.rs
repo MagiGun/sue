@@ -92,30 +92,34 @@ impl Shell {
             + theme.hairline().width * 2.0;
         let body_height = (sheet.height() - chrome).max(0.0);
         let view = self.view(now, dt);
-        let shown = Dialog::new(("sue-window", id.as_str()), name, theme)
+        let mut dialog = Dialog::new(("sue-window", id.as_str()), name, theme)
             .width(sheet.width())
-            .height(body_height)
             .scrim_cancels()
-            .enter_is_the_bodys()
-            .show(ctx, |ui| {
-                // The applet lays out its own body in the room it has, a
-                // hair short of it so the host's scroll area never needs
-                // its bar: only the applet's own lists scroll.
-                let size = vec2(ui.available_width(), (body_height - 1.0).max(0.0));
-                let (body, _) = ui.allocate_exact_size(size, Sense::hover());
-                let mut body_ui = ui.new_child(
-                    UiBuilder::new()
-                        .max_rect(body)
-                        .id_salt(("sue-window-body", id.as_str()))
-                        .layout(Layout::top_down(Align::Min)),
-                );
-                body_ui.set_clip_rect(body.intersect(ui.clip_rect()));
-                let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, id));
-                let (applets, mut cx) = split(io, theme, view);
-                if let Some(applet) = applets.get_mut(id) {
-                    applet.window_ui(&mut body_ui, &mut cx);
-                }
-            });
+            .enter_is_the_bodys();
+        if form == FormFactor::Desktop {
+            // Moved by its header, sized from its corner, as any window.
+            dialog = dialog.resizable();
+        }
+        let body_height = dialog.sized_body_height(ctx).unwrap_or(body_height);
+        let shown = dialog.height(body_height).show(ctx, |ui| {
+            // The applet lays out its own body in the room it has, a
+            // hair short of it so the host's scroll area never needs
+            // its bar: only the applet's own lists scroll.
+            let size = vec2(ui.available_width(), (body_height - 1.0).max(0.0));
+            let (body, _) = ui.allocate_exact_size(size, Sense::hover());
+            let mut body_ui = ui.new_child(
+                UiBuilder::new()
+                    .max_rect(body)
+                    .id_salt(("sue-window-body", id.as_str()))
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            body_ui.set_clip_rect(body.intersect(ui.clip_rect()));
+            let _language = sue_lang::scope(&crate::applet_language(&io.world.rice, id));
+            let (applets, mut cx) = split(io, theme, view);
+            if let Some(applet) = applets.get_mut(id) {
+                applet.window_ui(&mut body_ui, &mut cx);
+            }
+        });
         self.window_rect = shown.rect;
         if shown.answer == Some(Answer::Cancel) {
             self.close_window();

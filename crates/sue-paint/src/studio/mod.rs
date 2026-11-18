@@ -1556,6 +1556,7 @@ impl SuePaint {
 pub(crate) const KEYS_SECTION: &str = "sue_paint_keys";
 
 pub(crate) use crate::commands::shortcut_table;
+pub use applet::STUDIO_THEME_GRAY;
 pub use exports::{export_at_once, hold_export_starts, hold_exports_to};
 pub(crate) use files::export_dir;
 

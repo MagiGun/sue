@@ -213,14 +213,16 @@ pub fn title_bar(
 
 /// The edges and corners of a window Sue frames itself, around `rect`:
 /// dragging one resizes the window, as with the system's frame. How far
-/// they reach follows the [`Density`]: wider on touch.
-pub fn resize_edges(ui: &mut Ui, rect: egui::Rect) {
+/// they reach follows the [`Density`]: wider on touch. Returns `true` in
+/// the frame a resize starts.
+pub fn resize_edges(ui: &mut Ui, rect: egui::Rect) -> bool {
     use egui::viewport::ResizeDirection as Way;
     use egui::{CursorIcon, ViewportCommand, pos2};
     let ctx = ui.ctx().clone();
     if ctx.input(|input| input.viewport().maximized.unwrap_or(false)) {
-        return;
+        return false;
     }
+    let mut started = false;
     // A fifth of the least hit target along the sides, half of it at the
     // corners: 5 and 12 points at the compact density.
     let reach = Density::of(ui).min_hit();
@@ -280,8 +282,10 @@ pub fn resize_edges(ui: &mut Ui, rect: egui::Rect) {
         }
         if response.drag_started() {
             ctx.send_viewport_cmd(ViewportCommand::BeginResize(way));
+            started = true;
         }
     }
+    started
 }
 
 /// Notes for this frame whether Sue is laid out for touch (a phone or a

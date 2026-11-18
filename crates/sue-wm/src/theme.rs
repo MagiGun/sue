@@ -541,8 +541,15 @@ mod tests {
         crate::register_rice(&mut rice).unwrap();
         let presets = sue_rice::builtin_presets();
         let sue = Theme::from_rice(&rice);
-        // Sue Paint ships wearing Sue's theme, as every studio does.
-        assert_eq!(rice.get_str("sue_paint.theme"), Some(STUDIO_THEME_SUE));
+        // Sue Paint ships in its own Gray, as Clip Studio Paint does.
+        assert_eq!(rice.get_str("sue_paint.theme"), Some("gray"));
+        assert_ne!(sue.for_studio(&rice, "sue_paint", &presets), sue);
+        // Follow Sue's theme wears Sue's.
+        rice.set(
+            "sue_paint.theme",
+            sue_rice::RiceValue::Text(STUDIO_THEME_SUE.to_owned()),
+        )
+        .unwrap();
         assert_eq!(sue.for_studio(&rice, "sue_paint", &presets), sue);
         // A preset it is set to wears that preset's colors only.
         rice.set(

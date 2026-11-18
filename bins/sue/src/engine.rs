@@ -575,6 +575,9 @@ impl Engine {
                         tr!("interface"),
                         params(&["display.interface", "display.phone_frame"]),
                     ),
+                    // Kept by Sue itself; emptied, every dialog opens in
+                    // the middle again.
+                    group(tr!("dialog-places"), params(&["display.dialog_places"])).advanced(),
                     group(
                         tr!("performance"),
                         vec![

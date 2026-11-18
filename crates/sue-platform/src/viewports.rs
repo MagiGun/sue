@@ -146,21 +146,9 @@ pub(crate) fn install(ctx: &egui::Context, shared: &Shared) {
             child
                 .state
                 .handle_platform_output(&child.window, output.platform_output);
-            // Its own title bar moves, resizes, minimizes and maximizes it.
-            if let Some(own) = output.viewport_output.get(&id) {
-                let mut info = egui::ViewportInfo::default();
-                egui_winit::process_viewport_commands(
-                    ctx,
-                    &mut info,
-                    own.commands.iter().cloned(),
-                    &child.window,
-                    &mut Vec::new(),
-                );
-                if info.events.contains(&egui::ViewportEvent::Close) {
-                    child.close = true;
-                    ctx.request_repaint_of(id);
-                }
-            }
+            // What it asks of its window (its own title bar moves and
+            // resizes it) comes with the frame of the window that drew
+            // it, not here: see `run_commands`.
         }
         viewports.drawn.push(Drawn {
             id,
@@ -234,6 +222,40 @@ impl Viewports {
             opened = true;
         }
         opened
+    }
+
+    /// Carries out what the viewports asked of their windows in a frame
+    /// (`output`): moving one by its own title bar, resizing it by its
+    /// edges, bringing it to the front, closing it. egui hands an
+    /// immediate viewport's commands over with the frame of the window
+    /// that drew it, never with the viewport's own pass, so a dialog's own
+    /// title bar moved nothing while they were read there.
+    pub(crate) fn run_commands(&mut self, ctx: &egui::Context, output: &egui::FullOutput) {
+        let mut closing = Vec::new();
+        for (id, asked) in &output.viewport_output {
+            if asked.commands.is_empty() {
+                continue;
+            }
+            let Some(child) = self.children.get_mut(id) else {
+                continue;
+            };
+            let mut info = egui::ViewportInfo::default();
+            egui_winit::process_viewport_commands(
+                ctx,
+                &mut info,
+                asked.commands.iter().cloned(),
+                &child.window,
+                &mut Vec::new(),
+            );
+            if info.events.contains(&egui::ViewportEvent::Close) {
+                child.close = true;
+                closing.push(*id);
+            }
+        }
+        for id in closing {
+            // One more frame of its window hears of it.
+            ctx.request_repaint_of(self.owner(id));
+        }
     }
 
     /// Hands a window's event to its viewport, and says which window's

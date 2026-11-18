@@ -19,6 +19,7 @@ export-ellipsis = Export...
 open-folder = Open Folder
 performance = Performance
 graphics-card = Graphics Card
+dialog-places = Dialog Places
 restart-sue = Restart Sue
 motion = Motion
 output = Output

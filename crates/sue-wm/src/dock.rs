@@ -551,18 +551,45 @@ impl<P: DockPanel> Laid<P> {
 }
 
 /// Heights (or widths) sharing `length` by weight, each at least its
-/// least, the excess taken from the largest.
+/// least. What a group's weight would give below its least is taken from
+/// the largest group with room to spare above its own least, then the
+/// next largest, so a crowded column never squeezes one palette (a Layer
+/// palette's list) to nothing while another keeps room it does not
+/// need. When the leasts alone do not fit, each gets the same share of
+/// its least.
 fn share(length: f32, entries: &[(f32, f32)]) -> Vec<f32> {
+    let length = length.max(0.0);
+    let leasts: Vec<f32> = entries.iter().map(|(_, least)| least.max(0.0)).collect();
+    let needed: f32 = leasts.iter().sum();
+    if needed >= length {
+        let ratio = if needed > 0.0 { length / needed } else { 0.0 };
+        return leasts.iter().map(|least| least * ratio).collect();
+    }
     let total: f32 = entries.iter().map(|(weight, _)| weight.max(0.01)).sum();
     let mut sizes: Vec<f32> = entries
         .iter()
-        .map(|(weight, least)| (length * weight.max(0.01) / total).max(least.min(length)))
+        .map(|(weight, _)| length * weight.max(0.01) / total)
         .collect();
-    let excess: f32 = sizes.iter().sum::<f32>() - length;
-    if excess > 0.0
-        && let Some(largest) = sizes.iter_mut().max_by(|a, b| a.total_cmp(b))
-    {
-        *largest = (*largest - excess).max(24.0);
+    let mut deficit = 0.0;
+    for (size, least) in sizes.iter_mut().zip(&leasts) {
+        if *size < *least {
+            deficit += *least - *size;
+            *size = *least;
+        }
+    }
+    // The leasts fit, so the groups' spare room covers the deficit.
+    while deficit > 0.001 {
+        let Some((size, least)) = sizes
+            .iter_mut()
+            .zip(&leasts)
+            .filter(|(size, least)| **size > **least + 0.001)
+            .max_by(|a, b| a.0.total_cmp(b.0))
+        else {
+            break;
+        };
+        let given = (*size - least).min(deficit);
+        *size -= given;
+        deficit -= given;
     }
     sizes
 }
@@ -2318,6 +2345,33 @@ impl<P: DockPanel> DockLayout<P> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_crowded_column_gives_each_group_its_least_from_the_others() {
+        // Navigator, Layer Property and Layer, by weight 0.3, 0.2, 0.5,
+        // the Layer palette needing 250 points for its tools and a few
+        // layers, in a column 400 tall (1366 by 768 at 150 percent).
+        let sizes = super::share(400.0, &[(0.3, 114.0), (0.2, 114.0), (0.5, 250.0)]);
+        assert!(
+            (sizes.iter().sum::<f32>() - 400.0).abs() < 0.01,
+            "{sizes:?}"
+        );
+        // The leasts do not fit: each gets the same share of its own.
+        assert!(
+            (sizes[2] / 250.0 - sizes[0] / 114.0).abs() < 0.01,
+            "{sizes:?}"
+        );
+        // Room enough: the Layer palette has its least, made up from the
+        // largest of the others' room (the Navigator's), never below
+        // theirs.
+        let sizes = super::share(660.0, &[(0.3, 114.0), (0.2, 114.0), (0.5, 400.0)]);
+        assert!((sizes[2] - 400.0).abs() < 0.01, "{sizes:?}");
+        assert!((sizes[1] - 132.0).abs() < 0.01, "{sizes:?}");
+        assert!((sizes[0] - 128.0).abs() < 0.01, "{sizes:?}");
+        // Plenty: by weight.
+        let sizes = super::share(1000.0, &[(0.3, 114.0), (0.2, 114.0), (0.5, 250.0)]);
+        assert!((sizes[2] - 500.0).abs() < 0.01, "{sizes:?}");
+    }
+
     use super::*;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]

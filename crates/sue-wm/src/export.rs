@@ -696,6 +696,7 @@ impl ExportDialog {
         let title = self.title.clone();
         let page = self.page;
         Dialog::new(("sue-export", page), &title, theme)
+            .resizable()
             .accept(tr!("export-accept"))
             .cancel()
             .show(ctx, |ui| match page {

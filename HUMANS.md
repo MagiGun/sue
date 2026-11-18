@@ -170,7 +170,9 @@ The Sue button opens the **Sue menu**, for Sue as a whole:
   the browser too, and Sue remembers it;
 - **Command Palette** (its key stands beside it, as Settings' and Quit
   Sue's do; where the studio you are in keeps that key for itself, none
-  is shown), **Check for Updates**, Settings and Quit Sue.
+  is shown), **Check for Updates**, Settings and Quit Sue (on a computer:
+  phones and tablets leave Sue as they leave any app, so their menus and
+  command palette have no Quit).
 
 Inside a studio, File and Project are not in the Sue menu: the studio's own
 File menu opens and saves. The language Sue speaks and what Sue opens at
@@ -1641,14 +1643,14 @@ controls for it in **Settings**:
 **Appearance** also offers ready-made themes (Void, Graphite, Paper and
 Gray) that change every color at once, and one `Ctrl+Z` brings yours back.
 
-Each studio can wear its own theme (Settings, the studio's page). Every
-studio, Sue Paint included, starts in **Sue theme**: it follows Sue's own
-colors, so picking Paper or changing a color changes every studio that
-uses the Sue theme at once. Give a studio a preset of its own instead (Sue
-Paint in **Gray**, the mid grays painting apps use so your colors read
-true, while the rest of Sue stays Paper), or choose **Custom** and color
-Sue Paint with its own color wheels, which appear below once Custom is
-chosen. The side panels
+Each studio can wear its own theme (Settings, the studio's page). Sue
+Paint starts in its own **Gray**, the mid grays painting apps use so your
+colors read true; every other studio starts in Sue's theme. Choose
+**Follow Sue's theme** for Sue Paint and it wears Sue's own colors (Dark
+unless you change them), so picking Paper or changing a color changes it
+with the rest of Sue. Give a studio a preset of its own instead, or
+choose **Custom** and color Sue Paint with its own color wheels, which
+appear below once Custom is chosen. The side panels
 always keep Sue's theme. They are
 all black, white and gray: Sue's look stays out of the way of your work. A
 color you pick yourself stays; only the tinted colors that very old releases

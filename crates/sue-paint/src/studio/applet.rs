@@ -18,6 +18,10 @@ use super::{
     to_rgba,
 };
 use crate::dialogs::{Dialog, NewDialog, PressureDialog};
+
+/// Sue Paint's own colors, the Gray scheme it ships wearing, as Clip
+/// Studio Paint does; [`sue_wm::STUDIO_THEME_SUE`] follows Sue's theme.
+pub const STUDIO_THEME_GRAY: &str = "gray";
 use crate::doc::{self, NewPicture};
 
 impl SuePaint {
@@ -119,10 +123,10 @@ impl SueApplet for SuePaint {
             RiceDeclaration::new(
                 "sue_paint.theme",
                 RiceParameter::EnumChoice {
-                    value: sue_wm::STUDIO_THEME_SUE.to_owned(),
+                    value: STUDIO_THEME_GRAY.to_owned(),
                     options: [
+                        STUDIO_THEME_GRAY,
                         sue_wm::STUDIO_THEME_SUE,
-                        "gray",
                         "void",
                         "graphite",
                         "paper",
@@ -131,7 +135,7 @@ impl SueApplet for SuePaint {
                     .map(String::from)
                     .to_vec(),
                 },
-                "Sue Paint's colors: Sue's own theme (follows it), Gray, a preset, or Custom (below)",
+                "Sue Paint's colors: its own Gray, Sue's theme (follows it), a preset, or Custom (below)",
             ),
             RiceDeclaration::new(
                 crate::dialogs::PEN_PRESSURE,
