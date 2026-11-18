@@ -260,8 +260,13 @@ fn a_movie_dragged_from_the_pool_lands_on_the_timeline_and_the_keys_cut_it() {
     );
     driver.command("view.page_edit");
     driver.settle(10);
+    // The card in the pool (the source monitor's title names it too).
     let card = driver
-        .rect_of("bars.mp4")
+        .texts
+        .iter()
+        .filter(|(found, _)| found == "bars.mp4")
+        .map(|(_, rect)| *rect)
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
         .expect("the movie's card in the pool");
     let lane = driver.rect_of("V1").expect("V1's header");
     // Onto V1, a little way in.
