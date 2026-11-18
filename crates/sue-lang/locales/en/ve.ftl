@@ -268,3 +268,4 @@ kind-unknown = Not playable yet
 settings-group-playback = Playback
 settings-group-media = Media
 keys-group-other = Other
+dock-again = Dock Again

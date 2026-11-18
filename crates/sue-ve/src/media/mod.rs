@@ -6,6 +6,7 @@
 pub mod frames;
 pub mod import;
 pub mod sound;
+pub mod stills;
 pub mod thumbs;
 
 use std::collections::HashMap;
@@ -109,9 +110,17 @@ pub struct MediaHub {
     pub sounds: Sounds,
     /// Thumbnail strips.
     pub thumbs: Thumbs,
-    /// Pictures drawn from the arena (stills, pictures, titles, solids)
-    /// and image sequence frames: by source, its revision, frame and size.
+    /// Pictures drawn from the arena on this thread (stills, titles,
+    /// solids): by source, its revision, frame and size.
     generated: HashMap<EntityId, Generated>,
+    /// Frames of image sequences and Sue Paint pictures, drawn by
+    /// workers into [`Self::cache`].
+    pub stills: stills::Stills,
+    /// The revision and size each drawn source's cached frames are of.
+    drawn_as: HashMap<EntityId, (u64, (u32, u32))>,
+    /// The arena as a picture was when its frames were asked for: what
+    /// the workers composite it from (a clone copies no pixels).
+    snapshots: HashMap<EntityId, (u64, Arc<Arena>)>,
     /// Decode on the graphics card.
     pub hardware: bool,
     /// Play proxies where a movie has one.
@@ -143,6 +152,9 @@ impl MediaHub {
             sounds: Sounds::default(),
             thumbs: Thumbs::default(),
             generated: HashMap::new(),
+            stills: stills::Stills::default(),
+            drawn_as: HashMap::new(),
+            snapshots: HashMap::new(),
             hardware: true,
             proxies: false,
         }
@@ -249,44 +261,13 @@ impl MediaHub {
                     exact: false,
                 })
             }
-            SourceKind::ImageSequence => {
-                let entity = arena.get_by_id(id).ok()?;
-                let rate = model::rate_of(entity)?;
-                let index = source_time.frame(rate).max(0);
-                let revision = entity.revision();
-                if let Some((seen, at, _, picture)) = self.generated.get(&id)
-                    && *seen == revision
-                    && *at == index
-                {
-                    return Some(Found {
-                        frame: Arc::clone(picture),
-                        exact: true,
-                    });
-                }
-                let path = import::sequence_frame(entity, index)?;
-                let bytes = sue_platform::fs::read(&path).ok()?;
-                let tile = import::read_picture(&bytes).ok()?;
-                let picture = Arc::new(VideoFrame::new(
-                    tile.width(),
-                    tile.height(),
-                    render::rgba_of(&tile)?,
-                    index,
-                ));
-                self.generated
-                    .insert(id, (revision, index, frame, Arc::clone(&picture)));
-                Some(Found {
-                    frame: picture,
-                    exact: true,
-                })
+            SourceKind::ImageSequence | SourceKind::Picture => {
+                self.drawn(arena, id, kind, source_time, frame, need)
             }
             _ => {
                 let entity = arena.get_by_id(id).ok()?;
                 let revision = entity.revision();
-                let index = match kind {
-                    SourceKind::Picture => sue_picture::anim::timeline(arena, id)
-                        .map_or(0, |sequence| source_time.frame(sequence.rate)),
-                    _ => 0,
-                };
+                let index = 0;
                 if let Some((seen, at, size, picture)) = self.generated.get(&id)
                     && *seen == revision
                     && *at == index
@@ -340,15 +321,142 @@ impl MediaHub {
         }
     }
 
-    /// Takes in background work that finished. `true` when something did.
-    pub fn poll(&mut self) -> bool {
-        self.sounds.poll()
+    /// The frame of an image sequence or a Sue Paint picture (or its
+    /// animation) at `source_time`: from the cache when a worker drew it,
+    /// else the nearest frame drawn while the workers draw it (with the
+    /// frames after it when playing).
+    fn drawn(
+        &mut self,
+        arena: &Arena,
+        id: EntityId,
+        kind: &SourceKind,
+        source_time: Time,
+        frame: (u32, u32),
+        need: Need,
+    ) -> Option<Found> {
+        let entity = arena.get_by_id(id).ok()?;
+        let revision = entity.revision();
+        let (index, last) = match kind {
+            SourceKind::ImageSequence => {
+                let rate = model::rate_of(entity)?;
+                let count = model::number(entity, key::COUNT).unwrap_or(1.0).max(1.0) as i64;
+                (source_time.frame(rate).clamp(0, count - 1), count - 1)
+            }
+            _ => match sue_picture::anim::timeline(arena, id) {
+                Some(sequence) if sue_picture::anim::length(arena, id) > 0 => {
+                    let length = i64::from(sue_picture::anim::length(arena, id));
+                    (
+                        source_time.frame(sequence.rate).clamp(0, length - 1),
+                        length - 1,
+                    )
+                }
+                _ => (0, 0),
+            },
+        };
+        let size = if *kind == SourceKind::Picture {
+            frame
+        } else {
+            (0, 0)
+        };
+        if self.drawn_as.get(&id) != Some(&(revision, size)) {
+            frames::lock(&self.cache).forget(id);
+            self.drawn_as.insert(id, (revision, size));
+        }
+        let ahead = match need {
+            Need::Ahead(count) => i64::from(count),
+            _ => 0,
+        };
+        let wanted: Vec<i64> = {
+            let cache = frames::lock(&self.cache);
+            (index..=(index + ahead).min(last))
+                .filter(|at| !cache.has(id, DRAWN, *at))
+                .collect()
+        };
+        if !wanted.is_empty() {
+            let jobs = match kind {
+                SourceKind::ImageSequence => wanted
+                    .iter()
+                    .filter_map(|at| {
+                        let path = import::sequence_frame(entity, *at)?;
+                        let at = *at;
+                        Some(stills::Job {
+                            source: id,
+                            revision,
+                            index: at,
+                            make: Box::new(move || sequence_frame(&path, at)),
+                        })
+                    })
+                    .collect(),
+                _ => {
+                    let snapshot = match self.snapshots.get(&id) {
+                        Some((seen, snapshot)) if *seen == revision => Arc::clone(snapshot),
+                        _ => {
+                            let snapshot = Arc::new(arena.clone());
+                            self.snapshots
+                                .insert(id, (revision, Arc::clone(&snapshot)));
+                            snapshot
+                        }
+                    };
+                    let rate = sue_picture::anim::timeline(arena, id)
+                        .map_or(sue_core::Rate::FPS_24, |sequence| sequence.rate);
+                    let max = frame.0.max(frame.1).max(256);
+                    wanted
+                        .iter()
+                        .map(|at| {
+                            let snapshot = Arc::clone(&snapshot);
+                            let at = *at;
+                            stills::Job {
+                                source: id,
+                                revision,
+                                index: at,
+                                make: Box::new(move || {
+                                    let time = Time::from_frames(at, rate);
+                                    render::picture(&snapshot, id, time, max).map(|mut picture| {
+                                        picture.index = at;
+                                        picture
+                                    })
+                                }),
+                            }
+                        })
+                        .collect()
+                }
+            };
+            self.stills.want(id, jobs);
+        }
+        let mut cache = frames::lock(&self.cache);
+        if let Some(frame) = cache.get(id, DRAWN, index) {
+            return Some(Found { frame, exact: true });
+        }
+        cache.nearest(id, DRAWN, index).map(|frame| Found {
+            frame,
+            exact: false,
+        })
     }
 
-    /// `true` while sound or thumbnails are being made.
+    /// Takes in background work that finished. `true` when something did.
+    pub fn poll(&mut self) -> bool {
+        let mut changed = self.sounds.poll();
+        let drawn = self.stills.take();
+        if !drawn.is_empty() {
+            let mut cache = frames::lock(&self.cache);
+            for (source, revision, _, picture) in drawn {
+                let current = self
+                    .drawn_as
+                    .get(&source)
+                    .is_some_and(|(seen, _)| *seen == revision);
+                if let (true, Some(picture)) = (current, picture) {
+                    cache.put(source, DRAWN, picture);
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    /// `true` while sound, thumbnails or drawn frames are being made.
     #[must_use]
     pub fn busy(&self) -> bool {
-        self.sounds.loading() || self.thumbs.busy()
+        self.sounds.loading() || self.thumbs.busy() || self.stills.busy()
     }
 
     /// Why decoding source `id` failed, if it did.
@@ -384,5 +492,27 @@ impl MediaHub {
         *cache = FrameCache::new(budget.max(64 * 1024 * 1024));
         drop(cache);
         self.generated.clear();
+        self.stills.clear();
+        self.drawn_as.clear();
+        self.snapshots.clear();
     }
+}
+
+/// The cache's variant for frames the workers draw (image sequences,
+/// Sue Paint pictures).
+const DRAWN: Variant = Variant {
+    size: 4,
+    proxy: false,
+};
+
+/// Reads and decodes frame `index` of an image sequence from `path`.
+fn sequence_frame(path: &std::path::Path, index: i64) -> Option<VideoFrame> {
+    let bytes = sue_platform::fs::read(path).ok()?;
+    let tile = import::read_picture(&bytes).ok()?;
+    Some(VideoFrame::new(
+        tile.width(),
+        tile.height(),
+        render::rgba_of(&tile)?,
+        index,
+    ))
 }

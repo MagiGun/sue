@@ -414,20 +414,111 @@ impl SueVe {
             self.dock
                 .drop_ui(ui, &laid, &|panel: Panel| panel.title(), theme);
         }
-        // A palette dropped off the dock floats: it goes back to its place,
-        // since stage 1 draws no floating palettes.
-        let floating: Vec<Panel> = self.dock.floating.iter().map(|(panel, _)| *panel).collect();
-        for panel in floating {
-            self.dock.remove(panel);
-            match panel {
-                Panel::Inspector => self.dock.dock(panel, sue_wm::dock::Side::Right),
-                Panel::Timeline | Panel::Meters => {
-                    self.dock = default_dock();
+        monitor::monitors(self, ui, laid.center, cx, theme);
+        // A palette dropped off the dock floats in a window of its own
+        // over the page, as Sue Paint's do.
+        self.floating_ui(ui, body, cx, theme);
+    }
+
+    /// The palettes floating over the Edit page: each in a window that
+    /// moves and resizes, with its name and Dock Again in a header. The
+    /// header drags the window, and over the dock docks it again.
+    fn floating_ui(&mut self, ui: &mut Ui, body: Rect, cx: &mut AppletContext<'_>, theme: &Theme) {
+        let floating: Vec<(Panel, Rect)> = self.dock.floating.clone();
+        let header = Density::Compact.icon_button() + theme.space(Space::S2);
+        for (panel, rect) in floating {
+            let start_id = egui::Id::unique(("sve-float-from", panel.key()));
+            let moved = match self.dock.panel_drag() {
+                Some((dragged, by)) if dragged == panel => {
+                    let from = ui
+                        .data_mut(|data| *data.get_temp_mut_or_insert_with(start_id, || rect.min));
+                    Some(from + by)
                 }
-                _ => self.dock.dock(panel, sue_wm::dock::Side::Left),
+                _ => {
+                    ui.data_mut(|data| data.remove::<egui::Pos2>(start_id));
+                    None
+                }
+            };
+            let mut window = egui::Window::new(panel.title())
+                .id(egui::Id::unique(("sve-float", panel.key())))
+                .default_rect(rect)
+                .constrain_to(body)
+                .title_bar(false)
+                .collapsible(false)
+                .resizable(true)
+                .min_size(vec2(header * 4.0, header * 3.0));
+            if let Some(at) = moved {
+                window = window.current_pos(at);
+            }
+            let mut redock = false;
+            let shown = window.show(ui.ctx(), |ui| {
+                let area = ui.available_rect_before_wrap();
+                ui.allocate_rect(area, egui::Sense::hover());
+                let top = Rect::from_min_size(area.min, vec2(area.width(), header));
+                let button = Density::Compact.icon_button();
+                let dock_at = Rect::from_min_size(
+                    pos2(top.right() - button, top.center().y - button / 2.0),
+                    vec2(button, button),
+                );
+                if self.ready {
+                    let grab = Rect::from_min_max(top.min, pos2(dock_at.left(), top.bottom()));
+                    self.dock.grip(ui, grab, panel, "sve-floating");
+                }
+                ui.painter().rect_filled(top, SQUARE, theme.pill);
+                ui.painter().text(
+                    pos2(top.left() + theme.space(Space::S4), top.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    panel.title(),
+                    font(theme, TextRole::Caption),
+                    theme.text,
+                );
+                if sue_wm::ui::icon_button(
+                    ("sve-float-dock", panel.key()),
+                    Icon::ArrowUp,
+                    &tr!("dock-again"),
+                )
+                .quiet()
+                .show_at(ui, dock_at, theme)
+                .clicked()
+                {
+                    redock = true;
+                }
+                let inner = Rect::from_min_max(pos2(area.left(), top.bottom()), area.max);
+                let mut child = ui.new_child(
+                    UiBuilder::new()
+                        .max_rect(inner)
+                        .id_salt(("sve-float-panel", panel.key())),
+                );
+                child.set_clip_rect(inner.intersect(ui.clip_rect()));
+                self.panel_ui(panel, &mut child, cx, theme);
+            });
+            if let Some(inner) = shown
+                && let Some(entry) = self
+                    .dock
+                    .floating
+                    .iter_mut()
+                    .find(|(found, _)| *found == panel)
+            {
+                entry.1 = inner.response.rect;
+            }
+            if redock {
+                self.redock(panel, rect, body);
             }
         }
-        monitor::monitors(self, ui, laid.center, cx, theme);
+    }
+
+    /// Docks a floating `panel` again where it belongs: the timeline and
+    /// the meters along the bottom, the inspector at the right, the rest
+    /// on the side its window is nearer.
+    pub(crate) fn redock(&mut self, panel: Panel, rect: Rect, body: Rect) {
+        use sue_wm::dock::{Side, Target};
+        self.dock.remove(panel);
+        match panel {
+            Panel::Timeline | Panel::Meters => self.dock.put(panel, Target::Bottom),
+            Panel::Inspector => self.dock.dock(panel, Side::Right),
+            _ if rect.center().x > body.center().x => self.dock.dock(panel, Side::Right),
+            _ => self.dock.dock(panel, Side::Left),
+        }
     }
 
     /// Draws palette `panel` in `ui`.
